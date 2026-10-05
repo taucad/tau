@@ -105,6 +105,7 @@ const afterActivity = {
 };
 const animationInterval = {
   before: beforeActivity,
+  during: beforeActivity,
   after: afterActivity,
   intervalStart: 1_000_020,
   intervalEnd: 1_000_030,
@@ -119,6 +120,19 @@ it('should qualify a complete same-producer native drain interval without substi
     observedSpans: 3,
   });
   expect(Object.values(evidence.counts).every((count) => count === 0)).toBe(true);
+});
+it('should reject work started during animation that completes only after the interval checkpoint', () => {
+  expect(() =>
+    verifyDrainedMotionActivity({
+      ...animationInterval,
+      after: {
+        ...afterActivity,
+        telemetryEntries: afterActivity.telemetryEntries.map((entry) =>
+          entry.detail?.['spanId'] === '12' ? { ...entry, startTime: 25, duration: 10 } : entry,
+        ),
+      },
+    }),
+  ).toThrow('overlapped the actual animation interval');
 });
 it('should deny missing drain markers, span gaps, truncation, new source work and producer replacement', () => {
   expect(() =>
@@ -162,7 +176,7 @@ it('should deny missing drain markers, span gaps, truncation, new source work an
         ),
       },
     }),
-  ).toThrow('same-producer');
+  ).toThrow('Runtime producer changed');
   expect(() => verifyDrainedMotionActivity({ ...animationInterval, intervalEnd: 1_000_041 })).toThrow('bracket');
   expect(() =>
     verifyDrainedMotionActivity({ ...animationInterval, after: { ...afterActivity, lastRequestedRenderId: 4 } }),
@@ -188,8 +202,7 @@ const clippedBefore = {
 const clippedAfter = {
   ...beforeActivity,
   telemetryEntries: [
-    ...clippedBefore.telemetryEntries.slice(-2),
-    ...Array.from({ length: 18 }, (_, index) => completedSpan(198 + index, 'fs.read', 35)),
+    ...Array.from({ length: 18 }, (_, index) => completedSpan(198 + index, 'fs.read', index < 6 ? 15 : 35)),
     ...['step.product.prepare', 'step.document.build', 'step.writer.perform', 'step.file.transfer'].map(
       (name, index) => ({
         ...completedSpan(217 + index, name, 40),
@@ -199,11 +212,18 @@ const clippedAfter = {
     completedSpan(216, 'export.exportSTEP', 40),
   ],
 };
-const clippedInterval = { ...animationInterval, before: clippedBefore, after: clippedAfter };
+const clippedDuring = {
+  ...beforeActivity,
+  telemetryEntries: [
+    ...clippedBefore.telemetryEntries.slice(-2),
+    ...Array.from({ length: 6 }, (_, index) => completedSpan(198 + index, 'fs.read', 15)),
+  ],
+};
+const clippedInterval = { ...animationInterval, before: clippedBefore, during: clippedDuring, after: clippedAfter };
 
 it('should qualify the complete motion interval after exact twenty-root historical eviction', () => {
   expect(clippedBefore.telemetryEntries.filter((entry) => entry.detail?.parentSpanId === undefined)).toHaveLength(20);
-  expect(clippedAfter.telemetryEntries.filter((entry) => entry.detail?.parentSpanId === undefined)).toHaveLength(20);
+  expect(clippedAfter.telemetryEntries.some((entry) => entry.detail?.spanId === '196')).toBe(false);
   expect(verifyDrainedMotionActivity(clippedInterval)).toMatchObject({
     beforeSpanId: 197,
     afterSpanId: 220,
@@ -212,25 +232,67 @@ it('should qualify the complete motion interval after exact twenty-root historic
   expect(Object.values(verifyDrainedMotionActivity(clippedInterval).counts).every((count) => count === 0)).toBe(true);
 });
 it('should deny missing frontier or interval records after historical eviction', () => {
-  for (const id of ['196', '197', '198', '217']) {
+  for (const id of ['196', '197']) {
     expect(() =>
       verifyDrainedMotionActivity({
         ...clippedInterval,
+        during: {
+          ...clippedDuring,
+          telemetryEntries: clippedDuring.telemetryEntries.filter((entry) => entry.detail?.spanId !== id),
+        },
+      }),
+    ).toThrow('lost, truncated or replaced');
+  }
+  for (const id of ['198', '217']) {
+    expect(() =>
+      verifyDrainedMotionActivity({
+        ...clippedInterval,
+        during:
+          id === '198'
+            ? {
+                ...clippedDuring,
+                telemetryEntries: clippedDuring.telemetryEntries.filter((entry) => entry.detail?.spanId !== id),
+              }
+            : clippedDuring,
         after: {
           ...clippedAfter,
           telemetryEntries: clippedAfter.telemetryEntries.filter((entry) => entry.detail?.spanId !== id),
         },
       }),
-    ).toThrow(id === '196' || id === '197' ? 'lost, truncated or replaced' : 'Incomplete runtime span');
+    ).toThrow('Incomplete runtime span');
   }
+  expect(() =>
+    verifyDrainedMotionActivity({
+      ...clippedInterval,
+      after: {
+        ...clippedAfter,
+        telemetryEntries: clippedAfter.telemetryEntries.filter((entry) => entry.detail?.spanId !== '203'),
+      },
+    }),
+  ).toThrow('lost, truncated or replaced');
+  expect(() =>
+    verifyDrainedMotionActivity({
+      ...clippedInterval,
+      during: {
+        ...clippedDuring,
+        telemetryEntries: [
+          ...clippedDuring.telemetryEntries,
+          {
+            ...completedSpan(204, 'fs.read', 35),
+            origin: { label: 'worker', instance: 'intermediate-producer' },
+          },
+        ],
+      },
+    }),
+  ).toThrow('Runtime producer changed');
 });
 it('should deny changed clocks and unclassified or unfinished work after historical eviction', () => {
   const controls = [
     {
-      replacement: { ...completedSpan(198, 'fs.read', 35), workerTimeOrigin: 1_000_001 },
+      replacement: { ...completedSpan(204, 'fs.read', 35), workerTimeOrigin: 1_000_001 },
       message: 'clock or label changed',
     },
-    { replacement: completedSpan(198, 'unknown.work', 35), message: 'Unclassified runtime work' },
+    { replacement: completedSpan(204, 'unknown.work', 35), message: 'Unclassified runtime work' },
     {
       replacement: {
         ...completedSpan(217, 'step.product.prepare', 40),
@@ -246,10 +308,9 @@ it('should deny changed clocks and unclassified or unfinished work after histori
       },
       message: 'Unclassified runtime work',
     },
-    { replacement: completedSpan(196, 'rewritten.frontier', 12), message: 'lost, truncated or replaced' },
-    { replacement: completedSpan(198, 'kernel.compute', 35), message: 'performed observed' },
+    { replacement: completedSpan(204, 'kernel.compute', 35), message: 'performed observed' },
     {
-      replacement: { ...completedSpan(198, 'fs.read', 35), origin: { label: 'worker', instance: 'unknown-producer' } },
+      replacement: { ...completedSpan(204, 'fs.read', 35), origin: { label: 'worker', instance: 'unknown-producer' } },
       message: 'Runtime producer changed',
     },
   ];
@@ -267,6 +328,17 @@ it('should deny changed clocks and unclassified or unfinished work after histori
       }),
     ).toThrow(message);
   }
+  expect(() =>
+    verifyDrainedMotionActivity({
+      ...clippedInterval,
+      during: {
+        ...clippedDuring,
+        telemetryEntries: clippedDuring.telemetryEntries.map((entry) =>
+          entry.detail?.spanId === '196' ? completedSpan(196, 'rewritten.frontier', 12) : entry,
+        ),
+      },
+    }),
+  ).toThrow('lost, truncated or replaced');
   expect(() =>
     verifyDrainedMotionActivity({
       ...clippedInterval,

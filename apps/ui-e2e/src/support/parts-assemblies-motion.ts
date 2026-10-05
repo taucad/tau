@@ -545,6 +545,7 @@ export function getMotionBodyCandidate(
 export function verifyDrainedMotionActivity(
   input: Readonly<{
     before: MotionActivityObservation;
+    during: MotionActivityObservation;
     after: MotionActivityObservation;
     intervalStart: number;
     intervalEnd: number;
@@ -556,15 +557,19 @@ export function verifyDrainedMotionActivity(
   observedSpans: number;
   counts: Readonly<Record<string, number>>;
 }> {
-  const { before, after, intervalStart, intervalEnd } = input;
+  const { before, during, after, intervalStart, intervalEnd } = input;
+  const snapshots = [before, during, after] as const;
   if (!Number.isFinite(intervalStart) || !Number.isFinite(intervalEnd) || intervalEnd <= intervalStart) {
     throw new RangeError('Missing finite animation interval.');
   }
   if (
     before.lastRequestedRenderId === undefined ||
     before.lastRequestedRenderId !== before.lastSettledRenderId ||
-    after.lastRequestedRenderId !== before.lastRequestedRenderId ||
-    after.lastSettledRenderId !== before.lastSettledRenderId
+    snapshots.some(
+      (snapshot) =>
+        snapshot.lastRequestedRenderId !== before.lastRequestedRenderId ||
+        snapshot.lastSettledRenderId !== before.lastSettledRenderId,
+    )
   ) {
     throw new Error('CAD request or settled source changed during animation.');
   }
@@ -591,13 +596,25 @@ export function verifyDrainedMotionActivity(
   }
   const origin = baselineDrain.origin.instance;
   const prior = before.telemetryEntries.filter((entry) => entry.origin.instance === origin);
-  const current = after.telemetryEntries.filter((entry) => entry.origin.instance === origin);
   const priorById = new Map(prior.map((entry) => [spanId(entry), entry]));
-  const currentById = new Map(current.map((entry) => [spanId(entry), entry]));
-  if (priorById.size !== prior.length || currentById.size !== current.length) {
+  const duringEntries = during.telemetryEntries.filter((entry) => entry.origin.instance === origin);
+  const afterEntries = after.telemetryEntries.filter((entry) => entry.origin.instance === origin);
+  const duringById = new Map(duringEntries.map((entry) => [spanId(entry), entry]));
+  const afterById = new Map(afterEntries.map((entry) => [spanId(entry), entry]));
+  if (
+    priorById.size !== prior.length ||
+    duringById.size !== duringEntries.length ||
+    afterById.size !== afterEntries.length
+  ) {
     throw new Error('Duplicate runtime span identity.');
   }
-  if (before.telemetryEntries.length >= 2000 || after.telemetryEntries.length >= 2000) {
+  if (
+    snapshots.some(
+      (snapshot) =>
+        snapshot.telemetryEntries.length >= 2000 ||
+        snapshot.telemetryEntries.filter((entry) => entry.detail?.['parentSpanId'] === undefined).length > 20,
+    )
+  ) {
     throw new Error('Runtime interval reached its retained evidence capacity.');
   }
   const traceRoot = (
@@ -630,14 +647,50 @@ export function verifyDrainedMotionActivity(
     return currentEntry;
   };
   const beforeSpanId = Math.max(...priorById.keys());
-  const frontier = traceRoot(priorById.get(beforeSpanId)!, priorById);
   traceRoot(baselineDrain, priorById);
-  for (const [id, entry] of priorById) {
-    const retained = currentById.get(id);
-    if ((retained ?? traceRoot(entry, priorById) === frontier) && JSON.stringify(retained) !== JSON.stringify(entry)) {
-      throw new Error('Runtime marker was lost, truncated or replaced.');
+  const knownOrigins = new Set(before.telemetryEntries.map((entry) => entry.origin.instance));
+  for (const [previous, next, previousById, nextById] of [
+    [before, during, priorById, duringById],
+    [during, after, duringById, afterById],
+  ] as const) {
+    const previousSpanId = Math.max(...previousById.keys());
+    const nextSpanId = Math.max(...nextById.keys());
+    if (!Number.isFinite(previousSpanId) || !Number.isFinite(nextSpanId)) {
+      throw new TypeError('Runtime marker was lost, truncated or replaced.');
+    }
+    if (
+      next.telemetryEntries.some(
+        (entry) =>
+          !knownOrigins.has(entry.origin.instance) ||
+          (entry.origin.instance !== origin &&
+            !previous.telemetryEntries.some((priorEntry) => JSON.stringify(priorEntry) === JSON.stringify(entry))),
+      )
+    ) {
+      throw new Error('Runtime producer changed during the observed interval.');
+    }
+    const frontier = traceRoot(previousById.get(previousSpanId)!, previousById);
+    for (const [id, entry] of previousById) {
+      const retained = nextById.get(id);
+      if (
+        (retained !== undefined && JSON.stringify(retained) !== JSON.stringify(entry)) ||
+        (!retained && traceRoot(entry, previousById) === frontier)
+      ) {
+        throw new Error('Runtime marker was lost, truncated or replaced.');
+      }
+    }
+    for (let id = previousSpanId + 1; id <= nextSpanId; id++) {
+      if (!nextById.has(id)) {
+        throw new Error('Incomplete runtime span interval; unfinished or lost work is unknown.');
+      }
+    }
+    for (const id of nextById.keys()) {
+      if (id <= previousSpanId && !previousById.has(id)) {
+        throw new Error('Work active before animation completed inside its evidence interval.');
+      }
     }
   }
+  const current = [...duringEntries, ...afterEntries.filter((entry) => !duringById.has(spanId(entry)))];
+  const currentById = new Map(current.map((entry) => [spanId(entry), entry]));
   const drain = current.findLast((entry) => entry.name === 'export.exportSTEP' && spanId(entry) > beforeSpanId);
   if (!drain || drain.workerTimeOrigin !== baselineDrain.workerTimeOrigin) {
     throw new Error('No completed same-producer native STEP drain after animation.');
@@ -648,30 +701,9 @@ export function verifyDrainedMotionActivity(
   if (beforeEnd >= intervalStart || afterStart <= intervalEnd) {
     throw new Error('Native drain markers do not bracket the actual animation interval.');
   }
-  const knownOrigins = new Set(before.telemetryEntries.map((entry) => entry.origin.instance));
-  if (
-    after.telemetryEntries.some(
-      (entry) =>
-        !knownOrigins.has(entry.origin.instance) ||
-        (entry.origin.instance !== origin &&
-          !before.telemetryEntries.some((priorEntry) => JSON.stringify(priorEntry) === JSON.stringify(entry))),
-    )
-  ) {
-    throw new Error('Runtime producer changed during the observed interval.');
-  }
   const afterSpanId = Math.max(...currentById.keys());
   if (afterSpanId - beforeSpanId > 2000) {
     throw new Error('Runtime interval exceeds its retained evidence capacity.');
-  }
-  for (let id = beforeSpanId + 1; id <= afterSpanId; id++) {
-    if (!currentById.has(id)) {
-      throw new Error('Incomplete runtime span interval; unfinished or lost work is unknown.');
-    }
-  }
-  for (const id of currentById.keys()) {
-    if (id <= beforeSpanId && !priorById.has(id)) {
-      throw new Error('Work active before animation completed inside its evidence interval.');
-    }
   }
   const forbidden = [...motionEvidenceRequirements.sourceSpanNames, 'replicad.run-main', 'kernel.export-compute'];
   const counts: Record<string, number> = Object.fromEntries(forbidden.map((name) => [name, 0]));
@@ -694,6 +726,11 @@ export function verifyDrainedMotionActivity(
     const root = traceRoot(entry, currentById);
     if (spanId(root) <= beforeSpanId) {
       throw new Error('New runtime work extends a baseline trace.');
+    }
+    const earliestStart = Math.min(entry.epoch, entry.workerTimeOrigin) + entry.startTime;
+    const latestEnd = Math.max(entry.epoch, entry.workerTimeOrigin) + entry.startTime + entry.duration;
+    if (earliestStart < intervalEnd && latestEnd > intervalStart) {
+      throw new Error('Runtime work overlapped the actual animation interval.');
     }
     if (Object.hasOwn(counts, entry.name)) {
       counts[entry.name]! += 1;

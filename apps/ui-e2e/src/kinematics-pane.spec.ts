@@ -1139,6 +1139,7 @@ for (const backend of ['webgl', 'webgpu'] as const) {
     verifyNoMotionThumbnailJobs(thumbnailsBefore, thumbnailsBefore);
     const intervalStart = await target.evaluate(() => Math.max(Date.now(), performance.timeOrigin + performance.now()));
     let intervalEnd: number | undefined;
+    let activityAtIntervalEnd: MotionActivityObservation | undefined;
     try {
       await target.click(selectors.getByRole('button', { name: /^Animation:/u }));
       await target.click(selectors.getByTestId('kinematics-animation-sweep'));
@@ -1172,6 +1173,7 @@ for (const backend of ['webgl', 'webgpu'] as const) {
         return captures;
       });
       intervalEnd = await target.evaluate(() => Math.min(Date.now(), performance.timeOrigin + performance.now()));
+      activityAtIntervalEnd = await readMotionActivity();
       expect(new Set(samples.map(({ draw }) => draw.poseRevision)).size).toBeGreaterThan(1);
       const canonicalToRender = before.canonicalToRenderMatrix;
       const renderToCanonical = invertMotionMatrix(canonicalToRender);
@@ -1240,6 +1242,7 @@ for (const backend of ['webgl', 'webgpu'] as const) {
     const thumbnailsAfter = await readMotionHeadless();
     const drained = verifyDrainedMotionActivity({
       before: activityBefore,
+      during: activityAtIntervalEnd,
       after: activityAfter,
       intervalStart,
       intervalEnd,

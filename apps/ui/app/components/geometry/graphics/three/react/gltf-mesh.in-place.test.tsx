@@ -1865,6 +1865,8 @@ describe('GltfMesh in-place updates', () => {
       expect(resources?.parserJsonSerializedBytes).toBeGreaterThan(0);
       expect(resources?.parserObjectCount).toBeGreaterThan(1);
       expect(resources?.geometryCpuBytes).toBeGreaterThan(active.geometry.getAttribute('position').array.byteLength);
+      expect(resources?.currentAndCandidateExactBufferCpuBytes).toBe(resources?.exactResidentBufferCpuBytes);
+      expect(resources?.currentAndCandidateExactPayloadCpuBytes).toBe(resources?.exactResidentPayloadCpuBytes);
     }
     view.unmount();
     expect(activeImage.close).toHaveBeenCalledOnce();

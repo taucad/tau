@@ -5,7 +5,12 @@ import type {
   GeometryComponentNode,
   GeometryComponentPrimitiveRef,
 } from '@taucad/types';
-import { filterVisibleGltfPrimitives } from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
+import {
+  filterVisibleGltfPrimitives,
+  hasComponentOrAncestor,
+  hasComponentOrDescendant,
+  isModelComponentVisible,
+} from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
 
 const capabilities: GeometryComponentCapabilities = {
   canHide: true,
@@ -68,6 +73,28 @@ const filter = (
   filterVisibleGltfPrimitives({ primitives, manifest, hiddenComponentIds, isolatedComponentIds });
 
 describe('filterVisibleGltfPrimitives', () => {
+  it('should leave the component tree unread when no visibility target exists', () => {
+    const noTree = {
+      ...manifest,
+      nodesById: new Proxy(manifest.nodesById, {
+        get: () => {
+          throw new Error('An empty component set must not traverse the tree.');
+        },
+      }),
+    };
+    const empty = new Set<string>();
+    expect(hasComponentOrAncestor(noTree, 'face-a', empty)).toBe(false);
+    expect(hasComponentOrDescendant(noTree, 'face-a', empty)).toBe(false);
+    expect(
+      isModelComponentVisible({
+        manifest: noTree,
+        componentId: 'face-a',
+        hiddenComponentIds: empty,
+        isolatedComponentIds: empty,
+      }),
+    ).toBe(true);
+  });
+
   it('should share viewer ancestor hide and isolation semantics', () => {
     expect(filter(['assembly'], [])).toEqual([surfaceB]);
     expect(filter([], ['assembly'])).toEqual([surfaceA, lineA]);

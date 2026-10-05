@@ -2106,6 +2106,8 @@ async function prepareAssemblyScene({
   const hidden = new Set(modelVisualState.hiddenComponentIds);
   const isolated = new Set(modelVisualState.isolatedComponentIds);
   const focused = new Set(modelVisualState.focusedComponentId ? [modelVisualState.focusedComponentId] : []);
+  const opacityByComponentId =
+    Object.keys(modelVisualState.opacityByComponentId).length > 0 ? modelVisualState.opacityByComponentId : undefined;
   const extent = Math.max(...metadata.bounds.max.map((value, axis) => value - metadata.bounds.min[axis]!));
   // Cells only rebase draw storage; they never reject a demanded or selected occurrence.
   const cellWidth = Math.max(1, extent / 64);
@@ -2168,7 +2170,7 @@ async function prepareAssemblyScene({
         hiddenComponentIds: hidden,
         isolatedComponentIds: isolated,
         focusedComponentIds: focused,
-        opacityByComponentId: modelVisualState.opacityByComponentId,
+        opacityByComponentId,
       });
       return (
         visual.opacity >= 1 &&
@@ -2233,14 +2235,17 @@ async function prepareAssemblyScene({
         hiddenComponentIds: hidden,
         isolatedComponentIds: isolated,
         focusedComponentIds: focused,
-        opacityByComponentId: modelVisualState.opacityByComponentId,
+        opacityByComponentId,
       });
       if (!visual.visible) {
         continue;
       }
-      const linked = [componentId, ...getComponentAncestorIds(manifest, componentId)]
-        .map((id) => linkByComponent.get(id))
-        .find((entry) => entry !== undefined);
+      const linked =
+        linkByComponent.size === 0
+          ? undefined
+          : [componentId, ...getComponentAncestorIds(manifest, componentId)]
+              .map((id) => linkByComponent.get(id))
+              .find((entry) => entry !== undefined);
       const center = canonical.bounds
         ? canonical.bounds.min.map((value, axis) => (value + canonical.bounds!.max[axis]!) / 2)
         : [placement.elements[12], placement.elements[13], placement.elements[14]];
@@ -2259,9 +2264,11 @@ async function prepareAssemblyScene({
       }
       const localToBatch = parent.matrix.clone().invert().multiply(placement).multiply(primitive.localPlacement);
       if (primitive.geometry && primitive.material) {
-        const fullEvidence = [componentId, ...getComponentAncestorIds(manifest, componentId)].some(
-          (id) => selectedComponents.has(id) || focused.has(id),
-        );
+        const fullEvidence =
+          (selectedComponents.size > 0 || focused.size > 0) &&
+          [componentId, ...getComponentAncestorIds(manifest, componentId)].some(
+            (id) => selectedComponents.has(id) || focused.has(id),
+          );
         const drawGeometry =
           !fullEvidence &&
           primitive.detail &&
@@ -3017,8 +3024,10 @@ function countAssemblyResources(
         parserJsonSerializedBytes,
     };
   };
-  const { totalBytesEstimate, ...candidate } = inventory([bundle]);
+  const candidateInventory =
+    presentations.length === 1 && presentations[0] === bundle ? undefined : inventory([bundle]);
   const overlap = inventory(presentations);
+  const { totalBytesEstimate, ...candidate } = candidateInventory ?? overlap;
   return {
     ...candidate,
     preparedSourceBufferCount: overlap.preparedSourceBufferCount,

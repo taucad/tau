@@ -17,7 +17,18 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Copy, Plus, Settings2, Zap } from 'lucide-react';
+import {
+  Bot,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Copy,
+  Plus,
+  Settings2,
+  Zap,
+} from 'lucide-react';
 import type { AcpAgentExecution, TauAgentHostId } from '@taucad/chat';
 import type { ReasoningLevel } from '@taucad/chat/constants';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
@@ -588,7 +599,12 @@ function SettingRow({ setting }: { readonly setting: Setting }): React.JSX.Eleme
     );
   }
   const control = (
-    <SegmentedControl label={setting.name} value={setting.value} options={setting.options} onChange={setting.setValue} />
+    <SegmentedControl
+      label={setting.name}
+      value={setting.value}
+      options={setting.options}
+      onChange={setting.setValue}
+    />
   );
   const note = setting.note ? (
     <p className='truncate text-xs text-muted-foreground' title={setting.note}>
@@ -743,7 +759,6 @@ function Notice({ text }: { readonly text: string }): React.JSX.Element {
     </p>
   );
 }
-
 
 /** An agent the host lists but cannot start: the reason in the host's words, the fix, and the code support needs (F8). */
 function Unavailable({ agent }: { readonly agent: AcpSheetAgent & { readonly refusal: Refusal } }): React.JSX.Element {
@@ -1219,46 +1234,46 @@ function Sheet({
         >
           {/* The Agent and Model rows are as tall as a list row: label left, value right. */}
           <div className='flex flex-col gap-0.5 p-1'>
-          {hasChoice ? (
+            {hasChoice ? (
+              <button
+                ref={agentRowRef}
+                type='button'
+                data-slot='sheet-agent'
+                aria-label={`Agent: ${current.name}. Change`}
+                className={cn(rowClass, 'w-full gap-2')}
+                onClick={() => {
+                  returnTo.current = 'agent';
+                  go('agents');
+                }}
+              >
+                <span className='shrink-0 text-muted-foreground'>Agent</span>
+                <span className='ml-auto flex min-w-0 items-center gap-2'>
+                  <SheetAgentGlyph agent={current} className='size-4 shrink-0' />
+                  <span className='truncate'>{current.name}</span>
+                </span>
+                <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
+              </button>
+            ) : null}
             <button
-              ref={agentRowRef}
+              ref={modelRowRef}
               type='button'
-              data-slot='sheet-agent'
-              aria-label={`Agent: ${current.name}. Change`}
+              data-slot='sheet-model'
+              aria-label={`Model: ${current.kind === 'acp' ? `${current.name}, ` : ''}${sheetModel.name}. Change`}
               className={cn(rowClass, 'w-full gap-2')}
               onClick={() => {
-                returnTo.current = 'agent';
-                go('agents');
+                returnTo.current = 'model';
+                setBrowseKey(current.key);
+                setIsFromAgents(false);
+                go('models');
               }}
             >
-              <span className='shrink-0 text-muted-foreground'>Agent</span>
+              <span className='shrink-0 text-muted-foreground'>Model</span>
               <span className='ml-auto flex min-w-0 items-center gap-2'>
-                <SheetAgentGlyph agent={current} className='size-4 shrink-0' />
-                <span className='truncate'>{current.name}</span>
+                <span className='[&>svg]:size-4 [&>svg]:grayscale-0'>{sheetModel.glyph}</span>
+                <span className='truncate'>{sheetModel.name}</span>
               </span>
               <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
             </button>
-          ) : null}
-          <button
-            ref={modelRowRef}
-            type='button'
-            data-slot='sheet-model'
-            aria-label={`Model: ${current.kind === 'acp' ? `${current.name}, ` : ''}${sheetModel.name}. Change`}
-            className={cn(rowClass, 'w-full gap-2')}
-            onClick={() => {
-              returnTo.current = 'model';
-              setBrowseKey(current.key);
-              setIsFromAgents(false);
-              go('models');
-            }}
-          >
-            <span className='shrink-0 text-muted-foreground'>Model</span>
-            <span className='ml-auto flex min-w-0 items-center gap-2'>
-              <span className='[&>svg]:size-4 [&>svg]:grayscale-0'>{sheetModel.glyph}</span>
-              <span className='truncate'>{sheetModel.name}</span>
-            </span>
-            <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
-          </button>
           </div>
           {sheetModel.levels.length > 1 ? <ReasoningSection label={reasoningLabel} model={sheetModel} /> : null}
           {runsOn.notice ? <Notice text={runsOn.notice} /> : null}

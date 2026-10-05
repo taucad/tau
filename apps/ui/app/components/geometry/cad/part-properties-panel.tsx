@@ -145,10 +145,7 @@ export function PartPropertiesPanel({
           <p
             role={status.kind === 'failed' ? 'alert' : 'status'}
             aria-label='Measurement status'
-            className={cn(
-              'min-w-0 truncate text-xs text-muted-foreground',
-              status.kind === 'failed' && 'text-destructive',
-            )}
+            className={cn('min-w-0 truncate text-xs text-muted-foreground', status.kind === 'failed' && 'text-feature')}
           >
             <CircleHelp aria-hidden='true' className='mr-1 inline size-3.5' />
             {status.sentence}

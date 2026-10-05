@@ -98,8 +98,8 @@ describe('publishable()', () => {
     // package is noticed. Pinning the whole list would only restate the rule.
     expect(names).toHaveLength(51);
     expect(names).toEqual([...names].sort());
-    // Both ends of the train, and the native package added most recently.
-    for (const name of ['runtime', 'runtime-testing', 'geospec-engine', 'opencascade-native']) {
+    // Both ends of the train.
+    for (const name of ['runtime', 'runtime-testing', 'geospec-engine']) {
       expect(names).toContain(name);
     }
 

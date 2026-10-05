@@ -3,7 +3,7 @@ title: 'Color Policy'
 description: 'OKLCH color system rules: hue architecture, lightness levels, chroma ranges, semantic tokens, contrast requirements, colorblind safety, dark mode, and anti-patterns for all Tau UI surfaces.'
 status: active
 created: '2026-03-14'
-updated: '2026-09-28'
+updated: '2026-10-04'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/diagram-policy.md
@@ -54,11 +54,11 @@ Treat `--hue-primary` as the user-customizable accent hue, not as a generator fo
 | ------------------- | ---------------------------------- | ------------- | ---------------------------- |
 | `--hue-primary`     | Base                               | 180deg (teal) | Brand accent and focus       |
 | `--hue-secondary`   | `calc(var(--hue-primary) - 10deg)` | 170deg        | Explicitly chromatic accents |
-| `--hue-destructive` | Fixed                              | 15deg         | Error, delete, danger        |
+| `--hue-destructive` | Fixed                              | 15deg         | Delete, data loss            |
 | `--hue-success`     | Fixed                              | 150deg        | Success, complete            |
 | `--hue-warning`     | Fixed                              | 70deg         | Warning, caution             |
 | `--hue-information` | Fixed                              | 250deg        | Informational                |
-| `--hue-feature`     | Fixed                              | 280deg        | Feature highlights           |
+| `--hue-feature`     | Fixed                              | 280deg        | Errors, alerts, highlights   |
 | `--hue-highlighted` | Fixed                              | 330deg        | Highlighted/flagged          |
 
 Do not define a neutral hue. Achromatic colors have no meaningful hue, and every structural neutral uses chroma `0`. Status hues remain fixed so their meaning does not change with the user's accent choice.
@@ -132,7 +132,8 @@ Components always use semantic Tailwind classes. Shared CSS-variable mappings li
 | Border               | `--border`           | `border-border`                       |
 | Input field          | `--input`            | `border-input`                        |
 | Focus outline        | `--ring`             | `focus-visible:focus-outline`         |
-| Error state          | `--destructive`      | `bg-destructive`, `text-destructive`  |
+| Error or alert state | `--feature`          | `bg-feature`, `text-feature`          |
+| Data-losing action   | `--destructive`      | `variant='destructive'`               |
 | Success state        | `--success`          | `bg-success`, `text-success`          |
 
 ### Opacity Modifiers

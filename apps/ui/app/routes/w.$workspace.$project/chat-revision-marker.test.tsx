@@ -440,7 +440,7 @@ describe('ChatRevisionMarker', () => {
     expect(screen.getByRole('menuitem', { name: 'Copy revision id' })).not.toBeNull();
   });
 
-  it('should draw the trigger’s glyph family, purple only for an interrupted turn (HQ5)', () => {
+  it('should draw the trigger’s glyph family, a failed turn in the alert purple (HQ5)', () => {
     setLog(saved());
     setRevisions({ revisions: [revision()], byTurnId: new Map([['u1', revision()]]) });
     const { unmount } = render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
@@ -453,8 +453,8 @@ describe('ChatRevisionMarker', () => {
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     const glyph = document.querySelector('[data-slot="marker-glyph"]')?.getAttribute('class') ?? '';
     expect(glyph).toContain('lucide-circle-alert');
-    expect(glyph).toContain('text-destructive');
-    expect(glyph).not.toContain('text-feature');
+    expect(glyph).toContain('text-feature');
+    expect(glyph).not.toContain('text-destructive');
   });
 
   it('should say the saved revision is still on its way to Tau Cloud (round 21)', () => {

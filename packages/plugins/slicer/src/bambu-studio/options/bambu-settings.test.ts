@@ -382,11 +382,16 @@ const resolvePreset = (kind: string, name: string): Record<string, unknown> => {
   return { ...resolved, ...own };
 };
 
-describe.skipIf(!existsSync(profilesRoot))('bambu-studio options with installed X1C presets', () => {
-  const presets = {
-    process: resolvePreset('process', '0.20mm Standard @BBL X1C'),
-    filament: resolvePreset('filament', 'Bambu PETG Basic @BBL X1C'),
-  };
+const hasInstalledProfiles = existsSync(profilesRoot);
+
+describe.skipIf(!hasInstalledProfiles)('bambu-studio options with installed X1C presets', () => {
+  // Vitest collects a skipped suite's body too, so only read presets that exist.
+  const presets = hasInstalledProfiles
+    ? {
+        process: resolvePreset('process', '0.20mm Standard @BBL X1C'),
+        filament: resolvePreset('filament', 'Bambu PETG Basic @BBL X1C'),
+      }
+    : { process: {}, filament: {} };
 
   it('should cover every editable key of the resolved process and filament presets', () => {
     const keys = schemaKeys(buildBambuSettingsSchema(presets).schema);

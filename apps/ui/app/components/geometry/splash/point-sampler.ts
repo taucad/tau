@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MeshSurfaceSampler } from 'three/addons';
+import { MeshSurfaceSampler } from 'three/addons/math/MeshSurfaceSampler.js';
 
 /**
  * Result of sampling points from a mesh surface.

@@ -510,7 +510,7 @@ export function SvgViewer({ artifact, enableGrid = true, enableAxes = true, defa
   if (parsed.error !== undefined) {
     return (
       <div role='alert' aria-label='Invalid SVG' className='flex size-full items-center justify-center bg-background'>
-        <p className='max-w-sm text-center text-sm text-destructive'>{parsed.error.message}</p>
+        <p className='max-w-sm text-center text-sm text-feature'>{parsed.error.message}</p>
       </div>
     );
   }

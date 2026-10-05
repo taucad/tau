@@ -1316,7 +1316,7 @@ export function PrepareActions({
   if (action.kind === 'send') {
     return (
       <>
-        {sendError ? <PrintNotice tone='destructive'>{sendError}</PrintNotice> : null}
+        {sendError ? <PrintNotice tone='error'>{sendError}</PrintNotice> : null}
         <div className='flex min-w-0 flex-wrap items-center gap-2'>
           <Button type='button' size='sm' variant='outline' onClick={prepare.openPreview}>
             <Eye aria-hidden />
@@ -1569,9 +1569,7 @@ function BambuStudioChoices({
             : `${String(studio.dropped)} changed settings do not exist in these presets and were dropped.`}
         </PrintNotice>
       ) : null}
-      {mode === 'printer' || studio.error === undefined ? null : (
-        <PrintNotice tone='destructive'>{studio.error}</PrintNotice>
-      )}
+      {mode === 'printer' || studio.error === undefined ? null : <PrintNotice tone='error'>{studio.error}</PrintNotice>}
     </>
   );
 }
@@ -1586,7 +1584,7 @@ function SliceNotices({ prepare }: { readonly prepare: PrintPrepare }): React.JS
       </PrintNotice>
     );
   }
-  return sliceError ? <PrintNotice tone='destructive'>{sliceError}</PrintNotice> : undefined;
+  return sliceError ? <PrintNotice tone='error'>{sliceError}</PrintNotice> : undefined;
 }
 
 const startOptions = [

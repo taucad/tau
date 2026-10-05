@@ -246,11 +246,11 @@ const interruptingFacts = (status: RevisionStatusProjection, where: RevisionWher
   const { sync } = status;
   // `attention` counts conflicts too, and a conflict saved everything it was asked to (review R5).
   if (status.attention - status.conflicts.length > 0) {
-    return { icon: CircleAlert, tone: 'text-destructive', mark: 'failed', sentence: 'Save not confirmed' };
+    return { icon: CircleAlert, tone: 'text-feature', mark: 'failed', sentence: 'Save not confirmed' };
   }
   /* HQ3: an owner's revoke is the calm resting state below, never a red failure. */
   if (where.role !== 'revoked' && sync.state === 'failed' && failedBackupReasons.has(sync.reason ?? 'unknown')) {
-    return { icon: CircleAlert, tone: 'text-destructive', mark: 'failed', sentence: 'Backup failed' };
+    return { icon: CircleAlert, tone: 'text-feature', mark: 'failed', sentence: 'Backup failed' };
   }
   if (status.conflicts.length > 0 || sync.state === 'conflicted') {
     const line = conflictLine(status, where);
@@ -525,7 +525,7 @@ export const turnRevisionGlyph = (state: TurnRevisionState): Readonly<{ icon: Lu
       return { icon: GitMerge, tone: 'text-warning' };
     }
     case 'unconfirmed': {
-      return { icon: CircleAlert, tone: 'text-destructive' };
+      return { icon: CircleAlert, tone: 'text-feature' };
     }
     case 'hidden': {
       return { icon: History, tone: 'text-muted-foreground' };

@@ -12,7 +12,7 @@ export {
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
 export { createTauAgentHost } from '#host/tau-agent-host.js';
-export { isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
+export { isResumableRun, isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
 export {
   emptyChatLedger,
   foldChatLedger,

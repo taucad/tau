@@ -116,7 +116,7 @@ describe('ChatExecutionSelector', () => {
     expect(screen.getByText('offered:Tau')).toBeInTheDocument();
   });
 
-  it('offers one row per external agent a daemon advertises, with the credential note', async () => {
+  it('offers one row per external agent a daemon advertises, without a credential note', async () => {
     hostPlacements = [
       {
         hostId: 'origin',
@@ -149,9 +149,8 @@ describe('ChatExecutionSelector', () => {
 
     expect(await screen.findByRole('option', { name: /^Claude Code/u })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /^Codex/u })).toBeInTheDocument();
-    // SP-4 Result 3 + V2: the copy promises the project's tree and the user's own
-    // login, never per-action approval.
-    expect(screen.getByText("Runs with your local Codex login in this project's tree")).toBeInTheDocument();
+    // An agent that can start carries no note; only a refusal or a workspace path earns one.
+    expect(screen.queryByText(/Runs with your local/u)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('option', { name: /^Codex/u }));
     /* V5: the row is seeded with the model the host probed as this agent's

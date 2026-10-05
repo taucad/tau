@@ -15,7 +15,7 @@ export function RequirementIndicator({ passedCount, failedCount }: RequirementIn
         </span>
       )}
       {failedCount > 0 && (
-        <span className='flex items-center text-destructive'>
+        <span className='flex items-center text-feature'>
           <X className='size-3' />
           {failedCount}
         </span>

@@ -149,6 +149,8 @@ export type BenchmarkRunResult = {
 /** Options for configuring a benchmark run. */
 export type BenchmarkRunnerOptions = {
   iterations: number;
+  /** Run-local steady-state conditioning count; the default remains eight. */
+  warmupRuns?: number;
   ocTracing?: 'off' | 'summary' | 'per-call';
   libraryTracing?: 'off' | 'summary' | 'per-call';
   /** Operation to time. Defaults to `'export'` for historical benchmark compatibility. */
@@ -169,6 +171,14 @@ export type BenchmarkRunnerOptions = {
     totalRuns: number;
     warmupRuns: number;
     elapsed: number;
+  }) => void;
+  /** Retain a successful operation's GLB digest outside its timed wall interval. */
+  onIterationOutput?: (output: {
+    iteration: number;
+    totalRuns: number;
+    warmupRuns: number;
+    sha256: string;
+    bytes: number;
   }) => void;
   /** Explicit diagnostic callback; absent from ordinary benchmark runs. */
   onHostRenderBoundary?: (boundary: HostRenderBoundary) => void;
@@ -340,6 +350,7 @@ export async function runBenchmarks(
 ): Promise<BenchmarkRunResult> {
   const {
     iterations,
+    warmupRuns: warmupRunsOverride,
     ocTracing = 'off',
     libraryTracing = 'off',
     operation = 'export',
@@ -350,10 +361,14 @@ export async function runBenchmarks(
     onProgress,
     onIterationStart,
     onIterationProgress,
+    onIterationOutput,
     onHostRenderBoundary,
     cpuProfile: enableCpuProfile = false,
     cpuProfileInterval = 100,
   } = options;
+  if (warmupRunsOverride !== undefined && (!Number.isSafeInteger(warmupRunsOverride) || warmupRunsOverride < 0)) {
+    throw new RangeError('warmupRuns must be a nonnegative safe integer');
+  }
   const totalWork = cases.length;
   const results: BenchmarkResult[] = [];
   /* Read before the first case so the load average describes the run, not its own heat. */
@@ -401,7 +416,7 @@ export async function runBenchmarks(
     });
 
     const mode = benchCase.mode ?? 'steady-state';
-    const warmupRuns = mode === 'first-call' ? 0 : steadyStateWarmups;
+    const warmupRuns = mode === 'first-call' ? 0 : (warmupRunsOverride ?? steadyStateWarmups);
     const sampleIterations = mode === 'first-call' ? 1 : iterations;
     const totalRuns = sampleIterations + warmupRuns;
     let cpuProfileResult: CpuProfile | undefined;
@@ -465,6 +480,7 @@ export async function runBenchmarks(
           const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
           const committed = benchCase.stageSequence?.[iter % benchCase.stageSequence.length];
           let failureMessage: string | undefined;
+          let iterationOutputBytes: Uint8Array<ArrayBuffer> | undefined;
           hostBoundary('before-open');
           const document = client.open({
             source: { path: benchCase.mainFile },
@@ -509,6 +525,7 @@ export async function runBenchmarks(
                 const artifact = asKnownArtifact(outcome.rendering.artifact);
                 if (artifact?.mimeType === 'model/gltf-binary') {
                   outputBytes = artifact.content;
+                  iterationOutputBytes = artifact.content;
                 }
               } else {
                 failureMessage = outcome.rendering.issues.map((issue) => issue.message).join('; ');
@@ -521,6 +538,7 @@ export async function runBenchmarks(
               if (exportResult.success) {
                 outputBytes =
                   exportResult.files.find(({ name }) => name.endsWith('.glb'))?.bytes ?? exportResult.files[0].bytes;
+                iterationOutputBytes = outputBytes;
               } else {
                 failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');
               }
@@ -530,6 +548,15 @@ export async function runBenchmarks(
             hostBoundary('document-closed');
           }
           const elapsed = performance.now() - start;
+          if (iterationOutputBytes) {
+            onIterationOutput?.({
+              iteration: iter + 1,
+              totalRuns,
+              warmupRuns,
+              sha256: sha256(iterationOutputBytes),
+              bytes: iterationOutputBytes.byteLength,
+            });
+          }
           onIterationProgress?.({
             caseName: benchCase.name,
             iteration: iter + 1,

@@ -183,11 +183,15 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_HOST_AWAIT'] !== 'true')(
   },
 );
 
-type HoneycombWarmDiagnosticMode = 'profile' | 'gc-host' | 'tier-trace';
+type HoneycombWarmDiagnosticMode = 'profile' | 'gc-host' | 'tier-trace' | 'tier-calibration';
 
 const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Promise<void> => {
   const profile = mode === 'profile';
-  const tierTrace = mode === 'tier-trace';
+  const calibration = mode === 'tier-calibration';
+  const tierTrace = mode === 'tier-trace' || calibration;
+  const warmupRuns = calibration ? 400 : 8;
+  const measuredRuns = calibration ? 15 : 8;
+  const totalRuns = warmupRuns + measuredRuns;
   if (tierTrace) {
     expect(process.execArgv).toEqual(
       expect.arrayContaining(['--trace-opt', '--trace-deopt', '--trace-wasm-compilation-times']),
@@ -197,6 +201,9 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
     expect(typeof process.threadCpuUsage).toBe('function');
   }
   const workspace = resolve(import.meta.dirname, '../../../..');
+  const gitHead = calibration
+    ? execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim()
+    : undefined;
   const resourceRoot = resolve(workspace, 'apps/ui/public/assets/engines/replicad/density-single-v1');
   const assets = await Promise.all(
     [
@@ -210,6 +217,14 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
   );
   const source = await readHoneycombSource();
   const boundaries: HostRenderBoundary[] = [];
+  const iterationWalls: Array<{ iteration: number; totalRuns: number; warmupRuns: number; elapsed: number }> = [];
+  const iterationOutputs: Array<{
+    iteration: number;
+    totalRuns: number;
+    warmupRuns: number;
+    sha256: string;
+    bytes: number;
+  }> = [];
   let tierMarkerCount = 0;
   let tierMarkerFailed = false;
   const gcEntries: Array<{ name: string; startTime: number; duration: number; timeOrigin: number; detail: unknown }> =
@@ -247,14 +262,28 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
         },
       ],
       {
-        iterations: 8,
+        iterations: measuredRuns,
+        ...(calibration ? { warmupRuns } : {}),
         operation: 'render',
         includeEdges: true,
         wasm,
         ...(profile ? { cpuProfile: true, cpuProfileInterval: 100 } : {}),
+        ...(calibration
+          ? {
+              onIterationProgress: (progress: (typeof iterationWalls)[number]) => iterationWalls.push(progress),
+              onIterationOutput: (output: (typeof iterationOutputs)[number]) => iterationOutputs.push(output),
+            }
+          : {}),
         onHostRenderBoundary: (boundary) => {
           boundaries.push(boundary);
-          if (tierTrace && (boundary.phase === 'before-open' || boundary.phase === 'document-closed')) {
+          if (
+            tierTrace &&
+            (!calibration ||
+              (boundary.iteration === 1 && boundary.phase === 'before-open') ||
+              (boundary.iteration === warmupRuns && boundary.phase === 'document-closed') ||
+              boundary.iteration > warmupRuns) &&
+            (boundary.phase === 'before-open' || boundary.phase === 'document-closed')
+          ) {
             if (tierMarkerCount >= 32) {
               tierMarkerFailed = true;
               return;
@@ -281,8 +310,8 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
     observer.disconnect();
   }
   const result = run.results[0];
-  expect(result?.timings).toHaveLength(8);
-  expect(result?.warmupRuns).toBe(8);
+  expect(result?.timings).toHaveLength(measuredRuns);
+  expect(result?.warmupRuns).toBe(warmupRuns);
   expect(result?.outputHash).toBe('a961c7eaea123c509dd35092c606c8ff7d6a1b3be71e7506b3fc482a725cb408');
   expect(result?.outputSizeBytes).toBe(4800);
   expect(result?.triangleCount).toBe(16);
@@ -294,7 +323,7 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
     expect(result?.profileAnalysis).toBeUndefined();
   }
   const phases = ['before-open', 'after-open', 'after-view', 'request-issued', 'await-settled', 'document-closed'];
-  for (let iteration = 1; iteration <= 16; iteration++) {
+  for (let iteration = 1; iteration <= totalRuns; iteration++) {
     const operation = boundaries.filter((boundary) => boundary.iteration === iteration);
     expect(operation.filter(({ phase }) => !phase.startsWith('profile-')).map(({ phase }) => phase)).toEqual(phases);
     if (!profile) {
@@ -311,17 +340,50 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
   ).toEqual(
     profile
       ? [
-          { phase: 'profile-started', iteration: 9 },
-          { phase: 'profile-stopped', iteration: 16 },
+          { phase: 'profile-started', iteration: warmupRuns + 1 },
+          { phase: 'profile-stopped', iteration: totalRuns },
         ]
       : [],
   );
   if (!profile) {
-    expect(boundaries).toHaveLength(16 * phases.length);
+    expect(boundaries).toHaveLength(totalRuns * phases.length);
+  }
+  if (calibration) {
+    expect(iterationWalls).toHaveLength(totalRuns);
+    expect(iterationOutputs).toHaveLength(totalRuns);
+    for (let index = 0; index < totalRuns; index++) {
+      expect(iterationWalls[index]).toMatchObject({
+        iteration: index + 1,
+        totalRuns,
+        warmupRuns,
+      });
+      expect(Number.isFinite(iterationWalls[index]?.elapsed)).toBe(true);
+      expect(iterationOutputs[index]).toEqual({
+        iteration: index + 1,
+        totalRuns,
+        warmupRuns,
+        sha256: 'a961c7eaea123c509dd35092c606c8ff7d6a1b3be71e7506b3fc482a725cb408',
+        bytes: 4800,
+      });
+    }
+    expect(iterationWalls.slice(warmupRuns).map(({ elapsed }) => elapsed)).toEqual(result!.timings);
   }
   if (tierTrace) {
     expect(tierMarkerFailed).toBe(false);
     expect(tierMarkerCount).toBe(32);
+  }
+  if (calibration) {
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim()).toBe(gitHead);
+    expect(await readHoneycombSource()).toBe(source);
+    await Promise.all(
+      assets.map(async ({ name, digest }) => {
+        expect(
+          createHash('sha256')
+            .update(await readFile(resolve(resourceRoot, name)))
+            .digest('hex'),
+        ).toBe(digest);
+      }),
+    );
   }
   const directory = resolve(
     workspace,
@@ -332,7 +394,8 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
     resolve(directory, 'diagnostic.json'),
     JSON.stringify({
       status: 'diagnostic-only',
-      predeclared: { clients: 1, renderOperations: 16, warmupRuns: 8, measuredRuns: 8, cohortComparisons: 0 },
+      predeclared: { clients: 1, renderOperations: totalRuns, warmupRuns, measuredRuns, cohortComparisons: 0 },
+      ...(calibration ? { gitHead } : {}),
       source: { sha256: honeycombSourceDigest, bytes: Buffer.byteLength(source) },
       assets,
       options: profile
@@ -340,7 +403,7 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
             operation: 'render',
             includeEdges: true,
             mode: 'steady-state',
-            iterations: 8,
+            iterations: measuredRuns,
             cpuProfileIntervalUs: 100,
             wasm,
           }
@@ -348,16 +411,18 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
             operation: 'render',
             includeEdges: true,
             mode: 'steady-state',
-            iterations: 8,
+            iterations: measuredRuns,
+            ...(calibration ? { warmupRuns } : {}),
             cpuProfile: false,
             explicitPremeasurementGc: false,
             wasm,
           },
       output: { hash: result!.outputHash, bytes: result!.outputSizeBytes, triangles: result!.triangleCount },
       measuredRenderWall: result!.timings,
-      hostOperations: Array.from({ length: 16 }, (_, index) => ({
+      ...(calibration ? { conditioningWall: iterationWalls.slice(0, warmupRuns), iterationOutputs } : {}),
+      hostOperations: Array.from({ length: totalRuns }, (_, index) => ({
         iteration: index + 1,
-        warmup: index < 8,
+        warmup: index < warmupRuns,
         boundaries: boundaries.filter((boundary) => boundary.iteration === index + 1),
       })),
       gcEntries,
@@ -368,6 +433,7 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
               count: tierMarkerCount,
               maximum: 32,
               phases: { 1: 'before-open', 2: 'document-closed' },
+              ...(calibration ? { conditioningStartIteration: 1, conditioningEndIteration: warmupRuns } : {}),
               interpretation:
                 'Synchronous stdout emission order only; V8 compiler events may be emitted asynchronously.',
             },
@@ -376,7 +442,7 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
       ...(profile ? { cpuProfile: result!.cpuProfile, profileAnalysis: result!.profileAnalysis } : {}),
       workerSpans: result!.telemetry.flatMap((entries, index) =>
         entries.map(({ name, startTime, duration, workerTimeOrigin, detail }) => ({
-          iteration: index + 9,
+          iteration: index + warmupRuns + 1,
           name,
           startTime,
           duration,
@@ -386,26 +452,33 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
             : {}),
         })),
       ),
-      limits: tierTrace
+      limits: calibration
         ? [
-            'Marker lines bracket synchronous emission in this Node worker, not the time of V8 optimization or compilation events; background work and buffering may reorder trace output.',
-            'V8 tracing and the GC observer can perturb timings. This single 8+8 window cannot replace the original CV cohort or prove its historical outlier cause.',
+            'The fixed 400 conditioning renders probe Node 26 Maglev invocation behavior; render count does not prove persistent function identity or bound WASM dynamic tiering.',
+            'Two numeric markers bracket the full conditioning interval, and 30 bracket the 15 observed renders; they establish stdout emission order, not V8 compiler event time.',
+            'Tracing and GC observation perturb timings. This one diagnostic cannot replace the original five/five/fifteen CV cohort or explain its historical failure.',
           ]
-        : profile
+        : tierTrace
           ? [
-              'V8 samples cover the complete eight-operation measured window; they are not assigned to individual operations without verified clock alignment.',
-              'Profiler sampling, the explicit pre-measurement GC, and the GC observer can perturb timings. This run is diagnostic and cannot establish the original CV or its cause.',
-              'If this finite window has no slow operation, no slow-path attribution is possible.',
+              'Marker lines bracket synchronous emission in this Node worker, not the time of V8 optimization or compilation events; background work and buffering may reorder trace output.',
+              'V8 tracing and the GC observer can perturb timings. This single 8+8 window cannot replace the original CV cohort or prove its historical outlier cause.',
             ]
-          : [
-              'GC observations and host boundaries share this Node realm; worker telemetry clocks require their own verified origin before subtraction.',
-              'The observer can perturb timings. This finite diagnostic is not a replacement for the original CV cohort or proof of its historical outlier cause.',
-              'A window with no slow operation cannot attribute a slow path.',
-            ],
+          : profile
+            ? [
+                'V8 samples cover the complete eight-operation measured window; they are not assigned to individual operations without verified clock alignment.',
+                'Profiler sampling, the explicit pre-measurement GC, and the GC observer can perturb timings. This run is diagnostic and cannot establish the original CV or its cause.',
+                'If this finite window has no slow operation, no slow-path attribution is possible.',
+              ]
+            : [
+                'GC observations and host boundaries share this Node realm; worker telemetry clocks require their own verified origin before subtraction.',
+                'The observer can perturb timings. This finite diagnostic is not a replacement for the original CV cohort or proof of its historical outlier cause.',
+                'A window with no slow operation cannot attribute a slow path.',
+              ],
       implementationSources: await Promise.all(
         [
           'apps/runtime-e2e/src/benchmarks/benchmark-runner.ts',
           'apps/runtime-e2e/src/benchmarks/replicad-app-small-model.bench.test.ts',
+          ...(calibration ? ['apps/runtime-e2e/vitest.config.ts'] : []),
         ].map(async (path) => ({
           path,
           sha256: createHash('sha256')
@@ -427,9 +500,18 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_GC_HOST'] !== 'true')(
   async () => runHoneycombWarmDiagnostic('gc-host'),
 );
 
-it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_TIER_TRACE'] !== 'true')(
-  'should retain bounded Honeycomb warm-window tier-trace emission brackets without a V8 sampler',
-  async () => runHoneycombWarmDiagnostic('tier-trace'),
+it.skipIf(
+  process.env['TAU_E2E_HONEYCOMB_WARM_TIER_TRACE'] !== 'true' ||
+    process.env['TAU_E2E_HONEYCOMB_WARM_TIER_CALIBRATION'] === 'true',
+)('should retain bounded Honeycomb warm-window tier-trace emission brackets without a V8 sampler', async () =>
+  runHoneycombWarmDiagnostic('tier-trace'),
+);
+
+it.skipIf(
+  process.env['TAU_E2E_HONEYCOMB_WARM_TIER_TRACE'] !== 'true' ||
+    process.env['TAU_E2E_HONEYCOMB_WARM_TIER_CALIBRATION'] !== 'true',
+)('should retain one fixed 400-render Honeycomb tier calibration and 15 observed renders', async () =>
+  runHoneycombWarmDiagnostic('tier-calibration'),
 );
 
 // Existing runtime-e2e owner proposal; no default suite silently executes the opt-in native acquisition.

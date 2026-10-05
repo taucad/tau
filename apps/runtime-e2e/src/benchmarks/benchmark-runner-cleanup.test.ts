@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { createHash } from 'node:crypto';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
@@ -149,6 +150,77 @@ it('should dispatch the configured render operation without a per-case override 
   expect(fixture.viewSpy).toHaveBeenCalledWith('model', { content: { includeEdges: false } });
   expect(fixture.document.export).not.toHaveBeenCalled();
   expect(client.terminate).toHaveBeenCalledOnce();
+});
+
+it.each([
+  { requestedWarmups: undefined, expectedWarmups: 8 },
+  { requestedWarmups: 2, expectedWarmups: 2 },
+])(
+  'should retain $expectedWarmups conditioning outputs and close one client after the run',
+  async ({ requestedWarmups, expectedWarmups }) => {
+    const client = createMockRuntimeClient();
+    const fixture = createMockRuntimeDocument();
+    const bytes = Uint8Array.of(1);
+    const starts: Array<{ iteration: number; totalRuns: number; warmupRuns: number }> = [];
+    const outputs: Array<{ iteration: number; sha256: string; bytes: number }> = [];
+    vi.mocked(client.open).mockReturnValue(fixture.document);
+    vi.mocked(createRuntimeClient).mockReturnValue(client);
+    vi.mocked(fixture.view.rendering).mockResolvedValue({
+      superseded: false,
+      rendering: {
+        success: true,
+        requestId: 'conditioning-output',
+        evaluationId: fixture.evaluation.id,
+        transient: false,
+        view: 'model',
+        issues: [],
+        artifact: { mimeType: 'model/gltf-binary', content: bytes },
+        hash: 'conditioning-result',
+      },
+    });
+    const cleanup = new Error('client closed after all conditioning output callbacks');
+    vi.mocked(client.terminate).mockImplementation(() => {
+      throw cleanup;
+    });
+    const benchmarkCase = cases[0]!;
+    await expect(
+      runBenchmarks([{ ...benchmarkCase, mode: 'steady-state' }], {
+        ...options,
+        ...(requestedWarmups === undefined ? {} : { warmupRuns: requestedWarmups }),
+        onIterationStart: ({ iteration, totalRuns, warmupRuns }) => {
+          starts.push({ iteration, totalRuns, warmupRuns });
+        },
+        onIterationOutput: ({ iteration, sha256, bytes: outputBytes }) => {
+          outputs.push({ iteration, sha256, bytes: outputBytes });
+        },
+      }),
+    ).rejects.toBe(cleanup);
+    const totalRuns = expectedWarmups + 1;
+    expect(starts).toEqual(
+      Array.from({ length: totalRuns }, (_, index) => ({
+        iteration: index + 1,
+        totalRuns,
+        warmupRuns: expectedWarmups,
+      })),
+    );
+    expect(outputs).toEqual(
+      Array.from({ length: totalRuns }, (_, index) => ({
+        iteration: index + 1,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        bytes: bytes.byteLength,
+      })),
+    );
+    expect(createRuntimeClient).toHaveBeenCalledOnce();
+    expect(client.open).toHaveBeenCalledTimes(totalRuns);
+    expect(fixture.view.close).toHaveBeenCalledTimes(totalRuns);
+    expect(fixture.document.close).toHaveBeenCalledTimes(totalRuns);
+    expect(client.terminate).toHaveBeenCalledOnce();
+  },
+);
+
+it('should reject an unbounded conditioning count before creating a client', async () => {
+  await expect(runBenchmarks(cases, { ...options, warmupRuns: Infinity })).rejects.toThrow(RangeError);
+  expect(createRuntimeClient).not.toHaveBeenCalled();
 });
 
 it('should retain host await boundaries through deferred cancellation and close both owners', async () => {

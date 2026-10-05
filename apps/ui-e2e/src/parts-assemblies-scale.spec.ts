@@ -553,11 +553,45 @@ for (const workload of [
     // This first bounded recording freezes raw target/compositor/heap provenance. It is not a presented-frame verdict.
     const trajectoryBefore = await captureScaleViewportEvidence();
     expect(trajectoryBefore.identity.root).toBe(pin.root.digest);
-    const probe = await target.scalePresentationProbe(
-      `s16-${workload.name}-named-cell`,
-      'primary',
-      workload.name === 'scale-10k' ? { traceFormat: 'proto', inputLineage: true } : undefined,
-    );
+    const profile10k = workload.name === 'scale-10k' && process.env['TAU_E2E_SCALE_CPU_DIAGNOSTIC'] === '1';
+    if (profile10k) {
+      await target.startCpuProfile('primary');
+    }
+    let cpuProfile: string | undefined;
+    let probeFailed = false;
+    let probeFailure: unknown;
+    let stopFailed = false;
+    let stopFailure: unknown;
+    let sampled: Awaited<ReturnType<typeof target.scalePresentationProbe>> | undefined;
+    try {
+      sampled = await target.scalePresentationProbe(
+        `s16-${workload.name}-named-cell`,
+        'primary',
+        workload.name === 'scale-10k' ? { traceFormat: 'proto', inputLineage: true } : undefined,
+      );
+    } catch (error) {
+      probeFailed = true;
+      probeFailure = error;
+    } finally {
+      if (profile10k) {
+        try {
+          cpuProfile = await target.stopCpuProfile('s16-scale-10k-named-cell-ui.cpuprofile', 'primary');
+        } catch (error) {
+          stopFailed = true;
+          stopFailure = error;
+        }
+      }
+    }
+    if (probeFailed) {
+      throw probeFailure;
+    }
+    if (stopFailed) {
+      throw stopFailure;
+    }
+    if (!sampled) {
+      throw new Error('The scale presentation probe returned no result.');
+    }
+    const probe = sampled;
     expect(probe.traceBytes).toBeGreaterThan(0);
     expect(probe.dataLossOccurred).toBe(false);
     expect(probe.presentationQualification).toBe('raw-probe-only');
@@ -572,6 +606,12 @@ for (const workload of [
       JSON.stringify(
         {
           probe,
+          cpuProfileDiagnostic: profile10k
+            ? {
+                artifact: cpuProfile,
+                scope: 'selected primary page isolate only; diagnostic sampling, not a memory or GPU verdict',
+              }
+            : undefined,
           trajectoryBefore,
           trajectoryView,
           candidateBoundary: { before: beforeCandidate, after: afterCandidate },

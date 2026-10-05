@@ -1771,8 +1771,8 @@ describe('KernelWorker completed part publication', () => {
         // The sentinel is outside every selected snapshot and the final published source closure.
         // Its real provider reads isolate each child's global BEFORE validation, without span ancestry.
         expect(readFile.mock.calls.filter(([path]) => path === sentinelPath)).toHaveLength(childCount);
-        const recipeReadCounts = sources.map(({ path }) =>
-          readFile.mock.calls.filter(([readPath]) => readPath === path).length,
+        const recipeReadCounts = sources.map(
+          ({ path }) => readFile.mock.calls.filter(([readPath]) => readPath === path).length,
         );
         const lastRecipeReadCount = recipeReadCounts.at(-1);
         if (lastRecipeReadCount === undefined) {
@@ -1826,7 +1826,9 @@ describe('KernelWorker completed part publication', () => {
         entries.length = 0;
         readFile.mockClear();
         if (scenario === 'missing-batch') {
-          readFile.mockRejectedValueOnce(Object.assign(new Error('injected missing retained batch'), { code: 'ENOENT' }));
+          readFile.mockRejectedValueOnce(
+            Object.assign(new Error('injected missing retained batch'), { code: 'ENOENT' }),
+          );
         } else if (scenario === 'abort') {
           readFile.mockImplementationOnce(async () => {
             controller.abort(reason);
@@ -1835,10 +1837,7 @@ describe('KernelWorker completed part publication', () => {
         } else {
           readFile.mockRejectedValueOnce(reason);
         }
-        const snapshot = worker.snapshotSource(
-          { file: { path: 'parts', filename: 'next.kcl' } },
-          controller.signal,
-        );
+        const snapshot = worker.snapshotSource({ file: { path: 'parts', filename: 'next.kcl' } }, controller.signal);
         if (scenario === 'missing-batch') {
           const result = await snapshot;
           expect(result.success).toBe(true);

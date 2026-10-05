@@ -1104,9 +1104,12 @@ describe('RuntimeClient.publishAssembly', () => {
       }
       expect(result.failure).toEqual({ name: 'OperationTimeoutError', code: 'RUNTIME_OPERATION_TIMEOUT' });
       expect(Object.keys(result.failure).sort()).toEqual(['code', 'name']);
-      await vi.waitFor(() => {
-        expect(client.lifecycleState).toBe('terminated');
-      }, { timeout: 5000 });
+      await vi.waitFor(
+        () => {
+          expect(client.lifecycleState).toBe('terminated');
+        },
+        { timeout: 5000 },
+      );
       expect(workers[0]?.threadId).toBe(-1);
       await expect(result.readCurrent()).rejects.toMatchObject({
         name: 'RuntimeTerminatedError',

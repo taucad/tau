@@ -9,7 +9,8 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../.
 
 const pluginPackages = readdirSync(resolve(repositoryRoot, 'packages/plugins'), { withFileTypes: true })
   .filter(
-    (entry) => entry.isDirectory() && existsSync(resolve(repositoryRoot, 'packages/plugins', entry.name, 'package.json')),
+    (entry) =>
+      entry.isDirectory() && existsSync(resolve(repositoryRoot, 'packages/plugins', entry.name, 'package.json')),
   )
   .map((entry) => ({
     name: JSON.parse(readFileSync(resolve(repositoryRoot, 'packages/plugins', entry.name, 'package.json'), 'utf8'))

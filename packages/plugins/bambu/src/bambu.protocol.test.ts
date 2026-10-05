@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  bambuCalibrationTable,
   bambuRemoteName,
   bambuStage,
   bambuTopic,
   mergeBambuStatus,
   parseBambuCommandPayload,
+  parseBambuReply,
   parseBambuDiscoveryDatagram,
   parseBambuStatusPayload,
   parseBambuStill,
@@ -295,6 +297,23 @@ describe('Bambu protocol admission', () => {
 
     expect(again.externalMaterial).toMatchObject({ slot: 254, materialId: 'PETG' });
     expect(again.materials?.[0]).toMatchObject({ slot: 0, materialId: 'PLA' });
+  });
+
+  it('should report no AMS units when a printer without an AMS sends an empty list', () => {
+    expect(report({ ams: { ams: [], tray_now: '255' } }).materialUnits).toEqual([]);
+  });
+
+  it('should read a table reply without filaments as an empty table, and a failed reply as no table', () => {
+    const reply = (print: Readonly<Record<string, unknown>>) =>
+      parseBambuReply(bytes(JSON.stringify({ print: { command: 'extrusion_cali_get', sequence_id: '7', ...print } })))!;
+    expect(bambuCalibrationTable(reply({ result: 'success', nozzle_diameter: '0.4' }))).toEqual([]);
+    expect(bambuCalibrationTable(reply({ nozzle_diameter: '0.4' }))).toEqual([]);
+    expect(bambuCalibrationTable(reply({ result: 'fail', reason: 'invalid nozzle_diameter' }))).toBeUndefined();
+    expect(
+      bambuCalibrationTable(
+        reply({ filaments: [{ cali_idx: 2, filament_id: 'GFG99', name: 'PETG', k_value: '0.040000' }] }),
+      ),
+    ).toEqual([{ index: 2, name: 'PETG', filamentId: 'GFG99', settingId: '', pressureAdvance: 0.04 }]);
   });
   /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
 

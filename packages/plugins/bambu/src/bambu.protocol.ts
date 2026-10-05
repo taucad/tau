@@ -977,9 +977,10 @@ export type BambuCalibrationRow = Readonly<{
  * @internal
  */
 export const bambuCalibrationTable = (reply: BambuReply): readonly BambuCalibrationRow[] | undefined => {
-  if (reply.command !== 'extrusion_cali_get' || reply.result === 'fail' || !Array.isArray(reply.body['filaments'])) {
+  if (reply.command !== 'extrusion_cali_get' || reply.result === 'fail') {
     return undefined;
   }
+  // An empty table comes back without `filaments` (the workshop X1C, 01.12); Bambu Studio reads that as no rows.
   return Object.freeze(
     boundedArray(reply.body['filaments'], 512).flatMap((value) => {
       const row = recordOf(value);

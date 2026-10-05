@@ -706,11 +706,8 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     };
   };
 
-  /** AMS indexes the printer reports, else the one the manifest declares. */
-  const amsUnits = (): readonly number[] => {
-    const reported = status?.materialUnits?.map(({ unit }) => unit);
-    return reported === undefined || reported.length === 0 ? [0] : reported;
-  };
+  /** AMS indexes the printer reports (none when it reports an empty list), else the one the manifest declares. */
+  const amsUnits = (): readonly number[] => status?.materialUnits?.map(({ unit }) => unit) ?? [0];
 
   const materialValue = (): MachineComponentValue => ({
     kind: 'material-system',

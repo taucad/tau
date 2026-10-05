@@ -44,9 +44,23 @@ const opaqueColor = (color: string | undefined): string | undefined => {
 };
 
 /**
+ * How far apart two `#RRGGBB` colours look: the "redmean" weighted RGB distance, close enough to
+ * perception to pick a spool without a colour-space conversion.
+ */
+const colorDistance = (a: string | undefined, b: string | undefined): number | undefined => {
+  if (a === undefined || b === undefined) {
+    return undefined;
+  }
+  const [r1, g1, b1] = [1, 3, 5].map((at) => Number.parseInt(a.slice(at, at + 2), 16)) as [number, number, number];
+  const [r2, g2, b2] = [1, 3, 5].map((at) => Number.parseInt(b.slice(at, at + 2), 16)) as [number, number, number];
+  const redMean = (r1 + r2) / 2;
+  return (2 + redMean / 256) * (r1 - r2) ** 2 + 4 * (g1 - g2) ** 2 + (2 + (255 - redMean) / 256) * (b1 - b2) ** 2;
+};
+
+/**
  * The slot each of a model's filaments prints from unless someone chooses: only loaded trays of
- * the print's material count, each once, a tray of the filament's colour first, then the first
- * free one in the machine's order. The planner expects these slots, and the Print pane's Prepare
+ * the print's material count, each once, the tray nearest the filament's colour first (an exact
+ * colour is nearest), then the first free one in the machine's order. The planner expects these slots, and the Print pane's Prepare
  * step starts its filament rows from them.
  *
  * ponytail: "the print's material" is one material type, compared case-insensitively; families
@@ -67,19 +81,33 @@ export const defaultFilamentSlots = (
     (tray) => tray.state === 'loaded' && tray.materialId?.toLowerCase() === materialId.toLowerCase(),
   );
   const taken = new Set<number>();
-  const take = (isWanted: (tray: MachineObservedMaterial) => boolean): number | undefined => {
-    const tray = trays.find((candidate) => !taken.has(candidate.slot) && isWanted(candidate));
-    if (tray !== undefined) {
-      taken.add(tray.slot);
+  const slots: Array<number | undefined> = colors.map(() => undefined);
+  // Closest pairs first, so an exact match is never taken by another filament's near one.
+  const pairs = colors
+    .flatMap((color, filament) =>
+      trays.flatMap((tray) => {
+        const distance = colorDistance(opaqueColor(color), opaqueColor(tray.color));
+        return distance === undefined ? [] : [{ filament, slot: tray.slot, distance }];
+      }),
+    )
+    .toSorted((a, b) => a.distance - b.distance);
+  for (const { filament, slot } of pairs) {
+    if (slots[filament] === undefined && !taken.has(slot)) {
+      slots[filament] = slot;
+      taken.add(slot);
     }
-    return tray?.slot;
-  };
-  // Colour matches first, so no earlier filament's fallback takes a later filament's match.
-  const matched = colors.map((color) => {
-    const wanted = opaqueColor(color);
-    return wanted === undefined ? undefined : take((tray) => opaqueColor(tray.color) === wanted);
+  }
+  // A filament or tray without a colour takes the first free tray in the machine's order.
+  return slots.map((slot) => {
+    if (slot !== undefined) {
+      return slot;
+    }
+    const free = trays.find((tray) => !taken.has(tray.slot));
+    if (free !== undefined) {
+      taken.add(free.slot);
+    }
+    return free?.slot;
   });
-  return matched.map((slot) => slot ?? take(() => true));
 };
 
 /** What {@link createMachinePrintPlanner} borrows from its host. @public */

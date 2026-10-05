@@ -6,7 +6,7 @@ import type { DockviewApi, DockviewReadyEvent, IDockviewHeaderActionsProps } fro
 import { Dockview, dockviewStyleOverrides, scrollActiveTabIntoView } from '#components/panes/dockview.js';
 
 vi.mock('dockview-react', async () => {
-  const { createElement } = await import('react');
+  const { createElement, useState } = await import('react');
   const dockviewReact = ({
     className,
     disableTabsOverflowList,
@@ -22,8 +22,9 @@ vi.mock('dockview-react', async () => {
     rightHeaderActionsComponent?: FunctionComponent<IDockviewHeaderActionsProps>;
     scrollbars?: string;
   }) => {
-    // The group's element is the mock root, attached by the ref before header-action effects run.
-    const group = { element: undefined as HTMLElement | undefined };
+    // Native Dockview attaches its group before mounting React header portals.
+    const [groupElement, setGroupElement] = useState<HTMLElement>();
+    const group = { element: groupElement };
     return createElement(
       'div',
       {
@@ -33,11 +34,11 @@ vi.mock('dockview-react', async () => {
         'data-scrollbars': scrollbars,
         'data-testid': 'dockview-react',
         ref: (element) => {
-          if (!element) {
+          if (!element || groupElement === element) {
             return;
           }
 
-          group.element = element;
+          setGroupElement(element);
           onReady?.({
             api: {
               activeGroup: { element },
@@ -52,7 +53,9 @@ vi.mock('dockview-react', async () => {
         { className: 'dv-tabs-container', 'data-testid': 'dockview-tabs' },
         createElement('button', { className: 'dv-tab dv-active-tab', type: 'button' }, 'Tab'),
       ),
-      RightHeaderActions ? createElement(RightHeaderActions, { group } as IDockviewHeaderActionsProps) : null,
+      RightHeaderActions && groupElement
+        ? createElement(RightHeaderActions, { group } as IDockviewHeaderActionsProps)
+        : null,
     );
   };
 
@@ -405,8 +408,8 @@ describe('scrollActiveTabIntoView', () => {
 
   // ── requestAnimationFrame deferral ──
 
-  describe('requestAnimationFrame deferral', () => {
-    it('should not execute scroll logic synchronously', () => {
+  describe('prepaint scroll correction', () => {
+    it('should correct scroll without a later animation frame', () => {
       const { api, tabsContainer } = buildApi({
         tabs: [{ offsetLeft: 300, width: 120, isActive: true }],
         container: { scrollLeft: 0, clientWidth: 300 },
@@ -414,13 +417,8 @@ describe('scrollActiveTabIntoView', () => {
 
       scrollActiveTabIntoView(api);
 
-      // Before rAF fires, scrollLeft should be unchanged
-      expect(tabsContainer!.scrollLeft).toBe(0);
-
-      flushRaf();
-
-      // After rAF fires, scrollLeft should be corrected
       expect(tabsContainer!.scrollLeft).toBe(120);
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it('should survive a custom-scrollbar update in the same frame', () => {
@@ -573,7 +571,7 @@ describe('dockviewStyleOverrides', () => {
 });
 
 describe('Dockview', () => {
-  it('corrects the active tab after its click completes', () => {
+  it('should reveal an already active tab when clicked without a later frame', () => {
     vi.useFakeTimers();
     render(createElement(Dockview, { components: {}, onReady: vi.fn() }));
     const tabs = screen.getByTestId('dockview-tabs');
@@ -589,8 +587,6 @@ describe('Dockview', () => {
     tabs.style.setProperty('--scroll-fade-size', '42px');
 
     tab.click();
-    flushRaf();
-    flushRaf();
 
     expect(tabs.scrollLeft).toBe(0);
     vi.useRealTimers();
@@ -636,9 +632,6 @@ describe('Dockview', () => {
       for (const callback of resizeCallbacks) {
         callback([], {} as ResizeObserver);
       }
-      expect(tabs.scrollLeft).toBe(28);
-      flushRaf();
-
       // Tab right edge (236 + 112 = 348) - clientWidth (296) + fade (42) = 94
       expect(tabs.scrollLeft).toBe(94);
 

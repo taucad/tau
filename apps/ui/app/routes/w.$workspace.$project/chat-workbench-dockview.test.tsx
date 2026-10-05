@@ -680,6 +680,78 @@ describe('FileEditor routing', () => {
     expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ filesOpen: false });
   });
 
+  it('should apply restored Files widths in the same render without replacing the viewer', () => {
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('hello') });
+    const { rerender } = render(
+      <FileEditor
+        paneId='test-pane'
+        filePath='main.ts'
+        parameters={{ filePath: 'main.ts', filesOpen: true, filesWidth: 200 }}
+        panelApi={mockPanelApi}
+      />,
+    );
+    const region = screen.getByRole('region', { name: 'Files for main.ts' });
+    const toggle = screen.getByRole('button', { name: 'Hide files for main.ts' });
+    toggle.focus();
+
+    rerender(
+      <FileEditor
+        paneId='test-pane'
+        filePath='main.ts'
+        parameters={{ filePath: 'main.ts', filesOpen: true, filesWidth: 344 }}
+        panelApi={mockPanelApi}
+      />,
+    );
+
+    expect(region).toHaveStyle({ width: '344px' });
+    expect(toggle).toHaveFocus();
+    expect(screen.getByRole('region', { name: 'Files for main.ts' })).toBe(region);
+  });
+
+  it('should keep drag widths local and discard cancelled gestures before the next resize', () => {
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('hello') });
+    render(
+      <FileEditor
+        paneId='test-pane'
+        filePath='main.ts'
+        parameters={{ filePath: 'main.ts', filesOpen: true, filesWidth: 240 }}
+        panelApi={mockPanelApi}
+      />,
+    );
+    // The jsdom environment has no PointerEvent; pointer capture only needs the native event's id.
+    const pointer = (type: string, clientX = 0): MouseEvent => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX });
+      Object.defineProperty(event, 'pointerId', { value: 1 });
+      return event;
+    };
+    const region = screen.getByRole('region', { name: 'Files for main.ts' });
+    const sash = screen.getByRole('separator', { name: 'Resize Files pane' });
+    vi.mocked(mockPanelApi.updateParameters).mockClear();
+    mockEditorRef.send.mockClear();
+
+    fireEvent(sash, pointer('pointerdown', 500));
+    fireEvent(sash, pointer('pointermove', 440));
+    expect(region).toHaveStyle({ width: '300px' });
+    expect(mockPanelApi.updateParameters).not.toHaveBeenCalled();
+    expect(mockEditorRef.send).not.toHaveBeenCalled();
+
+    fireEvent(sash, pointer('pointercancel'));
+    expect(region).toHaveStyle({ width: '240px' });
+    fireEvent(sash, pointer('pointermove', 400));
+    fireEvent(sash, pointer('pointerup'));
+    expect(mockPanelApi.updateParameters).not.toHaveBeenCalled();
+
+    fireEvent(sash, pointer('pointerdown', 500));
+    fireEvent(sash, pointer('pointermove', 460));
+    fireEvent(sash, pointer('pointerup'));
+    expect(mockPanelApi.updateParameters).toHaveBeenCalledExactlyOnceWith({ filesWidth: 280 });
+    expect(mockEditorRef.send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setFileSidebarWidth',
+      path: 'main.ts',
+      width: 280,
+    });
+  });
+
   it('should show file-tree actions before the Files toggle only while the pane is open', () => {
     mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('hello') });
     const { rerender } = render(

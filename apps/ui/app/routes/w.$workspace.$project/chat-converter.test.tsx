@@ -6,6 +6,7 @@ import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { FileExtension, FileParameterEntry, JSONValue } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { admitParameterManifest } from '@taucad/parameters';
+import { bambuA1MiniMachine, bambuMachine } from '@taucad/bambu';
 import { imageEdgeSchemas } from '@taucad/image';
 import { toJSONSchema } from 'zod';
 import type * as RjsfCore from '@rjsf/core';
@@ -862,6 +863,18 @@ describe('ChatConverter', () => {
     });
     expect(screen.getByRole('heading', { name: 'Content' })).toBeDefined();
     expect(screen.getByRole('heading', { name: 'Format' })).toBeDefined();
+  });
+
+  it.each([
+    ['X1C', bambuMachine],
+    ['A1 mini', bambuA1MiniMachine],
+  ])('compiles the %s submission form, external spool slot included', async (_name, machine) => {
+    const { manifest } = await compileExportConfigurationManifest('bambu', 'machine.submission', {
+      schema: machine().submissionConfiguration.legacyProjection.inputSchema as JSONSchema7,
+      defaults: {},
+    });
+
+    expect(Object.keys(manifest.bindings)).toContain('/expectedMaterials/*/slot');
   });
 
   it('compiles the units the image exporter declares into the checked manifest', async () => {

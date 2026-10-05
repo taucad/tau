@@ -119,7 +119,7 @@ describe('configuration admission', () => {
     }).toThrow('UNSUPPORTED_KEYWORD');
     expect(() => {
       admitJsonSchema({
-        enum: Array.from({ length: 2049 }, (_, index) => index),
+        enum: Array.from({ length: 8193 }, (_, index) => index),
       });
     }).toThrow('SCHEMA_LIMIT');
   });

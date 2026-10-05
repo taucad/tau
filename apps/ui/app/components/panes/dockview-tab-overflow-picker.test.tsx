@@ -167,7 +167,7 @@ afterEach(() => {
 });
 
 describe('DockviewTabOverflowPicker', () => {
-  it('stays absent while all tabs fit', () => {
+  it('should reserve a stable slot while all tabs fit', () => {
     const panel = createPanel({ id: 'one', title: 'One' });
     const { properties } = createProperties({ panels: [panel], clientWidth: 300, scrollWidth: 300 });
 
@@ -176,6 +176,7 @@ describe('DockviewTabOverflowPicker', () => {
 
     expect(screen.queryByRole('button', { name: 'Open tabs' })).not.toBeInTheDocument();
     expect(comboBoxSpy).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-slot=tab-overflow]')).toHaveClass('size-7', 'shrink-0');
   });
 
   it('renders a named 28px action visible at rest and exposes every group panel with searchable identity', () => {
@@ -190,7 +191,6 @@ describe('DockviewTabOverflowPicker', () => {
     });
 
     renderPicker(properties);
-    flushMeasurement();
 
     const trigger = screen.getByRole('button', { name: 'Open tabs' });
     expect(trigger).toHaveClass('size-7');
@@ -313,15 +313,15 @@ describe('DockviewTabOverflowPicker', () => {
     expect(observers[0]?.disconnect).toHaveBeenCalledOnce();
   });
 
-  it('cancels a pending post-layout measurement when unmounted', () => {
-    const cancelFrame = vi.spyOn(globalThis, 'cancelAnimationFrame');
+  it('should measure before paint without scheduling a later frame', () => {
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame');
     const panel = createPanel({ id: 'one', title: 'One' });
     const { properties } = createProperties({ panels: [panel], clientWidth: 100, scrollWidth: 300 });
 
     const view = renderPicker(properties);
     view.unmount();
 
-    expect(cancelFrame).toHaveBeenCalledOnce();
+    expect(requestFrame).not.toHaveBeenCalled();
     expect(observers[0]?.disconnect).toHaveBeenCalledOnce();
   });
 

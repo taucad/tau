@@ -5,10 +5,13 @@ import type { FileProvenance } from '@taucad/types';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 
-const { send, useFileTreeEntry } = vi.hoisted(() => ({
+const { send, useFileTreeEntry, useFileReturn } = vi.hoisted(() => ({
   send: vi.fn(),
   useFileTreeEntry: vi.fn<() => { provenance: FileProvenance } | undefined>(),
+  useFileReturn: vi.fn<() => unknown>(),
 }));
+
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({ useFileReturn }));
 
 vi.mock('#hooks/use-file-tree.js', () => ({ useFileTreeEntry }));
 
@@ -41,6 +44,27 @@ describe('ChatEditorBreadcrumbs', () => {
   beforeEach(() => {
     send.mockClear();
     useFileTreeEntry.mockReset();
+    useFileReturn.mockReset();
+  });
+
+  it('should offer a way back only on the file a pane opened, and take it', () => {
+    const back = vi.fn();
+    useFileReturn.mockReturnValue({ returnTo: { path: '.tau/a/main.gcode.3mf', panel: 'print' }, back });
+    const { rerender } = render(
+      <TooltipProvider>
+        <ChatEditorBreadcrumbs filePath='.tau/a/main.gcode.3mf' />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Print' }));
+    expect(back).toHaveBeenCalledOnce();
+
+    rerender(
+      <TooltipProvider>
+        <ChatEditorBreadcrumbs filePath='main.ts' />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByRole('button', { name: 'Back to Print' })).not.toBeInTheDocument();
   });
 
   it('should scroll breadcrumbs from vertical wheel input while preserving selection and child actions', () => {

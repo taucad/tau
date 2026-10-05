@@ -8,6 +8,7 @@ import {
   planRelease,
   prependChangelog,
   releaseCommitSubject,
+  selectRelease,
   setManifestVersion,
 } from '#release-apps.js';
 
@@ -121,6 +122,38 @@ describe('changelogs', () => {
     expect(releaseCommitSubject([release, { ...release, name: 'api', nextVersion: '1.0.1' }])).toBe(
       'chore(release): ui v0.3.0, api v1.0.1',
     );
+  });
+});
+
+describe('selectRelease', () => {
+  const apps = [{ name: 'api' }, { name: 'desktop' }, { name: 'ui' }];
+  const pending = (name: string): AppRelease => ({
+    name,
+    root: `apps/${name}`,
+    currentVersion: '0.1.0',
+    nextVersion: '0.2.0',
+    previousTag: `${name}@0.1.0`,
+    tag: `${name}@0.2.0`,
+    bump: 'minor',
+    commits: [commit(`feat(${name}): Add`)],
+  });
+
+  it('keeps only the named application, so one release commit versions one application', () => {
+    expect(selectRelease([pending('api'), pending('ui')], apps, 'ui').map(({ name }) => name)).toEqual(['ui']);
+    expect(releaseCommitSubject(selectRelease([pending('api'), pending('ui')], apps, 'api'))).toBe(
+      'chore(release): api v0.2.0',
+    );
+  });
+
+  it('returns nothing for an application with no pending release', () => {
+    expect(selectRelease([pending('api')], apps, 'desktop')).toEqual([]);
+  });
+
+  it('rejects a name that is not an application', () => {
+    expect(() => selectRelease([], apps, 'docs')).toThrow(
+      '"docs" is not an application; expected one of api, desktop, ui',
+    );
+    expect(() => selectRelease([], apps, undefined)).toThrow('is not an application');
   });
 });
 

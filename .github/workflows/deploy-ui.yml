@@ -9,17 +9,17 @@
 #
 #   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on every push to
 #     `main` that affects the UI, using this run's `geospec-ci-*` artifact.
-#   - production (tau.new): `prod-deploy-on-merge.yml` on every push to
-#     `production` (made only by `deploy-production.yml`), using the artifact of
-#     the `ci.yml` push run on `main` for the same commit.
+#   - production (tau.new): `deploy-production.yml` dispatches this workflow at
+#     a `ui@x.y.z` tag, using the artifact of the `ci.yml` push run on `main`
+#     for the tag's commit.
 #
 # Both Netlify sites run with `deploy_mode = "ci"` in tau-cloud, so Netlify's Git
 # integration no longer builds them. Each environment holds a `NETLIFY_AUTH_TOKEN`
 # secret, set by hand by the account owner; the site IDs below are not secrets.
 #
-# Manual redeploy of the current commit: `gh workflow run deploy-ui.yml -f
-# environment=staging` from `main`, or `-f environment=production` from
-# `production`.
+# Manual redeploy of staging: `gh workflow run deploy-ui.yml -f
+# environment=staging` from `main`. Production redeploys go through
+# `deploy-production.yml` with the release tag.
 
 name: Deploy UI to Netlify
 
@@ -65,6 +65,20 @@ jobs:
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
     steps:
+      # Production deploys start only from deploy-production.yml, whose run a
+      # release manager approves; it dispatches this workflow at the release tag.
+      - name: Require a production deploy started by Deploy release to production
+        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+        env:
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$TRIGGERING_ACTOR" != 'github-actions[bot]' ] || ! [[ "$REF" =~ ^refs/tags/ui@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Deploy to production with Deploy release to production (deploy-production.yml); it dispatches this workflow at the release tag."
+            exit 1
+          fi
+
       - name: Resolve the Netlify site
         id: site
         env:

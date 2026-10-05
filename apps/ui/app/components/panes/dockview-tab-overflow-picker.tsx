@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { IDockviewHeaderActionsProps, IDockviewPanel } from 'dockview-react';
 import { Check, ChevronDown } from 'lucide-react';
 import { DockviewTabIcon } from '#components/panes/dockview-tab.js';
@@ -54,31 +55,24 @@ const useTabsOverflow = ({
 }): boolean => {
   const [isOverflowing, setIsOverflowing] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const tabs = group.element.querySelector<HTMLElement>('.dv-tabs-container');
     if (!tabs) {
       return;
     }
 
-    let frame: number | undefined;
     const measure = (): void => {
-      if (frame !== undefined) {
-        cancelAnimationFrame(frame);
-      }
-      frame = requestAnimationFrame(() => {
-        frame = undefined;
-        setIsOverflowing(panelCount > 0 && tabs.scrollWidth > tabs.clientWidth + 1);
-      });
+      setIsOverflowing(panelCount > 0 && tabs.scrollWidth > tabs.clientWidth + 1);
     };
-
-    const observer = new ResizeObserver(measure);
+    // The fixed slot keeps this update from changing the width we measured.
+    // Deliver resize-driven visibility before paint, not in the next frame.
+    const observer = new ResizeObserver(() => {
+      flushSync(measure);
+    });
     observer.observe(tabs);
     measure();
 
     return () => {
-      if (frame !== undefined) {
-        cancelAnimationFrame(frame);
-      }
       observer.disconnect();
     };
   }, [group, panelCount]);
@@ -142,20 +136,22 @@ export function DockviewTabOverflowPicker(
   const isOverflowing = useTabsOverflow({ group: properties.group, panelCount: panels.length });
 
   if (!isOverflowing) {
-    return undefined;
+    return <span aria-hidden className='size-7 shrink-0' data-slot='tab-overflow' />;
   }
 
   return (
-    <Tooltip>
-      <DockviewTabsComboBox activePanel={activePanel} panels={panels} getIcon={getIcon} leadingIcon={leadingIcon}>
-        <TooltipTrigger asChild>
-          {/* Not a hover-revealed pane action: while tabs overflow, this is their visible route. */}
-          <PaneButton aria-label='Open tabs'>
-            <ChevronDown aria-hidden className='size-3.5' />
-          </PaneButton>
-        </TooltipTrigger>
-      </DockviewTabsComboBox>
-      <TooltipContent>Open tabs</TooltipContent>
-    </Tooltip>
+    <span className='flex size-7 shrink-0 items-center' data-slot='tab-overflow'>
+      <Tooltip>
+        <DockviewTabsComboBox activePanel={activePanel} panels={panels} getIcon={getIcon} leadingIcon={leadingIcon}>
+          <TooltipTrigger asChild>
+            {/* Not a hover-revealed pane action: while tabs overflow, this is their visible route. */}
+            <PaneButton aria-label='Open tabs'>
+              <ChevronDown aria-hidden className='size-3.5' />
+            </PaneButton>
+          </TooltipTrigger>
+        </DockviewTabsComboBox>
+        <TooltipContent>Open tabs</TooltipContent>
+      </Tooltip>
+    </span>
   );
 }

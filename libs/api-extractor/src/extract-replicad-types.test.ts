@@ -39,8 +39,10 @@ describe('extract-replicad-types', () => {
   // ---------------------------------------------------------------------------
 
   it('preserves replicad-opencascadejs imports', () => {
-    expect(output).toContain("import type { gp_Pnt } from 'replicad-opencascadejs'");
-    expect(output).toContain("import type { TopoDS_Shape } from 'replicad-opencascadejs'");
+    // The bundle copies replicad's declarations verbatim, so whether the
+    // `type` modifier is present depends on replicad's own declaration emitter.
+    expect(output).toMatch(/^import (?:type )?\{ gp_Pnt \} from 'replicad-opencascadejs';$/mu);
+    expect(output).toMatch(/^import (?:type )?\{ TopoDS_Shape \} from 'replicad-opencascadejs';$/mu);
   });
 
   it('preserves opentype.js import', () => {
@@ -100,7 +102,8 @@ describe('extract-replicad-types', () => {
   });
 
   it('exports cast function', () => {
-    expect(output).toContain('export declare function cast(');
+    // Replicad 1.1 defines `cast` as a `makeCaster` constant, not a function declaration.
+    expect(output).toContain('export declare const cast: (shape: TopoDS_Shape) => AnyShape;');
   });
 
   // ---------------------------------------------------------------------------

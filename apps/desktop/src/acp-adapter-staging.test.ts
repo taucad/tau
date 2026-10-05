@@ -189,11 +189,11 @@ describe('ACP adapter staging', () => {
       expect(sharpRoot.startsWith(`${modulesRoot}/`)).toBe(true);
       expect(fromSharp.resolve(`${addonName}/package`).startsWith(`${sharpRoot}/node_modules/`)).toBe(true);
       expect(fromAddon.resolve(`${vipsName}/package`).startsWith(`${sharpRoot}/node_modules/`)).toBe(true);
-      expect(await versionAt(resolve(modulesRoot, addonName, 'package.json'))).toBe('0.35.3');
-      expect(await versionAt(resolve(modulesRoot, vipsName, 'package.json'))).toBe('1.3.2');
-      expect(await versionAt(resolve(sharpRoot, 'package.json'))).toBe('0.34.5');
-      expect(await versionAt(fromSharp.resolve(`${addonName}/package`))).toBe('0.34.5');
-      expect(await versionAt(fromAddon.resolve(`${vipsName}/package`))).toBe('1.2.4');
+      expect(await versionAt(resolve(modulesRoot, addonName, 'package.json'))).toBe('0.34.5');
+      expect(await versionAt(resolve(modulesRoot, vipsName, 'package.json'))).toBe('1.2.4');
+      expect(await versionAt(resolve(sharpRoot, 'package.json'))).toBe('0.35.3');
+      expect(await versionAt(fromSharp.resolve(`${addonName}/package`))).toBe('0.35.3');
+      expect(await versionAt(fromAddon.resolve(`${vipsName}/package`))).toBe('1.3.2');
 
       // Require from the staged tree so ndarray-pixels exercises the packaged native loader.
       const gltfCore = fromFunctions('@gltf-transform/core') as typeof GltfCore;
@@ -415,6 +415,7 @@ process.stdout.write(JSON.stringify([rootSharp.versions.sharp, nestedSharp.versi
         name: '@parcel/watcher',
         source: await realpath(resolve(appRoot, 'node_modules/@parcel/watcher')),
         modulesRoot: defaultModules,
+        optionalDependencies: [],
       });
       expect(await readFile(resolve(defaultModules, '@parcel/watcher/index.js'))).toEqual(
         await readFile(resolve(appRoot, 'node_modules/@parcel/watcher/index.js')),

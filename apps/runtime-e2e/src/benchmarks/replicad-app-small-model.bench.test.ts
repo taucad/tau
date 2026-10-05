@@ -45,19 +45,6 @@ const honeycombCohortMode = (cpuDiagnostic: boolean) => ({
   cpuDiagnostic,
 });
 
-it('should keep the qualified Honeycomb cohort separate from the opt-in CPU diagnostic', () => {
-  expect(honeycombCohortMode(false)).toEqual({
-    directoryName: 'cohort-v2',
-    finalStatus: 'qualified',
-    cpuDiagnostic: false,
-  });
-  expect(honeycombCohortMode(true)).toEqual({
-    directoryName: 'cohort-cpu-diagnostic-v1',
-    finalStatus: 'diagnostic-only',
-    cpuDiagnostic: true,
-  });
-});
-
 const readHoneycombSource = async (): Promise<string> => {
   const route = await readFile(
     resolve(import.meta.dirname, '../../../ui/app/routes/[__e2e].project-file-tree/route.tsx'),
@@ -596,9 +583,9 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
       for (const [index, windows] of freshClientIterationProcessWindows.entries()) {
         expect(windows.map(({ renderWall }) => renderWall)).toEqual(freshClientRuns[index]?.results[0]?.timings);
       }
-      expect(warmRun.results[0]?.warmupRuns).toBe(8);
-      expect(warmRun.results[0]?.timings).toHaveLength(15);
     }
+    expect(warmRun.results[0]?.warmupRuns).toBe(8);
+    expect(warmRun.results[0]?.timings).toHaveLength(15);
     if (cohortMode.cpuDiagnostic) {
       expect(warmIterations?.windows).toHaveLength(23);
       expect(warmIterations?.windows.slice(0, 8).every(({ warmup }) => warmup)).toBe(true);

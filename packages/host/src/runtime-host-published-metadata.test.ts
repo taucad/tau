@@ -122,34 +122,34 @@ describe('fresh published capabilities metadata', () => {
     const occurrences: readonly PublishedPartOccurrence[] = nested
       ? [{ id: 'group', transform: identity, children: [leaf] }]
       : [leaf];
-    const requested = runtimeDocumentProtocolSchemas.calls.publishPartsRoot.args.parse({
-      path: 'published/scene.json',
-      parts: { body: reference },
-    });
-    const rootBytes = bytesFor(
-      canonicalJson({
-        schemaVersion: 1,
-        generation: 1,
-        parts: requested.parts,
-        occurrences,
-      }),
-    );
-    const root = await asset(requested.path, rootBytes);
     await base.writeFile(displayAsset.path, glb);
     await base.writeFile(reference.path, recordBytes);
-    // Actual checked authority verifies every retained immutable dependency and absent root before commit.
-    const committed = await base.writeFileChecked({
-      path: root.path,
-      data: rootBytes,
-      preconditions: [
-        { path: root.path, expected: null },
-        { path: displayAsset.path, expected: glb },
-        { path: reference.path, expected: recordBytes },
-      ],
+    const authoredPath = 'published/authored.json';
+    await base.writeFile(
+      authoredPath,
+      bytesFor(canonicalJson({ schemaVersion: 1, parts: { body: { publishedPart: reference } }, occurrences })),
+    );
+    const publisher = createRuntimeWorker({
+      runtime: defineRuntime({ kernels: [] }),
+      admitAssemblyDisplay: admitDisplay,
     });
-    if (committed.status !== 'applied') {
-      throw new Error(`Fixture checked publication failed: ${committed.status}`);
+    await initializeWorkerForTesting(publisher, { fileSystem: base });
+    let root: PublishedPartAsset;
+    try {
+      const receipt = await publisher.publishAuthoredAssemblyRoot({
+        authoredPath,
+        publicationPath: 'published/scene.json',
+        directory: 'published',
+      });
+      if (receipt.outcome.status !== 'published') {
+        throw new Error(`Fixture checked publication failed: ${receipt.outcome.status}`);
+      }
+      root = receipt.outcome.root;
+    } finally {
+      await publisher.cleanup();
     }
+    const rootBytes = await base.readFile(root.path);
+    await base.unlink(authoredPath);
     // Source and optional native assets have never been written. Actual worker admission validates the durable root.
     const read = vi.spyOn(base, 'readFile');
     const write = vi.spyOn(base, 'writeFile');

@@ -469,7 +469,11 @@ describe('createHostToolRegistry', () => {
   it('routes agent export and capture through the exact selected assembly pin without source evaluation', async () => {
     const workspaceRoot = await makeWorkspace();
     const bytes = new TextEncoder().encode(
-      JSON.stringify({ schemaVersion: 1, generation: 1, parts: {}, occurrences: [] }),
+      JSON.stringify({
+        schemaVersion: 2,
+        generation: 1,
+        manifest: { path: 'manifest.json', digest: `sha256:${'0'.repeat(64)}`, byteLength: 1 },
+      }),
     );
     await writeFile(join(workspaceRoot, 'scene.json'), bytes);
     const root = { path: 'scene.json', digest: `sha256:${await sha256Bytes(bytes)}`, byteLength: bytes.byteLength };
@@ -518,7 +522,11 @@ describe('createHostToolRegistry', () => {
       expect.objectContaining({ from: 'glb', files: [expect.objectContaining({ bytes: display })] }),
     );
     const next = new TextEncoder().encode(
-      JSON.stringify({ schemaVersion: 1, generation: 2, parts: {}, occurrences: [] }),
+      JSON.stringify({
+        schemaVersion: 2,
+        generation: 2,
+        manifest: { path: 'manifest.json', digest: `sha256:${'0'.repeat(64)}`, byteLength: 1 },
+      }),
     );
     await writeFile(join(workspaceRoot, 'scene.json'), next);
     await invoke(registry, 'export_model', { targetFile: 'scene.json', to: 'glb' });
@@ -537,17 +545,23 @@ describe('createHostToolRegistry', () => {
       }),
     };
     const registry = createHostToolRegistry({ workspaceRoot, runtimeClient: async () => runtime });
+    const authored = JSON.stringify({ schemaVersion: 1, parts: {}, occurrences: [] });
     for (const content of [
       '{',
       '{"ordinary":true}',
-      JSON.stringify({ schemaVersion: 1, parts: {}, occurrences: [] }),
+      authored,
       JSON.stringify({ schemaVersion: 1, generation: 1, parts: {}, occurrences: [] }),
+      JSON.stringify({ schemaVersion: 2, generation: 1 }),
+      JSON.stringify({ schemaVersion: 2, generation: 1, manifest: {} }),
     ]) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- Each selected JSON replacement precedes its request.
       await writeFile(join(workspaceRoot, 'scene.json'), content);
       // oxlint-disable-next-line eslint/no-await-in-loop -- The request must settle before the next selected replacement.
       const result = await invoke(registry, 'export_model', { targetFile: 'scene.json', to: 'glb' });
       expect(result.isError).toBe(true);
+      if (content === authored) {
+        expect(JSON.stringify(result.content)).toContain('committed pinned scene');
+      }
     }
     expect(runtime.openAssembly).toHaveBeenCalledOnce();
     expect(runtime.open).not.toHaveBeenCalled();

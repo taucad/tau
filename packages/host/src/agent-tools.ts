@@ -116,6 +116,21 @@ const hasAssemblyAdmission = (
 ): client is HostRuntimeClient & Pick<RuntimeClient, 'openAssembly'> =>
   'openAssembly' in client && typeof client.openAssembly === 'function';
 
+const looksLikePublishedAssemblyPointer = (pointer: Record<string, unknown>): boolean => {
+  const { generation, manifest, schemaVersion } = pointer;
+  return (
+    schemaVersion === 2 &&
+    typeof generation === 'number' &&
+    Number.isSafeInteger(generation) &&
+    generation >= 1 &&
+    manifest !== null &&
+    typeof manifest === 'object' &&
+    !Array.isArray(manifest) &&
+    !Object.hasOwn(pointer, 'parts') &&
+    !Object.hasOwn(pointer, 'occurrences')
+  );
+};
+
 /**
  * Filesystem capability the host tool registry consumes. The project's print intent is read in bounded chunks and
  * written with a precondition, so both are required: a filesystem without them is refused when the host is composed,
@@ -497,19 +512,22 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       const bytes = await view.readFile(assertRootedPath(path));
       signal?.throwIfAborted();
       const candidate: unknown = JSON.parse(new TextDecoder().decode(bytes));
-      if (
-        candidate === null ||
-        typeof candidate !== 'object' ||
-        !Object.hasOwn(candidate, 'parts') ||
-        !Object.hasOwn(candidate, 'occurrences') ||
-        !Object.hasOwn(candidate, 'schemaVersion')
-      ) {
+      if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
         throw new Error('The selected JSON has no admitted assembly display.');
       }
-      if (!Object.hasOwn(candidate, 'generation')) {
+      const pointer = candidate as Record<string, unknown>;
+      if (
+        pointer['schemaVersion'] === 1 &&
+        Object.hasOwn(pointer, 'parts') &&
+        Object.hasOwn(pointer, 'occurrences') &&
+        !Object.hasOwn(pointer, 'generation')
+      ) {
         throw new Error(
           'Authored assembly agent export requires a committed pinned scene; select its published scene JSON.',
         );
+      }
+      if (!looksLikePublishedAssemblyPointer(pointer)) {
+        throw new Error('The selected JSON has no admitted assembly display.');
       }
       if (!hasAssemblyAdmission(client)) {
         throw new Error('This attached runtime has no assembly admission operation.');

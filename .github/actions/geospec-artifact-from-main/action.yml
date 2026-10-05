@@ -16,6 +16,14 @@ inputs:
     description: 'How long to wait for that CI run to finish; 0 requires it to be finished already'
     required: false
     default: '0'
+  require-success:
+    description: >-
+      'true' (the default) requires the main CI run to have passed. 'false' also takes
+      the GeoSpec artifact from a finished run that failed elsewhere, as long as its
+      producer uploaded one. Staging UI deploys use 'false'; releases and production
+      keep the default.
+    required: false
+    default: 'true'
   github-token:
     description: 'Token with actions: read'
     required: true
@@ -30,6 +38,7 @@ runs:
         GH_TOKEN: ${{ inputs.github-token }}
         SHA: ${{ inputs.sha }}
         WAIT_MINUTES: ${{ inputs.wait-minutes }}
+        REQUIRE_SUCCESS: ${{ inputs.require-success }}
       run: |
         set -euo pipefail
         SHA=${SHA:-$(git rev-parse HEAD)}
@@ -49,12 +58,21 @@ runs:
           echo "Waiting for the ci.yml push run on main for $SHA (${run:-not started})"
           sleep 60
         done
-        if [ "$conclusion" != success ]; then
+        if [ "$conclusion" != success ] && [ "$REQUIRE_SUCCESS" != false ]; then
           echo "::error::The ci.yml push run on main for $SHA concluded $conclusion; fix main before releasing or deploying it."
           exit 1
         fi
         name=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
           --jq "[.artifacts[] | select(.expired == false and (.name | startswith(\"geospec-ci-$SHA-\")))] | sort_by(.name) | last | .name // empty")
+        if [ "$conclusion" != success ]; then
+          # From a failed run only the producer's own artifact is taken, and it is still
+          # verified against this checkout below; the cache fallback is not.
+          if [ -z "$name" ]; then
+            echo "::error::The ci.yml push run on main for $SHA concluded $conclusion and uploaded no GeoSpec artifact."
+            exit 1
+          fi
+          echo "::warning::The ci.yml push run on main for $SHA concluded $conclusion; taking its GeoSpec artifact because require-success is false."
+        fi
         if [ -z "$name" ]; then
           # A run whose product closure matched an earlier build skipped the producer and
           # restored its products from the cache, so it uploaded no artifact; an artifact

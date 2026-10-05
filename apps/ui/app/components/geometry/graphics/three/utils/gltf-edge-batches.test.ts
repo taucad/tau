@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Matrix4, Vector2 } from 'three';
+import { DoubleSide, Matrix4, Vector2 } from 'three';
 import {
   createEdgePrototypeGeometry,
   createEdgeBatchMaterial,
@@ -45,6 +45,7 @@ describe('edge occurrence semantics', () => {
   it('should retain the stripped occurrence endpoint graph', () => {
     const m = createEdgeBatchMaterial('webgpu', new Vector2(128, 128), 0);
     try {
+      expect(m.side).toBe(DoubleSide);
       expect(serialiseStrippedTslGraph(m.toJSON())).toMatchSnapshot();
     } finally {
       m.dispose();

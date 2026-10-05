@@ -138,6 +138,14 @@ jobs:
       - name: Install browsers for Vitest Browser
         run: pnpm exec playwright install --with-deps chromium firefox webkit
 
+      # `scripts:test:e2e` converts HTML references with Pandoc 3.1.4 or newer, and
+      # its expected Markdown follows current Pandoc; Ubuntu's package is 3.1.3.
+      - name: Install Pandoc for reference conversion
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
+          echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
+          sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
+
       # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
       # `BILLING_*` development values; without them it refuses to start.
       - name: Prepare API env file

@@ -212,10 +212,27 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 
 const mockWriteFiles = vi.fn().mockResolvedValue(undefined);
 const mockReadFile = vi.fn().mockRejectedValue(new Error('File not found'));
-let mockContentService: unknown = {};
+const mockExists = vi.fn(async (_path: string) => false);
+/** A content service whose preference watch is ready at once and never fires. */
+const contentServiceStub = (): unknown => ({
+  watchReady: () => ({
+    ready: Promise.resolve(),
+    closed: new Promise<never>(() => {
+      // Never closes.
+    }),
+    dispose: () => undefined,
+  }),
+});
+/** Store preference bytes on disk: the reader checks existence before it reads. */
+const storePreferences = (bytes: Uint8Array<ArrayBuffer>): void => {
+  mockExists.mockResolvedValue(true);
+  mockReadFile.mockResolvedValue(bytes);
+};
+let mockContentService: unknown = contentServiceStub();
 const mockFileManager = {
   writeFiles: mockWriteFiles,
   readFile: mockReadFile,
+  exists: mockExists,
   get contentService(): unknown {
     return mockContentService;
   },
@@ -535,8 +552,9 @@ describe('ChatConverter', () => {
       issues: [],
     });
     mockKernelIssues = new Map();
-    mockContentService = {};
+    mockContentService = contentServiceStub();
     mockReadFile.mockRejectedValue(new Error('File not found'));
+    mockExists.mockResolvedValue(false);
     mockGeometryUnits.clear();
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockViewSettings = {};
@@ -1660,7 +1678,7 @@ describe('ChatConverter', () => {
   describe('preference persistence', () => {
     it('should restore persisted format selection on mount', async () => {
       const stored = JSON.stringify({ selectedFormats: ['stl'] });
-      mockReadFile.mockResolvedValue(new TextEncoder().encode(stored));
+      storePreferences(new TextEncoder().encode(stored));
 
       render(<ChatConverter isExpanded />);
 
@@ -1675,7 +1693,7 @@ describe('ChatConverter', () => {
         shouldDownload: false,
         shouldSaveToProject: true,
       });
-      mockReadFile.mockResolvedValue(new TextEncoder().encode(stored));
+      storePreferences(new TextEncoder().encode(stored));
 
       render(<ChatConverter isExpanded />);
 
@@ -1701,7 +1719,7 @@ describe('ChatConverter', () => {
           },
         ],
       });
-      mockReadFile.mockResolvedValue(
+      storePreferences(
         new TextEncoder().encode(
           JSON.stringify({
             selectedFormats: ['webp'],
@@ -1772,7 +1790,7 @@ describe('ChatConverter', () => {
     });
 
     it('should remove invalid and unknown persisted route options', async () => {
-      mockReadFile.mockResolvedValue(
+      storePreferences(
         new TextEncoder().encode(
           JSON.stringify({
             selectedFormats: ['stl'],
@@ -1794,7 +1812,7 @@ describe('ChatConverter', () => {
     });
 
     it('should remove persisted options and content when the active kernel has no matching route', async () => {
-      mockReadFile.mockResolvedValue(
+      storePreferences(
         new TextEncoder().encode(
           JSON.stringify({
             formatOptions: { webp: { width: 1920 } },
@@ -1818,7 +1836,7 @@ describe('ChatConverter', () => {
     });
 
     it('should remove persisted content when the route does not advertise content support', async () => {
-      mockReadFile.mockResolvedValue(
+      storePreferences(
         new TextEncoder().encode(
           JSON.stringify({
             formatContent: { glb: { includeEdges: true } },
@@ -1868,13 +1886,13 @@ describe('ChatConverter', () => {
 
     it('should load preferences once contentService becomes available', async () => {
       const stored = JSON.stringify({ selectedFormats: ['step'] });
-      mockReadFile.mockResolvedValue(new TextEncoder().encode(stored));
+      storePreferences(new TextEncoder().encode(stored));
       mockContentService = undefined;
 
       const { rerender } = render(<ChatConverter isExpanded />);
       expect(mockReadFile).not.toHaveBeenCalled();
 
-      mockContentService = {};
+      mockContentService = contentServiceStub();
       rerender(<ChatConverter isExpanded className='force-rerender' />);
 
       await vi.waitFor(() => {

@@ -1,4 +1,6 @@
 /* oxlint-disable typescript/no-restricted-types -- Refused record bytes may be absent (null), as the store reports them. */
+import { useObservation } from '@taucad/fs-client/react/use-observation';
+import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
@@ -30,7 +32,7 @@ const emptyEntries = (): WorkbenchEntries => workbenchRecords.entries.schema.par
 
 /** One project-lifetime reader and writer for shared per-file workbench settings. */
 export function EntriesSyncHost(): React.JSX.Element {
-  const { parameterFiles, subscribeWorkbenchRecord } = useFileManager();
+  const { parameterFiles, watchRecordFile } = useFileManager();
   const {
     projectId,
     geometryUnits,
@@ -114,18 +116,33 @@ export function EntriesSyncHost(): React.JSX.Element {
       },
     };
   }, [parameterFiles, root, setAppliedEntryRevision, setEntriesRecord]);
+  const observation = useMemo(
+    () =>
+      new ObservationService({
+        resource: `${root}/${workbenchPaths.entries}`,
+        watch: (invalidate, reset) =>
+          watchRecordFile(`${root}/${workbenchPaths.entries}`, (event) => {
+            if (event.type === 'reset') {
+              reset();
+            } else {
+              invalidate();
+            }
+          }),
+        invalidate: store.invalidateRead,
+        read: async () => store.read(!store.ready()),
+      }),
+    [root, store, watchRecordFile],
+  );
   useEffect(() => {
-    const unsubscribe = subscribeWorkbenchRecord(workbenchPaths.entries, () => {
-      void store.read();
-    });
-    void store.read(true);
+    // This source's applications belong to its lease; retiring it advances the generation.
+    const lease = observation.acquire();
     return () => {
-      unsubscribe();
+      lease.release();
       advanceGeneration();
       clearApplied();
       setEntriesDigest(undefined);
     };
-  }, [advanceGeneration, clearApplied, store, subscribeWorkbenchRecord]);
+  }, [advanceGeneration, clearApplied, observation]);
   useEffect(() => {
     storeMounts.set(store, (storeMounts.get(store) ?? 0) + 1);
     return () => {
@@ -142,7 +159,13 @@ export function EntriesSyncHost(): React.JSX.Element {
   useFlushOnClose(async () => confirmFlush(store.flush, 'Model display settings are not confirmed saved.'), {
     stage: 'producer',
   });
-  const issueState = recordIssueState(notice, health);
+  const observed = useObservation(observation);
+  const sourceHealth: RecordHealth | undefined = observed.error
+    ? { ...(health ?? store.health()), read: 'unavailable', error: observed.error }
+    : observed.status === 'pending' || observed.status === 'registering'
+      ? { ...(health ?? store.health()), read: 'retrying' }
+      : health;
+  const issueState = recordIssueState(notice, sourceHealth);
   const issue = useMemo((): RecordIssue | undefined => {
     if (!issueState) {
       return undefined;
@@ -151,15 +174,21 @@ export function EntriesSyncHost(): React.JSX.Element {
       kind: 'entries',
       path: workbenchPaths.entries,
       state: issueState,
-      message: notice?.message ?? health?.error,
+      message: notice?.message ?? sourceHealth?.error,
       bytes: notice?.bytes ?? null,
       writing: health?.writing ?? false,
-      retryRead: store.retryRead,
+      retryRead: async () => {
+        if (observed.error) {
+          observation.refresh();
+          return false;
+        }
+        return store.retryRead();
+      },
       retrySave: store.flush,
       reset: async (reviewed) => store.reset(emptyEntries(), reviewed),
       repair: async (record, reviewed) => store.reset(record, reviewed),
     };
-  }, [health?.error, health?.writing, issueState, notice, store]);
+  }, [sourceHealth?.error, health?.writing, issueState, notice, observed.error, observation, store]);
   usePublishRecordIssue(projectId, workbenchPaths.entries, issue);
   const write = useCallback(async (path: string, next: Entry) => store.edit(path, next), [store]);
   const ready = store.ready() && store.snapshot().refusal === undefined;

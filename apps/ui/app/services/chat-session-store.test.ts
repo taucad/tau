@@ -10,8 +10,10 @@ import type { Chat as ChatEntity, ModelSupport, MyUIMessage } from '@taucad/chat
 import { errorCategory } from '@taucad/types/constants';
 import type * as AiSdk from 'ai';
 import type { AgentHostClient } from '#services/agent-host-client.js';
+import type { WatchEvent } from '@taucad/filesystem';
 import type { CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
+import { chunksOf } from '#machines/chat-projection.logic.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machine.js';
@@ -53,7 +55,13 @@ type FakeChatInstance = {
   resumeStream: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   makeRequest: ReturnType<typeof vi.fn>;
-  finish: (options?: Partial<{ isAbort: boolean; isError: boolean; isDisconnect: boolean }>) => void;
+  finish: (
+    options?: Partial<{
+      isAbort: boolean;
+      isError: boolean;
+      isDisconnect: boolean;
+    }>,
+  ) => void;
   // Test driver — invoke any registered messages callback
   emitMessagesChange: () => void;
   emitStatusChange: () => void;
@@ -125,7 +133,13 @@ vi.mock('@ai-sdk/react', () => ({
             listener();
           }
         },
-        finish: (options?: Partial<{ isAbort: boolean; isError: boolean; isDisconnect: boolean }>) => {
+        finish: (
+          options?: Partial<{
+            isAbort: boolean;
+            isError: boolean;
+            isDisconnect: boolean;
+          }>,
+        ) => {
           init.onFinish?.({
             messages: this.messages,
             isAbort: options?.isAbort ?? false,
@@ -189,7 +203,7 @@ type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
  * that doesn't structurally match the typed closure fields.
  */
 type StubDeps = {
-  [K in Exclude<keyof ChatSessionDeps, 'client'>]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
+  [K in Exclude<keyof ChatSessionDeps, 'client' | 'watchRecordFile'>]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient };
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
@@ -343,6 +357,22 @@ function publishAdmission(
 }
 
 describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
+  // An SDK watch requires a visible admitted input; lifecycle-only logs cannot
+  // seed a new response safely from an earlier assistant.
+  const runningUserRows = (runId: string): Array<Record<string, unknown>> => {
+    const message = {
+      id: `user_${runId}`,
+      role: 'user',
+      content: 'Continue this turn',
+    };
+    return [
+      {
+        ...lifecycleRow(0, 'admitted', runId),
+        admission: { kind: 'tau', turnId: message.id, message },
+      },
+      lifecycleRow(1, 'running', runId),
+    ];
+  };
   it('reopens a projected run watch after live delivery drops without another durable row or command', async () => {
     const store = createStore();
     const chatId = 'chat_live_drop';
@@ -359,7 +389,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           cursor,
           nextCursor: 2,
           endCursor: 2,
-          events: cursor === 0 ? runningRows('run_live_drop') : [],
+          events: cursor === 0 ? runningUserRows('run_live_drop') : [],
         }),
       );
       return vi.fn();
@@ -394,7 +424,9 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       contentIndex: 0,
       delta: 'Preview',
     });
-    expect(store.getProjection(chatId)?.live?.chunks).toContainEqual(expect.objectContaining({ delta: 'Preview' }));
+    expect(chunksOf(store.getProjection(chatId)?.live?.chunks)).toContainEqual(
+      expect.objectContaining({ delta: 'Preview' }),
+    );
     endLive?.();
     expect(store.getProjection(chatId)?.live).toBeUndefined();
     await vi.waitFor(
@@ -1253,7 +1285,7 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       await vi.waitFor(() => {
         expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
-      publishLogRows(store, chatId, [...runningRows(runId), lifecycleRow(2, 'failed', runId)]);
+      publishLogRows(store, chatId, [...runningUserRows(runId), lifecycleRow(2, 'failed', runId)]);
       expect(store.getProjection(chatId)?.ledger.runs[runId]?.lifecycle).toBe('failed');
       const chat = harness.created.find((entry) => entry.id === chatId)!;
       const unpublishAdmission = publishChatTurnAdmission(chatId, async () => ({
@@ -1531,7 +1563,11 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
    * pin is about is *which* session hears a run start and settle.
    */
   const fakeSession = (projectId: string) => {
-    const heard: Array<{ type: string; runs: string[]; stoppableRuns: string[] }> = [];
+    const heard: Array<{
+      type: string;
+      runs: string[];
+      stoppableRuns: string[];
+    }> = [];
     let runs: string[] = [];
     let stoppableRuns: string[] = [];
     return {
@@ -1675,7 +1711,11 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
   it('forwards its project’s revision facts to a chat, whether it joined before or after them (PV-S5)', () => {
     const store = createStore();
     const revisionOf = (chatId: string) =>
-      (store.get(chatId)!.stateActorRef.getSnapshot().value as { revision: Record<string, string> }).revision;
+      (
+        store.get(chatId)!.stateActorRef.getSnapshot().value as {
+          revision: Record<string, string>;
+        }
+      ).revision;
 
     store.acquire('chat_facts_early', 'proj_facts');
     store.setRevisionFacts('proj_facts', { dirty: true, sync: 'pending', branch: 'main' });
@@ -1856,7 +1896,11 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
 
 describe('ChatSessionStore — run phase from the log (PV-S7, G02)', () => {
   const countingProject = () => {
-    const heard: Array<{ type: string; runs: string[]; stoppableRuns: string[] }> = [];
+    const heard: Array<{
+      type: string;
+      runs: string[];
+      stoppableRuns: string[];
+    }> = [];
     let runs: string[] = [];
     let stoppableRuns: string[] = [];
     const ref = {
@@ -2081,6 +2125,40 @@ describe('ChatSessionStore', () => {
     store.release('chat_presented');
   });
 
+  it('retains completed active-message parts while accepting a changed earlier part', () => {
+    const store = createStore();
+    const session = store.acquire('chat_parts', 'project_1');
+    const first: MyUIMessage = {
+      id: 'assistant',
+      role: 'assistant',
+      parts: [
+        { type: 'text', text: 'Completed paragraph', state: 'done' },
+        { type: 'text', text: 'Live', state: 'streaming' },
+      ],
+    };
+    session.chat.messages = [first];
+    const before = store.getMessagePresentation('chat_parts').messagesById.get('assistant')!;
+    session.chat.messages = [
+      {
+        ...first,
+        parts: [{ ...first.parts[0]! }, { type: 'text', text: 'Live grows', state: 'streaming' }],
+      },
+    ];
+    const next = store.getMessagePresentation('chat_parts').messagesById.get('assistant')!;
+    expect(next.parts[0]).toBe(before.parts[0]);
+    expect(next.parts[1]).not.toBe(before.parts[1]);
+    session.chat.messages = [
+      {
+        ...first,
+        parts: [{ type: 'text', text: 'Corrected earlier paragraph', state: 'done' }, next.parts[1]!],
+      },
+    ];
+    const corrected = store.getMessagePresentation('chat_parts').messagesById.get('assistant')!;
+    expect(corrected.parts[0]).not.toBe(before.parts[0]);
+    expect(corrected.parts[1]).toBe(next.parts[1]);
+    store.release('chat_parts');
+  });
+
   it('derives funded operation IDs and tokens from a foreign accepted host log', async () => {
     const client = createMemoryClient();
     const store = new ChatSessionStore({ chatSession });
@@ -2123,9 +2201,9 @@ describe('ChatSessionStore', () => {
     publishLogRows(store, 'chat_usage', []);
     await store.refreshRemoteSegments('chat_usage', 'project_1');
     expect(store.historicalUsageReady('chat_usage', 'project_1')).toBe(true);
-    expect(store.getProjection('chat_usage')?.remote?.views['run_1']?.chunks.map((chunk) => chunk.type)).toContain(
-      'data-usage',
-    );
+    expect(
+      chunksOf(store.getProjection('chat_usage')?.remote?.views['run_1']?.chunks).map((chunk) => chunk.type),
+    ).toContain('data-usage');
     const first = await store.getHistoricalUsage('chat_usage');
     expect(first).toMatchObject({
       operationIds: ['operation-1'],
@@ -2150,6 +2228,84 @@ describe('ChatSessionStore', () => {
     await store.touchChatRecency('chat_activity', 123);
 
     expect(deps.touchChatRecency).toHaveBeenCalledWith('chat_activity', 123);
+  });
+
+  it('acknowledges foreign watches before reading and fences a held read across a burst and final release', async () => {
+    const store = new ChatSessionStore({ chatSession });
+    const client = createMemoryClient();
+    const path = '/projects/project/.tau/chats/chat_foreign/events/peer.jsonl';
+    const bytes = (text: string): Uint8Array<ArrayBuffer> => {
+      const message = { id: 'user', role: 'user', content: text };
+      return new TextEncoder().encode(
+        [
+          {
+            ...lifecycleRow(0, 'admitted'),
+            admission: { kind: 'tau', turnId: message.id, message },
+          },
+          lifecycleRow(1, 'running'),
+          lifecycleRow(2, 'completed'),
+        ]
+          .map((row) => JSON.stringify(row))
+          .join('\n'),
+      );
+    };
+    client.files.set(path, bytes('Old input'));
+    const ready = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const held = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+    const readFile = client.readFile.bind(client);
+    let first = true;
+    client.readFile = vi.fn(async (selected: string) => {
+      if (first && selected === path) {
+        first = false;
+        return held.promise;
+      }
+      return readFile(selected);
+    });
+    let listener: ((event: WatchEvent) => void) | undefined;
+    const dispose = vi.fn(() => {
+      closed.resolve();
+    });
+    const watchRecordFile = vi.fn((_directory: string, callback: (event: WatchEvent) => void) => {
+      listener = callback;
+      return { ready: ready.promise, closed: closed.promise, dispose };
+    });
+    store.setDependencies({ ...createStubDeps(client), watchRecordFile });
+    const published: string[] = [];
+    const unsubscribe = store.subscribeProjection('chat_foreign', () => {
+      const part = store.getProjection('chat_foreign')?.remote?.views['run_1']?.user?.parts[0];
+      if (part?.type === 'text') {
+        published.push(part.text);
+      }
+    });
+    const release = store.observe('chat_foreign', 'project');
+    await settle();
+    expect(client.readFile).not.toHaveBeenCalled();
+    ready.resolve();
+    await vi.waitFor(() => {
+      expect(client.readFile).toHaveBeenCalledOnce();
+    });
+    client.files.set(path, bytes('Current input'));
+    for (let index = 0; index < 100; index++) {
+      listener?.({
+        type: 'change',
+        path: '.tau/chats/chat_foreign/events/peer.jsonl',
+      });
+      // Deliver separate event-loop ticks while the first read remains held.
+      // eslint-disable-next-line no-await-in-loop -- Each fact must arrive in its own tick during the held read.
+      await Promise.resolve();
+    }
+    held.resolve(bytes('Old input'));
+    await vi.waitFor(() => {
+      expect(published).toEqual(['Current input']);
+    });
+    expect(client.readFile).toHaveBeenCalledTimes(2);
+    release();
+    expect(dispose).toHaveBeenCalledOnce();
+    listener?.({ type: 'reset' });
+    await settle();
+    expect(client.readFile).toHaveBeenCalledTimes(2);
+    unsubscribe();
   });
 
   it('updates the active tool name from the log when counts stay unchanged (PV-S7)', () => {
@@ -2969,7 +3125,10 @@ describe('ChatSessionStore — composer records (W7)', () => {
   const projectId = 'proj_composer';
   const chatId = 'chat_composer';
   const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
-  type SelectedModel = { readonly name: string; readonly support: ModelSupport };
+  type SelectedModel = {
+    readonly name: string;
+    readonly support: ModelSupport;
+  };
   const pdfModel: SelectedModel = {
     name: 'Claude Test',
     support: { modalities: { input: ['text', 'image', 'pdf'], output: ['text'] } },

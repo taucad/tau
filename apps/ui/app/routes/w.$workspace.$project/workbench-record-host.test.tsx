@@ -1,5 +1,6 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 /* oxlint-disable typescript/no-confusing-void-expression -- Testing Library and adapter callbacks assert observable state. */
+import type { WatchEvent } from '@taucad/filesystem';
 // @vitest-environment jsdom
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -164,10 +165,16 @@ function mount(
     },
     workbenchFiles: { deleteFileChecked: vi.fn(), writeFileChecked: writes },
     contentService: options.initialServiceMissing ? undefined : makeService(),
-    subscribeWorkbenchRecord: (_path: string, listener: () => void) => {
-      liveWatch = listener;
-      return () => {
-        liveWatch = undefined;
+    watchRecordFile: (path: string, listener: (event: WatchEvent) => void) => {
+      liveWatch = () => listener({ type: 'change', path });
+      return {
+        ready: Promise.resolve(),
+        closed: new Promise<void>(() => {
+          /* This watch stays open until fixture disposal. */
+        }),
+        dispose: () => {
+          liveWatch = undefined;
+        },
       };
     },
   };

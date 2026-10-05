@@ -1,3 +1,6 @@
+import { ObservationService } from '#observation-service.js';
+import type { WatchRequest, WatchEvent } from '@taucad/filesystem';
+import type { ObservationWatch } from '#observation-service.js';
 import { BoundedFileCache, WorkspaceMutationError, parseRoute } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import { sha256Bytes } from '@taucad/utils/hash';
@@ -207,11 +210,15 @@ type EditorMutationBarrier = {
  */
 export class FileContentService {
   private readonly cache: BoundedFileCache;
+  private readonly channel: WorkerChangeChannel;
   private readonly proxy: ComposedViewClient;
   private readonly filePool: SharedPool | undefined;
+  private readonly retainedOutcomeEntries: number;
+  private readonly retainedOutcomeBytes: number;
   private readonly openSizeBytes: number;
   private readonly paths: WorkspacePathResolver;
   private readonly refreshGuard: RefreshGenerationGuard;
+  private readonly observations = new Map<string, ObservationService<FileContentResult>>();
   private readonly pendingResolves = new Map<string, Promise<FileContentResult>>();
   private readonly outcomes = new Map<string, FileContentResult>();
   private readonly binaryDigests = new WeakMap<FileContentResult, string>();
@@ -226,10 +233,13 @@ export class FileContentService {
   readonly #outcomeTopic = new Topic<OutcomeChangeEvent>({ name: 'FileContentService.outcome' });
 
   public constructor(init: FileContentServiceInit) {
+    this.channel = init.channel;
     this.proxy = init.proxy;
     this.paths = init.paths;
     this.refreshGuard = init.refreshGuard;
     this.filePool = init.filePool;
+    this.retainedOutcomeEntries = init.cacheOptions?.maxEntries ?? defaultMaxEntries;
+    this.retainedOutcomeBytes = init.cacheOptions?.maxTotalBytes ?? defaultMaxTotalBytes;
     this.openSizeBytes = init.openSizeBytes ?? defaultOpenSizeBytes;
     this.cache = new BoundedFileCache({
       maxEntries: init.cacheOptions?.maxEntries ?? defaultMaxEntries,
@@ -305,6 +315,16 @@ export class FileContentService {
   }
 
   /**
+   * Subscribe to a rooted path capability with actual registration readiness.
+   * @param request - Workspace-relative resource paths.
+   * @param handler - Watch changes and reset signals.
+   * @returns Captured watch lifetime.
+   */
+  public watchReady(request: WatchRequest, handler: (event: WatchEvent) => void): ObservationWatch {
+    return this.channel.watchReady(request, handler);
+  }
+
+  /**
    * Resolve file content, returning a discriminated outcome that captures
    * the binary/too-large/orphaned/error decision inside the read pipeline.
    * Cache hit short-circuits the read and reuses its existing classification.
@@ -330,13 +350,18 @@ export class FileContentService {
     }
 
     const generation = this.refreshGuard.begin(path);
-    const promise = this.computeOutcome(path, generation, options);
+    const promise = this.shouldRecompute(options)
+      ? this.computeOutcome(path, generation, options)
+      : this.observeOutcome(path);
     this.pendingResolves.set(path, promise);
 
     try {
       return await promise;
     } finally {
-      this.pendingResolves.delete(path);
+      if (this.pendingResolves.get(path) === promise) {
+        this.pendingResolves.delete(path);
+      }
+      this.pruneRetainedOutcomes();
     }
   }
 
@@ -969,9 +994,13 @@ export class FileContentService {
         callback();
       });
     }
-    return this.pathNotifyRegistry.subscribePath(path, () => {
-      callback();
-    });
+    const unsubscribe = this.pathNotifyRegistry.subscribePath(path, callback);
+    const lease = this.observationFor(path).acquire();
+    return () => {
+      unsubscribe();
+      lease.release();
+      this.pruneRetainedOutcomes();
+    };
   }
 
   /**
@@ -990,6 +1019,7 @@ export class FileContentService {
    */
   public reset(rootDirectory: string): void {
     this._cancelEditorPendingWork();
+    this.clearObservations();
     this.paths.reset(rootDirectory);
     this.cache.clear();
     this.pendingResolves.clear();
@@ -1003,6 +1033,7 @@ export class FileContentService {
    */
   public dispose(): void {
     this._cancelEditorPendingWork();
+    this.clearObservations();
     for (const unsubscribe of this.unsubscribeChannel) {
       unsubscribe();
     }
@@ -1308,21 +1339,31 @@ export class FileContentService {
     return Boolean(options?.forceText) || options?.sizeLimit !== undefined;
   }
 
+  private hasAuthorityObservation(path: string): boolean {
+    return this.channel.hasAuthorityWatch && (this.observations.get(path)?.diagnostics.activeWatches ?? 0) > 0;
+  }
+
   private onWorkerFileWritten(relativePath: string): void {
+    // Exact authority watches already fenced and refreshed active projections.
+    // The later coalesced tree notification must not launch a second content read.
+    if (this.hasAuthorityObservation(relativePath)) {
+      return;
+    }
     const shouldRefresh = this.shouldRefreshWorkerPath(relativePath);
     this.refreshGuard.begin(relativePath);
     this.setOrphaned(relativePath, false);
+    this.cache.delete(relativePath);
     if (shouldRefresh) {
-      this.cache.delete(relativePath);
       // async-iife: bootstrap
       // oxlint-disable-next-line promise/prefer-await-to-then -- fire-and-forget refresh
       void this.refreshOutcomeInPlace(relativePath).catch(() => undefined);
-    } else {
-      this.cache.delete(relativePath);
     }
   }
 
   private onWorkerFileDeleted(relativePath: string): void {
+    if (this.hasAuthorityObservation(relativePath)) {
+      return;
+    }
     this.refreshGuard.begin(relativePath);
     this.cache.delete(relativePath);
     this.setOrphaned(relativePath, true);
@@ -1331,7 +1372,7 @@ export class FileContentService {
 
   private onWorkerFileRenamed(event: WorkerRelativeRenameEvent): void {
     const { oldPath, newPath } = event;
-    if (oldPath !== undefined) {
+    if (oldPath !== undefined && !this.hasAuthorityObservation(oldPath)) {
       /* An applied revision renames an open file aside and a staged copy onto
        * it, and the pair arrives in one batch: re-read, so the open file never
        * flashes orphaned (RV-W5b2 R2-2). The read publishes `orphaned` on ENOENT. */
@@ -1347,7 +1388,7 @@ export class FileContentService {
         this.publishOutcome(oldPath, { kind: 'orphaned' });
       }
     }
-    if (newPath !== undefined) {
+    if (newPath !== undefined && !this.hasAuthorityObservation(newPath)) {
       this.refreshGuard.begin(newPath);
       this.cache.delete(newPath);
       this.setOrphaned(newPath, false);
@@ -1377,6 +1418,9 @@ export class FileContentService {
       }
     }
     for (const path of affected) {
+      if (this.hasAuthorityObservation(path)) {
+        continue;
+      }
       this.cache.delete(path);
       this.refreshGuard.begin(path);
       this.setOrphaned(path, true);
@@ -1402,10 +1446,12 @@ export class FileContentService {
       }
     }
     for (const path of affected) {
-      this.cache.delete(path);
-      this.refreshGuard.begin(path);
-      this.setOrphaned(path, true);
-      this.publishOutcome(path, { kind: 'orphaned' });
+      if (!this.hasAuthorityObservation(path)) {
+        this.cache.delete(path);
+        this.refreshGuard.begin(path);
+        this.setOrphaned(path, true);
+        this.publishOutcome(path, { kind: 'orphaned' });
+      }
       const remapped =
         newPrefix === undefined
           ? undefined
@@ -1413,7 +1459,9 @@ export class FileContentService {
             ? newDirectory
             : `${newPrefix}${path.slice(oldPrefix.length)}`;
       if (remapped !== undefined) {
-        this.refreshGuard.begin(remapped);
+        if (!this.hasAuthorityObservation(remapped)) {
+          this.refreshGuard.begin(remapped);
+        }
         this.notifyGlobalSubscribers({ type: 'renamed', oldPath: path, newPath: remapped });
         if (this.shouldRefreshWorkerPath(remapped)) {
           // async-iife: bootstrap
@@ -1429,9 +1477,12 @@ export class FileContentService {
     for (const [path] of this.cache.entries()) {
       pathsToRefresh.add(path);
     }
-    this.cache.clear();
-    this.orphanedPaths.clear();
     for (const path of pathsToRefresh) {
+      if (this.hasAuthorityObservation(path)) {
+        continue;
+      }
+      this.cache.delete(path);
+      this.setOrphaned(path, false);
       // async-iife: bootstrap
       // oxlint-disable-next-line promise/prefer-await-to-then -- fire-and-forget refresh
       void this.refreshOutcomeInPlace(path).catch(() => undefined);
@@ -1481,48 +1532,88 @@ export class FileContentService {
    * @param path - Workspace-relative file path.
    */
   private async refreshOutcomeInPlace(path: string): Promise<void> {
-    const generation = this.refreshGuard.begin(path);
-    const data = await this.readBytes(path, generation, true);
-    if (!this.refreshGuard.isCurrent(path, generation)) {
+    if (this.hasAuthorityObservation(path)) {
       return;
     }
-    if (data === undefined) {
-      return;
-    }
-
-    const limit = this.openSizeBytes;
-
-    if (data.byteLength > limit) {
-      const outcome: FileContentResult = { kind: 'too-large', size: data.byteLength, limit };
-      if (!this.refreshGuard.isCurrent(path, generation)) {
-        return;
-      }
-      this.cache.delete(path);
-      this.publishOutcome(path, outcome);
-      return;
-    }
-
-    if (seemsBinary(data)) {
-      const outcome = await this.binaryOutcome(data, generation);
-      if (!this.refreshGuard.isCurrent(path, generation)) {
-        return;
-      }
-      this.cache.set(path, data);
-      this.publishOutcome(path, outcome);
-      return;
-    }
-
-    if (!this.refreshGuard.isCurrent(path, generation)) {
-      return;
-    }
-    this.cache.set(path, data);
-    const outcome: FileContentResult = { kind: 'text', content: data };
-    this.publishOutcome(path, outcome);
-    this.notifyGlobalSubscribers({ type: 'read', path, data });
+    await this.observeOutcome(path, true);
   }
 
-  private async computeOutcome(path: string, generation: number, options?: ResolveOptions): Promise<FileContentResult> {
-    const data = await this.readBytes(path, generation);
+  private observationFor(path: string): ObservationService<FileContentResult> {
+    const existing = this.observations.get(path);
+    if (existing) {
+      return existing;
+    }
+    let authoritative = false;
+    const service = new ObservationService<FileContentResult>({
+      resource: path,
+      watch: (invalidate, reset) =>
+        this.channel.watchReady({ paths: [path] }, (event) => {
+          if (event.type === 'reset') {
+            reset();
+          } else {
+            invalidate();
+          }
+        }),
+      invalidate: () => {
+        authoritative = true;
+        this.refreshGuard.begin(path);
+      },
+      read: async ({ signal, isCurrent }) => {
+        const generation = this.refreshGuard.begin(path);
+        const result = await this.computeOutcome(path, generation, { authoritative });
+        signal.throwIfAborted();
+        return isCurrent()
+          ? this.refreshGuard.isCurrent(path, generation)
+            ? result
+            : this.peekOutcome(path)
+          : loadingOutcome;
+      },
+      equal: (previous, next) => outcomesEqual(previous, next, this.binaryDigests),
+    });
+    this.observations.set(path, service);
+    return service;
+  }
+
+  private async observeOutcome(path: string, refresh = false): Promise<FileContentResult> {
+    const service = this.observationFor(path);
+    const lease = service.acquire();
+    try {
+      if (refresh) {
+        lease.refresh();
+      }
+      return await new Promise<FileContentResult>((resolve) => {
+        const check = (): void => {
+          const snapshot = lease.getSnapshot();
+          if (snapshot.status === 'ready' && snapshot.value) {
+            unsubscribe();
+            resolve(snapshot.value);
+          } else if (snapshot.status === 'error' || snapshot.status === 'closed') {
+            unsubscribe();
+            resolve({ kind: 'error', cause: new Error(snapshot.error ?? 'Content observation closed.') });
+          }
+        };
+        const unsubscribe = lease.subscribe(check);
+        check();
+      });
+    } finally {
+      lease.release();
+      this.pruneRetainedOutcomes();
+    }
+  }
+
+  private clearObservations(): void {
+    for (const service of this.observations.values()) {
+      service.dispose();
+    }
+    this.observations.clear();
+  }
+
+  private async computeOutcome(
+    path: string,
+    generation: number,
+    options?: ResolveOptions & { authoritative?: boolean },
+  ): Promise<FileContentResult> {
+    const data = await this.readBytes(path, generation, options?.authoritative);
     if (data === undefined) {
       return this.outcomes.get(path) ?? loadingOutcome;
     }
@@ -1614,10 +1705,42 @@ export class FileContentService {
     if (previous && outcomesEqual(previous, result, this.binaryDigests)) {
       return previous;
     }
+    this.outcomes.delete(path);
     this.outcomes.set(path, result);
+    this.pruneRetainedOutcomes();
     this.#outcomeTopic.emit({ path, result });
     this.notifyPathSubscribers(path);
     return result;
+  }
+
+  private pruneRetainedOutcomes(): void {
+    const bytesOf = (result: FileContentResult): number =>
+      result.kind === 'text' ? result.content.byteLength : result.kind === 'binary' ? result.head.byteLength : 0;
+    let bytes = 0;
+    for (const result of this.outcomes.values()) {
+      bytes += bytesOf(result);
+    }
+    for (const [path, result] of this.outcomes) {
+      if (this.outcomes.size <= this.retainedOutcomeEntries && bytes <= this.retainedOutcomeBytes) {
+        break;
+      }
+      if (
+        this.pathNotifyRegistry.hasPathSubscribers(path) ||
+        this.editorSaves.has(path) ||
+        this.pendingResolves.has(path)
+      ) {
+        continue;
+      }
+      this.outcomes.delete(path);
+      this.orphanedPaths.delete(path);
+      bytes -= bytesOf(result);
+    }
+    for (const [path, observation] of this.observations) {
+      if (observation.activeLeaseCount === 0 && !this.outcomes.has(path) && !this.pendingResolves.has(path)) {
+        observation.dispose();
+        this.observations.delete(path);
+      }
+    }
   }
 
   private setOrphaned(path: string, orphaned: boolean): void {

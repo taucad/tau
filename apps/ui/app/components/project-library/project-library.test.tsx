@@ -158,14 +158,27 @@ vi.mock('#components/project-library/project-action-dropdown.js', () => ({
   ),
 }));
 
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({
-    client: { readFile: vi.fn().mockRejectedValue(new Error('not found')) },
+vi.mock('#hooks/use-file-manager.js', () => {
+  // Stable like the provider's memoized value: thumbnails are observed per record client and watch.
+  const missing = Object.assign(new Error('not found'), { code: 'ENOENT' });
+  const fileManager = {
+    client: { readFile: vi.fn().mockRejectedValue(missing) },
+    recordFiles: { readFile: vi.fn().mockRejectedValue(missing) },
+    watchRecordFile: () => ({
+      ready: Promise.resolve(),
+      closed: new Promise<never>(() => {
+        // Never closes.
+      }),
+      dispose: () => undefined,
+    }),
     contentService: undefined,
-  }),
-  SharedWorkerGate: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
-  HomeFileManagerProvider: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
-}));
+  };
+  return {
+    useFileManager: () => fileManager,
+    SharedWorkerGate: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
+    HomeFileManagerProvider: ({ children }: { readonly children: React.ReactNode }): React.ReactNode => children,
+  };
+});
 
 /* D20: the Tau Cloud listing, scripted rather than fetched. */
 const { cloudListing, mockOpenCloudProject } = vi.hoisted(() => ({

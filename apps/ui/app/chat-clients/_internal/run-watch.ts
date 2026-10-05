@@ -1,5 +1,6 @@
 import type { UIMessageChunk } from 'ai';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
+import { chunksSince } from '#machines/chat-projection.logic.js';
 
 /** The projection is the sole source of a watched run's durable chunks. @public */
 export type RunWatchSource = Readonly<{
@@ -18,6 +19,8 @@ export type RunWatch = Readonly<{ stream: ReadableStream<UIMessageChunk>; detach
  */
 export const openRunWatch = (source: RunWatchSource): RunWatch => {
   let sent = 0;
+  const initialStreamVersion = source.getProjection()?.views[source.runId]?.streamVersion ?? 0;
+  const initialSegmentId = source.getProjection()?.views[source.runId]?.segmentId;
   let closed = false;
   let controller: ReadableStreamDefaultController<UIMessageChunk> | undefined;
   let unsubscribe: (() => void) | undefined;
@@ -42,12 +45,16 @@ export const openRunWatch = (source: RunWatchSource): RunWatch => {
         : (projection?.views[source.runId]?.chunks ?? []);
     /* A projection reset invalidates this stream; the attachment rereads and
      * the session can open a fresh watch after it has rebuilt the transcript. */
-    if (chunks.length < sent) {
+    if (
+      chunks.length < sent ||
+      projection?.views[source.runId]?.segmentId !== initialSegmentId ||
+      (projection?.views[source.runId]?.streamVersion ?? 0) !== initialStreamVersion
+    ) {
       close();
       return;
     }
-    for (let at = sent; at < chunks.length; at++) {
-      controller.enqueue(chunks[at]);
+    for (const chunk of chunksSince(chunks, sent)) {
+      controller.enqueue(chunk);
     }
     sent = chunks.length;
     const lifecycle = projection?.ledger.runs[source.runId]?.lifecycle;

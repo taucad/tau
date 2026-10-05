@@ -42,16 +42,38 @@ export function buildTurnGroups(messages: readonly MyUIMessage[]): readonly Turn
     return cached.groups;
   }
   const draft: Array<{ messageIds: string[] }> = [];
-  for (const message of messages) {
+  let common = 0;
+  if (cached !== undefined) {
+    while (
+      common < messages.length &&
+      cached.ids[common] === messages[common]?.id &&
+      cached.roles[common] === messages[common]?.role
+    ) {
+      common++;
+    }
+  }
+  const prefix: TurnGroup[] = [];
+  let start = 0;
+  for (const group of cached?.groups ?? []) {
+    const end = start + group.messageIds.length;
+    // A following assistant extends the preceding group; a user closes it.
+    if (end > common || (end === common && messages[end]?.role !== messageRole.user && end < messages.length)) {
+      break;
+    }
+    prefix.push(group);
+    start = end;
+  }
+  for (const message of messages.slice(start)) {
     if (message.role === messageRole.user || draft.length === 0) {
       draft.push({ messageIds: [message.id] });
     } else {
       draft.at(-1)!.messageIds.push(message.id);
     }
   }
-  const frozen: readonly TurnGroup[] = Object.freeze(
-    draft.map((group): TurnGroup => ({ messageIds: Object.freeze([...group.messageIds]) })),
-  );
+  const frozen: readonly TurnGroup[] = Object.freeze([
+    ...prefix,
+    ...draft.map((group): TurnGroup => ({ messageIds: Object.freeze([...group.messageIds]) })),
+  ]);
   cache.set(firstMessage, {
     ids: Object.freeze(messages.map((message) => message.id)),
     roles: Object.freeze(messages.map((message) => message.role)),

@@ -1,4 +1,5 @@
 /* oxlint-disable typescript/no-unsafe-assignment -- Focused actor doubles intentionally expose only the consumed snapshot fields. */
+import type { WatchEvent } from '@taucad/filesystem';
 // @vitest-environment jsdom
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
@@ -20,10 +21,22 @@ let hostContentService: { subscribe: (path: string, listener: () => void) => () 
 let liveRootOnly = false;
 let selectedRoot = '/root';
 let liveWatchEntries: (() => void) | undefined;
-const subscribeWorkbenchRecord = (_path: string, listener: () => void): (() => void) => {
-  liveWatchEntries = listener;
-  return () => {
-    liveWatchEntries = undefined;
+let nextWatchReady: Promise<void> | undefined;
+const watchClosures: Array<ReturnType<typeof Promise.withResolvers<void>>> = [];
+const watchRecordFile = (path: string, listener: (event: WatchEvent) => void) => {
+  const closed = Promise.withResolvers<void>();
+  watchClosures.push(closed);
+  const ready = nextWatchReady ?? Promise.resolve();
+  nextWatchReady = undefined;
+  liveWatchEntries = () => {
+    listener({ type: 'change', path });
+  };
+  return {
+    ready,
+    closed: closed.promise,
+    dispose: () => {
+      liveWatchEntries = undefined;
+    },
   };
 };
 const hostFiles = vi.hoisted(() => {
@@ -63,7 +76,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     fileManagerRef: { getSnapshot: () => ({ context: { rootDirectory: selectedRoot } }) },
     parameterFiles: hostFiles,
     contentService: hostContentService,
-    subscribeWorkbenchRecord,
+    watchRecordFile,
   }),
 }));
 vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
@@ -73,6 +86,8 @@ describe('entry owner reconciliation', () => {
     liveRootOnly = false;
     selectedRoot = '/root';
     liveWatchEntries = undefined;
+    nextWatchReady = undefined;
+    watchClosures.length = 0;
   });
   it.each([0, 600_000])('should map durable renderTimeout %i to the runtime operation event', (renderTimeout) => {
     const send = vi.fn();
@@ -98,6 +113,78 @@ describe('entry owner reconciliation', () => {
     expect(send).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledWith({ type: 'setOperationTimeout', operationTimeout: renderTimeout });
     view.unmount();
+  });
+
+  it('re-registers a closed entries watch on retry and applies later external edits', async () => {
+    const bytes = (renderTimeout: number) =>
+      new TextEncoder().encode(
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: { 'a.ts': { renderTimeout } },
+        }),
+      );
+    hostFiles.set(bytes(30_000));
+    hostFiles.writeFileChecked.mockClear();
+    const setEntriesRecord = vi.fn();
+    hostProject = {
+      projectId: 'p',
+      geometryUnits: new Map(),
+      modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
+      entriesRecord: undefined,
+      setEntriesRecord,
+      registerWorkbenchRecordProducer: () => () => undefined,
+      registerEntryPathChange: () => () => undefined,
+      setAppliedEntryRevision: () => undefined,
+    };
+    const view = render(<EntriesSyncHost />);
+    try {
+      await waitFor(() => {
+        expect(setEntriesRecord).toHaveBeenCalled();
+      });
+      await act(async () => {
+        watchClosures[0]!.resolve();
+      });
+      await waitFor(() => {
+        expect(readRecordIssues('p')[0]?.state).toBe('unavailable');
+      });
+      const ready = Promise.withResolvers<void>();
+      nextWatchReady = ready.promise;
+      hostFiles.set(bytes(45_000));
+      setEntriesRecord.mockClear();
+      await act(async () => {
+        await readRecordIssues('p')[0]!.retryRead();
+      });
+      expect(watchClosures).toHaveLength(2);
+      expect(setEntriesRecord).not.toHaveBeenCalled();
+      expect(readRecordIssues('p')[0]?.state).toBe('reading');
+      await act(async () => {
+        ready.resolve();
+      });
+      await waitFor(() => {
+        expect(setEntriesRecord).toHaveBeenCalledWith(
+          expect.objectContaining({
+            entries: { 'a.ts': { renderTimeout: 45_000 } },
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(readRecordIssues('p')).toEqual([]);
+      });
+      hostFiles.set(bytes(60_000));
+      await act(async () => {
+        liveWatchEntries?.();
+      });
+      await waitFor(() => {
+        expect(setEntriesRecord).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            entries: { 'a.ts': { renderTimeout: 60_000 } },
+          }),
+        );
+      });
+      expect(hostFiles.writeFileChecked).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+    }
   });
 
   it('retains and observes live entry settings after code selects a checkout', async () => {

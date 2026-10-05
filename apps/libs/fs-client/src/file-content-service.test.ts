@@ -6,6 +6,8 @@ import type { ContentChangeEvent, FileContentResult, OutcomeChangeEvent } from '
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileStat } from '@taucad/types';
+import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
+import type { WatchEvent } from '@taucad/filesystem';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { WorkspacePathResolver, WorkspaceScopeViolationError } from '#workspace-path-resolver.js';
 import { RefreshGenerationGuard } from '#refresh-generation-guard.js';
@@ -51,12 +53,19 @@ type FileContentHarness = {
 function createHarness(
   init?: Partial<Omit<ConstructorParameters<typeof FileContentService>[0], 'channel' | 'refreshGuard'>> & {
     workspaceRoot?: string;
+    watchReady?: WorkerChangeChannelTransport['watchReady'];
   },
 ): FileContentHarness {
   const listen = vi.fn().mockReturnValue(vi.fn());
-  const { workspaceRoot = '/project', paths: inputPaths, proxy: inputProxy, ...serviceOptions } = init ?? {};
+  const {
+    watchReady,
+    workspaceRoot = '/project',
+    paths: inputPaths,
+    proxy: inputProxy,
+    ...serviceOptions
+  } = init ?? {};
   const paths = inputPaths ?? new WorkspacePathResolver(workspaceRoot);
-  const channel = new WorkerChangeChannel({ transport: { listen } });
+  const channel = new WorkerChangeChannel({ transport: { listen, watchReady } });
   const refreshGuard = new RefreshGenerationGuard();
   const proxy = inputProxy ?? createMockProxy();
   const service = new FileContentService({
@@ -124,6 +133,51 @@ describe('FileContentService', () => {
     proxy = harness.proxy;
     service = harness.service;
     emitFileChanged = harness.emitFileChanged;
+  });
+
+  it.each<ChangeEvent>([
+    fileWritten('dir/file.txt'),
+    { type: 'fileRenamed', oldPath: 'dir/file.txt', newPath: 'dir/new.txt', backend: 'indexeddb' },
+    { type: 'directoryChanged', path: 'dir', backend: 'indexeddb' },
+    { type: 'directoryRenamed', oldPath: 'dir', newPath: 'moved', backend: 'indexeddb' },
+    { type: 'backendChanged', backend: 'indexeddb' },
+  ])('uses one acquisition owner for exact watch followed by delayed $type', async (generic) => {
+    const closed = Promise.withResolvers<void>();
+    let onWatch = (_event: WatchEvent): void => undefined;
+    const harness = createHarness({
+      watchReady: (_request, handler) => {
+        onWatch = handler;
+        return { ready: Promise.resolve(), closed: closed.promise, unsubscribe: () => undefined };
+      },
+    });
+    const localService = harness.service;
+    const localProxy = harness.proxy;
+    vi.mocked(localProxy.readFile).mockResolvedValue(new TextEncoder().encode('before'));
+    const unsubscribe = localService.subscribe('dir/file.txt', () => undefined);
+    await localService.resolve('dir/file.txt');
+    vi.mocked(localProxy.readFile).mockClear();
+    vi.mocked(localProxy.readFile).mockResolvedValue(new TextEncoder().encode('after'));
+    onWatch(generic.type === 'backendChanged' ? { type: 'reset' } : { type: 'change', path: 'dir/file.txt' });
+    await vi.waitFor(() => {
+      expect(localService.peekOutcome('dir/file.txt')).toEqual({
+        kind: 'text',
+        content: new TextEncoder().encode('after'),
+      });
+    });
+    expect(localProxy.readFile).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers();
+    await vi.advanceTimersByTimeAsync(500);
+    harness.emitFileChanged(generic);
+    await vi.advanceTimersByTimeAsync(0);
+    vi.useRealTimers();
+    expect(localProxy.readFile).toHaveBeenCalledTimes(1);
+    expect(localService.peekOutcome('dir/file.txt')).toEqual({
+      kind: 'text',
+      content: new TextEncoder().encode('after'),
+    });
+    unsubscribe();
+    localService.dispose();
+    harness.disposeChannel();
   });
 
   it('resolve reads bundled typings from the global /node_modules mount, not under the project root', async () => {
@@ -1113,6 +1167,9 @@ describe('FileContentService', () => {
           expect(digest).toHaveBeenCalledOnce();
         });
         emitFileChanged(fileWritten('asset.bin'));
+        expect(proxy.readFile).toHaveBeenCalledTimes(2);
+        olderDigest.resolve(await actualHash(older));
+        await digest.mock.results[0]!.value;
         await vi.waitFor(() => {
           const result = service.peekOutcome('asset.bin');
           expect(result.kind).toBe('binary');
@@ -1121,10 +1178,6 @@ describe('FileContentService', () => {
           }
         });
         const latest = service.peekOutcome('asset.bin');
-
-        olderDigest.resolve(await actualHash(older));
-        await digest.mock.results[0]!.value;
-        await Promise.resolve();
 
         expect(service.peekOutcome('asset.bin')).toBe(latest);
         expect(handler).toHaveBeenCalledOnce();
@@ -1802,7 +1855,7 @@ describe('FileContentService', () => {
   });
 
   describe('refresh generation guard', () => {
-    it('should return classified bytes when an unsubscribed first resolve becomes stale', async () => {
+    it('should catch up before returning bytes when an unsubscribed first resolve becomes stale', async () => {
       const firstRead = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
       vi.mocked(proxy.readFile)
         .mockReturnValueOnce(firstRead.promise)
@@ -1815,8 +1868,8 @@ describe('FileContentService', () => {
       emitFileChanged(fileWritten('main.ts'));
       firstRead.resolve(new Uint8Array([1]));
 
-      await expect(resolving).resolves.toEqual(new Uint8Array([1]));
-      expect(service.peekOutcome('main.ts')).toEqual({ kind: 'loading' });
+      await expect(resolving).resolves.toEqual(new Uint8Array([2]));
+      expectTextContent(service.peekOutcome('main.ts'), new Uint8Array([2]));
       await expect(service.resolveBytes('main.ts')).resolves.toEqual(new Uint8Array([2]));
     });
 
@@ -1840,13 +1893,11 @@ describe('FileContentService', () => {
         });
 
         emitFileChanged(fileWritten('main.ts'));
-        emitFileChanged(fileWritten('main.ts'));
-
         await vi.advanceTimersByTimeAsync(0);
-        await vi.waitFor(() => {
-          expectTextContent(service.peekOutcome('main.ts'), new Uint8Array([9]));
-        });
-
+        expect(refreshReadCount).toBe(1);
+        emitFileChanged(fileWritten('main.ts'));
+        expect(refreshReadCount).toBe(1);
+        expectTextContent(service.peekOutcome('main.ts'), new Uint8Array([1]));
         await vi.advanceTimersByTimeAsync(1000);
         await vi.advanceTimersByTimeAsync(0);
 
@@ -2435,6 +2486,23 @@ describe('FileContentService over the composed view (north star W2)', () => {
     /* The write lands on the view, on the same connection the reads use (charter
      * D12) — and since W11 the authority has no `writeFile` for it to land on. */
     await expect(harness.provider.readFile('main.ts', 'utf8')).resolves.toBe('export const a = 1;\n');
+    harness.disposeChannel();
+  });
+});
+
+describe('inactive content outcome budget', () => {
+  it('should evict inactive decoded bytes while preserving an active editor base', async () => {
+    const harness = createHarness({ cacheOptions: { maxEntries: 2, maxTotalBytes: 4, maxSingleFileBytes: 4 } });
+    vi.mocked(harness.proxy.readFile).mockResolvedValue(new Uint8Array([65, 66]));
+    await harness.service.resolve('active.ts');
+    const unsubscribe = harness.service.subscribe('active.ts', () => undefined);
+    await harness.service.resolve('old.ts');
+    await harness.service.resolve('latest.ts');
+    expect(harness.service.peekOutcome('active.ts').kind).toBe('text');
+    expect(harness.service.peekOutcome('old.ts')).toEqual({ kind: 'loading' });
+    expect(harness.service.peekOutcome('latest.ts').kind).toBe('text');
+    unsubscribe();
+    harness.service.dispose();
     harness.disposeChannel();
   });
 });

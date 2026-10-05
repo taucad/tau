@@ -5,11 +5,71 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type * as Electron from 'electron';
 import type { IpcMain, IpcMainEvent, MessagePortMain, UtilityProcess, WebContents, WebFrameMain } from 'electron';
-import type { _electron as electron, BrowserContext, ElectronApplication, Page } from 'playwright';
+import type { _electron as electron, BrowserContext, ElectronApplication, Frame, Page } from 'playwright';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import { desktopDescendants, installDesktopRuntimeLeaseObservation, launchDesktopApp } from '#support/desktop-app.js';
+// oxlint-disable-next-line no-restricted-imports -- The standalone runner has no configured project import alias.
+import { createProtocolMetadataCollector } from '../../scripts/run-completed-artifact.mts';
+
 import type { DesktopRuntimeLease } from '#support/desktop-app.js';
+
+describe('opt-in protocol metadata collector', () => {
+  const send = (body: Record<string, unknown>): string =>
+    `2026-10-06T00:00:00.000Z pw:protocol SEND ► ${JSON.stringify(body)}`;
+  const receive = (body: Record<string, unknown>): string =>
+    `2026-10-06T00:00:00.000Z pw:protocol ◀ RECV ${JSON.stringify(body)}`;
+
+  it('should settle only a uniquely qualified session command and discard protocol bodies', () => {
+    const collector = createProtocolMetadataCollector();
+    expect(collector.consume('ordinary diagnostic')).toBe(false);
+    expect(
+      collector.consume(
+        send({ id: 1, method: 'Runtime.evaluate', sessionId: 'frame-A', params: { expression: 'private' } }),
+      ),
+    ).toBe(true);
+    expect(
+      collector.consume(
+        send({ id: 1, method: 'Runtime.evaluate', sessionId: 'frame-B', params: { expression: 'private' } }),
+      ),
+    ).toBe(true);
+    collector.consume(receive({ id: 1, sessionId: 'frame-B', result: { value: 'private' } }));
+    const result = collector.snapshot();
+    expect(result.commands).toHaveLength(2);
+    expect(result.commands[0]?.settledAt).toBeUndefined();
+    expect(result.commands[1]?.outcome).toBe('ok');
+    expect(result.commands[0]?.sessionHash).not.toBe(result.commands[1]?.sessionHash);
+    expect(JSON.stringify(result)).not.toContain('private');
+    expect(JSON.stringify(result)).not.toContain('frame-A');
+  });
+
+  it('should refuse clipped and oversized records before any pending command is created', () => {
+    const collector = createProtocolMetadataCollector();
+    collector.consume(
+      `${send({ id: 2, method: 'Runtime.evaluate', sessionId: 'frame-A' })} <<<<<( LOG TRUNCATED )>>>>>`,
+    );
+    collector.consume(`${send({ id: 3, method: 'Runtime.evaluate', sessionId: 'frame-A' })}${'x'.repeat(131_073)}`);
+    collector.consume(`${send({ id: 5, method: 'Runtime.evaluate', sessionId: 'frame-A' })}${'😀'.repeat(32_769)}`);
+    collector.consume('pw:protocol SEND ► malformed');
+    collector.consume(send({ id: 4, method: 'Runtime.evaluate' }));
+    collector.consume(receive({ id: 4, result: {} }));
+    expect(collector.snapshot()).toMatchObject({ counts: { refused: 4, unqualified: 2 }, commands: [] });
+  });
+
+  it('should refuse ambiguous session matches and keep the command ring bounded', () => {
+    const collector = createProtocolMetadataCollector();
+    collector.consume(send({ id: 5, method: 'Runtime.evaluate', sessionId: 'same' }));
+    collector.consume(send({ id: 5, method: 'Runtime.evaluate', sessionId: 'same' }));
+    collector.consume(receive({ id: 5, sessionId: 'same', result: {} }));
+    for (let id = 6; id < 266; id++) {
+      collector.consume(send({ id, method: 'Runtime.evaluate', sessionId: 'same' }));
+    }
+    const result = collector.snapshot();
+    expect(result.counts).toMatchObject({ refused: 1, dropped: 6 });
+    expect(result.commands).toHaveLength(256);
+    expect(result.commands[0]?.id).toBe(10);
+  });
+});
 
 const state = globalThis as typeof globalThis & {
   tauE2eRuntimeLeases?: DesktopRuntimeLease[];
@@ -177,6 +237,8 @@ describe('desktop startup ownership before a session is returned', () => {
     const context = mock<BrowserContext>({ tracing });
     const page = mock<Page>();
     page.context.mockReturnValue(context);
+    context.pages.mockReturnValue([page]);
+    page.frames.mockReturnValue([]);
     const { child, launch } = mockedLaunch(async () => page);
     const observation: { result?: Promise<unknown> } = {};
     onTestFinished(async () => {
@@ -246,6 +308,8 @@ describe('desktop startup ownership before a session is returned', () => {
     const context = mock<BrowserContext>({ tracing });
     const page = mock<Page>();
     page.context.mockReturnValue(context);
+    context.pages.mockReturnValue([page]);
+    page.frames.mockReturnValue([]);
     const { application, child, launch } = mockedLaunch(async () => page);
     const sample = (cpu: number) => ({
       status: 'selected',
@@ -347,6 +411,8 @@ describe('desktop startup ownership before a session is returned', () => {
     const context = mock<BrowserContext>({ tracing });
     const page = mock<Page>();
     page.context.mockReturnValue(context);
+    context.pages.mockReturnValue([page]);
+    page.frames.mockReturnValue([]);
     const { application, child, launch } = mockedLaunch(async () => page);
     const original = new Error('original trace refusal');
     const result = (async (): Promise<unknown> => {
@@ -431,6 +497,8 @@ describe('desktop startup ownership before a session is returned', () => {
       const context = mock<BrowserContext>({ tracing });
       const page = mock<Page>();
       page.context.mockReturnValue(context);
+      context.pages.mockReturnValue([page]);
+      page.frames.mockReturnValue([]);
       const { application, child, launch } = mockedLaunch(async () => page);
       const lateEvaluation = status === 'main-evaluate-timeout' ? Promise.withResolvers<unknown>() : undefined;
       application.evaluate
@@ -506,6 +574,137 @@ describe('desktop startup ownership before a session is returned', () => {
     },
     12_000,
   );
+
+  it('should retain other pages and subframe lifecycle while tracing is pending, then remove listeners', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-startup-test-'));
+    const before = await startupEntries();
+    const original = new Error('trace refused after context observation');
+    const tracingStarted = Promise.withResolvers<void>();
+    const tracing = mock<BrowserContext['tracing']>();
+    tracing.start.mockReturnValue(tracingStarted.promise);
+    const context = mock<BrowserContext>({ tracing });
+    // oxlint-disable-next-line unicorn/prefer-event-target -- Playwright pages expose Node-style on/off event names.
+    const contextEvents = new EventEmitter();
+    context.on.mockImplementation((event, listener) => {
+      contextEvents.on(event, listener);
+      return context;
+    });
+    context.off.mockImplementation((event, listener) => {
+      contextEvents.off(event, listener);
+      return context;
+    });
+    const page = mock<Page>();
+    const otherPage = mock<Page>();
+    // oxlint-disable-next-line unicorn/prefer-event-target -- Playwright pages expose Node-style on/off event names.
+    const otherEvents = new EventEmitter();
+    otherPage.on.mockImplementation((event, listener) => {
+      otherEvents.on(event, listener);
+      return otherPage;
+    });
+    otherPage.off.mockImplementation((event, listener) => {
+      otherEvents.off(event, listener);
+      return otherPage;
+    });
+    const mainFrame = mock<Frame>();
+    mainFrame.url.mockReturnValue('app://tau/');
+    mainFrame.parentFrame.mockReturnValue(null);
+    const childFrame = mock<Frame>();
+    childFrame.url.mockReturnValue('about:blank');
+    childFrame.parentFrame.mockReturnValue(mainFrame);
+    page.context.mockReturnValue(context);
+    page.frames.mockReturnValue([]);
+    otherPage.frames.mockReturnValue([mainFrame, childFrame]);
+    otherPage.frames.mockReturnValueOnce([
+      mainFrame,
+      childFrame,
+      ...Array.from({ length: 15 }, () => {
+        const frame = mock<Frame>();
+        frame.url.mockReturnValue('about:blank');
+        frame.parentFrame.mockReturnValue(mainFrame);
+        return frame;
+      }),
+    ]);
+    const excessPages = Array.from({ length: 7 }, () => {
+      const extra = mock<Page>();
+      extra.frames.mockReturnValue([]);
+      return extra;
+    });
+    context.pages.mockReturnValue([page, otherPage, ...excessPages]);
+    const { child, launch } = mockedLaunch(async () => page);
+    const result = launchDesktopApp({
+      token: 'unit-test-only',
+      profileRoot,
+      startupDiagnostic: true,
+      startupDiagnosticNoMainIpc: true,
+      launchElectron: launch,
+    });
+    // oxlint-disable-next-line promise/prefer-await-to-then -- Observe an early launch failure while assertions await trace entry.
+    const observedResult = result.catch(() => undefined);
+    let created: string | undefined;
+    try {
+      await vi.waitFor(() => {
+        expect(tracing.start).toHaveBeenCalledOnce();
+      });
+      expect(otherEvents.listenerCount('frameattached')).toBe(1);
+      context.pages.mockReturnValue([page, otherPage]);
+      otherEvents.emit('frameattached', childFrame);
+      for (let index = 0; index < 71; index++) {
+        otherEvents.emit('framenavigated', childFrame);
+      }
+      otherEvents.emit('close');
+      await vi.waitFor(
+        async () => {
+          const entries = [...(await startupEntries())].filter((entry) => !before.has(entry));
+          expect(entries).toHaveLength(1);
+          created = entries[0];
+          const report = JSON.parse(await readFile(join(startupRoot, created!, 'trace-pending.json'), 'utf8')) as {
+            status: string;
+            context: {
+              initial: { pageCount: number; truncatedPages: number; pages: Array<{ frameCount: number }> };
+              current: {
+                pageCount: number;
+                everPageOverflow: boolean;
+                everFrameOverflow: boolean;
+                droppedEvents: number;
+                events: Array<{ kind: string; page: number; frame?: number }>;
+              };
+            };
+          };
+          expect(report.status).toBe('control-no-main-ipc');
+          expect(report.context.initial.pageCount).toBe(9);
+          expect(report.context.initial.truncatedPages).toBe(1);
+          expect(report.context.initial.pages.slice(0, 2).map(({ frameCount }) => frameCount)).toEqual([0, 17]);
+          expect(report.context.current.pageCount).toBe(2);
+          expect(report.context.current.everPageOverflow).toBe(true);
+          expect(report.context.current.everFrameOverflow).toBe(true);
+          expect(report.context.current.events).toHaveLength(64);
+          expect(report.context.current.droppedEvents).toBe(9);
+          expect(report.context.current.events.at(-1)?.kind).toBe('page-closed');
+          expect(report.context.current.events[0]?.kind).toBe('frame-navigated');
+          expect(report.context.current.events[0]?.frame).toBe(report.context.current.events[62]?.frame);
+        },
+        { timeout: 6000 },
+      );
+      tracingStarted.reject(original);
+      await expect(result).rejects.toMatchObject({ cause: original });
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(contextEvents.listenerCount('page')).toBe(0);
+      expect(otherEvents.listenerCount('frameattached')).toBe(0);
+      expect(otherEvents.listenerCount('framenavigated')).toBe(0);
+      expect(otherEvents.listenerCount('close')).toBe(0);
+    } finally {
+      tracingStarted.reject(original);
+      await observedResult;
+      if (created) {
+        await rm(join(startupRoot, created), { recursive: true, force: true });
+      }
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+      await rm(profileRoot, { recursive: true, force: true });
+    }
+  }, 9000);
 });
 
 describe('actual desktop runtime lease observation', () => {

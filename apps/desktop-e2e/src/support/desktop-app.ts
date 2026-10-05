@@ -8,7 +8,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import type * as Electron from 'electron';
 import type { BrowserWindow, DownloadItem, Event, IpcMainEvent, UtilityProcess } from 'electron';
 import { _electron as electron } from 'playwright';
-import type { ElectronApplication, Page } from 'playwright';
+import type { BrowserContext, ElectronApplication, Frame, Page } from 'playwright';
 import { expect, onTestFinished } from 'vitest';
 import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 import {
@@ -45,6 +45,132 @@ const traceProbeMainLimit = 5000;
 /** Milliseconds between the two renderer CPU samples. */
 const traceProbeCpuInterval = 1000;
 
+/** Cached Playwright state only: observing this must not request renderer execution. */
+const observeTraceContext = (context: BrowserContext, startedAt: number) => {
+  const pageIds = new WeakMap<Page, number>();
+  const frameIds = new WeakMap<Frame, number>();
+  const listeners = new Map<Page, Array<() => void>>();
+  const events: Array<{ kind: string; page: number; frame?: number; elapsed: number }> = [];
+  let nextPageId = 0;
+  let nextFrameId = 0;
+  let droppedEvents = 0;
+  let everPageOverflow = false;
+  let everFrameOverflow = false;
+  const pageId = (page: Page): number => {
+    let id = pageIds.get(page);
+    if (id === undefined) {
+      id = ++nextPageId;
+      pageIds.set(page, id);
+    }
+    return id;
+  };
+  const frameId = (frame: Frame): number => {
+    let id = frameIds.get(frame);
+    if (id === undefined) {
+      id = ++nextFrameId;
+      frameIds.set(frame, id);
+    }
+    return id;
+  };
+  const record = (kind: string, page: Page, frame?: Frame): void => {
+    if (frame && page.frames().length > 16) {
+      everFrameOverflow = true;
+    }
+    if (events.length === 64) {
+      events.shift();
+      droppedEvents++;
+    }
+    events.push({
+      kind,
+      page: pageId(page),
+      ...(frame ? { frame: frameId(frame) } : {}),
+      elapsed: performance.now() - startedAt,
+    });
+  };
+  const attach = (page: Page): void => {
+    if (listeners.has(page)) {
+      return;
+    }
+    if (listeners.size === 8) {
+      everPageOverflow = true;
+      return;
+    }
+    const attached = (frame: Frame): void => {
+      record('frame-attached', page, frame);
+    };
+    const detached = (frame: Frame): void => {
+      record('frame-detached', page, frame);
+    };
+    const navigated = (frame: Frame): void => {
+      record('frame-navigated', page, frame);
+    };
+    const closed = (): void => {
+      record('page-closed', page);
+    };
+    page.on('frameattached', attached);
+    page.on('framedetached', detached);
+    page.on('framenavigated', navigated);
+    page.on('close', closed);
+    listeners.set(page, [
+      () => page.off('frameattached', attached),
+      () => page.off('framedetached', detached),
+      () => page.off('framenavigated', navigated),
+      () => page.off('close', closed),
+    ]);
+  };
+  const onPage = (page: Page): void => {
+    record('page-opened', page);
+    attach(page);
+  };
+  for (const page of context.pages()) {
+    attach(page);
+  }
+  context.on('page', onPage);
+  const snapshot = () => {
+    const pages = context.pages();
+    const selectedPages = pages.slice(0, 8);
+    const selectedFrames = selectedPages.map((page) => page.frames());
+    everPageOverflow ||= pages.length > 8;
+    everFrameOverflow ||= selectedFrames.some((frames) => frames.length > 16);
+    return {
+      pageCount: pages.length,
+      truncatedPages: Math.max(0, pages.length - 8),
+      everPageOverflow,
+      everFrameOverflow,
+      droppedEvents,
+      events: [...events],
+      pages: selectedPages.map((page, index) => {
+        const frames = selectedFrames[index]!;
+        return {
+          id: pageId(page),
+          closed: page.isClosed(),
+          frameCount: frames.length,
+          truncatedFrames: Math.max(0, frames.length - 16),
+          frames: frames.slice(0, 16).map((frame) => ({
+            id: frameId(frame),
+            parent: frame.parentFrame() ? frameId(frame.parentFrame()!) : null,
+            detached: frame.isDetached(),
+            location: frame.url().startsWith('app://tau/') ? 'app' : frame.url() === 'about:blank' ? 'blank' : 'other',
+          })),
+        };
+      }),
+    };
+  };
+  const initial = snapshot();
+  return {
+    snapshot: () => ({ initial, current: snapshot() }),
+    dispose: () => {
+      context.off('page', onPage);
+      for (const registrations of listeners.values()) {
+        for (const remove of registrations) {
+          remove();
+        }
+      }
+      listeners.clear();
+    },
+  };
+};
+
 const observePendingTrace = async ({
   application,
   directory,
@@ -52,6 +178,7 @@ const observePendingTrace = async ({
   startupStartedAt,
   traceEnter,
   controlNoMainIpc,
+  contextObservation,
 }: Readonly<{
   application: ElectronApplication;
   directory: string;
@@ -60,6 +187,7 @@ const observePendingTrace = async ({
   /** Milliseconds since startup began. */
   traceEnter: number;
   controlNoMainIpc: boolean;
+  contextObservation: ReturnType<typeof observeTraceContext>;
 }>): Promise<void> => {
   const observation: {
     status: string;
@@ -73,10 +201,12 @@ const observePendingTrace = async ({
       raceSettled?: number;
     }>;
     errorName?: string;
+    context?: ReturnType<ReturnType<typeof observeTraceContext>['snapshot']>;
   } = { status: 'waiting', samples: [], traceEnter, mainIpc: [] };
   const path = join(directory, 'trace-pending.json');
   let pendingWrite: Promise<void> = Promise.resolve();
   const persist = async (): Promise<void> => {
+    observation.context = contextObservation.snapshot();
     const snapshot = JSON.stringify(observation);
     const previousWrite = pendingWrite;
     pendingWrite = (async (): Promise<void> => {
@@ -813,6 +943,7 @@ export const launchDesktopApp = async (options: {
   let startupFinished = false;
   let traceProbeAbort: AbortController | undefined;
   let traceProbe: Promise<void> | undefined;
+  let contextObservation: ReturnType<typeof observeTraceContext> | undefined;
   const assertStartupActive = (): void => {
     if (startupFinished) {
       throw new Error('Desktop startup finished before a session was returned.');
@@ -825,6 +956,7 @@ export const launchDesktopApp = async (options: {
       child.kill('SIGKILL');
     }
     await traceProbe?.catch(() => undefined);
+    contextObservation?.dispose();
   });
   /* Installed before the first window loads, and kept for the whole session, so
    * startup and late traffic are both observed. */
@@ -900,6 +1032,9 @@ export const launchDesktopApp = async (options: {
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     await recordStartup('trace-start');
     assertStartupActive();
+    if (options.startupDiagnostic) {
+      contextObservation = observeTraceContext(page.context(), startupStartedAt);
+    }
     const traceEnter = performance.now() - startupStartedAt;
     const tracingStart = page.context().tracing.start({ screenshots: true, snapshots: true });
     if (options.startupDiagnostic) {
@@ -911,6 +1046,7 @@ export const launchDesktopApp = async (options: {
         startupStartedAt,
         traceEnter,
         controlNoMainIpc: options.startupDiagnosticNoMainIpc === true,
+        contextObservation: contextObservation!,
       });
       // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- Attach before the original tracing promise settles.
       void traceProbe.catch(() => undefined);
@@ -928,6 +1064,7 @@ export const launchDesktopApp = async (options: {
       }
       traceProbeAbort?.abort('trace-settled');
       await traceProbe?.catch(() => undefined);
+      contextObservation?.dispose();
     }
     assertStartupActive();
   } catch (error) {

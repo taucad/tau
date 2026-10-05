@@ -30,10 +30,123 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
+import { StringDecoder } from 'node:string_decoder';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const desktopE2ERoot = resolve(import.meta.dirname, '..');
+
+type ProtocolCommand = {
+  id: number;
+  kind: 'Page.addScriptToEvaluateOnNewDocument' | 'Runtime.evaluate' | 'Runtime.callFunctionOn';
+  sessionHash: string;
+  enteredAt: number;
+  settledAt?: number;
+  outcome?: 'ok' | 'error';
+};
+type ProtocolCounts = {
+  lines: number;
+  refused: number;
+  dropped: number;
+  unmatched: number;
+  unqualified: number;
+  overflow: boolean;
+};
+type ProtocolMetadataCollector = {
+  consume: (line: string) => boolean;
+  snapshot: () => { counts: ProtocolCounts; commands: ProtocolCommand[] };
+  refuse: () => void;
+};
+
+/** Retain only qualified CDP command timing; never persist a protocol body. */
+export const createProtocolMetadataCollector = (): ProtocolMetadataCollector => {
+  const commands: ProtocolCommand[] = [];
+  const counts = { lines: 0, refused: 0, dropped: 0, unmatched: 0, unqualified: 0, overflow: false };
+  const increment = (key: 'lines' | 'refused' | 'dropped' | 'unmatched' | 'unqualified'): void => {
+    if (counts[key] < 1_000_000) {
+      counts[key]++;
+    } else {
+      counts.overflow = true;
+    }
+  };
+  const consume = (line: string): boolean => {
+    if (!line.includes('pw:protocol')) {
+      return false;
+    }
+    increment('lines');
+    // A line longer than the parser budget or clipped by Playwright cannot
+    // establish a trustworthy session and must never reach ordinary stderr.
+    if (Buffer.byteLength(line, 'utf8') > 131_072 || line.includes('LOG TRUNCATED') || counts.overflow) {
+      increment('refused');
+      return true;
+    }
+    const direction = /\bpw:protocol\b.*?\b(SEND|RECV)\b/u.exec(line)?.[1];
+    const start = line.indexOf('{');
+    const end = line.lastIndexOf('}');
+    if (!direction || start === -1 || end <= start) {
+      increment('refused');
+      return true;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line.slice(start, end + 1));
+    } catch {
+      increment('refused');
+      return true;
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      increment('refused');
+      return true;
+    }
+    const message = parsed as { id?: unknown; method?: unknown; sessionId?: unknown; error?: unknown };
+    if (!Number.isSafeInteger(message.id) || typeof message.id !== 'number') {
+      return true; // Protocol event, not a command response.
+    }
+    if (typeof message.sessionId !== 'string' || message.sessionId.length === 0) {
+      increment('unqualified');
+      return true; // Root commands can reuse IDs across Electron's connections.
+    }
+    const sessionHash = createHash('sha256').update(message.sessionId).digest('hex');
+    if (direction === 'SEND') {
+      if (
+        message.method !== 'Page.addScriptToEvaluateOnNewDocument' &&
+        message.method !== 'Runtime.evaluate' &&
+        message.method !== 'Runtime.callFunctionOn'
+      ) {
+        return true;
+      }
+      if (commands.length === 256) {
+        commands.shift();
+        increment('dropped');
+      }
+      commands.push({ id: message.id, kind: message.method, sessionHash, enteredAt: Date.now() });
+      return true;
+    }
+    const matches = commands.filter(
+      (row) => row.id === message.id && row.sessionHash === sessionHash && row.settledAt === undefined,
+    );
+    if (matches.length === 1) {
+      matches[0]!.settledAt = Date.now();
+      matches[0]!.outcome = message.error === undefined ? 'ok' : 'error';
+    } else if (matches.length > 1) {
+      increment('refused');
+    } else {
+      increment('unmatched');
+    }
+    return true;
+  };
+  return {
+    consume,
+    snapshot: (): { counts: ProtocolCounts; commands: ProtocolCommand[] } => ({
+      counts: { ...counts },
+      commands: [...commands],
+    }),
+    refuse: (): void => {
+      increment('refused');
+    },
+  };
+};
 
 const main = async (): Promise<void> => {
   const { values } = parseArgs({
@@ -434,6 +547,18 @@ const main = async (): Promise<void> => {
     if (applied !== expected) {
       throw new Error('Disposable database migration checkpoint does not match the consumed journal.');
     }
+    // Playwright's supported pw:protocol logger is opt-in. Drain its stderr in
+    // this owned runner and retain only command metadata, never protocol bodies.
+    const protocol = createProtocolMetadataCollector();
+    const consumeProtocolLine = (line: string): void => {
+      if (!protocol.consume(line)) {
+        process.stderr.write(`${line}\n`);
+      }
+    };
+    const vitestEnvironment: NodeJS.ProcessEnv = {
+      ...environment,
+      ...(startupDiagnostic === '1' ? { DEBUG: 'pw:protocol', DEBUG_COLORS: '0', MAX_LOG_LENGTH: '65536' } : {}),
+    };
     const vitest = spawn(
       resolve(workspaceRoot, 'node_modules/.bin/vitest'),
       [
@@ -464,19 +589,72 @@ const main = async (): Promise<void> => {
       ],
       {
         cwd: desktopE2ERoot,
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Test environment contains only run-owned service credentials.
-        env: environment as NodeJS.ProcessEnv,
-        stdio: 'inherit',
+        env: vitestEnvironment,
+        stdio: startupDiagnostic === '1' ? ['inherit', 'inherit', 'pipe'] : 'inherit',
       },
     );
     activeChild = vitest;
+    if (startupDiagnostic === '1') {
+      const decoder = new StringDecoder('utf8');
+      let carry = '';
+      let carryBytes = 0;
+      let dropping = false;
+      const append = (text: string): void => {
+        let offset = 0;
+        while (offset < text.length) {
+          const end = text.indexOf('\n', offset);
+          const final = end === -1 ? text.length : end;
+          const segment = text.slice(offset, final);
+          if (!dropping) {
+            const segmentBytes = Buffer.byteLength(segment, 'utf8');
+            if (carryBytes + segmentBytes > 131_072) {
+              carry = '';
+              carryBytes = 0;
+              dropping = true;
+              protocol.refuse();
+            } else {
+              carry += segment;
+              carryBytes += segmentBytes;
+            }
+          }
+          if (end === -1) {
+            break;
+          }
+          if (!dropping) {
+            consumeProtocolLine(carry);
+          }
+          carry = '';
+          carryBytes = 0;
+          dropping = false;
+          offset = end + 1;
+        }
+      };
+      vitest.stderr?.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+        for (let offset = 0; offset < chunk.byteLength; offset += 16_384) {
+          append(decoder.write(Buffer.from(chunk.subarray(offset, offset + 16_384))));
+        }
+      });
+      vitest.stderr?.once('end', () => {
+        append(decoder.end());
+        if (carry && !dropping) {
+          consumeProtocolLine(carry);
+        }
+      });
+    }
     const status = await new Promise<number>((resolve, reject) => {
       vitest.once('error', reject);
-      vitest.once('exit', (code, signal) => {
+      vitest.once('close', (code, signal) => {
         resolve(code ?? (signal ? 1 : 0));
       });
     });
     activeChild = undefined;
+    if (startupDiagnostic === '1') {
+      const path = resolve(workspaceRoot, 'out/test-results/desktop-e2e', `protocol-${project}.json`);
+      mkdirSync(resolve(workspaceRoot, 'out/test-results/desktop-e2e'), { recursive: true });
+      const metadata = protocol.snapshot();
+      writeFileSync(path, JSON.stringify(metadata), { mode: 0o600 });
+      console.info('[completed-artifact] private protocol metadata', { path, ...metadata.counts });
+    }
     if (status !== 0) {
       throw new Error(`Completed-artifact Vitest failed with status ${String(status)}.`);
     }
@@ -485,9 +663,11 @@ const main = async (): Promise<void> => {
   }
 };
 
-try {
-  await main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  }
 }

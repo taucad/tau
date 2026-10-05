@@ -611,6 +611,53 @@ describe('GltfMesh in-place updates', () => {
     expect(captureLiveGltfAssemblyResourceInventory(next)).toBeUndefined();
   });
 
+  it('should replace a committed assembly with standalone source geometry', async () => {
+    const scenes: Object3D[] = [];
+    mocks.observePreparation = vi.fn((scene: Object3D) => {
+      scenes.push(scene);
+    });
+    const parse = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const display = await residentAssembly();
+    const view = render(
+      <GltfMesh
+        assemblyDisplay={display}
+        geometryHash={display.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    try {
+      await waitFor(() => {
+        expect(committedRevisions()).toEqual([1]);
+      });
+      const assemblyScene = scenes.at(-1)!;
+      const committedAssembly = captureCommittedGltfDrawInventory(assemblyScene);
+      expect(committedAssembly?.isCurrent()).toBe(true);
+      const priorReads = vi.mocked(display.admitted.readAsset).mock.calls.length;
+      const priorParses = parse.mock.calls.length;
+      view.rerender(
+        <GltfMesh
+          gltfFile={buildGlb({ lift: 5 })}
+          geometryHash='standalone'
+          presentationRevision={2}
+          enableMatcap={false}
+        />,
+      );
+      await waitFor(() => {
+        expect(committedRevisions()).toEqual([1, 2]);
+      });
+      const standaloneScene = scenes.at(-1)!;
+      expect(standaloneScene).not.toBe(assemblyScene);
+      expect(findSurface(standaloneScene).geometry.getAttribute('position').getZ(2)).toBe(5);
+      expect(parse).toHaveBeenCalledTimes(priorParses + 1);
+      expect(display.admitted.readAsset).toHaveBeenCalledTimes(priorReads);
+      expect(committedAssembly?.isCurrent()).toBe(false);
+      expect(captureCommittedGltfDrawInventory(assemblyScene)).toBeUndefined();
+    } finally {
+      view.unmount();
+    }
+  });
+
   it('captures an ungated same-task admission after the live candidate has already disappeared', async () => {
     const scenes: Object3D[] = [];
     mocks.observePreparation = vi.fn((scene: Object3D) => {
@@ -2726,6 +2773,7 @@ describe('actual candidate indexed demand', () => {
       scenes.push(scene);
     });
     const display = await residentAssembly({ occurrenceCount: 20, spacing: 20, withEdges: true });
+    const stringify = vi.spyOn(JSON, 'stringify');
     const view = render(
       <GltfMesh
         assemblyDisplay={display}
@@ -2782,6 +2830,16 @@ describe('actual candidate indexed demand', () => {
       expect(
         measurements.filter(({ candidateSceneId }) => candidateSceneId === currentCapture?.candidateSceneId),
       ).toHaveLength(1);
+      const manifests = mocks.graphicsActor.send.mock.calls.flatMap(([event]) =>
+        event.type === 'gltfPresentationCommitted' ? [event.manifest] : [],
+      );
+      expect(manifests).toHaveLength(2);
+      expect(
+        stringify.mock.calls.filter(([value]) => {
+          const payload: unknown = value;
+          return Array.isArray(payload) && manifests.some((manifest) => payload[1] === manifest.nodeOrder);
+        }),
+      ).toHaveLength(0);
     } finally {
       view.unmount();
     }

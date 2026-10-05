@@ -2551,7 +2551,7 @@ type PreparedGltfPresentation = {
   assemblyResources?: GltfPresentationTelemetry['assemblyResources'];
   readonly assemblyFacade?: AdmittedAssembly;
   readonly sourceBindings?: ReadonlyMap<Object3D, GltfSectionSourceBinding>;
-  readonly ownershipSignature: string;
+  readonly ownershipSignature?: string;
   readonly getMeasurementFeatures: ReturnType<typeof prepareGltfMetadata>['getMeasurementFeatures'];
   surfaceBatches: GltfSurfaceBatches;
   /** D22: the buffers a same-topology result may be written into, absent when the scene cannot take one. */
@@ -4378,6 +4378,7 @@ export function GltfMesh({
         !gltfFile ||
         assemblyDisplay !== undefined ||
         !committed ||
+        committed.assemblyFacade !== undefined ||
         committed.disposed ||
         candidatePresentationRef.current !== undefined ||
         !committed.parser ||
@@ -4851,7 +4852,7 @@ export function GltfMesh({
           originalMaterials,
           resources,
           inPlace,
-          ownershipSignature: ownershipSignature(manifest),
+          ...(assemblyDisplay ? {} : { ownershipSignature: ownershipSignature(manifest) }),
           getMeasurementFeatures,
           surfaceBatches,
           sourceBytes: gltfFile ?? new Uint8Array(),

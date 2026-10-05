@@ -87,7 +87,7 @@ async function measurePinnedOccurrenceDistance(
   }
   const { context } = initial;
   const client = context.kernelClient;
-  const document = display.document;
+  const { document } = display;
   const requestId = context.lastRequestedRenderId;
   const matches = (): boolean => {
     const snapshot = input.cadRef.getSnapshot();
@@ -95,7 +95,6 @@ async function measurePinnedOccurrenceDistance(
       !isCancelled(input.signal) &&
       selectCadDisplay(snapshot) === display &&
       snapshot.context.kernelClient === client &&
-      selectCadDisplay(snapshot) === display &&
       snapshot.context.latestRenderingOutcome === 'success' &&
       snapshot.context.lastRequestedRenderId === requestId &&
       snapshot.context.lastSettledRenderId === requestId &&
@@ -114,7 +113,7 @@ async function measurePinnedOccurrenceDistance(
     return unavailable('Exact measurement requires unique captured placement for both selected canonical components.');
   }
   const route = client && bestRouteForActiveKernel(client, 'step', display.admitted.publication);
-  if (!client || !document || !route || route.transcoderId !== undefined || route.kernelId !== 'replicad') {
+  if (!route || route.transcoderId !== undefined || route.kernelId !== 'replicad') {
     return unavailable('This pinned scene has no direct installed Replicad exact export route.');
   }
   try {
@@ -136,7 +135,7 @@ async function measurePinnedOccurrenceDistance(
     // Codec-v2 composition names each placed native entry by its admitted canonical component ID.
     const request: ExactRequest = {
       id: ++nextRequestId,
-      source: { format: 'ap242', bytes: exported.files[0]!.bytes, coordinateSystem: 'y-up' },
+      source: { format: 'ap242', bytes: exported.files[0].bytes, coordinateSystem: 'y-up' },
       occurrences: [{ name: occurrenceA }, { name: occurrenceB }],
     };
     const result = await runExactRequest(request, input.signal);

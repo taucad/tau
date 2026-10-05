@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { contentDigest } from '@taucad/cache-core';
 import type {
   AdmittedAssembly,
@@ -7,14 +7,13 @@ import type {
   PublishedPartRecord,
   PublishedPartExact,
 } from '@taucad/runtime/types';
-import type { GeometryComponentNode } from '@taucad/types';
+import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import type { PublishedAssemblyDocument } from '@taucad/runtime/client';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import type { ExactOccurrenceDistanceInput } from '#workers/measurement-exact.client.js';
 import { mock } from 'vitest-mock-extended';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { ExportResult, Rendering, SourceRevision } from '@taucad/runtime';
-import type { GeometryComponentManifest } from '@taucad/types';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { CadContext, cadMachine } from '#machines/cad.machine.js';
 import { bestRouteForActiveKernel } from '#utils/export-formats.utils.js';
@@ -34,15 +33,18 @@ const stepBytes = new Uint8Array([83, 84, 69, 80]);
 function fixture() {
   const runtime = createMockRuntimeDocument();
   const rendering: Rendering = { ...runtime.rendering, sourceRevision: revision };
-  const context = mock<CadContext>({
+  const context = mock<CadContext>();
+  Object.assign(context, {
     activeKernelId: 'replicad',
     latestRenderingOutcome: 'success',
     rendering,
     entryPath: 'main.ts',
     document: runtime.document,
     kernelClient: createMockRuntimeClient(),
+    publishedAssemblyRoot: undefined,
   });
-  const snapshot = mock<SnapshotFrom<typeof cadMachine>>({ context });
+  const snapshot = mock<SnapshotFrom<typeof cadMachine>>();
+  Object.assign(snapshot, { context });
   const cadRef = mock<ActorRefFrom<typeof cadMachine>>({ getSnapshot: () => snapshot });
   const manifest = mock<GeometryComponentManifest>({
     geometryHash: 'mock-rendering',
@@ -208,29 +210,30 @@ function pinnedFixture() {
     },
     occurrences: [{ id: 'part', part: 'part', variant: 'default', transform: identity }],
   });
-  const admitted = mock<AdmittedAssembly>({ publication });
+  const admitted = mock<AdmittedAssembly>();
+  Object.assign(admitted, { publication });
   Object.assign(document, { root, admitted });
   const display = { root, admitted, document };
   const actor = mock<ActorRefFrom<typeof cadMachine>>();
-  vi.mocked(actor.getSnapshot).mockReturnValue(
-    mock<SnapshotFrom<typeof cadMachine>>({
-      context: {
-        kernelClient: client,
-        document: undefined,
-        rendering: undefined,
-        committedRendering: undefined,
-        publishedAssemblyRoot: root,
-        publishedAssembly: publication,
-        admittedAssembly: admitted,
-        committedAssemblyDisplay: display,
-        entryPath: 'scene.json',
-        publishedAssemblyEntryPath: 'scene.json',
-        latestRenderingOutcome: 'success',
-        lastRequestedRenderId: 3,
-        lastSettledRenderId: 3,
-      },
-    }),
-  );
+  const snapshot = mock<SnapshotFrom<typeof cadMachine>>();
+  Object.assign(snapshot, {
+    context: {
+      kernelClient: client,
+      document: undefined,
+      rendering: undefined,
+      committedRendering: undefined,
+      publishedAssemblyRoot: root,
+      publishedAssembly: publication,
+      admittedAssembly: admitted,
+      committedAssemblyDisplay: display,
+      entryPath: 'scene.json',
+      publishedAssemblyEntryPath: 'scene.json',
+      latestRenderingOutcome: 'success',
+      lastRequestedRenderId: 3,
+      lastSettledRenderId: 3,
+    },
+  });
+  vi.mocked(actor.getSnapshot).mockReturnValue(snapshot);
   const isCurrent = vi.fn(() => true);
   const manifest = mock<GeometryComponentManifest>();
   manifest.sourceFile = 'scene.json';
@@ -266,13 +269,17 @@ function pinnedFixture() {
     status: 'cad-geometry',
     source: 'ap242',
     distanceMeters: 0.02,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact worker response uses point A/B field names.
     pointAMeters: [0, 0, 0],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact worker response uses point A/B field names.
     pointBMeters: [0.02, 0, 0],
   }));
   return { input, document, actor, isCurrent };
 }
 
 describe('pinned exact occurrence adapter', () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it('should export the captured root and placement-only pose and query canonical IDs despite duplicate authored names', async () => {
     const { input, document } = pinnedFixture();
     expect(await measureExactOccurrenceDistance(input)).toMatchObject({ status: 'cad-geometry', distanceMeters: 0.02 });
@@ -327,9 +334,9 @@ describe('pinned exact occurrence adapter', () => {
         files: [{ name: 'scene.step', mimeType: 'application/step', bytes: new Uint8Array([1]) }],
       };
     });
-    expect(await measureExactOccurrenceDistance(input)).toMatchObject({
+    expect(await measureExactOccurrenceDistance(input)).toEqual({
       status: 'unavailable',
-      reason: expect.stringContaining('during exact export'),
+      reason: 'The presented root or pose changed during exact export.',
     });
     expect(runExactRequest).not.toHaveBeenCalled();
   });
@@ -343,9 +350,9 @@ describe('pinned exact occurrence adapter', () => {
       });
       return { id, status: 'unavailable', reason: 'Native result no longer current' };
     });
-    expect(await measureExactOccurrenceDistance(input)).toMatchObject({
+    expect(await measureExactOccurrenceDistance(input)).toEqual({
       status: 'unavailable',
-      reason: expect.stringContaining('during the exact query'),
+      reason: 'The presented root or pose changed during the exact query.',
     });
   });
 });

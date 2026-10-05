@@ -24,7 +24,7 @@ An open, coaxial, three-planet spur-gear stage. The ring is fixed through six mo
 - Carrier angle $\theta_c=\theta_s/4$; absolute planet angle $\theta_p=7.5^\circ-\theta_s/2$.
 - Ring tooth-space phase $2.5^\circ$.
 - Working gear face width 14 mm; ring face width 16 mm.
-- Standard full-depth addenda and 1.25-module dedenda; curved 0.6 mm root transitions. Involute flanks interpolated as single B-spline edges, not polygonal teeth.
+- Standard full-depth addenda and 1.25-module dedenda; curved 0.6 mm root transitions; 0.5 mm × 45° tip chamfers at both gear faces. Involute flanks interpolated as single B-spline edges, not polygonal teeth.
 - Tangential tooth-thickness reduction 0.10 mm per external gear; ring tooth spaces widened by 0.10 mm. Nominal pair backlash 0.20 mm at the pitch circle.
 - Ring OD174 mm; 6 x diameter 5.5 mm holes on PCD162 mm, diameter 9.5 x 3 mm counterbores.
 - Gear z=0..14 mm; rear carrier z=-8..-3 mm; front carrier z=17..22 mm; output hub to z=40 mm; input shaft to z=-28 mm.
@@ -50,7 +50,7 @@ Links: ring (root, Internal Ring Gear); sun (Sun Gear And Input Shaft); carrier 
 - Pins: hardened and ground bearing steel.
 - Bushings and thrust washers: lubricated SAE 660 bronze.
 - Purchased screws: black-oxide steel ISO 4762 M5 x 12, 4 mm hex socket. Threaded regions are nominal smooth envelopes; specify M5 x 0.8 in manufacturing documentation. Pin tapped bores are modeled at major-diameter envelope for assembly interference analysis, not tap-drill size.
-- Deburr tooth face edges without altering the involute flank; grease teeth and bushings.
+- Tooth tips carry a 0.25-module (0.5 mm) 45° chamfer at both faces: turned on the external gear blanks at the tip diameter and countersunk into the ring bore at its tip diameter, so the involute flank is untouched below the chamfer. Deburr the remaining tooth face edges; grease teeth and bushings.
 
 ### Assembly Order
 

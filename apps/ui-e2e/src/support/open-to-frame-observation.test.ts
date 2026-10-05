@@ -37,6 +37,31 @@ it('should refuse browser link-intent before waiting for a project that only des
   );
 }, 15_000);
 
+it('refuses an incomplete cold reference population before launching Chromium', async () => {
+  await Promise.all(
+    (
+      [
+        ['tray', 'webgl', '3'],
+        ['unselected', 'webgl', '5'],
+        ['honeycomb', 'unselected', '5'],
+      ] as const
+    ).map(async ([fixture, backend, count]) =>
+      expect(
+        execFileAsync(process.execPath, [
+          resolve(import.meta.dirname, 'open-to-frame.ts'),
+          'browser',
+          'replicad',
+          count,
+          'http://127.0.0.1:3110',
+          'reference-cold',
+          fixture,
+          backend,
+        ]),
+      ).rejects.toHaveProperty('stderr', expect.stringContaining('reference-cold requires browser replicad 5')),
+    ),
+  );
+}, 15_000);
+
 it('accepts a selected kernel only when it belongs to a render in the same utility', async () => {
   directory = await mkdtemp(join(tmpdir(), 'tau-otf-selection-'));
   const file = join(directory, 'trace.jsonl');

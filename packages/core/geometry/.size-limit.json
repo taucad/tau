@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — measured 18997 bytes on 2026-10-02; 503 bytes headroom",
+    "name": "total (ESM JS) with admitted assembly GLB — measured 25448 bytes on 2026-10-05; 552 bytes headroom",
     "path": "dist/**/*.mjs",
-    "limit": "19.5 kB"
+    "limit": "26 kB"
   }
 ]

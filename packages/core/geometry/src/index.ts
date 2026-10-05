@@ -9,6 +9,9 @@ export {
   TauCadTopologyRoot,
 } from '#extensions/index.js';
 export type {
+  TauCadPhysical,
+  TauCadPhysicalDensity,
+  TauCadPhysicalVolume,
   TauCadTopologyComponent,
   TauCadTopologyEdgeGroup,
   TauCadTopologyExport,
@@ -63,6 +66,8 @@ export {
 export type { GlbInput, GlbManifoldTopology, GlbMaterial, GlbNode, GlbPrimitive } from '#utils/glb-writer.js';
 export type { GlbImage, GlbResources } from '#utils/glb-material.js';
 export { validateGlbMaterial, validateGlbResources } from '#utils/glb-material.js';
+export { flattenAdmittedAssemblyGlb, validateAdmittedAssemblyGlb } from '#assembly-glb.js';
+export type { AdmittedAssemblyGlbMetadata } from '#assembly-glb.js';
 
 // Names
 export {

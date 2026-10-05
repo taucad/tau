@@ -1,3 +1,4 @@
+import type { Extension } from '@gltf-transform/core';
 import { KHRONOS_EXTENSIONS } from '@gltf-transform/extensions';
 import { tauCadGltfExtensions } from '#extensions/registry.js';
 
@@ -6,4 +7,4 @@ import { tauCadGltfExtensions } from '#extensions/registry.js';
  *
  * @public
  */
-export const allExtensions = [...KHRONOS_EXTENSIONS, ...tauCadGltfExtensions];
+export const allExtensions: Array<typeof Extension> = [...KHRONOS_EXTENSIONS, ...tauCadGltfExtensions];

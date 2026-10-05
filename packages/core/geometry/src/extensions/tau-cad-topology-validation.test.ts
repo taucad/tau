@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Physical wire units use the published valueGPerCm3 spelling. */
 import { describe, expect, it } from 'vitest';
 import type { Mechanism } from '@taucad/kinematics';
 import { validateTauCadTopology } from '#extensions/tau-cad-topology-validation.js';
@@ -30,6 +31,115 @@ const payload: TauCadTopologyPayload = {
 };
 
 describe('validateTauCadTopology', () => {
+  it('accepts requested solid evidence and rejects fabricated or invalid physical facts', () => {
+    const bounds = { nodes: [], meshes: [] };
+    const component = { ...payload.components[1]!, parentId: undefined };
+    const digest = `sha256:${'a'.repeat(64)}`;
+    expect(
+      validateTauCadTopology(
+        {
+          schemaVersion: 1,
+          components: [
+            {
+              ...component,
+              physical: {
+                volume: {
+                  state: 'measured',
+                  valueMm3: 480,
+                  geometryDigest: digest,
+                  method: 'occt-solid-volume',
+                  validity: 'closed-solid',
+                },
+                density: { valueGPerCm3: 2.7, provenance: 'authored-shape-config' },
+              },
+            },
+          ],
+        },
+        bounds,
+      ),
+    ).toEqual([]);
+    expect(
+      validateTauCadTopology(
+        {
+          schemaVersion: 1,
+          components: [
+            {
+              ...component,
+              physical: {
+                volume: {
+                  state: 'measured',
+                  valueMm3: Number.NaN,
+                  geometryDigest: 'sha256:mesh',
+                  method: 'occt-solid-volume',
+                  validity: 'closed-solid',
+                },
+                density: { valueGPerCm3: -2, provenance: 'authored-shape-config' },
+              },
+            },
+          ],
+        },
+        bounds,
+      ),
+    ).toEqual([
+      'component:face-0 has invalid native solid volume evidence',
+      'component:face-0 has invalid authored density evidence',
+    ]);
+    expect(
+      validateTauCadTopology(
+        {
+          schemaVersion: 1,
+          components: [
+            {
+              ...component,
+              physical: {
+                volume: {
+                  state: 'measured',
+                  valueMm3: 0,
+                  geometryDigest: digest,
+                  method: 'occt-solid-volume',
+                  validity: 'closed-solid',
+                },
+              },
+            },
+          ],
+        },
+        bounds,
+      ),
+    ).toEqual(['component:face-0 has invalid native solid volume evidence']);
+  });
+  it('accepts only a provenance-preserving placed-volume product', () => {
+    const bounds = { nodes: [], meshes: [] };
+    const component = { ...payload.components[1]!, parentId: undefined };
+    const volume = {
+      state: 'derived',
+      sourceValueMm3: 3840,
+      addedAbsDeterminant: 3.375,
+      valueMm3: 12_960,
+      geometryDigest: `sha256:${'a'.repeat(64)}`,
+      method: 'occurrence-determinant-v1',
+      validity: 'placed-solid',
+    } as const;
+    expect(
+      validateTauCadTopology({ schemaVersion: 1, components: [{ ...component, physical: { volume } }] }, bounds),
+    ).toEqual([]);
+    expect(
+      validateTauCadTopology(
+        { schemaVersion: 1, components: [{ ...component, physical: { volume: { ...volume, valueMm3: 3840 } } }] },
+        bounds,
+      ),
+    ).toEqual(['component:face-0 has invalid placed-volume evidence']);
+    expect(
+      validateTauCadTopology(
+        {
+          schemaVersion: 1,
+          components: [
+            { ...component, physical: { volume: { state: 'unavailable', reason: 'degenerate-placement' } } },
+          ],
+        },
+        bounds,
+      ),
+    ).toEqual([]);
+  });
   it('accepts in-range hierarchy and primitive groups', () => {
     expect(
       validateTauCadTopology(payload, {
@@ -42,6 +152,37 @@ describe('validateTauCadTopology', () => {
         ],
       }),
     ).toEqual([]);
+  });
+
+  it('checks Replicad edge groups in flat XYZ scalar units', () => {
+    const source = {
+      ...payload.components[0]!,
+      childIds: [],
+      sourceRefs: { edgeGroupUnit: 'xyz-scalars-v1' },
+      edgeGroups: [{ start: 3, count: 6, edgeId: 0 }],
+    };
+    const input: TauCadTopologyPayload = { schemaVersion: 1, components: [source] };
+    const bounds = {
+      nodes: [{ meshIndex: 0 }],
+      meshes: [
+        [
+          { mode: 4, indexCount: 3 },
+          { mode: 1, indexCount: 3, positionScalarCount: 9 },
+        ],
+      ],
+    };
+    expect(validateTauCadTopology(input, bounds)).toEqual([]);
+    expect(
+      validateTauCadTopology(input, {
+        ...bounds,
+        meshes: [
+          [
+            { mode: 4, indexCount: 3 },
+            { mode: 1, indexCount: 3, positionScalarCount: 6 },
+          ],
+        ],
+      }),
+    ).toEqual(['component:body-0 edge group exceeds its primitive position scalar count']);
   });
 
   it('reports duplicate, hierarchy, primitive, and group bounds failures', () => {

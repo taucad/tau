@@ -24,7 +24,7 @@ import { TauCadTopology } from '#extensions/tau-cad-topology.js';
  *
  * @public
  */
-export const tauCadGltfExtensions = [
+export const tauCadGltfExtensions: ReadonlyArray<typeof Extension> = [
   EXTManifold,
   KHRMaterialsAnisotropy,
   KHRMaterialsClearcoat,
@@ -42,7 +42,7 @@ export const tauCadGltfExtensions = [
   KittyCadBoundaryRepresentation,
   TauCadTopology,
   FbNgonEncodingExtension,
-] as const satisfies ReadonlyArray<typeof Extension>;
+];
 
 /**
  * Register Tau-supported glTF extensions on a glTF-Transform IO instance.

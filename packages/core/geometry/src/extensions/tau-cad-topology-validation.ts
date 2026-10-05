@@ -2,7 +2,12 @@ import { admitMechanism } from '@taucad/kinematics';
 import type { TauCadTopologyPayload, TauCadTopologyPrimitiveRef } from '#extensions/tau-cad-topology.types.js';
 
 /** Primitive mode and index bounds used to validate topology references. @public */
-export type TauCadTopologyPrimitiveBounds = { readonly mode: number; readonly indexCount: number };
+export type TauCadTopologyPrimitiveBounds = {
+  readonly mode: number;
+  readonly indexCount: number;
+  /** Non-indexed POSITION accessor count times three, for XYZ-scalar edge spans. */
+  readonly positionScalarCount?: number;
+};
 
 /** Document bounds used to validate topology references without owning a parser. @public */
 export type TauCadTopologyDocumentBounds = {
@@ -40,6 +45,76 @@ const mechanismIssues = (mechanism: unknown, identifiers: ReadonlySet<string>): 
   );
 };
 
+const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+
+const physicalIssues = (componentId: string, input: unknown): string[] => {
+  if (input === undefined) {
+    return [];
+  }
+  const physical = asRecord(input);
+  const volume = asRecord(physical?.['volume']);
+  if (!physical || !volume) {
+    return [`${componentId} has invalid physical evidence`];
+  }
+  const issues: string[] = [];
+  if (volume['state'] === 'measured') {
+    if (
+      typeof volume['valueMm3'] !== 'number' ||
+      !Number.isFinite(volume['valueMm3']) ||
+      volume['valueMm3'] <= 0 ||
+      typeof volume['geometryDigest'] !== 'string' ||
+      !/^sha256:[0-9a-f]{64}$/u.test(volume['geometryDigest']) ||
+      volume['method'] !== 'occt-solid-volume' ||
+      volume['validity'] !== 'closed-solid'
+    ) {
+      issues.push(`${componentId} has invalid native solid volume evidence`);
+    }
+  } else if (volume['state'] === 'derived') {
+    const source = volume['sourceValueMm3'];
+    const factor = volume['addedAbsDeterminant'];
+    const value = volume['valueMm3'];
+    if (
+      typeof source !== 'number' ||
+      !Number.isFinite(source) ||
+      source <= 0 ||
+      typeof factor !== 'number' ||
+      !Number.isFinite(factor) ||
+      factor <= 0 ||
+      typeof value !== 'number' ||
+      !Number.isFinite(value) ||
+      value <= 0 ||
+      value !== source * factor ||
+      typeof volume['geometryDigest'] !== 'string' ||
+      !/^sha256:[0-9a-f]{64}$/u.test(volume['geometryDigest']) ||
+      volume['method'] !== 'occurrence-determinant-v1' ||
+      volume['validity'] !== 'placed-solid'
+    ) {
+      issues.push(`${componentId} has invalid placed-volume evidence`);
+    }
+  } else if (
+    volume['state'] !== 'unavailable' ||
+    !['not-solid', 'invalid-solid', 'native-unavailable', 'degenerate-placement', 'nonfinite-placement'].includes(
+      volume['reason'] as string,
+    )
+  ) {
+    issues.push(`${componentId} has invalid unavailable-volume evidence`);
+  }
+  if (physical['density'] !== undefined) {
+    const density = asRecord(physical['density']);
+    if (
+      !density ||
+      typeof density['valueGPerCm3'] !== 'number' ||
+      !Number.isFinite(density['valueGPerCm3']) ||
+      density['valueGPerCm3'] <= 0 ||
+      density['provenance'] !== 'authored-shape-config'
+    ) {
+      issues.push(`${componentId} has invalid authored density evidence`);
+    }
+  }
+  return issues;
+};
+
 /**
  * Validate payload hierarchy, references and mechanism against one glTF document.
  *
@@ -59,6 +134,7 @@ export const validateTauCadTopology = (
       issues.push(`${component.id} is duplicated`);
     }
     identifiers.add(component.id);
+    issues.push(...physicalIssues(component.id, component.physical));
     const references = component.primitiveRefs ?? [];
     for (const reference of references) {
       const issue = referenceIssue(reference, bounds);
@@ -89,8 +165,12 @@ export const validateTauCadTopology = (
         continue;
       }
       for (const group of groups) {
-        if (group.start + group.count > primitiveBounds.indexCount) {
-          issues.push(`${component.id} ${label} group exceeds its primitive index count`);
+        const scalarEdges = label === 'edge' && component.sourceRefs?.['edgeGroupUnit'] === 'xyz-scalars-v1';
+        const limit = scalarEdges ? primitiveBounds.positionScalarCount : primitiveBounds.indexCount;
+        if (limit === undefined || group.start + group.count > limit) {
+          issues.push(
+            `${component.id} ${label} group exceeds its primitive ${scalarEdges ? 'position scalar' : 'index'} count`,
+          );
         }
       }
     }

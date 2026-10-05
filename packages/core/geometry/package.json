@@ -46,7 +46,10 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./schema/tau-cad-topology": "./schema/tau-cad-topology.schema.json",
+      "./schema/tau-cad-topology": {
+        "types": "./schema/tau-cad-topology.schema.d.cts",
+        "default": "./schema/tau-cad-topology.schema.json"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -67,7 +70,9 @@
     "@taucad/runtime": "^0.1.0-beta.0"
   },
   "devDependencies": {
+    "@taucad/nx": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/types": "workspace:*",
     "ajv": "catalog:"
   },
   "taucad": {

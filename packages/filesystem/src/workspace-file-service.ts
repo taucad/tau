@@ -8,6 +8,8 @@ import type {
   FileSystemBackend,
 } from '@taucad/types';
 import type {
+  FileStatOptions,
+  HeadFileStat,
   FileSystemProvider,
   FileTreeNode,
   FileReadStreamOptions,
@@ -369,9 +371,11 @@ export class WorkspaceFileService {
    * @param path - Absolute path.
    * @returns Stat information (type, size, mtime).
    */
-  public async stat(path: string): Promise<FileStat> {
+  public async stat(path: string): Promise<FileStat>;
+  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
+  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    return provider.stat(resolvedPath);
+    return options ? provider.stat(resolvedPath, options) : provider.stat(resolvedPath);
   }
 
   /**

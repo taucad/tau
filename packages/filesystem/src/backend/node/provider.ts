@@ -30,6 +30,7 @@ import type {
   DirectoryEntry,
   FileMode,
   FileReadStreamOptions,
+  FileStatOptions,
   FileStat,
   HeadFileStat,
   PathPolicy,
@@ -299,7 +300,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }));
   }
 
-  public async stat(path_: string): Promise<FileStat> {
+  public async stat(path_: string): Promise<FileStat>;
+  public async stat(path_: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
+  public async stat(path_: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+    if (options?.content === 'head') {
+      return this._headStat(path_);
+    }
     this._assertRootedPath(path_);
     const target = await this._resolve(path_);
     const stats = await fs.stat(target);

@@ -64,7 +64,10 @@ export type PathPolicy = {
  */
 export type FileMode = '100644' | '100755';
 
-/** Metadata from a head-only directory listing. Text line counts are unknown. @public */
+/** Options for authoritative metadata without exact text line counting. @public */
+export type FileStatOptions = Readonly<{ content: 'head' }>;
+
+/** Metadata from a head-only stat or listing. Text line counts are unknown. @public */
 export type HeadFileStat =
   | Extract<FileStat, { type: 'dir' }>
   | {
@@ -170,6 +173,7 @@ export type FileSystemProvider = {
   appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   readdir(path: string): Promise<string[]>;
   stat(path: string): Promise<FileStat>;
+  stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
   mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   unlink(path: string): Promise<void>;
   rmdir(path: string): Promise<void>;

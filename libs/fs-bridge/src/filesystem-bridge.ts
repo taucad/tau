@@ -1503,6 +1503,13 @@ export function createFileSystemBridgeProxy(
           ) {
             throw new TypeError('Exact readdirWithStats response is missing required metadata.');
           }
+          if (
+            property === 'stat' &&
+            args[1] === undefined &&
+            !fileSystemBridgeSchemas.calls.lstat.result.safeParse(result).success
+          ) {
+            throw new TypeError('Exact stat response is missing required metadata.');
+          }
           return result;
         } catch (error) {
           if (property === 'writeFileChecked' || property === 'deleteFileChecked') {

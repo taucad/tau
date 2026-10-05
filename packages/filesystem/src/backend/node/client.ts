@@ -18,6 +18,7 @@ import type {
   ExternalChangeFact,
   FileMode,
   FileReadStreamOptions,
+  FileStatOptions,
   FileStat,
   HeadFileStat,
   ProviderCapabilities,
@@ -393,9 +394,13 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
       : this._channel.request({ root: this._root, op: 'readdirHeadWithStats', path });
   }
 
-  public async stat(path: string): Promise<FileStat> {
+  public async stat(path: string): Promise<FileStat>;
+  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
+  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
     this._assertRootedPath(path);
-    return this._channel.request({ root: this._root, op: 'stat', path });
+    return options?.content === 'head'
+      ? this._channel.request({ root: this._root, op: 'headStat', path })
+      : this._channel.request({ root: this._root, op: 'stat', path });
   }
 
   public async getFileMode(path: string): Promise<FileMode> {

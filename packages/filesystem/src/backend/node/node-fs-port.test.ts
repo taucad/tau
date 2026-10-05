@@ -176,6 +176,10 @@ describe('node filesystem client/host round trip', () => {
     expect(head).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text' }]);
     expect(head[0]).not.toHaveProperty('lineCount');
     expect(exact).toMatchObject([{ name: 'large.txt', type: 'file', size: 1028, contentKind: 'text', lineCount: 2 }]);
+    const headStat = await provider.stat('large.txt', { content: 'head' });
+    expect(headStat).toMatchObject({ size: 1028, contentKind: 'text' });
+    expect(headStat).not.toHaveProperty('lineCount');
+    expect(await provider.stat('large.txt')).toMatchObject({ lineCount: 2 });
   });
 
   it('fences checked deletion across ports and reports conflict and unchanged accurately', async () => {

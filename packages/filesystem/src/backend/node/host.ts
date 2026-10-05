@@ -414,6 +414,9 @@ const runOperation = async (
     case 'readdirHeadWithStats': {
       return provider.readdirWithStats(request.path, { content: 'head' });
     }
+    case 'headStat': {
+      return provider.stat(request.path, { content: 'head' });
+    }
     case 'stat': {
       return provider.stat(request.path);
     }

@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { FileSystemAccessProvider } from '@taucad/filesystem/backend';
+/* oxlint-disable no-restricted-imports -- Reuse the real provider's internal test handle; this fixture is intentionally not a public package export. */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- Reuse the real provider's internal test handle without publishing a test-only fixture API.
+import { createMockRootHandle } from '../../../filesystem/src/testing/mock-handle-factory.js';
+/* oxlint-enable no-restricted-imports */
+import { describe, expect, it, vi } from 'vitest';
 import { createProviderEventLog } from '#browser.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
@@ -66,6 +71,113 @@ describe('createProviderEventLog', () => {
     const reopened = await createProviderEventLog({ fileSystem, filePath, access: 'write' });
     await expect(reopened.read()).resolves.toEqual([event(0), event(1)]);
     await reopened.close();
+  });
+
+  it('uses authoritative head stat on warm append and refuses a peer size change', async () => {
+    const fixture = createFileSystem();
+    const filePath = '/.tau/chats/stat-fence/events.jsonl';
+    const readFile = vi.fn(fixture.fileSystem.readFile);
+    const stat = vi.fn(async (path: string) => {
+      const bytes = fixture.files.get(path);
+      if (!bytes) {
+        throw Object.assign(new Error('Missing file'), { code: 'ENOENT' });
+      }
+      return { size: bytes.byteLength };
+    });
+    const log = await createProviderEventLog({
+      fileSystem: { ...fixture.fileSystem, readFile, stat },
+      filePath,
+      access: 'write',
+    });
+    await log.append(event(0));
+    readFile.mockClear();
+    stat.mockClear();
+    await log.append(event(1));
+    expect(readFile.mock.calls.filter(([path]) => path === filePath)).toHaveLength(0);
+    expect(stat).toHaveBeenCalledWith(filePath, { content: 'head' });
+    const before = fixture.files.get(filePath)!;
+    const changed = new Uint8Array(before.byteLength + 1);
+    changed.set(before);
+    changed[before.byteLength] = 10;
+    fixture.files.set(filePath, changed);
+    await expect(log.append(event(2))).rejects.toThrow();
+    expect(fixture.files.get(filePath)).toEqual(changed);
+    await log.close();
+  });
+
+  it('avoids full reads in the real FSA warm fence and preserves stale-size refusal', async () => {
+    const provider = new FileSystemAccessProvider(createMockRootHandle() as unknown as FileSystemDirectoryHandle);
+    const filePath = 'events.jsonl';
+    const log = await createProviderEventLog({ fileSystem: provider, filePath, access: 'write' });
+    for (let sequence = 0; sequence < 10; sequence++) {
+      // oxlint-disable-next-line no-await-in-loop -- Event-log sequence is causal.
+      await log.append(event(sequence));
+    }
+    const original = File.prototype.arrayBuffer;
+    const fullReads: number[] = [];
+    const spy = vi.spyOn(File.prototype, 'arrayBuffer').mockImplementation(async function (this: File) {
+      if (this.name === filePath && this.size > 512) {
+        fullReads.push(this.size);
+      }
+      return original.call(this);
+    });
+    try {
+      await log.append(event(10));
+      expect(fullReads).toEqual([]);
+      await provider.appendFile(filePath, '\n');
+      await expect(log.append(event(11))).rejects.toThrow();
+      expect(fullReads).toEqual([]);
+      await expect(log.read()).resolves.toHaveLength(11);
+    } finally {
+      spy.mockRestore();
+      await log.close();
+      provider.dispose();
+    }
+  });
+
+  it('preserves real FSA torn-tail repair and partial-append rollback', async () => {
+    const provider = new FileSystemAccessProvider(createMockRootHandle() as unknown as FileSystemDirectoryHandle);
+    const filePath = 'events.jsonl';
+    const valid = `${JSON.stringify(event(0))}\n`;
+    await provider.writeFile(filePath, `${valid}{"version":`);
+    const append = provider.appendFile.bind(provider);
+    const spy = vi.spyOn(provider, 'appendFile');
+    const log = await createProviderEventLog({ fileSystem: provider, filePath, access: 'write' });
+    await log.append(event(1));
+    const before = await provider.readFile(filePath);
+    expect(new TextDecoder().decode(before)).toBe(`${valid}${JSON.stringify(event(1))}\n`);
+    spy.mockImplementationOnce(async (path, bytes) => {
+      await append(path, bytes.slice(0, 5));
+      throw new Error('partial append');
+    });
+    try {
+      await expect(log.append(event(2))).rejects.toThrow('partial append');
+      expect(await provider.readFile(filePath)).toEqual(before);
+      await expect(log.append(event(2))).resolves.toMatchObject({ appended: true });
+      await expect(log.read()).resolves.toEqual([event(0), event(1), event(2)]);
+    } finally {
+      spy.mockRestore();
+      await log.close();
+      provider.dispose();
+    }
+  });
+
+  it.each(['ENOENT', 'ENOTDIR', 'EACCES'])('handles only missing head-stat failures as zero (%s)', async (code) => {
+    const fixture = createFileSystem();
+    const filePath = 'events.jsonl';
+    const stat = vi.fn().mockRejectedValue(Object.assign(new Error(code), { code }));
+    const log = await createProviderEventLog({
+      fileSystem: { ...fixture.fileSystem, stat },
+      filePath,
+      access: 'write',
+    });
+    if (code === 'EACCES') {
+      await expect(log.append(event(0))).rejects.toMatchObject({ code });
+      expect(fixture.files.has(filePath)).toBe(false);
+    } else {
+      await expect(log.append(event(0))).resolves.toMatchObject({ appended: true });
+    }
+    await log.close();
   });
 
   it('repairs a torn tail inside its first append, not at open', async () => {

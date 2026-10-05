@@ -1250,3 +1250,71 @@ describe('FileTreeService listDirectory / subscribePath', () => {
     disposeChannel();
   });
 });
+
+describe('directory observation bootstrap and shared cancellation', () => {
+  it('should catch up once after a burst invalidates a held bootstrap read', async () => {
+    const first = Promise.withResolvers<FileTreeNode[]>();
+    const readDirectory = vi
+      .fn<ComposedViewClient['readDirectory']>()
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValueOnce([textNode('latest.ts')]);
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+    });
+    const listing = tree.listDirectory('');
+    for (let index = 0; index < 100; index++) {
+      emitFileChanged({ type: 'fileWritten', path: 'latest.ts', backend: 'indexeddb' });
+    }
+    expect(readDirectory).toHaveBeenCalledOnce();
+    first.resolve([]);
+    await expect(listing).resolves.toMatchObject([{ name: 'latest.ts' }]);
+    expect(readDirectory).toHaveBeenCalledTimes(2);
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it('should not let the first caller cancellation cancel a shared directory read', async () => {
+    const pending = Promise.withResolvers<FileTreeNode[]>();
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockReturnValue(pending.promise);
+    const { tree, disposeChannel } = createTreeHarness({ proxy: mock<ComposedViewClient>({ readDirectory }) });
+    const controller = new AbortController();
+    const first = tree.listDirectory('', { signal: controller.signal });
+    const second = tree.listDirectory('');
+    controller.abort();
+    pending.resolve([textNode('current.ts')]);
+    await expect(first).rejects.toMatchObject({ listing: { code: DirectoryListingErrorCode.Aborted } });
+    await expect(second).resolves.toMatchObject([{ name: 'current.ts' }]);
+    expect(readDirectory).toHaveBeenCalledOnce();
+    tree.dispose();
+    disposeChannel();
+  });
+});
+
+describe('directory capability replacement', () => {
+  it('should fence a held old-root listing without deleting the new root read', async () => {
+    const oldRead = Promise.withResolvers<FileTreeNode[]>();
+    const newRead = Promise.withResolvers<FileTreeNode[]>();
+    const readDirectory = vi
+      .fn<ComposedViewClient['readDirectory']>()
+      .mockReturnValueOnce(oldRead.promise)
+      .mockReturnValueOnce(newRead.promise);
+    const { tree, disposeChannel } = createTreeHarness({ proxy: mock<ComposedViewClient>({ readDirectory }) });
+    const oldListing = (async (): Promise<unknown> => {
+      try {
+        return await tree.listDirectory('');
+      } catch (error) {
+        return error;
+      }
+    })();
+    tree.reset('/projects/new');
+    const newListing = tree.listDirectory('');
+    oldRead.resolve([textNode('old.ts')]);
+    expect(await oldListing).toBeInstanceOf(DirectoryListingFailedError);
+    expect(tree.listDirectorySync('')).toBeUndefined();
+    newRead.resolve([textNode('new.ts')]);
+    await expect(newListing).resolves.toMatchObject([{ name: 'new.ts' }]);
+    expect(readDirectory).toHaveBeenCalledTimes(2);
+    tree.dispose();
+    disposeChannel();
+  });
+});

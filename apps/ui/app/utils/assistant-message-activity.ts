@@ -397,7 +397,7 @@ export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGr
     if (pendingParts.length === 0) {
       return;
     }
-    const toolParts = pendingParts.filter((part) => classifyActivityPart(part) === 'research');
+    const toolParts = pendingParts.filter((part) => cachedCategory(part) === 'research');
     const isReasoning = toolParts.length === 0;
     groups.push({
       kind: 'aggregated',
@@ -412,7 +412,7 @@ export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGr
   };
 
   for (const [partIndex, part] of parts.entries()) {
-    const category = classifyActivityPart(part);
+    const category = cachedCategory(part);
     if (category === 'skip') {
       continue;
     }
@@ -425,5 +425,41 @@ export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGr
     groups.push({ kind: 'singleton', part, partIndex, category });
   }
   flush();
+  const first = parts[0];
+  if (first !== undefined) {
+    const previous = activityGroups.get(first);
+    for (const [index, group] of groups.entries()) {
+      const old = previous?.[index];
+      if (
+        old?.kind === 'singleton' &&
+        group.kind === 'singleton' &&
+        old.part === group.part &&
+        old.partIndex === group.partIndex
+      ) {
+        groups[index] = old;
+      } else if (
+        old?.kind === 'aggregated' &&
+        group.kind === 'aggregated' &&
+        old.category === group.category &&
+        old.parts.length === group.parts.length &&
+        old.parts.every((part, at) => part === group.parts[at] && old.partIndices[at] === group.partIndices[at])
+      ) {
+        groups[index] = old;
+      }
+    }
+    activityGroups.set(first, groups);
+  }
   return groups;
+};
+
+const partCategories = new WeakMap<MyMessagePart, ActivityCategory>();
+const activityGroups = new WeakMap<MyMessagePart, ActivityGroup[]>();
+const cachedCategory = (part: MyMessagePart): ActivityCategory => {
+  const prior = partCategories.get(part);
+  if (prior !== undefined) {
+    return prior;
+  }
+  const category = classifyActivityPart(part);
+  partCategories.set(part, category);
+  return category;
 };

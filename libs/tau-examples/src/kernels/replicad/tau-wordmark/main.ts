@@ -1,8 +1,29 @@
-import { draw, type Drawing, type Point2D } from 'replicad';
+import { draw, drawRectangle, type Drawing, type Point2D } from 'replicad';
 import { tauBrandColor } from '../tau-brand.js';
 
-const symbolScale = 1200 / 512;
-const symbolVerticalOffset = 2.622 * symbolScale;
+// Letter grid, y up from the baseline. Bars are slightly thinner than stems so
+// curves and bars read with the same weight as the verticals.
+const letterGrid = {
+  xHeight: 520,
+  stem: 100,
+  bar: 88,
+  overshoot: 10,
+  /** Cubic handle factor; 0.5523 is a circle, larger values square the bowls. */
+  squareness: 0.6,
+  /** The Tau symbol's sloped axis, used for the t's top and tail cuts. */
+  axis: Math.atan(1 / Math.sqrt(15)),
+  tHeight: 700,
+  tLeftBar: 70,
+  tRightBar: 140,
+  tFoot: 176,
+  tTail: 232,
+  bowlWidth: 476,
+  spacing: { markToT: 210, tToA: 44, aToU: 98 },
+  markHeight: 700,
+} as const;
+
+const symbolScale = letterGrid.markHeight / (509.378 - 2.622);
+const symbolVerticalOffset = 509.378 * symbolScale;
 const r24 = 24 * symbolScale;
 const r60 = 60 * symbolScale;
 
@@ -48,43 +69,6 @@ const symbolCornerRadii = {
   top: [r24, r60, 0, r60, 0, r60],
   side: [0, r60, 0, r60, r24, r60],
 } as const;
-
-const aOuterPoints: readonly Point2D[] = [
-  [1960, -681.76],
-  [1480, -805.74],
-  [1480, -1187.64],
-  [1320, -1146.31],
-  [1320, -103.35],
-  [1720, -0.11],
-  [2120, -103.35],
-  [2120, -1146.31],
-  [1960, -1187.71],
-];
-
-const aCounterPoints: readonly Point2D[] = [
-  [1480, -640.4],
-  [1960, -516.52],
-  [1959.85, -227.38],
-  [1719.98, -165.41],
-  [1480, -227.3],
-];
-
-const uPoints: readonly Point2D[] = [
-  [2760, -1187.68],
-  [2360, -1084.44],
-  [2360, -41.48],
-  [2520, -0.18],
-  [2520, -961.96],
-  [2760, -1023.94],
-  [3000, -962],
-  [3000, -41.58],
-  [3160, -0.25],
-  [3160, -1084.44],
-];
-
-const aOuterCornerRadii = [r24, r24, 0, r24, r60, r60, r60, r24, 0] as const;
-const aCounterCornerRadii = [r24, r24, r24, r24, r24] as const;
-const uCornerRadii = [r60, r60, r24, 0, r24, r24, r24, r24, 0, r60] as const;
 
 type Corner = {
   readonly start: Point2D;
@@ -182,17 +166,135 @@ const roundedPolygon = (
   return pen.close();
 };
 
-const createA = (): Drawing =>
-  roundedPolygon(aOuterPoints, aOuterCornerRadii).cut(
-    roundedPolygon(aCounterPoints, aCounterCornerRadii),
-  );
+const rect = ([x0, y0]: Point2D, [x1, y1]: Point2D): Drawing =>
+  drawRectangle(x1 - x0, y1 - y0).translate((x0 + x1) / 2, (y0 + y1) / 2);
 
-export const createTauWordmark = (): Drawing =>
+const polygon = (points: readonly Point2D[]): Drawing => {
+  const [first, ...rest] = points;
+  const pen = draw(first);
+  for (const point of rest) {
+    pen.lineTo(point);
+  }
+  return pen.close();
+};
+
+/** Superellipse-like closed curve from four cubic quadrants. */
+const bowl = ([cx, cy]: Point2D, rx: number, ry: number): Drawing => {
+  const k = letterGrid.squareness;
+  return draw([cx + rx, cy])
+    .cubicBezierCurveTo(
+      [cx, cy + ry],
+      [cx + rx, cy + k * ry],
+      [cx + k * rx, cy + ry],
+    )
+    .cubicBezierCurveTo(
+      [cx - rx, cy],
+      [cx - k * rx, cy + ry],
+      [cx - rx, cy + k * ry],
+    )
+    .cubicBezierCurveTo(
+      [cx, cy - ry],
+      [cx - rx, cy - k * ry],
+      [cx - k * rx, cy - ry],
+    )
+    .cubicBezierCurveTo(
+      [cx + rx, cy],
+      [cx + k * rx, cy - ry],
+      [cx + rx, cy - k * ry],
+    )
+    .close();
+};
+
+const ring = (center: Point2D, rx: number, ry: number): Drawing => {
+  const { stem, bar } = letterGrid;
+  return bowl(center, rx, ry).cut(bowl(center, rx - stem, ry - bar));
+};
+
+/** The single-storey a is a squared bowl closed by a straight stem on the right. */
+const createA = (x: number): Drawing => {
+  const { xHeight, stem, overshoot, bowlWidth } = letterGrid;
+  const rx = bowlWidth / 2;
+  const ry = xHeight / 2 + overshoot;
+  return ring([x + rx, xHeight / 2], rx, ry).fuse(
+    rect([x + bowlWidth - stem, 0], [x + bowlWidth, xHeight]),
+  );
+};
+
+/** The u is the a's bowl opened at the top, with the same right stem. */
+const createU = (x: number): Drawing => {
+  const { xHeight, stem, bar, overshoot, bowlWidth } = letterGrid;
+  const rx = bowlWidth / 2;
+  const cy = xHeight / 2;
+  const ry = cy + overshoot;
+  const outer = bowl([x + rx, cy], rx, ry).fuse(
+    rect([x, cy], [x + bowlWidth, xHeight]),
+  );
+  const counter = bowl([x + rx, cy], rx - stem, ry - bar).fuse(
+    rect([x + stem, cy], [x + bowlWidth - stem, xHeight + overshoot + 1]),
+  );
+  return outer
+    .cut(counter)
+    .fuse(rect([x + bowlWidth - stem, 0], [x + bowlWidth, xHeight]));
+};
+
+/** The t is a stem cut on the symbol's axis, an asymmetric bar and a foot that turns towards the a. */
+const createT = (x: number): Drawing => {
+  const {
+    xHeight,
+    stem,
+    bar,
+    overshoot,
+    axis,
+    tHeight,
+    tLeftBar,
+    tRightBar,
+    tFoot,
+    tTail,
+  } = letterGrid;
+  const left = x + tLeftBar;
+  const right = left + stem;
+  const rise = stem * Math.tan(axis);
+  const footY = tFoot - overshoot;
+  const top = polygon([
+    [left, footY],
+    [right, footY],
+    [right, tHeight],
+    [left, tHeight - rise],
+  ]);
+  const crossbar = rect([x, xHeight - bar], [right + tRightBar, xHeight]);
+  const corner = ring([left + tFoot, footY], tFoot, tFoot).intersect(
+    rect([left, -overshoot], [left + tFoot, footY]),
+  );
+  const tailEnd = right + tTail - stem;
+  // The tail's terminal is cut on the symbol's axis, echoing the top of the stem.
+  const tail = polygon([
+    [left + tFoot - 1, -overshoot],
+    [tailEnd, -overshoot],
+    [tailEnd - bar * Math.tan(axis), -overshoot + bar],
+    [left + tFoot - 1, -overshoot + bar],
+  ]);
+  return top.fuse(crossbar).fuse(corner).fuse(tail);
+};
+
+const symbolWidth = 512 * symbolScale;
+
+/** The canonical Tau symbol, standing on the baseline at the letters' height. */
+export const createSymbol = (): Drawing =>
   roundedPolygon(symbolTopPoints, symbolCornerRadii.top)
     .fuse(roundedPolygon(symbolLeftPoints, symbolCornerRadii.side))
-    .fuse(roundedPolygon(symbolRightPoints, symbolCornerRadii.side))
-    .fuse(createA())
-    .fuse(roundedPolygon(uPoints, uCornerRadii));
+    .fuse(roundedPolygon(symbolRightPoints, symbolCornerRadii.side));
+
+/** The lowercase letters, set after the symbol. */
+export const createLetters = (): Drawing => {
+  const { spacing, bowlWidth, tLeftBar, stem, tRightBar } = letterGrid;
+  const x = symbolWidth + spacing.markToT;
+  const aX = x + tLeftBar + stem + tRightBar + spacing.tToA;
+  const uX = aX + bowlWidth + spacing.aToU;
+  return createT(x).fuse(createA(aX)).fuse(createU(uX));
+};
+
+export const createTauWordmark = (): Drawing =>
+  createSymbol().fuse(createLetters());
 
 const main = () => ({
   shape: createTauWordmark(),

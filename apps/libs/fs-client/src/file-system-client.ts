@@ -7,6 +7,8 @@ import type {
 } from '@taucad/types';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
+  FileStatOptions,
+  HeadFileStat,
   FileTreeNode,
   MkdirOptions,
   MountConfig,
@@ -127,6 +129,7 @@ export type FileSystemClient = {
   mkdir(path: string, options?: MkdirOptions): Promise<void>;
   readdir(path: string): Promise<string[]>;
   stat(path: string): Promise<FileStat>;
+  stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
   lstat(path: string): Promise<FileStat>;
   /**
    * Move a file or directory. Directory-aware: same-mount moves delegate to

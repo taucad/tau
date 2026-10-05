@@ -52,7 +52,7 @@ it('rejects shallow metadata from an exact bridge listing', async () => {
   const channel = new MessageChannel();
   const row = { name: 'large.txt', type: 'file', size: 2048, mtimeMs: 1, contentKind: 'text' };
   const server = createBridgeServer(
-    { readdirWithStats: async () => [row] },
+    { readdirWithStats: async () => [row], stat: async () => row },
     fsBridgePort(channel.port1, 'listing-server'),
     {
       hello: createFileSystemBridgeHello({
@@ -72,6 +72,8 @@ it('rejects shallow metadata from an exact bridge listing', async () => {
   try {
     await expect(proxy.readdirWithStats('')).rejects.toThrow('missing required metadata');
     await expect(proxy.readdirWithStats('', { content: 'head' })).resolves.toEqual([row]);
+    await expect(proxy.stat('large.txt')).rejects.toThrow('missing required metadata');
+    await expect(proxy.stat('large.txt', { content: 'head' })).resolves.toEqual(row);
   } finally {
     proxy.dispose();
     server.dispose();

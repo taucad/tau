@@ -35,6 +35,7 @@ jobs:
       pull-requests: 'read'
     outputs:
       apps: ${{ steps.plan.outputs.apps }}
+      deploy-apps: ${{ steps.plan.outputs.deploy-apps }}
       api: ${{ steps.plan.outputs.api }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
@@ -49,10 +50,16 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Nx Environment
+        id: setup
         uses: ./.github/actions/setup-nx
 
       - name: Compute affected lanes
         id: plan
+        env:
+          # With no earlier successful `main` run, nx-set-shas diffs against HEAD~1, so
+          # an app changed by an earlier, failed push would never be deployed. The
+          # staging deploys then take every app; the test lanes keep the affected set.
+          NO_PREVIOUS_BUILD: ${{ steps.setup.outputs.no-previous-build == 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
         run: |
           # `tail -1` keeps the JSON array and drops Nx's log lines.
           apps=$(pnpm nx show projects --affected --type=app --json | tail -1)
@@ -63,9 +70,17 @@ jobs:
           echo "Affected tag:scope:api: $api"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
+          deploy_apps=$apps
+          if [ "$NO_PREVIOUS_BUILD" = 'true' ]; then
+            deploy_apps=$(pnpm nx show projects --type=app --json | tail -1)
+            echo "No earlier successful main run: deploying every app: $deploy_apps"
+          fi
           {
             echo "apps<<EOF"
             echo "$apps"
+            echo "EOF"
+            echo "deploy-apps<<EOF"
+            echo "$deploy_apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           for lane in "api=$api" "size=$size" "formal=$formal"; do
@@ -144,9 +159,10 @@ jobs:
       - name: Run workspace validators
         run: pnpm nx run scripts:validate
 
-  # Builds the products only when no earlier run produced this closure. Its Darwin
-  # host suites run here when it builds, and in `geospec-darwin` when it does not, so
-  # the Linux lanes never wait for a Mac merely to run those suites.
+  # Builds the products only when no earlier run produced this closure. It ends once
+  # they are saved: the Darwin host suites run in `geospec-darwin`, so the Linux lanes
+  # start as soon as the products exist instead of waiting for the suites (about an
+  # hour on a full graph, run 37246560360).
   geospec-producer:
     name: Produce current GeoSpec artifacts
     needs: [plan]
@@ -188,8 +204,38 @@ jobs:
           key: ${{ needs.plan.outputs.geospec-key }}
           mode: save
 
-      - &prepare-geospec-consumer
-        name: Prepare current installed GeoSpec consumer
+      - &retain-geospec-preparation
+        name: Retain the OCCT and toolchain preparation
+        if: always() && steps.prepare.outcome == 'success' && github.event_name != 'pull_request'
+        uses: ./.github/actions/geospec-preparation-save
+        with:
+          generation: ${{ steps.prepare.outputs.generation }}
+          preparation-hit: ${{ steps.prepare.outputs.preparation-hit }}
+          cargo-hit: ${{ steps.prepare.outputs.cargo-hit }}
+
+  # Restores the products this run's producer or an earlier run saved. The Darwin host
+  # suites still need a delivery assembled from this checkout's source kit, which
+  # `prepare-geospec-ci-artifacts` reassembles around them.
+  geospec-darwin:
+    name: Run GeoSpec Darwin host suites
+    needs: [plan, geospec-producer]
+    if: >-
+      !cancelled() && needs.plan.outputs.geospec-required == 'true' &&
+      needs.plan.outputs.geospec-darwin-tests == 'true' &&
+      (needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success')
+    runs-on: macos-15
+    steps:
+      - *checkout-darwin
+      - *setup-nx-darwin
+
+      - name: Restore GeoSpec engine products from an earlier run
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: restore
+
+      - *prepare-geospec
+      - name: Prepare current installed GeoSpec consumer
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
         env:
           GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
@@ -204,42 +250,13 @@ jobs:
           pnpm nx run scripts:prepare-geospec-test-consumer
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
 
-      - &darwin-host-suites
-        name: Run complete affected Darwin host suites
+      # Projects tagged `ci:quarantined` (runtime-e2e) run in the nightly Darwin job in
+      # e2e-nightly.yml instead, until their failing tests pass there:
+      # https://github.com/taucad/tau/issues/342
+      - name: Run complete affected Darwin host suites
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
-        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api --skip-nx-cache
+        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
 
-      - &retain-geospec-preparation
-        name: Retain the OCCT and toolchain preparation
-        if: always() && steps.prepare.outcome == 'success' && github.event_name != 'pull_request'
-        uses: ./.github/actions/geospec-preparation-save
-        with:
-          generation: ${{ steps.prepare.outputs.generation }}
-          preparation-hit: ${{ steps.prepare.outputs.preparation-hit }}
-          cargo-hit: ${{ steps.prepare.outputs.cargo-hit }}
-
-  # Restored products: the Darwin host suites still need a delivery assembled from this
-  # checkout's source kit, which `prepare-geospec-ci-artifacts` reassembles around them.
-  geospec-darwin:
-    name: Run GeoSpec Darwin host suites
-    needs: [plan]
-    if: >-
-      needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached == 'true' &&
-      needs.plan.outputs.geospec-darwin-tests == 'true'
-    runs-on: macos-15
-    steps:
-      - *checkout-darwin
-      - *setup-nx-darwin
-
-      - name: Restore GeoSpec engine products from an earlier run
-        uses: ./.github/actions/geospec-transport
-        with:
-          key: ${{ needs.plan.outputs.geospec-key }}
-          mode: restore
-
-      - *prepare-geospec
-      - *prepare-geospec-consumer
-      - *darwin-host-suites
       - *retain-geospec-preparation
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
@@ -458,26 +475,29 @@ jobs:
         if: always()
         run: pnpm nx run scripts:validate-workspace-root
 
-  # The required check. It passes only when every affected lane passed and, when this
-  # run needed the GeoSpec producer (including its host suites), the producer did too.
-  # An unneeded producer may be skipped, and so may one whose products an earlier run
-  # already made (see `plan`).
+  # The required check. It passes only when every affected lane passed, when this run
+  # needed the GeoSpec producer the producer did too, and when it needed the Darwin host
+  # suites they passed. An unneeded producer may be skipped, and so may one whose
+  # products an earlier run already made (see `plan`).
   affected:
     name: Run affected tasks
-    needs: [plan, geospec-producer, affected-lane]
+    needs: [plan, geospec-producer, geospec-darwin, affected-lane]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
-      - name: Require every affected lane and the artifact producer
+      - name: Require every affected lane, the artifact producer and the Darwin suites
         env:
           PLAN_RESULT: ${{ needs.plan.result }}
           PRODUCER_RESULT: ${{ needs.geospec-producer.result }}
           PRODUCER_REQUIRED: ${{ needs.plan.outputs.geospec-required }}
           PRODUCTS_CACHED: ${{ needs.plan.outputs.geospec-cached }}
+          DARWIN_REQUIRED: ${{ needs.plan.outputs.geospec-darwin-tests }}
+          DARWIN_RESULT: ${{ needs.geospec-darwin.result }}
           LANES_RESULT: ${{ needs.affected-lane.result }}
         run: |
           test "$PLAN_RESULT" = success
           if [ "$PRODUCER_REQUIRED" = true ] && [ "$PRODUCTS_CACHED" != true ]; then test "$PRODUCER_RESULT" = success; fi
+          if [ "$PRODUCER_REQUIRED" = true ] && [ "$DARWIN_REQUIRED" = true ]; then test "$DARWIN_RESULT" = success; fi
           test "$LANES_RESULT" = success
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
@@ -979,7 +999,7 @@ jobs:
   deploy-api-staging:
     name: Deploy API (Staging)
     needs: [workspace, affected, plan, api]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(fromJSON(needs.plan.outputs.apps), 'api')
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api')
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging
@@ -995,7 +1015,7 @@ jobs:
     needs: [workspace, affected, plan, geospec-producer]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
-      contains(fromJSON(needs.plan.outputs.apps), 'ui') &&
+      contains(fromJSON(needs.plan.outputs.deploy-apps), 'ui') &&
       needs.workspace.result == 'success' && needs.affected.result == 'success' &&
       (needs.geospec-producer.result == 'success' || needs.plan.outputs.geospec-cached == 'true')
     permissions:

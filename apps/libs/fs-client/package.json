@@ -36,7 +36,9 @@
     "./file-content-service": "./src/file-content-service.ts",
     "./file-tree-service": "./src/file-tree-service.ts",
     "./directory-listing": "./src/directory-listing.ts",
-    "./react/use-directory-listing": "./src/react/use-directory-listing.ts"
+    "./react/use-directory-listing": "./src/react/use-directory-listing.ts",
+    "./observation-service": "./src/observation-service.ts",
+    "./react/use-observation": "./src/react/use-observation.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -115,6 +117,16 @@
         "types": "./dist/react/use-directory-listing.d.mts",
         "import": "./dist/react/use-directory-listing.mjs",
         "default": "./dist/react/use-directory-listing.mjs"
+      },
+      "./observation-service": {
+        "types": "./dist/observation-service.d.mts",
+        "import": "./dist/observation-service.mjs",
+        "default": "./dist/observation-service.mjs"
+      },
+      "./react/use-observation": {
+        "types": "./dist/react/use-observation.d.mts",
+        "import": "./dist/react/use-observation.mjs",
+        "default": "./dist/react/use-observation.mjs"
       }
     }
   },
@@ -130,13 +142,15 @@
     "@taucad/filesystem": "workspace:*",
     "@taucad/memory": "workspace:*",
     "@taucad/types": "workspace:*",
-    "@taucad/utils": "workspace:*"
+    "@taucad/utils": "workspace:*",
+    "xstate": "catalog:"
   },
   "devDependencies": {
     "fast-check": "catalog:",
     "@testing-library/react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@taucad/xstate-testing": "workspace:*"
   }
 }

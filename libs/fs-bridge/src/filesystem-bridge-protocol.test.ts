@@ -32,7 +32,10 @@ describe('head-only directory metadata', () => {
     expect(listing.args.safeParse(['', { content: 'head' }]).success).toBe(true);
     expect(listing.args.safeParse(['']).success).toBe(true);
     expect(listing.result.safeParse(rows).success).toBe(true);
-    expect(fileSystemBridgeSchemas.calls.stat.result.safeParse(rows[0]).success).toBe(false);
+    expect(fileSystemBridgeSchemas.calls.stat.args.safeParse(['large.txt', { content: 'head' }]).success).toBe(true);
+    expect(fileSystemBridgeSchemas.calls.stat.args.safeParse(['large.txt']).success).toBe(true);
+    expect(fileSystemBridgeSchemas.calls.stat.result.safeParse(rows[0]).success).toBe(true);
+    expect(fileSystemBridgeSchemas.calls.lstat.result.safeParse(rows[0]).success).toBe(false);
   });
 });
 
@@ -40,7 +43,7 @@ describe('head-only directory metadata', () => {
  * every other assertion in the suite now reads the constant (G0-11). */
 describe('filesystem bridge protocol version', () => {
   it('should be 5', () => {
-    expect(fileSystemBridgeProtocolVersion).toBe(5);
+    expect(fileSystemBridgeProtocolVersion).toBe(6);
   });
 
   it('rejects a version 4 peer', () => {

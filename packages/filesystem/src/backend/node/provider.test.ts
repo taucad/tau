@@ -260,6 +260,10 @@ describe('NodeFsProvider head listing', () => {
       size: 1028,
     });
     expect(fullRead).not.toHaveBeenCalled();
+    const head = await provider.stat('large.txt', { content: 'head' });
+    expect(head).toMatchObject({ type: 'file', size: 1028, contentKind: 'text' });
+    expect(head).not.toHaveProperty('lineCount');
+    expect(fullRead).not.toHaveBeenCalled();
     writeFileSync(file, `${'a'.repeat(1024)}-end`);
     expect(await provider.stat('large.txt')).toMatchObject({ contentKind: 'text', lineCount: 1 });
     const exactRows = await provider.readdirWithStats('');

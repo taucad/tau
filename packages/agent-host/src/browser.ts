@@ -1,3 +1,4 @@
+import type { FileStatOptions } from '@taucad/filesystem';
 import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
@@ -50,6 +51,8 @@ export type ProviderEventLogOptions = {
     writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
     appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
     unlink(path: string): Promise<void>;
+    /** Current durable byte size; omission retains the full-read compatibility fallback. */
+    stat?(path: string, options: FileStatOptions): Promise<{ readonly size: number }>;
   };
 };
 
@@ -236,8 +239,23 @@ export async function createProviderEventLog(
       const bytes = await fileSystem.readFile(filePath);
       await fileSystem.writeFile(filePath, bytes.slice(0, size));
     },
-    // ponytail: size by reading the file; a provider `stat` would save the read when logs grow large.
     size: async () => {
+      if (fileSystem.stat) {
+        try {
+          const stat = await fileSystem.stat(filePath, { content: 'head' });
+          return stat.size;
+        } catch (error) {
+          if (
+            error &&
+            typeof error === 'object' &&
+            'code' in error &&
+            (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+          ) {
+            return 0;
+          }
+          throw error;
+        }
+      }
       const bytes = await readBytes();
       return bytes.byteLength;
     },

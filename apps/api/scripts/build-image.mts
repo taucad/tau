@@ -21,10 +21,21 @@ const nativeBuild = 'geospec-engine-native:build';
 
 type TaskGraph = { tasks: { tasks: Record<string, unknown>; dependencies: Record<string, string[]> } };
 
+const nxBin = join(repoRoot, 'node_modules/.bin/nx');
+
+/* Nx 22.7.1 intermittently segfaults before it runs anything, as the CI setup
+ * (`.github/actions/setup-nx`) records; the Dockerfile also turns off its native PTY
+ * runner. Call the bin directly, so the signal reaches this process instead of pnpm's
+ * exit 1, then rerun once on SIGSEGV and pass every other outcome through. */
 const nx = (...args: string[]): void => {
-  const result = spawnSync('pnpm', ['nx', ...args], { cwd: repoRoot, stdio: 'inherit' });
+  const run = () => spawnSync(nxBin, args, { cwd: repoRoot, stdio: 'inherit' });
+  let result = run();
+  if (result.signal === 'SIGSEGV') {
+    console.warn(`Nx was killed by SIGSEGV; rerunning: nx ${args.join(' ')}`);
+    result = run();
+  }
   if (result.status !== 0) {
-    throw new Error(`pnpm nx ${args.join(' ')} exited with ${result.status ?? result.signal}`);
+    throw new Error(`nx ${args.join(' ')} exited with ${result.status ?? result.signal}`);
   }
 };
 

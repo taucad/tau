@@ -10,13 +10,7 @@ import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-a
 import { serializeTranscript } from '#utils/chat.utils.js';
 import * as Projection from '#machines/chat-projection.logic.js';
 import * as HostCommands from '#chat-clients/_internal/host-command.js';
-import {
-  lifecycleRow,
-  logRow,
-  publishLogRows,
-  publishLogPage,
-  runningRows,
-} from '#machines/chat-projection.fixture.js';
+import { lifecycleRow, logRow, publishLogRows, publishLogPage } from '#machines/chat-projection.fixture.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import {
@@ -85,6 +79,18 @@ const acquire = (): Readonly<{ store: ChatSessionStore; chat: Chat<MyUIMessage>;
   store.setDependencies(deps);
   return { store, chat: store.acquire('chat_1', 'project_1').chat, deps };
 };
+
+/** An admission with its visible input: an SDK watch opens only once the run's user turn is projected. */
+const admittedRow = (sequence: number, runId = 'run_1'): Record<string, unknown> => {
+  const message = { id: `user_${runId}`, role: 'user', content: 'Continue this turn' };
+  return { ...lifecycleRow(sequence, 'admitted', runId), admission: { kind: 'tau', turnId: message.id, message } };
+};
+
+/** A running run with its visible input, as its first two rows. */
+const runningRows = (runId = 'run_1'): Array<Record<string, unknown>> => [
+  admittedRow(0, runId),
+  lifecycleRow(1, 'running', runId),
+];
 
 /** One authoritative assistant row arriving after the presentation failed. */
 const replyRow = (sequence: number, text: string): Record<string, unknown> =>
@@ -308,7 +314,7 @@ describe('ChatSessionStore real SDK presentation recovery', () => {
         publishLogRows(
           store,
           'chat_1',
-          [lifecycleRow(2, 'completed'), lifecycleRow(3, 'admitted', 'run_new'), lifecycleRow(4, 'running', 'run_new')],
+          [lifecycleRow(2, 'completed'), admittedRow(3, 'run_new'), lifecycleRow(4, 'running', 'run_new')],
           2,
         );
       }

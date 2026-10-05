@@ -1239,6 +1239,16 @@ for (const backend of ['webgl', 'webgpu'] as const) {
     expect(pair).toHaveLength(2);
     await explicitMotionMinimum(pair[0]!, pair[1]!);
     const activityAfter = await readMotionActivity();
+    await target.writeArtifact(
+      `c6-native100-${backend}-activity-snapshots.json`,
+      JSON.stringify({
+        intervalStart,
+        intervalEnd,
+        before: activityBefore,
+        during: activityAtIntervalEnd,
+        after: activityAfter,
+      }),
+    );
     const thumbnailsAfter = await readMotionHeadless();
     const drained = verifyDrainedMotionActivity({
       before: activityBefore,
@@ -1256,6 +1266,17 @@ for (const backend of ['webgl', 'webgpu'] as const) {
     expect(await readMotionPinBytes()).toEqual(pinBefore);
     expect(await downloadMotionSource('motion/parts/chain.js')).toBe(authorBefore);
     expect(await downloadMotionSource('motion/assembly.json')).toBe(authoredAssemblyBefore);
+    const activityWindowFacts = ({ telemetryEntries }: MotionActivityObservation) => {
+      const spanIds = telemetryEntries
+        .map((entry) => Number(entry.detail?.['spanId']))
+        .filter((value) => Number.isSafeInteger(value));
+      return {
+        entries: telemetryEntries.length,
+        roots: telemetryEntries.filter((entry) => entry.detail?.['parentSpanId'] === undefined).length,
+        firstSpanId: spanIds.length > 0 ? Math.min(...spanIds) : null,
+        frontierSpanId: spanIds.length > 0 ? Math.max(...spanIds) : null,
+      };
+    };
     await target.writeArtifact(
       `c6-native100-${backend}-drained-work.json`,
       JSON.stringify(
@@ -1263,6 +1284,11 @@ for (const backend of ['webgl', 'webgpu'] as const) {
           intervalStart,
           intervalEnd,
           drained,
+          activityWindows: {
+            before: activityWindowFacts(activityBefore),
+            during: activityWindowFacts(activityAtIntervalEnd),
+            after: activityWindowFacts(activityAfter),
+          },
           requestedRenderId: activityAfter.lastRequestedRenderId,
           settledRenderId: activityAfter.lastSettledRenderId,
           immutablePin: pinBefore,

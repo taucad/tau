@@ -119,6 +119,9 @@ jobs:
         uses: ./.github/actions/geospec-artifact-from-main
         with:
           sha: ${{ github.sha }}
+          # Staging needs only the producer's artifact; production also requires
+          # the whole main run to have passed.
+          require-success: ${{ inputs.environment == 'production' }}
           github-token: ${{ github.token }}
 
       # `ui:sourcemaps` uploads with the PostHog CLI key. The Netlify site's own

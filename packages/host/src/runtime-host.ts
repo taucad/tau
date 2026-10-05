@@ -13,7 +13,8 @@ const admitAssemblyDisplay: AssemblyDisplayProjector = async ({ purpose, records
     await validateAdmittedAssemblyGlb(input);
     return;
   }
-  return (await flattenAdmittedAssemblyGlb(input)).geometry.content;
+  const result = await flattenAdmittedAssemblyGlb(input);
+  return result.geometry.content;
 };
 
 /** Handle for a loopback runtime hosted by a host child process. @public */

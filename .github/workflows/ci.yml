@@ -35,6 +35,7 @@ jobs:
       pull-requests: 'read'
     outputs:
       apps: ${{ steps.plan.outputs.apps }}
+      deploy-apps: ${{ steps.plan.outputs.deploy-apps }}
       api: ${{ steps.plan.outputs.api }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
@@ -49,10 +50,16 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Nx Environment
+        id: setup
         uses: ./.github/actions/setup-nx
 
       - name: Compute affected lanes
         id: plan
+        env:
+          # With no earlier successful `main` run, nx-set-shas diffs against HEAD~1, so
+          # an app changed by an earlier, failed push would never be deployed. The
+          # staging deploys then take every app; the test lanes keep the affected set.
+          NO_PREVIOUS_BUILD: ${{ steps.setup.outputs.no-previous-build == 'true' && github.ref == 'refs/heads/main' && github.event_name == 'push' }}
         run: |
           # `tail -1` keeps the JSON array and drops Nx's log lines.
           apps=$(pnpm nx show projects --affected --type=app --json | tail -1)
@@ -63,9 +70,17 @@ jobs:
           echo "Affected tag:scope:api: $api"
           echo "Affected with a size target: $size"
           echo "Affected with a formal target: $formal"
+          deploy_apps=$apps
+          if [ "$NO_PREVIOUS_BUILD" = 'true' ]; then
+            deploy_apps=$(pnpm nx show projects --type=app --json | tail -1)
+            echo "No earlier successful main run: deploying every app: $deploy_apps"
+          fi
           {
             echo "apps<<EOF"
             echo "$apps"
+            echo "EOF"
+            echo "deploy-apps<<EOF"
+            echo "$deploy_apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           for lane in "api=$api" "size=$size" "formal=$formal"; do
@@ -984,7 +999,7 @@ jobs:
   deploy-api-staging:
     name: Deploy API (Staging)
     needs: [workspace, affected, plan, api]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(fromJSON(needs.plan.outputs.apps), 'api')
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api')
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging
@@ -1000,7 +1015,7 @@ jobs:
     needs: [workspace, affected, plan, geospec-producer]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
-      contains(fromJSON(needs.plan.outputs.apps), 'ui') &&
+      contains(fromJSON(needs.plan.outputs.deploy-apps), 'ui') &&
       needs.workspace.result == 'success' && needs.affected.result == 'success' &&
       (needs.geospec-producer.result == 'success' || needs.plan.outputs.geospec-cached == 'true')
     permissions:

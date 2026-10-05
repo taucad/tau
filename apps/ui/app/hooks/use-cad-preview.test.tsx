@@ -87,6 +87,7 @@ vi.mock('#machines/cad.machine.js', async () => {
   return {
     cadMachine,
     disposeCadRuntime: mockDisposeCadRuntime,
+    selectCadDisplay: () => undefined,
     selectCadFailureIssues: () => mockCadSelection.failureIssues,
   };
 });

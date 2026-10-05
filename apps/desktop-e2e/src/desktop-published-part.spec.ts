@@ -319,6 +319,7 @@ test.skipIf(!desktopE2ECompletedArtifact || process.env['TAU_E2E_DESKTOP_STARTUP
       token,
       packaged: true,
       startupDiagnostic: true,
+      startupDiagnosticNoMainIpc: process.env['TAU_E2E_DESKTOP_STARTUP_CONTROL'] === '1',
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Native launch environment uses these external keys.
       env: { TAU_DEBUG: 'true', TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1' },
     });

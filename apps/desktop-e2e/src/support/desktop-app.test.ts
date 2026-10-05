@@ -305,9 +305,14 @@ describe('desktop startup ownership before a session is returned', () => {
         const report = JSON.parse(await readFile(join(startupRoot, created[0]!, 'trace-pending.json'), 'utf8')) as {
           status: string;
           samples: Array<{ rendererPid: number; creationTime: number; cpu: { cumulativeCPUUsage: number } }>;
+          traceEnter: number;
+          mainIpc: Array<{ enter: number; exit: number }>;
         };
         expect(report.status).toBe('selected');
         expect(report.samples).toHaveLength(2);
+        expect(report.traceEnter).toBeGreaterThanOrEqual(0);
+        expect(report.mainIpc).toHaveLength(2);
+        expect(report.mainIpc.every(({ enter, exit }) => exit >= enter && enter >= report.traceEnter)).toBe(true);
         expect(report.samples.map((sample) => [sample.rendererPid, sample.creationTime])).toEqual([
           [31, 42],
           [31, 42],
@@ -329,6 +334,74 @@ describe('desktop startup ownership before a session is returned', () => {
     ]);
     expect(readMain(electronMain, undefined)).toEqual({ status: 'ambiguous-window', windowCount: 2 });
   }, 10_000);
+
+  it('should retain the same pending trace and cleanup while the finite control sends no main IPC', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-startup-test-'));
+    const before = await startupEntries();
+    let rejectTracing: ((error: Error) => void) | undefined;
+    const tracingStarted = new Promise<void>((_resolve, reject) => {
+      rejectTracing = reject;
+    });
+    const tracing = mock<BrowserContext['tracing']>();
+    tracing.start.mockReturnValue(tracingStarted);
+    const context = mock<BrowserContext>({ tracing });
+    const page = mock<Page>();
+    page.context.mockReturnValue(context);
+    const { application, child, launch } = mockedLaunch(async () => page);
+    const original = new Error('original trace refusal');
+    const result = (async (): Promise<unknown> => {
+      try {
+        await launchDesktopApp({
+          token: 'unit-test-only',
+          profileRoot,
+          startupDiagnostic: true,
+          startupDiagnosticNoMainIpc: true,
+          launchElectron: launch,
+        });
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    })();
+    let created: string | undefined;
+    try {
+      await vi.waitFor(
+        async () => {
+          const entries = [...(await startupEntries())].filter((entry) => !before.has(entry));
+          expect(entries).toHaveLength(1);
+          created = entries[0];
+          const report = JSON.parse(await readFile(join(startupRoot, created!, 'trace-pending.json'), 'utf8')) as {
+            status: string;
+            samples: unknown[];
+            mainIpc: unknown[];
+          };
+          expect(report).toMatchObject({ status: 'control-no-main-ipc', samples: [], mainIpc: [] });
+        },
+        { timeout: 6000 },
+      );
+      expect(application.evaluate).toHaveBeenCalledOnce(); // The required pre-trace main override only.
+      rejectTracing?.(original);
+      expect(await result).toMatchObject({ cause: original });
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      const settled = JSON.parse(await readFile(join(startupRoot, created!, 'trace-settled.json'), 'utf8')) as {
+        status: string;
+        elapsed: number;
+      };
+      expect(settled.status).toBe('rejected');
+      expect(settled.elapsed).toBeGreaterThanOrEqual(0);
+    } finally {
+      rejectTracing?.(original);
+      await result;
+      if (created) {
+        await rm(join(startupRoot, created), { recursive: true, force: true });
+      }
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+      await rm(profileRoot, { recursive: true, force: true });
+    }
+  }, 9000);
 
   it.each([
     [
@@ -359,7 +432,10 @@ describe('desktop startup ownership before a session is returned', () => {
       const page = mock<Page>();
       page.context.mockReturnValue(context);
       const { application, child, launch } = mockedLaunch(async () => page);
-      application.evaluate.mockResolvedValueOnce(undefined).mockImplementationOnce(mainEvaluation);
+      const lateEvaluation = status === 'main-evaluate-timeout' ? Promise.withResolvers<unknown>() : undefined;
+      application.evaluate
+        .mockResolvedValueOnce(undefined)
+        .mockImplementationOnce(lateEvaluation ? async () => lateEvaluation.promise : mainEvaluation);
       const original = new Error('original trace failure');
       const result = (async (): Promise<unknown> => {
         try {
@@ -385,15 +461,32 @@ describe('desktop startup ownership before a session is returned', () => {
               status: string;
               samples: unknown[];
               errorName?: string;
+              mainIpc: Array<{ enter: number; exit?: number; raceSettled?: number }>;
             };
             expect(report.status).toBe(status);
             expect(report.samples).toEqual([]);
+            expect(report.mainIpc).toHaveLength(1);
+            expect(report.mainIpc[0]?.raceSettled).toBeGreaterThanOrEqual(report.mainIpc[0]!.enter);
             if (status === 'main-evaluate-refused') {
               expect(report.errorName).toBe('Error');
+              expect(report.mainIpc[0]?.exit).toBeLessThanOrEqual(report.mainIpc[0]!.raceSettled!);
+            } else {
+              expect(report.mainIpc[0]).not.toHaveProperty('exit');
             }
           },
           { timeout: 9000 },
         );
+        if (lateEvaluation) {
+          lateEvaluation.resolve('late main result');
+          await vi.waitFor(async () => {
+            const report = JSON.parse(await readFile(join(startupRoot, created!, 'trace-pending.json'), 'utf8')) as {
+              status: string;
+              mainIpc: Array<{ exit?: number; raceSettled: number }>;
+            };
+            expect(report.status).toBe('main-evaluate-timeout');
+            expect(report.mainIpc[0]?.exit).toBeGreaterThanOrEqual(report.mainIpc[0]!.raceSettled);
+          });
+        }
         rejectTracing?.(original);
         const failure = await result;
         expect(failure).toMatchObject({ cause: original });

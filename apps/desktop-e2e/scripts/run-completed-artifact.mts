@@ -55,6 +55,13 @@ const main = async (): Promise<void> => {
   if (startupDiagnostic !== undefined && !['0', '1', 'false'].includes(startupDiagnostic)) {
     throw new Error('TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC accepts only 1, 0, or false.');
   }
+  const startupControl = process.env['TAU_E2E_DESKTOP_STARTUP_CONTROL'];
+  if (startupControl !== undefined && !['0', '1', 'false'].includes(startupControl)) {
+    throw new Error('TAU_E2E_DESKTOP_STARTUP_CONTROL accepts only 1, 0, or false.');
+  }
+  if (startupControl === '1' && startupDiagnostic !== '1') {
+    throw new Error('Startup control requires the explicit startup diagnostic.');
+  }
   const executable = process.env['TAU_E2E_DESKTOP_EXECUTABLE'];
   if (!unpackagedWriterControl && (!executable || !isAbsolute(executable) || !existsSync(executable))) {
     throw new Error('TAU_E2E_DESKTOP_EXECUTABLE must name an existing absolute packaged executable.');
@@ -348,6 +355,7 @@ const main = async (): Promise<void> => {
         : {}),
       ...(executable === undefined ? {} : { TAU_E2E_DESKTOP_EXECUTABLE: executable }),
       ...(startupDiagnostic === '1' ? { TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC: '1' } : {}),
+      ...(startupControl === '1' ? { TAU_E2E_DESKTOP_STARTUP_CONTROL: '1' } : {}),
       ...(browserClosure === undefined ? {} : { TAU_E2E_BROWSER_PHYSICAL_CLOSURE: browserClosure }),
       TAU_E2E_EXTERNAL_SERVICES: 'true',
       TAU_E2E_POSTGRES_CONTAINER: postgresContainer,

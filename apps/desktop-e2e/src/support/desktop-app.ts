@@ -45,20 +45,57 @@ const traceProbeMainLimit = 5000;
 /** Milliseconds between the two renderer CPU samples. */
 const traceProbeCpuInterval = 1000;
 
-const observePendingTrace = async (
-  application: ElectronApplication,
-  directory: string,
-  signal: AbortSignal,
-): Promise<void> => {
+const observePendingTrace = async ({
+  application,
+  directory,
+  signal,
+  startupStartedAt,
+  traceEnter,
+  controlNoMainIpc,
+}: Readonly<{
+  application: ElectronApplication;
+  directory: string;
+  signal: AbortSignal;
+  startupStartedAt: number;
+  /** Milliseconds since startup began. */
+  traceEnter: number;
+  controlNoMainIpc: boolean;
+}>): Promise<void> => {
   const observation: {
     status: string;
     samples: unknown[];
+    /** Milliseconds since startup began. */
+    traceEnter: number;
+    mainIpc: Array<{
+      /** Milliseconds since startup began. */ enter: number;
+      /** Milliseconds since startup began. */ exit?: number;
+      /** Milliseconds since startup began; may precede actual IPC settlement on deadline. */
+      raceSettled?: number;
+    }>;
     errorName?: string;
-  } = { status: 'waiting', samples: [] };
+  } = { status: 'waiting', samples: [], traceEnter, mainIpc: [] };
   const path = join(directory, 'trace-pending.json');
-  const persist = async (): Promise<void> => writeFile(path, JSON.stringify(observation));
+  let pendingWrite: Promise<void> = Promise.resolve();
+  const persist = async (): Promise<void> => {
+    const snapshot = JSON.stringify(observation);
+    const previousWrite = pendingWrite;
+    pendingWrite = (async (): Promise<void> => {
+      try {
+        await previousWrite;
+      } catch {
+        // A later observation still gets its own attempt if an earlier write failed.
+      }
+      await writeFile(path, snapshot);
+    })();
+    await pendingWrite;
+  };
   const read = async () => {
+    const timing: { enter: number; exit?: number; raceSettled?: number } = {
+      enter: performance.now() - startupStartedAt,
+    };
+    observation.mainIpc.push(timing);
     const mainDeadlineController = new AbortController();
+    let readRaceSettled = false;
     try {
       const mainDeadline = async (): Promise<never> => {
         await wait(traceProbeMainLimit, undefined, {
@@ -66,64 +103,84 @@ const observePendingTrace = async (
         });
         throw new Error('main-evaluate-timeout');
       };
-      return await Promise.race([
-        application.evaluate(({ app, BrowserWindow }) => {
-          const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
-          if (windows.length !== 1) {
+      const evaluate = async () => {
+        try {
+          return await application.evaluate(({ app, BrowserWindow }) => {
+            const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+            if (windows.length !== 1) {
+              return {
+                status: windows.length === 0 ? 'missing-window' : 'ambiguous-window',
+                windowCount: windows.length,
+              } as const;
+            }
+            const contents = windows[0]!.webContents;
+            const rendererPid = contents.getOSProcessId();
+            const frames = contents.mainFrame.framesInSubtree;
+            const selected = {
+              windowCount: 1,
+              webContentsId: contents.id,
+              rendererPid,
+              loading: contents.isLoading(),
+              loadingMainFrame: contents.isLoadingMainFrame(),
+              waitingForResponse: contents.isWaitingForResponse(),
+              crashed: contents.isCrashed(),
+              appDocument: contents.getURL().startsWith('app://tau/'),
+              frameCount: frames.length,
+              frames: frames.slice(0, 16).map((frame) => ({
+                processId: frame.processId,
+                routingId: frame.routingId,
+                detached: frame.detached,
+              })),
+            };
+            if (rendererPid <= 0) {
+              return { status: 'missing-renderer', ...selected } as const;
+            }
+            const metrics = app.getAppMetrics().filter((metric) => metric.pid === rendererPid);
+            if (metrics.length !== 1) {
+              return {
+                status: metrics.length === 0 ? 'missing-metric' : 'ambiguous-metric',
+                ...selected,
+              } as const;
+            }
+            const metric = metrics[0]!;
             return {
-              status: windows.length === 0 ? 'missing-window' : 'ambiguous-window',
-              windowCount: windows.length,
-            } as const;
-          }
-          const contents = windows[0]!.webContents;
-          const rendererPid = contents.getOSProcessId();
-          const frames = contents.mainFrame.framesInSubtree;
-          const selected = {
-            windowCount: 1,
-            webContentsId: contents.id,
-            rendererPid,
-            loading: contents.isLoading(),
-            loadingMainFrame: contents.isLoadingMainFrame(),
-            waitingForResponse: contents.isWaitingForResponse(),
-            crashed: contents.isCrashed(),
-            appDocument: contents.getURL().startsWith('app://tau/'),
-            frameCount: frames.length,
-            frames: frames.slice(0, 16).map((frame) => ({
-              processId: frame.processId,
-              routingId: frame.routingId,
-              detached: frame.detached,
-            })),
-          };
-          if (rendererPid <= 0) {
-            return { status: 'missing-renderer', ...selected } as const;
-          }
-          const metrics = app.getAppMetrics().filter((metric) => metric.pid === rendererPid);
-          if (metrics.length !== 1) {
-            return {
-              status: metrics.length === 0 ? 'missing-metric' : 'ambiguous-metric',
+              status: 'selected',
               ...selected,
+              creationTime: metric.creationTime,
+              cpu: {
+                percentCPUUsage: metric.cpu.percentCPUUsage,
+                cumulativeCPUUsage: metric.cpu.cumulativeCPUUsage,
+              },
             } as const;
+          });
+        } finally {
+          timing.exit = performance.now() - startupStartedAt;
+          if (readRaceSettled) {
+            // The observation race already ended; retain the later real IPC result time.
+            try {
+              await persist();
+            } catch {
+              // Private diagnostics never replace the original IPC result or error.
+            }
           }
-          const metric = metrics[0]!;
-          return {
-            status: 'selected',
-            ...selected,
-            creationTime: metric.creationTime,
-            cpu: {
-              percentCPUUsage: metric.cpu.percentCPUUsage,
-              cumulativeCPUUsage: metric.cpu.cumulativeCPUUsage,
-            },
-          } as const;
-        }),
-        mainDeadline(),
-      ]);
+        }
+      };
+      return await Promise.race([evaluate(), mainDeadline()]);
     } finally {
+      readRaceSettled = true;
+      timing.raceSettled = performance.now() - startupStartedAt;
       mainDeadlineController.abort();
     }
   };
   try {
     await persist();
     await wait(traceProbeDelay, undefined, { signal });
+    if (controlNoMainIpc) {
+      await persist();
+      await wait(traceProbeCpuInterval, undefined, { signal });
+      observation.status = 'control-no-main-ipc';
+      return;
+    }
     const first = await read();
     signal.throwIfAborted();
     observation.samples.push(first);
@@ -632,6 +689,8 @@ export const launchDesktopApp = async (options: {
   readonly captureStartupNetwork?: boolean | undefined;
   /** Collect private renderer state only while the original tracing call is pending. */
   readonly startupDiagnostic?: boolean | undefined;
+  /** Private finite control: retain observation timing without sending main-process IPC. */
+  readonly startupDiagnosticNoMainIpc?: boolean | undefined;
   /** Unit tests supply an owned launcher without starting a native process. */
   readonly launchElectron?: typeof electron.launch | undefined;
   /** WAV input for Chromium's fake capture driver; leaves the OS microphone unchanged. */
@@ -841,16 +900,32 @@ export const launchDesktopApp = async (options: {
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     await recordStartup('trace-start');
     assertStartupActive();
+    const traceEnter = performance.now() - startupStartedAt;
     const tracingStart = page.context().tracing.start({ screenshots: true, snapshots: true });
     if (options.startupDiagnostic) {
       traceProbeAbort = new AbortController();
-      traceProbe = observePendingTrace(application, startupDirectory, traceProbeAbort.signal);
+      traceProbe = observePendingTrace({
+        application,
+        directory: startupDirectory,
+        signal: traceProbeAbort.signal,
+        startupStartedAt,
+        traceEnter,
+        controlNoMainIpc: options.startupDiagnosticNoMainIpc === true,
+      });
       // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- Attach before the original tracing promise settles.
       void traceProbe.catch(() => undefined);
     }
+    let traceOutcome: 'fulfilled' | 'rejected' = 'rejected';
     try {
       await tracingStart;
+      traceOutcome = 'fulfilled';
     } finally {
+      if (options.startupDiagnostic) {
+        await writeFile(
+          join(startupDirectory, 'trace-settled.json'),
+          JSON.stringify({ status: traceOutcome, elapsed: performance.now() - startupStartedAt }),
+        ).catch(() => undefined);
+      }
       traceProbeAbort?.abort('trace-settled');
       await traceProbe?.catch(() => undefined);
     }

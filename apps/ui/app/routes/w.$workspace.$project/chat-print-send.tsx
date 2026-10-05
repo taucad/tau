@@ -306,7 +306,7 @@ export function StartConfirmationCard({
           {blocker}
         </PrintNotice>
       )}
-      {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+      {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
       <div className='flex flex-wrap gap-2'>
         <Button type='button' size='sm' disabled={isBusy || !isReady} onClick={onConfirm}>
           {isBusy ? (
@@ -418,7 +418,7 @@ function ApprovalCard({
               {blocker}
             </PrintNotice>
           )}
-          {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+          {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
           {/* The decision and its evidence on one row; the digest is in Inspect. */}
           <div className='flex flex-wrap items-center gap-2'>
             <Button
@@ -563,7 +563,7 @@ export function UnknownCard({
             : ''}
         </p>
       ) : null}
-      {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+      {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
       <div>
         <Button type='button' size='sm' variant='outline' disabled={isBusy} onClick={onReconcile}>
           {isBusy ? (
@@ -600,7 +600,7 @@ export function FailureCard({
       ? { code: request.receipt.code, message: request.receipt.message }
       : undefined);
   return (
-    <PrintNotice tone='destructive'>
+    <PrintNotice tone='error'>
       <p className='font-medium'>
         {request.state === 'rejected'
           ? 'The printer rejected the start'

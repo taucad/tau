@@ -598,7 +598,7 @@ export function ProjectLibrary(): React.JSX.Element {
       )}
 
       {listingError && projects.length > 0 ? (
-        <div className='mb-6 flex items-center justify-between gap-3 rounded-md border border-destructive/40 p-3'>
+        <div className='mb-6 flex items-center justify-between gap-3 rounded-md border border-feature/40 p-3'>
           <span className='text-sm'>Projects could not be refreshed.</span>
           <Button size='sm' variant='outline' onClick={async () => retry()}>
             Retry

@@ -15,7 +15,7 @@ import { formatNumberAbbreviation } from '#utils/number.utils.js';
 
 type CompactionView = {
   icon: LucideIcon;
-  tone?: 'success' | 'warning' | 'destructive';
+  tone?: 'success' | 'warning' | 'error';
   cardStatus: 'ready' | 'warning' | 'error';
   verb: string;
   description: string;
@@ -27,7 +27,7 @@ function getCompactionView(data: ContextCompactionData): CompactionView {
     case 'failed': {
       return {
         icon: AlertTriangle,
-        tone: 'destructive',
+        tone: 'error',
         cardStatus: 'error',
         verb: 'Compaction blocked',
         description: 'provider dispatch',

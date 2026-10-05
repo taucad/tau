@@ -216,7 +216,7 @@ function RecordIssuesPopover({
   const Icon = summary.state === 'reading' ? CircleDashed : CircleAlert;
   const tone =
     summary.state === 'unconfirmed'
-      ? 'text-destructive'
+      ? 'text-feature'
       : summary.state === 'reading'
         ? 'text-muted-foreground'
         : 'text-warning';

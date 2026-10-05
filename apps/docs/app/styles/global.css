@@ -38,7 +38,7 @@
   --color-fd-popover-foreground: var(--popover-foreground);
   --color-fd-info: var(--information);
   --color-fd-warning: var(--warning);
-  --color-fd-error: var(--destructive);
+  --color-fd-error: var(--feature);
   --color-fd-success: var(--success);
   --color-fd-idea: var(--feature);
   --color-fd-diff-remove: color-mix(in oklch, var(--destructive) 12%, transparent);
@@ -76,7 +76,7 @@
   --color-fd-overlay: color-mix(in oklch, var(--foreground) 20%, transparent);
   --color-fd-info: var(--information);
   --color-fd-warning: var(--warning);
-  --color-fd-error: var(--destructive);
+  --color-fd-error: var(--feature);
   --color-fd-success: var(--success);
   --color-fd-idea: var(--feature);
   --color-fd-diff-remove: color-mix(in oklch, var(--destructive) 12%, transparent);

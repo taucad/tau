@@ -16,7 +16,7 @@ export function getFillColor(
   scheduleStatus?: ContextUsageData['compactionScheduleStatus'],
 ): string {
   if (scheduleStatus === 'scheduled_next_turn') {
-    return 'stroke-destructive';
+    return 'stroke-feature';
   }
   if (status === 'compacted') {
     return 'stroke-success';
@@ -25,7 +25,7 @@ export function getFillColor(
     return 'stroke-warning';
   }
   if (percent >= 85) {
-    return 'stroke-destructive';
+    return 'stroke-feature';
   }
   if (percent >= 60) {
     return 'stroke-warning';
@@ -40,7 +40,7 @@ export function getTrackColor(
   scheduleStatus?: ContextUsageData['compactionScheduleStatus'],
 ): string {
   if (scheduleStatus === 'scheduled_next_turn') {
-    return 'stroke-destructive/20';
+    return 'stroke-feature/20';
   }
   if (status === 'compacted') {
     return 'stroke-success/20';
@@ -49,7 +49,7 @@ export function getTrackColor(
     return 'stroke-warning/20';
   }
   if (percent >= 85) {
-    return 'stroke-destructive/20';
+    return 'stroke-feature/20';
   }
   if (percent >= 60) {
     return 'stroke-warning/20';

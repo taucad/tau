@@ -177,7 +177,7 @@ export const ChatTextareaAttachmentRail = memo(function ({
         <p
           id={blockReasonId}
           role='status'
-          className={cn('text-xs text-destructive', size === 'desktop' ? 'px-3 pb-3' : 'pb-1')}
+          className={cn('text-xs text-feature', size === 'desktop' ? 'px-3 pb-3' : 'pb-1')}
         >
           {blockReason}
         </p>

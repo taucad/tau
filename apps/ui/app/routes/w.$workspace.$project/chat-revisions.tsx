@@ -924,7 +924,7 @@ function RevisionAlerts(): React.JSX.Element | undefined {
     <div className='flex flex-col gap-2 px-1'>
       {outcomes.length === 0 && unsaved > 0 ? (
         <p role='alert' aria-label='Unsaved changes' className='flex items-start gap-2 text-xs'>
-          <CircleAlert aria-hidden className='mt-px size-3.5 shrink-0 text-destructive' />
+          <CircleAlert aria-hidden className='mt-px size-3.5 shrink-0 text-feature' />
           <span>
             {unsaved === 1
               ? 'One change could not be saved. Try again from the file that failed.'
@@ -941,10 +941,7 @@ function RevisionAlerts(): React.JSX.Element | undefined {
         >
           <CircleAlert
             aria-hidden
-            className={cn(
-              'mt-px size-3.5 shrink-0',
-              outcome.kind === 'conflicted' ? 'text-warning' : 'text-destructive',
-            )}
+            className={cn('mt-px size-3.5 shrink-0', outcome.kind === 'conflicted' ? 'text-warning' : 'text-feature')}
           />
           <span className='min-w-0 flex-1'>
             {outcome.kind === 'conflicted'

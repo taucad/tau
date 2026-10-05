@@ -1,5 +1,5 @@
 import { describe, expectGeo, it } from 'geospec';
-import { loadModel } from 'geospec/model';
+import { createModelLoader } from 'geospec/model';
 // oxlint-disable-next-line no-restricted-imports -- GeoSpec's project VM resolves corpus-relative files, not package import maps.
 import inventory from './src/manifest.json';
 
@@ -15,24 +15,29 @@ const models = modelRows.filter((entry): entry is typeof entry & { mainFile: str
 describe('Tau example model health', () => {
   for (const model of models) {
     it(`${model.kernel}.${model.name}`, async () => {
-      const subject = await loadModel({
-        file: `kernels/${model.kernel}/${model.name}/${model.mainFile}`,
-        format: 'glb',
-      });
+      const loadModel = createModelLoader();
+      try {
+        const subject = await loadModel({
+          file: `kernels/${model.kernel}/${model.name}/${model.mainFile}`,
+          format: 'glb',
+        });
 
-      // Tscircuit boards are component assemblies from an upstream mesh library
-      // (bodies are not closed shells) and carry upstream DRC/style warnings by
-      // design, so they are held to error-free diagnostics and mesh integrity.
-      const assembly = model.kernel === 'tscircuit';
-      expectGeo(subject).toHaveNoDiagnostics(assembly ? { severities: ['error'] } : undefined);
-      expectGeo(subject).toHaveMeshIntegrity({
-        finitePositions: true,
-        degenerateTriangles: { count: 0 },
-        duplicateFaces: { count: 0 },
-        triangleCount: model.geometry === '2d' ? 0 : { greaterThan: 0 },
-      });
-      if (model.geometry === '3d' && !assembly) {
-        expectGeo(subject).toBeWatertight();
+        // Tscircuit boards are component assemblies from an upstream mesh library
+        // (bodies are not closed shells) and carry upstream DRC/style warnings by
+        // design, so they are held to error-free diagnostics and mesh integrity.
+        const assembly = model.kernel === 'tscircuit';
+        expectGeo(subject).toHaveNoDiagnostics(assembly ? { severities: ['error'] } : undefined);
+        expectGeo(subject).toHaveMeshIntegrity({
+          finitePositions: true,
+          degenerateTriangles: { count: 0 },
+          duplicateFaces: { count: 0 },
+          triangleCount: model.geometry === '2d' ? 0 : { greaterThan: 0 },
+        });
+        if (model.geometry === '3d' && !assembly) {
+          expectGeo(subject).toBeWatertight();
+        }
+      } finally {
+        await loadModel.dispose();
       }
     });
   }

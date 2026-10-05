@@ -37,6 +37,7 @@ import type {
   MachineStatus,
 } from '@taucad/runtime/machine';
 import { createQuantity, quantityKinds } from '@taucad/units/quantity';
+import type { Quantity } from '@taucad/units/quantity';
 
 import { summarizeCarveraProgram } from '#carvera.gcode.js';
 import type { CarveraProgram } from '#carvera.gcode.js';
@@ -147,7 +148,16 @@ const celsius = (value: number) => {
   if (result.status !== 'success') {
     throw new TypeError('CARVERA_INVALID_TEMPERATURE');
   }
-  return result.value;
+  // A report is JSON: absent metadata must be missing, not undefined (a temperature carries no reference).
+  const { assumptions, kind, representation, space, unit } = result.value;
+  return Object.freeze({
+    unit,
+    ...(kind ? { kind } : {}),
+    space,
+    assumptions,
+    value,
+    ...(representation ? { representation } : {}),
+  }) as Quantity;
 };
 
 const round = (value: number): number => Math.round(value * 1000) / 1000;

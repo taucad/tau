@@ -5,6 +5,9 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "build": {
+      "dependsOn": ["^build"]
+    },
     "lint": {
       "executor": "nx:run-commands",
       "options": {

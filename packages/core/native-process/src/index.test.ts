@@ -47,6 +47,7 @@ const sandbox = vi.hoisted(() => ({
   supported: true,
   dependencyErrors: [] as string[],
   initialize: vi.fn(async () => undefined),
+  reset: vi.fn(async () => undefined),
   wrap: vi.fn<(command: string, ...rest: unknown[]) => void>(),
   wrapFailure: undefined as unknown,
   launcher: '/bin/sh',
@@ -59,6 +60,7 @@ vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
     isSupportedPlatform: () => sandbox.supported,
     checkDependenciesAsync: async () => ({ errors: sandbox.dependencyErrors, warnings: [] }),
     initialize: sandbox.initialize,
+    reset: sandbox.reset,
     wrapWithSandboxArgv: async (command: string, ...rest: unknown[]) => {
       sandbox.wrap(command, ...rest);
       if (sandbox.wrapFailure !== undefined) {
@@ -210,6 +212,7 @@ afterEach(() => {
   sandbox.wrapFailure = undefined;
   sandbox.wrap.mockClear();
   sandbox.initialize.mockClear();
+  sandbox.reset.mockClear();
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -479,6 +482,32 @@ ${keepAlive}`;
     const unverified = new NativeProcessSession<Issue>(fresh.options);
     await expect(request(unverified)).rejects.toThrow(/support resource/);
     await unverified.cleanup();
+  });
+
+  it('should stop the sandbox runtime only when the last started session is cleaned up', async () => {
+    // The Linux runtime's network bridge child holds the event loop open until reset, so a
+    // one-shot host would never exit after its last native worker stopped.
+    const first = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'a'}}`));
+    const second = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'b'}}`));
+    await expect(request(first.session)).resolves.toEqual({ value: 'a' });
+    await expect(request(second.session)).resolves.toEqual({ value: 'b' });
+
+    await first.session.cleanup();
+    expect(sandbox.reset).not.toHaveBeenCalled();
+    await second.session.cleanup();
+    expect(sandbox.reset).toHaveBeenCalledOnce();
+    await second.session.cleanup();
+    expect(sandbox.reset).toHaveBeenCalledOnce();
+
+    sandbox.initialize.mockClear();
+    const third = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'c'}}`));
+    try {
+      await expect(request(third.session)).resolves.toEqual({ value: 'c' });
+      expect(sandbox.initialize).toHaveBeenCalledOnce();
+    } finally {
+      await third.session.cleanup();
+    }
+    expect(sandbox.reset).toHaveBeenCalledTimes(2);
   });
 
   it('should refuse to spawn the worker when the sandbox cannot wrap it', async () => {

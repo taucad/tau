@@ -8,7 +8,7 @@ import { StringDecoder } from 'node:string_decoder';
 
 import type { RuntimeLogger } from '@taucad/runtime/kernel';
 
-import { launchInNativeSandbox } from '#native-sandbox.js';
+import { acquireNativeSandbox, launchInNativeSandbox, releaseNativeSandbox } from '#native-sandbox.js';
 
 const maxProtocolLineBytes = 1_048_576;
 const maxStderrBytes = 65_536;
@@ -269,6 +269,7 @@ export class NativeProcessSession<Issue> {
   private requestSequence = 0;
   private termination: Promise<void> | undefined;
   private closed = false;
+  private sandboxLeased = false;
   // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids parameter properties.
   private readonly options: NativeProcessSessionOptions<Issue>;
   private readonly maxProtocolLineBytes: number;
@@ -365,6 +366,17 @@ export class NativeProcessSession<Issue> {
       return;
     }
     this.closed = true;
+    try {
+      await this.stop();
+    } finally {
+      if (this.sandboxLeased) {
+        this.sandboxLeased = false;
+        await releaseNativeSandbox();
+      }
+    }
+  }
+
+  private async stop(): Promise<void> {
     await this.termination;
     const { child } = this;
     if (!child) {
@@ -432,6 +444,10 @@ export class NativeProcessSession<Issue> {
       return;
     }
     await this.verifyResources();
+    if (!this.sandboxLeased) {
+      this.sandboxLeased = true;
+      acquireNativeSandbox();
+    }
     // Fail closed: when the sandbox cannot wrap the worker, nothing is spawned.
     const [command, ...commandArguments] = await launchInNativeSandbox({
       executablePath: this.options.executablePath,

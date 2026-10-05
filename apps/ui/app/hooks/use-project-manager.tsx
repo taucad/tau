@@ -853,7 +853,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       discoveryLease.release();
       metadataLease.release();
     };
-  }, [fileManager.workerChangeChannel, invalidateProjectsList, metadataReadOwner, queryClient]);
+  }, [fileManager.workerChangeChannel, metadataReadOwner, queryClient]);
 
   // Select state from the machine
   const error = useSelector(actorRef, (state) => state.context.error);

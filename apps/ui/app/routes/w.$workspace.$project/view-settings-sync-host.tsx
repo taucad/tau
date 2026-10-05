@@ -141,7 +141,10 @@ function ViewSettingsSyncEntry({
     [root, store, watchRecordFile, viewId],
   );
   useEffect(() => {
+    // This source's applications belong to its lease; retiring it advances the generation.
+    const lease = observation.acquire();
     return () => {
+      lease.release();
       advanceGeneration();
       setAppliedWorkbenchRevision(recordPath, undefined);
     };

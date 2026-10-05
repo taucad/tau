@@ -133,7 +133,10 @@ export function EntriesSyncHost(): React.JSX.Element {
     [root, store, watchRecordFile],
   );
   useEffect(() => {
+    // This source's applications belong to its lease; retiring it advances the generation.
+    const lease = observation.acquire();
     return () => {
+      lease.release();
       advanceGeneration();
       clearApplied();
       setEntriesDigest(undefined);

@@ -337,13 +337,17 @@ export function WorkbenchRecordHost(): React.JSX.Element {
             }
           }),
         invalidate: store.invalidateRead,
-        read: async () => (store.ready() ? store.read() : firstRead()),
+        // Until the content service binds, every read joins the first read of this store.
+        read: async () => (contentService && store.ready() ? store.read() : firstRead()),
       }),
     [contentService, firstRead, root, store, watchRecordFile],
   );
   useEffect(() => {
     firstReadRef.current = undefined;
+    // This source's applications belong to its lease; retiring it starts a new epoch.
+    const lease = observation.acquire();
     return () => {
+      lease.release();
       applicationRef.current.epoch++;
       applicationRef.current.viewer = false;
       applicationRef.current.workbench = false;

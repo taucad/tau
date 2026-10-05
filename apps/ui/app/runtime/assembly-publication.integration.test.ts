@@ -67,8 +67,10 @@ const readStoredLogicalRoot = async (rooted: RootedProject, path: string) => {
     .parse(JSON.parse(new TextDecoder().decode(manifestBytes)));
   const chunks: Array<Uint8Array<ArrayBuffer>> = [];
   for (const asset of manifest.chunks) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Read chunks in manifest order and stop at the first failed pin.
     const bytes = await rooted.readFile(asset.path);
     expect(bytes.byteLength).toBe(asset.byteLength);
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Verify each chunk before admitting the next read.
     expect(await digestContent({ bytes })).toBe(asset.digest);
     chunks.push(bytes);
   }

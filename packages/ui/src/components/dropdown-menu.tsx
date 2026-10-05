@@ -320,12 +320,7 @@ function DropdownMenuSwitchItem({
       }}
       {...properties}
     >
-      <SwitchRowLabel
-        icon={icon}
-        description={description}
-        titleId={`${id}-title`}
-        descriptionId={`${id}-description`}
-      >
+      <SwitchRowLabel icon={icon} description={description} titleId={`${id}-title`} descriptionId={`${id}-description`}>
         {children}
       </SwitchRowLabel>
       <Switch

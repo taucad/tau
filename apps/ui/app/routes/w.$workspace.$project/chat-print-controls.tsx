@@ -11,6 +11,7 @@ import {
   CircleAlert,
   Crosshair,
   Hand,
+  House,
   LoaderCircle,
   Move,
   RefreshCw,
@@ -31,6 +32,7 @@ import type {
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
+import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { cn } from '@taucad/ui/utils/cn';
 import { isRecord } from '@taucad/utils/schema';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
@@ -322,14 +324,8 @@ const group = (title: string, children: React.ReactNode): React.JSX.Element => (
 
 type MotionComponent = Extract<MachineComponent, { kind: 'motion' }>;
 
-const jogSteps = ['hold', '0.1', '1', '10'] as const;
+const jogSteps = ['0.1', '1', '10', 'hold'] as const;
 type JogStep = (typeof jogSteps)[number];
-const jogStepLabel: Readonly<Record<JogStep, string>> = {
-  hold: 'Hold to jog',
-  '0.1': '0.1 mm',
-  '1': '1 mm',
-  '10': '10 mm',
-};
 /** Millimetres per minute for a jog from the pane. */
 const jogFeed = 1000;
 
@@ -342,13 +338,17 @@ const jogButtons = [
   { axis: 'x', direction: -1, icon: ArrowLeft, area: 'col-start-1 row-start-2' },
   { axis: 'x', direction: 1, icon: ArrowRight, area: 'col-start-3 row-start-2' },
   { axis: 'y', direction: -1, icon: ArrowDown, area: 'col-start-2 row-start-3' },
-  { axis: 'z', direction: 1, icon: ChevronsUp, area: 'col-start-4 row-start-1' },
-  { axis: 'z', direction: -1, icon: ChevronsDown, area: 'col-start-4 row-start-3' },
+  { axis: 'z', direction: 1, icon: ChevronsUp, area: 'row-start-1' },
+  { axis: 'z', direction: -1, icon: ChevronsDown, area: 'row-start-3' },
 ] as const;
 
+/** One square cell of the pad: an icon over its axis label. */
+const jogCell = 'size-11 flex-col gap-0 font-mono text-[0.625rem]';
+
 /**
- * The jog pad: one step per press, or press and hold, which moves only while held and renews its lease every half
- * lease until released.
+ * The jog pad as studios lay it out (Bambu Studio, OctoPrint, Mainsail): an XY cross with Home in its centre, Z in its
+ * own column beside it, and the step as a segmented control. One step per press, or press and hold, which moves only
+ * while held and renews its lease every half lease until released.
  *
  * @param properties - The control, the motion component and its axes.
  * @returns The pad.
@@ -373,85 +373,136 @@ function JogPad({
   const check = control.check(motion.id, 'motion.jog', isHold ? 'hold' : 'action');
   const isEnabled = check.status === 'available';
   const present = new Set(axes.map((axis) => axis.id));
+  const isBedOnZ = axes.find((axis) => axis.id === 'z')?.carries === 'work';
+  const home = declaredAction(control.entry, motion.id, 'motion.home');
+  const homeCheck = control.check(motion.id, 'motion.home');
   const end = (): void => {
     if (isHold) {
       control.endHold();
     }
   };
+  const button = ({ axis, direction: shown, icon: Icon, area }: (typeof jogButtons)[number]): React.JSX.Element => {
+    const isBed = axis === 'z' && isBedOnZ;
+    const direction = isBed ? -shown : shown;
+    const label = `${axis.toUpperCase()}${direction > 0 ? '+' : '−'}`;
+    const begin = (): void => {
+      if (isEnabled && isHold) {
+        control.beginHold(motion.id, { axis, direction, feed: jogFeed });
+      }
+    };
+    return (
+      <Button
+        key={label}
+        type='button'
+        size='icon-lg'
+        variant='outline'
+        aria-label={isBed ? `Jog ${label}, bed ${shown > 0 ? 'up' : 'down'}` : `Jog ${label}`}
+        aria-pressed={
+          isHold ? control.hold?.parameters.axis === axis && control.hold.parameters.direction === direction : undefined
+        }
+        disabled={!isEnabled}
+        className={cn(jogCell, area)}
+        onPointerDown={begin}
+        onPointerUp={end}
+        onPointerLeave={end}
+        onPointerCancel={end}
+        onBlur={end}
+        onKeyDown={(event) => {
+          if ((event.key === ' ' || event.key === 'Enter') && isHold) {
+            event.preventDefault();
+            if (!event.repeat) {
+              begin();
+            }
+          }
+        }}
+        onKeyUp={(event) => {
+          if (event.key === ' ' || event.key === 'Enter') {
+            end();
+          }
+        }}
+        onClick={() => {
+          if (!isHold) {
+            void control.apply(motion.id, 'motion.jog', {
+              axis,
+              distance: Number(step) * direction,
+              feed: jogFeed,
+            });
+          }
+        }}
+      >
+        <Icon aria-hidden />
+        {label}
+      </Button>
+    );
+  };
+  const planar = jogButtons.filter((jog) => jog.axis !== 'z' && present.has(jog.axis));
+  const vertical = jogButtons.filter((jog) => jog.axis === 'z' && present.has(jog.axis));
   return (
-    <div className='flex min-w-0 flex-col gap-2'>
+    <div className='flex min-w-0 flex-col gap-3'>
       <PrintSetupRow label='Jog'>
         <QualificationBadge
           descriptor={isHold ? holdDescriptor : declaredAction(control.entry, motion.id, 'motion.jog')}
         />
-        <ParameterSelect
-          label='Jog step'
+        <ToggleGroup
+          type='single'
+          variant='outline'
+          size='sm'
+          aria-label='Jog step'
           value={step}
-          groups={[{ options: steps.map((key) => ({ value: key, label: jogStepLabel[key] })) }]}
-          onChange={(value) => {
-            setStep(value as JogStep);
+          onValueChange={(value) => {
+            if (value !== '') {
+              setStep(value as JogStep);
+            }
           }}
-        />
+        >
+          {steps.map((key) => (
+            <ToggleGroupItem
+              key={key}
+              value={key}
+              aria-label={key === 'hold' ? 'Hold to jog' : `${key} mm`}
+              className='px-2.5 font-mono text-xs'
+            >
+              {key === 'hold' ? 'Hold' : key}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        <span className='text-xs text-muted-foreground'>mm</span>
       </PrintSetupRow>
-      <div className='grid grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1fr)] gap-1.5' role='group' aria-label='Jog pad'>
-        {jogButtons
-          .filter((button) => present.has(button.axis))
-          .map(({ axis, direction: shown, icon: Icon, area }) => {
-            const isBed = axis === 'z' && axes.find((candidate) => candidate.id === 'z')?.carries === 'work';
-            const direction = isBed ? -shown : shown;
-            const label = `${axis.toUpperCase()}${direction > 0 ? '+' : '−'}`;
-            const begin = (): void => {
-              if (isEnabled && isHold) {
-                control.beginHold(motion.id, { axis, direction, feed: jogFeed });
-              }
-            };
-            return (
+      <div className='flex items-start justify-center gap-6'>
+        {planar.length > 0 || home !== undefined ? (
+          <div className='grid grid-cols-3 grid-rows-3 gap-1.5' role='group' aria-label='Jog X and Y'>
+            {planar.map((jog) => button(jog))}
+            {home === undefined ? null : (
               <Button
-                key={label}
                 type='button'
-                size='sm'
-                variant='outline'
-                aria-label={isBed ? `Jog ${label}, bed ${shown > 0 ? 'up' : 'down'}` : `Jog ${label}`}
-                aria-pressed={
-                  isHold
-                    ? control.hold?.parameters.axis === axis && control.hold.parameters.direction === direction
-                    : undefined
-                }
-                disabled={!isEnabled}
-                className={cn('h-8 font-mono', area)}
-                onPointerDown={begin}
-                onPointerUp={end}
-                onPointerLeave={end}
-                onPointerCancel={end}
-                onBlur={end}
-                onKeyDown={(event) => {
-                  if ((event.key === ' ' || event.key === 'Enter') && isHold) {
-                    event.preventDefault();
-                    if (!event.repeat) {
-                      begin();
-                    }
-                  }
-                }}
-                onKeyUp={(event) => {
-                  if (event.key === ' ' || event.key === 'Enter') {
-                    end();
-                  }
-                }}
+                size='icon-lg'
+                variant='secondary'
+                aria-label={home.label}
+                title={homeCheck.status === 'unavailable' ? homeCheck.message : home.consequence}
+                disabled={homeCheck.status !== 'available' || control.pending !== undefined}
+                className={cn(jogCell, 'col-start-2 row-start-2 font-sans')}
                 onClick={() => {
-                  if (!isHold) {
-                    void control.apply(motion.id, 'motion.jog', {
-                      axis,
-                      distance: Number(step) * direction,
-                      feed: jogFeed,
-                    });
-                  }
+                  void control.apply(motion.id, 'motion.home', {});
                 }}
               >
-                <Icon aria-hidden />
-                {label}
+                {control.pending === `${motion.id}:motion.home` ? (
+                  <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
+                ) : (
+                  <House aria-hidden />
+                )}
+                Home
               </Button>
-            );
-          })}
+            )}
+          </div>
+        ) : null}
+        {vertical.length > 0 ? (
+          <div className='grid grid-rows-3 gap-1.5' role='group' aria-label={isBedOnZ ? 'Move the bed' : 'Jog Z'}>
+            {vertical.map((jog) => button(jog))}
+            <span className='row-start-2 flex items-center justify-center text-xs text-muted-foreground'>
+              {isBedOnZ ? 'Bed' : 'Z'}
+            </span>
+          </div>
+        ) : null}
       </div>
       {isHold && holdDescriptor !== undefined ? (
         <p className='text-xs text-muted-foreground'>
@@ -506,7 +557,7 @@ function MotionGroup({
       <div className='flex flex-wrap gap-2'>
         <ActionButton control={control} componentId={controllerId} action='controller.unlock' />
         <ActionButton control={control} componentId={controllerId} action='controller.wake' />
-        <ActionButton control={control} componentId={motion.id} action='motion.home' />
+        {hasJog ? null : <ActionButton control={control} componentId={motion.id} action='motion.home' />}
         <ActionButton
           control={control}
           componentId={motion.id}

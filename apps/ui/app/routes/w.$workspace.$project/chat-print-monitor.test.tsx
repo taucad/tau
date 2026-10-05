@@ -302,8 +302,7 @@ describe('press and hold', () => {
   const holdJog = (fixture: PrintClientFixture): HTMLElement => {
     renderControl(router(), { attended: true, fixture });
     const control = openStage('Control');
-    fireEvent.click(within(control).getByRole('combobox', { name: 'Jog step' }));
-    fireEvent.click(screen.getByRole('option', { name: 'Hold to jog' }));
+    fireEvent.click(within(control).getByRole('radio', { name: 'Hold to jog' }));
     expect(control).toHaveTextContent('the machine stops by itself within 150 ms');
     return within(control).getByRole('button', { name: 'Jog X+' });
   };

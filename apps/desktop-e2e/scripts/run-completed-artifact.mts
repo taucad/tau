@@ -2,10 +2,11 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Compose keys, credential fixtures, and environment variables retain external wire names. */
 
 /**
- * Purpose: Run packaged desktop smoke tests against disposable Postgres, Redis, and MinIO services.
+ * Purpose: Run packaged desktop smoke tests or the selected unpackaged writer control against disposable Postgres, Redis, and MinIO services.
  * Why: Completed-package proof must not use the shared development database or storage stack.
- * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE (absolute packaged Tau executable path).
- * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only).
+ * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE for packaged mode; absolute TAU_E2E_BROWSER_PHYSICAL_CLOSURE for --unpackaged-writer-control.
+ * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only);
+ * TAU_E2E_BROWSER_PHYSICAL_CLOSURE forwards the absolute physical pin artifact path; --test-name-pattern selects tests.
  * Usage: pnpm nx run desktop-e2e:test:e2e:desktop:completed-artifact [--args='--test-name-pattern="pattern" [--isolated-cloud-gateway]']
  * Exit codes: 0 when package tests pass; non-zero on preflight, infrastructure, migration, or test failure.
  */
@@ -13,7 +14,16 @@
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -27,14 +37,31 @@ const desktopE2ERoot = resolve(import.meta.dirname, '..');
 const main = async (): Promise<void> => {
   const { values } = parseArgs({
     options: {
-      'test-name-pattern': { type: 'string', default: String.raw`^\[completed-artifact\]` },
+      'test-name-pattern': { type: 'string' },
+      'unpackaged-writer-control': { type: 'boolean', default: false },
       'isolated-cloud-gateway': { type: 'boolean', default: false },
     },
   });
-  const isolatedCloudGateway = values['isolated-cloud-gateway'];
+  const unpackagedWriterControl = values['unpackaged-writer-control'];
+  const unpackagedPattern = String.raw`^\[unpackaged-utility-control\] should reopen the exact browser pin without a publication writer and deny authored publication$`;
+  const testNamePattern =
+    values['test-name-pattern'] ?? (unpackagedWriterControl ? unpackagedPattern : String.raw`^\[completed-artifact\]`);
+  if (unpackagedWriterControl && testNamePattern !== unpackagedPattern) {
+    throw new Error('Unpackaged isolated mode selects only the actual missing-writer utility control.');
+  }
+  const isolatedCloudGateway = values['isolated-cloud-gateway'] || unpackagedWriterControl;
   const executable = process.env['TAU_E2E_DESKTOP_EXECUTABLE'];
-  if (!executable || !isAbsolute(executable) || !existsSync(executable)) {
+  if (!unpackagedWriterControl && (!executable || !isAbsolute(executable) || !existsSync(executable))) {
     throw new Error('TAU_E2E_DESKTOP_EXECUTABLE must name an existing absolute packaged executable.');
+  }
+
+  const browserClosure = process.env['TAU_E2E_BROWSER_PHYSICAL_CLOSURE'];
+  if (
+    (unpackagedWriterControl && browserClosure === undefined) ||
+    (browserClosure !== undefined &&
+      (!isAbsolute(browserClosure) || !existsSync(browserClosure) || !statSync(browserClosure).isFile()))
+  ) {
+    throw new Error('TAU_E2E_BROWSER_PHYSICAL_CLOSURE must name an existing absolute artifact file.');
   }
 
   const toolEnvironment = Object.fromEntries(
@@ -181,11 +208,17 @@ const main = async (): Promise<void> => {
     }
     cleaned = true;
     await stopActiveChild();
-    spawnSync(composeCommand, [...composeArguments, 'down', '--volumes', '--remove-orphans'], {
+    const result = spawnSync(composeCommand, [...composeArguments, 'down', '--volumes', '--remove-orphans'], {
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Cleanup receives only tool discovery variables.
       env: toolEnvironment as NodeJS.ProcessEnv,
       stdio: 'ignore',
       timeout: 40_000,
+    });
+    console.info('[completed-artifact] service cleanup', {
+      project,
+      status: result.status,
+      signal: result.signal,
+      error: result.error?.message,
     });
     rmSync(directory, { force: true, recursive: true });
   };
@@ -244,6 +277,15 @@ const main = async (): Promise<void> => {
       throw new Error('Disposable Postgres container identity was not resolved.');
     }
 
+    console.info('[completed-artifact] verified container services', {
+      project,
+      postgresContainer,
+      databaseAddress,
+      redisAddress,
+      storageAddress,
+      databaseIdentity,
+    });
+
     const apiPort = await freePort();
     const apiUrl = `http://127.0.0.1:${String(apiPort)}`;
     const providerPort = isolatedCloudGateway ? await freePort() : undefined;
@@ -281,8 +323,9 @@ const main = async (): Promise<void> => {
       OTEL_METRICS_PORT: String(await freePort()),
       TAU_E2E_API_URL: apiUrl,
       TAU_E2E_API_CWD: directory,
-      TAU_E2E_COMPLETED_ARTIFACT: 'true',
-      TAU_E2E_ACP_PACKAGED: 'true',
+      TAU_E2E_COMPLETED_ARTIFACT: unpackagedWriterControl ? 'false' : 'true',
+      TAU_E2E_ACP_PACKAGED: unpackagedWriterControl ? 'false' : 'true',
+      ...(unpackagedWriterControl ? { TAU_E2E_UNPACKAGED_WRITER_CONTROL: 'true' } : {}),
       TAU_E2E_COMPOSE_PROJECT: project,
       ...(isolatedCloudGateway
         ? {
@@ -298,7 +341,8 @@ const main = async (): Promise<void> => {
             }),
           }
         : {}),
-      TAU_E2E_DESKTOP_EXECUTABLE: executable,
+      ...(executable === undefined ? {} : { TAU_E2E_DESKTOP_EXECUTABLE: executable }),
+      ...(browserClosure === undefined ? {} : { TAU_E2E_BROWSER_PHYSICAL_CLOSURE: browserClosure }),
       TAU_E2E_EXTERNAL_SERVICES: 'true',
       TAU_E2E_POSTGRES_CONTAINER: postgresContainer,
       TAU_E2E_POSTGRES_DATABASE: 'desktop_e2e',
@@ -382,22 +426,27 @@ const main = async (): Promise<void> => {
         'run',
         '--config',
         'vitest.config.ts',
-        'src/desktop-build123d.spec.ts',
-        'src/desktop-assimp.spec.ts',
-        'src/desktop-main-editor-kernels.spec.ts',
-        'src/desktop-converter.spec.ts',
-        'src/desktop-ephemeral-isolation.spec.ts',
-        'src/desktop-image-geospec.spec.ts',
-        'src/desktop-geometry-host.spec.ts',
-        'src/desktop-chat-replay.spec.ts',
-        'src/desktop-chat-in-project.spec.ts',
-        'src/desktop-chat-acp.spec.ts',
-        'src/desktop-measurement-exact.spec.ts',
-        'src/desktop-thumbnail-lifecycle.spec.ts',
-        'src/desktop-native-payload.spec.ts',
-        'src/desktop-community-preview.spec.ts',
+        ...(unpackagedWriterControl
+          ? []
+          : [
+              'src/desktop-build123d.spec.ts',
+              'src/desktop-assimp.spec.ts',
+              'src/desktop-main-editor-kernels.spec.ts',
+              'src/desktop-converter.spec.ts',
+              'src/desktop-ephemeral-isolation.spec.ts',
+              'src/desktop-image-geospec.spec.ts',
+              'src/desktop-geometry-host.spec.ts',
+              'src/desktop-chat-replay.spec.ts',
+              'src/desktop-chat-in-project.spec.ts',
+              'src/desktop-chat-acp.spec.ts',
+              'src/desktop-measurement-exact.spec.ts',
+              'src/desktop-thumbnail-lifecycle.spec.ts',
+              'src/desktop-native-payload.spec.ts',
+              'src/desktop-community-preview.spec.ts',
+            ]),
+        'src/desktop-published-part.spec.ts',
         '-t',
-        values['test-name-pattern'],
+        testNamePattern,
       ],
       {
         cwd: desktopE2ERoot,

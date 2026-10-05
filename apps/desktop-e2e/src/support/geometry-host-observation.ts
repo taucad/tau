@@ -11,6 +11,8 @@ export type GeometryHostEvent = Readonly<{
   at: number;
   root?: string;
   eventType?: string;
+  eventJsonBytes?: number;
+  eventJsonError?: 'no-json' | 'stringify-failed';
   capability?: string;
   held?: boolean;
   count?: number;
@@ -100,6 +102,8 @@ export const observeGeometryHost = async (
           at: number;
           root?: string;
           eventType?: string;
+          eventJsonBytes?: number;
+          eventJsonError?: 'no-json' | 'stringify-failed';
           capability?: string;
           held?: boolean;
           count?: number;
@@ -158,7 +162,18 @@ export const observeGeometryHost = async (
           child.on('message', (message: unknown) => {
             const frame = message as { type?: string; event?: { type?: string } } | undefined;
             if (frame?.type === 'geometry-event') {
-              record('event', { eventType: frame.event?.type });
+              const eventType = typeof frame.event?.type === 'string' ? frame.event.type : undefined;
+              try {
+                const json: unknown = JSON.stringify(frame.event);
+                record('event', {
+                  eventType,
+                  ...(typeof json === 'string'
+                    ? { eventJsonBytes: Buffer.byteLength(json) }
+                    : { eventJsonError: 'no-json' }),
+                });
+              } catch {
+                record('event', { eventType, eventJsonError: 'stringify-failed' });
+              }
             }
             if (frame?.type === 'tau-e2e-native-entry') {
               const entry = frame as typeof frame & {

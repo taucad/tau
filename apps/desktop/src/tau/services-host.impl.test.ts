@@ -440,6 +440,88 @@ public static class Params
     }
   });
 
+  it('serves private publication scope over shared checked authority and denies every escape before mutation', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-publication-'));
+    const root = join(sandbox, 'project');
+    const authorityDirectory = join(sandbox, 'authority');
+    const path = '.tau/artifacts/reusable-parts/entry/scene.json';
+    const prior = new TextEncoder().encode('prior');
+    const winner = new TextEncoder().encode('winner');
+    await mkdir(join(root, '.tau/artifacts/reusable-parts/entry'), { recursive: true });
+    await mkdir(authorityDirectory);
+    await writeFile(join(root, path), prior);
+    await writeFile(join(root, 'main.ts'), 'source');
+    type Handlers = Parameters<NonNullable<ServicesHostOptions['serveRuntimeFileSystem']>>[0];
+    const served: Handlers[] = [];
+    const host = createServicesHost({
+      authorityDirectory,
+      log: vi.fn(),
+      serveRuntimeFileSystem: (handlers) => {
+        served.push(handlers);
+        return { emit: vi.fn(), dispose: vi.fn() };
+      },
+    });
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+      for (let i = 0; i < 2; i += 1) {
+        host.handleMessage(
+          frame(
+            {
+              type: 'concern',
+              concern: 'runtimeFileSystem',
+              context: { workspaceRoot: root, runtimeRole: 'publication' },
+            },
+            [stubPort()],
+          ),
+        );
+      }
+      const [first, second] = served;
+      if (!first?.writeFileChecked || !second?.writeFileChecked) {
+        throw new Error('Missing private checked publication views.');
+      }
+      await expect(first.readFile('main.ts')).rejects.toThrow('escapes');
+      await expect(first.mkdir('.tau/artifacts/reusable-parts-elsewhere')).rejects.toThrow('escapes');
+      await expect(first.mkdir('.tau/artifacts/reusable-parts/../outside')).rejects.toThrow();
+      await expect(
+        first.writeFileChecked({ path: 'main.ts', data: winner, preconditions: [{ path, expected: prior }] }),
+      ).rejects.toThrow('escapes');
+      await expect(
+        first.writeFileChecked({
+          path,
+          data: winner,
+          preconditions: [
+            { path, expected: prior },
+            { path: 'main.ts', expected: null },
+          ],
+        }),
+      ).rejects.toThrow('escapes');
+      await expect(first.writeFile(path, winner)).rejects.toThrow('only checked');
+      await expect(first.unlink(path)).rejects.toThrow('only checked');
+      await expect(first.rename(path, '.tau/artifacts/reusable-parts/entry/new.json')).rejects.toThrow('only checked');
+      expect(await readFile(join(root, path))).toEqual(Buffer.from(prior));
+      expect(await readFile(join(root, 'main.ts'), 'utf8')).toBe('source');
+      expect(await readdir(join(root, '.tau/artifacts'))).toEqual(['reusable-parts']);
+      await expect(
+        first.writeFileChecked({ path, data: winner, preconditions: [{ path, expected: prior }] }),
+      ).resolves.toMatchObject({ status: 'applied' });
+      await expect(
+        second.writeFileChecked({
+          path,
+          data: new TextEncoder().encode('loser'),
+          preconditions: [{ path, expected: prior }],
+        }),
+      ).resolves.toMatchObject({ status: 'conflict' });
+      expect(await readFile(join(root, path))).toEqual(Buffer.from(winner));
+      await host.quiesce();
+      await expect(first.mkdir('.tau/artifacts/reusable-parts/entry/late')).rejects.toThrow();
+      expect(await readFile(join(root, path))).toEqual(Buffer.from(winner));
+    } finally {
+      await host.quiesce();
+      host.dispose();
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+
   it('should serve the runtime filesystem when main names a trusted root by its physical path', async () => {
     const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-physical-root-'));
     const alias = `${sandbox}-alias`;

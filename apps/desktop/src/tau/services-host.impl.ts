@@ -37,6 +37,7 @@ import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend'
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { assertRootedPath } from '@taucad/utils/path';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
@@ -128,6 +129,75 @@ type RuntimeFileSystemDisposer = {
 };
 
 type RuntimeFileSystemHandlers = Parameters<typeof serveElectronFileSystemBridgePort>[0];
+
+/** Capture only the protected reusable-parts owner operations for one trusted runtime host. */
+const publicationFileSystemFor = (filesystem: RuntimeFileSystemHandlers): RuntimeFileSystemHandlers => {
+  const prefix = '.tau/artifacts/reusable-parts';
+  const checkedWrite = filesystem.writeFileChecked?.bind(filesystem);
+  let disposed = false;
+  const scoped = (path: string): string => {
+    if (disposed) {
+      throw new Error('Desktop publication authority was disposed.');
+    }
+    const canonical = assertRootedPath(path);
+    if (canonical !== prefix && !canonical.startsWith(`${prefix}/`)) {
+      throw new Error('Desktop publication operation escapes the reusable-parts subtree.');
+    }
+    return canonical;
+  };
+  async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  async function readFile(path: string, encoding: 'utf8'): Promise<string>;
+  async function readFile(path: string, encoding?: 'utf8'): Promise<Uint8Array<ArrayBuffer> | string> {
+    return encoding === 'utf8' ? filesystem.readFile(scoped(path), encoding) : filesystem.readFile(scoped(path));
+  }
+  const denied = async (): Promise<never> => {
+    throw new Error('Desktop publication authority permits only checked publication writes.');
+  };
+  return {
+    id: `publication:${filesystem.id}`,
+    capabilities: filesystem.capabilities,
+    readFile,
+    stat: async (path) => filesystem.stat(scoped(path)),
+    lstat: async (path) => filesystem.lstat(scoped(path)),
+    exists: async (path) => filesystem.exists(scoped(path)),
+    readdir: async (path) => filesystem.readdir(scoped(path)),
+    mkdir: async (path, options) => filesystem.mkdir(scoped(path), options),
+    writeFileChecked: async (input) => {
+      const checked = {
+        ...input,
+        path: scoped(input.path),
+        preconditions: input.preconditions.map((condition) => ({ ...condition, path: scoped(condition.path) })),
+      };
+      if (!checkedWrite) {
+        throw new Error('Desktop checked publication authority is unavailable.');
+      }
+      return checkedWrite(checked);
+    },
+    writeFile: async (path) => {
+      scoped(path);
+      return denied();
+    },
+    unlink: async (path) => {
+      scoped(path);
+      return denied();
+    },
+    rmdir: async (path) => {
+      scoped(path);
+      return denied();
+    },
+    rename: async (from, to) => {
+      scoped(from);
+      scoped(to);
+      return denied();
+    },
+    dispose: () => {
+      if (!disposed) {
+        disposed = true;
+        filesystem.dispose();
+      }
+    },
+  };
+};
 
 /**
  * Stop runtime-filesystem admission and observe every dispatched reply before
@@ -1420,7 +1490,20 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
            * the agent's view of the checkout and never the working copy: the
            * control plane is absent from it and the records Tau keeps itself are
            * read-only (invariant CI1, W14). */
-          const lifecycle = drainingRuntimeFileSystem(executorViewFor(requested));
+          const role = context?.['runtimeRole'];
+          if (role !== undefined && role !== 'publication') {
+            log('runtime-fs.invalid-role', { role }, 'warn');
+            port.close();
+            return;
+          }
+          const checkout: HostToolFileSystem = providerForAgentRoot(requested);
+          const handlers =
+            role === 'publication'
+              ? publicationFileSystemFor(
+                  composeView({ filesystem: checkout }, { consumer: 'user', policy: tauPathPolicy }),
+                )
+              : executorViewFor(requested);
+          const lifecycle = drainingRuntimeFileSystem(handlers);
           const server = serveRuntimeFileSystem(lifecycle.handlers, port);
           let stopped: Promise<void> | undefined;
           const stopRuntimeFileSystem = async (): Promise<void> => {

@@ -158,4 +158,103 @@ describe('geometry utility dispatcher', () => {
       value: { type: 'error' },
     });
   });
+  it('keeps a large suite result while forwarding only bounded lifecycle events', async () => {
+    const fileResult: GeoSpecRunnerResult['files'][number]['result'] = {
+      success: true,
+      passed: true,
+      tests: [],
+      bundle: { success: true, code: 'x'.repeat(70_000), issues: [], dependencies: [], unresolvedPaths: [] },
+    };
+    const result: GeoSpecRunnerResult = {
+      success: true,
+      passed: 1,
+      failed: 0,
+      selectedTests: 1,
+      files: [{ file: 'model.geospec.ts', result: fileResult }],
+    };
+    const completedFile = {
+      type: 'file-complete',
+      file: 'model.geospec.ts',
+      result: fileResult,
+      durationMs: 1,
+    } as const;
+    const completedRun = { type: 'run-complete', result } as const;
+    expect(Buffer.byteLength(JSON.stringify(completedFile))).toBeGreaterThan(64 * 1024);
+    expect(Buffer.byteLength(JSON.stringify(completedRun))).toBeGreaterThan(64 * 1024);
+
+    const port = mock<UtilityPort>();
+    const runner = mock<HostGeoSpecRunner>();
+    runner.on.mockReturnValue(() => undefined);
+    runner.close.mockResolvedValue();
+    const emit = <Type extends GeoSpecRunnerEvent['type']>(
+      type: Type,
+      event: Extract<GeoSpecRunnerEvent, { type: Type }>,
+    ): void => {
+      for (const [registered, handler] of runner.on.mock.calls) {
+        if (registered === type) {
+          // The registered discriminant matches the emitted event at this call site.
+          (handler as (value: typeof event) => void)(event);
+        }
+      }
+    };
+    runner.run.mockImplementation(async () => {
+      emit('run-start', { type: 'run-start', files: ['model.geospec.ts'] });
+      emit('file-complete', completedFile);
+      emit('run-complete', completedRun);
+      emit('forensic', { type: 'forensic', name: 'selected', value: 1, unit: 'count' });
+      return result;
+    });
+    const post = vi.fn();
+    const host = createGeometryHost({ post, measure: vi.fn(), performance: vi.fn(), createRunner: async () => runner });
+    host.handle({
+      data: {
+        type: 'geometry-run',
+        generation: 4,
+        requestId: 8,
+        kind: 'suite',
+        root: '/project',
+        runtimeConfig: { tauApiUrl: 'http://localhost', tauWebSocketUrl: 'ws://localhost' },
+        input: { type: 'run', options: { files: ['model.geospec.ts'] } },
+      },
+      ports: [port],
+    });
+    await vi.waitFor(() => {
+      expect(runner.close).toHaveBeenCalledOnce();
+    });
+    expect(post.mock.calls).toStrictEqual([
+      [
+        {
+          type: 'geometry-event',
+          generation: 4,
+          requestId: 8,
+          event: { type: 'run-start', files: ['model.geospec.ts'] },
+        },
+      ],
+      [
+        {
+          type: 'geometry-event',
+          generation: 4,
+          requestId: 8,
+          event: { type: 'file-progress', file: completedFile.file, durationMs: completedFile.durationMs },
+        },
+      ],
+      [
+        {
+          type: 'geometry-event',
+          generation: 4,
+          requestId: 8,
+          event: { type: 'forensic', name: 'selected', value: 1, unit: 'count' },
+        },
+      ],
+      [
+        {
+          type: 'geometry-result',
+          generation: 4,
+          requestId: 8,
+          value: { type: 'result', result, sourceRevisions: [] },
+        },
+      ],
+    ]);
+    expect(port.close).toHaveBeenCalledOnce();
+  });
 });

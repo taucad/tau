@@ -7,7 +7,12 @@ import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@taucad/runtime-testing';
 
-import { authenticatePackagedDesktop, desktopDescendants, launchDesktopApp } from '#support/desktop-app.js';
+import {
+  authenticatePackagedDesktop,
+  desktopDescendants,
+  launchDesktopApp,
+  observeDesktopRuntimeLeases,
+} from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { desktopE2ECompletedArtifact } from '#support/config.js';
 import {
@@ -260,11 +265,14 @@ const capturePicoGkFiles = (root: string, destination: string, artifacts: boolea
   });
 };
 
-const ownedPicoGkWorkers = (electronPid: number | undefined): readonly NativeWorker[] => {
+const ownedNativeWorkers = (
+  electronPid: number | undefined,
+  workers: readonly NativeWorker[],
+): readonly NativeWorker[] => {
   const result = spawnSync('ps', ['-axww', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);
   const owned = new Set(desktopDescendants(electronPid, result.stdout).map(({ pid }) => pid));
-  return picogkWorkers().filter(({ pid }) => owned.has(pid));
+  return workers.filter(({ pid }) => owned.has(pid));
 };
 
 const exportToProject = async (page: Page, projectRoot: string, extension: 'glb' | 'stl'): Promise<string> => {
@@ -412,7 +420,6 @@ test('boots the packaged desktop app with no endpoint environment', async () => 
 });
 
 test('[completed-artifact] runs the Build123d filesystem, parameter, topology, watcher, viewer, and STEP loop', async () => {
-  const existingWorkerPids = new Set(nativeWorkers().map(({ pid }) => pid));
   const account = tauTestAccount('build123d');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
@@ -421,6 +428,7 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     token,
     env: { TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1' },
   });
+  await observeDesktopRuntimeLeases(session);
   const { page } = session;
   const rendererErrors: string[] = [];
   page.on('console', (message) => {
@@ -521,7 +529,7 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     expect(size[2]).toBeCloseTo(10, 7);
 
     if (process.platform !== 'win32') {
-      const workers = nativeWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
+      const workers = ownedNativeWorkers(session.application.process().pid, nativeWorkers());
       expect(workers.length).toBeGreaterThan(0);
       await session.close();
       session = undefined;
@@ -603,6 +611,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1',
     },
   });
+  await observeDesktopRuntimeLeases(session);
   const { page } = session;
   const rendererErrors: string[] = [];
   page.on('console', (message) => {
@@ -813,7 +822,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const stlPath = await exportToProject(page, projectRoot, 'stl');
     expect(readFileSync(stlPath).byteLength).toBeGreaterThan(84);
 
-    const workersBeforeReload = ownedPicoGkWorkers(session.application.process().pid);
+    const workersBeforeReload = ownedNativeWorkers(session.application.process().pid, picogkWorkers());
     expect(workersBeforeReload).not.toHaveLength(0);
     const renderingStatus = page.getByText('rendering...', { exact: true });
     await expectCount(renderingStatus, 0, 120_000);
@@ -842,7 +851,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
 
     const captureDirectory = await session.capture('picogk-packaged-success');
     const electronProcess = session.application.process();
-    const workers = ownedPicoGkWorkers(electronProcess.pid);
+    const workers = ownedNativeWorkers(electronProcess.pid, picogkWorkers());
     writeFileSync(
       join(captureDirectory, 'picogk-shutdown-owners.json'),
       JSON.stringify({ electronPid: electronProcess.pid, workers }, null, 2),
@@ -881,7 +890,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
         if (electronPid === undefined) {
           throw new Error('Electron PID unavailable; refusing worker filesystem capture.');
         }
-        const workers = ownedPicoGkWorkers(electronPid);
+        const workers = ownedNativeWorkers(electronPid, picogkWorkers());
         const visibleParameters = await page.getByRole('spinbutton').evaluateAll((inputs: HTMLInputElement[]) =>
           inputs
             .filter((input) => input.checkVisibility())

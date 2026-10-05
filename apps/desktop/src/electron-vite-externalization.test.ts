@@ -187,6 +187,7 @@ describe('electron-vite main externalization', () => {
       '@taucad/openrscad',
       '@taucad/middleware',
       '@taucad/filesystem',
+      '@taucad/geometry-core',
       '@taucad/agent-host',
       '@taucad/host/agent-tools',
       '@taucad/skills/resources',

@@ -12,14 +12,16 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
-import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { acpAgentProfiles } from '@taucad/host';
+import { acpAdapterEnvironment, acpAgentProfiles } from '@taucad/host';
+import type * as GltfCore from '@gltf-transform/core';
+import type * as GltfFunctions from '@gltf-transform/functions';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { copyRuntimeClosure } from '../scripts/runtime-closure.mjs';
@@ -46,10 +48,19 @@ const stagedEntry = (modulesRoot: string, name: string): string => {
  *
  * @param modulePath - Adapter entry module to run with this process's `node`.
  * @param cwd - Working directory for the adapter.
+ * @param profile - The actual adapter profile, including its required spawn environment.
  * @returns The agent's `initialize` result.
  */
-const initialize = async (modulePath: string, cwd: string): Promise<Record<string, unknown>> => {
-  const child = spawn(process.execPath, [modulePath], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+const initialize = async (
+  modulePath: string,
+  cwd: string,
+  profile: (typeof acpAgentProfiles)[number],
+): Promise<Record<string, unknown>> => {
+  const child = spawn(process.execPath, [modulePath], {
+    cwd,
+    env: acpAdapterEnvironment(process.env, profile),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk: string) => {
@@ -116,16 +127,121 @@ describe('ACP adapter staging', () => {
     ]).toStrictEqual(['1.4.0', '1.3.0']);
   });
 
-  it('should resolve a shared glTF core from the staged root', async () => {
-    for (const name of ['@gltf-transform/core', '@gltf-transform/functions']) {
-      // oxlint-disable-next-line no-await-in-loop -- The second closure must see the first staged package.
-      await copyRuntimeClosure({ name, source: await realpath(resolve(appRoot, 'node_modules', name)), modulesRoot });
-    }
+  it.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
+    'should share glTF core and encode images with the nearest staged Sharp native dependencies',
+    async () => {
+      const functionsSource = await realpath(resolve(appRoot, 'node_modules/@gltf-transform/functions'));
+      const fromInstalledFunctions = createRequire(resolve(functionsSource, 'package.json'));
+      const unrelatedSharp = dirname(dirname(fromInstalledFunctions.resolve('sharp')));
+      // Seed the old hoisted workaround: the consumer's Sharp must still resolve its own native versions.
+      for (const name of [
+        `@img/sharp-${process.platform}-${process.arch}`,
+        `@img/sharp-libvips-${process.platform}-${process.arch}`,
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- Seed both unrelated native roots before staging the real consumer.
+        await copyRuntimeClosure({ name, source: await realpath(resolve(unrelatedSharp, '..', name)), modulesRoot });
+      }
+      for (const name of ['@gltf-transform/core', '@gltf-transform/functions']) {
+        // oxlint-disable-next-line no-await-in-loop -- The second closure must see the first staged package.
+        await copyRuntimeClosure({ name, source: await realpath(resolve(appRoot, 'node_modules', name)), modulesRoot });
+      }
 
-    const fromFunctions = createRequire(resolve(modulesRoot, '@gltf-transform/functions/package.json'));
-    expect(fromFunctions.resolve('@gltf-transform/core')).toBe(
-      resolve(modulesRoot, '@gltf-transform/core/dist/index.cjs'),
-    );
+      const fromFunctions = createRequire(resolve(modulesRoot, '@gltf-transform/functions/package.json'));
+      expect(fromFunctions.resolve('@gltf-transform/core')).toBe(
+        resolve(modulesRoot, '@gltf-transform/core/dist/index.cjs'),
+      );
+      const fromPixels = createRequire(fromFunctions.resolve('ndarray-pixels'));
+      const sharpRoot = dirname(dirname(fromPixels.resolve('sharp')));
+      const fromSharp = createRequire(resolve(sharpRoot, 'package.json'));
+      const addonName = `@img/sharp-${process.platform}-${process.arch}`;
+      const vipsName = `@img/sharp-libvips-${process.platform}-${process.arch}`;
+      const fromAddon = createRequire(fromSharp.resolve(`${addonName}/package`));
+      const versionAt = async (path: string): Promise<string> => {
+        const manifest = JSON.parse(await readFile(path, 'utf8')) as { readonly version: string };
+        return manifest.version;
+      };
+      expect(sharpRoot.startsWith(`${modulesRoot}/`)).toBe(true);
+      expect(fromSharp.resolve(`${addonName}/package`).startsWith(`${sharpRoot}/node_modules/`)).toBe(true);
+      expect(fromAddon.resolve(`${vipsName}/package`).startsWith(`${sharpRoot}/node_modules/`)).toBe(true);
+      expect(await versionAt(resolve(modulesRoot, addonName, 'package.json'))).toBe('0.35.3');
+      expect(await versionAt(resolve(modulesRoot, vipsName, 'package.json'))).toBe('1.3.2');
+      expect(await versionAt(resolve(sharpRoot, 'package.json'))).toBe('0.34.5');
+      expect(await versionAt(fromSharp.resolve(`${addonName}/package`))).toBe('0.34.5');
+      expect(await versionAt(fromAddon.resolve(`${vipsName}/package`))).toBe('1.2.4');
+
+      // Require from the staged tree so ndarray-pixels exercises the packaged native loader.
+      const gltfCore = fromFunctions('@gltf-transform/core') as typeof GltfCore;
+      const { compressTexture } = fromFunctions('@gltf-transform/functions') as typeof GltfFunctions;
+      const texture = new gltfCore.Document()
+        .createTexture()
+        .setMimeType('image/png')
+        .setImage(
+          Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==',
+            'base64',
+          ),
+        );
+      await compressTexture(texture, { targetFormat: 'webp' });
+      expect(texture.getMimeType()).toBe('image/webp');
+      expect(Buffer.from(texture.getImage()!).subarray(8, 12).toString()).toBe('WEBP');
+      await compressTexture(texture, { targetFormat: 'png' });
+      expect(texture.getMimeType()).toBe('image/png');
+      expect(texture.getSize()).toStrictEqual([1, 1]);
+      expect([...texture.getImage()!.subarray(0, 8)]).toStrictEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    },
+  );
+
+  it('should select installed optional packages and propagate malformed manifests and real IO errors', async () => {
+    const source = resolve(stageRoot, 'optional-source');
+    const targetModules = resolve(stageRoot, 'optional-stage/node_modules');
+    const writePackage = async (directory: string, manifest: unknown): Promise<void> => {
+      await mkdir(directory, { recursive: true });
+      await writeFile(resolve(directory, 'package.json'), JSON.stringify(manifest));
+    };
+    const optional = { matched: '1', negative: '1', deniedOs: '1', deniedCpu: '1', missing: '1', notDirectory: '1' };
+    await writePackage(source, {
+      name: 'optional-root',
+      version: '1',
+      dependencies: { missing: '1', matched: '2' },
+      optionalDependencies: optional,
+    });
+    await writePackage(resolve(source, 'node_modules/matched'), {
+      name: 'matched',
+      version: '1',
+      os: [process.platform, '!other-os'],
+      cpu: [process.arch, '!other-cpu'],
+    });
+    await writePackage(resolve(source, 'node_modules/negative'), {
+      name: 'negative',
+      version: '1',
+      os: ['!other-os'],
+      cpu: ['!other-cpu'],
+    });
+    await writePackage(resolve(source, 'node_modules/deniedOs'), {
+      name: 'deniedOs',
+      version: '1',
+      os: [process.platform, `!${process.platform}`],
+    });
+    await writePackage(resolve(source, 'node_modules/deniedCpu'), {
+      name: 'deniedCpu',
+      version: '1',
+      cpu: ['other-cpu'],
+    });
+    await writeFile(resolve(source, 'node_modules/notDirectory'), 'not a package directory');
+    await copyRuntimeClosure({ name: 'optional-root', source, modulesRoot: targetModules });
+    const stagedOptional = await readdir(resolve(targetModules, 'optional-root/node_modules'));
+    expect(stagedOptional.sort()).toStrictEqual(['matched', 'negative']);
+
+    const matchedManifest = resolve(source, 'node_modules/matched/package.json');
+    await writeFile(matchedManifest, '{');
+    const malformed = copyRuntimeClosure({ name: 'optional-root', source, modulesRoot: targetModules });
+    await expect(malformed).rejects.toThrow(SyntaxError);
+    await expect(malformed).rejects.toThrow(/JSON/);
+    await rm(matchedManifest);
+    await symlink('package.json', matchedManifest);
+    const loop = copyRuntimeClosure({ name: 'optional-root', source, modulesRoot: targetModules });
+    await expect(loop).rejects.toThrow(/ELOOP/);
+    await expect(loop).rejects.toMatchObject({ code: 'ELOOP' });
   });
 
   it.each(adapters)(
@@ -135,7 +251,25 @@ describe('ACP adapter staging', () => {
       const entryStat = await stat(entry);
       expect(entryStat.isFile()).toBe(true);
 
-      const result = await initialize(entry, stageRoot);
+      const profile = acpAgentProfiles.find((candidate) => candidate.package === name)!;
+      if (name === '@agentclientprotocol/codex-acp') {
+        const optionalName = `@openai/codex-${process.platform}-${process.arch}`;
+        const fromInstalledAdapter = createRequire(require.resolve(`${name}/package.json`));
+        const fromInstalledCodex = createRequire(fromInstalledAdapter.resolve('@openai/codex/package.json'));
+        const installedOptional = await stat(fromInstalledCodex.resolve(`${optionalName}/package.json`));
+        expect(installedOptional.isFile()).toBe(true);
+        const fromStagedAdapter = createRequire(entry);
+        expect(fromStagedAdapter.resolve('@openai/codex/package.json').startsWith(`${modulesRoot}/`)).toBe(true);
+        const stagedPackages = await readdir(modulesRoot, { recursive: true, withFileTypes: true });
+        expect(
+          stagedPackages.some(
+            (entry) =>
+              basename(entry.parentPath) === '@openai' && entry.name === `codex-${process.platform}-${process.arch}`,
+          ),
+        ).toBe(false);
+        expect(profile.spawnEnv?.['CODEX_PATH']).toBe('codex');
+      }
+      const result = await initialize(entry, stageRoot, profile);
       expect(result).toMatchObject({ protocolVersion: 1 });
     },
     60_000,

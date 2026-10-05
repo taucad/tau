@@ -4,7 +4,12 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
-import { desktopE2EApiUrl, desktopE2ECompletedArtifact, desktopE2EFrontendUrl } from '#support/config.js';
+import {
+  desktopE2EApiUrl,
+  desktopE2ECompletedArtifact,
+  desktopE2EFrontendUrl,
+  desktopE2EIsolatedServices,
+} from '#support/config.js';
 
 /**
  * Test-account seeding (work item Z2, auth blueprint A7).
@@ -72,7 +77,7 @@ const tauBillingEnvironment = async (token: string): Promise<string | undefined>
     throw new Error(`Reading the Tau billing environment failed with HTTP ${String(response.status)}.`);
   }
   const { environment } = (await response.json()) as { readonly environment?: string };
-  if (desktopE2ECompletedArtifact && !selfHostedArtifact && environment !== 'development') {
+  if (desktopE2EIsolatedServices && !selfHostedArtifact && environment !== 'development') {
     throw new Error('Completed-artifact cloud billing requires the disposable development environment.');
   }
   return environment;
@@ -129,9 +134,7 @@ const completedArtifactBillingDatabase = async (environment: string): Promise<st
 };
 
 const runTauBillingAccount = async (action: 'fund' | 'close', email: string, environment: string): Promise<void> => {
-  const ownedDatabaseUrl = desktopE2ECompletedArtifact
-    ? await completedArtifactBillingDatabase(environment)
-    : undefined;
+  const ownedDatabaseUrl = desktopE2EIsolatedServices ? await completedArtifactBillingDatabase(environment) : undefined;
   const arguments_ = tauBillingAccountArgs(action, email);
   await execFileAsync(process.execPath, ownedDatabaseUrl ? arguments_.slice(1) : arguments_, {
     cwd: workspaceRoot,
@@ -169,13 +172,14 @@ export const tauDatabaseExecArgs = (
   statement: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): readonly string[] => {
-  const completedArtifact = environment['TAU_E2E_COMPLETED_ARTIFACT'] === 'true';
+  const isolatedServices =
+    environment['TAU_E2E_COMPLETED_ARTIFACT'] === 'true' || environment['TAU_E2E_UNPACKAGED_WRITER_CONTROL'] === 'true';
   const completedIdentity = [
     environment['TAU_E2E_POSTGRES_CONTAINER'],
     environment['TAU_E2E_POSTGRES_USER'],
     environment['TAU_E2E_POSTGRES_DATABASE'],
   ];
-  if (completedArtifact && completedIdentity.some((value) => !value)) {
+  if (isolatedServices && completedIdentity.some((value) => !value)) {
     throw new Error('Completed-artifact E2E requires every run-owned database identity.');
   }
   const container = environment['TAU_E2E_POSTGRES_CONTAINER'] ?? 'tau-postgres';

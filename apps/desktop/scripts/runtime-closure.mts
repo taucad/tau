@@ -236,19 +236,47 @@ const packageIdentity = async (directory: string): Promise<string> => {
   return `${manifest.name}@${manifest.version}`;
 };
 
-/** Ordinary dependencies plus only the optional payloads this caller selected. */
+/** Installed runtime dependencies eligible for this platform, with optional declarations taking precedence. */
 const runtimeDependencies = async (
   directory: string,
-  optionalDependencies: readonly string[],
+  optionalDependencies?: readonly string[],
 ): Promise<readonly string[]> => {
   const manifest = JSON.parse(await readFile(resolve(directory, 'package.json'), 'utf8')) as {
+    readonly name: string;
     readonly dependencies?: Readonly<Record<string, string>>;
     readonly optionalDependencies?: Readonly<Record<string, string>>;
   };
-  return [
-    ...Object.keys(manifest.dependencies ?? {}),
-    ...optionalDependencies.filter((name) => Object.hasOwn(manifest.optionalDependencies ?? {}, name)),
-  ];
+  const optional = manifest.optionalDependencies ?? {};
+  const dependencies = Object.keys(manifest.dependencies ?? {}).filter((name) => !Object.hasOwn(optional, name));
+  // The host's Codex profile requires CODEX_PATH, so its vendored CLI is deliberately omitted.
+  if (manifest.name === '@openai/codex') {
+    return dependencies;
+  }
+  const matches = (selectors: readonly string[] | undefined, value: string): boolean =>
+    selectors === undefined ||
+    (!selectors.includes(`!${value}`) &&
+      (selectors.includes(value) ||
+        selectors.includes('any') ||
+        selectors.every((selector) => selector.startsWith('!'))));
+  for (const name of optionalDependencies ?? Object.keys(optional)) {
+    if (!Object.hasOwn(optional, name)) {
+      continue;
+    }
+    /* oxlint-disable no-await-in-loop -- Each optional package is resolved from its declaring package. */
+    const source = await resolveFromTree(directory, name, '/');
+    if (!source) {
+      continue;
+    }
+    const platform = JSON.parse(await readFile(resolve(source, 'package.json'), 'utf8')) as {
+      readonly os?: readonly string[];
+      readonly cpu?: readonly string[];
+    };
+    if (matches(platform.os, process.platform) && matches(platform.cpu, process.arch)) {
+      dependencies.push(name);
+    }
+    /* oxlint-enable no-await-in-loop */
+  }
+  return dependencies;
 };
 
 /**
@@ -266,7 +294,12 @@ const resolveFromTree = async (from: string, name: string, stopAt: string): Prom
         ? resolve(directory, name, 'package.json')
         : resolve(directory, 'node_modules', name, 'package.json');
     // oxlint-disable-next-line no-await-in-loop -- Node's own resolution is a serial walk up the tree.
-    const found = await realpath(candidate).catch(() => undefined);
+    const found = await realpath(candidate).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+        return undefined;
+      }
+      throw error;
+    });
     if (found) {
       return dirname(found);
     }
@@ -287,11 +320,11 @@ const resolveFromTree = async (from: string, name: string, stopAt: string): Prom
  * A dependency already visible up the staged tree at the same version is
  * skipped, which is Node's own resolution rule and also the cycle guard.
  *
- * Optional dependencies are not followed unless the caller selects their exact
- * names. Desktop native payloads retain each consuming package's installed
- * version; unrelated optional payloads, such as Codex's vendored binary, stay out.
- * Select shared native libraries before addons so both are siblings when an
- * addon's relative library lookup requires that layout.
+ * By default, installed optional dependencies are followed when their OS and CPU selectors
+ * match this platform. An explicit list restricts payloads and preserves caller order
+ * so shared native libraries can precede addons. Missing optional packages are skipped; broken manifests
+ * and filesystem errors propagate. Only Codex's vendored CLI is omitted because
+ * the host's Codex profile explicitly selects the user's CLI with CODEX_PATH.
  *
  * @param options - The package to stage, where it lives, the staged
  *   `node_modules` it is copied into (also the highest directory a staged
@@ -305,7 +338,7 @@ export const copyRuntimeClosure = async (options: {
   readonly filter?: ((path: string) => boolean) | undefined;
   readonly optionalDependencies?: readonly string[];
 }): Promise<void> => {
-  const { modulesRoot, filter = (): boolean => true, optionalDependencies = [] } = options;
+  const { modulesRoot, filter = (): boolean => true, optionalDependencies } = options;
   const stage = async (packageName: string, from: string, into: string): Promise<void> => {
     const target = resolve(into, packageName);
     /* `node_modules` is dropped because this function rebuilds it; `src` is

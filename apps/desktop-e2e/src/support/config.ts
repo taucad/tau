@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- E2E is the established project acronym. */
 import process from 'node:process';
-import { existsSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { existsSync, statSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 
 /**
  * Ports and origins this suite owns (work item Z2).
@@ -46,6 +46,61 @@ export const desktopE2EFreeTierSyncEnabled = process.env['TAU_FREE_TIER_SYNC_ENA
 
 /** Whether this run must use a completed package and externally isolated services. */
 export const desktopE2ECompletedArtifact = process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true';
+
+/** The narrowly selected actual utility control still owns a disposable service stack. */
+export const desktopE2EIsolatedServices =
+  desktopE2ECompletedArtifact || process.env['TAU_E2E_UNPACKAGED_WRITER_CONTROL'] === 'true';
+
+/** Require private API composition independently of whether the Electron shell is packaged. */
+export const desktopE2EIsolatedApiDirectory = (environment: NodeJS.ProcessEnv = process.env): string | undefined => {
+  const controlFlag = environment['TAU_E2E_UNPACKAGED_WRITER_CONTROL'];
+  if (controlFlag !== undefined && controlFlag !== 'true' && controlFlag !== 'false') {
+    throw new Error('TAU_E2E_UNPACKAGED_WRITER_CONTROL must be true or false.');
+  }
+  const completed = environment['TAU_E2E_COMPLETED_ARTIFACT'] === 'true';
+  const unpackaged = controlFlag === 'true';
+  if (!completed && !unpackaged) {
+    return undefined;
+  }
+  if (unpackaged && (completed || environment['TAU_E2E_PUBLISHED_PACKAGED'] === 'true')) {
+    throw new Error('The unpackaged writer control cannot launch a packaged artifact.');
+  }
+  const apiUrl = new URL(environment['TAU_E2E_API_URL'] ?? 'http://localhost:4014');
+  if (
+    !['127.0.0.1', '[::1]', 'localhost'].includes(apiUrl.hostname) ||
+    apiUrl.protocol !== 'http:' ||
+    !apiUrl.port ||
+    apiUrl.port === '4014' ||
+    environment['TAU_E2E_EXTERNAL_SERVICES'] !== 'true'
+  ) {
+    throw new Error('Isolated desktop E2E requires external services and a non-default loopback-only API.');
+  }
+  const directory = environment['TAU_E2E_API_CWD'];
+  if (
+    !directory ||
+    !isAbsolute(directory) ||
+    !existsSync(directory) ||
+    !statSync(directory).isDirectory() ||
+    existsSync(join(directory, '.env'))
+  ) {
+    throw new Error('Isolated desktop E2E requires a private absolute API directory without .env.');
+  }
+  if (unpackaged) {
+    const closure = environment['TAU_E2E_BROWSER_PHYSICAL_CLOSURE'];
+    if (
+      !closure ||
+      !isAbsolute(closure) ||
+      !existsSync(closure) ||
+      !statSync(closure).isFile() ||
+      environment['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] !== 'true'
+    ) {
+      throw new Error(
+        'The isolated unpackaged writer control requires its actual closure and disposable cloud gateway.',
+      );
+    }
+  }
+  return directory;
+};
 
 /** The exact packaged executable selected by a completed-artifact run. */
 export const desktopE2EPackagedExecutable = (): string => {

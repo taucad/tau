@@ -21,6 +21,8 @@ import {
   startGatewayFixture,
 } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
+import { geometryHostEvents, observeGeometryHost, restoreGeometryHost } from '#support/geometry-host-observation.js';
+import type { GeometryHostEvent } from '#support/geometry-host-observation.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   connectPickedFolder,
@@ -247,8 +249,16 @@ it('accepts the project Runtime mesh', async () => {
   await mkdir(evidenceRoot, { recursive: true });
   const apiReports: NativeGeoSpecReport[] = [];
   let apiSubjectHash: string | undefined;
+  let fullTestModelOutput: z.infer<typeof testModelOutputSchema> | undefined;
+  let testModelCallId: string | undefined;
+  let durableEventsPath: string | undefined;
   let apiReleased = false;
   let apiClosed = false;
+  let observationAttempted = false;
+  let bodyFailure: PromiseRejectedResult | undefined;
+  let observation: PromiseSettledResult<readonly GeometryHostEvent[]> | undefined;
+  let evidenceWrite: PromiseSettledResult<void> | undefined;
+  let observationCleanup: PromiseSettledResult<void> | undefined;
   try {
     const account = tauTestAccount('native-geospec');
     seededEmail = account.email;
@@ -261,6 +271,8 @@ it('accepts the project Runtime mesh', async () => {
       ],
     });
     session = await launchDesktopApp({ packaged: true, token, env: { [disableCredentialPersistenceVariable]: '1' } });
+    observationAttempted = true;
+    await observeGeometryHost(session);
     await session.page.addInitScript(() => {
       localStorage.setItem('tau:flags', JSON.stringify({ nativeGeoSpec: false }));
     });
@@ -409,35 +421,68 @@ it('accepts the project Runtime mesh', async () => {
     await page.getByRole('button', { name: /^(?:Edited files, )?ran tests$/iu }).click();
     await expectVisible(page.getByText('Tested 3 requirements', { exact: true }));
     await expectVisible(page.getByText('1. rejects the impossible fixed box volume', { exact: true }));
+    await expectVisible(page.getByText('1. accepts the fixed box volume', { exact: true }));
+    await expectVisible(page.getByText('2. accepts the project Runtime mesh', { exact: true }));
     const requestCount = fixture.gatewayRequests.length;
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 120_000);
     expect(fixture.gatewayRequests).toHaveLength(requestCount);
   } catch (error) {
-    await session?.capture('native-geospec-failure');
-    throw error;
+    bodyFailure = { status: 'rejected', reason: error };
+    await Promise.allSettled([session?.capture('native-geospec-failure')]);
   } finally {
-    await writeFile(
-      new URL('native-chat-native.json', evidenceRoot),
-      JSON.stringify(
-        {
-          profile: 'native',
-          fixtureSha256: nativeFixtureHash,
-          fixtureBase64: fixtureBytes.toString('base64'),
-          nativeSource,
-          runtimeSource: solidSource,
-          requests: fixture?.gatewayRequests ?? [],
-          apiSubjectHash,
-          apiReports,
-          apiReleased,
-          apiClosed,
-          limitations: [
-            'Runtime row has independent verdict coverage; finalized export bytes are not exposed. Fixed fixture rows require exact report equality with a bounded-profile API client, the profile the chat runner selects.',
-          ],
-        },
-        null,
-        2,
+    if (observationAttempted && session) {
+      [observation] = await Promise.allSettled([geometryHostEvents(session)]);
+    }
+    [evidenceWrite] = await Promise.allSettled([
+      Promise.resolve().then(async () =>
+        writeFile(
+          new URL('native-chat-native.json', evidenceRoot),
+          JSON.stringify(
+            {
+              profile: 'native',
+              fixtureSha256: nativeFixtureHash,
+              fixtureBase64: fixtureBytes.toString('base64'),
+              nativeSource,
+              runtimeSource: solidSource,
+              requests: fixture?.gatewayRequests ?? [],
+              fullTestModelOutput,
+              testModelCallId,
+              durableEventsPath,
+              apiSubjectHash,
+              apiReports,
+              apiReleased,
+              apiClosed,
+              geometryEvents: observation?.status === 'fulfilled' ? observation.value : [],
+              geometryObservationReadFailed: observation?.status === 'rejected',
+              limitations: [
+                'Runtime row has independent verdict coverage; finalized export bytes are not exposed. Fixed fixture rows require exact report equality with a bounded-profile API client, the profile the chat runner selects.',
+              ],
+            },
+            null,
+            2,
+          ),
+        ),
       ),
-    );
+    ]);
+    if (observationAttempted && session) {
+      [observationCleanup] = await Promise.allSettled([restoreGeometryHost(session)]);
+    }
+  }
+  if (bodyFailure?.status === 'rejected') {
+    const error: unknown = bodyFailure.reason;
+    throw error;
+  }
+  if (observation?.status === 'rejected') {
+    const error: unknown = observation.reason;
+    throw error;
+  }
+  if (evidenceWrite.status === 'rejected') {
+    const error: unknown = evidenceWrite.reason;
+    throw error;
+  }
+  if (observationCleanup?.status === 'rejected') {
+    const error: unknown = observationCleanup.reason;
+    throw error;
   }
 });

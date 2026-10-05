@@ -734,7 +734,16 @@ jobs:
       # The comparison rebuilds the base branch, which took 24 min on a full graph (run
       # 37221169741, 2026-10-04), so it runs only on PRs labelled `size-compare`. A label
       # alone does not start a run: push after adding it.
+      # Keep the formatter outside the checkout: the comparison switches to the base branch.
+      - name: Prepare compact size report
+        id: size-report-format
+        if: contains(github.event.pull_request.labels.*.name, 'size-compare')
+        run: |
+          cp scripts/src/compact-size-report.ts "$RUNNER_TEMP/compact-size-report.ts"
+          echo "started-at=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       - name: Compare bundle sizes with the base branch
+        id: size-comparison
         if: contains(github.event.pull_request.labels.*.name, 'size-compare')
         continue-on-error: true
         uses: andresz1/size-limit-action@94bc357df29c36c8f8d50ea497c3e225c3c95d1d # v1.8.0
@@ -745,6 +754,35 @@ jobs:
           # `--silent` keeps pnpm's banner out of the JSON the action parses.
           script: pnpm --silent size:check --json
           package_manager: pnpm
+
+      - name: Highlight bundle size increases
+        if: steps.size-comparison.outcome == 'success'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          SIZE_COMPARISON_STARTED_AT: ${{ steps.size-report-format.outputs.started-at }}
+        with:
+          script: |
+            const { join } = require('node:path');
+            const { pathToFileURL } = require('node:url');
+            const { compactSizeReport } = await import(pathToFileURL(join(process.env.RUNNER_TEMP, 'compact-size-report.ts')).href);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: context.issue.number,
+            });
+            const report = comments.find(comment =>
+              comment.user?.login === 'github-actions[bot]' &&
+              comment.body?.startsWith('## size-limit report 📦 ') &&
+              Date.parse(comment.updated_at) >= Number(process.env.SIZE_COMPARISON_STARTED_AT) * 1000
+            );
+            if (!report) {
+              core.warning('No fresh size comparison comment found; leaving previous reports unchanged.');
+              return;
+            }
+            await github.rest.issues.updateComment({
+              ...context.repo,
+              comment_id: report.id,
+              body: compactSizeReport(report.body),
+            });
 
   performance:
     needs: [plan, geospec-producer]

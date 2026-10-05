@@ -177,159 +177,202 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_HOST_AWAIT'] !== 'true')(
   },
 );
 
-it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_PROFILE'] !== 'true')(
-  'should retain the exact Honeycomb warm-window V8 samples and GC observations',
-  async () => {
-    const workspace = resolve(import.meta.dirname, '../../../..');
-    const resourceRoot = resolve(workspace, 'apps/ui/public/assets/engines/replicad/density-single-v1');
-    const assets = await Promise.all(
-      [
-        { name: 'replicad_single.wasm', digest: '9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9' },
-        { name: 'replicad_single.mjs', digest: 'cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27' },
-      ].map(async ({ name, digest }) => {
-        const bytes = await readFile(resolve(resourceRoot, name));
-        expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
-        return { name, digest, bytes: bytes.byteLength };
-      }),
-    );
-    const source = await readHoneycombSource();
-    const boundaries: HostRenderBoundary[] = [];
-    const gcEntries: Array<{ name: string; startTime: number; duration: number; timeOrigin: number; detail: unknown }> =
-      [];
-    const observer = new PerformanceObserver((entries) => {
-      for (const entry of entries.getEntries()) {
-        if (entry.entryType === 'gc') {
-          gcEntries.push({
-            name: entry.name,
-            startTime: entry.startTime,
-            duration: entry.duration,
-            timeOrigin: performance.timeOrigin,
-            detail: Reflect.get(entry, 'detail'),
-          });
-        }
+type HoneycombWarmDiagnosticMode = 'profile' | 'gc-host';
+
+const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Promise<void> => {
+  const profile = mode === 'profile';
+  if (!profile) {
+    expect(typeof process.threadCpuUsage).toBe('function');
+  }
+  const workspace = resolve(import.meta.dirname, '../../../..');
+  const resourceRoot = resolve(workspace, 'apps/ui/public/assets/engines/replicad/density-single-v1');
+  const assets = await Promise.all(
+    [
+      { name: 'replicad_single.wasm', digest: '9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9' },
+      { name: 'replicad_single.mjs', digest: 'cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27' },
+    ].map(async ({ name, digest }) => {
+      const bytes = await readFile(resolve(resourceRoot, name));
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
+      return { name, digest, bytes: bytes.byteLength };
+    }),
+  );
+  const source = await readHoneycombSource();
+  const boundaries: HostRenderBoundary[] = [];
+  const gcEntries: Array<{ name: string; startTime: number; duration: number; timeOrigin: number; detail: unknown }> =
+    [];
+  const observer = new PerformanceObserver((entries) => {
+    for (const entry of entries.getEntries()) {
+      if (entry.entryType === 'gc') {
+        gcEntries.push({
+          name: entry.name,
+          startTime: entry.startTime,
+          duration: entry.duration,
+          timeOrigin: performance.timeOrigin,
+          detail: Reflect.get(entry, 'detail'),
+        });
       }
-    });
-    const wasm = {
-      wasmUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.wasm')).href,
-      wasmBindingsUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.mjs')).href,
-    };
-    let run: Awaited<ReturnType<typeof runBenchmarks>>;
-    observer.observe({ entryTypes: ['gc'] });
-    try {
-      run = await runBenchmarks(
-        [
-          {
-            name: 'app-custom-honeycomb-warm-profile-v1',
-            category: 'app-small-model',
-            files: { 'public/models/honeycomb.js': source },
-            mainFile: 'public/models/honeycomb.js',
-            mode: 'steady-state',
-            operation: 'render',
-          },
-        ],
-        {
-          iterations: 8,
-          operation: 'render',
-          includeEdges: true,
-          wasm,
-          cpuProfile: true,
-          cpuProfileInterval: 100,
-          onHostRenderBoundary: (boundary) => {
-            boundaries.push(boundary);
-          },
-        },
-      );
-      await new Promise<void>((resolve) => {
-        setImmediate(resolve);
-      });
-    } finally {
-      observer.disconnect();
     }
-    const result = run.results[0];
-    expect(result?.timings).toHaveLength(8);
-    expect(result?.warmupRuns).toBe(8);
-    expect(result?.outputHash).toBe('a961c7eaea123c509dd35092c606c8ff7d6a1b3be71e7506b3fc482a725cb408');
-    expect(result?.outputSizeBytes).toBe(4800);
-    expect(result?.triangleCount).toBe(16);
+  });
+  const wasm = {
+    wasmUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.wasm')).href,
+    wasmBindingsUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.mjs')).href,
+  };
+  const caseName = profile ? 'app-custom-honeycomb-warm-profile-v1' : 'app-custom-honeycomb-warm-gc-host-v1';
+  let run: Awaited<ReturnType<typeof runBenchmarks>>;
+  observer.observe({ entryTypes: ['gc'] });
+  try {
+    run = await runBenchmarks(
+      [
+        {
+          name: caseName,
+          category: 'app-small-model',
+          files: { 'public/models/honeycomb.js': source },
+          mainFile: 'public/models/honeycomb.js',
+          mode: 'steady-state',
+          operation: 'render',
+        },
+      ],
+      {
+        iterations: 8,
+        operation: 'render',
+        includeEdges: true,
+        wasm,
+        ...(profile ? { cpuProfile: true, cpuProfileInterval: 100 } : {}),
+        onHostRenderBoundary: (boundary) => {
+          boundaries.push(boundary);
+        },
+      },
+    );
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  } finally {
+    observer.disconnect();
+  }
+  const result = run.results[0];
+  expect(result?.timings).toHaveLength(8);
+  expect(result?.warmupRuns).toBe(8);
+  expect(result?.outputHash).toBe('a961c7eaea123c509dd35092c606c8ff7d6a1b3be71e7506b3fc482a725cb408');
+  expect(result?.outputSizeBytes).toBe(4800);
+  expect(result?.triangleCount).toBe(16);
+  if (profile) {
     expect(result?.cpuProfile?.samples.length).toBeGreaterThan(0);
     expect(result?.cpuProfile?.samples.length).toBe(result?.cpuProfile?.timeDeltas.length);
-    const phases = ['before-open', 'after-open', 'after-view', 'request-issued', 'await-settled', 'document-closed'];
-    for (let iteration = 1; iteration <= 16; iteration++) {
-      expect(
-        boundaries
-          .filter((boundary) => boundary.iteration === iteration && !boundary.phase.startsWith('profile-'))
-          .map(({ phase }) => phase),
-      ).toEqual(phases);
+  } else {
+    expect(result?.cpuProfile).toBeUndefined();
+    expect(result?.profileAnalysis).toBeUndefined();
+  }
+  const phases = ['before-open', 'after-open', 'after-view', 'request-issued', 'await-settled', 'document-closed'];
+  for (let iteration = 1; iteration <= 16; iteration++) {
+    const operation = boundaries.filter((boundary) => boundary.iteration === iteration);
+    expect(operation.filter(({ phase }) => !phase.startsWith('profile-')).map(({ phase }) => phase)).toEqual(phases);
+    if (!profile) {
+      expect(operation.every(({ threadCpu }) => threadCpu !== undefined)).toBe(true);
+      expect(operation.map(({ monotonic }) => monotonic)).toEqual(
+        operation.map(({ monotonic }) => monotonic).toSorted((a, b) => a - b),
+      );
     }
-    expect(
-      boundaries
-        .filter(({ phase }) => phase.startsWith('profile-'))
-        .map(({ phase, iteration }) => ({ phase, iteration })),
-    ).toEqual([
-      { phase: 'profile-started', iteration: 9 },
-      { phase: 'profile-stopped', iteration: 16 },
-    ]);
-    const directory = resolve(
-      workspace,
-      'out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb/warm-profile-v1',
-    );
-    await mkdir(directory, { recursive: true });
-    await writeFile(
-      resolve(directory, 'diagnostic.json'),
-      JSON.stringify({
-        status: 'diagnostic-only',
-        predeclared: { clients: 1, renderOperations: 16, warmupRuns: 8, measuredRuns: 8, cohortComparisons: 0 },
-        source: { sha256: honeycombSourceDigest, bytes: Buffer.byteLength(source) },
-        assets,
-        options: {
-          operation: 'render',
-          includeEdges: true,
-          mode: 'steady-state',
-          iterations: 8,
-          cpuProfileIntervalUs: 100,
-          wasm,
-        },
-        output: { hash: result!.outputHash, bytes: result!.outputSizeBytes, triangles: result!.triangleCount },
-        measuredRenderWall: result!.timings,
-        hostOperations: Array.from({ length: 16 }, (_, index) => ({
-          iteration: index + 1,
-          warmup: index < 8,
-          boundaries: boundaries.filter((boundary) => boundary.iteration === index + 1),
+  }
+  expect(
+    boundaries
+      .filter(({ phase }) => phase.startsWith('profile-'))
+      .map(({ phase, iteration }) => ({ phase, iteration })),
+  ).toEqual(
+    profile
+      ? [
+          { phase: 'profile-started', iteration: 9 },
+          { phase: 'profile-stopped', iteration: 16 },
+        ]
+      : [],
+  );
+  if (!profile) {
+    expect(boundaries).toHaveLength(16 * phases.length);
+  }
+  const directory = resolve(
+    workspace,
+    `out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb/${profile ? 'warm-profile-v1' : 'warm-gc-host-v1'}`,
+  );
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    resolve(directory, 'diagnostic.json'),
+    JSON.stringify({
+      status: 'diagnostic-only',
+      predeclared: { clients: 1, renderOperations: 16, warmupRuns: 8, measuredRuns: 8, cohortComparisons: 0 },
+      source: { sha256: honeycombSourceDigest, bytes: Buffer.byteLength(source) },
+      assets,
+      options: profile
+        ? {
+            operation: 'render',
+            includeEdges: true,
+            mode: 'steady-state',
+            iterations: 8,
+            cpuProfileIntervalUs: 100,
+            wasm,
+          }
+        : {
+            operation: 'render',
+            includeEdges: true,
+            mode: 'steady-state',
+            iterations: 8,
+            cpuProfile: false,
+            explicitPremeasurementGc: false,
+            wasm,
+          },
+      output: { hash: result!.outputHash, bytes: result!.outputSizeBytes, triangles: result!.triangleCount },
+      measuredRenderWall: result!.timings,
+      hostOperations: Array.from({ length: 16 }, (_, index) => ({
+        iteration: index + 1,
+        warmup: index < 8,
+        boundaries: boundaries.filter((boundary) => boundary.iteration === index + 1),
+      })),
+      gcEntries,
+      ...(profile ? { cpuProfile: result!.cpuProfile, profileAnalysis: result!.profileAnalysis } : {}),
+      workerSpans: result!.telemetry.flatMap((entries, index) =>
+        entries.map(({ name, startTime, duration, workerTimeOrigin, detail }) => ({
+          iteration: index + 9,
+          name,
+          startTime,
+          duration,
+          workerTimeOrigin,
+          ...(typeof detail?.['operationId'] === 'string'
+            ? { operationHash: createHash('sha256').update(detail['operationId']).digest('hex') }
+            : {}),
         })),
-        gcEntries,
-        cpuProfile: result!.cpuProfile,
-        profileAnalysis: result!.profileAnalysis,
-        workerSpans: result!.telemetry.flatMap((entries, index) =>
-          entries.map(({ name, startTime, duration, workerTimeOrigin, detail }) => ({
-            iteration: index + 9,
-            name,
-            startTime,
-            duration,
-            workerTimeOrigin,
-            ...(typeof detail?.['operationId'] === 'string'
-              ? { operationHash: createHash('sha256').update(detail['operationId']).digest('hex') }
-              : {}),
-          })),
-        ),
-        limits: [
-          'V8 samples cover the complete eight-operation measured window; they are not assigned to individual operations without verified clock alignment.',
-          'Profiler sampling, the explicit pre-measurement GC, and the GC observer can perturb timings. This run is diagnostic and cannot establish the original CV or its cause.',
-          'If this finite window has no slow operation, no slow-path attribution is possible.',
-        ],
-        implementationSources: await Promise.all(
-          [
-            'apps/runtime-e2e/src/benchmarks/benchmark-runner.ts',
-            'apps/runtime-e2e/src/benchmarks/replicad-app-small-model.bench.test.ts',
-          ].map(async (path) => ({
-            path,
-            sha256: createHash('sha256')
-              .update(await readFile(resolve(workspace, path)))
-              .digest('hex'),
-          })),
-        ),
-      }),
-    );
-  },
+      ),
+      limits: profile
+        ? [
+            'V8 samples cover the complete eight-operation measured window; they are not assigned to individual operations without verified clock alignment.',
+            'Profiler sampling, the explicit pre-measurement GC, and the GC observer can perturb timings. This run is diagnostic and cannot establish the original CV or its cause.',
+            'If this finite window has no slow operation, no slow-path attribution is possible.',
+          ]
+        : [
+            'GC observations and host boundaries share this Node realm; worker telemetry clocks require their own verified origin before subtraction.',
+            'The observer can perturb timings. This finite diagnostic is not a replacement for the original CV cohort or proof of its historical outlier cause.',
+            'A window with no slow operation cannot attribute a slow path.',
+          ],
+      implementationSources: await Promise.all(
+        [
+          'apps/runtime-e2e/src/benchmarks/benchmark-runner.ts',
+          'apps/runtime-e2e/src/benchmarks/replicad-app-small-model.bench.test.ts',
+        ].map(async (path) => ({
+          path,
+          sha256: createHash('sha256')
+            .update(await readFile(resolve(workspace, path)))
+            .digest('hex'),
+        })),
+      ),
+    }),
+  );
+};
+
+it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_PROFILE'] !== 'true')(
+  'should retain the exact Honeycomb warm-window V8 samples and GC observations',
+  async () => runHoneycombWarmDiagnostic('profile'),
+);
+
+it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_GC_HOST'] !== 'true')(
+  'should retain the exact Honeycomb warm-window GC and caller-thread boundaries without a V8 sampler',
+  async () => runHoneycombWarmDiagnostic('gc-host'),
 );
 
 // Existing runtime-e2e owner proposal; no default suite silently executes the opt-in native acquisition.

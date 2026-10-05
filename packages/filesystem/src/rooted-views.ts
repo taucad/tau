@@ -33,6 +33,8 @@ import type {
 } from '@taucad/types';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 import type {
+  FileStatOptions,
+  HeadFileStat,
   DirectoryEntry,
   FileReadStreamOptions,
   FileSystemProvider,
@@ -276,10 +278,10 @@ export class RootedViews {
           return resolution.provider.readdirWithStats!(resolution.path);
         }) as NonNullable<FileSystemProvider['readdirWithStats']>)
       : undefined;
-    const stat = async (path: string): Promise<FileStat> => {
+    const stat = (async (path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> => {
       const { resolution } = resolveLocal(path);
-      return resolution.provider.stat(resolution.path);
-    };
+      return options ? resolution.provider.stat(resolution.path, options) : resolution.provider.stat(resolution.path);
+    }) as FileSystemProvider['stat'];
     const readdirEntries = captured.provider.readdirEntries
       ? async (path: string): Promise<DirectoryEntry[]> => {
           const { resolution } = resolveLocal(path);

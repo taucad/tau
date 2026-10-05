@@ -18,6 +18,8 @@ const baseConfig: UserConfig = {
     'src/file-tree-service.ts',
     'src/directory-listing.ts',
     'src/react/use-directory-listing.ts',
+    'src/observation-service.ts',
+    'src/react/use-observation.ts',
   ],
   sourcemap: false,
   clean: ['dist'],

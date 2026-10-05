@@ -73,5 +73,5 @@ describe('physical material BRep examples through the public runtime', () => {
       document.close();
       await client.shutdown();
     }
-  }, 60_000);
+  });
 });

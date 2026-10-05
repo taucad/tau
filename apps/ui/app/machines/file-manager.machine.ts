@@ -1,6 +1,6 @@
 import { setup, types } from 'xstate';
 import type { EnqueueObject, EventObject, SystemRegistry } from 'xstate';
-import type { FileEntry, FileSystemBackend } from '@taucad/types';
+import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime';
 import { connectComputeStoreChannel } from '@taucad/runtime/host';
@@ -530,7 +530,9 @@ const initializeServicesActor = fromSafeAsync<
   signal.addEventListener('abort', disposeOnAbort, { once: true });
 
   try {
-    const initializedChangeChannel = new WorkerChangeChannel({ transport: { listen: viewProxy.listen } });
+    const initializedChangeChannel = new WorkerChangeChannel({
+      transport: { listen: viewProxy.listen, watchReady: viewProxy.watchReady, closed: viewProxy.closed },
+    });
     workerChangeChannel = initializedChangeChannel;
     const client = createComposedViewClient({
       workspace: proxy,
@@ -538,41 +540,6 @@ const initializeServicesActor = fromSafeAsync<
       dependencies: dependencyProxy,
       paths,
     });
-
-    /*
-     * The first listing of the root, through the same composition every later
-     * listing of it uses (CI3). Read off the raw workspace surface it showed the
-     * control plane with no provenance, and `initialEntries` marks the root
-     * resolved — so that listing was the one the tree kept (blueprint Finding 3).
-     */
-    let initialEntries: FileEntry[] = [];
-    try {
-      const absolutePath = normalizePath(context.rootDirectory);
-      if (backend === 'webaccess') {
-        await proxy.pollExternalChanges(absolutePath);
-      }
-      const rootNodes = await client.readDirectory(absolutePath);
-      for (const node of rootNodes) {
-        const common = {
-          path: node.name,
-          name: node.name,
-          size: node.size,
-          mtimeMs: node.mtimeMs,
-          isLoaded: false,
-          ...(node.provenance === undefined ? {} : { provenance: node.provenance }),
-        };
-        if (node.children !== undefined) {
-          initialEntries.push({ ...common, type: 'dir', isDirectoryResolved: false });
-        } else if (node.contentKind === 'text') {
-          initialEntries.push({ ...common, type: 'file', contentKind: 'text', lineCount: node.lineCount });
-        } else {
-          initialEntries.push({ ...common, type: 'file', contentKind: 'binary' });
-        }
-      }
-    } catch {
-      initialEntries = [];
-    }
-    signal.throwIfAborted();
 
     const initializedContentService = new FileContentService({
       proxy: client,
@@ -593,12 +560,17 @@ const initializeServicesActor = fromSafeAsync<
       paths,
       channel: initializedChangeChannel,
       visibility: visibilityProvider,
-      initialEntries,
       onExternalPollTelemetry: context.onExternalPollTelemetry,
     });
     treeService = initializedTreeService;
 
     initializedTreeService.connectToContentService(initializedContentService);
+
+    // Subscribe the resident tree before its first authoritative root listing.
+    if (backend === 'webaccess') {
+      await proxy.pollExternalChanges(normalizePath(context.rootDirectory));
+    }
+    await initializedTreeService.listDirectory('', { signal });
 
     signal.throwIfAborted();
     ownsConstructed = false;

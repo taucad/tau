@@ -239,6 +239,8 @@ const config: KnipConfig = {
         'app/types/**/*.d.ts',
         'vite-environment.d.ts',
         'app/offline/offline-shell-env.d.ts',
+        // Netlify bundles every edge function in this directory; `config` names its paths.
+        'netlify/edge-functions/*.ts',
         // `apps/ui/project.json` runs every calibration script with a workspace-root path.
         'scripts/render-calibration/*.mts',
         // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.
@@ -265,6 +267,18 @@ const config: KnipConfig = {
       // React Router typegen writes `./+types/*` into the gitignored `.react-router/types`
       // (tsconfig `rootDirs`), which a fresh checkout does not have.
       ignoreUnresolved: [/^\.\/\+types\//u],
+    },
+    'apps/www': {
+      // The static builder bundles browser entries by path; these CLIs run directly from Node.
+      entry: [
+        'src/client.mjs',
+        'src/site.css',
+        'scripts/{build,serve,browser-check,check-story,render-assets,optimize-assets,capture-metal-hero,export-story-assets}.mjs',
+        'scripts/metal-hero-entry.mjs',
+        'tests/*.test.mjs',
+      ],
+      project: ['src/**/*.{mjs,css}', 'scripts/**/*.{mjs,js}', 'tests/**/*.mjs'],
+      ignore: ['public/**'],
     },
     'apps/docs': {
       entry: ['app/routes/**/*.{ts,tsx}', 'vite-environment.d.ts'],

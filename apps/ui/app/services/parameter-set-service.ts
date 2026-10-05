@@ -6,7 +6,7 @@ import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { fileParameterEntrySchema, parameterEntryPath, parametersDirectory } from '@taucad/types';
 import type { JSONValue } from '@taucad/types';
 import { createParameterSetActor, submitParameterRequest } from '@taucad/parameters/set-machine';
-import type { parameterSetMachine } from '@taucad/parameters/set-machine';
+import type { parameterSetMachine, ParameterFiles } from '@taucad/parameters/set-machine';
 import { serializeParameterRecord } from '@taucad/parameters';
 import type {
   ParameterManifest,
@@ -196,7 +196,7 @@ export const createParameterSetService = (
       RootedContentClient,
       'exists' | 'readFile' | 'writeFileChecked' | 'move' | 'unlink' | 'rmdir' | 'mkdir'
     >;
-    subscribe(path: string, listener: () => void): () => void;
+    watchReady: ParameterFiles['watchReady'];
     onError?(error: unknown): void;
   }>,
 ): ParameterSetService => {
@@ -264,25 +264,7 @@ export const createParameterSetService = (
       // The page is handed each manifest the runtime publishes, so a load reads against the held one.
       resolve: async () => manifestRef.current,
       files: {
-        watchReady: ({ paths }, onEvent) => {
-          const stops = paths.map((path) =>
-            options.subscribe(path, () => {
-              onEvent({ type: 'change' });
-            }),
-          );
-          return {
-            ready: Promise.resolve(),
-            /* The page's subscriptions end only when the service disposes the actor, so the watch never closes under it. */
-            closed: new Promise<void>(() => {
-              /* Never settles. */
-            }),
-            unsubscribe: () => {
-              for (const stop of stops) {
-                stop();
-              }
-            },
-          };
-        },
+        watchReady: options.watchReady,
         exists: async (path) => options.client.exists(rooted(path)),
         readFile: async (path) => options.client.readFile(rooted(path)),
         writeFileChecked: async ({ path, preconditions, ...write }) =>

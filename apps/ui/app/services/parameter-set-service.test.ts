@@ -47,12 +47,15 @@ const fixtureBinding: NonNullable<ParameterSetRequestBase['binding']> = {
 };
 
 /** One project over an in-memory checked filesystem that enforces every precondition. */
-const serviceFixture = (initialRecord?: string) => {
+const serviceFixture = (initialRecord?: string, watchReady = Promise.resolve()) => {
   const files = new Map<string, Uint8Array<ArrayBuffer>>([[`${fixtureRoot}/main.ts`, encoder.encode('source:1')]]);
   if (initialRecord !== undefined) {
     files.set(fixtureRecordPath, encoder.encode(initialRecord));
   }
   const listeners = new Map<string, Set<() => void>>();
+  const watchClosed = Promise.withResolvers<void>();
+  let watchEvent: ((event: { type: string }) => void) | undefined;
+  const exists = vi.fn(async (path: string) => files.has(path));
   let gate: Promise<void> | undefined;
   let loseNextReply = false;
   const writes: WriteInput[] = [];
@@ -78,7 +81,7 @@ const serviceFixture = (initialRecord?: string) => {
   };
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- structural test double covers the service's authority seam
   const client = {
-    exists: async (path: string) => files.has(path),
+    exists,
     readFile: async (path: string) => new Uint8Array(files.get(path) ?? new Uint8Array()),
     writeFileChecked,
     move: async (source: string, target: string) => {
@@ -94,11 +97,26 @@ const serviceFixture = (initialRecord?: string) => {
   const service = createParameterSetService({
     rootDirectory: fixtureRoot,
     client,
-    subscribe: (path, listener) => {
-      const current = listeners.get(path) ?? new Set();
-      current.add(listener);
-      listeners.set(path, current);
-      return () => current.delete(listener);
+    watchReady: ({ paths }, onEvent) => {
+      watchEvent = onEvent;
+      const stops = paths.map((path) => {
+        const listener = (): void => {
+          onEvent({ type: 'change' });
+        };
+        const current = listeners.get(path) ?? new Set();
+        current.add(listener);
+        listeners.set(path, current);
+        return () => current.delete(listener);
+      });
+      return {
+        ready: watchReady,
+        closed: watchClosed.promise,
+        unsubscribe: () => {
+          for (const stop of stops) {
+            stop();
+          }
+        },
+      };
     },
   });
   const manifestFor = async (source = 'source:1'): Promise<ParameterManifest> => {
@@ -158,6 +176,11 @@ const serviceFixture = (initialRecord?: string) => {
       .groups?.['default']?.values[name];
   return {
     service,
+    exists,
+    closeWatch: () => {
+      watchClosed.resolve();
+    },
+    resetWatch: () => watchEvent?.({ type: 'reset' }),
     files,
     writes,
     manifestFor,
@@ -188,6 +211,33 @@ const serviceFixture = (initialRecord?: string) => {
 };
 
 describe('parameter set service behaviours', () => {
+  it.each(['reset', 'closed'] as const)(
+    'waits for actual watch acknowledgement and preserves %s diagnostics',
+    async (type) => {
+      const ready = Promise.withResolvers<void>();
+      const fixture = serviceFixture(undefined, ready.promise);
+      const manifest = await fixture.manifestFor();
+      const resolving = fixture.service.resolve('main.ts', manifest);
+      await vi.waitFor(() => {
+        expect(fixture.service.actor('main.ts')).toBeDefined();
+      });
+      expect(fixture.exists).not.toHaveBeenCalled();
+      ready.resolve();
+      await resolving;
+      if (type === 'reset') {
+        fixture.resetWatch();
+      } else {
+        fixture.closeWatch();
+      }
+      await vi.waitFor(() => {
+        expect(fixture.service.actor('main.ts')?.getSnapshot().context.diagnostic?.code).toBe(
+          type === 'reset' ? 'WATCH_RESET' : 'WATCH_CLOSED',
+        );
+      });
+      await fixture.service.close();
+    },
+  );
+
   it('commits each field against the live manifest after a source edit', async () => {
     const fixture = serviceFixture();
     const first = await fixture.manifestFor();

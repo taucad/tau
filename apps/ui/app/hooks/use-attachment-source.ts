@@ -3,7 +3,7 @@
  * (blueprint §Flows: Render).
  *
  * An `attachments/<hash>.<ext>` reference is read from the directory that owns
- * it and served as an object URL. One object URL exists per absolute path,
+ * it and served as an object URL. One object URL exists per source capability and absolute path,
  * however many consumers show it, and it is revoked when the last of them
  * unmounts. A `data:` URL (legacy rows, D14) passes through unchanged.
  *
@@ -43,10 +43,18 @@ type CacheEntry = {
   url?: string;
 };
 
-// Ponytail: one module-level map keyed by absolute path; the path already names its directory.
-const cache = new Map<string, CacheEntry>();
-
 type AttachmentReader = Parameters<typeof createAttachmentStore>[0];
+
+const caches = new WeakMap<AttachmentReader, Map<string, CacheEntry>>();
+
+const cacheFor = (client: AttachmentReader): Map<string, CacheEntry> => {
+  let cache = caches.get(client);
+  if (!cache) {
+    cache = new Map();
+    caches.set(client, cache);
+  }
+  return cache;
+};
 
 type AttachmentRequest = {
   readonly client: AttachmentReader;
@@ -74,6 +82,7 @@ const load = async (entry: CacheEntry, request: AttachmentRequest): Promise<Atta
 
 const acquire = (request: AttachmentRequest): CacheEntry => {
   const path = pathOf(request.directory, request.url);
+  const cache = cacheFor(request.client);
   const existing = cache.get(path);
   if (existing) {
     existing.consumers += 1;
@@ -85,12 +94,15 @@ const acquire = (request: AttachmentRequest): CacheEntry => {
   return entry;
 };
 
-const release = (path: string, entry: CacheEntry): void => {
+const release = (client: AttachmentReader, path: string, entry: CacheEntry): void => {
   entry.consumers -= 1;
   if (entry.consumers > 0) {
     return;
   }
-  cache.delete(path);
+  const cache = cacheFor(client);
+  if (cache.get(path) === entry) {
+    cache.delete(path);
+  }
   if (entry.url !== undefined) {
     URL.revokeObjectURL(entry.url);
   }
@@ -133,7 +145,9 @@ export function useAttachmentSource(
 ): AttachmentSource {
   // Optional: a surface without a filesystem still renders `data:` parts, and shows references as absent.
   const client = useOptionalFileManager()?.recordFiles;
-  const [resolved, setResolved] = useState<{ key: string; source: AttachmentSource } | undefined>(undefined);
+  const [resolved, setResolved] = useState<
+    { client: AttachmentReader; key: string; source: AttachmentSource } | undefined
+  >(undefined);
   const isReference = attachmentReferenceOf(part) !== undefined;
   const listed = typeof directories === 'string' ? [directories] : (directories ?? []);
   // A string, so a caller's fresh array of the same directories does not re-read.
@@ -160,18 +174,18 @@ export function useAttachmentSource(
           return;
         }
         if (source.status !== 'absent') {
-          setResolved({ key, source });
+          setResolved({ client, key, source });
           return;
         }
       }
-      setResolved({ key, source: absent });
+      setResolved({ client, key, source: absent });
     };
     // async-iife: bootstrap — the shared entries own the reads; a consumer that unmounted ignores their results
     void settle();
     return () => {
       active = false;
       for (const { path, entry } of held) {
-        release(path, entry);
+        release(client, path, entry);
       }
     };
   }, [client, key, part.mediaType, part.url]);
@@ -184,5 +198,5 @@ export function useAttachmentSource(
     // Nowhere to read the bytes from on this surface.
     return absent;
   }
-  return resolved?.key === key ? resolved.source : loading;
+  return resolved !== undefined && resolved.client === client && resolved.key === key ? resolved.source : loading;
 }

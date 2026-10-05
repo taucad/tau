@@ -12,6 +12,7 @@ import type {
   DirectoryEntry,
   ExternalChangeFact,
   FileReadStreamOptions,
+  FileStatOptions,
   FileStat,
   HeadFileStat,
   ProviderCapabilities,
@@ -242,7 +243,9 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
    * @param path - Absolute path to stat.
    * @returns Type/size/mtime for the entry at `path`.
    */
-  public async stat(path: string): Promise<FileStat> {
+  public async stat(path: string): Promise<FileStat>;
+  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
+  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
     this._assertReady();
     this._assertRootedPath(path);
     const segments = this._splitPath(path);
@@ -257,7 +260,8 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     let fileError: unknown;
     try {
       const fileHandle = await parentHandle.getFileHandle(name);
-      return await fileStatFromFile(await fileHandle.getFile());
+      const file = await fileHandle.getFile();
+      return options?.content === 'head' ? await headFileStatFromFile(file) : await fileStatFromFile(file);
     } catch (error) {
       fileError = error;
     }

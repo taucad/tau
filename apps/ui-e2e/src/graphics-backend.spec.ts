@@ -141,6 +141,7 @@ type CanvasFrameDifference = Readonly<{
 type OverlayBrightness = Readonly<{
   gridMinimumLuminance: number;
   gridLineMeanLuminance: number;
+  gridLineSamples: number;
   axisInk: Readonly<Record<'x' | 'y' | 'z', number>>;
 }>;
 
@@ -522,8 +523,10 @@ async function sampleOverlayBrightness(pngBase64: string): Promise<OverlayBright
     let gridMinimumLuminance = 255;
     let lineTotal = 0;
     let lineSamples = 0;
+    // The fixed Birdhouse camera puts its left roof edge inside x=15–25% of this canvas at
+    // y=45–55%. Sample the visible grid to its left, not the model's black silhouette.
     for (let y = Math.floor(height * 0.45); y < Math.floor(height * 0.55); y += 1) {
-      for (let x = Math.floor(width * 0.02); x < Math.floor(width * 0.25); x += 1) {
+      for (let x = Math.floor(width * 0.02); x < Math.floor(width * 0.15); x += 1) {
         const luminance = luminanceAt((y * width + x) * 4);
         gridMinimumLuminance = Math.min(gridMinimumLuminance, luminance);
         if (luminance < 252) {
@@ -550,6 +553,7 @@ async function sampleOverlayBrightness(pngBase64: string): Promise<OverlayBright
     return {
       gridMinimumLuminance,
       gridLineMeanLuminance: lineSamples > 0 ? lineTotal / lineSamples : 255,
+      gridLineSamples: lineSamples,
       axisInk,
     };
   }, pngBase64);
@@ -1720,6 +1724,7 @@ test.describe('Graphics backend regression guard', () => {
     // straight-alpha canvas drew it at 189 and WebGPU's linear blend with AO at 164.
     expect(reference.gridMinimumLuminance, JSON.stringify(samples)).toBeGreaterThanOrEqual(208);
     for (const [label, sample] of Object.entries(samples)) {
+      expect(sample.gridLineSamples, `${label} visible grid pixels`).toBeGreaterThan(1000);
       expect(Math.abs(sample.gridMinimumLuminance - reference.gridMinimumLuminance), label).toBeLessThanOrEqual(3);
       expect(Math.abs(sample.gridLineMeanLuminance - reference.gridLineMeanLuminance), label).toBeLessThanOrEqual(3);
       for (const axis of ['x', 'y', 'z'] as const) {

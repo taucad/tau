@@ -250,8 +250,8 @@ describe('MonitorStage', () => {
   it('should show heaters in whole degrees and no target while a heater is off', () => {
     const idle = printing();
     const temperatures = idle.snapshot.temperatures ?? {};
-    const at = <T extends { value: number }>(quantity: T | undefined, value: number) =>
-      quantity === undefined ? undefined : { ...quantity, value };
+    const at = (quantity: typeof temperatures.nozzle, value: number): typeof temperatures.nozzle =>
+      quantity === undefined ? undefined : { ...quantity, value, representation: 'binary64' };
     renderMonitor({
       ...idle,
       snapshot: {

@@ -209,7 +209,7 @@ type Temperature = NonNullable<NonNullable<MachineDirectoryEntry['snapshot']['te
 
 /** A heater in whole degrees, as the printer's own screen shows it: "24 °C", not "24.34 °C". */
 const formatTemperature = (temperature: Temperature): string =>
-  formatQuantity({ ...temperature, value: Math.round(temperature.value) });
+  formatQuantity({ ...temperature, value: Math.round(Number(temperature.value)), representation: 'binary64' });
 
 /**
  * The heaters as three columns a person reads at a glance: where each one is, and where it is heading.
@@ -245,7 +245,7 @@ function TemperatureGroup({
               {current === undefined ? '–' : formatTemperature(current)}
             </dd>
             {/* A target of 0 is a heater that is off, not one heating to 0 °C. */}
-            {target === undefined || target.value === 0 ? null : (
+            {target === undefined || Number(target.value) === 0 ? null : (
               <dd className='truncate text-xs text-muted-foreground tabular-nums'>to {formatTemperature(target)}</dd>
             )}
           </div>

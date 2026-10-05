@@ -183,7 +183,7 @@ describe('completed part publication groundwork', () => {
     }
     const assetReads = vi.spyOn(filesystem, 'readFile');
     const owned = await readPublishedPartAsset(
-      filesystem,
+      { readFile: filesystem.readFile.bind(filesystem) },
       prepared.reference,
       prepared.record.variants['default']!.glb.digest,
     );

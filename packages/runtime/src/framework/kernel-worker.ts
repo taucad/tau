@@ -830,6 +830,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** One serialized lane for kernel/cache/watch/native state. */
   private operationTail: Promise<void> = Promise.resolve();
 
+  /** Immutable pinned reads can run beside kernel work, with one verification buffer outstanding. */
+  private publishedAssetReadTail: Promise<void> = Promise.resolve();
+
   /** Trusted worker-entry display projector, never supplied by an RPC caller. */
   private readonly admitAssemblyDisplay: AssemblyDisplayProjector | undefined;
   private readonly documentTasks = new Set<Promise<void>>();
@@ -2218,7 +2221,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (!this.operationAdmissionOpen) {
       throw new Error('Runtime worker is closing');
     }
-    const previous = this.operationTail;
+    const previous = Promise.all([this.operationTail, this.publishedAssetReadTail]);
     const next = Promise.withResolvers<void>();
     this.operationTail = next.promise;
     await previous;
@@ -2573,7 +2576,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private async drainAndCleanup(): Promise<void> {
     await this.watchReconciliationTail;
-    await this.operationTail;
+    await Promise.all([this.operationTail, this.publishedAssetReadTail]);
     await Promise.allSettled(this.documentTasks);
     await this.performCleanup();
   }
@@ -5092,7 +5095,33 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     digest: PublishedPartAsset['digest'],
     signal?: AbortSignal,
   ): Promise<Uint8Array<ArrayBuffer>> {
-    return this.enqueueOperation(async () => readPinnedPartAsset(this.filesystem, reference, digest), signal);
+    if (!this.operationAdmissionOpen) {
+      throw new Error('Runtime worker is closing');
+    }
+    const { fileSystem: bridge } = this;
+    if (!bridge) {
+      throw new Error('filesystem not available - initialize must complete first with fileSystemPort');
+    }
+    const reader = {
+      readFile: async (path: string) => {
+        signal?.throwIfAborted();
+        const bytes = await bridge.readFile(path);
+        signal?.throwIfAborted();
+        return bytes;
+      },
+    };
+    // oxlint-disable-next-line promise/prefer-await-to-then -- Schedule the pure read without waiting for unrelated kernel work.
+    const pending = this.publishedAssetReadTail.then(async () => {
+      const bytes = await readPinnedPartAsset(reader, reference, digest);
+      signal?.throwIfAborted();
+      return bytes;
+    });
+    // oxlint-disable-next-line promise/prefer-await-to-then -- A refused read must release the serial read lane.
+    this.publishedAssetReadTail = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pending;
   }
 
   /** Commit pinned parts through the shared checked filesystem authority. @internal */

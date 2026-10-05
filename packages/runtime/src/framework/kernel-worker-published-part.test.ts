@@ -732,6 +732,247 @@ describe('KernelWorker completed part publication', () => {
     }
   });
 
+  it('should start a verified pinned asset read while assembly projection is held', async () => {
+    await seedTestFileSystem({ 'parts/screw.kcl': 'cube' });
+    const producer = await createWorker();
+    const prepared = await producer.preparePublishedPart({ sourcePath: 'parts/screw.kcl', directory: 'published' });
+    await producer.cleanup();
+    const root = await commitPinnedPartsRoot(createRuntimeFileSystem(getTestFileSystem()), {
+      path: 'published/held-projection-root.json',
+      parts: { screw: prepared.reference },
+      occurrences: [
+        {
+          id: 'placed',
+          part: 'screw',
+          variant: 'default',
+          transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        },
+      ],
+    });
+    expect(root.status).toBe('published');
+    if (root.status !== 'published') {
+      return;
+    }
+    const projectionEntered = Promise.withResolvers<void>();
+    const releaseProjection = Promise.withResolvers<void>();
+    const filesystem = getTestFileSystem();
+    const read = vi.spyOn(filesystem, 'readFile');
+    const consumer = await createWorker(false, undefined, {
+      admitAssemblyDisplay: async () => {
+        projectionEntered.resolve();
+        await releaseProjection.promise;
+        return emptyGlb();
+      },
+    });
+    try {
+      const exportPending = consumer.exportPublished({ publishedAssembly: { root: root.root }, format: 'glb' });
+      await projectionEntered.promise;
+      read.mockClear();
+      const asset = prepared.record.variants['default']!.glb;
+      const readPending = consumer.readPublishedPartAsset(prepared.reference, asset.digest);
+      await vi.waitFor(() => {
+        expect(read.mock.calls.some(([path]) => path === prepared.reference.path)).toBe(true);
+      });
+      releaseProjection.resolve();
+      const [exported, bytes] = await Promise.all([exportPending, readPending]);
+      expect(exported.success).toBe(true);
+      expect(bytes).toEqual(emptyGlb());
+    } finally {
+      releaseProjection.resolve();
+      await consumer.cleanup();
+      read.mockRestore();
+    }
+  });
+
+  it('should keep a pinned read independent of a concurrently aborted export signal', async () => {
+    await seedTestFileSystem({ 'parts/screw.kcl': 'cube' });
+    const producer = await createWorker();
+    const prepared = await producer.preparePublishedPart({ sourcePath: 'parts/screw.kcl', directory: 'published' });
+    await producer.cleanup();
+    const root = await commitPinnedPartsRoot(createRuntimeFileSystem(getTestFileSystem()), {
+      path: 'published/abort-export-root.json',
+      parts: { screw: prepared.reference },
+      occurrences: [
+        {
+          id: 'placed',
+          part: 'screw',
+          variant: 'default',
+          transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        },
+      ],
+    });
+    expect(root.status).toBe('published');
+    if (root.status !== 'published') {
+      return;
+    }
+    const projectionEntered = Promise.withResolvers<void>();
+    const releaseProjection = Promise.withResolvers<void>();
+    const readEntered = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    const filesystem = getTestFileSystem();
+    const originalReadFile = filesystem.readFile.bind(filesystem);
+    let projectionStarted = false;
+    const readFile = vi.spyOn(filesystem, 'readFile').mockImplementation((async (path: string, encoding?: 'utf8') => {
+      if (projectionStarted && path === prepared.reference.path) {
+        readEntered.resolve();
+        await releaseRead.promise;
+      }
+      return encoding === 'utf8' ? originalReadFile(path, 'utf8') : originalReadFile(path);
+    }) as typeof filesystem.readFile);
+    const consumer = await createWorker(false, undefined, {
+      suppliedFileSystem: filesystem,
+      admitAssemblyDisplay: async () => {
+        projectionStarted = true;
+        projectionEntered.resolve();
+        await releaseProjection.promise;
+        return emptyGlb();
+      },
+    });
+    try {
+      const exportAbort = new AbortController();
+      const exportPending = consumer.exportPublished(
+        { publishedAssembly: { root: root.root }, format: 'glb' },
+        exportAbort.signal,
+      );
+      await projectionEntered.promise;
+      const asset = prepared.record.variants['default']!.glb;
+      const readPending = consumer.readPublishedPartAsset(prepared.reference, asset.digest);
+      await readEntered.promise;
+      exportAbort.abort(new Error('unrelated export aborted'));
+      releaseRead.resolve();
+      expect(await readPending).toEqual(emptyGlb());
+      releaseProjection.resolve();
+      await Promise.allSettled([exportPending]);
+    } finally {
+      releaseRead.resolve();
+      releaseProjection.resolve();
+      await consumer.cleanup();
+      readFile.mockRestore();
+    }
+  });
+
+  it('should serialize pinned reads ahead of later kernel work and recover after refusal or abort', async () => {
+    await seedTestFileSystem({ 'parts/screw.kcl': 'cube' });
+    const producer = await createWorker();
+    const prepared = await producer.preparePublishedPart({ sourcePath: 'parts/screw.kcl', directory: 'published' });
+    await producer.cleanup();
+    const asset = prepared.record.variants['default']!.glb;
+    const filesystem = getTestFileSystem();
+    const originalReadFile = filesystem.readFile.bind(filesystem);
+    const firstReadEntered = Promise.withResolvers<void>();
+    const releaseFirstRead = Promise.withResolvers<void>();
+    const releaseAbortRead = Promise.withResolvers<void>();
+    const recordReads: number[] = [];
+    let held = true;
+    let abortHold: { entered: () => void; release: Promise<void> } | undefined;
+    const readFile = vi.spyOn(filesystem, 'readFile').mockImplementation((async (path: string, encoding?: 'utf8') => {
+      if (path === prepared.reference.path) {
+        recordReads.push(held ? 1 : 0);
+        if (recordReads.length === 1) {
+          firstReadEntered.resolve();
+          await releaseFirstRead.promise;
+        }
+        if (abortHold) {
+          abortHold.entered();
+          await abortHold.release;
+        }
+      }
+      return encoding === 'utf8' ? originalReadFile(path, 'utf8') : originalReadFile(path);
+    }) as typeof filesystem.readFile);
+    const consumer = await createWorker(false, undefined, { suppliedFileSystem: filesystem });
+    try {
+      const first = consumer.readPublishedPartAsset(prepared.reference, asset.digest);
+      await firstReadEntered.promise;
+      const second = consumer.readPublishedPartAsset(prepared.reference, asset.digest);
+      const admit = consumer.admitPublishedPart(prepared.reference);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(recordReads).toEqual([1]);
+      held = false;
+      releaseFirstRead.resolve();
+      expect(await first).toEqual(emptyGlb());
+      expect(await second).toEqual(emptyGlb());
+      const admittedRecord = await admit;
+      expect(admittedRecord.variants['default']?.glb.digest).toBe(asset.digest);
+      expect(recordReads).toEqual([1, 0, 0]);
+
+      readFile.mockRejectedValueOnce(new TypeError('pinned provider refusal'));
+      await expect(consumer.readPublishedPartAsset(prepared.reference, asset.digest)).rejects.toMatchObject({
+        name: 'TypeError',
+        message: 'pinned provider refusal',
+      });
+      const controller = new AbortController();
+      const abortReason = new Error('pinned read aborted');
+      controller.abort(abortReason);
+      await expect(consumer.readPublishedPartAsset(prepared.reference, asset.digest, controller.signal)).rejects.toBe(
+        abortReason,
+      );
+      const abortReadEntered = Promise.withResolvers<void>();
+      abortHold = { entered: abortReadEntered.resolve, release: releaseAbortRead.promise };
+      const duringRead = new AbortController();
+      const priorGlbReads = readFile.mock.calls.filter(([path]) => path === asset.path).length;
+      const abortedRead = consumer.readPublishedPartAsset(prepared.reference, asset.digest, duringRead.signal);
+      await abortReadEntered.promise;
+      duringRead.abort(abortReason);
+      releaseAbortRead.resolve();
+      await expect(abortedRead).rejects.toBe(abortReason);
+      expect(readFile.mock.calls.filter(([path]) => path === asset.path)).toHaveLength(priorGlbReads);
+      abortHold = undefined;
+      expect(await consumer.readPublishedPartAsset(prepared.reference, asset.digest)).toEqual(emptyGlb());
+    } finally {
+      held = false;
+      releaseFirstRead.resolve();
+      releaseAbortRead.resolve();
+      await consumer.cleanup();
+      readFile.mockRestore();
+    }
+  });
+
+  it('should drain accepted pinned reads before filesystem cleanup and reject later reads', async () => {
+    await seedTestFileSystem({ 'parts/screw.kcl': 'cube' });
+    const producer = await createWorker();
+    const prepared = await producer.preparePublishedPart({ sourcePath: 'parts/screw.kcl', directory: 'published' });
+    await producer.cleanup();
+    const asset = prepared.record.variants['default']!.glb;
+    const filesystem = getTestFileSystem();
+    const originalReadFile = filesystem.readFile.bind(filesystem);
+    const readEntered = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    const readFile = vi.spyOn(filesystem, 'readFile').mockImplementation((async (path: string, encoding?: 'utf8') => {
+      if (path === prepared.reference.path) {
+        readEntered.resolve();
+        await releaseRead.promise;
+      }
+      return encoding === 'utf8' ? originalReadFile(path, 'utf8') : originalReadFile(path);
+    }) as typeof filesystem.readFile);
+    const consumer = await createWorker(false, undefined, { suppliedFileSystem: filesystem });
+    const bridge = (consumer as unknown as { fileSystem?: { dispose: () => void } }).fileSystem;
+    if (!bridge) {
+      throw new Error('Expected an initialized rooted filesystem bridge');
+    }
+    const dispose = vi.spyOn(bridge, 'dispose');
+    try {
+      const accepted = consumer.readPublishedPartAsset(prepared.reference, asset.digest);
+      await readEntered.promise;
+      const cleanup = consumer.cleanup();
+      expect(dispose).not.toHaveBeenCalled();
+      await expect(consumer.readPublishedPartAsset(prepared.reference, asset.digest)).rejects.toThrow(
+        'Runtime worker is closing',
+      );
+      releaseRead.resolve();
+      expect(await accepted).toEqual(emptyGlb());
+      await cleanup;
+      expect(dispose).toHaveBeenCalledOnce();
+      expect(readFile.mock.calls.filter(([path]) => path === prepared.reference.path)).toHaveLength(1);
+    } finally {
+      releaseRead.resolve();
+      await consumer.cleanup();
+      dispose.mockRestore();
+      readFile.mockRestore();
+    }
+  });
+
   it('fails exact pinned export explicitly when the publication has display bytes only', async () => {
     await seedTestFileSystem({ 'parts/screw.kcl': 'cube' });
     const producer = await createWorker();

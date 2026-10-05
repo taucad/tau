@@ -20,6 +20,8 @@ const filePath = (path: string): string => {
   return canonical;
 };
 
+type PublishedPartReader = { readFile(path: string): Promise<Uint8Array<ArrayBuffer>> };
+
 const checkBytes = async (bytes: Uint8Array<ArrayBuffer>, asset: PublishedPartAsset): Promise<void> => {
   if (bytes.byteLength !== asset.byteLength || (await digestContent({ bytes })) !== asset.digest) {
     throw new Error(`Published-part asset does not match its pinned digest: ${asset.path}`);
@@ -27,7 +29,7 @@ const checkBytes = async (bytes: Uint8Array<ArrayBuffer>, asset: PublishedPartAs
 };
 
 const readPinned = async (
-  filesystem: KernelFileSystem,
+  filesystem: PublishedPartReader,
   asset: PublishedPartAsset,
 ): Promise<Uint8Array<ArrayBuffer>> => {
   const bytes = await filesystem.readFile(filePath(asset.path));
@@ -376,7 +378,7 @@ export const preparePublishedPartVariants = async (input: {
  * @internal
  */
 const verifyPublishedPart = async (
-  filesystem: KernelFileSystem,
+  filesystem: PublishedPartReader,
   reference: PublishedPartReference,
   selectedDigest?: PublishedPartAsset['digest'],
 ): Promise<{ record: PublishedPartRecord; selected?: Uint8Array<ArrayBuffer> }> => {
@@ -424,7 +426,7 @@ export const admitPublishedPart = async (
 
 /** Return an owned copy of one verified asset from an admitted published part. @internal */
 export const readPublishedPartAsset = async (
-  filesystem: KernelFileSystem,
+  filesystem: PublishedPartReader,
   reference: PublishedPartReference,
   digest: PublishedPartAsset['digest'],
 ): Promise<Uint8Array<ArrayBuffer>> => {

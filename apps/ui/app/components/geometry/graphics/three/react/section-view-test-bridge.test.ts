@@ -703,6 +703,9 @@ describe('committed assembly bridge registration lifetime', () => {
         view = render(React.createElement(SectionViewTestBridge, { isGeometryFramed: true }));
         const bridge = scope.__TAU_SECTION_VIEW_TEST__!;
         expect(bridge.getTaggedResourceInventory()).toBeUndefined();
+        expect(bridge.armAssemblyAdmissionResourceInventory()).toBe(false);
+        expect(bridge.takeAssemblyAdmissionResourceInventory()).toBeUndefined();
+        bridge.clearAssemblyAdmissionResourceInventory();
         const projectionCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
         projectionCamera.position.set(0, 0, 6);
         projectionCamera.updateMatrixWorld(true);

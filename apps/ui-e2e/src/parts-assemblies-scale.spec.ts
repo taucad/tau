@@ -1065,6 +1065,14 @@ type S15BridgeWindow = typeof globalThis & {
   __TAU_SECTION_VIEW_TEST__?: Omit<AssemblyTestBridgeApi, 'getCadActivity'> & {
     getCadActivity(options?: Readonly<{ entryPath: string }>): MixedOwnedActivity | undefined;
     getLiveAssemblyResourceInventory(): S16LiveAssemblyResources | undefined;
+    armAssemblyAdmissionResourceInventory(): boolean;
+    takeAssemblyAdmissionResourceInventory():
+      | Readonly<{
+          held: Readonly<{ key: string; sceneId: string; revision: number; unitId: string; poseRevision: number }>;
+          resources: S16LiveAssemblyResources;
+        }>
+      | undefined;
+    clearAssemblyAdmissionResourceInventory(): void;
     getRequestedAssemblyPreparation():
       | Readonly<{
           revision: number;
@@ -2820,47 +2828,56 @@ test.each(['WebGL', 'WebGPU'])(
         if (!bridge || !held || !subject?.assemblyDisplay || !subject.isCurrent()) {
           throw new Error('The live overlap has no current initial assembly owner.');
         }
-        bridge.setAssemblyDetailCalibration(next);
-        const started = performance.now();
-        while (performance.now() - started < 30_000) {
-          const draw = bridge.getCommittedDrawInventory();
-          const live = bridge.getLiveAssemblyResourceInventory();
-          if (
-            !subject.isCurrent() ||
-            draw?.key !== held.key ||
-            draw.unitId !== held.unitId ||
-            draw.poseRevision !== held.poseRevision
-          ) {
-            throw new Error('The overlap changed its root, unit or pose before the candidate observation.');
-          }
-          if (live?.candidate) {
-            return { identity: { root: subject.assemblyDisplay.root.digest, sceneId: draw.candidateSceneId }, live };
-          }
-          if (draw.candidateSceneId !== held.candidateSceneId) {
-            break;
-          }
-          // The getter runs only for this bounded opt-in observation, never on a render frame.
-          // oxlint-disable-next-line no-await-in-loop -- Each yield observes the one actual candidate in order.
-          await new Promise<void>((resolve) => {
-            setTimeout(resolve, 1);
-          });
+        if (!bridge.armAssemblyAdmissionResourceInventory()) {
+          throw new Error('The current assembly owner refused the private admission observation.');
         }
-        throw new Error('The real current/candidate overlap was not observed before admission.');
+        try {
+          bridge.setAssemblyDetailCalibration(next);
+          const started = performance.now();
+          while (performance.now() - started < 30_000) {
+            const captured = bridge.takeAssemblyAdmissionResourceInventory();
+            if (captured) {
+              return captured;
+            }
+            const draw = bridge.getCommittedDrawInventory();
+            if (
+              !subject.isCurrent() ||
+              draw?.key !== held.key ||
+              draw.unitId !== held.unitId ||
+              draw.poseRevision !== held.poseRevision
+            ) {
+              throw new Error('The overlap changed its root, unit or pose before the admission observation.');
+            }
+            if (draw.candidateSceneId !== held.candidateSceneId) {
+              break;
+            }
+            // Only the scalar one-shot admission record is polled; unarmed frames perform no resource traversal.
+            // oxlint-disable-next-line no-await-in-loop -- One real candidate is observed in order.
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, 1);
+            });
+          }
+          throw new Error('The real current/candidate admission snapshot was unavailable.');
+        } finally {
+          bridge.clearAssemblyAdmissionResourceInventory();
+        }
       }, policy);
-      const { candidate } = overlap.live;
+      const { candidate } = overlap.resources;
       if (!candidate) {
         throw new Error('The candidate owner was absent from the overlap observation.');
       }
-      expect(overlap.identity.root).toBe(initial.identity.root);
-      expect(overlap.identity.sceneId).toBe(initial.identity.sceneId);
+      expect(overlap.held.key).toBe(initial.identity.root);
+      expect(overlap.held.sceneId).toBe(initial.identity.sceneId);
+      expect(overlap.held.unitId).toBe(initial.identity.unitId);
+      expect(overlap.held.poseRevision).toBe(initial.identity.poseRevision);
       expect(candidate.key).toBe(initial.identity.root);
       expect(candidate.unitId).toBe(initial.identity.unitId);
       expect(candidate.sceneId).not.toBe(initial.identity.sceneId);
       for (const dimension of ['bufferCount', 'backingBytes', 'payloadBytes'] as const) {
-        expect(overlap.live.union[dimension]).toBeGreaterThanOrEqual(overlap.live.current[dimension]);
-        expect(overlap.live.union[dimension]).toBeGreaterThanOrEqual(candidate[dimension]);
-        expect(overlap.live.union[dimension]).toBeLessThanOrEqual(
-          overlap.live.current[dimension] + candidate[dimension],
+        expect(overlap.resources.union[dimension]).toBeGreaterThanOrEqual(overlap.resources.current[dimension]);
+        expect(overlap.resources.union[dimension]).toBeGreaterThanOrEqual(candidate[dimension]);
+        expect(overlap.resources.union[dimension]).toBeLessThanOrEqual(
+          overlap.resources.current[dimension] + candidate[dimension],
         );
       }
       await target.waitFor(

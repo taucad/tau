@@ -30,9 +30,11 @@ import type { GraphicsContext } from '#machines/graphics.machine.js';
 import { isAssemblyDetailCalibration } from '#machines/graphics.machine.js';
 import { rendererSpans } from '#lib/renderer-telemetry.js';
 import {
+  armGltfAssemblyAdmissionResourceInventory,
   captureCommittedGltfDrawInventory,
   captureLiveGltfAssemblyResourceInventory,
   captureRequestedGltfAssemblyPreparation,
+  clearGltfAssemblyAdmissionResourceInventory,
   collectModelPickableSurfaceMeshes,
   resolveModelComponentHitFromRay,
 } from '#components/geometry/graphics/three/react/gltf-mesh.js';
@@ -1217,6 +1219,15 @@ export type SectionViewTestBridgeApi = Readonly<{
   getTaggedResourceInventory(): SectionViewTestTaggedResourceInventory | undefined;
   /** Live committed/candidate/retired assembly-owned CPU buffers; excludes textures, demand, WASM and driver memory. */
   getLiveAssemblyResourceInventory(): ReturnType<typeof captureLiveGltfAssemblyResourceInventory>;
+  /** One explicitly armed historical admission-boundary sample, with no retained scene references. */
+  armAssemblyAdmissionResourceInventory(): boolean;
+  takeAssemblyAdmissionResourceInventory():
+    | Readonly<{
+        held: Readonly<{ key: string; sceneId: string; revision: number; unitId: string; poseRevision: number }>;
+        resources: NonNullable<ReturnType<typeof captureLiveGltfAssemblyResourceInventory>>;
+      }>
+    | undefined;
+  clearAssemblyAdmissionResourceInventory(): void;
   /** Requested assembly preparation only; may exist before a current committed draw. */
   getRequestedAssemblyPreparation(): ReturnType<typeof captureRequestedGltfAssemblyPreparation>;
   getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
@@ -1650,6 +1661,13 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     let live = true;
     let backendObservationAbort: AbortController | undefined;
     const { scene } = get();
+    let armedAdmissionSceneId: string | undefined;
+    let admissionObservation:
+      | Readonly<{
+          held: Readonly<{ key: string; sceneId: string; revision: number; unitId: string; poseRevision: number }>;
+          resources: NonNullable<ReturnType<typeof captureLiveGltfAssemblyResourceInventory>>;
+        }>
+      | undefined;
     const bridgeGlobal = globalThis as SectionViewTestGlobal;
     const getActiveUnitId = (): string | undefined => graphicsActor.getSnapshot().context.modelInteractionUnitId;
     const setFovAngle = (angle: number): void => {
@@ -2901,6 +2919,82 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           ? resources
           : undefined;
       },
+      armAssemblyAdmissionResourceInventory() {
+        bridge.clearAssemblyAdmissionResourceInventory();
+        const subject = bridge.getCommittedAssembly();
+        const draw = bridge.getCommittedDrawInventory();
+        if (!live || !subject.assemblyDisplay || !subject.isCurrent() || !draw) {
+          return false;
+        }
+        const held = {
+          key: draw.key,
+          sceneId: draw.candidateSceneId,
+          revision: draw.presentationRevision,
+          unitId: draw.unitId,
+          poseRevision: draw.poseRevision,
+        };
+        if (held.key !== subject.assemblyDisplay.root.digest) {
+          return false;
+        }
+        const armed = armGltfAssemblyAdmissionResourceInventory(scene, held.sceneId, (resources) => {
+          armedAdmissionSceneId = undefined;
+          const current = bridge.getCommittedDrawInventory();
+          const owner = bridge.getCommittedAssembly();
+          if (
+            !live ||
+            !owner.assemblyDisplay ||
+            !owner.isCurrent() ||
+            owner.assemblyDisplay.root.digest !== held.key ||
+            current?.candidateSceneId !== held.sceneId ||
+            current.presentationRevision !== held.revision ||
+            current.unitId !== held.unitId ||
+            current.poseRevision !== held.poseRevision ||
+            resources.key !== held.key ||
+            resources.candidateSceneId !== held.sceneId ||
+            resources.presentationRevision !== held.revision ||
+            resources.unitId !== held.unitId ||
+            resources.candidate?.key !== held.key ||
+            resources.candidate.unitId !== held.unitId
+          ) {
+            return;
+          }
+          admissionObservation = { held, resources };
+        });
+        armedAdmissionSceneId = armed ? held.sceneId : undefined;
+        return armed;
+      },
+      takeAssemblyAdmissionResourceInventory() {
+        const captured = admissionObservation;
+        if (!captured) {
+          return undefined;
+        }
+        const { candidate } = captured.resources;
+        const current = bridge.getCommittedDrawInventory();
+        if (!current || current.candidateSceneId === captured.held.sceneId) {
+          return undefined;
+        }
+        admissionObservation = undefined;
+        const subject = bridge.getCommittedAssembly();
+        return live &&
+          candidate &&
+          subject.assemblyDisplay &&
+          subject.isCurrent() &&
+          subject.assemblyDisplay.root.digest === captured.held.key &&
+          current.key === captured.held.key &&
+          current.candidateSceneId === candidate.sceneId &&
+          current.presentationRevision === candidate.revision &&
+          current.unitId === captured.held.unitId &&
+          current.poseRevision === captured.held.poseRevision
+          ? captured
+          : undefined;
+      },
+      clearAssemblyAdmissionResourceInventory() {
+        if (armedAdmissionSceneId) {
+          clearGltfAssemblyAdmissionResourceInventory(scene, armedAdmissionSceneId);
+        }
+        armedAdmissionSceneId = undefined;
+        admissionObservation = undefined;
+      },
       getRequestedAssemblyPreparation() {
         const cad = cadRef?.getSnapshot();
         const selected = cad && selectCadDisplay(cad);
@@ -2988,6 +3082,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
 
     return () => {
       live = false;
+      bridge.clearAssemblyAdmissionResourceInventory();
       backendObservationAbort?.abort(new Error('Backend observation viewport was torn down.'));
       const index = bridges.indexOf(bridge);
       if (index !== -1) {

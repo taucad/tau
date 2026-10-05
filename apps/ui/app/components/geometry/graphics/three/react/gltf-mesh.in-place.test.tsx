@@ -188,6 +188,8 @@ const {
   GltfMesh,
   captureCommittedGltfDrawInventory,
   captureLiveGltfAssemblyResourceInventory,
+  armGltfAssemblyAdmissionResourceInventory,
+  clearGltfAssemblyAdmissionResourceInventory,
   captureRequestedGltfAssemblyPreparation,
   isOpaqueAssemblyBatchMaterial,
   deriveAssemblyDetailGeometry,
@@ -578,6 +580,58 @@ describe('GltfMesh in-place updates', () => {
     expect(captureLiveGltfAssemblyResourceInventory(next)).toBeUndefined();
   });
 
+  it('captures an ungated same-task admission after the live candidate has already disappeared', async () => {
+    const scenes: Object3D[] = [];
+    mocks.observePreparation = vi.fn((scene: Object3D) => {
+      scenes.push(scene);
+    });
+    const display = await residentAssembly();
+    const view = render(
+      <GltfMesh
+        assemblyDisplay={display}
+        geometryHash={display.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const first = scenes.at(-1)!;
+    let historical: ReturnType<typeof captureLiveGltfAssemblyResourceInventory>;
+    expect(
+      armGltfAssemblyAdmissionResourceInventory(first, first.uuid, (value) => {
+        historical = value;
+      }),
+    ).toBe(true);
+    view.rerender(
+      <GltfMesh
+        assemblyDisplay={display}
+        geometryHash={display.root.digest}
+        presentationRevision={2}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1, 2]);
+    });
+    const next = scenes.at(-1)!;
+    expect(next).not.toBe(first);
+    expect(captureLiveGltfAssemblyResourceInventory(first)).toBeUndefined();
+    expect(captureLiveGltfAssemblyResourceInventory(next)?.candidate).toBeUndefined();
+    expect(historical).toMatchObject({
+      key: display.root.digest,
+      candidateSceneId: first.uuid,
+      candidate: { key: display.root.digest, revision: 2, sceneId: next.uuid },
+    });
+    expect(historical?.current.bufferCount).toBeGreaterThan(0);
+    expect(historical?.candidate?.bufferCount).toBeGreaterThan(0);
+    expect(historical?.union.backingBytes).toBeLessThanOrEqual(
+      (historical?.current.backingBytes ?? 0) + (historical?.candidate?.backingBytes ?? 0),
+    );
+    view.unmount();
+  });
+
   it('should deduplicate the real current/candidate CPU union and release the retired owner after admission', async () => {
     const scenes: Object3D[] = [];
     mocks.observePreparation = vi.fn((scene: Object3D) => {
@@ -598,6 +652,18 @@ describe('GltfMesh in-place updates', () => {
       expect(committedRevisions()).toEqual([1]);
     });
     const first = scenes.at(-1)!;
+    let admissionSnapshot: ReturnType<typeof captureLiveGltfAssemblyResourceInventory>;
+    expect(
+      armGltfAssemblyAdmissionResourceInventory(first, first.uuid, (value) => {
+        admissionSnapshot = value;
+      }),
+    ).toBe(true);
+    clearGltfAssemblyAdmissionResourceInventory(first, first.uuid);
+    expect(
+      armGltfAssemblyAdmissionResourceInventory(first, first.uuid, (value) => {
+        admissionSnapshot = value;
+      }),
+    ).toBe(true);
     mocks.sectionView = { isActive: true };
     view.rerender(
       <GltfMesh
@@ -639,6 +705,7 @@ describe('GltfMesh in-place updates', () => {
     expect(overlap!.union.bufferCount).toBeLessThanOrEqual(overlap!.current.bufferCount + candidate.bufferCount);
     expect(overlap!.union.backingBytes).toBeLessThan(overlap!.current.backingBytes + candidate.backingBytes);
     expect(overlap!.union.payloadBytes).toBeLessThanOrEqual(overlap!.current.payloadBytes + candidate.payloadBytes);
+    expect(admissionSnapshot).toBeUndefined();
     await act(async () => {
       gate.resolve();
     });
@@ -646,6 +713,15 @@ describe('GltfMesh in-place updates', () => {
       expect(committedRevisions()).toEqual([1, 2]);
     });
     expect(captureLiveGltfAssemblyResourceInventory(first)).toBeUndefined();
+    expect(admissionSnapshot).toMatchObject({
+      key: initial.root.digest,
+      candidateSceneId: first.uuid,
+      candidate: { key: replacement.root.digest, sceneId: scenes.at(-1)?.uuid, revision: 2 },
+    });
+    expect(admissionSnapshot?.union.bufferCount).toBeLessThanOrEqual(
+      (admissionSnapshot?.current.bufferCount ?? 0) + (admissionSnapshot?.candidate?.bufferCount ?? 0),
+    );
+    expect(armGltfAssemblyAdmissionResourceInventory(first, first.uuid, () => undefined)).toBe(false);
     const settled = captureLiveGltfAssemblyResourceInventory(scenes.at(-1)!);
     expect(settled?.candidate).toBeUndefined();
     expect(settled?.retiredOwnerCount).toBe(0);

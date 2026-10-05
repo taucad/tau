@@ -2359,6 +2359,7 @@ type GltfPresentationTimings = Partial<Record<keyof GltfPresentationTelemetry['d
 
 const committedGltfDrawInventory = Symbol('committedGltfDrawInventory');
 const liveGltfAssemblyResourceInventory = Symbol('liveGltfAssemblyResourceInventory');
+const armedGltfAssemblyAdmissionResourceInventory = Symbol('armedGltfAssemblyAdmissionResourceInventory');
 
 type AssemblyPreparationPhase =
   | 'queued'
@@ -2479,6 +2480,7 @@ type GltfAssemblyDrawCapture = Readonly<{
 type GltfInventoryObject = Object3D & {
   [committedGltfDrawInventory]?: () => GltfAssemblyDrawCapture | undefined;
   [liveGltfAssemblyResourceInventory]?: () => LiveGltfAssemblyResourceInventory | undefined;
+  [armedGltfAssemblyAdmissionResourceInventory]?: (inventory: LiveGltfAssemblyResourceInventory) => void;
 };
 
 /** Explicit readonly debug capture of the actual mounted producer; never derives identity from names or extras. */
@@ -2503,6 +2505,29 @@ export function captureLiveGltfAssemblyResourceInventory(
     capture ??= (object as GltfInventoryObject)[liveGltfAssemblyResourceInventory]?.();
   });
   return capture;
+}
+
+/** Arm one private numeric observation on the actual current scene, without retaining that scene in the caller. */
+export function armGltfAssemblyAdmissionResourceInventory(
+  root: Object3D,
+  sceneId: string,
+  onAdmission: (inventory: LiveGltfAssemblyResourceInventory) => void,
+): boolean {
+  const owner: GltfInventoryObject | undefined = root.getObjectByProperty('uuid', sceneId);
+  const current = owner?.[committedGltfDrawInventory]?.();
+  if (!owner?.[liveGltfAssemblyResourceInventory] || current?.candidateSceneId !== sceneId || !current.isCurrent()) {
+    return false;
+  }
+  owner[armedGltfAssemblyAdmissionResourceInventory] = onAdmission;
+  return true;
+}
+
+/** Revoke an unconsumed test observation while its owning scene is still mounted. */
+export function clearGltfAssemblyAdmissionResourceInventory(root: Object3D, sceneId: string): void {
+  const owner: GltfInventoryObject | undefined = root.getObjectByProperty('uuid', sceneId);
+  if (owner) {
+    owner[armedGltfAssemblyAdmissionResourceInventory] = undefined;
+  }
 }
 
 type PreparedGltfPresentation = {
@@ -5086,6 +5111,7 @@ export function GltfMesh({
             return;
           }
           bundle.disposed = true;
+          (bundle.scene as GltfInventoryObject)[armedGltfAssemblyAdmissionResourceInventory] = undefined;
           bundle.sectionStatus = 'cancelled';
           setGltfSectionSurfaceRegistrationState(bundle.scene, 'cancelled');
           disposeResources();
@@ -5210,6 +5236,15 @@ export function GltfMesh({
           sourceBytes: preparingSourceBytes,
           resourceBudget: assemblyResourceBudget,
         });
+        const previousScene: GltfInventoryObject | undefined = previous?.scene;
+        const onAdmission = previousScene?.[armedGltfAssemblyAdmissionResourceInventory];
+        if (onAdmission) {
+          previousScene[armedGltfAssemblyAdmissionResourceInventory] = undefined;
+          const exact = previousScene[liveGltfAssemblyResourceInventory]?.();
+          if (exact?.candidate?.sceneId === bundle.scene.uuid) {
+            onAdmission(exact);
+          }
+        }
         if (bundle.assemblyFacade) {
           bundle.assemblyResources = resourceInventory;
         }

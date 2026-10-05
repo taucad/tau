@@ -1,3 +1,4 @@
+import { filesystemSourceIdentity } from '#services/filesystem-source-identity.js';
 import { useQuery } from '@tanstack/react-query';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -20,8 +21,12 @@ export function useChatRecords(
     error,
     refetch,
   } = useQuery({
-    queryKey: ['chats', resourceId, 'records', { includeDeleted }],
-    queryFn: async () => getChatRecordsForResource(resourceId, { includeDeleted }),
+    queryKey: ['chats', resourceId, 'records', filesystemSourceIdentity(getChatRecordsForResource), { includeDeleted }],
+    queryFn: async ({ signal }) => {
+      const records = await getChatRecordsForResource(resourceId, { includeDeleted });
+      signal.throwIfAborted();
+      return records;
+    },
     enabled: options?.enabled !== false && !isWorkerLoading && Boolean(resourceId),
   });
 

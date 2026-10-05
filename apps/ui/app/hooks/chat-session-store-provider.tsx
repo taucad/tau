@@ -41,7 +41,7 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
       }),
   );
   const projectManager = useProjectManager();
-  const { recordFiles } = useFileManager();
+  const { recordFiles, watchRecordFile } = useFileManager();
 
   // Mirror the latest project manager closures into the store synchronously
   // during render so child subtrees that acquire a session in the same
@@ -58,6 +58,7 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
     commitCancelledDraftRestore: projectManager.commitCancelledDraftRestore,
     // Composer records and chat attachments are files, reached through the root that owns them.
     client: recordFiles,
+    watchRecordFile,
   });
 
   return <ChatSessionStoreContext.Provider value={store}>{children}</ChatSessionStoreContext.Provider>;

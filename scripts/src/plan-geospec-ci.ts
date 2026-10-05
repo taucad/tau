@@ -12,7 +12,10 @@ import { pathToFileURL } from 'node:url';
 
 /** The fields consumed from Nx's `--graph=<file.json>` export. */
 export type TaskGraphExport = {
-  graph?: { nodes?: Record<string, { data: { targets?: Record<string, unknown>; tags?: string[] } }> };
+  graph?: {
+    nodes?: Record<string, { data: { targets?: Record<string, unknown>; tags?: string[] } }>;
+    dependencies?: Record<string, Array<{ target: string }>>;
+  };
   tasks?: { tasks?: Record<string, { target?: { project?: string; target?: string } }> };
 };
 
@@ -23,9 +26,11 @@ export const planGeospecCi = (
   required: boolean;
   artifactTasks: string[];
   darwinTests: string[];
+  consumerTests: string[];
 } => {
   const artifactTasks = new Set<string>();
   const darwinTests = new Set<string>();
+  const consumerTests = new Set<string>();
   for (const graph of graphs) {
     assert.ok(graph.graph?.nodes && graph.tasks?.tasks, 'Expected an expanded Nx task graph');
     for (const [id, task] of Object.entries(graph.tasks.tasks)) {
@@ -43,13 +48,26 @@ export const planGeospecCi = (
       if (owner.data.tags?.includes('host:darwin-arm64') && task.target.target === 'test') {
         darwinTests.add(id);
       }
+
+      // A test that imports a GeoSpec engine package directly loads its generated
+      // bindings, so it needs the products even when no build task asks for them.
+      const { nodes, dependencies } = graph.graph;
+      if (
+        task.target.target === 'test' &&
+        dependencies?.[task.target.project]?.some(
+          (dependency) => nodes[dependency.target]?.data.targets?.['prepare-geospec-ci-artifacts'],
+        )
+      ) {
+        consumerTests.add(id);
+      }
     }
   }
 
   return {
-    required: artifactTasks.size > 0 || darwinTests.size > 0,
+    required: artifactTasks.size > 0 || darwinTests.size > 0 || consumerTests.size > 0,
     artifactTasks: [...artifactTasks].sort(),
     darwinTests: [...darwinTests].sort(),
+    consumerTests: [...consumerTests].sort(),
   };
 };
 

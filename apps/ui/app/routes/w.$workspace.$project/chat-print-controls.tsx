@@ -333,6 +333,10 @@ const jogStepLabel: Readonly<Record<JogStep, string>> = {
 /** Millimetres per minute for a jog from the pane. */
 const jogFeed = 1000;
 
+/**
+ * The pad, in the direction each arrow shows. Z's arrows show what moves vertically: on a machine whose bed rides Z
+ * (the X1C), the up arrow raises the bed, which is Z− in machine coordinates, as in Bambu Studio.
+ */
 const jogButtons = [
   { axis: 'y', direction: 1, icon: ArrowUp, area: 'col-start-2 row-start-1' },
   { axis: 'x', direction: -1, icon: ArrowLeft, area: 'col-start-1 row-start-2' },
@@ -392,7 +396,9 @@ function JogPad({
       <div className='grid grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,1fr)] gap-1.5' role='group' aria-label='Jog pad'>
         {jogButtons
           .filter((button) => present.has(button.axis))
-          .map(({ axis, direction, icon: Icon, area }) => {
+          .map(({ axis, direction: shown, icon: Icon, area }) => {
+            const isBed = axis === 'z' && axes.find((candidate) => candidate.id === 'z')?.carries === 'work';
+            const direction = isBed ? -shown : shown;
             const label = `${axis.toUpperCase()}${direction > 0 ? '+' : '−'}`;
             const begin = (): void => {
               if (isEnabled && isHold) {
@@ -405,7 +411,7 @@ function JogPad({
                 type='button'
                 size='sm'
                 variant='outline'
-                aria-label={`Jog ${label}`}
+                aria-label={isBed ? `Jog ${label}, bed ${shown > 0 ? 'up' : 'down'}` : `Jog ${label}`}
                 aria-pressed={
                   isHold
                     ? control.hold?.parameters.axis === axis && control.hold.parameters.direction === direction

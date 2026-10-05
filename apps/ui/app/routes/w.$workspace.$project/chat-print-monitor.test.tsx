@@ -190,6 +190,21 @@ describe('Control on a milling machine', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it('raises the bed with the up arrow when the bed rides Z, as Bambu Studio does', async () => {
+    const user = userEvent.setup();
+    const bedOnZ = {
+      ...routerManifest,
+      axes: routerManifest.axes.map((axis) => (axis.id === 'z' ? ({ ...axis, carries: 'work' } as const) : axis)),
+    };
+    const { fixture } = renderControl(router({ manifest: bedOnZ }), { attended: true });
+    await user.click(within(openStage('Control')).getByRole('button', { name: 'Jog Z−, bed up' }));
+    await waitFor(() => {
+      expect(fixture.applyAction).toHaveBeenCalledWith(
+        expect.objectContaining({ parameters: { axis: 'z', distance: -1, feed: 1000 } }),
+      );
+    });
+  });
+
   it('says why the machine refused, without resending', async () => {
     const user = userEvent.setup();
     const fixture = createFixture({ entries: [router()] });

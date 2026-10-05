@@ -1,9 +1,15 @@
+import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import type * as Electron from 'electron';
 import type { IpcMain, IpcMainEvent, MessagePortMain, UtilityProcess, WebContents, WebFrameMain } from 'electron';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { _electron as electron } from 'playwright';
+import type { BrowserContext, ElectronApplication, Page } from 'playwright';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { desktopDescendants, installDesktopRuntimeLeaseObservation } from '#support/desktop-app.js';
+import { desktopDescendants, installDesktopRuntimeLeaseObservation, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopRuntimeLease } from '#support/desktop-app.js';
 
 const state = globalThis as typeof globalThis & {
@@ -54,8 +60,109 @@ const relay = (event: IpcMainEvent, requestId: string, hostId: string): void => 
 };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   state.tauE2eRestoreRuntimeLeases?.();
   delete state.tauE2eRuntimeLeases;
+});
+
+const startupRoot = resolve(import.meta.dirname, '../../../../out/test-results/desktop-e2e');
+const startupEntries = async (): Promise<Set<string>> => {
+  const entries = await readdir(startupRoot).catch(() => []);
+  return new Set(entries.filter((entry) => entry.startsWith('startup-')));
+};
+
+const mockedLaunch = (firstWindow: () => Promise<Page>) => {
+  const child = mock<ChildProcess>({ pid: 12_345, exitCode: null, signalCode: null, stdout: null, stderr: null });
+  const application = mock<ElectronApplication>();
+  application.process.mockReturnValue(child);
+  application.context.mockReturnValue(mock<BrowserContext>());
+  application.firstWindow.mockImplementation(firstWindow);
+  const launch = vi.spyOn(electron, 'launch').mockResolvedValue(application);
+  return { application, child, launch };
+};
+
+describe('desktop startup ownership before a session is returned', () => {
+  it('should retain the failing startup stage and terminate the launched child without replacing the cause', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-startup-test-'));
+    const before = await startupEntries();
+    const primary = new Error('first window failed');
+    const { child, launch } = mockedLaunch(async () => {
+      throw primary;
+    });
+    try {
+      await expect(launchDesktopApp({ token: 'unit-test-only', profileRoot })).rejects.toMatchObject({
+        cause: primary,
+      });
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      const created = [...(await startupEntries())].filter((entry) => !before.has(entry));
+      expect(created).toHaveLength(1);
+      const stage = JSON.parse(await readFile(join(startupRoot, created[0]!, 'stage.json'), 'utf8')) as {
+        stage: string;
+        status: string;
+        /** Milliseconds. */
+        elapsed: number;
+        pid: number;
+      };
+      expect(stage).toMatchObject({ stage: 'first-window', status: 'failed', pid: 12_345 });
+      expect(stage.elapsed).toBeGreaterThanOrEqual(0);
+      await rm(join(startupRoot, created[0]!), { recursive: true, force: true });
+    } finally {
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+      await rm(profileRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('should terminate the launched child on test finish when no session was handed to the caller', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-startup-test-'));
+    const before = await startupEntries();
+    let rejectFirstWindow: ((error: Error) => void) | undefined;
+    const pendingCause = new Error('owned child terminated');
+    const firstWindow = new Promise<Page>((_resolve, reject) => {
+      rejectFirstWindow = reject;
+    });
+    const { application, child, launch } = mockedLaunch(async () => firstWindow);
+    child.kill.mockImplementation(() => {
+      rejectFirstWindow?.(pendingCause);
+      return true;
+    });
+    const observation: { failure?: Promise<unknown> } = {};
+    onTestFinished(async () => {
+      if (!observation.failure) {
+        throw new Error('Startup observation was never initiated.');
+      }
+      const error: unknown = await observation.failure;
+      expect(error).toMatchObject({ cause: pendingCause });
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      const created = [...(await startupEntries())].filter((entry) => !before.has(entry));
+      expect(created).toHaveLength(1);
+      const stage = JSON.parse(await readFile(join(startupRoot, created[0]!, 'stage.json'), 'utf8')) as {
+        stage: string;
+        status: string;
+        pid: number;
+      };
+      expect(stage).toMatchObject({ stage: 'first-window', status: 'failed', pid: 12_345 });
+      await rm(join(startupRoot, created[0]!), { recursive: true, force: true });
+      const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+      if (picked) {
+        await rm(dirname(picked), { recursive: true, force: true });
+      }
+      await rm(profileRoot, { recursive: true, force: true });
+    });
+    observation.failure = (async (): Promise<unknown> => {
+      try {
+        await launchDesktopApp({ token: 'unit-test-only', profileRoot });
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    })();
+    await vi.waitFor(() => {
+      expect(application.firstWindow).toHaveBeenCalledOnce();
+    });
+  });
 });
 
 describe('actual desktop runtime lease observation', () => {

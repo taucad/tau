@@ -9,7 +9,7 @@ import type * as Electron from 'electron';
 import type { BrowserWindow, DownloadItem, Event, IpcMainEvent, UtilityProcess } from 'electron';
 import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
-import { expect } from 'vitest';
+import { expect, onTestFinished } from 'vitest';
 import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 import {
   desktopE2EApiUrl,
@@ -546,7 +546,27 @@ export const launchDesktopApp = async (options: {
     delete inheritedEnvironment['TAU_FRONTEND_URL'];
   }
 
-  const application = await electron.launch({
+  await mkdir(diagnosticsRoot, { recursive: true });
+  const startupDirectory = await mkdtemp(join(diagnosticsRoot, 'startup-'));
+  const startupStartedAt = performance.now();
+  let startupStage = 'electron.launch';
+  const owner: { child?: ReturnType<ElectronApplication['process']> } = {};
+  const recordStartup = async (stage: string, status: 'pending' | 'failed' | 'returned' = 'pending'): Promise<void> => {
+    startupStage = stage;
+    await writeFile(
+      join(startupDirectory, 'stage.json'),
+      JSON.stringify({
+        stage,
+        status,
+        /** Milliseconds since the first startup mark. */
+        elapsed: performance.now() - startupStartedAt,
+        pid: owner.child?.pid,
+      }),
+    );
+  };
+  await recordStartup(startupStage);
+
+  const launch = electron.launch({
     ...(packaged ? { executablePath: packagedExecutable } : {}),
     args: [
       ...(packaged ? [] : [desktopRoot]),
@@ -594,7 +614,21 @@ export const launchDesktopApp = async (options: {
       ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
     },
   });
+  let application: ElectronApplication;
+  try {
+    application = await launch;
+  } catch (error) {
+    await recordStartup(startupStage, 'failed').catch(() => undefined);
+    throw error;
+  }
   const child = application.process();
+  owner.child = child;
+  let sessionReturned = false;
+  onTestFinished(() => {
+    if (!sessionReturned && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+    }
+  });
   /* Installed before the first window loads, and kept for the whole session, so
    * startup and late traffic are both observed. */
   const analyticsRequests: string[] = [];
@@ -617,11 +651,14 @@ export const launchDesktopApp = async (options: {
   try {
     /* A packaged launch releases main bootstrap before its first window exists.
      * Configure the main-process test overrides only after that startup boundary. */
+    await recordStartup('first-window');
     page = await application.firstWindow();
+    await recordStartup('dom-content-loaded');
     await page.waitForLoadState('domcontentloaded');
     if (options.fakeMicrophonePath) {
       // Chromium recommends disabling DSP for calibrated file microphone input.
       // Keep the real capture driver; change only its audio-processing constraints.
+      await recordStartup('audio-init-script');
       await page.addInitScript(() => {
         const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         navigator.mediaDevices.getUserMedia = async (constraints) => {
@@ -640,6 +677,7 @@ export const launchDesktopApp = async (options: {
         };
       });
     }
+    await recordStartup('main-overrides');
     await application.evaluate(({ dialog, shell }, selectedDirectory) => {
       const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
       shell.openExternal = async (url): Promise<void> => {
@@ -655,9 +693,11 @@ export const launchDesktopApp = async (options: {
       }
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
+    await recordStartup('trace-start');
     await page.context().tracing.start({ screenshots: true, snapshots: true });
   } catch (error) {
     child.kill('SIGKILL');
+    await recordStartup(startupStage, 'failed').catch(() => undefined);
     /* The shell's own output is the only account of why it went away, and the
      * caller has no session to read it from. */
     throw new Error(`The desktop shell did not survive launch.\n${output.join('')}`, { cause: error });
@@ -789,6 +829,8 @@ export const launchDesktopApp = async (options: {
     }
   };
 
+  await recordStartup('session-returned', 'returned');
+  sessionReturned = true;
   return {
     analyticsRequests,
     startupNetworkLogPath,

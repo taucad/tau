@@ -189,7 +189,7 @@ const runText = (run: MachineRun): string => {
     run.paused === undefined
       ? ''
       : ` (paused by ${run.paused.by}${run.paused.reason === undefined ? '' : `: ${run.paused.reason}`})`;
-  return `Run ${run.runId}: ${run.program?.name ?? 'program'} ${run.state}${paused}${facts.length === 0 ? '' : `, ${facts.join(', ')}`}${run.stage === undefined ? '' : `; ${run.stage}`}${run.origin === 'external' ? '; started at the machine' : ''}.`;
+  return `Run ${run.runId}: ${run.program?.name ?? 'program'} ${run.state}${paused}${facts.length === 0 ? '' : `, ${facts.join(', ')}`}${run.stage === undefined ? '' : `; ${run.stage}`}${run.origin === 'external' ? '; not started from Tau' : ''}.`;
 };
 
 /**

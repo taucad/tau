@@ -451,6 +451,13 @@ describe('jscadToGltf', () => {
     const { nodeNames, meshNames } = await readNodeMeshNames(glb);
     expect(nodeNames).toEqual(['Housing', 'Planet Gear', 'Planet Gear 2', 'Shape 4']);
     expect(meshNames).toEqual(nodeNames);
+    const document = await createNodeIo().readBinary(glb);
+    expect(
+      document
+        .getRoot()
+        .listNodes()
+        .map((node) => node.getExtras()['tauComponentId']),
+    ).toEqual(['component:housing', 'component:planet-gear', 'component:planet-gear-2', 'component:node-3']);
 
     const primitiveModes = await readPrimitiveModes(glb);
     expect(primitiveModes).toEqual([

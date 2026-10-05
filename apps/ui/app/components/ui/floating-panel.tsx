@@ -567,8 +567,8 @@ function FloatingPanelErrorContent({
     <div className={cn('flex h-full flex-col items-center justify-center gap-4 p-6', className)}>
       <div className='flex w-full max-w-sm flex-col items-center gap-3 text-center'>
         {/* Error Icon */}
-        <div className='flex size-12 items-center justify-center rounded-full bg-destructive/10'>
-          <AlertCircle className='size-6 text-destructive' />
+        <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
+          <AlertCircle className='size-6 text-feature' />
         </div>
 
         {/* Error Title */}
@@ -590,12 +590,12 @@ function FloatingPanelErrorContent({
             title={errorMessage ?? 'Error'}
             text={errorStack}
             collapsedLineCount={3}
-            className='text-left text-destructive/80'
+            className='text-left text-feature/80'
             containerClassName='w-full'
           />
         ) : errorMessage ? (
-          <div className='w-full rounded-md border border-destructive/20 bg-destructive/5 p-3 text-left'>
-            <p className='text-xs font-medium text-destructive/80'>{errorMessage}</p>
+          <div className='w-full rounded-md border border-feature/20 bg-feature/5 p-3 text-left'>
+            <p className='text-xs font-medium text-feature/80'>{errorMessage}</p>
           </div>
         ) : undefined}
       </div>

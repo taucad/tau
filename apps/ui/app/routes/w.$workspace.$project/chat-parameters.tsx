@@ -168,7 +168,7 @@ function ParameterAuthorityFailure({
   const unreadable = failure.code === unreadableRecordCode;
   return (
     <div role='alert' className='flex flex-col items-start gap-2 p-3 text-sm'>
-      <p className='text-destructive'>
+      <p className='text-feature'>
         {unreadable ? 'Saved parameter values for this model cannot be read.' : 'Parameters could not be loaded.'}
       </p>
       <p className='text-muted-foreground'>{failure.message}</p>

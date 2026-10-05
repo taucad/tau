@@ -77,8 +77,8 @@ const statePresentation: Readonly<Record<JobState, StatePresentation>> = {
   failed: {
     label: 'Failed',
     icon: CircleAlert,
-    rail: 'before:bg-destructive',
-    tone: 'border-destructive/30 bg-destructive/10 text-destructive',
+    rail: 'before:bg-feature',
+    tone: 'border-feature/30 bg-feature/10 text-feature',
   },
   cancelled: {
     label: 'Cancelled',
@@ -108,7 +108,7 @@ export const JobsPanelBody = (): React.JSX.Element => {
         {error && jobs.length === 0 ? (
           <PanelEmptyState
             icon={CircleAlert}
-            iconClassName='text-destructive'
+            iconClassName='text-feature'
             title='Jobs unavailable'
             description={error}
             role='alert'
@@ -168,7 +168,7 @@ const JobsOverview = ({ jobs }: { readonly jobs: readonly JobProjection[] }): Re
         <span>{jobs.length === 1 ? 'job' : 'jobs'}</span>
       </span>
       <span>{active} active</span>
-      {failed > 0 ? <span className='ml-auto text-destructive'>{failed} failed</span> : null}
+      {failed > 0 ? <span className='ml-auto text-feature'>{failed} failed</span> : null}
     </div>
   );
 };
@@ -305,7 +305,7 @@ const JobCard = ({
       ) : null}
 
       {job.syncState === 'failed' ? (
-        <p role='alert' className='mt-3 flex items-start gap-1.5 text-xs text-destructive'>
+        <p role='alert' className='mt-3 flex items-start gap-1.5 text-xs text-feature'>
           <CircleAlert aria-hidden className='mt-0.5 size-3 shrink-0' />
           Updates stopped: {job.syncError}
         </p>
@@ -317,7 +317,7 @@ const JobCard = ({
         </p>
       ) : null}
       {cancellationError ? (
-        <p role='alert' className='mt-3 text-xs text-destructive'>
+        <p role='alert' className='mt-3 text-xs text-feature'>
           {cancellationError}
         </p>
       ) : null}
@@ -346,8 +346,8 @@ const JobOutcome = ({ job }: { readonly job: JobProjection }): ReactNode => {
   const { snapshot } = job;
   if (snapshot.state === 'failed' && snapshot.failure) {
     return (
-      <div role='alert' className='mt-3 rounded-lg border border-destructive/25 bg-destructive/5 p-2 text-xs'>
-        <p className='font-medium text-destructive'>
+      <div role='alert' className='mt-3 rounded-lg border border-feature/25 bg-feature/5 p-2 text-xs'>
+        <p className='font-medium text-feature'>
           {snapshot.failure.code}
           {snapshot.failure.retryable ? ' · retryable' : ''}
         </p>
@@ -475,7 +475,7 @@ const ArtifactManifestEntry = ({
         <p className='mt-1 truncate font-mono text-muted-foreground'>{projectPath}</p>
       ) : null}
       {importError ? (
-        <p role='alert' className='mt-1 text-destructive'>
+        <p role='alert' className='mt-1 text-feature'>
           {importError}
         </p>
       ) : null}

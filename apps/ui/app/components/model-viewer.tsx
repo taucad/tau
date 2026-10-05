@@ -48,9 +48,9 @@ const previewFailureSummary = 'Preview could not load. Open the project to see t
 export function RuntimeErrorOverlay({ message, summary, className }: RuntimeErrorOverlayProps): React.JSX.Element {
   return (
     <div role='alert' aria-label='CAD runtime error' className={cn('flex items-center gap-2', className)}>
-      <AlertTriangle aria-hidden className='size-5 shrink-0 text-destructive' strokeWidth={1.5} />
+      <AlertTriangle aria-hidden className='size-5 shrink-0 text-feature' strokeWidth={1.5} />
       {summary === undefined ? (
-        <span className='max-w-sm text-sm text-destructive'>{message}</span>
+        <span className='max-w-sm text-sm text-feature'>{message}</span>
       ) : (
         <div className='flex max-w-sm flex-col gap-1'>
           <p className='text-sm'>{summary}</p>
@@ -197,7 +197,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
         <RuntimeErrorOverlay
           message={error.message}
           summary={previewFailureSummary}
-          className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-destructive/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'
+          className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-feature/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'
         />
       ) : null}
     </div>

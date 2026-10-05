@@ -269,7 +269,7 @@ function codedErrorCard({
     return (
       <ChatErrorCard
         className={className}
-        tone='destructive'
+        tone='warning'
         icon={CircleAlert}
         title='Tau could not start this turn'
         description={error.message}

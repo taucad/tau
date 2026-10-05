@@ -411,7 +411,7 @@ function CameraView({
           </figcaption>
         ) : null}
       </figure>
-      {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+      {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
     </div>
   );
 }
@@ -664,7 +664,7 @@ export function ControlCenterStage({
           {reason}
         </p>
       ))}
-      {action.error ? <PrintNotice tone='destructive'>{action.error}</PrintNotice> : null}
+      {action.error ? <PrintNotice tone='error'>{action.error}</PrintNotice> : null}
     </PrintStage>
   );
 }

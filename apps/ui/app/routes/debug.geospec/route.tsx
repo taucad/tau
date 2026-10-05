@@ -535,12 +535,12 @@ function GeoSpecLab(): React.JSX.Element {
                             ) : engine === 'combined-mt' && !mt ? (
                               <span className='text-muted-foreground'>No qualified MT assets</span>
                             ) : cellError ? (
-                              <span role='alert' className='text-destructive'>
+                              <span role='alert' className='text-feature'>
                                 Error: {cellError}
                               </span>
                             ) : latest ? (
                               <>
-                                <strong className={hasUnexpectedMismatch ? 'text-destructive' : 'text-foreground'}>
+                                <strong className={hasUnexpectedMismatch ? 'text-feature' : 'text-foreground'}>
                                   {[...new Set(rows.map(({ status }) => status))].join(' / ')}
                                 </strong>
                                 <div className='font-mono text-xs text-muted-foreground'>
@@ -620,7 +620,7 @@ function GeoSpecLab(): React.JSX.Element {
           {busy ? `Running ${progress}…` : ''}
         </div>
         {error ? (
-          <p role='alert' className='text-sm text-destructive'>
+          <p role='alert' className='text-sm text-feature'>
             {error}
           </p>
         ) : null}

@@ -93,6 +93,9 @@ export const bambuAcceptedContainers: readonly MachineAcceptedContainer[] = acce
 /** The qualification profile of the controls proven on the workshop X1C. @internal */
 export const bambuX1cHardwareProfile = 'x1c-hardware-2026-10';
 const proven: MachineActionQualification = { status: 'qualified', profileId: bambuX1cHardwareProfile };
+/** The profile of the controls the operator proved from the Print pane in Testing mode. @internal */
+export const bambuX1cTestingProfile = 'x1c-testing-2026-10-05';
+const provenInTesting: MachineActionQualification = { status: 'qualified', profileId: bambuX1cTestingProfile };
 
 const anyState: readonly MachineStatus[] = ['ready', 'active', 'held'];
 const idle: readonly MachineStatus[] = ['ready'];
@@ -145,6 +148,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
             when: anyState,
             effects: ['illumination'],
             schema: standardMachineActions['switch.set'].schema,
+            qualification: provenInTesting,
           }),
         ]
       : []),
@@ -316,6 +320,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       consequence: 'The toolhead and the bed move to their end stops.',
       confirms: 'acknowledgement',
       schema: z.strictObject({}),
+      ...(x1c ? { qualification: provenInTesting } : {}),
     }),
     standardMachineAction({
       id: 'motion.jog',
@@ -540,6 +545,15 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
             attachments: ['filament', 'camera'],
             evidence:
               'qualify-x1c print-cube runs on the workshop X1C (machines production readiness program): start, pause, resume, cancel, stop and camera still.',
+          },
+          {
+            id: bambuX1cTestingProfile,
+            environment: 'hardware',
+            model: 'X1C',
+            firmware: ['01.12.00.00'],
+            attachments: ['filament', 'camera'],
+            evidence:
+              'The operator switched the chamber light and homed the axes on the workshop X1C from the Print pane in Testing mode (2026-10-05).',
           },
         ]
       : [],

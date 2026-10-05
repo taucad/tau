@@ -2,7 +2,12 @@ import { fffProcessOf, isUnattendedAction, parseMachineManifest } from '@taucad/
 import { describe, expect, it } from 'vitest';
 
 import { bambuA1MiniMachine, bambuMachine } from '#bambu.machine.js';
-import { bambuA1MiniManifest, bambuX1cHardwareProfile, bambuX1cManifest } from '#bambu.manifest.js';
+import {
+  bambuA1MiniManifest,
+  bambuX1cHardwareProfile,
+  bambuX1cManifest,
+  bambuX1cTestingProfile,
+} from '#bambu.manifest.js';
 import { bambuA1MiniSimulatorMachine, bambuSimulatorMachine } from '#bambu.simulator.js';
 
 const actionIds = (manifest: typeof bambuX1cManifest): string[] =>
@@ -27,7 +32,7 @@ describe('bambuX1cManifest', () => {
     ]);
   });
 
-  it('should declare every action once, with the run actions hardware-qualified and the rest designed', () => {
+  it('should declare every action once, with the run actions, the light and homing hardware-qualified and the rest designed', () => {
     const ids = actionIds(bambuX1cManifest);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toEqual([
@@ -54,14 +59,22 @@ describe('bambuX1cManifest', () => {
       'motion:motion.jog',
       'controller:bambu.printer.calibrate',
     ]);
-    const qualified = bambuX1cManifest.actions
-      .filter(({ qualification }) => qualification.status === 'qualified')
-      .map(({ id }) => id);
-    expect(qualified).toEqual(['run.pause', 'run.resume', 'run.cancel']);
-    for (const action of bambuX1cManifest.actions.filter(({ qualification }) => qualification.status === 'qualified')) {
-      expect(action.qualification).toEqual({ status: 'qualified', profileId: bambuX1cHardwareProfile });
-    }
-    expect(bambuX1cManifest.qualifications.map(({ id }) => id)).toEqual([bambuX1cHardwareProfile]);
+    const qualified = Object.fromEntries(
+      bambuX1cManifest.actions
+        .filter(({ qualification }) => qualification.status === 'qualified')
+        .map(({ id, qualification }) => [id, qualification.status === 'qualified' ? qualification.profileId : '']),
+    );
+    expect(qualified).toEqual({
+      'switch.set': bambuX1cTestingProfile,
+      'run.pause': bambuX1cHardwareProfile,
+      'run.resume': bambuX1cHardwareProfile,
+      'run.cancel': bambuX1cHardwareProfile,
+      'motion.home': bambuX1cTestingProfile,
+    });
+    expect(bambuX1cManifest.qualifications.map(({ id }) => id)).toEqual([
+      bambuX1cHardwareProfile,
+      bambuX1cTestingProfile,
+    ]);
   });
 
   it('should let an agent switch the light, change the speed and pause, and nothing that moves material', () => {

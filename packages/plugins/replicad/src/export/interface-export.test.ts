@@ -13,6 +13,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
+import type { AnyShape } from 'replicad';
 import type { OpenCascadeInstance, Quantity_ColorRGBA, TDF_Label } from 'replicad-opencascadejs';
 import { esbuildBundler } from '@taucad/esbuild';
 import { assertRenderingSuccess, createTestGeometry } from '@taucad/runtime-testing';
@@ -114,7 +115,7 @@ describe('exportSTEP visual materials', () => {
     ]);
     const { oc, materials } = withRecordedVisualMaterials(getOC());
 
-    exportSTEP(oc, shapes);
+    exportSTEP(oc, shapes as Array<(typeof shapes)[number] & { shape: AnyShape }>);
 
     const geometries = render(shapes).filter(
       (geometry): geometry is GeometryReplicad => geometry.format === 'replicad',

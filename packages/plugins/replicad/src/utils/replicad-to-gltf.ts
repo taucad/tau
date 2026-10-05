@@ -134,10 +134,15 @@ function buildNodeFromReplicadGeometry({
 
   const resolvedName = resolveShapeName({ index: nodeIndex, name: geometry.name, source: 'generated' });
   const nodeName = uniqueShapeName(resolvedName, usedNames);
-  const componentId = uniqueComponentId(
-    formatNamedComponentId(nodeName, nodeIndex) ?? formatComponentId(nodeIndex),
-    usedIds,
-  );
+  const storedId = geometry.sourceComponentId;
+  if (storedId !== undefined && (storedId.length === 0 || usedIds.has(storedId))) {
+    throw new TypeError('Stored native/display source component IDs must be nonempty and unique.');
+  }
+  const componentId =
+    storedId ?? uniqueComponentId(formatNamedComponentId(nodeName, nodeIndex) ?? formatComponentId(nodeIndex), usedIds);
+  if (storedId !== undefined) {
+    usedIds.set(storedId, 1);
+  }
   const selector = formatNodeSelector(nodeIndex);
   const faceOccurrences = faces.faceGroups.map((group, faceId) => ({ ...group, faceId }));
   const compactedFaces =
@@ -149,7 +154,7 @@ function buildNodeFromReplicadGeometry({
         })
       : undefined;
   const faceGroups = compactedFaces?.groups ?? [];
-  const edgeGroups = edges.edgeGroups.map((group, edgeId) => ({ ...group, edgeId }));
+  const edgeGroups = edges.lines.length > 0 ? edges.edgeGroups.map((group, edgeId) => ({ ...group, edgeId })) : [];
 
   if (compactedFaces && compactedFaces.indices.length > 0) {
     const positions = transformVertexArray(faces.vertices, transformOptions);
@@ -290,12 +295,13 @@ function buildNodeFromReplicadGeometry({
       faceGroups,
       edgeGroups,
       sourceRefs: { kernelId: 'replicad', faceGroupUnit: 'indices-v1', edgeGroupUnit: 'xyz-scalars-v1' },
+      ...(geometry.physical ? { physical: geometry.physical } : {}),
       capabilities: {
         exports: [
           { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },
-          { fidelity: 'brep', formats: ['step', 'stp', 'brep', 'dxf'], available: true },
+          { fidelity: 'brep', formats: ['step', 'stp', 'brep', 'dxf'], available: geometry.meshOnly !== true },
         ],
-        hasPreciseTopology: true,
+        hasPreciseTopology: geometry.meshOnly !== true,
       },
     },
   };

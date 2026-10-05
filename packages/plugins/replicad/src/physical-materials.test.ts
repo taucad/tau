@@ -196,7 +196,7 @@ describe('standard physical materials through Replicad and the runtime', () => {
       textures: [{ source: 0 }],
     };
     const serialized = serialize({ handle: nativeHandle }, createMockKernelRuntime(), context);
-    const restored = deserialize({ serialized: structuredClone(serialized) }, createMockKernelRuntime(), context);
+    const restored = await deserialize({ serialized: structuredClone(serialized) }, createMockKernelRuntime(), context);
     expect(restored.images?.[0]?.data).toEqual(image);
     expect(restored.shapes[0]?.material).toEqual(material);
     const geometries = render(normalizeRenderShapes(restored.shapes)).filter(

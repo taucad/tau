@@ -64,11 +64,18 @@ import type { OcctModuleFactory, OcErrorContext, OcTracingSummary } from '@tauca
 import { isDrawingShape, normalizeRenderShapes, render } from '#utils/render-output.js';
 import * as tauReplicadAnnotations from '#annotations/index.js';
 import { exportSTEP } from '#export/interface-export.js';
-import { resolveEntryInterfaces, rotateNativeEntryToYup } from '#interface-resolution.js';
+import {
+  bindSourceComponentIds,
+  resolvePublishedComponentBindings,
+  placePublishedEntry,
+  resolveEntryInterfaces,
+  rotateNativeEntryToYup,
+} from '#interface-resolution.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
 import type { GlbResources } from '@taucad/geometry-core';
 
 import { convertReplicadGeometriesToGltf } from '#utils/replicad-to-gltf.js';
+import { measureReplicadPhysical } from '#utils/physical-evidence.js';
 import { createReplicadComputeReuse, replicadComputeNamespace, replicadModuleFacade } from '#replicad-compute-reuse.js';
 import type { ReplicadComputeReuseAdapter } from '#replicad-compute-reuse.js';
 
@@ -88,7 +95,30 @@ import {
  * Live Replicad native handle: the shapes `main` returned, the model's GLB resources and the entry module's
  * `mechanism` export, normalised to plain JSON. All are export-facing evidence, so all survive a snapshot.
  */
-type NativeHandle = GlbResources & { shapes: NativeHandleEntry[]; mechanism?: unknown };
+type NativeHandle = GlbResources & { shapes: NativeHandleEntry[]; mechanism?: unknown; componentIdentityVersion?: 1 };
+const liveShapeReferences = new WeakMap<NativeHandleEntry['shape'], number>();
+const distinctShapes = (entries: readonly NativeHandleEntry[]) => new Set(entries.map(({ shape }) => shape));
+const retainNativeHandle = (handle: NativeHandle): NativeHandle => {
+  for (const shape of distinctShapes(handle.shapes)) {
+    liveShapeReferences.set(shape, (liveShapeReferences.get(shape) ?? 0) + 1);
+  }
+  return handle;
+};
+const releaseShapeEntries = (entries: readonly NativeHandleEntry[], retained: boolean): void => {
+  for (const shape of distinctShapes(entries)) {
+    const remaining = retained ? (liveShapeReferences.get(shape) ?? 1) - 1 : 0;
+    if (remaining > 0) {
+      liveShapeReferences.set(shape, remaining);
+      continue;
+    }
+    liveShapeReferences.delete(shape);
+    try {
+      shape.delete();
+    } catch {
+      // Authored code may already have released a returned native wrapper.
+    }
+  }
+};
 
 /**
  * Advertise the views and exports supported by one retained model.
@@ -145,6 +175,7 @@ const geistRegularUrl = new URL('fonts/Geist-Regular.ttf', import.meta.url).href
 const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.url).href;
 const replicadSingleWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/wasm')).href;
 const replicadMultiWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/multi/wasm')).href;
+const manifoldWasmUrl = new URL(import.meta.resolve('manifold-3d/manifold.wasm')).href;
 
 // Content digests of the two shipped OCCT binaries. The digest of a shipped asset is a
 // build-time constant, so reading and SHA-256ing 23 MB again at every init (~20 ms of cold
@@ -154,6 +185,11 @@ const replicadWasmDigests = {
   single: 'sha256:ca354769b158aa38479e6fa59bc7511d0fa896059ce755a0cff85261a637ee6a',
   multi: 'sha256:31b1fdd375d8257218bdeb155f7aeaf34e074f8ddb01a815ea7ebfa85d4e6444',
 } as const;
+// 1.4.4 mints stored native/display component binding; the current multi-thread variant caps the OCCT pool at four.
+const kernelVersion = '1.4.4';
+// Native snapshot compatibility changes only with native codec/semantics, independently of display caches.
+const nativeSnapshotCompatibilityVersion = '1.4.2';
+const legacyNativeSnapshotCompatibilityVersion = '1.4.1';
 
 // =============================================================================
 // WASM variant selection
@@ -284,9 +320,78 @@ type ReplicadContext = {
   computeReuse: ReplicadComputeReuseAdapter<ReplicadLibrary> | undefined;
   computeProducer: ComputeAction['producer'];
   computeEnvironment: CacheValue;
+  exactProviderVersion: string | undefined;
+  legacyExactProviderVersion: string | undefined;
 };
 
 type ReplicadLibrary = typeof ReplicadModule;
+const isMeshShape = (shape: unknown, library: ReplicadLibrary): shape is ReplicadModule.MeshShape =>
+  shape instanceof library.MeshShape;
+const manifoldInitializations = new WeakMap<ReplicadLibrary, Promise<void>>();
+const ensureManifold = async (library: ReplicadLibrary): Promise<void> => {
+  try {
+    library.getManifold();
+    return;
+  } catch {
+    // The Manifold WASM module is needed only for mesh import or restoration.
+  }
+  let initialization = manifoldInitializations.get(library);
+  if (!initialization) {
+    initialization = (async () => {
+      const { default: createManifold } = await import('manifold-3d');
+      library.setManifold(await createManifold({ locateFile: () => manifoldWasmUrl }));
+    })();
+    manifoldInitializations.set(library, initialization);
+  }
+  try {
+    await initialization;
+  } catch (error) {
+    manifoldInitializations.delete(library);
+    throw error;
+  }
+};
+const serializeMeshShape = (shape: ReplicadModule.MeshShape) => {
+  // Manifold documents getMesh() as the lossless input to a new Manifold(mesh).
+  // Replicad's display mesh() recalculates normals and may split welded vertices.
+  const mesh = shape.wrapped.getMesh();
+  return {
+    numProp: mesh.numProp,
+    vertProperties: [...mesh.vertProperties],
+    triVerts: [...mesh.triVerts],
+    mergeFromVert: [...mesh.mergeFromVert],
+    mergeToVert: [...mesh.mergeToVert],
+    runIndex: [...mesh.runIndex],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the native Manifold/Replicad API field name.
+    runOriginalID: [...mesh.runOriginalID],
+    runTransform: [...mesh.runTransform],
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the native Manifold/Replicad API field name.
+    faceID: [...mesh.faceID],
+    halfedgeTangent: [...mesh.halfedgeTangent],
+    tolerance: mesh.tolerance,
+  };
+};
+const restoreMeshShape = (
+  mesh: ReturnType<typeof serializeMeshShape>,
+  library: ReplicadLibrary,
+): ReplicadModule.MeshShape => {
+  const manifold = library.getManifold();
+  const data = new manifold.Mesh({
+    numProp: mesh.numProp,
+    vertProperties: new Float32Array(mesh.vertProperties),
+    triVerts: new Uint32Array(mesh.triVerts),
+    mergeFromVert: new Uint32Array(mesh.mergeFromVert),
+    mergeToVert: new Uint32Array(mesh.mergeToVert),
+    runIndex: new Uint32Array(mesh.runIndex),
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the native Manifold/Replicad API field name.
+    runOriginalID: new Uint32Array(mesh.runOriginalID),
+    runTransform: new Float32Array(mesh.runTransform),
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the native Manifold/Replicad API field name.
+    faceID: new Uint32Array(mesh.faceID),
+    halfedgeTangent: new Float32Array(mesh.halfedgeTangent),
+    tolerance: mesh.tolerance,
+  });
+  return new library.MeshShape(new manifold.Manifold(data));
+};
 
 // Match both the public package name (`replicad/`) and the aliased pnpm path
 // (`@taulabs/replicad/`) — the package.json aliases `replicad` to the Tau fork,
@@ -382,10 +487,21 @@ async function loadTextFile(url: string): Promise<string | undefined> {
 // Module registration helpers
 // =============================================================================
 
-function registerReplicadModule(runtime: KernelServices, replicadLibrary: ReplicadLibrary): void {
+function registerReplicadModule(
+  runtime: KernelServices,
+  tracedLibrary: ReplicadLibrary,
+  replicadLibrary: ReplicadLibrary,
+): void {
   registerKernelModule(runtime, {
     name: 'replicad',
-    exports: replicadLibrary,
+    exports: {
+      ...tracedLibrary,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the native Manifold/Replicad API field name.
+      importSTLAsMesh: async (stlBlob: Blob) => {
+        await ensureManifold(replicadLibrary);
+        return tracedLibrary.importSTLAsMesh(stlBlob);
+      },
+    },
     version: '0.19.1',
     globalName: 'replicad',
   });
@@ -476,14 +592,14 @@ export const replicadKernel = defineKernel({
   detectImport: replicadDetectPattern,
   builtinModuleNames: ['replicad', '@taucad/replicad/annotations'],
   name: 'ReplicadKernel',
-  version: '1.4.0',
+  version: kernelVersion,
   optionsSchema: replicadOptionsSchema,
   views: {
     model: {
       title: 'Model',
       mimeType: 'model/gltf-binary',
       optionsSchema: replicadRenderSchema,
-      content: ['includeEdges', 'includeTopology'],
+      content: ['includeEdges', 'includeTopology', 'includePhysical'],
     },
     drawing: { title: 'Drawing', mimeType: 'image/svg+xml', instances: true },
   },
@@ -497,14 +613,14 @@ export const replicadKernel = defineKernel({
       mimeType: 'model/gltf-binary',
       extension: 'glb',
       optionsSchema: replicadExportSchemas.glb,
-      content: ['includeEdges', 'includeTopology'],
+      content: ['includeEdges', 'includeTopology', 'includePhysical'],
     },
     gltf: {
       title: 'glTF JSON',
       mimeType: 'model/gltf+json',
       extension: 'gltf',
       optionsSchema: replicadExportSchemas.gltf,
-      content: ['includeEdges', 'includeTopology'],
+      content: ['includeEdges', 'includeTopology', 'includePhysical'],
     },
   },
   async initialize(options, runtime): Promise<ReplicadContext> {
@@ -614,6 +730,18 @@ export const replicadKernel = defineKernel({
       wasmVariant: resolved.variant,
       lengthUnit: 'millimeter',
     };
+    const snapshotProviderVersion = (version: string): string | undefined =>
+      identifiedAssets && identifiedAssets.length > 0
+        ? JSON.stringify({
+            kernelVersion: version,
+            producer: computeProducer.version,
+            wasmVariant: resolved.variant,
+            assets: identifiedAssets,
+          })
+        : undefined;
+    // Explicit legacy compatibility uses the same verified implementation assets, units and producer.
+    const exactProviderVersion = snapshotProviderVersion(nativeSnapshotCompatibilityVersion);
+    const legacyExactProviderVersion = snapshotProviderVersion(legacyNativeSnapshotCompatibilityVersion);
     const computeReuse = computeReuseEnabled
       ? createReplicadComputeReuse({
           library: replicadLibrary,
@@ -629,7 +757,7 @@ export const replicadKernel = defineKernel({
       policy: replicadLibraryTracePolicy,
       defaultScope: 'kernel-setup',
     });
-    registerReplicadModule(runtime, libraryTrace.tracedLibrary);
+    registerReplicadModule(runtime, libraryTrace.tracedLibrary, replicadLibrary);
 
     const librarySourceMapCache = new Map<string, SourceMapConsumer | undefined>();
     if (withSourceMapping) {
@@ -662,6 +790,8 @@ export const replicadKernel = defineKernel({
       computeReuse,
       computeProducer,
       computeEnvironment,
+      exactProviderVersion,
+      legacyExactProviderVersion,
     };
   },
 
@@ -794,8 +924,10 @@ export const replicadKernel = defineKernel({
             stage: 'brep',
           });
           try {
-            return normalizeRenderShapes(model ? modelShapes : shapes, defaultName).map((entry) =>
-              resolveEntryInterfaces(entry, context.replicadLibrary),
+            return bindSourceComponentIds(
+              normalizeRenderShapes(model ? modelShapes : shapes, defaultName).map((entry) =>
+                resolveEntryInterfaces(entry, context.replicadLibrary),
+              ),
             );
           } finally {
             interfaceSpan.end();
@@ -805,10 +937,11 @@ export const replicadKernel = defineKernel({
         runtime.signal.throwIfAborted();
         const handle: NativeHandle = {
           shapes: entries,
+          componentIdentityVersion: 1,
           mechanism,
           ...(model ? { images: model.images, textures: model.textures, samplers: model.samplers } : {}),
         };
-        return { handle, issues, ...offersFor(handle) };
+        return { handle: retainNativeHandle(handle), issues, ...offersFor(handle) };
       });
 
       if (runtime.compute.status !== 'on' || !context.computeReuse) {
@@ -875,12 +1008,16 @@ export const replicadKernel = defineKernel({
     try {
       const { tessellation } = options;
       const includeEdges = content?.includeEdges === true;
-      const includeTopology = content?.includeTopology === true;
+      const includePhysical = content?.includePhysical === true;
+      const includeTopology = content?.includeTopology === true || includePhysical;
       let mechanismIssues: KernelIssue[] = [];
-      const namedShapes = modelShapes.map((entry, index) => ({
-        ...entry,
-        name: resolveShapeName({ index, name: entry.name, source: 'authored' }),
-      }));
+      const namedShapes = await Promise.all(
+        modelShapes.map(async (entry, index) => ({
+          ...entry,
+          name: resolveShapeName({ index, name: entry.name, source: 'authored' }),
+          ...(includePhysical ? { physical: await measureReplicadPhysical(entry, context.openCascade) } : {}),
+        })),
+      );
 
       let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
       const renderedShapes = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
@@ -996,14 +1133,20 @@ export const replicadKernel = defineKernel({
 
             const { linearTolerance, angularTolerance } = options.tessellation;
             const { coordinateSystem, unit } = options;
-            const namedShapes = entries.map((shapeConfig, index) => ({
-              ...shapeConfig,
-              name: resolveShapeName({
-                index,
-                name: shapeConfig.name,
-                source: 'generated',
-              }),
-            }));
+            const includePhysical = content?.includePhysical === true;
+            const namedShapes = await Promise.all(
+              entries.map(async (shapeConfig, index) => ({
+                ...shapeConfig,
+                name: resolveShapeName({
+                  index,
+                  name: shapeConfig.name,
+                  source: 'generated',
+                }),
+                ...(includePhysical
+                  ? { physical: await measureReplicadPhysical(shapeConfig, context.openCascade) }
+                  : {}),
+              })),
+            );
             const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
               render(namedShapes, {
                 tessellation: { linearTolerance, angularTolerance },
@@ -1035,7 +1178,7 @@ export const replicadKernel = defineKernel({
                         edges: { ...geometry.edges, lines: [] },
                       })),
                 format: exportId,
-                includeTauTopology: content?.includeTopology === true,
+                includeTauTopology: content?.includeTopology === true || includePhysical,
                 logger: runtime.logger,
                 coordinateSystem,
                 unit,
@@ -1059,10 +1202,20 @@ export const replicadKernel = defineKernel({
               return noGeometryExportError();
             }
 
+            const brepEntries = entries.filter(
+              (entry): entry is NativeHandleEntry & { shape: AnyShape } =>
+                entry.shape instanceof context.replicadLibrary.Shape,
+            );
+            if (brepEntries.length !== entries.length) {
+              return stepExportError(
+                new TypeError('STEP export requires native BRep shapes; imported meshes are display-only.'),
+              );
+            }
+
             const { coordinateSystem } = options;
 
             const shapes =
-              coordinateSystem === 'y-up' ? entries.map((entry) => rotateNativeEntryToYup(entry)) : entries;
+              coordinateSystem === 'y-up' ? brepEntries.map((entry) => rotateNativeEntryToYup(entry)) : brepEntries;
 
             let stepBlob: Blob;
             try {
@@ -1098,11 +1251,15 @@ export const replicadKernel = defineKernel({
 
             const result = await Promise.all(
               shapes.map(async ({ shape, name }, index) => {
-                const bytes = await buildExportBytes(shape, {
-                  tolerance: linearTolerance,
-                  angularTolerance: angularToleranceRad,
-                  binary: options.binary,
-                });
+                const bytes = await buildExportBytes(
+                  shape,
+                  {
+                    tolerance: linearTolerance,
+                    angularTolerance: angularToleranceRad,
+                    binary: options.binary,
+                  },
+                  context.replicadLibrary,
+                );
                 return createExportFile('stl', resolveShapeName({ index, name, source: 'generated' }), bytes);
               }),
             );
@@ -1125,50 +1282,158 @@ export const replicadKernel = defineKernel({
     });
   },
 
-  serializeHandle({ handle }, runtime) {
-    return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () => serializeReplicadHandle(handle));
+  serializeHandle({ handle }, runtime, context) {
+    return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () =>
+      handle.shapes.every(
+        ({ shape }) => shape instanceof context.replicadLibrary.Shape || isMeshShape(shape, context.replicadLibrary),
+      )
+        ? serializeReplicadHandle(handle, context.replicadLibrary)
+        : undefined,
+    );
   },
 
-  deserializeHandle({ serialized }, _runtime, context): NativeHandle {
+  async deserializeHandle({ serialized }, _runtime, context): Promise<NativeHandle> {
+    if (!serialized) {
+      throw new TypeError('Replicad native-handle snapshot is unavailable.');
+    }
+    if (serialized.shapes.some((entry) => entry.kind === 'mesh')) {
+      await ensureManifold(context.replicadLibrary);
+    }
+    const shapes: NativeHandleEntry[] = [];
+    try {
+      for (const entry of serialized.shapes) {
+        shapes.push({
+          shape:
+            entry.kind === 'brep'
+              ? context.replicadLibrary.deserializeShape(entry.brep)
+              : restoreMeshShape(entry.mesh, context.replicadLibrary),
+          ...entry.metadata,
+        });
+      }
+      return retainNativeHandle({ ...serialized, shapes });
+    } catch (error) {
+      releaseShapeEntries(shapes, false);
+      throw error;
+    }
+  },
+
+  async composeHandles({ occurrences }, _runtime, context): Promise<NativeHandle> {
+    const shapes: NativeHandleEntry[] = [];
+    try {
+      // Preflight every identity join before native cloning; legacy ordinary composition keeps its prior route.
+      const canonicalIds = new Set<string>();
+      const bound = occurrences.map((occurrence) => {
+        if (occurrence.components === undefined && occurrence.displaySourceComponentIds === undefined) {
+          return occurrence.handle.shapes.map((entry) => ({
+            entry,
+            worldTransform: occurrence.worldTransform,
+            occurrencePath: occurrence.occurrencePath,
+          }));
+        }
+        return resolvePublishedComponentBindings(occurrence).map(({ entry, placement }) => {
+          if (canonicalIds.has(placement.componentId)) {
+            throw new TypeError('Pinned canonical component IDs are duplicated across occurrences.');
+          }
+          canonicalIds.add(placement.componentId);
+          return {
+            entry,
+            worldTransform: placement.worldTransform,
+            occurrencePath: occurrence.occurrencePath,
+            componentId: placement.componentId,
+          };
+        });
+      });
+      for (const entries of bound) {
+        for (const entry of entries) {
+          shapes.push(placePublishedEntry({ ...entry, library: context.replicadLibrary, oc: context.openCascade }));
+        }
+      }
+      return retainNativeHandle({ shapes });
+    } catch (error) {
+      releaseShapeEntries(shapes, false);
+      throw error;
+    }
+  },
+
+  describeHandleSnapshot({ serialized }, _runtime, context) {
+    if (
+      !context.exactProviderVersion ||
+      !serialized ||
+      serialized.shapes.length === 0 ||
+      serialized.shapes.some((entry) => entry.kind !== 'brep' || entry.brep.length === 0)
+    ) {
+      return undefined;
+    }
+    // Only the historical absence of the marker is codec-v1; an explicit unknown/invalid marker is not legacy.
+    const hasIdentityVersion = Object.hasOwn(serialized, 'componentIdentityVersion');
+    if (hasIdentityVersion && serialized.componentIdentityVersion !== 1) {
+      return undefined;
+    }
+    const bound = hasIdentityVersion;
+    if (bound) {
+      const ids = serialized.shapes.map(({ metadata }) => metadata.sourceComponentId);
+      if (ids.some((id) => typeof id !== 'string' || id.length === 0) || new Set(ids).size !== ids.length) {
+        return undefined;
+      }
+    }
+    const providerVersion = bound ? context.exactProviderVersion : context.legacyExactProviderVersion;
+    if (!providerVersion) {
+      return undefined;
+    }
     return {
-      ...serialized,
-      shapes: serialized.shapes.map((entry) => ({
-        shape: context.replicadLibrary.deserializeShape(entry.brep),
-        ...entry.metadata,
-      })),
+      provider: '@taucad/replicad',
+      providerVersion,
+      codec: 'replicad.native-handle-msgpack',
+      codecVersion: bound ? '2' : '1',
+      unit: 'millimeter',
+      linearToleranceMm: 0,
+      angularToleranceRad: 0,
     };
+  },
+  releaseHandle({ handle }) {
+    releaseShapeEntries(handle.shapes, true);
   },
 });
 
-const serializeReplicadHandle = (nativeHandle: NativeHandle) => ({
-  images: nativeHandle.images,
-  textures: nativeHandle.textures,
-  samplers: nativeHandle.samplers,
+const serializeReplicadHandle = (nativeHandle: NativeHandle, library: ReplicadLibrary) => ({
+  ...(nativeHandle.componentIdentityVersion === 1 ? ({ componentIdentityVersion: 1 } as const) : {}),
+  ...(nativeHandle.images === undefined ? {} : { images: nativeHandle.images }),
+  ...(nativeHandle.textures === undefined ? {} : { textures: nativeHandle.textures }),
+  ...(nativeHandle.samplers === undefined ? {} : { samplers: nativeHandle.samplers }),
   shapes: nativeHandle.shapes.map((entry) => ({
-    brep: entry.shape.serialize(),
+    ...(isMeshShape(entry.shape, library)
+      ? ({
+          kind: 'mesh',
+          mesh: serializeMeshShape(entry.shape),
+        } as const)
+      : ({ kind: 'brep', brep: entry.shape.serialize() } as const)),
     metadata: {
-      name: entry.name,
-      color: entry.color,
-      opacity: entry.opacity,
-      metalness: entry.metalness,
-      roughness: entry.roughness,
-      material: entry.material,
-      density: entry.density,
-      resolvedInterfaces: entry.resolvedInterfaces,
+      ...(entry.sourceComponentId === undefined ? {} : { sourceComponentId: entry.sourceComponentId }),
+      ...(entry.name === undefined ? {} : { name: entry.name }),
+      ...(entry.color === undefined ? {} : { color: entry.color }),
+      ...(entry.opacity === undefined ? {} : { opacity: entry.opacity }),
+      ...(entry.metalness === undefined ? {} : { metalness: entry.metalness }),
+      ...(entry.roughness === undefined ? {} : { roughness: entry.roughness }),
+      ...(entry.material === undefined ? {} : { material: entry.material }),
+      ...(entry.density === undefined ? {} : { density: entry.density }),
+      ...(entry.resolvedInterfaces === undefined ? {} : { resolvedInterfaces: entry.resolvedInterfaces }),
     },
   })),
-  mechanism: nativeHandle.mechanism,
+  ...(nativeHandle.mechanism === undefined ? {} : { mechanism: nativeHandle.mechanism }),
 });
 
 async function buildExportBytes(
-  shape: AnyShape,
+  shape: AnyShape | ReplicadModule.MeshShape,
   tessellation: {
     tolerance: number;
     angularTolerance: number;
     binary?: boolean;
   },
+  library: ReplicadLibrary,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const blob = shape.blobSTL(tessellation.binary ? { ...tessellation, binary: true } : tessellation);
+  const blob = isMeshShape(shape, library)
+    ? shape.blobSTL({ binary: tessellation.binary })
+    : shape.blobSTL(tessellation.binary ? { ...tessellation, binary: true } : tessellation);
   return new Uint8Array(await blob.arrayBuffer());
 }
 

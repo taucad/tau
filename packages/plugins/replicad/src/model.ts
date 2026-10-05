@@ -1,4 +1,4 @@
-import type { AnyShape } from 'replicad';
+import type { AnyShape, MeshShape } from 'replicad';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 import type { InterfaceDeclarations } from '#annotations/index.js';
 
@@ -6,7 +6,8 @@ import type { InterfaceDeclarations } from '#annotations/index.js';
  * A shape with optional display and material metadata for rendering.
  *
  * Returned from a Replicad model's `main()` function to control per-shape
- * appearance in both GLTF preview rendering and STEP export.
+ * appearance in GLTF preview rendering. Native BRep shapes also support STEP;
+ * imported MeshShape geometry remains mesh-only.
  *
  * @public
  *
@@ -27,10 +28,10 @@ import type { InterfaceDeclarations } from '#annotations/index.js';
  * ```
  */
 export type ShapeConfig = {
-  shape: AnyShape;
+  shape: AnyShape | MeshShape;
   name?: string;
   strokeType?: string;
-  /** Physical density in g/cm³ for STEP mass computation. */
+  /** Authored density in g/cm³ for physical inspection and native STEP export. */
   density?: number;
   interfaces?: InterfaceDeclarations;
 } & (

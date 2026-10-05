@@ -179,8 +179,26 @@ const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 const cancelledCode = '0500-400E';
 
 /** `ams_status` main states (bits 8–15; DevDefs.h:41-52). */
-const amsMain = { idle: 0, filamentChange: 1, readingTag: 2 } as const;
+const amsMain = {
+  idle: 0,
+  filamentChange: 1,
+  readingTag: 2,
+  assist: 3,
+  calibration: 4,
+  coldPull: 7,
+  selfCheck: 0x10,
+} as const;
 const mainOf = (status: BambuStatus | undefined): number => Math.floor((status?.amsStatus ?? 0) / 256);
+/* Busy is a procedure in progress, as Bambu Studio reads it (StatusPanel.cpp:6030-6130): a loaded AMS sits in
+ * ASSIST (3), not IDLE, once a load finishes. */
+const busyMains: ReadonlySet<number> = new Set([
+  amsMain.filamentChange,
+  amsMain.readingTag,
+  amsMain.calibration,
+  amsMain.coldPull,
+  amsMain.selfCheck,
+]);
+const isFilamentBusy = (status: BambuStatus | undefined): boolean => busyMains.has(mainOf(status));
 const stepOf = (status: BambuStatus | undefined): number => (status?.amsStatus ?? 0) % 256;
 
 const liveStates: ReadonlySet<string> = new Set(['RUNNING', 'PREPARE', 'SLICING', 'PAUSE', 'INIT']);
@@ -537,7 +555,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
   const machineStatus = (): MachineReport['state'] => {
     const native = status?.gcodeState;
     const words = native === undefined ? {} : { native };
-    const busy = mainOf(status) !== amsMain.idle;
+    const busy = isFilamentBusy(status);
     switch (native) {
       case 'IDLE':
       case 'FINISH':
@@ -976,9 +994,9 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       case 'filament:material.load':
       case 'filament:material.unload':
       case 'filament:bambu.ams.read-tag': {
-        return main === amsMain.idle
-          ? undefined
-          : unavailable('MACHINE_ACTION_BUSY', 'Wait for the filament system to finish.');
+        return isFilamentBusy(status)
+          ? unavailable('MACHINE_ACTION_BUSY', 'Wait for the filament system to finish.')
+          : undefined;
       }
       case 'filament:interaction.respond': {
         return change?.promptStep === undefined
@@ -1171,7 +1189,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         if (slot === undefined || parameters['toolheadId'] !== 'tool-0') {
           return invalid;
         }
-        if (mainOf(status) !== amsMain.idle) {
+        if (isFilamentBusy(status)) {
           return refusal('MACHINE_ACTION_BUSY', 'Wait for the filament system to finish.');
         }
         if (trayOf(slot)?.state === 'empty') {
@@ -1195,7 +1213,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         if (slot === undefined || parameters['toolheadId'] !== 'tool-0') {
           return invalid;
         }
-        if (mainOf(status) !== amsMain.idle) {
+        if (isFilamentBusy(status)) {
           return refusal('MACHINE_ACTION_BUSY', 'Wait for the filament system to finish.');
         }
         if (status?.currentMaterialSlot !== slot) {
@@ -1583,10 +1601,10 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         return when(percent !== undefined && Math.abs(percent / 100 - Number(parameters['ratio'])) <= 1 / 15 + 0.001);
       }
       case 'filament:material.load': {
-        if (main === amsMain.idle && status?.currentMaterialSlot === slot && slot !== undefined) {
+        if (!isFilamentBusy(status) && status?.currentMaterialSlot === slot && slot !== undefined) {
           return confirmed;
         }
-        return entry?.sawActivity === true && main === amsMain.idle
+        return entry?.sawActivity === true && !isFilamentBusy(status)
           ? {
               status: 'refuted',
               code: 'MACHINE_ACTION_ABORTED',
@@ -1595,10 +1613,10 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
           : pending;
       }
       case 'filament:material.unload': {
-        if (main === amsMain.idle && status?.currentMaterialSlot === undefined) {
+        if (!isFilamentBusy(status) && status?.currentMaterialSlot === undefined) {
           return confirmed;
         }
-        return entry?.sawActivity === true && main === amsMain.idle
+        return entry?.sawActivity === true && !isFilamentBusy(status)
           ? {
               status: 'refuted',
               code: 'MACHINE_ACTION_ABORTED',
@@ -1647,7 +1665,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         return when(entry?.sawActivity === true && main !== amsMain.readingTag);
       }
       case 'filament:bambu.filament.abort': {
-        return when(main === amsMain.idle);
+        return when(main !== amsMain.filamentChange);
       }
       default: {
         return pending;

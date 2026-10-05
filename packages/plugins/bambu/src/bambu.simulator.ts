@@ -681,7 +681,14 @@ export const createBambuSimulator = async (
       plate_type: 'textured_plate',
       wifi_signal: '-45dBm',
       sdcard: true,
-      ams_status: procedure ? (procedure.kind === 'read-tag' ? 0x02_00 : 0x01_00 + (step?.code ?? 0)) : 0,
+      // An X1C with an AMS spool in the toolhead reports ASSIST (3), not IDLE, between procedures.
+      ams_status: procedure
+        ? procedure.kind === 'read-tag'
+          ? 0x02_00
+          : 0x01_00 + (step?.code ?? 0)
+        : trayNow < 254
+          ? 0x03_00
+          : 0,
       cali_version: caliVersion,
       flag3: 0b1000,
       ...(x1c ? { fun: developerMode ? '0' : '20000000' } : {}),

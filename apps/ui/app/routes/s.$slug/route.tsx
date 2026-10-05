@@ -333,7 +333,7 @@ export const PortableShareSurface = (): React.JSX.Element => {
             <p className='text-xs text-muted-foreground'>
               {sharePasswordLimits.minBytes}–{sharePasswordLimits.maxBytes} UTF-8 bytes required.
             </p>
-            {passwordError ? <p className='text-sm text-destructive'>{passwordError}</p> : null}
+            {passwordError ? <p className='text-sm text-feature'>{passwordError}</p> : null}
           </div>
           <Button className='mt-5 w-full' type='submit' disabled={!passwordValid || opening}>
             {opening ? <Loader className='size-4' /> : null}

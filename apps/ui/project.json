@@ -290,6 +290,9 @@
     "typecheck": {
       "dependsOn": ["typegen"]
     },
+    "lint": {
+      "dependsOn": ["typegen"]
+    },
     "test:e2e": {
       "executor": "nx:run-commands",
       "metadata": {

@@ -80,6 +80,7 @@ describe('startDesktopUpdater', () => {
     ['unpackaged', { packaged: false }],
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
     ['switched off', { environment: { TAU_DESKTOP_UPDATES: 'off' } }],
+    ['a staging package', { channel: 'staging' }],
   ] as const)('does nothing when %s', async (_case, overrides) => {
     const disabled = options(overrides);
     const updater = startDesktopUpdater(disabled);

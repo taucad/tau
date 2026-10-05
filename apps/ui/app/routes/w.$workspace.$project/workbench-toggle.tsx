@@ -35,6 +35,21 @@ const WorkbenchFrame = ({ count }: { readonly count?: number }): React.JSX.Eleme
   </span>
 );
 
+type Point = { readonly x: number; readonly y: number };
+type Box = Pick<DOMRect, 'bottom' | 'left' | 'right' | 'top'>;
+
+const isInBox = (point: Point, box: Box): boolean =>
+  point.x >= box.left && point.x <= box.right && point.y >= box.top && point.y <= box.bottom;
+
+/** Whether `point` lies inside the triangle `a`, `b`, `c` (edges included). */
+const isInTriangle = (point: Point, [a, b, c]: readonly [Point, Point, Point]): boolean => {
+  const side = (p: Point, q: Point, r: Point): number => (p.x - r.x) * (q.y - r.y) - (q.x - r.x) * (p.y - r.y);
+  const d1 = side(point, a, b);
+  const d2 = side(point, b, c);
+  const d3 = side(point, c, a);
+  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+};
+
 /** Subscribe to tab identity, not pixel-only Dockview layout notifications. */
 const usePanels = (api: DockviewApi | undefined): readonly IDockviewPanel[] => {
   const subscribe = useCallback(
@@ -89,19 +104,14 @@ export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: Workbenc
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const canList = !isOpen && panels.length > 0;
 
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // The last pointer position over the button: the safe triangle's apex.
+  const apex = useRef<Point | undefined>(undefined);
+
   const cancelClose = (): void => {
     clearTimeout(closeTimer.current);
-  };
-
-  const scheduleClose = (): void => {
-    cancelClose();
-    isSuppressed.current = false;
-    if (isHoverOpen.current) {
-      // Milliseconds: lets the pointer cross the gap between the button and the menu.
-      closeTimer.current = setTimeout(() => {
-        setIsMenuOpen(false);
-      }, 150);
-    }
+    closeTimer.current = undefined;
   };
 
   const closeMenu = (): void => {
@@ -112,6 +122,60 @@ export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: Workbenc
 
   useEffect(() => cancelClose, []);
 
+  /*
+   * A hover-opened list stays open while the pointer is over the button, the
+   * list, the band between them, or the triangle from where it last was on
+   * the button to the list's top edge (the path to a far row or the search
+   * field crosses the header first). Anywhere else, it closes once the pointer
+   * settles. Geometry rather than pointerleave: the desktop window's drag band
+   * can swallow pointer events in between, and a pause must not count as leaving.
+   */
+  useEffect(() => {
+    if (!isMenuOpen) {
+      return undefined;
+    }
+    const onPointerMove = (event: PointerEvent): void => {
+      const trigger = triggerRef.current?.getBoundingClientRect();
+      const content = contentRef.current?.getBoundingClientRect();
+      if (!isHoverOpen.current || !trigger || !content) {
+        return;
+      }
+      const point = { x: event.clientX, y: event.clientY };
+      if (isInBox(point, trigger)) {
+        apex.current = point;
+      }
+      const gap = {
+        left: Math.min(trigger.left, content.left),
+        top: trigger.bottom,
+        right: Math.max(trigger.right, content.right),
+        bottom: content.top,
+      };
+      const isInside =
+        isInBox(point, trigger) ||
+        isInBox(point, content) ||
+        isInBox(point, gap) ||
+        (apex.current !== undefined &&
+          isInTriangle(point, [
+            apex.current,
+            { x: content.left, y: content.top },
+            { x: content.right, y: content.top },
+          ]));
+      if (isInside) {
+        cancelClose();
+      } else {
+        // Milliseconds: forgives a pointer that grazes the corridor's edge on its way in.
+        closeTimer.current ??= setTimeout(() => {
+          closeTimer.current = undefined;
+          setIsMenuOpen(false);
+        }, 150);
+      }
+    };
+    document.addEventListener('pointermove', onPointerMove);
+    return () => {
+      document.removeEventListener('pointermove', onPointerMove);
+    };
+  }, [isMenuOpen]);
+
   return (
     <DockviewTabsComboBox
       panels={panels}
@@ -120,12 +184,14 @@ export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: Workbenc
       description='Search and open a workbench tab.'
       isOpen={isMenuOpen && canList}
       popoverProperties={{
+        ref: contentRef,
+        // The gap below the header matches the list's inset from the window's right edge.
+        sideOffset: 8,
         onPointerDown() {
+          // Pressing into the list (search field or a row) keeps it open until dismissed.
           isHoverOpen.current = false;
           cancelClose();
         },
-        onPointerEnter: cancelClose,
-        onPointerLeave: scheduleClose,
         onOpenAutoFocus(event) {
           // A hover peek leaves focus where it was; Down Arrow moves it into the search field.
           if (isHoverOpen.current) {
@@ -150,6 +216,7 @@ export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: Workbenc
       }}
     >
       <PaneButton
+        ref={triggerRef}
         className='aria-pressed:text-foreground'
         aria-label='Toggle Workbench lane'
         aria-pressed={isOpen}
@@ -161,10 +228,13 @@ export function WorkbenchToggle({ isOpen, onOpenChange, api, getIcon }: Workbenc
             return;
           }
           cancelClose();
+          apex.current = { x: event.clientX, y: event.clientY };
           isHoverOpen.current = true;
           setIsMenuOpen(true);
         }}
-        onPointerLeave={scheduleClose}
+        onPointerLeave={() => {
+          isSuppressed.current = false;
+        }}
         onClick={(event) => {
           // The click belongs to the lane, not the menu.
           event.preventDefault();

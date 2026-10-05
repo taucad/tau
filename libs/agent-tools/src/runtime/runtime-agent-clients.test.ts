@@ -178,6 +178,20 @@ describe('createRuntimeAgentClients', () => {
     }
   });
 
+  it('should open every request-scoped document unwatched', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture);
+
+    await clients.kernelClient.evaluateModel({ targetFile: 'main.ts' });
+    await clients.graphics.exportModel({ targetFile: 'main.ts', to: 'stl' });
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single' });
+
+    expect(fixture.open).toHaveBeenCalledTimes(3);
+    for (const [input] of fixture.open.mock.calls) {
+      expect(input.watch).toBe(false);
+    }
+  });
+
   it('keeps concurrent captures and exports scoped to their source documents', async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();

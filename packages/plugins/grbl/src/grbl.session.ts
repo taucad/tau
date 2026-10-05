@@ -1561,7 +1561,7 @@ export const openGrblSession = async (
         id: options.id,
         name: options.name,
         vendor: manifest.identity.vendor,
-        model: manifest.identity.model,
+        model: manifest.identity.displayName,
         firmware: controller.firmware,
         capabilities: {
           connection: manifest.connection,

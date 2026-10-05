@@ -1116,7 +1116,20 @@ for (const backend of ['webgl', 'webgpu'] as const) {
       }
       expect(edgeTriangles).toBeGreaterThan(0);
       if (backend === 'webgl' && index === 0) {
-        const tagged = await readCurrentSectionTaggedResources(held(sectionHeld));
+        // Clearing the cut may replace the draw candidate while preserving the root, unit, pose and revision.
+        const postClear = await readState();
+        expect({
+          root: postClear.root,
+          unit: postClear.draw.unitId,
+          pose: postClear.draw.poseRevision,
+          revision: postClear.draw.presentationRevision,
+        }).toEqual({
+          root: sectionHeld.root,
+          unit: sectionHeld.draw.unitId,
+          pose: sectionHeld.draw.poseRevision,
+          revision: sectionHeld.draw.presentationRevision,
+        });
+        const tagged = await readCurrentSectionTaggedResources(held(postClear));
         const section = tagged.sectionViewHelper;
         expect(section.geometryCount).toBe(0);
         expect(section.materialCount).toBe(0);

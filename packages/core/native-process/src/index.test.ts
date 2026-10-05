@@ -510,6 +510,22 @@ ${keepAlive}`;
     expect(sandbox.reset).toHaveBeenCalledTimes(2);
   });
 
+  it('should not take a sandbox lease when cleanup lands while resources are being verified', async () => {
+    const closing = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'a'}}`));
+    const pending = request(closing.session);
+    // Let the queued start reach its resource hashing before the session closes.
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    await closing.session.cleanup();
+    await expect(pending).rejects.toThrow(/session is closed/);
+
+    const next = fixture(respondingWorker(`{protocolVersion:1,requestId:request.requestId,result:{value:'b'}}`));
+    await expect(request(next.session)).resolves.toEqual({ value: 'b' });
+    await next.session.cleanup();
+    expect(sandbox.reset).toHaveBeenCalledOnce();
+  });
+
   it('should refuse to spawn the worker when the sandbox cannot wrap it', async () => {
     for (const failure of [new Error('profile rejected'), 'launcher exited']) {
       const value = fixture(

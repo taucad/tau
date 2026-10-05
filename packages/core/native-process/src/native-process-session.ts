@@ -444,6 +444,10 @@ export class NativeProcessSession<Issue> {
       return;
     }
     await this.verifyResources();
+    // cleanup() may have run during verification; a lease taken now would never be released.
+    if (this.closed) {
+      throw new Error(`${this.options.sessionName} session is closed.`);
+    }
     if (!this.sandboxLeased) {
       this.sandboxLeased = true;
       acquireNativeSandbox();

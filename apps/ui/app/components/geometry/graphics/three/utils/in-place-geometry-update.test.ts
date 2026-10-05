@@ -392,15 +392,30 @@ describe('in-place geometry update', () => {
     expect(normal.version).toBe(versions[1]);
   });
 
-  it('should refuse scene transform or ownership changes before writing buffers', async () => {
+  it('should update a captured rigid node pose without uploading unchanged geometry', async () => {
     const bytes = buildGlb();
     const gltf = await present(bytes);
     const targets = captureInPlaceGeometryTargets({ scene: gltf.scene, associations: gltf.parser.associations, bytes });
-    const changed = editJson(buildGlb({ lift: 5 }), (json) => {
+    const surface = findSurface(gltf.scene);
+    const { geometry, material } = surface;
+    const { index } = geometry;
+    const positions = geometry.getAttribute('position') as BufferAttribute;
+    const { version } = positions;
+    const unchanged = snapshotGeometry(geometry);
+    const changed = editJson(buildGlb(), (json) => {
       json.nodes![0]!.translation = [2, 0, 0];
     });
-    expect(applyInPlaceGeometryUpdate(targets!, changed)).toBe(false);
-    expect(findSurface(gltf.scene).geometry.getAttribute('position').getZ(2)).toBe(0);
+    expect(applyInPlaceGeometryUpdate(targets!, changed)).toBe(true);
+    expect(targets!.nodes[0]!.object.matrix.elements[12]).toBe(2);
+    expect(surface.getWorldPosition(new Vector3()).x).toBe(2);
+    expect(new Box3().setFromObject(gltf.scene).min.x).toBe(2);
+    expect(new Box3().setFromObject(gltf.scene).max.x).toBe(3);
+    expect(surface.geometry).toBe(geometry);
+    expect(surface.material).toBe(material);
+    expect(geometry.index).toBe(index);
+    expect(surface.geometry.getAttribute('position')).toBe(positions);
+    expect(positions.version).toBe(version);
+    unchanged();
   });
 
   it('should refuse a result whose index buffer changed', async () => {

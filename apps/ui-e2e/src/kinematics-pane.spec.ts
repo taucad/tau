@@ -1135,171 +1135,205 @@ for (const backend of ['webgl', 'webgpu'] as const) {
     await openKinematicsPane();
     const pinBefore = await readMotionPinBytes();
     const activityBefore = await readMotionActivity();
-    const thumbnailsBefore = await readMotionHeadless();
-    verifyNoMotionThumbnailJobs(thumbnailsBefore, thumbnailsBefore);
-    const intervalStart = await target.evaluate(() => Math.max(Date.now(), performance.timeOrigin + performance.now()));
-    let intervalEnd: number | undefined;
-    let activityAtIntervalEnd: MotionActivityObservation | undefined;
+    expect(
+      await target.evaluate(() =>
+        (globalThis as MotionBrowserWindow).__TAU_SECTION_VIEW_TEST__?.armCadTelemetryIngress(),
+      ),
+    ).toBe(true);
     try {
-      await target.click(selectors.getByRole('button', { name: /^Animation:/u }));
-      await target.click(selectors.getByTestId('kinematics-animation-sweep'));
-      const play = selectors.getByTestId('kinematics-play');
-      const awaitedResult6 = await target.read(play);
-      if (awaitedResult6.visible) {
-        await target.click(play);
-      }
-      await target.expectVisible(selectors.getByTestId('kinematics-pause'));
-      const samples = await target.evaluate(async () => {
-        const browser: MotionBrowserWindow = globalThis;
-        const captures: Array<{ draw: MotionDrawObservation; coordinates: Readonly<Record<string, number>> }> = [];
-        for (let frame = 0; frame < 120; frame += 1) {
-          // Explicit test observation only; no production per-frame capture or telemetry hook.
-          /* oxlint-disable-next-line no-await-in-loop -- The real UI/pose observation is ordered on one viewport; the next gesture or frame depends on this settled result. */
-          await new Promise<void>((resolve) => {
-            requestAnimationFrame(() => {
-              resolve();
+      const thumbnailsBefore = await readMotionHeadless();
+      verifyNoMotionThumbnailJobs(thumbnailsBefore, thumbnailsBefore);
+      const intervalStart = await target.evaluate(() =>
+        Math.max(Date.now(), performance.timeOrigin + performance.now()),
+      );
+      let intervalEnd: number | undefined;
+      let activityAtIntervalEnd: MotionActivityObservation | undefined;
+      let ingressAtIntervalEnd: MotionActivityObservation['telemetryEntries'] = [];
+      try {
+        await target.click(selectors.getByRole('button', { name: /^Animation:/u }));
+        await target.click(selectors.getByTestId('kinematics-animation-sweep'));
+        const play = selectors.getByTestId('kinematics-play');
+        const awaitedResult6 = await target.read(play);
+        if (awaitedResult6.visible) {
+          await target.click(play);
+        }
+        await target.expectVisible(selectors.getByTestId('kinematics-pause'));
+        const samples = await target.evaluate(async () => {
+          const browser: MotionBrowserWindow = globalThis;
+          const captures: Array<{ draw: MotionDrawObservation; coordinates: Readonly<Record<string, number>> }> = [];
+          for (let frame = 0; frame < 120; frame += 1) {
+            // Explicit test observation only; no production per-frame capture or telemetry hook.
+            /* oxlint-disable-next-line no-await-in-loop -- The real UI/pose observation is ordered on one viewport; the next gesture or frame depends on this settled result. */
+            await new Promise<void>((resolve) => {
+              requestAnimationFrame(() => {
+                resolve();
+              });
             });
-          });
-          const capture = browser.__TAU_SECTION_VIEW_TEST__?.getCommittedDrawInventory();
-          if (!capture) {
-            throw new Error('The presented root or pose became incoherent during animation.');
-          }
-          const state = browser.__TAU_KINEMATICS_TEST__?.getState(capture.unitId);
-          if (!state) {
-            throw new Error('Missing actual pose coordinates.');
-          }
-          captures.push({ draw: capture, coordinates: state.coordinates });
-        }
-        return captures;
-      });
-      intervalEnd = await target.evaluate(() => Math.min(Date.now(), performance.timeOrigin + performance.now()));
-      activityAtIntervalEnd = await readMotionActivity();
-      expect(new Set(samples.map(({ draw }) => draw.poseRevision)).size).toBeGreaterThan(1);
-      const canonicalToRender = before.canonicalToRenderMatrix;
-      const renderToCanonical = invertMotionMatrix(canonicalToRender);
-      for (const { draw: sample, coordinates } of samples) {
-        const displacements = expectedMotionLinkDisplacements(before.mechanism!, coordinates);
-        for (const [linkId, link] of Object.entries(before.mechanism!.links)) {
-          for (const id of link.components) {
-            if (!moving.includes(id)) {
-              continue;
+            const capture = browser.__TAU_SECTION_VIEW_TEST__?.getCommittedDrawInventory();
+            if (!capture) {
+              throw new Error('The presented root or pose became incoherent during animation.');
             }
-            const initial = rows.find(({ componentId }) => componentId === id)!;
-            const actual = sample.surfaces.find(({ componentId }) => componentId === id)!;
-            const expected = multiplyMotionMatrices(
-              multiplyMotionMatrices(
-                multiplyMotionMatrices(canonicalToRender, displacements.get(linkId)!),
-                renderToCanonical,
-              ),
-              initial.drawMatrixWorld,
-            );
-            expect(
-              Math.max(...actual.drawMatrixWorld.map((value, index) => Math.abs(value - expected[index]!))),
-              id,
-            ).toBeLessThan(1e-6);
+            const state = browser.__TAU_KINEMATICS_TEST__?.getState(capture.unitId);
+            if (!state) {
+              throw new Error('Missing actual pose coordinates.');
+            }
+            captures.push({ draw: capture, coordinates: state.coordinates });
           }
+          return captures;
+        });
+        intervalEnd = await target.evaluate(() => Math.min(Date.now(), performance.timeOrigin + performance.now()));
+        const intervalActivity = await target.evaluate(() => {
+          const api = (globalThis as MotionBrowserWindow).__TAU_SECTION_VIEW_TEST__;
+          const activity = api?.getCadActivity();
+          if (!activity) {
+            throw new Error('The exact current CAD activity owner retired during animation.');
+          }
+          return { activity, ingress: api!.readCadTelemetryIngress() };
+        });
+        activityAtIntervalEnd = intervalActivity.activity;
+        ingressAtIntervalEnd = intervalActivity.ingress;
+        expect(new Set(samples.map(({ draw }) => draw.poseRevision)).size).toBeGreaterThan(1);
+        const canonicalToRender = before.canonicalToRenderMatrix;
+        const renderToCanonical = invertMotionMatrix(canonicalToRender);
+        for (const { draw: sample, coordinates } of samples) {
+          const displacements = expectedMotionLinkDisplacements(before.mechanism!, coordinates);
+          for (const [linkId, link] of Object.entries(before.mechanism!.links)) {
+            for (const id of link.components) {
+              if (!moving.includes(id)) {
+                continue;
+              }
+              const initial = rows.find(({ componentId }) => componentId === id)!;
+              const actual = sample.surfaces.find(({ componentId }) => componentId === id)!;
+              const expected = multiplyMotionMatrices(
+                multiplyMotionMatrices(
+                  multiplyMotionMatrices(canonicalToRender, displacements.get(linkId)!),
+                  renderToCanonical,
+                ),
+                initial.drawMatrixWorld,
+              );
+              expect(
+                Math.max(...actual.drawMatrixWorld.map((value, index) => Math.abs(value - expected[index]!))),
+                id,
+              ).toBeLessThan(1e-6);
+            }
+          }
+          expect(sample.canonicalToRenderMatrix).toEqual(before.canonicalToRenderMatrix);
+          expect(sample.key).toBe(before.key);
+          expect(sample.presentationRevision).toBe(before.presentationRevision);
+          expect(sample.candidateSceneId).toBe(before.candidateSceneId);
+          expect(sample.unitId).toBe(before.unitId);
+          expect(motionResourceSignature(sample)).toBe(initialResources);
         }
-        expect(sample.canonicalToRenderMatrix).toEqual(before.canonicalToRenderMatrix);
-        expect(sample.key).toBe(before.key);
-        expect(sample.presentationRevision).toBe(before.presentationRevision);
-        expect(sample.candidateSceneId).toBe(before.candidateSceneId);
-        expect(sample.unitId).toBe(before.unitId);
-        expect(motionResourceSignature(sample)).toBe(initialResources);
-      }
-      for (const id of moving) {
-        const original = rows.find(({ componentId }) => componentId === id)!;
-        expect(
-          samples.some(({ draw: sample }) =>
-            sample.surfaces.some(
-              (row) =>
-                row.componentId === id &&
-                row.drawMatrixWorld.some((value, index) => Math.abs(value - original.drawMatrixWorld[index]!) > 1e-8),
+        for (const id of moving) {
+          const original = rows.find(({ componentId }) => componentId === id)!;
+          expect(
+            samples.some(({ draw: sample }) =>
+              sample.surfaces.some(
+                (row) =>
+                  row.componentId === id &&
+                  row.drawMatrixWorld.some((value, index) => Math.abs(value - original.drawMatrixWorld[index]!) > 1e-8),
+              ),
             ),
-          ),
-          id,
-        ).toBe(true);
+            id,
+          ).toBe(true);
+        }
+        await target.screenshot(selectors.getByCss('body'), `c6-native100-${backend}-moving.png`);
+      } finally {
+        const pause = selectors.getByTestId('kinematics-pause');
+        const awaitedResult7 = await target.read(pause);
+        if (awaitedResult7.visible) {
+          await target.click(pause);
+        }
       }
-      await target.screenshot(selectors.getByCss('body'), `c6-native100-${backend}-moving.png`);
-    } finally {
-      const pause = selectors.getByTestId('kinematics-pause');
-      const awaitedResult7 = await target.read(pause);
-      if (awaitedResult7.visible) {
-        await target.click(pause);
-      }
-    }
-    // The explicit exact consumer is the real dispatcher drain boundary. It is never called per animation frame.
-    const firstAncestry = sources[0]!.ancestry;
-    const pair = sources
-      .filter(
-        ({ ancestry, component }) =>
-          JSON.stringify(ancestry) === JSON.stringify(firstAncestry) &&
-          (component.name === 'Link c0 b0' || component.name === 'Link c4 b0'),
-      )
-      .map(({ component }) => component.id);
-    expect(pair).toHaveLength(2);
-    await explicitMotionMinimum(pair[0]!, pair[1]!);
-    const activityAfter = await readMotionActivity();
-    await target.writeArtifact(
-      `c6-native100-${backend}-activity-snapshots.json`,
-      JSON.stringify({
-        intervalStart,
-        intervalEnd,
+      // The explicit exact consumer is the real dispatcher drain boundary. It is never called per animation frame.
+      const firstAncestry = sources[0]!.ancestry;
+      const pair = sources
+        .filter(
+          ({ ancestry, component }) =>
+            JSON.stringify(ancestry) === JSON.stringify(firstAncestry) &&
+            (component.name === 'Link c0 b0' || component.name === 'Link c4 b0'),
+        )
+        .map(({ component }) => component.id);
+      expect(pair).toHaveLength(2);
+      await explicitMotionMinimum(pair[0]!, pair[1]!);
+      const { activity: activityAfter, ingress: ingressAfter } = await target.evaluate(() => {
+        const api = (globalThis as MotionBrowserWindow).__TAU_SECTION_VIEW_TEST__;
+        const activity = api?.getCadActivity();
+        if (!activity) {
+          throw new Error('The exact current CAD activity owner retired after native drain.');
+        }
+        return { activity, ingress: api!.stopCadTelemetryIngress() };
+      });
+      await target.writeArtifact(
+        `c6-native100-${backend}-activity-snapshots.json`,
+        JSON.stringify({
+          intervalStart,
+          intervalEnd,
+          before: activityBefore,
+          during: activityAtIntervalEnd,
+          after: activityAfter,
+          ingress: { during: ingressAtIntervalEnd, after: ingressAfter },
+        }),
+      );
+      const thumbnailsAfter = await readMotionHeadless();
+      const drained = verifyDrainedMotionActivity({
         before: activityBefore,
         during: activityAtIntervalEnd,
         after: activityAfter,
-      }),
-    );
-    const thumbnailsAfter = await readMotionHeadless();
-    const drained = verifyDrainedMotionActivity({
-      before: activityBefore,
-      during: activityAtIntervalEnd,
-      after: activityAfter,
-      intervalStart,
-      intervalEnd,
-    });
-    expect(Object.values(drained.counts)).toEqual(Array.from({ length: Object.keys(drained.counts).length }, () => 0));
-    expect(verifyNoMotionThumbnailJobs(thumbnailsBefore, thumbnailsAfter)).toEqual({
-      admitted: 0,
-      completed: 0,
-      transcodes: 0,
-    });
-    expect(await readMotionPinBytes()).toEqual(pinBefore);
-    expect(await downloadMotionSource('motion/parts/chain.js')).toBe(authorBefore);
-    expect(await downloadMotionSource('motion/assembly.json')).toBe(authoredAssemblyBefore);
-    const activityWindowFacts = ({ telemetryEntries }: MotionActivityObservation) => {
-      const spanIds = telemetryEntries
-        .map((entry) => Number(entry.detail?.['spanId']))
-        .filter((value) => Number.isSafeInteger(value));
-      return {
-        entries: telemetryEntries.length,
-        roots: telemetryEntries.filter((entry) => entry.detail?.['parentSpanId'] === undefined).length,
-        firstSpanId: spanIds.length > 0 ? Math.min(...spanIds) : null,
-        frontierSpanId: spanIds.length > 0 ? Math.max(...spanIds) : null,
+        ingress: { during: ingressAtIntervalEnd, after: ingressAfter },
+        intervalStart,
+        intervalEnd,
+      });
+      expect(Object.values(drained.counts)).toEqual(
+        Array.from({ length: Object.keys(drained.counts).length }, () => 0),
+      );
+      expect(verifyNoMotionThumbnailJobs(thumbnailsBefore, thumbnailsAfter)).toEqual({
+        admitted: 0,
+        completed: 0,
+        transcodes: 0,
+      });
+      expect(await readMotionPinBytes()).toEqual(pinBefore);
+      expect(await downloadMotionSource('motion/parts/chain.js')).toBe(authorBefore);
+      expect(await downloadMotionSource('motion/assembly.json')).toBe(authoredAssemblyBefore);
+      const activityWindowFacts = ({ telemetryEntries }: MotionActivityObservation) => {
+        const spanIds = telemetryEntries
+          .map((entry) => Number(entry.detail?.['spanId']))
+          .filter((value) => Number.isSafeInteger(value));
+        return {
+          entries: telemetryEntries.length,
+          roots: telemetryEntries.filter((entry) => entry.detail?.['parentSpanId'] === undefined).length,
+          firstSpanId: spanIds.length > 0 ? Math.min(...spanIds) : null,
+          frontierSpanId: spanIds.length > 0 ? Math.max(...spanIds) : null,
+        };
       };
-    };
-    await target.writeArtifact(
-      `c6-native100-${backend}-drained-work.json`,
-      JSON.stringify(
-        {
-          intervalStart,
-          intervalEnd,
-          drained,
-          activityWindows: {
-            before: activityWindowFacts(activityBefore),
-            during: activityWindowFacts(activityAtIntervalEnd),
-            after: activityWindowFacts(activityAfter),
+      await target.writeArtifact(
+        `c6-native100-${backend}-drained-work.json`,
+        JSON.stringify(
+          {
+            intervalStart,
+            intervalEnd,
+            drained,
+            activityWindows: {
+              before: activityWindowFacts(activityBefore),
+              during: activityWindowFacts(activityAtIntervalEnd),
+              after: activityWindowFacts(activityAfter),
+            },
+            requestedRenderId: activityAfter.lastRequestedRenderId,
+            settledRenderId: activityAfter.lastSettledRenderId,
+            immutablePin: pinBefore,
+            actualAuthorSourceDigest: authorBefore,
+            authoredAssemblyDigest: authoredAssemblyBefore,
           },
-          requestedRenderId: activityAfter.lastRequestedRenderId,
-          settledRenderId: activityAfter.lastSettledRenderId,
-          immutablePin: pinBefore,
-          actualAuthorSourceDigest: authorBefore,
-          authoredAssemblyDigest: authoredAssemblyBefore,
-        },
-        undefined,
-        2,
-      ),
-    );
-    // These are actual retained CPU/job records, not GPU bindings/uploads, independent AP242 bytes, pixels or timing qualification.
+          undefined,
+          2,
+        ),
+      );
+      // These are actual retained CPU/job records, not GPU bindings/uploads, independent AP242 bytes, pixels or timing qualification.
+    } finally {
+      await target.evaluate(() =>
+        (globalThis as MotionBrowserWindow).__TAU_SECTION_VIEW_TEST__?.clearCadTelemetryIngress(),
+      );
+    }
   });
 }
 

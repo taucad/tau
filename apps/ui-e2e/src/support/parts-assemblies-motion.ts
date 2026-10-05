@@ -276,6 +276,10 @@ export type MotionBrowserWindow = typeof globalThis & {
       | undefined;
     getMeasureState(): MotionMeasureObservation;
     getCadActivity(): MotionActivityObservation | undefined;
+    armCadTelemetryIngress(): boolean;
+    readCadTelemetryIngress(): readonly TelemetrySpanRecord[];
+    stopCadTelemetryIngress(): readonly TelemetrySpanRecord[];
+    clearCadTelemetryIngress(): void;
     getGraphicsBackend(): 'webgl' | 'webgpu';
     getModelComponents(): ReadonlyArray<Readonly<{ id: string; name: string }>>;
     hideModelComponent(componentId: string): void;
@@ -547,6 +551,7 @@ export function verifyDrainedMotionActivity(
     before: MotionActivityObservation;
     during: MotionActivityObservation;
     after: MotionActivityObservation;
+    ingress?: Readonly<{ during: readonly TelemetrySpanRecord[]; after: readonly TelemetrySpanRecord[] }>;
     intervalStart: number;
     intervalEnd: number;
   }>,
@@ -557,7 +562,60 @@ export function verifyDrainedMotionActivity(
   observedSpans: number;
   counts: Readonly<Record<string, number>>;
 }> {
-  const { before, during, after, intervalStart, intervalEnd } = input;
+  const { before, intervalStart, intervalEnd, ingress } = input;
+  const ordinary = [before, input.during, input.after] as const;
+  if (ingress) {
+    const baseline = before.telemetryEntries.findLast(({ name }) => name === 'export.exportSTEP');
+    const identity = (entry: TelemetrySpanRecord): string =>
+      `${entry.origin.instance}:${String(entry.detail?.['spanId'])}`;
+    if (
+      ingress.after.length > 2000 ||
+      ingress.during.length > ingress.after.length ||
+      ingress.during.some((entry, index) => JSON.stringify(entry) !== JSON.stringify(ingress.after[index]))
+    ) {
+      throw new Error('Telemetry ingress was truncated, replaced or reached its evidence capacity.');
+    }
+    if (
+      ingress.after.some(
+        (entry) =>
+          entry.origin.instance !== baseline?.origin.instance ||
+          entry.origin.label !== baseline.origin.label ||
+          entry.epoch !== baseline.epoch,
+      )
+    ) {
+      throw new Error('Runtime producer changed during the observed interval.');
+    }
+    const captured = new Map([...before.telemetryEntries, ...ingress.after].map((entry) => [identity(entry), entry]));
+    for (const [snapshot, frontier] of [
+      [input.during, ingress.during],
+      [input.after, ingress.after],
+    ] as const) {
+      const known = new Map([...before.telemetryEntries, ...frontier].map((entry) => [identity(entry), entry]));
+      if (
+        snapshot.telemetryEntries.some((entry) => JSON.stringify(known.get(identity(entry))) !== JSON.stringify(entry))
+      ) {
+        throw new Error('Ordinary CAD activity disagrees with captured telemetry ingress.');
+      }
+      const ordinaryIds = snapshot.telemetryEntries
+        .filter((entry) => entry.origin.instance === baseline?.origin.instance)
+        .map((entry) => Number(entry.detail?.['spanId']));
+      const expectedIds = [...known.values()]
+        .filter((entry) => entry.origin.instance === baseline?.origin.instance)
+        .map((entry) => Number(entry.detail?.['spanId']));
+      if (Math.max(...ordinaryIds) !== Math.max(...expectedIds)) {
+        throw new Error('Ordinary CAD activity frontier disagrees with captured telemetry ingress.');
+      }
+    }
+    if (captured.size !== before.telemetryEntries.length + ingress.after.length) {
+      throw new Error('Duplicate runtime span identity.');
+    }
+  }
+  const during = ingress
+    ? { ...input.during, telemetryEntries: [...before.telemetryEntries, ...ingress.during] }
+    : input.during;
+  const after = ingress
+    ? { ...input.after, telemetryEntries: [...before.telemetryEntries, ...ingress.after] }
+    : input.after;
   const snapshots = [before, during, after] as const;
   if (!Number.isFinite(intervalStart) || !Number.isFinite(intervalEnd) || intervalEnd <= intervalStart) {
     throw new RangeError('Missing finite animation interval.');
@@ -609,7 +667,7 @@ export function verifyDrainedMotionActivity(
     throw new Error('Duplicate runtime span identity.');
   }
   if (
-    snapshots.some(
+    ordinary.some(
       (snapshot) =>
         snapshot.telemetryEntries.length >= 2000 ||
         snapshot.telemetryEntries.filter((entry) => entry.detail?.['parentSpanId'] === undefined).length > 20,

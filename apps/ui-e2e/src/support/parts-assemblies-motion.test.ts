@@ -231,6 +231,56 @@ it('should qualify the complete motion interval after exact twenty-root historic
   });
   expect(Object.values(verifyDrainedMotionActivity(clippedInterval).counts).every((count) => count === 0)).toBe(true);
 });
+it('should retain one complete post-animation batch when the actor trims more than twenty new roots', () => {
+  const ingress = [
+    ...clippedAfter.telemetryEntries,
+    ...Array.from({ length: 4 }, (_, index) => completedSpan(221 + index, 'fs.read', 45)),
+  ];
+  const after = { ...clippedAfter, telemetryEntries: ingress.slice(3) };
+  const observed = { ...clippedInterval, during: clippedBefore, after };
+  expect(ingress.filter((entry) => entry.detail?.parentSpanId === undefined)).toHaveLength(23);
+  expect(after.telemetryEntries.filter((entry) => entry.detail?.parentSpanId === undefined)).toHaveLength(20);
+  expect(after.telemetryEntries.some((entry) => entry.detail?.spanId === '198')).toBe(false);
+  expect(() => verifyDrainedMotionActivity(observed)).toThrow('lost, truncated');
+  expect(verifyDrainedMotionActivity({ ...observed, ingress: { during: [], after: ingress } })).toMatchObject({
+    beforeSpanId: 197,
+    afterSpanId: 224,
+    observedSpans: 27,
+  });
+  expect(() => verifyDrainedMotionActivity({ ...observed, ingress: { during: [], after: ingress.slice(1) } })).toThrow(
+    'Incomplete runtime span',
+  );
+  const delayed = ingress.map((entry) =>
+    entry.detail?.spanId === '210' ? { ...entry, startTime: 25, duration: 10 } : entry,
+  );
+  expect(() =>
+    verifyDrainedMotionActivity({
+      ...observed,
+      after: { ...after, telemetryEntries: delayed.slice(3) },
+      ingress: { during: [], after: delayed },
+    }),
+  ).toThrow('overlapped the actual animation interval');
+  expect(() =>
+    verifyDrainedMotionActivity({
+      ...observed,
+      ingress: {
+        during: [],
+        after: ingress.map((entry) =>
+          entry.detail?.spanId === '210' ? { ...entry, origin: { label: 'worker', instance: 'unknown' } } : entry,
+        ),
+      },
+    }),
+  ).toThrow('Runtime producer changed');
+  expect(() =>
+    verifyDrainedMotionActivity({
+      ...observed,
+      ingress: {
+        during: [],
+        after: Array.from({ length: 2001 }, (_, index) => completedSpan(index + 198, 'fs.read', 45)),
+      },
+    }),
+  ).toThrow('capacity');
+});
 it('should deny missing frontier or interval records after historical eviction', () => {
   for (const id of ['196', '197']) {
     expect(() =>

@@ -956,6 +956,10 @@ describe('committed assembly bridge registration lifetime', () => {
         } satisfies Partial<ReturnType<typeof kinematics.getSnapshot>>);
         kinematics.getSnapshot.mockReturnValue(kinematicsSnapshot);
         const previousKernelClient = cad.context.kernelClient;
+        const previousAssemblyTelemetry = cad.context.telemetryEntries;
+        const telemetryClient = mock<NonNullable<CadContext['kernelClient']>>();
+        const unsubscribeTelemetry = vi.fn();
+        telemetryClient.on.mockReturnValue(unsubscribeTelemetry);
         const previousKinematics = graphics.context.kinematicsRef;
         const previousUnitId = graphics.context.modelInteractionUnitId;
         const beforePosePresentation = { ...graphics.context.gltfPresentation };
@@ -971,7 +975,18 @@ describe('committed assembly bridge registration lifetime', () => {
           publishedAssemblyRoot: poseDisplay.root,
           admittedAssembly: poseDisplay.admitted,
           publishedAssembly: poseDisplay.admitted.publication,
-          kernelClient: mock<NonNullable<CadContext['kernelClient']>>(),
+          kernelClient: telemetryClient,
+          telemetryEntries: [
+            {
+              name: 'export.exportSTEP',
+              startTime: 1,
+              duration: 1,
+              workerTimeOrigin: 100,
+              epoch: 100,
+              origin: { label: 'worker', instance: 'held-producer' },
+              detail: { spanId: '1' },
+            },
+          ],
         } satisfies Partial<CadContext>);
         Object.assign(graphics.context, { modelInteractionUnitId: unitId, kinematicsRef: kinematics });
         Object.assign(graphics.context.gltfPresentation, {
@@ -988,6 +1003,72 @@ describe('committed assembly bridge registration lifetime', () => {
           files: [{ name: 'assembly', mimeType: 'application/step', bytes: stepBytes }],
         };
         try {
+          expect(bridge.armCadTelemetryIngress()).toBe(true);
+          const emit = telemetryClient.on.mock.calls[0]?.[1] as (batch: {
+            entries: Array<{
+              name: string;
+              startTime: number;
+              duration: number;
+              workerTimeOrigin: number;
+              detail: { spanId: string };
+            }>;
+            origin: { label: string; instance: string };
+            epoch: number;
+          }) => void;
+          emit({
+            entries: Array.from({ length: 25 }, (_, index) => ({
+              name: 'fs.read',
+              startTime: index + 2,
+              duration: 1,
+              workerTimeOrigin: 100,
+              detail: { spanId: String(index + 2) },
+            })),
+            origin: { label: 'worker', instance: 'held-producer' },
+            epoch: 100,
+          });
+          expect(bridge.readCadTelemetryIngress()).toHaveLength(25);
+          expect(
+            bridge.readCadTelemetryIngress().filter((entry) => entry.detail?.['parentSpanId'] === undefined),
+          ).toHaveLength(25);
+          expect(() => bridge.armCadTelemetryIngress()).toThrow('already armed');
+          expect(bridge.stopCadTelemetryIngress()).toHaveLength(25);
+          expect(unsubscribeTelemetry).toHaveBeenCalledOnce();
+          expect(() => bridge.readCadTelemetryIngress()).toThrow('not armed');
+          expect(bridge.armCadTelemetryIngress()).toBe(true);
+          const emitChanged = telemetryClient.on.mock.calls[1]?.[1] as typeof emit;
+          emitChanged({
+            entries: [{ name: 'fs.read', startTime: 30, duration: 1, workerTimeOrigin: 100, detail: { spanId: '27' } }],
+            origin: { label: 'worker', instance: 'replacement' },
+            epoch: 100,
+          });
+          expect(() => bridge.stopCadTelemetryIngress()).toThrow('producer changed');
+          expect(unsubscribeTelemetry).toHaveBeenCalledTimes(2);
+          expect(bridge.armCadTelemetryIngress()).toBe(true);
+          const emitOverflow = telemetryClient.on.mock.calls[2]?.[1] as typeof emit;
+          emitOverflow({
+            entries: Array.from({ length: 2001 }, (_, index) => ({
+              name: 'fs.read',
+              startTime: index + 2,
+              duration: 1,
+              workerTimeOrigin: 100,
+              detail: { spanId: String(index + 2) },
+            })),
+            origin: { label: 'worker', instance: 'held-producer' },
+            epoch: 100,
+          });
+          expect(() => bridge.stopCadTelemetryIngress()).toThrow('capacity');
+          expect(unsubscribeTelemetry).toHaveBeenCalledTimes(3);
+          expect(bridge.armCadTelemetryIngress()).toBe(true);
+          const emitRetired = telemetryClient.on.mock.calls[3]?.[1] as typeof emit;
+          Object.assign(cad.context, { kernelClient: mock<NonNullable<CadContext['kernelClient']>>() });
+          emitRetired({
+            entries: [{ name: 'fs.read', startTime: 30, duration: 1, workerTimeOrigin: 100, detail: { spanId: '27' } }],
+            origin: { label: 'worker', instance: 'held-producer' },
+            epoch: 100,
+          });
+          expect(() => bridge.stopCadTelemetryIngress()).toThrow('retired');
+          expect(unsubscribeTelemetry).toHaveBeenCalledTimes(4);
+          Object.assign(cad.context, { kernelClient: telemetryClient });
           posedDocument.exportPublished.mockResolvedValue(nativeReply);
           const legacyExport = await bridge.exportCurrentPosedAssembly();
           expect(legacyExport.canonicalIds).toEqual(posedIds);
@@ -1068,6 +1149,7 @@ describe('committed assembly bridge registration lifetime', () => {
             admittedAssembly: display.admitted,
             publishedAssembly: display.admitted.publication,
             kernelClient: previousKernelClient,
+            telemetryEntries: previousAssemblyTelemetry,
           });
           Object.assign(graphics.context, {
             kinematicsRef: previousKinematics,

@@ -70,7 +70,7 @@ import { resolveSectionViewRaycastClip } from '#components/geometry/graphics/thr
 import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import { captureGltfAssemblyPlacements } from '#components/geometry/graphics/three/react/kinematics-pose-composer.js';
 import type { KinematicsPoseUnit } from '#components/geometry/graphics/three/react/kinematics-pose-composer.js';
-import type { PublishedPartAsset } from '@taucad/runtime/types';
+import type { PublishedPartAsset, TelemetrySpanRecord } from '@taucad/runtime/types';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
   getControlsDistance,
@@ -1144,6 +1144,11 @@ export type SectionViewTestBridgeApi = Readonly<{
         }
       >
     | undefined;
+  /** Explicitly armed, bounded pre-trim telemetry from this exact current runtime client. */
+  armCadTelemetryIngress(): boolean;
+  readCadTelemetryIngress(): readonly TelemetrySpanRecord[];
+  stopCadTelemetryIngress(): readonly TelemetrySpanRecord[];
+  clearCadTelemetryIngress(): void;
   /** Existing actor calibration gesture; undefined clears to full canonical detail. */
   setAssemblyDetailCalibration(calibration: unknown): void;
   /** Current viewport/candidate records only; first-frame timings describe PRE-DRAW callbacks, not browser paint. */
@@ -1660,6 +1665,17 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
 
     let live = true;
     let backendObservationAbort: AbortController | undefined;
+    type TelemetryIngressCapture = {
+      entries: TelemetrySpanRecord[];
+      unsubscribe: () => void;
+      isCurrent: () => boolean;
+      refusal?: string;
+    };
+    let telemetryIngress: TelemetryIngressCapture | undefined;
+    const clearTelemetryIngress = (): void => {
+      telemetryIngress?.unsubscribe();
+      telemetryIngress = undefined;
+    };
     const { scene } = get();
     let armedAdmissionSceneId: string | undefined;
     let admissionObservation:
@@ -2224,6 +2240,105 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
               ...(displayedDocument ? { displayedDocument } : {}),
             }
           : undefined;
+      },
+      armCadTelemetryIngress() {
+        if (telemetryIngress) {
+          throw new Error('Telemetry ingress is already armed.');
+        }
+        const subject = bridge.getCommittedAssembly();
+        const activity = bridge.getCadActivity();
+        const client = cadRef?.getSnapshot().context.kernelClient;
+        const baseline = activity?.telemetryEntries.findLast(({ name }) => name === 'export.exportSTEP');
+        const held = subject.diagnostics;
+        const heldRoot = subject.assemblyDisplay?.root.digest;
+        if (!subject.isCurrent() || !client || !baseline || !held.projectId || !held.sourceEntryPath) {
+          return false;
+        }
+        const { origin: heldOrigin, epoch: heldEpoch } = baseline;
+        const isCurrent = (): boolean => {
+          const current = bridge.getCommittedAssembly();
+          const { diagnostics } = current;
+          return (
+            live &&
+            current.isCurrent() &&
+            cadRef.getSnapshot().context.kernelClient === client &&
+            current.assemblyDisplay?.root.digest === heldRoot &&
+            diagnostics.projectId === held.projectId &&
+            diagnostics.sourceEntryPath === held.sourceEntryPath &&
+            diagnostics.requestedRenderId === held.requestedRenderId &&
+            diagnostics.settledRenderId === held.settledRenderId &&
+            diagnostics.requestedKey === held.requestedKey &&
+            diagnostics.presentedKey === held.presentedKey &&
+            diagnostics.requestedRevision === held.requestedRevision &&
+            diagnostics.presentedRevision === held.presentedRevision
+          );
+        };
+        const capture: TelemetryIngressCapture = {
+          entries: [],
+          unsubscribe: () => undefined,
+          isCurrent,
+        };
+        telemetryIngress = capture;
+        try {
+          capture.unsubscribe = client.on('telemetry', (batch) => {
+            if (capture.refusal) {
+              return;
+            }
+            if (!isCurrent()) {
+              capture.refusal = 'Telemetry ingress owner retired or changed.';
+            } else if (
+              batch.origin.instance !== heldOrigin.instance ||
+              batch.origin.label !== heldOrigin.label ||
+              batch.epoch !== heldEpoch
+            ) {
+              capture.refusal = 'Telemetry ingress producer changed.';
+            } else if (capture.entries.length + batch.entries.length > 2000) {
+              capture.refusal = 'Telemetry ingress reached its evidence capacity.';
+            } else {
+              capture.entries.push(
+                ...batch.entries.map((entry) => ({
+                  ...entry,
+                  detail: entry.detail && { ...entry.detail },
+                  origin: { ...batch.origin },
+                  epoch: batch.epoch,
+                })),
+              );
+            }
+            if (capture.refusal) {
+              capture.entries.length = 0;
+              capture.unsubscribe();
+              capture.unsubscribe = () => undefined;
+            }
+          });
+          return true;
+        } catch (error) {
+          clearTelemetryIngress();
+          throw error;
+        }
+      },
+      readCadTelemetryIngress() {
+        const capture = telemetryIngress;
+        if (!capture) {
+          throw new Error('Telemetry ingress was not armed.');
+        }
+        if (capture.refusal) {
+          throw new Error(capture.refusal);
+        }
+        if (!capture.isCurrent()) {
+          clearTelemetryIngress();
+          throw new Error('Telemetry ingress owner retired or changed.');
+        }
+        return [...capture.entries];
+      },
+      stopCadTelemetryIngress() {
+        try {
+          return bridge.readCadTelemetryIngress();
+        } finally {
+          clearTelemetryIngress();
+        }
+      },
+      clearCadTelemetryIngress() {
+        clearTelemetryIngress();
       },
       setAssemblyDetailCalibration(calibration) {
         if (calibration !== undefined && !isAssemblyDetailCalibration(calibration)) {
@@ -3082,6 +3197,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
 
     return () => {
       live = false;
+      clearTelemetryIngress();
       bridge.clearAssemblyAdmissionResourceInventory();
       backendObservationAbort?.abort(new Error('Backend observation viewport was torn down.'));
       const index = bridges.indexOf(bridge);

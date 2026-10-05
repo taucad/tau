@@ -140,8 +140,60 @@ const unavailable = (error: unknown): NativeRuntimeUnavailableError =>
     : new NativeRuntimeUnavailableError(error instanceof Error ? error.message : String(error), { cause: error });
 
 let initialization: Promise<void> | undefined;
+let leases = 0;
+let release: Promise<void> = Promise.resolve();
+
+/**
+ * Hold the process-wide sandbox for one native session until {@link releaseNativeSandbox}.
+ *
+ * @internal
+ */
+export const acquireNativeSandbox = (): void => {
+  leases += 1;
+};
+
+/**
+ * Release one session's hold; the last release stops the sandbox runtime.
+ *
+ * On Linux the runtime keeps a referenced `socat` network bridge child alive until `reset()`,
+ * and only resets on `process.on('exit')`, which that child prevents. Without this release a
+ * one-shot host such as the CLI never exits after its last native worker has stopped.
+ *
+ * @internal
+ * @returns Once the sandbox runtime has stopped, when this was the last hold.
+ */
+export const releaseNativeSandbox = async (): Promise<void> => {
+  leases = Math.max(0, leases - 1);
+  const previous = release;
+  release = (async () => {
+    try {
+      await previous;
+    } catch {
+      // The earlier release already reported its own failure to its caller.
+    }
+    const running = initialization;
+    // A session acquired meanwhile keeps the runtime; a failed start left nothing to stop.
+    if (leases > 0 || running === undefined) {
+      return;
+    }
+    initialization = undefined;
+    try {
+      await running;
+    } catch {
+      return;
+    }
+    await SandboxManager.reset();
+  })();
+  await release;
+};
 
 const ensureInitialized = async (): Promise<void> => {
+  // A launch never initializes into a runtime whose reset is still under way.
+  try {
+    await release;
+  } catch {
+    // A failed reset was reported to its releasing session; initialization starts afresh.
+  }
   initialization ??= (async () => {
     if (process.platform === 'win32') {
       // The released Windows backend cannot grant per-launch filesystem paths; see the blueprint's release gates.

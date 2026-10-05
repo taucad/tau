@@ -343,9 +343,13 @@ const git = (cwd: string, ...arguments_: string[]): string => gitRaw(cwd, ...arg
 const reviewFile = /(?:^|\/)review\/[^/]+\.json$/;
 
 /** Porcelain entries under `directory`, as [status, path relative to the repository root]. */
-const changes = (repository: string, directory: string): ReadonlyArray<readonly [string, string]> =>
+const changes = (
+  repository: string,
+  directory: string,
+  untracked: 'all' | 'no' = 'all',
+): ReadonlyArray<readonly [string, string]> =>
   // Untrimmed: the first entry's status can start with a space.
-  gitRaw(repository, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', directory)
+  gitRaw(repository, 'status', '--porcelain=v1', '-z', `--untracked-files=${untracked}`, '--', directory)
     .split('\0')
     .filter(Boolean)
     .map((entry) => [entry.slice(0, 2), entry.slice(3)] as const)
@@ -407,11 +411,7 @@ export const changedReviewEvents = (root = artifactsRoot): readonly string[] => 
   }
   const directory = realpathSync(root);
   const repository = repositoryOf(directory);
-  return repository
-    ? changes(repository, directory)
-        .filter(([status]) => status !== '??')
-        .map(([, path]) => path)
-    : [];
+  return repository ? changes(repository, directory, 'no').map(([, path]) => path) : [];
 };
 
 // --- CLI ------------------------------------------------------------------------------------------

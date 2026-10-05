@@ -1628,7 +1628,7 @@ describe('picovoxel kernel', () => {
     it.each(['exact', 'fast'] as const)('keeps %s handle projections stable across content requests', async (lane) => {
       const { runtime, context, result } = await evaluate({ module: { default: helloCube }, lane });
       const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
-      const fresh = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
+      const fresh = await definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
       const project = async (handle: typeof result.handle, includeEdges: boolean) => {
         const rendered = await definition.render!(
           { handle, view: 'model', options: {}, content: { includeEdges } },
@@ -1655,7 +1655,7 @@ describe('picovoxel kernel', () => {
 
     it('keeps an empty snapshot projection stable', async () => {
       const { runtime, context, result } = await evaluate({ module: { default: () => [] }, lane: 'exact' });
-      const fresh = definition.deserializeHandle!(
+      const fresh = await definition.deserializeHandle!(
         { serialized: structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context)) },
         runtime,
         context,
@@ -1698,13 +1698,13 @@ describe('picovoxel kernel', () => {
 
       expect(snapshot.shapes[0]?.vertices).toBeInstanceOf(Uint8Array);
       expect(snapshot.shapes[0]?.triangles).toBeInstanceOf(Uint8Array);
-      expect(definition.deserializeHandle!({ serialized: snapshot }, runtime, context)).toEqual(result.handle);
+      expect(await definition.deserializeHandle!({ serialized: snapshot }, runtime, context)).toEqual(result.handle);
     });
 
     it('should preserve authored and legacy snapshot labels and repair blank restored names', async () => {
       const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
       const snapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
-      const nativeHandle = definition.deserializeHandle!(
+      const nativeHandle = await definition.deserializeHandle!(
         {
           serialized: {
             shapes: ['  蓋 / Lid  ', 'Mesh', 'Shape 1', ''].map((name) => ({
@@ -1751,7 +1751,7 @@ describe('picovoxel kernel', () => {
     ])('should refuse the malformed snapshot %j', async (snapshot, message) => {
       const { runtime, context } = await evaluate({ module: { default: () => [] } });
 
-      expect(() =>
+      await expect(async () =>
         definition.deserializeHandle!(
           // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Deliberately malformed cache bytes exercise restoration's trust boundary.
           {
@@ -1760,7 +1760,7 @@ describe('picovoxel kernel', () => {
           runtime,
           context,
         ),
-      ).toThrow(message);
+      ).rejects.toThrow(message);
     });
   });
 });
@@ -1779,46 +1779,61 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
     return document.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
   };
   it.each([
-    { label: 'generated', name: undefined, reference: 'Shape 1', valid: false },
-    { label: 'blank', name: ' ', reference: 'Shape 1', valid: false },
-    { label: 'authored fallback-looking', name: 'Shape 1', reference: 'Shape 1', valid: true },
-    { label: 'trimmed Unicode', name: '  蓋 / Lid  ', reference: '蓋 / Lid', valid: true },
-  ] as const)('should bind $label labels only with explicit name evidence', async ({ name, reference, valid }) => {
-    const { runtime, context, result } = await evaluate({
-      module: {
-        default: (pico: Pico) => [
-          { shape: helloCube(pico), ...(name === undefined ? {} : { name }) },
-          { shape: helloCube(pico), name: 'Lid' },
-        ],
-        mechanism: hinge(reference),
-      },
-    });
-    try {
-      const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
-      const restored = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
-      expect(restored).toEqual(result.handle);
-      expect(restored.mechanism).not.toBe(result.handle.mechanism);
-      const meshed = await definition.render!(
-        { handle: restored, view: 'model', options: {}, content: { includeTopology: true } },
-        runtime,
-        context,
-      );
-      if (typeof meshed.content === 'string') {
-        throw new TypeError('Expected binary topology view');
+    { label: 'generated', name: undefined, reference: 'Shape 1', valid: false, componentId: 'component:node-0' },
+    { label: 'blank', name: ' ', reference: 'Shape 1', valid: false, componentId: 'component:node-0' },
+    {
+      label: 'authored fallback-looking',
+      name: 'Shape 1',
+      reference: 'Shape 1',
+      valid: true,
+      componentId: 'component:node-0',
+    },
+    {
+      label: 'trimmed Unicode',
+      name: '  蓋 / Lid  ',
+      reference: '蓋 / Lid',
+      valid: true,
+      componentId: 'component:lid',
+    },
+  ] as const)(
+    'should bind $label labels only with explicit name evidence',
+    async ({ name, reference, valid, componentId }) => {
+      const { runtime, context, result } = await evaluate({
+        module: {
+          default: (pico: Pico) => [
+            { shape: helloCube(pico), ...(name === undefined ? {} : { name }) },
+            { shape: helloCube(pico), name: 'Lid' },
+          ],
+          mechanism: hinge(reference),
+        },
+      });
+      try {
+        const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
+        const restored = await definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
+        expect(restored).toEqual(result.handle);
+        expect(restored.mechanism).not.toBe(result.handle.mechanism);
+        const meshed = await definition.render!(
+          { handle: restored, view: 'model', options: {}, content: { includeTopology: true } },
+          runtime,
+          context,
+        );
+        if (typeof meshed.content === 'string') {
+          throw new TypeError('Expected binary topology view');
+        }
+        const payload = await readTopology(meshed.content);
+        expect(payload?.['components']).toHaveLength(2);
+        if (valid) {
+          expect(payload?.['mechanism']).toMatchObject({ links: { base: { components: [componentId] } } });
+          expect(meshed.issues).toEqual([]);
+        } else {
+          expect(payload?.['mechanism']).toBeUndefined();
+          expect(meshed.issues).toMatchObject([{ code: 'INVALID_REFERENCE', severity: 'warning' }]);
+        }
+      } finally {
+        await definition.onDispose!(context);
       }
-      const payload = await readTopology(meshed.content);
-      expect(payload?.['components']).toHaveLength(2);
-      if (valid) {
-        expect(payload?.['mechanism']).toMatchObject({ links: { base: { components: ['component:node-0'] } } });
-        expect(meshed.issues).toEqual([]);
-      } else {
-        expect(payload?.['mechanism']).toBeUndefined();
-        expect(meshed.issues).toMatchObject([{ code: 'INVALID_REFERENCE', severity: 'warning' }]);
-      }
-    } finally {
-      await definition.onDispose!(context);
-    }
-  });
+    },
+  );
 
   it.each([true, false])(
     'should preserve duplicate parts and reject only an ambiguous referenced name (%s)',
@@ -1866,9 +1881,9 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
       const snapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Deliberately corrupted cache payload exercises the restoration trust boundary.
       const corrupted = { ...snapshot, shapes: [{ ...snapshot.shapes[0]!, authoredName }] } as typeof snapshot;
-      expect(() => definition.deserializeHandle!({ serialized: corrupted }, runtime, context)).toThrow(
-        'authoredName must match',
-      );
+      await expect(async () =>
+        definition.deserializeHandle!({ serialized: corrupted }, runtime, context),
+      ).rejects.toThrow('authoredName must match');
     } finally {
       await definition.onDispose!(context);
     }
@@ -1882,7 +1897,7 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
     try {
       expect(result.issues).toHaveLength(1);
       const snapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
-      const restored = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
+      const restored = await definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
       expect(restored.mechanismIssues).toEqual(result.issues);
       expect(restored.mechanismIssues).not.toBe(result.issues);
       const mesh = await definition.render!(
@@ -1908,7 +1923,10 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
       ]) {
         // oxlint-disable-next-line typescript/consistent-type-assertions -- Deliberately corrupted cache payload exercises warning-envelope validation.
         const corrupted = { ...snapshot, mechanismIssues } as typeof snapshot;
-        expect(() => definition.deserializeHandle!({ serialized: corrupted }, runtime, context)).toThrow();
+        // eslint-disable-next-line no-await-in-loop -- Restoration checks share one kernel context in fixture order.
+        await expect(async () =>
+          definition.deserializeHandle!({ serialized: corrupted }, runtime, context),
+        ).rejects.toThrow();
       }
     } finally {
       await definition.onDispose!(context);

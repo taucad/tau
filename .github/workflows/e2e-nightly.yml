@@ -230,6 +230,42 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # runtime-e2e's Darwin host suite, quarantined out of ci.yml's Darwin lane until its
+  # 11 failing tests pass here: https://github.com/taucad/tau/issues/342. The steps
+  # mirror ci.yml's `geospec-darwin` job.
+  runtime-e2e-darwin:
+    name: Runtime end-to-end on Darwin (quarantined, #342)
+    runs-on: macos-15
+    timeout-minutes: 150
+    needs: [plan]
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    steps:
+      - *checkout
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+
+      - *geospec
+
+      - name: Prepare GeoSpec engine products
+        uses: ./.github/actions/geospec-producer
+
+      - name: Prepare current installed GeoSpec consumer
+        env:
+          GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
+        run: |
+          pnpm nx run-many -t require-geospec-delivery --parallel=1
+          pnpm nx run-many -t build --projects tag:host:darwin-arm64 --parallel=1
+          pnpm nx run scripts:prepare-geospec-test-consumer
+          node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
+
+      - name: Run the runtime end-to-end suite
+        run: pnpm nx run-many -t test --projects tag:ci:quarantined --skip-nx-cache
+
   # D19's funded cell: one real frontier turn placed on launcher 2, against a local
   # API with real provider keys. Skipped without the key; the deterministic half of
   # D19 runs in the `e2e` job, which stubs the provider upstream. Only the OpenAI key

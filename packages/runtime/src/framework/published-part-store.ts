@@ -375,10 +375,11 @@ export const preparePublishedPartVariants = async (input: {
  * Non-entry absence is a stored producer fact; source-free admission cannot recreate its resolution proof.
  * @internal
  */
-export const admitPublishedPart = async (
+const verifyPublishedPart = async (
   filesystem: KernelFileSystem,
   reference: PublishedPartReference,
-): Promise<PublishedPartRecord> => {
+  selectedDigest?: PublishedPartAsset['digest'],
+): Promise<{ record: PublishedPartRecord; selected?: Uint8Array<ArrayBuffer> }> => {
   const path = filePath(reference.path);
   const recordBytes = await filesystem.readFile(path);
   if ((await digestContent({ bytes: recordBytes })) !== reference.digest) {
@@ -392,7 +393,9 @@ export const admitPublishedPart = async (
   }
   // Verify every variant serially to bound outstanding verification buffers. Individual
   // readFile allocation and the later selected-asset owned copy remain separate transients.
-  for (const variant of Object.values(record.variants)) {
+  const variants = Object.values(record.variants);
+  let selected: Uint8Array<ArrayBuffer> | undefined;
+  for (const variant of variants) {
     filePath(variant.source.entry);
     if (
       !Object.hasOwn(variant.source.files, variant.source.entry) ||
@@ -403,8 +406,20 @@ export const admitPublishedPart = async (
     // oxlint-disable-next-line no-await-in-loop -- All pinned variants must verify with one outstanding source read.
     const glb = await readPinned(filesystem, variant.glb);
     verifyGlb(glb);
+    if (variant === variants.at(-1) && variant.glb.digest === selectedDigest) {
+      selected = glb;
+    }
   }
-  return record;
+  return { record, selected };
+};
+
+/** Verify pinned provenance and the required display closure before reuse. @internal */
+export const admitPublishedPart = async (
+  filesystem: KernelFileSystem,
+  reference: PublishedPartReference,
+): Promise<PublishedPartRecord> => {
+  const verified = await verifyPublishedPart(filesystem, reference);
+  return verified.record;
 };
 
 /** Return an owned copy of one verified asset from an admitted published part. @internal */
@@ -413,7 +428,7 @@ export const readPublishedPartAsset = async (
   reference: PublishedPartReference,
   digest: PublishedPartAsset['digest'],
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const record = await admitPublishedPart(filesystem, reference);
+  const { record, selected } = await verifyPublishedPart(filesystem, reference, digest);
   const assets = Object.values(record.variants).flatMap((variant) =>
     variant.exact ? [variant.glb, variant.exact.asset] : [variant.glb],
   );
@@ -421,7 +436,7 @@ export const readPublishedPartAsset = async (
   if (!asset) {
     throw new Error('Asset digest is not in the admitted published-part closure.');
   }
-  return new Uint8Array(await readPinned(filesystem, asset));
+  return new Uint8Array(selected ?? (await readPinned(filesystem, asset)));
 };
 
 /** Read native bytes only for an exact descriptor supplied by the selected producer. @internal */

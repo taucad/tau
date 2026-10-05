@@ -181,11 +181,24 @@ describe('completed part publication groundwork', () => {
       await Promise.allSettled([admission]);
       readSpy.mockRestore();
     }
+    const assetReads = vi.spyOn(filesystem, 'readFile');
     const owned = await readPublishedPartAsset(
       filesystem,
       prepared.reference,
       prepared.record.variants['default']!.glb.digest,
     );
+    expect(assetReads.mock.calls.map(([path]) => path)).toEqual([
+      prepared.reference.path,
+      firstPath,
+      secondPath,
+      firstPath,
+    ]);
+    assetReads.mockClear();
+    expect(
+      await readPublishedPartAsset(filesystem, prepared.reference, prepared.record.variants['secondary']!.glb.digest),
+    ).toEqual(alternate);
+    expect(assetReads.mock.calls.map(([path]) => path)).toEqual([prepared.reference.path, firstPath, secondPath]);
+    assetReads.mockRestore();
     owned[0] = 0;
     expect(
       await readPublishedPartAsset(filesystem, prepared.reference, prepared.record.variants['default']!.glb.digest),
@@ -195,6 +208,38 @@ describe('completed part publication groundwork', () => {
       readPublishedPartAsset(filesystem, prepared.reference, prepared.record.variants['default']!.glb.digest),
     ).rejects.toThrow(/pinned digest/u);
   });
+
+  it.each([2, 4, 8])(
+    'should read each of %i distinct default-only assets without rereading its verified GLB',
+    async (count) => {
+      const filesystem = createFilesystem();
+      const prepared = await Promise.all(
+        Array.from({ length: count }, async (_, index) =>
+          preparePublishedPart({
+            filesystem,
+            directory: 'published',
+            source: await source(`part-${index}.ts`),
+            glb: testGlb({ asset: { version: '2.0' }, scene: 0, scenes: [{ nodes: [] }], extras: { index } }),
+          }),
+        ),
+      );
+      const read = vi.spyOn(filesystem, 'readFile');
+      for (const part of prepared) {
+        // oxlint-disable-next-line no-await-in-loop -- Mirror the serialized viewport asset reads.
+        const bytes = await readPublishedPartAsset(
+          filesystem,
+          part.reference,
+          part.record.variants['default']!.glb.digest,
+        );
+        expect(bytes.byteLength).toBe(part.record.variants['default']!.glb.byteLength);
+      }
+      const paths = read.mock.calls.map(([path]) => path);
+      for (const part of prepared) {
+        expect(paths.filter((path) => path === part.reference.path)).toHaveLength(1);
+        expect(paths.filter((path) => path === part.record.variants['default']!.glb.path)).toHaveLength(1);
+      }
+    },
+  );
 
   it('keeps equivalent source text at another entry distinct while sharing content bytes', async () => {
     const filesystem = createFilesystem();

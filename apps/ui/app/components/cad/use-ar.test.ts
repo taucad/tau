@@ -23,7 +23,13 @@ const root = {
   digest: contentDigest({ value: `sha256:${'0'.repeat(64)}`, name: 'AR fixture root' }),
   byteLength: 42,
 } as const;
-const assembly = mock<PublishedAssembly>({ parts: {}, occurrences: [] });
+const assembly = mock<PublishedAssembly>();
+Object.assign(assembly, {
+  parts: { part: { variants: { default: { glb: mock() } } } },
+  occurrences: [
+    { id: 'part', part: 'part', variant: 'default', transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+  ],
+});
 function fixture(outcome: 'success' | 'failure' = 'success', hash: string = root.digest) {
   const client = mock<AppRuntimeClient>();
   Object.defineProperty(client, 'capabilities', {
@@ -50,45 +56,43 @@ function fixture(outcome: 'success' | 'failure' = 'success', hash: string = root
     files: [{ name: 'scene.usdz', mimeType: 'model/vnd.usdz+zip', bytes: new Uint8Array([1]) }],
   });
   const actor = mock<ActorRefFrom<typeof cadMachine>>();
-  const admitted = mock<AdmittedAssembly>({ publication: assembly });
+  const admitted = mock<AdmittedAssembly>();
+  Object.assign(admitted, { publication: assembly });
   const display = { root: hash === root.digest ? root : { ...root }, admitted, document };
-  vi.mocked(actor.getSnapshot).mockReturnValue(
-    mock<SnapshotFrom<typeof cadMachine>>({
-      context: {
-        kernelClient: client,
-        publishedAssemblyRoot: root,
-        publishedAssembly: assembly,
-        rendering: undefined,
-        committedRendering: undefined,
-        admittedAssembly: admitted,
-        committedAssemblyDisplay: display,
-        entryPath: 'scene.json',
-        publishedAssemblyEntryPath: 'scene.json',
-        latestRenderingOutcome: outcome,
-      },
-    }),
-  );
+  const cadSnapshot = mock<SnapshotFrom<typeof cadMachine>>();
+  Object.assign(cadSnapshot, {
+    context: {
+      kernelClient: client,
+      publishedAssemblyRoot: root,
+      publishedAssembly: assembly,
+      rendering: undefined,
+      committedRendering: undefined,
+      admittedAssembly: admitted,
+      committedAssemblyDisplay: display,
+      entryPath: 'scene.json',
+      publishedAssemblyEntryPath: 'scene.json',
+      latestRenderingOutcome: outcome,
+    },
+  });
+  vi.mocked(actor.getSnapshot).mockReturnValue(cadSnapshot);
   vi.mocked(actor.subscribe).mockReturnValue({ unsubscribe: vi.fn() });
   const kinematics = mock<ActorRefFrom<typeof kinematicsMachine>>();
-  vi.mocked(kinematics.getSnapshot).mockReturnValue(
-    mock<SnapshotFrom<typeof kinematicsMachine>>({
-      context: {
-        revision: 1,
-        unitsById: { model: mock<KinematicsUnitState>({ coordinates: {}, revision: 1 }) },
-      },
-    }),
-  );
+  const unit = mock<KinematicsUnitState>();
+  Object.assign(unit, { coordinates: {}, revision: 1 });
+  const kinematicsSnapshot = mock<SnapshotFrom<typeof kinematicsMachine>>();
+  Object.assign(kinematicsSnapshot, { context: { revision: 1, unitsById: { model: unit } } });
+  vi.mocked(kinematics.getSnapshot).mockReturnValue(kinematicsSnapshot);
   vi.mocked(kinematics.subscribe).mockReturnValue({ unsubscribe: vi.fn() });
   const graphics = mock<ActorRefFrom<typeof graphicsMachine>>();
-  vi.mocked(graphics.getSnapshot).mockReturnValue(
-    mock<SnapshotFrom<typeof graphicsMachine>>({
-      context: {
-        gltfPresentation: { presentedKey: root.digest, phase: 'presented' },
-        kinematicsRef: kinematics,
-        modelInteractionUnitId: 'model',
-      },
-    }),
-  );
+  const graphicsSnapshot = mock<SnapshotFrom<typeof graphicsMachine>>();
+  Object.assign(graphicsSnapshot, {
+    context: {
+      gltfPresentation: { presentedKey: root.digest, phase: 'presented' },
+      kinematicsRef: kinematics,
+      modelInteractionUnitId: 'model',
+    },
+  });
+  vi.mocked(graphics.getSnapshot).mockReturnValue(graphicsSnapshot);
   vi.mocked(graphics.subscribe).mockReturnValue({ unsubscribe: vi.fn() });
   return { client, document, actor, graphics, kinematics };
 }
@@ -103,7 +107,7 @@ beforeEach(() => {
 describe('AR pinned assembly export', () => {
   it('exports the displayed pin through its GLB transcoder route and releases the blob', async () => {
     const { document, actor, graphics } = fixture();
-    const { result } = renderHook(() => useAr(undefined, undefined, actor, graphics));
+    const { result } = renderHook(() => useAr({ artifact: undefined, cadRef: actor, graphicsRef: graphics }));
     expect(result.current.canActivateAr).toBe(true);
     await act(async () => result.current.activateAr());
     expect(document.exportPublished).toHaveBeenCalledWith({ format: 'usdz', publishedAssembly: { root } });
@@ -124,7 +128,7 @@ describe('AR pinned assembly export', () => {
         files: [{ name: 'scene.usdz', mimeType: 'model/vnd.usdz+zip', bytes: new Uint8Array([1]) }],
       };
     });
-    const { result } = renderHook(() => useAr(undefined, undefined, actor, graphics));
+    const { result } = renderHook(() => useAr({ artifact: undefined, cadRef: actor, graphicsRef: graphics }));
     await act(async () => result.current.activateAr());
     expect(toastError).toHaveBeenCalledWith('The selected assembly changed during AR export.');
     expect(URL.createObjectURL).not.toHaveBeenCalled();
@@ -146,7 +150,9 @@ describe('AR pinned assembly export', () => {
           },
         },
       });
-      const { result, unmount } = renderHook(() => useAr(undefined, undefined, actor, graphics));
+      const { result, unmount } = renderHook(() =>
+        useAr({ artifact: undefined, cadRef: actor, graphicsRef: graphics }),
+      );
       expect(result.current.canActivateAr).toBe(false);
       // oxlint-disable-next-line eslint/no-await-in-loop -- Each retained-presentation case must settle before unmounting.
       await act(async () => result.current.activateAr());
@@ -157,7 +163,7 @@ describe('AR pinned assembly export', () => {
   });
   it('denies pinned AR without a committed presentation authority', async () => {
     const { document, actor } = fixture();
-    const { result } = renderHook(() => useAr(undefined, undefined, actor));
+    const { result } = renderHook(() => useAr({ artifact: undefined, cadRef: actor }));
     expect(result.current.canActivateAr).toBe(false);
     await act(async () => result.current.activateAr());
     expect(document.exportPublished).not.toHaveBeenCalled();
@@ -172,7 +178,7 @@ describe('AR pinned assembly export', () => {
         unitsById: { model: mock<KinematicsUnitState>({ coordinates: { hinge: 0.5 }, revision: 1 }) },
       },
     });
-    const { result } = renderHook(() => useAr(undefined, undefined, actor, graphics));
+    const { result } = renderHook(() => useAr({ artifact: undefined, cadRef: actor, graphicsRef: graphics }));
     expect(result.current.canActivateAr).toBe(false);
     await act(async () => result.current.activateAr());
     expect(document.exportPublished).not.toHaveBeenCalled();
@@ -190,7 +196,7 @@ describe('AR pinned assembly export', () => {
         files: [{ name: 'scene.usdz', mimeType: 'model/vnd.usdz+zip', bytes: new Uint8Array([1]) }],
       };
     });
-    const { result } = renderHook(() => useAr(undefined, undefined, actor, graphics));
+    const { result } = renderHook(() => useAr({ artifact: undefined, cadRef: actor, graphicsRef: graphics }));
     await act(async () => result.current.activateAr());
     expect(toastError).toHaveBeenCalledWith(
       'The presented pose changed during AR export; USDZ supports the as-built pose only.',
@@ -215,7 +221,7 @@ describe('AR pinned assembly export', () => {
         files: [{ name: 'scene.usdz', mimeType: 'model/vnd.usdz+zip', bytes: new Uint8Array([1]) }],
       };
     });
-    const { result } = renderHook(() => useAr(undefined, undefined, actor, graphics));
+    const { result } = renderHook(() => useAr({ artifact: undefined, cadRef: actor, graphicsRef: graphics }));
     await act(async () => result.current.activateAr());
     expect(toastError).toHaveBeenCalledWith('The presented model changed during AR export.');
     expect(URL.createObjectURL).not.toHaveBeenCalled();
@@ -226,7 +232,9 @@ describe('AR pinned assembly export', () => {
       ['success', 'stale'],
     ] as const) {
       const { document, actor, graphics } = fixture(outcome, hash);
-      const { result, unmount } = renderHook(() => useAr(undefined, undefined, actor, graphics));
+      const { result, unmount } = renderHook(() =>
+        useAr({ artifact: undefined, cadRef: actor, graphicsRef: graphics }),
+      );
       expect(result.current.canActivateAr).toBe(false);
       // oxlint-disable-next-line eslint/no-await-in-loop -- Each hook instance must settle before unmounting.
       await act(async () => result.current.activateAr());

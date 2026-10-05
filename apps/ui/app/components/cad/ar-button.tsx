@@ -49,7 +49,7 @@ export const ArButton = memo(function ({
   readonly className?: string;
 }): React.ReactNode {
   const isMobile = useIsMobile();
-  const { canActivateAr, isConverting, activateAr } = useAr(artifact, runtimeDocument, cadRef, graphicsRef);
+  const { canActivateAr, isConverting, activateAr } = useAr({ artifact, runtimeDocument, cadRef, graphicsRef });
 
   if (!isMobile || !canActivateAr) {
     return undefined;

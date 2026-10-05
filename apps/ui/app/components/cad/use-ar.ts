@@ -17,6 +17,13 @@ type ArCapability = {
   readonly activateAr: () => Promise<void>;
 };
 
+type UseArInput = Readonly<{
+  artifact: Artifact | undefined;
+  runtimeDocument?: RuntimeDocument;
+  cadRef?: ActorRefFrom<typeof cadMachine>;
+  graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
+}>;
+
 /**
  * Detect iOS via user agent (iPhone/iPad/iPod) and iPad masquerading as Mac.
  * Mirrors model-viewer's detection logic from constants.ts.
@@ -71,12 +78,7 @@ function launchQuickLook(usdzBlobUrl: string): void {
  * and GLTF geometry is available. Call `activateAr()` from a user click handler
  * to export the model to USDZ via the runtime client and open AR Quick Look.
  */
-export function useAr(
-  artifact: Artifact | undefined,
-  runtimeDocument?: RuntimeDocument,
-  cadRef?: ActorRefFrom<typeof cadMachine>,
-  graphicsRef?: ActorRefFrom<typeof graphicsMachine>,
-): ArCapability {
+export function useAr({ artifact, runtimeDocument, cadRef, graphicsRef }: UseArInput): ArCapability {
   const [isConverting, setIsConverting] = useState(false);
   const kernelClient = useSelector(cadRef, (state) => state?.context.kernelClient);
   const root = useSelector(cadRef, (state) => state?.context.publishedAssemblyRoot);
@@ -107,7 +109,7 @@ export function useAr(
     hasGltfGeometry &&
     matchesPresentation &&
     (!graphicsRef || asBuilt) &&
-    Boolean(runtimeDocument || assemblyDisplay?.document) &&
+    Boolean(runtimeDocument ?? assemblyDisplay?.document) &&
     (!cadRef || (outcome === 'success' && (assemblyDisplay !== undefined || currentHash !== undefined))) &&
     (!root || (assemblyDisplay?.root === root && outcome === 'success' && assembly !== undefined));
 

@@ -148,6 +148,7 @@ import {
 } from '#components/geometry/graphics/three/utils/assembly-demand-index.js';
 import type { AssemblyDemandIndex } from '#components/geometry/graphics/three/utils/assembly-demand-index.js';
 import { canonicalJson, sha256Bytes } from '@taucad/utils/hash';
+import { jsonSerializedByteLength } from '#components/geometry/graphics/three/utils/json-serialized-byte-length.js';
 import {
   applyCanonicalGltfBounds,
   createCanonicalGltfToTauMatrix,
@@ -1339,14 +1340,12 @@ function prepareAssemblyDemand(metadata: AssemblyMetadata, layout: PreparedAssem
     index,
     pathsByComponent,
     fullBoundComponents,
-    serializedBytes: new TextEncoder().encode(
-      canonicalJson({
-        keys: index.keys,
-        occurrenceIndices: index.occurrenceIndices,
-        pathsByComponent: [...pathsByComponent].map(([id, paths]) => [id, [...paths]]),
-        fullBoundComponents,
-      }),
-    ).byteLength,
+    serializedBytes: jsonSerializedByteLength({
+      keys: index.keys,
+      occurrenceIndices: index.occurrenceIndices,
+      pathsByComponent: [...pathsByComponent].map(([id, paths]) => [id, [...paths]]),
+      fullBoundComponents,
+    }),
   };
 }
 
@@ -1531,15 +1530,13 @@ async function prepareAssemblyMetadata(
     demand: prepareAssemblyDemand(metadata, layout),
     bytes,
     validatedSourceBytes: [...bytes.values()].reduce((sum, value) => sum + value.byteLength, 0),
-    metadataSerializedBytes: new TextEncoder().encode(
-      canonicalJson({
-        metadata,
-        publication: display.admitted.publication,
-        manifest: layout.manifest,
-        occurrenceManifests: [...layout.occurrenceManifests],
-        sourceComponentIdsByAncestry: [...layout.sourceComponentIdsByAncestry].map(([path, ids]) => [path, [...ids]]),
-      }),
-    ).byteLength,
+    metadataSerializedBytes: jsonSerializedByteLength({
+      metadata,
+      publication: display.admitted.publication,
+      manifest: layout.manifest,
+      occurrenceManifests: [...layout.occurrenceManifests],
+      sourceComponentIdsByAncestry: [...layout.sourceComponentIdsByAncestry].map(([path, ids]) => [path, [...ids]]),
+    }),
   };
 }
 

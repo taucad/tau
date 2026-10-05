@@ -295,7 +295,29 @@ function PrintFooter({ entry }: { readonly entry: MachineDirectoryEntry | undefi
 }
 
 /**
- * Stop, always one press away and never waiting for approval: what it does on this machine is said beside it.
+ * Whether Stop has anything to stop: the machine working or held, a run or an activity in progress, a jog held, or an
+ * operation Tau sent still in flight. An idle machine shows no Stop (operator ruling, 2026-10-05).
+ *
+ * @param control - The control.
+ * @returns True while something could be stopped.
+ * @public
+ */
+export const hasSomethingToStop = (control: MachineControl): boolean => {
+  const { state, activities, operations } = control.entry.snapshot;
+  return (
+    state.status === 'active' ||
+    state.status === 'held' ||
+    isRunOwned(control.entry) ||
+    control.hold !== undefined ||
+    control.isStopping ||
+    activities.some((activity) => activity.state === 'in-progress' || activity.state === 'needs-person') ||
+    operations.some((operation) => operation.state === 'sending' || operation.state === 'confirming')
+  );
+};
+
+/**
+ * Stop, one press away whenever something could be stopped and never waiting for approval: what it does on this
+ * machine is said beside it.
  *
  * @param properties - The control.
  * @returns The button.
@@ -513,7 +535,7 @@ function MachinePanel({
   const prepareDeferred = deferredPrepare(entry, openJob);
   return (
     <>
-      {header(<StopButton control={control} />)}
+      {header(hasSomethingToStop(control) ? <StopButton control={control} /> : undefined)}
       <div className='relative flex min-h-0 min-w-0 flex-1 scroll-shadows-y flex-col gap-3 overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
         {errors.map((error) =>
           error === undefined ? null : (

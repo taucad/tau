@@ -1587,6 +1587,51 @@ describe('Print pane monitor and controls', () => {
   });
 
   it.each([
+    { when: 'nothing while the printer is idle', snapshot: {}, status: 'Ready', isShown: false },
+    { when: 'while it is held', snapshot: { state: { status: 'held' } }, status: 'Paused', isShown: true },
+    {
+      when: 'while an activity is in progress',
+      snapshot: {
+        activities: [
+          {
+            activityId: 'load-1',
+            componentId: 'filament',
+            kind: 'load',
+            label: 'Loading filament',
+            state: 'in-progress',
+            steps: [],
+          },
+        ],
+      },
+      status: 'Loading filament',
+      isShown: true,
+    },
+    {
+      when: 'while an operation Tau sent is in flight',
+      snapshot: {
+        operations: [
+          {
+            operationId: 'operation-light',
+            machineId: 'machine-1',
+            kind: 'action',
+            inputDigest: artifact.digest,
+            state: 'sending',
+            updatedAt: later,
+            action: { componentId: 'chamber-light', id: 'switch.set', label: 'Chamber light' },
+          },
+        ],
+      },
+      status: 'Ready',
+      isShown: true,
+    },
+  ] as const)('offers Stop $when', async ({ snapshot, status, isShown }) => {
+    const idle = entry();
+    renderPane(createFixture({ entries: [entry({ snapshot: { ...idle.snapshot, ...snapshot } })] }).client);
+    await findMachine(status);
+    expect(screen.queryByRole('button', { name: 'Stop' }) !== null).toBe(isShown);
+  });
+
+  it.each([
     { name: 'finished', state: 'completed', origin: 'tau', line: 'Last run: Finished · pyramid.gcode.3mf' },
     { name: 'failed external', state: 'failed', origin: 'external', line: 'Last run: Failed · pyramid.gcode.3mf' },
   ] as const)(
@@ -2849,22 +2894,24 @@ describe('Print pane with the Bambu provider’s own manifests', () => {
   it.each([
     ['X1C', bambuX1cManifest],
     ['A1 mini', bambuA1MiniManifest],
-  ])('serves the %s as the provider declares it: Monitor, Control, Prepare and Stop', async (_name, real) => {
-    const machine = machineEntry({ manifest: real, snapshot: entry().snapshot });
-    renderPane(createFixture({ entries: [machine] }).client);
+  ])(
+    'serves the %s as the provider declares it: Monitor, Control and Prepare, and no Stop while idle',
+    async (_name, real) => {
+      const machine = machineEntry({ manifest: real, snapshot: entry().snapshot });
+      renderPane(createFixture({ entries: [machine] }).client);
 
-    await findMachine('Ready');
-    const monitor = screen.getByRole('region', { name: 'Monitor' });
-    // The plate is a fact beside the heaters, by the name the manifest gives it.
-    expect(monitor).toHaveTextContent('PlateTextured PEI plate');
-    const slots = within(monitor).getByRole('list', { name: 'Material slots' });
-    expect(within(slots).getAllByRole('listitem')).toHaveLength(5);
-    expect(screen.getByRole('button', { name: /^Control/u })).toBeInTheDocument();
-    expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Stop' })).toHaveAccessibleDescription(
-      /^Stop: .* Not an emergency stop\.$/u,
-    );
-  });
+      await findMachine('Ready');
+      const monitor = screen.getByRole('region', { name: 'Monitor' });
+      // The plate is a fact beside the heaters, by the name the manifest gives it.
+      expect(monitor).toHaveTextContent('PlateTextured PEI plate');
+      const slots = within(monitor).getByRole('list', { name: 'Material slots' });
+      expect(within(slots).getAllByRole('listitem')).toHaveLength(5);
+      expect(screen.getByRole('button', { name: /^Control/u })).toBeInTheDocument();
+      expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
+      // Nothing to stop on an idle printer.
+      expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    },
+  );
 });
 
 describe('Print pane without printers', () => {

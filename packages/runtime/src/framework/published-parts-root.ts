@@ -92,7 +92,7 @@ const readContent = async (
     if (chunk.path !== storagePath(path, chunk.digest, 'chunk') || chunk.byteLength !== expectedLength) {
       throw new Error('Published assembly chunk order or length is invalid.');
     }
-    // Read pinned chunks serially to bound outstanding buffers.
+    // oxlint-disable-next-line no-await-in-loop -- Serial pinned reads bound outstanding chunk buffers.
     content.set(await readPinnedBytes(filesystem, chunk), offset);
     offset += expectedLength;
   }
@@ -289,9 +289,10 @@ const commitPartsRoot = async (
   for (let offset = 0; offset < content.byteLength; offset += chunkBytes) {
     const bytes = content.slice(offset, offset + chunkBytes);
     // Admit each immutable chunk before the manifest and root pointer.
+    // oxlint-disable-next-line no-await-in-loop -- Each digest names the next immutable chunk before it is written.
     const digest = await digestContent({ bytes });
     const asset = { path: storagePath(path, digest, 'chunk'), digest, byteLength: bytes.byteLength };
-    // Bounded checked writes preserve content-before-pointer order.
+    // oxlint-disable-next-line no-await-in-loop -- Bounded checked writes preserve content-before-pointer order.
     await writePublishedImmutableAsset(filesystem, { asset, bytes, publicationWriter: writer });
     signal?.throwIfAborted();
     chunks.push(asset);

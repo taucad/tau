@@ -630,6 +630,68 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(transcript.filter((message) => message.role === 'user')).toHaveLength(2);
   });
 
+  it('should trim only the messages a rewind dropped from a run that keeps its user turn', async () => {
+    const user = (id: string) => ({ id, role: 'user', content: 'x' });
+    const assistant = (id: string) => ({ id, role: 'assistant', content: [{ type: 'text', text: id }] });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: user('u1') }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('a1') }),
+      logRow(4, { runId: 'r1', type: 'message.appended', message: assistant('a2') }),
+      logRow(5, { runId: 'r1', type: 'run.lifecycle', state: 'failed', attempt: 1, detail: { message: 'no' } }),
+      logRow(6, { runId: 'r1', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['u1', 'a1'] }),
+    ];
+    const projection = project(rows, 1);
+    const texts = chunksOf(projection.views['r1']?.chunks)
+      .filter((chunk) => chunk.type === 'text-delta')
+      .map((chunk) => chunk.delta);
+    expect(texts).toEqual(['a1']);
+    expect(selectTranscriptSource(projection).map((run) => run.runId)).toEqual(['r1']);
+  });
+
+  it('should keep a turn a compaction evicted even when a rewind drops its summary', () => {
+    const user = (id: string) => ({ id, role: 'user', content: 'x' });
+    const assistant = (id: string) => ({ id, role: 'assistant', content: [{ type: 'text', text: id }] });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: user('u1') }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('a1') }),
+      lifecycleRow(4, 'completed', 'r1'),
+      lifecycleRow(5, 'admitted', 'r2'),
+      logRow(6, {
+        runId: 'r2',
+        type: 'history.compacted',
+        evictedMessageIds: ['u1', 'a1'],
+        summary: { id: 's1', role: 'user', content: 'summary' },
+      }),
+      logRow(7, { runId: 'r2', type: 'history.rewound', trigger: 'edit', retainedMessageIds: [] }),
+    ];
+    expect(selectTranscriptSource(project(rows, 1)).map((run) => run.runId)).toEqual(['r1', 'r2']);
+  });
+
+  it('should not repeat streamed text when a resumed run replays an earlier envelope', async () => {
+    const assistant = (text: string) => ({ id: 'a1', role: 'assistant', content: [{ type: 'text', text }] });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: { id: 'u1', role: 'user', content: 'x' } }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('hello') }),
+      logRow(4, { runId: 'r1', type: 'run.lifecycle', state: 'cancelled', attempt: 1, detail: { message: 'stop' } }),
+      lifecycleRow(5, 'running', 'r1'),
+      logRow(6, {
+        runId: 'r1',
+        type: 'message.envelope-replaced',
+        messageId: 'a1',
+        replacement: assistant('hello'),
+      }),
+    ];
+    const transcript = await materializeTranscript(project(rows, 1));
+    const message = transcript.find((entry) => entry.role === 'assistant');
+    expect(message?.parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(['hello']);
+  });
+
   it('keeps the newest row that asks for the person, and never a cancelled run (PV-S8)', () => {
     const rows = readLog('seeded/cancel-after-settled-pause');
     const requested = rows.findIndex((row) => row.type === 'interrupt.recorded' && row.phase === 'requested');

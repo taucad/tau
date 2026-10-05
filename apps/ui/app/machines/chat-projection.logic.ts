@@ -364,7 +364,12 @@ const rewindViews = (views: Record<string, RunView>, runId: string, retainedIds:
     if (view.retired === true) {
       continue;
     }
-    if (id === runId || view.providerIds?.some((messageId) => retained.has(messageId))) {
+    // A compaction-evicted message is never dropped: its summary stands for it in the history.
+    if (
+      id === runId ||
+      view.providerIds?.some((messageId) => retained.has(messageId)) === true ||
+      view.messages?.some((message) => message.evicted === true) === true
+    ) {
       views[id] = trimDropped(view, retained);
       continue;
     }
@@ -511,14 +516,12 @@ const foldRunViews = (
       }
     }
     const chunks = projectAgentHostEvent(row, blocks);
-    if (
-      row.type === 'run.lifecycle' &&
-      (row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled')
-    ) {
-      // A resumed run continues its open checkpoint blocks, so only closed ones are released.
+    /* Only a completed run never reopens. A failed or cancelled one may resume, continuing its open checkpoint blocks
+     * and replaying envelopes of messages it already projected, which its closed blocks dedupe. */
+    if (row.type === 'run.lifecycle' && row.state === 'completed') {
       const prefix = `[${JSON.stringify(row.runId)},`;
-      for (const [key, block] of blocks) {
-        if (key.startsWith(prefix) && block.closed) {
+      for (const key of blocks.keys()) {
+        if (key.startsWith(prefix)) {
           blocks.delete(key);
         }
       }

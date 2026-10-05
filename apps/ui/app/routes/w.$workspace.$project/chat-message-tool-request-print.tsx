@@ -38,8 +38,8 @@ const presentation: Record<PrintRequestState, Presentation> = {
   started: { verb: 'Printing', tone: 'success' },
   denied: { verb: 'Print declined', separated: true },
   withdrawn: { verb: 'Print withdrawn', separated: true },
-  rejected: { verb: 'Print failed', tone: 'destructive', separated: true },
-  failed: { verb: 'Print failed', tone: 'destructive', separated: true },
+  rejected: { verb: 'Print failed', tone: 'error', separated: true },
+  failed: { verb: 'Print failed', tone: 'error', separated: true },
   unknown: { verb: 'Start not confirmed', tone: 'warning', separated: true },
 };
 

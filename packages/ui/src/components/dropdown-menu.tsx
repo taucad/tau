@@ -15,7 +15,9 @@ import {
   subMenuSideAlignOffset,
   menuItemLayoutClass,
   menuItemIconClass,
+  menuSwitchRowVariants,
 } from '#components/menu.variants.js';
+import { SwitchRowLabel } from '#components/switch-row-label.js';
 import { useFullscreenElement } from '#hooks/use-fullscreen-element.js';
 
 /**
@@ -279,7 +281,8 @@ function DropdownMenuRadioItem({
 }
 
 /**
- * Keeps a dropdown open while toggling a boolean setting.
+ * Keeps a dropdown open while toggling a boolean setting. It shares its row classes and label
+ * layout with `SwitchRow`, the same row for surfaces that are not a dropdown menu.
  *
  * @public
  * @example <caption>Render a switch-backed menu setting.</caption>
@@ -293,25 +296,39 @@ function DropdownMenuRadioItem({
 function DropdownMenuSwitchItem({
   className,
   children,
+  icon,
+  description,
   isChecked,
   onIsCheckedChange,
   ...properties
 }: Omit<React.ComponentProps<typeof DropdownMenuPrimitive.Item>, 'onSelect'> & {
+  /** A leading icon, drawn before the title (and beside both lines when there is a description). */
+  readonly icon?: React.ReactNode;
+  /** A second line under the title. */
+  readonly description?: React.ReactNode;
   readonly isChecked: boolean;
   readonly onIsCheckedChange?: (checked: boolean) => void;
 }): React.JSX.Element {
+  const id = React.useId();
   return (
     <DropdownMenuPrimitive.Item
       data-slot='dropdown-menu-switch-item'
-      className={cn(menuItemVariants(), 'justify-between', className)}
+      className={cn(menuItemVariants(), menuSwitchRowVariants({ described: description !== undefined }), className)}
       onSelect={(event) => {
         event.preventDefault();
         onIsCheckedChange?.(!isChecked);
       }}
       {...properties}
     >
-      <span className={menuItemLayoutClass}>{children}</span>
-      <Switch checked={isChecked} onCheckedChange={onIsCheckedChange} />
+      <SwitchRowLabel icon={icon} description={description} titleId={`${id}-title`} descriptionId={`${id}-description`}>
+        {children}
+      </SwitchRowLabel>
+      <Switch
+        checked={isChecked}
+        aria-labelledby={`${id}-title`}
+        {...(description === undefined ? {} : { 'aria-describedby': `${id}-description` })}
+        onCheckedChange={onIsCheckedChange}
+      />
     </DropdownMenuPrimitive.Item>
   );
 }

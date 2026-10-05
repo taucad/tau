@@ -80,7 +80,7 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
     await connectPickedFolder(session);
     const rows = await openAgentList(page);
     expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
-    expect(await selectAgent(page, 'Codex')).toMatch(/Runs with your local Codex login/u);
+    expect(await selectAgent(page, 'Codex')).toMatch(/^Agent and model: Codex, /u);
 
     /* Run the first project turn through the fake ACP adapter. This fixture
      * tests the desktop utility boundary, so it must not depend on a separate

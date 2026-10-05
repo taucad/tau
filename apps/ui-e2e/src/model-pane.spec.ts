@@ -2109,8 +2109,8 @@ test('recovers manual source-free pinned previews at distinct reusable occurrenc
                   isRecord(value) &&
                   value['identity'] === part['identity'] &&
                   value['outputAccepted'] === true &&
-                  Array.isArray(value['after']) &&
-                  value['after'].some(
+                  Array.isArray(value['recipientStates']) &&
+                  value['recipientStates'].some(
                     (recipient: unknown) =>
                       isRecord(recipient) &&
                       recipient['id'] === id &&
@@ -2952,7 +2952,7 @@ export default function main() {
           return (
             name === 'thumbnail.service.accept' &&
             Array.isArray(outputs) &&
-            outputs.some((output: unknown) => isRecord(output) && readyRecipient(output['after']))
+            outputs.some((output: unknown) => isRecord(output) && readyRecipient(output['recipientStates']))
           );
         });
         return (
@@ -3021,7 +3021,7 @@ export default function main() {
                 return (
                   name === 'thumbnail.service.accept' &&
                   Array.isArray(outputs) &&
-                  outputs.some((output: unknown) => isRecord(output) && readyRecipient(output['after']))
+                  outputs.some((output: unknown) => isRecord(output) && readyRecipient(output['recipientStates']))
                 );
               });
               const containsRecipient = (value: unknown): boolean =>
@@ -3252,7 +3252,7 @@ export default function main() {
               }
               const recipientStates = [];
               for (const stage of ['before', 'after']) {
-                const states = value[stage];
+                const states = value[stage === 'after' ? 'recipientStates' : stage];
                 const stateRecords: readonly unknown[] = Array.isArray(states) ? states : [];
                 for (const current of stateRecords) {
                   if (!isRecord(current)) {
@@ -3646,7 +3646,7 @@ test('should replace current authored embedded-texture previews while retaining 
           return (
             name === 'thumbnail.service.accept' &&
             Array.isArray(outputs) &&
-            outputs.some((output: unknown) => isRecord(output) && readyRecipient(output['after']))
+            outputs.some((output: unknown) => isRecord(output) && readyRecipient(output['recipientStates']))
           );
         });
         return (
@@ -3715,7 +3715,7 @@ test('should replace current authored embedded-texture previews while retaining 
                 return (
                   name === 'thumbnail.service.accept' &&
                   Array.isArray(outputs) &&
-                  outputs.some((output: unknown) => isRecord(output) && readyRecipient(output['after']))
+                  outputs.some((output: unknown) => isRecord(output) && readyRecipient(output['recipientStates']))
                 );
               });
               const containsRecipient = (value: unknown): boolean =>
@@ -3946,7 +3946,7 @@ test('should replace current authored embedded-texture previews while retaining 
               }
               const recipientStates = [];
               for (const stage of ['before', 'after']) {
-                const states = value[stage];
+                const states = value[stage === 'after' ? 'recipientStates' : stage];
                 const stateRecords: readonly unknown[] = Array.isArray(states) ? states : [];
                 for (const current of stateRecords) {
                   if (!isRecord(current)) {

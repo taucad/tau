@@ -647,7 +647,7 @@ export class PartThumbnailService {
         })),
         outputs: acceptedRows.map((row) => ({
           ...row,
-          after: row.recipients.map((id) => ({
+          recipientStates: row.recipients.map((id) => ({
             id,
             registeredIdentity: this.identities.get(id),
             status: this.states.get(id)?.status,

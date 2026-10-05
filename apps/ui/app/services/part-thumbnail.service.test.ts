@@ -372,7 +372,7 @@ describe('PartThumbnailService', () => {
             { id: 'left', status: 'pending' },
             { id: 'right', status: 'pending' },
           ],
-          after: [
+          recipientStates: [
             { id: 'left', status: 'ready', byteLength: 1, decoded: false },
             { id: 'right', status: 'ready', byteLength: 1, decoded: false },
           ],
@@ -410,7 +410,7 @@ describe('PartThumbnailService', () => {
     expect(accepted[0]?.[2]).toMatchObject({
       jobIdentity: exportImage.mock.calls[0]?.[0].identity,
       currentIds: ['left'],
-      outputs: [{ recipients: ['left'], after: [{ id: 'left', status: 'ready' }] }],
+      outputs: [{ recipients: ['left'], recipientStates: [{ id: 'left', status: 'ready' }] }],
     });
   });
 

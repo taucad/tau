@@ -50,12 +50,13 @@ import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { Engine as NativeGeoSpecEngine } from '@taucad/geospec-engine-native/node';
 import { assertRootedPath } from '@taucad/utils/path';
+import { sha256Bytes } from '@taucad/utils/hash';
 
 /* Not `@taucad/types`: that barrel is an `export type *` the dts bundler cannot
  * follow, and it bundles rather than externalises. `@taucad/runtime` is a peer,
  * and re-exports the same declaration by name, so the emitted `.d.mts` keeps it
  * as an external import. */
-import type { ExportFile, RuntimeFileSystemBase } from '@taucad/runtime/types';
+import type { ExportFile, RuntimeFileSystemBase, PublishedPartAsset } from '@taucad/runtime/types';
 import type { RuntimeClient, WideViewRequest } from '@taucad/runtime/client';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
@@ -109,6 +110,11 @@ export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | '
     ) => Pick<ReturnType<ReturnType<RuntimeClient['open']>['view']>, 'rendering' | 'close'>;
   };
 };
+
+const hasAssemblyAdmission = (
+  client: HostRuntimeClient,
+): client is HostRuntimeClient & Pick<RuntimeClient, 'openAssembly'> =>
+  'openAssembly' in client && typeof client.openAssembly === 'function';
 
 /**
  * Filesystem capability the host tool registry consumes. The project's print intent is read in bounded chunks and
@@ -479,8 +485,56 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       return client;
     };
 
+    const assemblyRootFor = async (
+      client: HostRuntimeClient,
+      path: string,
+      signal?: AbortSignal,
+    ): Promise<PublishedPartAsset | undefined> => {
+      if (!path.endsWith('.json')) {
+        return undefined;
+      }
+      signal?.throwIfAborted();
+      const bytes = await view.readFile(assertRootedPath(path));
+      signal?.throwIfAborted();
+      const candidate: unknown = JSON.parse(new TextDecoder().decode(bytes));
+      if (
+        candidate === null ||
+        typeof candidate !== 'object' ||
+        !Object.hasOwn(candidate, 'parts') ||
+        !Object.hasOwn(candidate, 'occurrences') ||
+        !Object.hasOwn(candidate, 'schemaVersion')
+      ) {
+        throw new Error('The selected JSON has no admitted assembly display.');
+      }
+      if (!Object.hasOwn(candidate, 'generation')) {
+        throw new Error(
+          'Authored assembly agent export requires a committed pinned scene; select its published scene JSON.',
+        );
+      }
+      if (!hasAssemblyAdmission(client)) {
+        throw new Error('This attached runtime has no assembly admission operation.');
+      }
+      // SAFETY: sha256Bytes returns the canonical lowercase SHA-256 hex used by this asset brand.
+      const digest = `sha256:${await sha256Bytes(bytes)}` as PublishedPartAsset['digest'];
+      const root = { path, digest, byteLength: bytes.byteLength };
+      signal?.throwIfAborted();
+      signal?.throwIfAborted();
+      return root;
+    };
+
     const { kernelClient, graphics, images } = createRuntimeAgentClients({
       runtime: async () => requireRuntime(),
+      async openPublishedAssembly({ targetFile, signal }) {
+        const client = await requireRuntime({ signal });
+        const root = await assemblyRootFor(client, targetFile, signal);
+        if (!root) {
+          return undefined;
+        }
+        if (!hasAssemblyAdmission(client)) {
+          throw new Error('This attached runtime has no assembly admission operation.');
+        }
+        return client.openAssembly({ root, signal });
+      },
       mapRuntimeError: runtimeFailure,
       async exportImage(job) {
         const client = await requireRuntime(job);

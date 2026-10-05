@@ -14,9 +14,18 @@ import {
   parameterManifestWireSchema,
 } from '@taucad/chat/schemas';
 import { asKnownArtifact } from '@taucad/runtime';
-import type { RuntimeClient, ViewOffer, WideViewRequest } from '@taucad/runtime';
-import type { ExportFile, KernelIssue } from '@taucad/runtime/types';
+import { evaluateModelOutputSchema } from '@taucad/chat/schemas/tools/evaluate-model';
+import { selectPublishedExportRoute } from '@taucad/runtime/client';
+import type { RuntimeClient, ViewOffer, WideViewRequest, ExportResult } from '@taucad/runtime';
+import type {
+  ExportFile,
+  KernelIssue,
+  SourceRevision,
+  PublishedAssemblyDocument,
+  ExportOutcome,
+} from '@taucad/runtime/types';
 import { waitFor } from 'xstate';
+import { fileExtensions } from '@taucad/types/constants';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -83,6 +92,10 @@ export type CreateRuntimeAgentClientsInput = Readonly<{
   runtime: RuntimeAgentClient | (() => Promise<RuntimeAgentClient>);
   exportImage: RuntimeAgentImageExporter;
   mapRuntimeError: RuntimeAgentErrorMapper;
+  /** Resolve only an explicitly selected immutable assembly; ordinary sources return undefined. */
+  openPublishedAssembly?: (
+    input: Readonly<{ targetFile: string; signal?: AbortSignal }>,
+  ) => Promise<PublishedAssemblyDocument | undefined>;
 }>;
 
 /** Inputs for adapting one host-owned parameter actor per source target. @public */
@@ -321,13 +334,136 @@ export const createRuntimeAgentClients = (
   const runtimeFor = async (): Promise<RuntimeAgentClient> =>
     typeof input.runtime === 'function' ? input.runtime() : input.runtime;
 
+  const captureGlb = async ({
+    captureInput,
+    targetFile,
+    content,
+    hash,
+    echo,
+    sourceRevision,
+    signal,
+  }: Readonly<{
+    captureInput: Parameters<RpcImageClient['captureImages']>[0];
+    targetFile: string;
+    content: Uint8Array<ArrayBuffer>;
+    hash: string;
+    echo: Readonly<{ view: string; instance?: string }>;
+    sourceRevision?: SourceRevision;
+    signal?: AbortSignal;
+  }>): ReturnType<RpcImageClient['captureImages']> => {
+    assertGlb(content);
+    const exportOptions = buildCaptureExportOptions({
+      mode: captureInput.mode,
+      size: captureSize,
+      ...(captureInput.includeEdges === undefined ? {} : { includeEdges: captureInput.includeEdges }),
+    });
+    const count = captureInput.mode === 'multi_angle' ? canonicalCaptureViews.length : 1;
+    const names =
+      captureInput.mode === 'multi_angle'
+        ? canonicalCaptureViews.map(({ id }) => `render-${id}.webp`)
+        : ['render.webp'];
+    const files = requireImageFiles(
+      await input.exportImage({
+        kind: 'capture',
+        identity: `agent-host:${targetFile}:${hash}:${captureInput.mode}:${echo.view}:${echo.instance ?? ''}`,
+        sourceFormat: 'glb',
+        sourcePath: targetFile,
+        geometryHash: hash,
+        content,
+        format: 'webp',
+        signal,
+        exportOptions,
+      }),
+      { count, mimeType: 'image/webp', names },
+    );
+    signal?.throwIfAborted();
+    const dataUrls = captureFilesToDataUrls(files);
+    return {
+      success: true,
+      images:
+        captureInput.mode === 'multi_angle'
+          ? canonicalCaptureViews.map(({ id }, index) => ({ ...echo, angle: id, dataUrl: dataUrls[index]! }))
+          : [{ ...echo, angle: 'isometric', dataUrl: dataUrls[0]! }],
+      ...(sourceRevision === undefined ? {} : { sourceRevision }),
+    };
+  };
+
+  const optionMetadataSchema = evaluateModelOutputSchema.shape.capabilities.unwrap().shape.exports.valueType;
+  const metadata = (options: ViewOffer['options']) =>
+    optionMetadataSchema.parse({
+      schema: options?.schema ?? { type: 'object', properties: {} },
+      defaults: options?.defaults ?? {},
+    });
+
   const kernelClient: RpcRuntimeClient = {
     async evaluateModel({ targetFile, includeCapabilities }, context) {
       const rooted = assertRootedPath(targetFile);
+      let published: PublishedAssemblyDocument | undefined;
       let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
         const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
+        published = await input.openPublishedAssembly?.({ targetFile: rooted, signal: context?.signal });
+        if (published) {
+          const result = await published.exportPublished({
+            publishedAssembly: { root: published.root },
+            format: 'glb',
+            signal: context?.signal,
+          });
+          context?.signal?.throwIfAborted();
+          if (result.success) {
+            if (result.files.length !== 1 || result.files[0].mimeType !== 'model/gltf-binary') {
+              throw new TypeError('Published assembly evaluation expected one GLB artifact');
+            }
+            assertGlb(result.files[0].bytes);
+          }
+          const publication = published.admitted.publication;
+          const eligible =
+            includeCapabilities && result.success
+              ? fileExtensions.flatMap((format) => {
+                  const route = selectPublishedExportRoute({
+                    publication,
+                    capabilities: runtime.capabilities,
+                    format,
+                  });
+                  return route === undefined ? [] : [route];
+                })
+              : [];
+          const declaredIds = new Set<string>();
+          const declarations = eligible.filter((route) => {
+            if (route.sourceFormat !== route.targetFormat || declaredIds.has(route.exportId)) {
+              return false;
+            }
+            declaredIds.add(route.exportId);
+            return true;
+          });
+          return {
+            success: true,
+            status: result.success ? 'ready' : 'error',
+            kernelIssues: [...result.issues],
+            ...(result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision }),
+            ...(result.success
+              ? {
+                  views: [published.projection],
+                  exports: {
+                    [result.exportId]: 'glb',
+                    ...Object.fromEntries(declarations.map((route) => [route.exportId, route.sourceFormat])),
+                  },
+                }
+              : {}),
+            ...(includeCapabilities && result.success
+              ? {
+                  capabilities: {
+                    views: { [published.projection]: { schema: { type: 'object', properties: {} }, defaults: {} } },
+                    exports: Object.fromEntries(
+                      declarations.map((route) => [route.exportId, metadata(route.exportOptions)]),
+                    ),
+                    targets: [...new Set(eligible.flatMap((route) => [route.targetFormat, route.exportId]))],
+                  },
+                }
+              : {}),
+          };
+        }
         /* Every agent document is one request's snapshot, opened unwatched: a watched one is
          * superseded when the watch echo of an edit made just before the call lands mid-evaluation. */
         document = runtime.open({ source: { path: rooted }, watch: false, signal: context?.signal });
@@ -368,10 +504,6 @@ export const createRuntimeAgentClients = (
         if (includeCapabilities && evaluation.success) {
           const description = await runtime.describe({ source: { path: rooted }, signal: context?.signal });
           const routes = runtime.capabilities?.routes.filter((route) => route.kernelId === description.kernelId) ?? [];
-          const metadata = (options: ViewOffer['options']) => ({
-            schema: Object.fromEntries(Object.entries(options?.schema ?? { type: 'object', properties: {} })),
-            defaults: { ...options?.defaults },
-          });
           capabilities = {
             capabilities: {
               views: Object.fromEntries(evaluation.views.map(({ id, options }) => [id, metadata(options)])),
@@ -398,6 +530,7 @@ export const createRuntimeAgentClients = (
       } catch (error) {
         return input.mapRuntimeError(error, rooted);
       } finally {
+        published?.close();
         document?.close();
       }
     },
@@ -406,15 +539,36 @@ export const createRuntimeAgentClients = (
   const graphics: RpcGraphicsClient = {
     async exportModel({ targetFile, to, options }, context): Promise<RpcGraphicsExportModelResult> {
       const rooted = assertRootedPath(targetFile);
+      let published: PublishedAssemblyDocument | undefined;
       let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
         const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
-        document = runtime.open({ source: { path: rooted }, watch: false, signal: context?.signal });
-        const result = await document.export(to, {
-          ...(options === undefined ? {} : { options }),
-          signal: context?.signal,
-        });
+        published = await input.openPublishedAssembly?.({ targetFile: rooted, signal: context?.signal });
+        let result: ExportOutcome | ExportResult;
+        if (published) {
+          const publication = published.admitted.publication;
+          const declaredRoute = fileExtensions.flatMap((format) => {
+            const route = selectPublishedExportRoute({ publication, capabilities: runtime.capabilities, format });
+            return route?.exportId === to && route.sourceFormat === route.targetFormat ? [route] : [];
+          })[0];
+          const format = fileExtensions.find((extension) => extension === (declaredRoute?.sourceFormat ?? to));
+          if (format === undefined) {
+            throw new TypeError(`Unsupported published export format: ${to}`);
+          }
+          result = await published.exportPublished({
+            publishedAssembly: { root: published.root },
+            format,
+            ...(options === undefined ? {} : { exportOptions: options }),
+            signal: context?.signal,
+          });
+        } else {
+          document = runtime.open({ source: { path: rooted }, watch: false, signal: context?.signal });
+          result = await document.export(to, {
+            ...(options === undefined ? {} : { options }),
+            signal: context?.signal,
+          });
+        }
         context?.signal?.throwIfAborted();
         return result.success
           ? {
@@ -432,6 +586,7 @@ export const createRuntimeAgentClients = (
       } catch (error) {
         return input.mapRuntimeError(error, rooted);
       } finally {
+        published?.close();
         document?.close();
       }
     },
@@ -440,10 +595,47 @@ export const createRuntimeAgentClients = (
   const images: RpcImageClient = {
     async captureImages(captureInput, context) {
       const targetFile = assertRootedPath(captureInput.targetFile);
+      let published: PublishedAssemblyDocument | undefined;
       let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
         const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
+        published = await input.openPublishedAssembly?.({ targetFile, signal: context?.signal });
+        if (published) {
+          if (
+            (captureInput.view !== undefined && captureInput.view !== published.projection) ||
+            captureInput.instance !== undefined ||
+            Object.keys(captureInput.options ?? {}).length > 0
+          ) {
+            throw new TypeError(
+              'Published assembly capture supports only its declared projection without instance or render options.',
+            );
+          }
+          const result = await published.exportPublished({
+            publishedAssembly: { root: published.root },
+            format: 'glb',
+            signal: context?.signal,
+          });
+          if (!result.success) {
+            return {
+              success: false,
+              errorCode: issueErrorCode(result.issues),
+              message: issueMessage(result.issues, 'Published projection failed'),
+            };
+          }
+          if (result.files.length !== 1 || result.files[0].mimeType !== 'model/gltf-binary') {
+            throw new TypeError('Published projection must return one GLB.');
+          }
+          return await captureGlb({
+            captureInput,
+            targetFile,
+            content: result.files[0].bytes,
+            hash: published.root.digest,
+            echo: { view: published.projection },
+            sourceRevision: result.sourceRevision,
+            signal: context?.signal,
+          });
+        }
         document = runtime.open({ source: { path: targetFile }, watch: false, signal: context?.signal });
         const evaluated = await document.evaluation({ signal: context?.signal });
         if (evaluated.superseded) {
@@ -521,47 +713,22 @@ export const createRuntimeAgentClients = (
             context?.signal?.throwIfAborted();
             return { success: true, images: [{ ...echo, dataUrl: captureFilesToDataUrls(files)[0]! }], ...provenance };
           }
-          assertGlb(artifact.content);
-          const exportOptions = buildCaptureExportOptions({
-            mode: captureInput.mode,
-            size: captureSize,
-            ...(captureInput.includeEdges === undefined ? {} : { includeEdges: captureInput.includeEdges }),
+          return await captureGlb({
+            captureInput,
+            targetFile,
+            content: artifact.content,
+            hash: rendering.hash,
+            echo,
+            sourceRevision: rendering.sourceRevision,
+            signal: context?.signal,
           });
-          const count = captureInput.mode === 'multi_angle' ? canonicalCaptureViews.length : 1;
-          const names =
-            captureInput.mode === 'multi_angle'
-              ? canonicalCaptureViews.map(({ id }) => `render-${id}.webp`)
-              : ['render.webp'];
-          const files = requireImageFiles(
-            await input.exportImage({
-              kind: 'capture',
-              identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}`,
-              sourceFormat: 'glb',
-              sourcePath: targetFile,
-              geometryHash: rendering.hash,
-              content: artifact.content,
-              format: 'webp',
-              signal: context?.signal,
-              exportOptions,
-            }),
-            { count, mimeType: 'image/webp', names },
-          );
-          context?.signal?.throwIfAborted();
-          const dataUrls = captureFilesToDataUrls(files);
-          return {
-            success: true,
-            images:
-              captureInput.mode === 'multi_angle'
-                ? canonicalCaptureViews.map(({ id }, index) => ({ ...echo, angle: id, dataUrl: dataUrls[index]! }))
-                : [{ ...echo, angle: 'isometric', dataUrl: dataUrls[0]! }],
-            ...provenance,
-          };
         } finally {
           view.close();
         }
       } catch (error) {
         return input.mapRuntimeError(error, targetFile);
       } finally {
+        published?.close();
         document?.close();
       }
     },

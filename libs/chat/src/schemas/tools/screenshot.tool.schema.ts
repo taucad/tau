@@ -37,7 +37,7 @@ export type ScreenshotAngle = z.infer<typeof screenshotAngleSchema>;
  */
 export const screenshotImageSchema = z
   .object({
-    view: z.string().describe('Kernel view ID captured.'),
+    view: z.string().describe('Declared kernel view or published assembly projection captured.'),
     instance: z.string().optional().describe('Captured sheet or drawing ID.'),
     angle: screenshotAngleSchema.optional().describe('Camera angle for a 3D view only.'),
     dataUrl: z.string().describe('Base64 data URL of the captured image'),
@@ -47,7 +47,7 @@ export const screenshotImageSchema = z
 /** A persisted image returned to an external agent without inline image bytes. @public */
 export const screenshotArtifactImageSchema = z
   .object({
-    view: z.string().describe('Kernel view ID captured.'),
+    view: z.string().describe('Declared kernel view or published assembly projection captured.'),
     instance: z.string().optional().describe('Captured sheet or drawing ID.'),
     angle: screenshotAngleSchema.optional().describe('Camera angle for a 3D view only.'),
     path: z

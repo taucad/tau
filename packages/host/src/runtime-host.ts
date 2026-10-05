@@ -4,6 +4,17 @@ import { packageVersion } from '@taucad/runtime/metadata';
 import { webSocketHost } from '@taucad/runtime/transport/websocket-host';
 import { createRuntimeWorker } from '@taucad/runtime/worker';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+import type { AssemblyDisplayProjector } from '@taucad/runtime/types';
+import { flattenAdmittedAssemblyGlb, validateAdmittedAssemblyGlb } from '@taucad/geometry-core';
+
+const admitAssemblyDisplay: AssemblyDisplayProjector = async ({ purpose, records, occurrences, readAsset }) => {
+  const input = { parts: records, occurrences, readAsset };
+  if (purpose === 'admission') {
+    await validateAdmittedAssemblyGlb(input);
+    return;
+  }
+  return (await flattenAdmittedAssemblyGlb(input)).geometry.content;
+};
 
 /** Handle for a loopback runtime hosted by a host child process. @public */
 export type HostRuntimeHandle = {
@@ -48,7 +59,7 @@ export const serveHostRuntime = async (options: {
   const host = webSocketHost({
     host: '127.0.0.1',
     port: 0,
-    worker: () => createRuntimeWorker({ runtime: options.runtime }),
+    worker: () => createRuntimeWorker({ runtime: options.runtime, admitAssemblyDisplay }),
     authorize: (request) => tokenMatches(request.headers.authorization, options.authorizationToken),
     allowPrivateComputePairing: true,
   });

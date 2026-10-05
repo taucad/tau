@@ -405,24 +405,49 @@ class PreparationContractTest(unittest.TestCase):
             self.assertEqual(error.exception.code, 2)
             self.assertIn('not allowed with argument', stderr.getvalue())
 
-    def test_should_reserve_build_space_only_for_build_routes(self):
+    def test_should_reserve_build_space_only_for_build_routes_and_missing_sources(self):
         for name in ['occt', *prepare.RECIPE['headers']]:
             (self.cache / 'sources' / name).mkdir(parents=True)
             (self.cache / 'downloads' / f'{name}.tar.gz').touch()
-        for stage, required_gib in [('prefixes', 14), ('reuse-prefix', 6)]:
-            with self.subTest(stage=stage):
-                required = required_gib * 1024 ** 3
-                with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required)):
-                    prepare.room(stage)
-                with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required - 1)):
-                    with self.assertRaisesRegex(ValueError, f'requires {required} free bytes'):
-                        prepare.room(stage)
+        required = 14 * 1024 ** 3
+        with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required)):
+            prepare.room('prefixes')
+        with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required - 1)):
+            with self.assertRaisesRegex(ValueError, f'requires {required} free bytes'):
+                prepare.room('prefixes')
+        for stage in ['sources', 'reuse-prefix']:
+            with self.subTest(stage=stage), \
+                    patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=0)):
+                prepare.room(stage)
         with patch.object(prepare, 'SOURCE', self.cache / 'missing-source'):
-            with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=6 * 1024 ** 3)):
-                with self.assertRaisesRegex(ValueError, f'requires {7 * 1024 ** 3} free bytes'):
-                    prepare.room('reuse-prefix')
-            with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=7 * 1024 ** 3)):
-                prepare.room('reuse-prefix')
+            for stage in ['sources', 'reuse-prefix']:
+                with self.subTest(stage=stage):
+                    required = 1024 ** 3
+                    with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required - 1)):
+                        with self.assertRaisesRegex(ValueError, f'requires {required} free bytes'):
+                            prepare.room(stage)
+                    with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=required)):
+                        prepare.room(stage)
+
+        sdk = self.cache / 'sdk/install'
+        sdk.mkdir(parents=True)
+        prepare.RUST.mkdir()
+        with patch.object(prepare, 'SDK', sdk), \
+                patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=0)), \
+                patch.object(prepare, 'tool_paths', return_value=self.paths), \
+                patch.object(prepare, 'validate_tools', return_value='inert rust') as validate, \
+                patch.object(prepare, 'download', side_effect=AssertionError('unexpected install')):
+            prepare.prepare_tools()
+            validate.assert_called_once_with(self.paths)
+            self.assertEqual(json.loads((self.cache / 'tool-metadata.json').read_text())['selectedToolHashes'],
+                             'verified')
+        sdk.rmdir()
+        with patch.object(prepare, 'SDK', sdk), \
+                patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=4 * 1024 ** 3 - 1)):
+            with self.assertRaisesRegex(ValueError, f'requires {4 * 1024 ** 3} free bytes'):
+                prepare.room('tools')
+            with patch.dict(os.environ, GEOSPEC_DELIVERY_EMSDK_PREFIX=str(sdk)):
+                prepare.room('tools')  # External missing tools fail validation, never install.
 
         with patch.object(prepare, 'room') as room, \
                 patch.object(prepare, 'prepare_sources') as sources, \
@@ -434,6 +459,51 @@ class PreparationContractTest(unittest.TestCase):
             room.assert_called_once_with('reuse-prefix')
             sources.assert_called_once_with()
             build.assert_not_called()
+
+    def test_should_verify_existing_sources_and_receipt_on_low_free_reuse(self):
+        for name, item in [('occt', self.recipe['occt']), *self.recipe['headers'].items()]:
+            archive = self.cache / 'downloads' / f'{name}.tar.gz'
+            payload = f'selected {name} bytes'.encode()
+            with tarfile.open(archive, 'w:gz') as output:
+                member = tarfile.TarInfo(f'{name}/selected.txt')
+                member.size = len(payload)
+                output.addfile(member, io.BytesIO(payload))
+            item['sha256'] = prepare.digest(archive)
+        (self.package / 'native/occt/source-manifest.json').write_text(json.dumps({
+            'archiveSha256': self.recipe['occt']['sha256'],
+            'commit': self.recipe['occt']['commit'],
+        }))
+        self.recipe_path.write_text(json.dumps(self.recipe))
+        self.original_recipe.write_bytes(self.recipe_path.read_bytes())
+        self.receipt = prepare.create_prefix_receipt(self.prefix, self.contract())
+        prepare.write_json(self.receipt_path, self.receipt)
+        with patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=1024 ** 3)):
+            prepare.prepare_sources()
+
+        low_free = patch.object(prepare.shutil, 'disk_usage', return_value=SimpleNamespace(free=512 * 1024 ** 2))
+        with low_free, patch.object(prepare, 'prefix_context', return_value=self.context), \
+                patch.object(prepare, 'producer_builder', return_value=self.builder), \
+                patch.object(prepare, 'prepare_prefix') as build:
+            prepare.prepare_prefixes(self.paths, self.env, reuse_prefix='mixed')
+            build.assert_not_called()
+            archive = self.cache / 'downloads/occt.tar.gz'
+            original_archive = archive.read_bytes()
+            archive.unlink()
+            with self.assertRaisesRegex(ValueError, f'requires {1024 ** 3} free bytes'):
+                prepare.prepare_prefixes(self.paths, self.env, reuse_prefix='mixed')
+            archive.write_bytes(original_archive)
+            archive.write_bytes(b'changed archive')
+            with self.assertRaisesRegex(ValueError, 'Archive hash mismatch'):
+                prepare.prepare_prefixes(self.paths, self.env, reuse_prefix='mixed')
+            archive.write_bytes(original_archive)
+            source_file = prepare.SOURCE / 'selected.txt'
+            source_file.write_text('changed source')
+            with self.assertRaisesRegex(ValueError, 'Changed archive member'):
+                prepare.prepare_prefixes(self.paths, self.env, reuse_prefix='mixed')
+            source_file.write_text('selected occt bytes')
+            self.library.write_text('changed prefix')
+            with self.assertRaisesRegex(ValueError, 'Installed prefix outputs changed'):
+                prepare.prepare_prefixes(self.paths, self.env, reuse_prefix='mixed')
 
     def sdk_support_fixture(self):
         sdk = self.root / 'sdk'

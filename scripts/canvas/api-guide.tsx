@@ -288,7 +288,7 @@ const horizonTone: Record<Horizon, string> = {
   placeholder: 'bg-muted text-muted-foreground',
 };
 
-const themes = { light: 'github-light', dark: 'github-dark' } as const;
+const themes = { light: 'github-light-high-contrast', dark: 'github-dark-high-contrast' } as const;
 // Set once by `mountApiGuide`; a language Shiki does not bundle is highlighted with the guide's grammars.
 let guideLanguages: readonly LanguageInput[] = [];
 let guideHighlighter: ReturnType<typeof createHighlighter> | undefined;
@@ -492,7 +492,7 @@ function Code({ sketch, evidence }: { sketch: Sketch; evidence?: Evidence }): Re
         ) : checked === undefined ? (
           <span className='text-destructive'>not compiled: run check-design</span>
         ) : checked.diagnostics.length === 0 ? (
-          <span className='text-success'>{language === 'kcl' ? 'parses and runs' : 'compiles'}</span>
+          <span className='text-foreground'>{language === 'kcl' ? 'parses and runs' : 'compiles'}</span>
         ) : (
           <span className='text-destructive'>{checked.diagnostics.length} compile errors</span>
         )}
@@ -518,7 +518,7 @@ function Section({ id, title, children }: { id: string; title: string; children:
 
 function Bullets({ items }: { items: readonly string[] }): React.JSX.Element {
   return (
-    <ul className='list-disc space-y-1 pl-5 text-sm'>
+    <ul className='list-disc space-y-1 pl-5 text-sm wrap-anywhere'>
       {items.map((item) => (
         <li key={item}>
           <Markdown text={item} inline />

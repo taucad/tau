@@ -222,9 +222,19 @@ describe('Vitest Browser test-runner ownership', () => {
       const chromiumInstances = source.match(/browser:\s*['"]chromium['"]/gu)?.length ?? 0;
       const managedChannels = source.match(/channel:\s*['"]chromium['"]/gu)?.length ?? 0;
       expect(chromiumInstances, `${path} must declare at least one Chromium instance`).toBeGreaterThan(0);
-      expect(managedChannels, `${path} must select managed full Chromium for every Chromium instance`).toBe(
-        chromiumInstances,
-      );
+      if (path === 'apps/ui-e2e/vitest.config.ts') {
+        expect(source, `${path} must default the explicit reference selection to managed Chromium`).toMatch(
+          /const browserChannel = process\.env\['TAU_E2E_BROWSER_CHANNEL'\] \?\? 'chromium';/u,
+        );
+        expect(source, `${path} must reject every channel except managed Chromium or explicit Chrome`).toMatch(
+          /if \(browserChannel !== 'chromium' && browserChannel !== 'chrome'\) \{\s*throw new Error\(/u,
+        );
+        expect(source.match(/channel:\s*browserChannel\b/gu)?.length ?? 0).toBe(chromiumInstances);
+      } else {
+        expect(managedChannels, `${path} must select managed full Chromium for every Chromium instance`).toBe(
+          chromiumInstances,
+        );
+      }
       expect(source, `${path} must keep headless ownership at the Vitest Browser level`).toMatch(
         /browser:\s*\{[\s\S]*?headless:\s*true/u,
       );

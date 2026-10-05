@@ -1,6 +1,8 @@
 # replicad — Constants
 
-3 top-level symbols. Signatures are verbatim typescript.
+4 top-level symbols. Signatures are verbatim typescript.
+
+AXIS_NAMES: readonly ["X", "Y", "Z", "-X", "-Y", "-Z"]
 
 DEG2RAD: number
 

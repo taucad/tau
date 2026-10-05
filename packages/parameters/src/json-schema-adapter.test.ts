@@ -1,6 +1,9 @@
+import { contentDigest } from '@taucad/cache-core';
 import { describe, expect, it } from 'vitest';
 import { projectJsonSchemaToParameterDeclaration } from '#json-schema-adapter.js';
-import { ParameterAdmissionError } from '#manifest.js';
+import { ParameterAdmissionError, compileParameterManifest } from '#manifest.js';
+
+const digest = contentDigest({ value: `sha256:${'0'.repeat(64)}` });
 
 const identity = {
   schemaId: 'urn:test:producer:parameters:v1',
@@ -145,6 +148,61 @@ describe('JSON Schema parameter declaration adapter', () => {
     expect(declaration.bindings).toEqual({
       '/value': { quantityKind: 'http://qudt.org/vocab/quantitykind/Length', space: 'linear' },
     });
+  });
+
+  it('should admit a nullable number with a unit through a quantity definition', async () => {
+    const declaration = projectJsonSchemaToParameterDeclaration({
+      ...identity,
+      defaults: { retraction: null },
+      schema: {
+        type: 'object',
+        properties: {
+          retraction: { type: ['number', 'null'], minimum: 0, title: 'Retraction', default: null, 'x-tau-unit': 'mm' },
+        },
+      },
+    });
+    const manifest = await compileParameterManifest({
+      declaration,
+      scope: { kind: 'provider', provider: 'slicer', configuration: 'settings' },
+      source: { id: 'slicer:settings', version: digest, revision: digest, capability: 'json-structure' },
+      dependency: digest,
+      middleware: digest,
+    });
+
+    expect(manifest.bindings['/retraction']).toMatchObject({ nullable: true, unit: 'mm' });
+  });
+
+  it('should admit a slicer-sized settings schema of four hundred described settings', () => {
+    const groups = Object.fromEntries(
+      Array.from({ length: 13 }, (_, group) => [
+        `group${String(group)}`,
+        {
+          type: 'object',
+          title: `Group ${String(group)}`,
+          properties: Object.fromEntries(
+            Array.from({ length: 31 }, (_, setting) => [
+              `setting${String(setting)}`,
+              {
+                type: 'number',
+                minimum: 0,
+                title: `Setting ${String(setting)}`,
+                description: 'What this setting does to the print, in a sentence.',
+                default: 1,
+                'x-tau-unit': 'mm',
+              },
+            ]),
+          ),
+        },
+      ]),
+    );
+
+    expect(() =>
+      projectJsonSchemaToParameterDeclaration({
+        ...identity,
+        defaults: {},
+        schema: { type: 'object', properties: groups },
+      }),
+    ).not.toThrow();
   });
 
   it('should reject every reference sibling independent of key order or semantics', () => {

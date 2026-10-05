@@ -253,7 +253,7 @@ internal static class Program
     }
 
     [ExcludeFromCodeCoverage]
-    internal static Thread StartParentWatch(
+    internal static Thread? StartParentWatch(
         int parentPid,
         Action? terminate = null,
         Func<int, bool>? parentIsAlive = null,
@@ -261,6 +261,10 @@ internal static class Program
     {
         terminate ??= () => Environment.Exit(0);
         parentIsAlive ??= ParentIsAlive;
+        // A PID namespace (Linux Bubblewrap) hides the supervisor from the start. Watching it there
+        // would exit the worker right after its handshake; the sandbox itself dies with its parent,
+        // and a supervisor that is already gone closes stdin instead.
+        if (!parentIsAlive(parentPid)) return null;
         var thread = new Thread(() =>
         {
             while (parentIsAlive(parentPid))

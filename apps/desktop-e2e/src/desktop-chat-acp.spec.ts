@@ -294,7 +294,7 @@ test.each(authoringCases)('[agent-authoring] $name', async (control) => {
       throw new Error('The actual Codex adapter does not advertise Sol6.1; no model substitution is permitted.');
     }
     await page.keyboard.press('Escape');
-    expect(await selectAgent(page, 'Codex', advertised)).toMatch(/Runs with your local Codex login/u);
+    expect(await selectAgent(page, 'Codex', advertised)).toMatch(/^Agent and model: Codex, /u);
     const slug = await submitPrompt(page, control.prompt);
     await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
     const projectRoot = join(session.pickedDirectory, slug);
@@ -562,7 +562,7 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     /* 3. The first project turn is placed on the Codex row and answered by the
      * real adapter. Keeping this ACP-first makes the ACP contract independent
      * of a separate Tau-provider seed. */
-    expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/Runs with your local Codex login/u);
+    expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/^Agent and model: Codex, /u);
     const gatewayCallsBefore = fixture.gatewayRequests.length;
     await submitPrompt(page, cadInspectionPrompt);
     await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
@@ -752,7 +752,7 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       } else {
         const rows = await openAgentList(page);
         expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
-        expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/Runs with your local Codex login/u);
+        expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/^Agent and model: Codex, /u);
       }
 
       const slug = await submitPrompt(page, externalPrompt);
@@ -908,7 +908,7 @@ test.skipIf(!codexAvailable || !packaged || process.env['TAU_E2E_ACP_KINEMATICS'
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
       await connectPickedFolder(session);
-      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Sol')).toMatch(/Runs with your local Codex login/u);
+      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Sol')).toMatch(/^Agent and model: Codex, /u);
       await selectKernel(page, 'Replicad');
       expect(await page.evaluate(() => localStorage.getItem('tau-cad-kernel'))).toBe('"replicad"');
 
@@ -1034,7 +1034,7 @@ test.skipIf(!codexAvailable)(
        * created carrying it. */
       const rows = await openAgentList(page);
       expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
-      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/Runs with your local Codex login/u);
+      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/^Agent and model: Codex, /u);
 
       await submitPrompt(page, externalPrompt);
 
@@ -1253,7 +1253,7 @@ test.skipIf(!codexAvailable)(
        * is the same verb a Tau turn uses. */
       const rows = await openAgentList(page);
       expect(rows).toContainEqual(expect.stringMatching(/^Codex/u));
-      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/Runs with your local Codex login/u);
+      expect(await selectAgent(page, 'Codex', 'GPT-5.6-Luna')).toMatch(/^Agent and model: Codex, /u);
       /* The composer offers no branch (C3): the Revisions pane makes it by name,
          and its row places this chat there. The candidate revision's branch,
          below, is what proves the placement held. */

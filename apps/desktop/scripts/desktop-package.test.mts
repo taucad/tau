@@ -19,7 +19,7 @@ import {
   desktopPackagePlans,
   parseDesktopPackageArguments,
 } from './desktop-package-target.mjs';
-import { runtimePlatformPackages } from './runtime-stage.mjs';
+import { desktopManifestFields, desktopPackageChannel, runtimePlatformPackages } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 /* Target selection: exactly one supported target, on its own host. */
@@ -157,3 +157,18 @@ assert.ok(
 assert.ok(licenceGate < packageSource.indexOf('await packager('));
 assert.ok(licenceGate < packageSource.indexOf('desktopArchiveCommand(plan'));
 console.log('✓ the vendored-licence gate runs before packaging whenever an archive is written');
+
+/* TAU_DESKTOP_CHANNEL selects the channel main reads from the staged manifest. */
+assert.equal(desktopPackageChannel(undefined), 'production');
+assert.equal(desktopPackageChannel(' '), 'production');
+assert.equal(desktopPackageChannel('production'), 'production');
+assert.equal(desktopPackageChannel('staging'), 'staging');
+assert.throws(() => desktopPackageChannel('beta'), /production or staging/u);
+assert.deepEqual(desktopManifestFields({ environmentOverrides: false, channel: 'production' }), {});
+assert.deepEqual(desktopManifestFields({ environmentOverrides: true, channel: 'production' }), {
+  tauDesktop: { environmentOverrides: true },
+});
+assert.deepEqual(desktopManifestFields({ environmentOverrides: false, channel: 'staging' }), {
+  tauDesktop: { channel: 'staging' },
+});
+console.log('✓ a staging package records its channel and a production release records nothing');

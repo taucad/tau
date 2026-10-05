@@ -54,7 +54,10 @@ describe('@taucad/replicad', () => {
       'ws',
     ]);
     const offenders = readdirSync(sourceDirectory, { encoding: 'utf8', recursive: true })
-      .filter((name) => name.endsWith('.ts') && !name.includes('.test'))
+      // This private Node child is referenced only by a test and is outside the three package entrypoints.
+      .filter(
+        (name) => name.endsWith('.ts') && !name.includes('.test') && name !== 'replicad-mesh-cache-process.fixture.ts',
+      )
       .flatMap((name) => {
         // Comments are prose, not payload: a doc comment naming `import('ws')` is not an import.
         // `import type` is erased before the bundle exists, so it is not payload either.

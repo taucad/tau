@@ -18,16 +18,19 @@ if ((mode !== 'seed' && mode !== 'restore') || directory === undefined) {
 const plugin = replicadKernel({ wasm: 'single', computeReuse: false });
 const definition = await resolveRuntimePluginDefinition('kernel', plugin);
 const originalCreateGeometry = definition.evaluate.bind(definition);
-const originalDeserializeNativeHandle = definition.deserializeHandle?.bind(definition);
+const deserializeNativeHandle = definition.deserializeHandle;
+if (!deserializeNativeHandle) {
+  throw new Error('Replicad must expose native snapshot restoration.');
+}
+const originalDeserializeNativeHandle = deserializeNativeHandle.bind(definition);
+// The factory loader returns a new definition on each resolution; pin this observed instance for the worker.
+const observedPlugin = { ...plugin, [Symbol.for('@taucad/runtime/plugin-definition')]: () => definition };
 let builds = 0;
 let restores = 0;
 definition.evaluate = async (...args) => {
   builds += 1;
   return originalCreateGeometry(...args);
 };
-if (originalDeserializeNativeHandle === undefined) {
-  throw new Error('Replicad must expose native snapshot restoration.');
-}
 definition.deserializeHandle = async (...args) => {
   restores += 1;
   return originalDeserializeNativeHandle(...args);
@@ -36,7 +39,7 @@ definition.deserializeHandle = async (...args) => {
 const store = createSqliteComputeEngine({ directory: join(directory, 'cache') });
 const client = createRuntimeClient({
   transport: inProcessTransport({
-    runtime: defineRuntime({ kernels: [plugin], middleware: [geometryCache()], bundlers: [esbuildBundler()] }),
+    runtime: defineRuntime({ kernels: [observedPlugin], middleware: [geometryCache()], bundlers: [esbuildBundler()] }),
     fileSystem: fromNodeFs(directory),
     compute: { mode: 'durable', store: fromSqlite({ store, workspace: '/project/replicad-mesh-process' }) },
   }),
@@ -58,7 +61,7 @@ try {
     if (!exported.success) {
       throw new Error(`MeshShape export failed: ${JSON.stringify(exported.issues)}`);
     }
-    stlBytes = exported.files[0]?.bytes.byteLength ?? 0;
+    stlBytes = exported.files[0].bytes.byteLength;
   }
   process.stdout.write(`MESH_CACHE_RESULT ${JSON.stringify({ builds, restores, stlBytes })}\n`);
 } finally {

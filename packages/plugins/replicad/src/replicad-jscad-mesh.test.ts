@@ -61,7 +61,7 @@ const exportJscadFixture = async () => {
     if (!stl.success) {
       throw new Error(`JSCAD GLB→Assimp STL export failed: ${JSON.stringify(stl.issues)}`);
     }
-    return { glb: glb.files[0]!.bytes, stl: stl.files[0]!.bytes };
+    return { glb: glb.files[0].bytes, stl: stl.files[0].bytes };
   } finally {
     await producer.shutdown();
   }
@@ -138,7 +138,7 @@ describe('JSCAD mesh handoff into Replicad', () => {
     if (!restored.success) {
       throw new Error(`Replicad MeshShape display export failed: ${JSON.stringify(restored.issues)}`);
     }
-    await expectGlbBounds(restored.files[0]!.bytes, displayBounds);
+    await expectGlbBounds(restored.files[0].bytes, displayBounds);
     const step = await consumer.open({ source: { path: 'mesh.ts' } }).export('step');
     expect(step.success).toBe(false);
     expect(step.issues.some((issue) => /native BRep|display-only/u.test(issue.message))).toBe(true);
@@ -152,7 +152,13 @@ describe('JSCAD mesh handoff into Replicad', () => {
     const definition = await resolveRuntimePluginDefinition('kernel', plugin);
     const createGeometry = vi.spyOn(definition, 'evaluate');
     const deserializeNativeHandle = vi.spyOn(definition, 'deserializeHandle');
-    const runtime = defineRuntime({ kernels: [plugin], middleware: [geometryCache()], bundlers: [esbuildBundler()] });
+    // The factory loader returns a new definition on each resolution; pin this observed instance for the worker.
+    const observedPlugin = { ...plugin, [Symbol.for('@taucad/runtime/plugin-definition')]: () => definition };
+    const runtime = defineRuntime({
+      kernels: [observedPlugin],
+      middleware: [geometryCache()],
+      bundlers: [esbuildBundler()],
+    });
     const run = async (exportStl: boolean) => {
       const store = createSqliteComputeEngine({ directory });
       const client = createRuntimeClient({
@@ -177,7 +183,7 @@ describe('JSCAD mesh handoff into Replicad', () => {
           if (!exported.success) {
             throw new Error(`Cold MeshShape STL export failed: ${JSON.stringify(exported.issues)}`);
           }
-          expect(exported.files[0]!.bytes.byteLength).toBeGreaterThan(84);
+          expect(exported.files[0].bytes.byteLength).toBeGreaterThan(84);
         }
       } finally {
         await client.shutdown();

@@ -140,11 +140,14 @@ const codex = (refusal?: ExternalAgentDescriptor['refusal']): AgentHostPlacement
 });
 
 const renderSheet = (focusEditor = vi.fn(), agentConfig: AgentConfig = noConfig) => {
-  return { focusEditor, ...render(
-    <TooltipProvider>
-      <ChatAgentSheet agentConfig={agentConfig} placements={state.placements} focusEditor={focusEditor} />
-    </TooltipProvider>,
-  ) };
+  return {
+    focusEditor,
+    ...render(
+      <TooltipProvider>
+        <ChatAgentSheet agentConfig={agentConfig} placements={state.placements} focusEditor={focusEditor} />
+      </TooltipProvider>,
+    ),
+  };
 };
 
 /** Codex's options as it sends them to a client without boolean config options. */
@@ -548,9 +551,7 @@ describe('ChatAgentSheet', () => {
 
   it('puts Runs on under Settings and keeps an offline host’s notice on the sheet', async () => {
     state.execution = { kind: 'tau', model: fable.id, hostId: 'workshop' };
-    state.placements = [
-      { hostId: 'workshop', rung: 2, label: 'Workshop', workspaceRoot: '/srv/tau', online: false },
-    ];
+    state.placements = [{ hostId: 'workshop', rung: 2, label: 'Workshop', workspaceRoot: '/srv/tau', online: false }];
     renderSheet();
     await openSheet();
 

@@ -6,12 +6,18 @@ import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 
 export type MenuDisclosureItemProperties = {
-  /** The row's label; the row keeps an ordinary menu row's height. */
+  /** The row's label. */
   readonly label: React.ReactNode;
-  /** Right-aligned content that previews what the disclosure holds. */
+  /** A second line under the label, as Matcap's or Post-processing's, summarising what the disclosure holds. */
+  readonly description?: React.ReactNode;
+  /** The row's glyph, in the menu's icon column. Disclosed content still starts at the menu's left edge. */
+  readonly icon?: React.ReactNode;
+  /** Right-aligned content that previews what the disclosure holds, before the chevron. */
   readonly trailing?: React.ReactNode;
   /** Revealed under the row when it is expanded; without it the row is a plain label. */
   readonly children?: React.ReactNode;
+  /** Whether the content starts revealed. Disclosures default to closed: they hold what most people never need. */
+  readonly isDefaultOpen?: boolean;
   readonly className?: string;
 };
 
@@ -24,30 +30,40 @@ type RowRenderer = (properties: {
 }) => React.ReactNode;
 
 /**
- * A menu row that discloses content beneath it, for progressive disclosure inside menus: the row is
- * a menu item (arrow keys reach it, Enter or Space toggles it) that never closes the menu.
+ * A menu row that discloses content beneath it, for progressive disclosure inside menus: the row is a menu item
+ * (arrow keys reach it, Enter or Space toggles it) that never closes the menu. Its chevron points down and sits in the
+ * menu's right-hand control column, where switches and values end, and turns over while the content shows; a
+ * flyout submenu keeps the right-pointing chevron.
  */
 const MenuDisclosure = ({
   label,
+  description,
+  icon,
   trailing,
   children,
+  isDefaultOpen = false,
   className,
   renderRow,
 }: MenuDisclosureItemProperties & { readonly renderRow: RowRenderer }): React.JSX.Element => {
-  const [isOpen, setIsOpen] = React.useState(false);
+  const [isOpen, setIsOpen] = React.useState(isDefaultOpen);
   const contentId = React.useId();
+  const rowClassName = cn(menuItemVariants(), 'w-full text-left', description !== undefined && 'h-10', className);
   const rowContent = (
     <>
-      <span className='min-w-0 flex-1 truncate text-left font-medium text-foreground'>{label}</span>
+      {icon}
+      <span className='flex min-w-0 flex-1 flex-col'>
+        <span className='truncate text-foreground'>{label}</span>
+        {description === undefined ? null : (
+          <span className='truncate text-xs font-medium text-muted-foreground/80'>{description}</span>
+        )}
+      </span>
       {trailing}
     </>
   );
 
   if (children === undefined) {
     return (
-      <div data-slot='menu-disclosure-item' className={cn(menuItemVariants(), 'hover:bg-transparent', className)}>
-        {/* Holds the chevron's column so the label lines up with the rows below. */}
-        <span aria-hidden className='size-3.5 shrink-0' />
+      <div data-slot='menu-disclosure-item' className={cn(rowClassName, 'hover:bg-transparent')}>
         {rowContent}
       </div>
     );
@@ -56,7 +72,8 @@ const MenuDisclosure = ({
   return (
     <div data-slot='menu-disclosure-item' data-state={isOpen ? 'open' : 'closed'}>
       {renderRow({
-        className: cn(menuItemVariants(), 'w-full', className),
+        // The chevron ends where a switch row's switch ends.
+        className: cn(rowClassName, 'pr-2'),
         'aria-expanded': isOpen,
         'aria-controls': contentId,
         onToggle: () => {
@@ -64,8 +81,8 @@ const MenuDisclosure = ({
         },
         children: (
           <>
-            <ChevronDown aria-hidden className={cn('transition-transform', isOpen && 'rotate-180')} />
             {rowContent}
+            <ChevronDown aria-hidden className={cn('motion-safe:transition-transform', isOpen && 'rotate-180')} />
           </>
         ),
       })}

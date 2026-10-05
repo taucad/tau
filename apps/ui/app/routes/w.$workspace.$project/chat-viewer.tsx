@@ -935,7 +935,6 @@ const ViewerContent = memo(function ({
     presentedKey,
     previewRetry,
     thumbnails,
-    viewerActionMenu,
     viewerPart,
   ]);
   useEffect(() => () => thumbnails?.releaseOwner('viewer'), [thumbnails]);

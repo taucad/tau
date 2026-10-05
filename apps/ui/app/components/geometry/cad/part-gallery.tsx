@@ -687,8 +687,6 @@ function useGalleryPreviews({
     };
   }, [
     artifact,
-    artifactKey,
-    artifactSourcePath,
     assemblyDisplay,
     cadRef,
     cadSnapshot,
@@ -698,7 +696,6 @@ function useGalleryPreviews({
     modelRef,
     isCurrent,
     neighbours,
-    presentation,
     presentedKey,
     project,
     retryId,

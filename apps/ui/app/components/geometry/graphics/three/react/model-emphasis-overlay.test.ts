@@ -278,11 +278,14 @@ describe('actual batch slot emphasis lifetime', () => {
         throw new Error('Expected live candidate slot evidence');
       }
       const geometryDispose = vi.spyOn(template.geometry, 'dispose');
-      syncModelEmphasisProxies(resources, {
+      const selection = {
         hover: [],
         selected: [],
         selectedInstances: [{ source, instanceIds: selected, slots: [evidence[0], evidence[1]] }],
-      });
+      };
+      syncModelEmphasisProxies(resources, selection);
+      const sibling = createModelEmphasisResources(backend, createSectionClip(backend));
+      syncModelEmphasisProxies(sibling, selection);
       const { mask, visibility, wash } = resources.proxies[0]!;
       if (
         !(mask instanceof InstancedMesh) ||
@@ -294,7 +297,19 @@ describe('actual batch slot emphasis lifetime', () => {
       expect(mask.count).toBe(2);
       expect(mask.instanceMatrix).toBe(visibility.instanceMatrix);
       expect(mask.instanceMatrix).toBe(wash.instanceMatrix);
-      expect(getModelEmphasisInstanceBytes(resources)).toEqual({ cpuBytes: 128, gpuBytesEstimate: 128, proxyCount: 3 });
+      const sharedBacking = new Float32Array(64);
+      sharedBacking.set(mask.instanceMatrix.array, 16);
+      mask.instanceMatrix.array = sharedBacking.subarray(16, 48);
+      expect(getModelEmphasisInstanceBytes(resources)).toEqual({
+        cpuBytes: 256,
+        payloadBytes: 128,
+        bufferCount: 1,
+        attributeCount: 1,
+        gpuBytesEstimate: 128,
+        proxyCount: 3,
+      });
+      const siblingBytes = getModelEmphasisInstanceBytes(sibling);
+      expect(siblingBytes).toMatchObject({ cpuBytes: 128, payloadBytes: 128, bufferCount: 1 });
       const sampled = new Matrix4();
       mask.getMatrixAt(1, sampled);
       expect(sampled.elements[12]).toBe(2700);
@@ -317,9 +332,19 @@ describe('actual batch slot emphasis lifetime', () => {
       const disposeMask = vi.spyOn(mask, 'dispose');
       syncModelEmphasisProxies(resources, emptyModelEmphasisSet);
       expect(disposeMask).toHaveBeenCalledOnce();
-      expect(getModelEmphasisInstanceBytes(resources)).toEqual({ cpuBytes: 0, gpuBytesEstimate: 0, proxyCount: 0 });
+      expect(getModelEmphasisInstanceBytes(resources)).toEqual({
+        cpuBytes: 0,
+        payloadBytes: 0,
+        bufferCount: 0,
+        attributeCount: 0,
+        gpuBytesEstimate: 0,
+        proxyCount: 0,
+      });
       expect(geometryDispose).not.toHaveBeenCalled();
       resources.dispose();
+      expect(getModelEmphasisInstanceBytes(sibling)).toEqual(siblingBytes);
+      sibling.dispose();
+      expect(getModelEmphasisInstanceBytes(sibling).bufferCount).toBe(0);
       template.geometry.dispose();
       for (const material of Array.isArray(template.material) ? template.material : [template.material]) {
         material.dispose();

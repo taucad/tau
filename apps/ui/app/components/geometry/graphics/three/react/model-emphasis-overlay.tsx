@@ -191,32 +191,53 @@ function disposeInstanceProxies(proxies: readonly Proxy[]): void {
   }
 }
 
-/** Exact owned instance backing arrays; renderer storage is an estimate of these attribute payloads. */
+/** Count this overlay's owned instance backing capacity, viewed byte ranges and attribute handles. */
 export function getModelEmphasisInstanceBytes(resources: ModelEmphasisResources): {
   cpuBytes: number;
+  payloadBytes: number;
+  bufferCount: number;
+  attributeCount: number;
   gpuBytesEstimate: number;
   proxyCount: number;
 } {
   const buffers = new Set<ArrayBufferLike>();
   const attributes = new Set<InstancedBufferAttribute>();
+  const ranges = new Map<ArrayBufferLike, Array<readonly [number, number]>>();
   let proxyCount = 0;
   for (const proxy of resources.proxies) {
     if (!proxy.instanceAttribute) {
       continue;
     }
-    buffers.add(proxy.instanceAttribute.array.buffer);
+    const { array } = proxy.instanceAttribute;
+    buffers.add(array.buffer);
+    const views = ranges.get(array.buffer) ?? [];
+    views.push([array.byteOffset, array.byteOffset + array.byteLength]);
+    ranges.set(array.buffer, views);
     attributes.add(proxy.instanceAttribute);
     proxyCount += 3;
   }
   let cpuBytes = 0;
+  let payloadBytes = 0;
   let gpuBytesEstimate = 0;
   for (const buffer of buffers) {
     cpuBytes += buffer.byteLength;
+    let end = 0;
+    for (const [start, stop] of ranges.get(buffer)!.toSorted((left, right) => left[0] - right[0])) {
+      payloadBytes += Math.max(0, stop - Math.max(start, end));
+      end = Math.max(end, stop);
+    }
   }
   for (const attribute of attributes) {
     gpuBytesEstimate += attribute.array.byteLength;
   }
-  return { cpuBytes, gpuBytesEstimate, proxyCount };
+  return {
+    cpuBytes,
+    payloadBytes,
+    bufferCount: buffers.size,
+    attributeCount: attributes.size,
+    gpuBytesEstimate,
+    proxyCount,
+  };
 }
 
 /**

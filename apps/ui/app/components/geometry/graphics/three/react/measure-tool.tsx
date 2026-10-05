@@ -499,7 +499,9 @@ export function MeasureTool(): React.JSX.Element {
   >(undefined);
   const cameraMatrixRef = useRef('');
   useLayoutEffect(() => {
-    cameraMatrixRef.current = `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`;
+    if (isMeasureActive) {
+      cameraMatrixRef.current = `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`;
+    }
   }, [camera, isMeasureActive]);
   useFrame(() => {
     if (!isMeasureActive) {

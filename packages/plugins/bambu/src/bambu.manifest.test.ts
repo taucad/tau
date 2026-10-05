@@ -77,6 +77,14 @@ describe('bambuX1cManifest', () => {
     expect(unattended).not.toContain('motion.jog');
   });
 
+  it.each([
+    ['X1C', bambuX1cManifest],
+    ['A1 mini', bambuA1MiniManifest],
+  ])('should keep printer calibration on the %s for a person without asking for their presence', (_name, manifest) => {
+    const calibrate = manifest.actions.find(({ id }) => id === 'bambu.printer.calibrate');
+    expect(calibrate?.safety).toEqual({ authority: 'person', attended: false, interlocks: [] });
+  });
+
   it('should take stored jobs started remotely after the plate is attested clear', () => {
     expect(bambuX1cManifest.jobs).toMatchObject({
       type: 'supported',

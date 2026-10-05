@@ -335,7 +335,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
         effects: ['motion', 'thermal'],
         scope: 'idle',
         when: idle,
-        safety: { authority: 'person', attended: true, interlocks: [] },
+        safety: { authority: 'person', attended: false, interlocks: [] },
         requires: [],
         consequence: 'The printer homes, probes the bed and sweeps its motors; the plate must be empty.',
         confirms: 'observation',

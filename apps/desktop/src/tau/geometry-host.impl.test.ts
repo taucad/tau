@@ -251,7 +251,7 @@ describe('geometry utility dispatcher', () => {
           type: 'geometry-result',
           generation: 4,
           requestId: 8,
-          value: { type: 'result', result, sourceRevisions: [] },
+          value: { type: 'result', result },
         },
       ],
     ]);

@@ -57,6 +57,10 @@ TAU_API_URL = "http://localhost:4000"
 TAU_FRONTEND_URL = "http://localhost:3000"
 TAU_WEBSOCKET_URL = "ws://localhost:4001"
 
+# Marketing site: `netlify/edge-functions/marketing.ts` proxies a full load of
+# `/` and the apps/www pages to the deploy named by the `MARKETING_ORIGIN` site
+# variable (set per site in tau-cloud). Unset, every request reaches the app.
+
 # The docs site serves documentation at its root, so the old runtime-scoped
 # LLM indexes are replaced by its top-level ones rather than moving verbatim.
 [[redirects]]

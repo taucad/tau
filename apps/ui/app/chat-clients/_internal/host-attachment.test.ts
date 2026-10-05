@@ -2,7 +2,7 @@ import { createActor } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
 import type { ReadAnswer } from '@taucad/agent-host/wire';
 import type { AgentHostClient } from '#services/agent-host-client.js';
-import { chatProjectionLogic } from '#machines/chat-projection.logic.js';
+import { chunksOf, chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow } from '#machines/chat-projection.fixture.js';
 import { hostAttachment } from '#chat-clients/_internal/host-attachment.js';
 
@@ -52,7 +52,7 @@ describe('hostAttachment', () => {
       delta: 'Partial',
     } as const;
     onLive?.('chat_1', delta);
-    expect(projection.getSnapshot().context.live?.chunks).toContainEqual(
+    expect(chunksOf(projection.getSnapshot().context.live?.chunks)).toContainEqual(
       expect.objectContaining({
         type: 'text-delta',
         delta: 'Partial',
@@ -136,7 +136,7 @@ describe('hostAttachment', () => {
     await vi.waitFor(() => {
       expect(projection.getSnapshot().context.live).toBeUndefined();
     });
-    expect(projection.getSnapshot().context.views['run_1']?.chunks).toContainEqual(
+    expect(chunksOf(projection.getSnapshot().context.views['run_1']?.chunks)).toContainEqual(
       expect.objectContaining({
         type: 'text-delta',
         delta: 'Partial',

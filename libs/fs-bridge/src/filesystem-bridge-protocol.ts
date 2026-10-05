@@ -1,6 +1,7 @@
 import type {
   ProviderCapabilities,
   FileSystemProvider,
+  FileStatOptions,
   FileTreeNode,
   HeadFileStat,
   ProjectDiscoveryEntry,
@@ -60,10 +61,10 @@ const discriminatedResultUnion = <
 /**
  * Current filesystem bridge protocol version.
  *
- * Version 4 requires both checked deletion and head-only directory metadata.
+ * Version 6 adds authoritative stat head mode.
  * @public
  */
-export const fileSystemBridgeProtocolVersion = 5;
+export const fileSystemBridgeProtocolVersion = 6;
 
 const unavailableCapabilities = null;
 
@@ -291,11 +292,13 @@ export type FileSystemBridgeService = FileSystemBridgeUnrootedCalls & FileSystem
 type FileSystemBridgeCallName = keyof FileSystemBridgeService;
 type FileSystemBridgeCallArgs<Name extends FileSystemBridgeCallName> = Name extends 'readFile'
   ? [path: string, options?: 'utf8' | { readonly encoding?: 'utf8' }]
-  : Name extends 'readdirWithStats'
-    ? [path: string, options?: { readonly content: 'head' }]
-    : Name extends 'readScopedFile'
-      ? [path: string, options: { readonly encoding?: 'utf8'; readonly scope: WorkspaceScope }]
-      : Parameters<FileSystemBridgeService[Name]>;
+  : Name extends 'stat'
+    ? [path: string, options?: FileStatOptions]
+    : Name extends 'readdirWithStats'
+      ? [path: string, options?: { readonly content: 'head' }]
+      : Name extends 'readScopedFile'
+        ? [path: string, options: { readonly encoding?: 'utf8'; readonly scope: WorkspaceScope }]
+        : Parameters<FileSystemBridgeService[Name]>;
 type FileSystemBridgeCallResult<Name extends FileSystemBridgeCallName> = Name extends 'readFile' | 'readScopedFile'
   ? string | Uint8Array<ArrayBuffer>
   : Name extends 'readdirWithStats'
@@ -882,7 +885,12 @@ const callSchemas = {
   },
   mkdir: { args: z.tuple([z.string(), recursiveOptionsSchema.optional()]), result: voidResult },
   readdir: { args: oneStringArgument, result: z.array(z.string()) },
-  stat: { args: oneStringArgument, result: fileStatSchema },
+  stat: {
+    args: z.tuple([z.string(), z.object({ content: z.literal('head') }).optional()]),
+    result: z.custom<FileStat | HeadFileStat>(
+      (value) => fileStatSchema.safeParse(value).success || headFileStatSchema.safeParse(value).success,
+    ),
+  },
   lstat: { args: oneStringArgument, result: fileStatSchema },
   move: { args: twoStringArgs, result: fileStatSchema },
   canMove: { args: twoStringArgs, result: mutationResultSchema },

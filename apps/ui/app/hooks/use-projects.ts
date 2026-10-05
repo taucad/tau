@@ -39,12 +39,14 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     // One key for one whole-workspace discovery pass per navigation: the deleted rows are
     // filtered below rather than scanned again under a second key (W21).
     queryKey: ['projects'],
-    async queryFn() {
-      return getProjectListing({ includeDeleted: true });
+    async queryFn({ signal }) {
+      const listing = await getProjectListing({ includeDeleted: true });
+      signal.throwIfAborted();
+      return listing;
     },
     enabled: !isWorkerLoading,
     // No poll: worker filesystem events and cross-tab root broadcasts already
-    // invalidate this key (debounced in ProjectManagerProvider), and the
+    // invalidate this key (coalesced in ProjectManagerProvider), and the
     // default window-focus refetch covers a tab returning from the background.
     // The stale window only stops rapid navigations re-running the scan.
     staleTime: 3000,

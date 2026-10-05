@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Test fixtures use React component names and literal workspace file paths. */
 import { render, renderHook, act, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
 import { createElement, useEffect, useState } from 'react';
+import type { ChatRecord } from '@taucad/chat/schemas';
 import type { Chat, MyUIMessage } from '@taucad/chat';
-import type { ProjectDiscoveryEntry, ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem';
+import type { ProjectDiscoveryEntry, ProjectDiscoveryResult, ProjectLocator, WatchEvent } from '@taucad/filesystem';
 import { consumableBytes } from '@taucad/fs-bridge';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
@@ -136,7 +137,20 @@ const subscribeWorkerChannel = (channel: string) =>
     workerChangeSubscriptions.set(channel, subscription);
     return () => workerChangeSubscriptions.delete(channel);
   });
+const nativeWatches = new Set<(event: WatchEvent) => void>();
 const mockWorkerChangeChannel = {
+  watchReady: (_request: unknown, listener: (event: WatchEvent) => void) => {
+    nativeWatches.add(listener);
+    return {
+      ready: Promise.resolve(),
+      closed: new Promise<void>(() => {
+        /* This watch stays open until fixture disposal. */
+      }),
+      dispose: () => {
+        nativeWatches.delete(listener);
+      },
+    };
+  },
   onFileWritten: subscribeWorkerChannel('fileWritten'),
   onFileDeleted: subscribeWorkerChannel('fileDeleted'),
   onFileRenamed: subscribeWorkerChannel('fileRenamed'),
@@ -146,6 +160,9 @@ const mockWorkerChangeChannel = {
   onDirectoryChanged: subscribeWorkerChannel('directoryChanged'),
 };
 const emitWorkerChange = (channel: string, path: string): void => {
+  for (const listener of nativeWatches) {
+    listener({ type: channel.includes('Deleted') ? 'delete' : 'change', path });
+  }
   const subscription = workerChangeSubscriptions.get(channel);
   if (subscription?.interestedIn(path)) {
     subscription.handler({ path });
@@ -436,6 +453,7 @@ const mockTouchProjectActivity = vi.fn(async (projectId: string, activityAt?: nu
  * sit on the store. */
 const mockPutChatRecord = vi.fn<(chat: Chat) => Promise<void>>(async () => undefined);
 const mockInvalidateChatLog = vi.fn();
+const mockReadChatRecords = vi.fn<(resourceId: string) => Promise<ChatRecord[]>>(async () => []);
 vi.mock('#db/chat-file-storage.js', () => ({
   createChatFileStore: () => ({
     invalidateLog: mockInvalidateChatLog,
@@ -444,7 +462,7 @@ vi.mock('#db/chat-file-storage.js', () => ({
     putChatRecord: mockPutChatRecord,
     getChatsForResource: vi.fn(async () => []),
     getAllChats: vi.fn(async () => []),
-    getChatRecordsForResource: vi.fn(async () => []),
+    getChatRecordsForResource: mockReadChatRecords,
     getAllChatRecords: vi.fn(async () => []),
     getChat: vi.fn(async () => undefined),
     createChat: vi.fn(async () => activityChat),
@@ -1261,62 +1279,177 @@ describe('useProjectManager.createProject', () => {
     expect(mockDeleteProjectResources).toHaveBeenCalledWith(fakeProject.id);
   });
 
-  it('coalesces a burst of worker filesystem events into one library invalidation', async () => {
-    const { wrapper, projectsInvalidations } = createCountingWrapper();
-    renderHook(() => useProjectManager(), { wrapper });
-    vi.useFakeTimers();
+  it('bounds actual metadata I/O across Query cancellation and drains one latest trailing read', async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const { result } = renderHook(() => useProjectManager(), { wrapper });
+    const replies: Array<ReturnType<typeof Promise.withResolvers<ChatRecord[]>>> = [];
+    let active = 0;
+    let maxActive = 0;
+    mockReadChatRecords.mockImplementation(async () => {
+      const reply = Promise.withResolvers<ChatRecord[]>();
+      replies.push(reply);
+      active++;
+      maxActive = Math.max(maxActive, active);
+      try {
+        return await reply.promise;
+      } finally {
+        active--;
+      }
+    });
+    const key = ['chats', 'p', 'records', 'held-owner'];
+    const query = new QueryObserver(queryClient, {
+      queryKey: key,
+      queryFn: async ({ signal }) => {
+        const records = await result.current.getChatRecordsForResource('p');
+        signal.throwIfAborted();
+        return records;
+      },
+    });
+    const values: Array<ChatRecord[] | undefined> = [];
+    const unsubscribe = query.subscribe((snapshot) => {
+      values.push(snapshot.data);
+    });
+    const record = (name: string): ChatRecord => ({ id: 'c', resourceId: 'p', name, createdAt: 1, updatedAt: 2 });
     try {
-      act(() => {
-        for (let index = 0; index < 12; index++) {
-          emitWorkerChange('fileWritten', `/project-${index}/tau.json`);
-        }
-        emitWorkerChange('directoryCreated', '/test-project');
+      await waitFor(() => {
+        expect(replies).toHaveLength(1);
       });
-      expect(projectsInvalidations()).toBe(0);
-
-      act(() => {
-        vi.advanceTimersByTime(300);
+      await act(async () => {
+        replies[0]!.resolve([record('Seed')]);
       });
-      expect(projectsInvalidations()).toBe(1);
-
-      // A later burst is a separate write, not the tail of the first one.
-      act(() => {
-        emitWorkerChange('fileDeleted', '/test-project/tau.json');
-        vi.advanceTimersByTime(300);
+      await waitFor(() => {
+        expect(queryClient.getQueryData<ChatRecord[]>(key)?.[0]?.name).toBe('Seed');
       });
-      expect(projectsInvalidations()).toBe(2);
+      act(() => {
+        emitWorkerChange('fileWritten', '/projects/p/.tau/chats/c/chat.json');
+      });
+      await waitFor(() => {
+        expect(replies).toHaveLength(2);
+      });
+      for (let tick = 0; tick < 5; tick++) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Separate event turns reproduce cancellation before non-abortable metadata bytes settle.
+        await act(async () => {
+          emitWorkerChange('fileWritten', '/projects/p/.tau/chats/c/chat.json');
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 0);
+          });
+        });
+      }
+      expect(replies).toHaveLength(2);
+      expect(active).toBe(1);
+      expect(maxActive).toBe(1);
+      expect(queryClient.getQueryData<ChatRecord[]>(key)?.[0]?.name).toBe('Seed');
+      await act(async () => {
+        replies[1]!.resolve([record('Canceled stale bytes')]);
+      });
+      await waitFor(() => {
+        expect(replies).toHaveLength(3);
+      });
+      expect(values.some((records) => records?.[0]?.name === 'Canceled stale bytes')).toBe(false);
+      await act(async () => {
+        replies[2]!.resolve([record('Latest')]);
+      });
+      await waitFor(() => {
+        expect(queryClient.getQueryData<ChatRecord[]>(key)?.[0]?.name).toBe('Latest');
+      });
+      expect(maxActive).toBe(1);
+      expect(mockReadChatRecords).toHaveBeenCalledTimes(3);
     } finally {
-      vi.useRealTimers();
+      for (const reply of replies) {
+        reply.resolve([]);
+      }
+      unsubscribe();
+      queryClient.clear();
+      mockReadChatRecords.mockImplementation(async () => []);
     }
   });
 
-  it('ignores workspace and project app-state writes so `.tau/**` cannot storm discovery', async () => {
-    const { wrapper, projectsInvalidations } = createCountingWrapper();
+  it('awaits held discovery refetch work and drains one trailing burst', async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const held = Promise.withResolvers<void>();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries').mockImplementation(async (filter) => {
+      if (filter?.queryKey?.[0] === 'projects') {
+        await held.promise;
+      }
+    });
     renderHook(() => useProjectManager(), { wrapper });
-    vi.useFakeTimers();
-    try {
-      act(() => {
-        emitWorkerChange('fileWritten', '/.tau/workspace.json');
-        emitWorkerChange('fileWritten', '/.tau/cache/blobs/abc');
-        emitWorkerChange('fileWritten', '/test-project/.tau/library.json');
-        emitWorkerChange('fileWritten', `/projects/${fakeProject.id}/.tau/transcripts/1.json`);
-        emitWorkerChange('fileWritten', '/test-project/main.ts');
-        vi.advanceTimersByTime(300);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      emitWorkerChange('fileWritten', '/first/tau.json');
+    });
+    await waitFor(() => {
+      expect(invalidate.mock.calls.filter(([filter]) => filter?.queryKey?.[0] === 'projects')).toHaveLength(1);
+    });
+    for (let index = 0; index < 8; index++) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Distinct event turns must occur while the real refetch remains held.
+      await act(async () => {
+        emitWorkerChange('fileWritten', `/later-${index}/tau.json`);
+        await Promise.resolve();
       });
-      expect(projectsInvalidations()).toBe(0);
-
-      // …but a project directory appearing at the workspace root does.
-      act(() => {
-        emitWorkerChange('directoryCreated', '/externally-added-project');
-        vi.advanceTimersByTime(300);
-      });
-      expect(projectsInvalidations()).toBe(1);
-    } finally {
-      vi.useRealTimers();
     }
+    expect(invalidate.mock.calls.filter(([filter]) => filter?.queryKey?.[0] === 'projects')).toHaveLength(1);
+    await act(async () => {
+      held.resolve();
+    });
+    await waitFor(() => {
+      expect(invalidate.mock.calls.filter(([filter]) => filter?.queryKey?.[0] === 'projects')).toHaveLength(2);
+    });
   });
 
-  it("should invalidate only the affected chat when another device's projected log segment changes", async () => {
+  it('invalidates chat metadata precisely while keeping local and foreign logs separate', async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    renderHook(() => useProjectManager(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      emitWorkerChange('fileWritten', '/projects/p/.tau/chats/c/chat.json');
+    });
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['chat', 'c'] }, { cancelRefetch: false });
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['chats', 'p'] }, { cancelRefetch: false });
+    invalidate.mockClear();
+    await act(async () => {
+      emitWorkerChange('fileWritten', '/projects/p/.tau/chats/c/events/local.jsonl');
+      emitWorkerChange('fileWritten', '/projects/p/.tau/chats/c/events/foreign.jsonl');
+      await Promise.resolve();
+    });
+    expect(invalidate).not.toHaveBeenCalled();
+    act(() => {
+      for (const listener of nativeWatches) {
+        listener({ type: 'reset' });
+      }
+    });
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['chats'] }, { cancelRefetch: false });
+    });
+  });
+
+  it('ignores unrelated app-state writes and refreshes a project manifest change', async () => {
+    const { wrapper, projectsInvalidations } = createCountingWrapper();
+    renderHook(() => useProjectManager(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      emitWorkerChange('fileWritten', '/.tau/workspace.json');
+      emitWorkerChange('fileWritten', '/test-project/.tau/library.json');
+      emitWorkerChange('fileWritten', '/test-project/main.ts');
+    });
+    expect(projectsInvalidations()).toBe(0);
+    act(() => {
+      emitWorkerChange('fileWritten', '/test-project/tau.json');
+    });
+    await waitFor(() => {
+      expect(projectsInvalidations()).toBeGreaterThan(0);
+    });
+  });
+
+  it('leaves foreign log observation to the retained chat store', async () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
     renderHook(() => useProjectManager(), { wrapper });
@@ -1325,7 +1458,7 @@ describe('useProjectManager.createProject', () => {
       emitWorkerChange('fileWritten', `/projects/${fakeProject.id}/.tau/chats/chat_remote/events/device-b.jsonl`);
     });
 
-    expect(invalidateQueries.mock.calls).toEqual([[{ queryKey: ['chat', 'chat_remote'] }]]);
+    expect(invalidateQueries).not.toHaveBeenCalled();
     expect(mockInvalidateChatLog).not.toHaveBeenCalled();
   });
 
@@ -1347,7 +1480,7 @@ describe('useProjectManager.createProject', () => {
     }
   });
 
-  it('applies cross-tab route changes immediately and debounces only the refetch', async () => {
+  it('applies cross-tab route changes and coalesces their refetch', async () => {
     const { wrapper, projectsInvalidations } = createCountingWrapper();
     renderHook(() => useProjectManager(), { wrapper });
 
@@ -1356,7 +1489,6 @@ describe('useProjectManager.createProject', () => {
       await Promise.resolve();
     });
     expect(mockSyncProjectRoots).toHaveBeenCalledOnce();
-    expect(projectsInvalidations()).toBe(0);
 
     await act(async () => {
       await vi.waitFor(() => {

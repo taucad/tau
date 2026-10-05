@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { attachmentAbsentLabel, useAttachmentSource } from '#hooks/use-attachment-source.js';
 import type { AttachmentSource } from '#hooks/use-attachment-source.js';
 import { AttachmentFileChip } from '#components/chat/attachment-preview.js';
@@ -83,6 +83,44 @@ describe('useAttachmentSource', () => {
 
     second.unmount();
     expect(revokeObjectURL).toHaveBeenCalledExactlyOnceWith('blob:object-1');
+  });
+
+  it('should replace a same-path URL when the source capability changes', async () => {
+    const original = fileManager.recordFiles;
+    const view = render(<Probe id='source' part={imagePart} />);
+    await screen.findByText('ready blob:object-1');
+    const replacementRead = vi.fn(async () => new Uint8Array([1, 2]));
+    fileManager.recordFiles = { readFile: replacementRead };
+    try {
+      view.rerender(<Probe id='source' part={imagePart} />);
+      await screen.findByText('ready blob:object-2');
+      expect(replacementRead).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:object-1');
+    } finally {
+      view.unmount();
+      fileManager.recordFiles = original;
+    }
+  });
+
+  it('should dispose a late URL after the final release without replacing a new lease', async () => {
+    let resolveBytes: ((bytes: Uint8Array<ArrayBuffer>) => void) | undefined;
+    readFile.mockImplementationOnce(
+      async () =>
+        new Promise((resolve) => {
+          resolveBytes = resolve;
+        }),
+    );
+    const first = render(<Probe id='first' part={imagePart} />);
+    first.unmount();
+    const second = render(<Probe id='second' part={imagePart} />);
+    await screen.findByText('ready blob:object-1');
+    await act(async () => {
+      resolveBytes?.(new Uint8Array([1]));
+    });
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:object-2');
+    expect(screen.getByTestId('second')).toHaveTextContent('ready blob:object-1');
+    second.unmount();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:object-1');
   });
 
   it('should pass a data URL through without reading or creating anything', () => {

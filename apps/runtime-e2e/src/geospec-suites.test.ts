@@ -82,7 +82,16 @@ describe('geospec example suites (regression backbone)', () => {
     { timeout: 1_500_000 },
     async (name) => {
       const report = await runGeoSpecSuite(`libs/tau-examples/src/kernels/replicad/${name}`);
-      expect(report.failed, JSON.stringify(report.files, null, 2)).toBe(0);
+      const unpassed = (report.files ?? []).flatMap(({ file, tests }) =>
+        (tests ?? [])
+          .filter(({ status }) => status !== 'passed')
+          .map(({ suite, name: test, status, diagnostics }) => ({
+            test: [file, ...suite, test].join(' > '),
+            status,
+            codes: diagnostics?.map(({ code }) => code),
+          })),
+      );
+      expect(unpassed).toStrictEqual([]);
       expect(report.success).toBe(true);
     },
   );

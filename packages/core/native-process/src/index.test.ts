@@ -10,7 +10,6 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
-  readdirSync,
   rmSync,
   symlinkSync,
   unlinkSync,

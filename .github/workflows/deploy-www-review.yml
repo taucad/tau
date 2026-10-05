@@ -74,12 +74,15 @@ jobs:
           WWW_ORIGIN: https://tau.new
         run: node apps/www/scripts/build.mjs
 
+      # From the repository root the CLI finds every workspace package and stops
+      # unless `--filter` names the one being deployed.
       - name: Deploy with the Netlify CLI
         env:
           MESSAGE: ${{ github.workflow }} ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
-            --prod --no-build --dir apps/www/dist \
+            --prod --no-build --filter @taucad/www \
+            --dir "$GITHUB_WORKSPACE/apps/www/dist" \
             --site "$SITE_ID" --message "$MESSAGE"
 
       - name: Check the site answers

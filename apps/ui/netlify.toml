@@ -19,7 +19,9 @@
 # **production context** only (`[build]` + `[context.production]` include them);
 # previews skip sourcemaps uploads to avoid leaking prod PostHog project keys into
 # PR builds (POSTHOG_CLI_* are still present on staging for main-branch builds —
-# use a distinct PostHog env per site in Terraform if needed).
+# use a distinct PostHog env per site in Terraform if needed). A failed upload
+# fails the build unless `TAU_SOURCEMAPS_OPTIONAL=true`, which `deploy-ui.yml`
+# sets for staging only, so a bad staging PostHog key cannot block the deploy.
 #
 # NX_PREFER_NODE_STRIP_TYPES: NODE_ENV=production at build time would make pnpm
 # skip devDependencies (including @swc/core). Nx needs a TS transpiler to load
@@ -28,7 +30,7 @@
 [build]
 # Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && pnpm nx run ui:sourcemaps"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 publish = "build/client"
 
 [build.environment]
@@ -36,7 +38,7 @@ publish = "build/client"
 NX_NO_CLOUD = "true"
 
 [context.production]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && pnpm nx run ui:sourcemaps"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 
 [context.deploy-preview]
 command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"

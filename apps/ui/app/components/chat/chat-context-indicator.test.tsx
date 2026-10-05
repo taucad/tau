@@ -124,16 +124,16 @@ describe('getFillColor', () => {
     expect(getFillColor(60)).toContain('warning');
   });
 
-  it('should return destructive stroke for high usage', () => {
-    expect(getFillColor(85)).toContain('destructive');
+  it('should return feature stroke for high usage', () => {
+    expect(getFillColor(85)).toContain('feature');
   });
 
   it('should return success stroke after compaction', () => {
     expect(getFillColor(20, 'compacted')).toContain('success');
   });
 
-  it('should return destructive stroke when compaction is scheduled', () => {
-    expect(getFillColor(20, 'compacted', 'scheduled_next_turn')).toContain('destructive');
+  it('should return feature stroke when compaction is scheduled', () => {
+    expect(getFillColor(20, 'compacted', 'scheduled_next_turn')).toContain('feature');
   });
 });
 
@@ -146,16 +146,16 @@ describe('getTrackColor', () => {
     expect(getTrackColor(70)).toContain('warning');
   });
 
-  it('should return destructive track for high usage', () => {
-    expect(getTrackColor(90)).toContain('destructive');
+  it('should return feature track for high usage', () => {
+    expect(getTrackColor(90)).toContain('feature');
   });
 
   it('should return warning track after overflow retry', () => {
     expect(getTrackColor(20, 'overflow_retry_succeeded')).toContain('warning');
   });
 
-  it('should return destructive track when compaction is scheduled', () => {
-    expect(getTrackColor(20, 'compacted', 'scheduled_next_turn')).toContain('destructive');
+  it('should return feature track when compaction is scheduled', () => {
+    expect(getTrackColor(20, 'compacted', 'scheduled_next_turn')).toContain('feature');
   });
 });
 

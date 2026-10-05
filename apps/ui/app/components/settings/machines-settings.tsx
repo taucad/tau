@@ -504,7 +504,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         </ul>
       )}
       {directory.error === undefined ? undefined : (
-        <p role='alert' className='text-xs text-destructive'>
+        <p role='alert' className='text-xs text-feature'>
           {directory.error}
         </p>
       )}

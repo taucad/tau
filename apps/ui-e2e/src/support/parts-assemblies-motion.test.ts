@@ -247,6 +247,16 @@ it('should retain one complete post-animation batch when the actor trims more th
     afterSpanId: 224,
     observedSpans: 27,
   });
+  const reanchored = ingress.map((entry) =>
+    entry.detail?.spanId === '224' ? { ...entry, epoch: entry.epoch + 1 } : entry,
+  );
+  expect(
+    verifyDrainedMotionActivity({
+      ...observed,
+      after: { ...after, telemetryEntries: reanchored.slice(3) },
+      ingress: { during: [], after: reanchored },
+    }),
+  ).toMatchObject({ beforeSpanId: 197, afterSpanId: 224 });
   expect(() => verifyDrainedMotionActivity({ ...observed, ingress: { during: [], after: ingress.slice(1) } })).toThrow(
     'Incomplete runtime span',
   );

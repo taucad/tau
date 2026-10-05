@@ -2254,7 +2254,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         if (!subject.isCurrent() || !client || !baseline || !held.projectId || !held.sourceEntryPath) {
           return false;
         }
-        const { origin: heldOrigin, epoch: heldEpoch } = baseline;
+        const { origin: heldOrigin, workerTimeOrigin: heldWorkerTimeOrigin } = baseline;
         const isCurrent = (): boolean => {
           const current = bridge.getCommittedAssembly();
           const { diagnostics } = current;
@@ -2289,7 +2289,8 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
             } else if (
               batch.origin.instance !== heldOrigin.instance ||
               batch.origin.label !== heldOrigin.label ||
-              batch.epoch !== heldEpoch
+              !Number.isFinite(batch.epoch) ||
+              batch.entries.some((entry) => entry.workerTimeOrigin !== heldWorkerTimeOrigin)
             ) {
               capture.refusal = 'Telemetry ingress producer changed.';
             } else if (capture.entries.length + batch.entries.length > 2000) {

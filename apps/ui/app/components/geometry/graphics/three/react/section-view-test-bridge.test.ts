@@ -1024,7 +1024,7 @@ describe('committed assembly bridge registration lifetime', () => {
               detail: { spanId: String(index + 2) },
             })),
             origin: { label: 'worker', instance: 'held-producer' },
-            epoch: 100,
+            epoch: 101,
           });
           expect(bridge.readCadTelemetryIngress()).toHaveLength(25);
           expect(
@@ -1044,7 +1044,25 @@ describe('committed assembly bridge registration lifetime', () => {
           expect(() => bridge.stopCadTelemetryIngress()).toThrow('producer changed');
           expect(unsubscribeTelemetry).toHaveBeenCalledTimes(2);
           expect(bridge.armCadTelemetryIngress()).toBe(true);
-          const emitOverflow = telemetryClient.on.mock.calls[2]?.[1] as typeof emit;
+          const emitChangedClock = telemetryClient.on.mock.calls[2]?.[1] as typeof emit;
+          emitChangedClock({
+            entries: [{ name: 'fs.read', startTime: 30, duration: 1, workerTimeOrigin: 101, detail: { spanId: '27' } }],
+            origin: { label: 'worker', instance: 'held-producer' },
+            epoch: 101,
+          });
+          expect(() => bridge.stopCadTelemetryIngress()).toThrow('producer changed');
+          expect(unsubscribeTelemetry).toHaveBeenCalledTimes(3);
+          expect(bridge.armCadTelemetryIngress()).toBe(true);
+          const emitInvalidEpoch = telemetryClient.on.mock.calls[3]?.[1] as typeof emit;
+          emitInvalidEpoch({
+            entries: [{ name: 'fs.read', startTime: 30, duration: 1, workerTimeOrigin: 100, detail: { spanId: '27' } }],
+            origin: { label: 'worker', instance: 'held-producer' },
+            epoch: Number.NaN,
+          });
+          expect(() => bridge.stopCadTelemetryIngress()).toThrow('producer changed');
+          expect(unsubscribeTelemetry).toHaveBeenCalledTimes(4);
+          expect(bridge.armCadTelemetryIngress()).toBe(true);
+          const emitOverflow = telemetryClient.on.mock.calls[4]?.[1] as typeof emit;
           emitOverflow({
             entries: Array.from({ length: 2001 }, (_, index) => ({
               name: 'fs.read',
@@ -1057,9 +1075,9 @@ describe('committed assembly bridge registration lifetime', () => {
             epoch: 100,
           });
           expect(() => bridge.stopCadTelemetryIngress()).toThrow('capacity');
-          expect(unsubscribeTelemetry).toHaveBeenCalledTimes(3);
+          expect(unsubscribeTelemetry).toHaveBeenCalledTimes(5);
           expect(bridge.armCadTelemetryIngress()).toBe(true);
-          const emitRetired = telemetryClient.on.mock.calls[3]?.[1] as typeof emit;
+          const emitRetired = telemetryClient.on.mock.calls[5]?.[1] as typeof emit;
           Object.assign(cad.context, { kernelClient: mock<NonNullable<CadContext['kernelClient']>>() });
           emitRetired({
             entries: [{ name: 'fs.read', startTime: 30, duration: 1, workerTimeOrigin: 100, detail: { spanId: '27' } }],
@@ -1067,7 +1085,7 @@ describe('committed assembly bridge registration lifetime', () => {
             epoch: 100,
           });
           expect(() => bridge.stopCadTelemetryIngress()).toThrow('retired');
-          expect(unsubscribeTelemetry).toHaveBeenCalledTimes(4);
+          expect(unsubscribeTelemetry).toHaveBeenCalledTimes(6);
           Object.assign(cad.context, { kernelClient: telemetryClient });
           posedDocument.exportPublished.mockResolvedValue(nativeReply);
           const legacyExport = await bridge.exportCurrentPosedAssembly();

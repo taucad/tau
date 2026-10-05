@@ -580,7 +580,8 @@ export function verifyDrainedMotionActivity(
         (entry) =>
           entry.origin.instance !== baseline?.origin.instance ||
           entry.origin.label !== baseline.origin.label ||
-          entry.epoch !== baseline.epoch,
+          !Number.isFinite(entry.epoch) ||
+          entry.workerTimeOrigin !== baseline.workerTimeOrigin,
       )
     ) {
       throw new Error('Runtime producer changed during the observed interval.');

@@ -2642,6 +2642,12 @@ export const uiScalePresentationProbe: BrowserCommand<
   let failed = false;
   let stream: string | undefined;
   let observed: Promise<unknown> | undefined;
+  const steppedMoveCalls: Array<{
+    cycle: number;
+    startedAt: number;
+    finishedAt?: number;
+    completed: boolean;
+  }> = [];
   let traceBytes = 0;
   let dataLossOccurred = true;
   let traceBufferHighWater: number | undefined;
@@ -3002,7 +3008,14 @@ export const uiScalePresentationProbe: BrowserCommand<
       const y = box.y + box.height * 0.5;
       await page.mouse.move(x, y);
       await page.mouse.down();
-      await page.mouse.move(x + box.width * 0.2, y + box.height * 0.04, { steps: 24 });
+      const moveCall: (typeof steppedMoveCalls)[number] = { cycle, startedAt: performance.now(), completed: false };
+      steppedMoveCalls.push(moveCall);
+      try {
+        await page.mouse.move(x + box.width * 0.2, y + box.height * 0.04, { steps: 24 });
+        moveCall.completed = true;
+      } finally {
+        moveCall.finishedAt = performance.now();
+      }
       await page.mouse.up();
     }
     await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5);
@@ -3092,6 +3105,9 @@ export const uiScalePresentationProbe: BrowserCommand<
           traceFormat,
           tracePath,
           inputLineage,
+          hostSteppedMoveCalls: steppedMoveCalls,
+          hostTimeOrigin: performance.timeOrigin,
+          hostMoveSemantics: 'Playwright 24-step call wall time, not individual CDP send/ack or presentation',
           browser,
           browserCommandLine,
           targetInfoBefore,
@@ -3178,6 +3194,9 @@ export const uiScalePresentationProbe: BrowserCommand<
                 finiteObservation: null,
                 completedNativeInputCount: null,
                 windows: null,
+                hostSteppedMoveCalls: steppedMoveCalls,
+                hostTimeOrigin: performance.timeOrigin,
+                hostMoveSemantics: 'Playwright 24-step call wall time, not individual CDP send/ack or presentation',
                 presentationQualification: 'unqualified',
                 coverage:
                   'Checked trace through failure cleanup; completed finite observation and window fields unavailable.',

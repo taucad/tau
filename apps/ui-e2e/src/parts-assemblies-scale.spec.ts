@@ -474,7 +474,11 @@ for (const workload of [
     // This first bounded recording freezes raw target/compositor/heap provenance. It is not a presented-frame verdict.
     const trajectoryBefore = await captureScaleViewportEvidence();
     expect(trajectoryBefore.identity.root).toBe(pin.root.digest);
-    const probe = await target.scalePresentationProbe(`s16-${workload.name}-named-cell`);
+    const probe = await target.scalePresentationProbe(
+      `s16-${workload.name}-named-cell`,
+      'primary',
+      workload.name === 'scale-10k' ? { traceFormat: 'proto', inputLineage: true } : undefined,
+    );
     expect(probe.traceBytes).toBeGreaterThan(0);
     expect(probe.dataLossOccurred).toBe(false);
     expect(probe.presentationQualification).toBe('raw-probe-only');

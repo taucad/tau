@@ -12,7 +12,7 @@ import { geometryReceiptAt, recordRendererSpan } from '#lib/renderer-telemetry.j
 import { invalidateSceneTransparency } from '#components/geometry/graphics/three/utils/scene-transparency-revision.js';
 import { holdGeometryPresentation } from '#components/geometry/graphics/three/utils/geometry-presentation-admission.js';
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import type {
   Group,

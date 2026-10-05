@@ -1526,10 +1526,12 @@ public static class Params
         Assert.True(Program.ParentIsAlive(Environment.ProcessId));
         Assert.False(Program.ParentIsAlive(int.MaxValue));
         var terminated = new ManualResetEventSlim();
-        var checks = new Queue<bool>([true, false]);
+        var checks = new Queue<bool>([true, true, false]);
         var watcher = Program.StartParentWatch(1, terminated.Set, _ => checks.Dequeue(), pollMilliseconds: 1);
+        Assert.NotNull(watcher);
         Assert.True(terminated.Wait(TimeSpan.FromSeconds(1)));
         watcher.Join();
+        Assert.Null(Program.StartParentWatch(1, () => throw new InvalidOperationException("hidden parent"), _ => false));
 
         Assert.False(Program.DisposeLibrary(null, new StringWriter()));
         Assert.False(Program.DisposeLibrary(new MemoryStream(), new StringWriter()));

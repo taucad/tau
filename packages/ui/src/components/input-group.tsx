@@ -38,7 +38,7 @@ function InputGroup({ className, ...props }: React.ComponentProps<'div'>): React
         'has-[[data-slot=input-group-control]:focus-visible]:focus-outline',
 
         // Error state.
-        'has-[[data-slot][aria-invalid=true]]:border-destructive',
+        'has-[[data-slot][aria-invalid=true]]:border-feature',
 
         className,
       )}

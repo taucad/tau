@@ -32,10 +32,16 @@ import {
 /* oxlint-enable no-restricted-imports -- End co-located CLI import exception. */
 
 void test('malformed process listings cannot prove a producer group exited', (context) => {
-  const listing = context.mock.method(childProcess, 'spawnSync', () => ({
-    status: 0,
-    stdout: '123 S\nmalformed row\n',
-  }));
+  const listing = context.mock.method(
+    childProcess,
+    'spawnSync',
+    /** @type {() => {status: number, stdout: string | undefined}} */ (
+      () => ({
+        status: 0,
+        stdout: '123 S\nmalformed row\n',
+      })
+    ),
+  );
   assert.throws(() => darwinGroupAlive(123), /Malformed process listing/);
   listing.mock.mockImplementation(() => ({ status: 0, stdout: undefined }));
   assert.throws(() => darwinGroupAlive(123), /Could not prove GeoSpec producer group exit/);
@@ -280,17 +286,20 @@ void test('explicit delivery cache remains the exact selected path', (context) =
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, name);
   }
-  context.mock.method(childProcess, 'execFileSync', (_executable, args) =>
-    args[0] === 'rev-parse' ? `${'a'.repeat(40)}\n` : '',
+  context.mock.method(
+    childProcess,
+    'execFileSync',
+    /** @type {(executable: string, args: string[]) => string} */ (_executable, args) =>
+      args[0] === 'rev-parse' ? `${'a'.repeat(40)}\n` : '',
   );
   const selected = join(root, 'retained-cache');
-  const previous = process.env.GEOSPEC_DELIVERY_CACHE;
-  process.env.GEOSPEC_DELIVERY_CACHE = selected;
+  const previous = process.env['GEOSPEC_DELIVERY_CACHE'];
+  process.env['GEOSPEC_DELIVERY_CACHE'] = selected;
   context.after(() => {
     if (previous === undefined) {
-      delete process.env.GEOSPEC_DELIVERY_CACHE;
+      delete process.env['GEOSPEC_DELIVERY_CACHE'];
     } else {
-      process.env.GEOSPEC_DELIVERY_CACHE = previous;
+      process.env['GEOSPEC_DELIVERY_CACHE'] = previous;
     }
   });
   const producer = context.mock.method(
@@ -327,7 +336,7 @@ const waitForCondition = async (condition, label) =>
     }, 2000);
   });
 
-/** @type {(context: import('node:test').TestContext, reusePrefixes: boolean) => void} */
+/** @type {(context: import('node:test').TestContext, reusePrefixes: boolean, sourceOnly?: boolean) => void} */
 const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
   const actualSpawnSync = childProcess.spawnSync;
   const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
@@ -348,6 +357,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
   const snapshotPath = `${packagePath}/bindings/node/types/generated/index.d.ts`;
   const bindingPath = `${packagePath}/bindings/emscripten/src/lib.rs`;
   const patchPath = `${packagePath}/native/occt/patches/fixture.patch`;
+  /** @type {[string, ...string[]]} */
   const sourceKitPaths = [
     `${packagePath}/scripts/ci-artifacts.test.mjs`,
     `${packagePath}/bindings/browser-conformance/run-browser-conformance.ts`,
@@ -374,7 +384,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
   const mixedPath = `${packagePath}/bindings/emscripten/generated`;
   const callerBin = join(temporary, 'caller-bin');
   mkdirSync(join(callerBin, 'pnpm'), { recursive: true });
-  const productPath = `${callerBin}:${process.env.PATH}`;
+  const productPath = `${callerBin}:${process.env['PATH']}`;
   const nativeBin = join(temporary, 'strict-native-bin');
   mkdirSync(nativeBin);
   symlinkSync(process.execPath, join(nativeBin, 'node'));
@@ -538,7 +548,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
   context.mock.method(
     childProcess,
     'spawnSync',
-    /** @type {(executable: string, args: string[], options: {cwd: string, stdio: unknown, env: {PATH?: string, CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number}} */ (
+    /** @type {(executable: string, args: string[], options: {cwd: string, stdio: import('node:child_process').StdioOptions, env: {PATH?: string, CARGO_HOME: string, GEOSPEC_NODE_MANIFEST: string, GEOSPEC_OCCT_PREFIX: string, GEOSPEC_MIXED_INPUTS: string, GEOSPEC_DELIVERY_CACHE: string, GEOSPEC_DELIVERY_GENERATION?: string, GEOSPEC_OCCT_PRODUCER_BUILDER?: string, GEOSPEC_OCCT_PRODUCER_RECIPE?: string, GIT_CEILING_DIRECTORIES?: string}}) => {status: number | null, stdout?: string | Buffer}} */ (
       executable,
       args,
       options,
@@ -575,6 +585,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
         assert.equal(options.env.PATH, productPath);
         observations += 1;
         assert.equal(args[1], join(producer, packagePath, 'scripts/collect-native-proof.py'));
+        assert.ok(args[3] !== undefined && args[4] !== undefined, 'native proof collection lacks its paths');
         /** @type {unknown} */
         const invocationData = JSON.parse(readFileSync(args[3], 'utf8'));
         const invocation =
@@ -911,6 +922,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     assert.equal(renewed.schema, 'geospec-ci-artifacts-v3');
     assert.equal(deliveryCacheKey(producer), sourceKitCacheKey, 'assembly must not change the current Nx cache key');
     assert.equal(renewed.source.revision, revision, 'source kit records the current checkout revision');
+    assert.ok(renewed.producerSource && inventory.producerSource && renewed.delivery && inventory.delivery);
     assert.equal(
       renewed.producerSource.revision,
       inventory.producerSource.revision,
@@ -962,6 +974,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
         inventory.producerSource,
         'source-only relinks retain original producer source',
       );
+      assert.ok(second.delivery && inventory.delivery);
       assert.deepEqual(second.delivery.run, inventory.delivery.run, 'source-only relinks never relabel the product');
       assert.deepEqual(second.delivery.assemblyRun, { id: 'assembly-C', attempt: '3' });
       const { archives } = /** @type {{archives: {path: string, sha256: string}[]}} */ (second.delivery);
@@ -976,13 +989,13 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       assert.equal(deliveryCacheKey(producer), currentCacheKey, `warm reuse retains the Nx cache key after ${path}`);
       assert.deepEqual(targets, [...builtTargets, ...Array.from({ length: index + 2 }, () => 'assemble-package')]);
     }
-    for (const [path, value] of [
+    for (const [path, value] of /** @type {[string, string][]} */ ([
       [bindingPath, 'different ABI'],
       [patchPath, 'different native patch'],
       [toolchainPath, 'different toolchain'],
       [cargoLockPath, 'different lock'],
       [`${packagePath}/scripts/ci-artifacts.mjs`, 'different producer script'],
-    ]) {
+    ])) {
       const original = readFileSync(join(producer, path));
       put(join(producer, path), value);
       assert.throws(() => verifyArtifacts(producer), /source inputs differ/);
@@ -1058,10 +1071,10 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     syncBuiltinESMExports();
   }
   assert.deepEqual(readdirSync(dirname(snapshot)), existingSnapshots, 'source-raced snapshots must be removed');
-  for (const [name, original] of [
+  for (const [name, original] of /** @type {[string, string][]} */ ([
     ['mixed-inputs.json', join(mixedCache, 'mixed-inputs-simd128.json')],
     ['mixed-commands.json', join(buildCache, 'attempt-1/commands.json')],
-  ]) {
+  ])) {
     assert.deepEqual(readFileSync(join(producer, transportPath, name)), readFileSync(original));
   }
   assert.equal(
@@ -1137,7 +1150,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     put(path, bytes);
   }
   // Even an updated transport hash must still join the selected manifest and command tools to the receipt.
-  for (const [key, name, replacement, message] of [
+  for (const [key, name, replacement, message] of /** @type {[string, string, string, RegExp][]} */ ([
     ['mixedInputs', 'mixed-inputs.json', '{}', /receipt\/input-manifest hash differs/],
     ['mixedCommands', 'mixed-commands.json', '[]', /Incomplete mixed commands/],
     [
@@ -1149,7 +1162,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       ),
       /command\/tool selection differs/,
     ],
-  ]) {
+  ])) {
     const path = join(consumer, transportPath, name);
     const bytes = readFileSync(path);
     put(path, replacement);
@@ -1249,12 +1262,13 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
         ...receiptChanges.buildEnvironment,
       },
     });
+    /** @type {Record<string, unknown>} */
     const changedInventory = { ...inventory };
-    for (const [key, name, bytes] of [
+    for (const [key, name, bytes] of /** @type {[string, string, string][]} */ ([
       ['mixedInputs', 'mixed-inputs.json', inputs],
       ['mixedReceipt', 'mixed-build-receipt.json', receipt],
       ['mixedCommands', 'mixed-commands.json', commands],
-    ]) {
+    ])) {
       put(join(consumer, transportPath, name), bytes);
       changedInventory[key] = {
         path: `${transportPath}/${name}`,
@@ -1369,7 +1383,7 @@ await test('a killed coordinator leaves a refusal while a nested Python writer s
         if (existsSync(path)) {
           clearInterval(pollTimer);
           clearTimeout(deadlineTimer);
-          resolve();
+          resolve(undefined);
         }
       }, 20);
       const deadlineTimer = setTimeout(() => {
@@ -1517,7 +1531,9 @@ await test(
       assert.throws(() => recoverExitedProducer(root, darwinGroupAlive), /possible writer/);
       writeFileSync(release, 'release');
       await waitForCondition(() => existsSync(done), 'nested writer completion');
-      await waitForCondition(() => !darwinGroupAlive(coordinator.pid), 'owned group exit');
+      const coordinatorPid = coordinator.pid;
+      assert.ok(coordinatorPid !== undefined);
+      await waitForCondition(() => !darwinGroupAlive(coordinatorPid), 'owned group exit');
       assert.equal(recoverExitedProducer(root, darwinGroupAlive), true, 'retry follows actual process-group exit');
     } finally {
       writeFileSync(release, 'release');

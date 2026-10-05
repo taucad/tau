@@ -529,7 +529,7 @@ function SlotActions({
       setSent({ verb: 'set', at: Date.now(), material: choice });
     }
   };
-  const error = action.error ? <PrintNotice tone='destructive'>{action.error}</PrintNotice> : null;
+  const error = action.error ? <PrintNotice tone='error'>{action.error}</PrintNotice> : null;
 
   if (pending !== undefined && now - pending.at < reportWithin) {
     return (
@@ -921,7 +921,7 @@ export function MaterialChangeCard({
           printer&apos;s screen.
         </p>
       ) : null}
-      {action.error ? <PrintNotice tone='destructive'>{action.error}</PrintNotice> : null}
+      {action.error ? <PrintNotice tone='error'>{action.error}</PrintNotice> : null}
     </section>
   );
 }

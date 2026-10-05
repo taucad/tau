@@ -7,6 +7,8 @@ import { galleryProjects } from '#constants/project-examples.js';
 let registered: CommandPaletteItem[] = [];
 
 vi.mock('#components/layout/command-palette.js', () => ({
+  // Example rows build their thumbnail elements when the module loads.
+  CommandPaletteThumbnail: () => null,
   useCommandPaletteItems: (_id: string, factory: () => CommandPaletteItem[]) => {
     registered = factory();
   },

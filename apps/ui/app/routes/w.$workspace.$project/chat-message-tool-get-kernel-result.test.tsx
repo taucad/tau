@@ -139,7 +139,7 @@ describe('ChatMessageToolGetKernelResult — file-aware titles', () => {
     expect(screen.getByTestId('chat-tool-card-icon').dataset['tone']).toBe('');
   });
 
-  it('should render "Failed to render <filename>" with the icon toned destructive (not the header)', () => {
+  it('should render "Failed to render <filename>" with the icon toned error (not the header)', () => {
     const issues: KernelIssue[] = [
       {
         severity: 'error',
@@ -166,7 +166,7 @@ describe('ChatMessageToolGetKernelResult — file-aware titles', () => {
     expect(header.dataset['classname']).toBe('');
     // Header icon is the only colored element (icon at index 0; per-issue icons follow in the list).
     const icons = screen.getAllByTestId('chat-tool-card-icon');
-    expect(icons[0]?.dataset['tone']).toBe('destructive');
+    expect(icons[0]?.dataset['tone']).toBe('error');
   });
 
   it('should render "Rendered <filename> with N warning(s)" with an untoned leading icon (warnings are not failures)', () => {

@@ -328,7 +328,7 @@ replicad.plugin.ts             plugin.ts
 replicad.plugin.test.ts        plugin.test.ts
 ```
 
-Hyphens stay legal inside the name segment (`opencascade-native.kernel.ts`); only the role separator is a dot. Roles are `plugin`, `kernel`, `transcoder`, `middleware`, `bundler`, `job`, and `machine`. Helper, schema, and scenario modules carry no role marker (`assimp-backend.ts`, `replicad.schemas.ts`, `image-import-failure.test.ts`) and are not governed. Keep `tau-lint/plugin-capability-filename` and the plugin generator aligned with these roles for flat modules under `packages/plugins/*/src`.
+Hyphens stay legal inside the name segment (`geometry-cache.middleware.ts`); only the role separator is a dot. Roles are `plugin`, `kernel`, `transcoder`, `middleware`, `bundler`, `job`, and `machine`. Helper, schema, and scenario modules carry no role marker (`assimp-backend.ts`, `replicad.schemas.ts`, `image-import-failure.test.ts`) and are not governed. Keep `tau-lint/plugin-capability-filename` and the plugin generator aligned with these roles for flat modules under `packages/plugins/*/src`.
 
 **Why**: A capability is locatable by filename, and a test always sits next to the subject it covers instead of drifting one convention away from it.
 

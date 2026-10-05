@@ -47,6 +47,10 @@ export type RunView = Readonly<{
   user?: MyUIMessage;
   admittedAt: string;
   terminal?: 'completed' | 'failed' | 'cancelled';
+  /** Each history message the run appended and its chunk range, so a rewind removes exactly what it dropped. */
+  messages?: ReadonlyArray<Readonly<{ id: string; from: number; to: number; evicted?: true }>>;
+  /** A later rewind dropped this run's user turn (a regenerate or an edit): the transcript omits the run. */
+  rewound?: true;
 }>;
 
 /** @public */
@@ -219,6 +223,69 @@ export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =
       .toSorted((left, right) => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0)),
   );
 
+/** A terminal row's chunk: always a view's last, and superseded when the run reopens. */
+const terminalChunks: ReadonlySet<UIMessageChunk['type']> = new Set(['finish', 'error', 'abort']);
+
+/**
+ * One view after a `history.rewound` row (the host reducer's prefix cut, at message granularity).
+ *
+ * A message is dropped when it is still in the history (not evicted by a compaction) and outside the retained prefix.
+ * Dropped messages are a suffix of the history, so an earlier run is kept whole, trimmed at its end, or — its user turn
+ * dropped — hidden. The rewinding run's own turn is never hidden: it is admitted before the rewind row, and a
+ * regenerate re-admits the very message id the rewind drops.
+ */
+const rewindView = (view: RunView, retained: ReadonlySet<string>, own: boolean): RunView => {
+  const dropped = (view.messages ?? []).filter((message) => message.evicted !== true && !retained.has(message.id));
+  if (dropped.length === 0) {
+    return view;
+  }
+  if (!own && dropped.some((message) => message.id === view.user?.id)) {
+    return view.rewound ? view : { ...view, rewound: true };
+  }
+  const chunks: UIMessageChunk[] = [];
+  const messages: Array<NonNullable<RunView['messages']>[number]> = [];
+  let at = 0;
+  for (const message of view.messages ?? []) {
+    chunks.push(...view.chunks.slice(at, message.from));
+    at = message.to;
+    if (!dropped.includes(message)) {
+      messages.push({ ...message, from: chunks.length, to: chunks.length + message.to - message.from });
+      chunks.push(...view.chunks.slice(message.from, message.to));
+    }
+  }
+  chunks.push(...view.chunks.slice(at));
+  return { ...view, chunks, messages };
+};
+
+/** A compaction marks the messages it evicted (a later rewind keeps them); a rewind cuts every view. */
+const foldHistoryRow = (
+  views: ChatProjection['views'],
+  row: Extract<AgentLogEvent, { readonly type: 'history.rewound' | 'history.compacted' }>,
+): ChatProjection['views'] => {
+  let next = views;
+  for (const [runId, view] of Object.entries(views)) {
+    let folded = view;
+    if (row.type === 'history.rewound') {
+      folded = rewindView(view, new Set(row.retainedMessageIds), runId === row.runId);
+    } else if (view.messages?.some((message) => row.evictedMessageIds.includes(message.id)) === true) {
+      folded = {
+        ...view,
+        messages: view.messages.map((message): NonNullable<RunView['messages']>[number] =>
+          row.evictedMessageIds.includes(message.id) ? { ...message, evicted: true } : message,
+        ),
+      };
+    }
+    if (folded !== view) {
+      next = { ...next, [runId]: folded };
+    }
+  }
+  return next;
+};
+
+/** The history message a row appends, if any. */
+const appendedId = (row: AgentLogEvent): string | undefined =>
+  row.type === 'message.appended' || row.type === 'turn.history-projection-committed' ? row.message.id : undefined;
+
 const foldRunViews = (
   rows: readonly AgentLogEvent[],
   previousViews: ChatProjection['views'],
@@ -230,17 +297,17 @@ const foldRunViews = (
     Object.entries(previousBlocks).map(([key, block]) => [key, { ...block }]),
   );
   for (const row of rows) {
-    const previous = views[row.runId];
-    const reopened = row.type === 'run.lifecycle' && row.state === 'running' && previous?.terminal !== undefined;
-    if (reopened) {
-      const prefix = `[${JSON.stringify(row.runId)},`;
-      for (const key of blocks.keys()) {
-        if (key.startsWith(prefix)) {
-          blocks.delete(key);
-        }
-      }
+    if (row.type === 'history.rewound' || row.type === 'history.compacted') {
+      views = foldHistoryRow(views, row);
+      continue;
     }
+    const previous = views[row.runId];
+    /* A reopen continues the run's committed transcript: only the terminal marker it supersedes goes (resume
+     * everywhere). A retracted failure marker leaves with its own `history.rewound` row. */
+    const reopened = row.type === 'run.lifecycle' && row.state === 'running' && previous?.terminal !== undefined;
+    const kept = reopened ? previous.chunks.filter((chunk) => !terminalChunks.has(chunk.type)) : previous?.chunks;
     const chunks = projectAgentHostEvent(row, blocks);
+    const appended = appendedId(row);
     const user = projectAgentHostUserTurn(row);
     const terminal =
       row.type === 'run.lifecycle' && (row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled')
@@ -249,6 +316,7 @@ const foldRunViews = (
     if (
       chunks.length === 0 &&
       user === undefined &&
+      appended === undefined &&
       previous !== undefined &&
       (row.type !== 'run.lifecycle' || terminal === previous.terminal)
     ) {
@@ -264,14 +332,18 @@ const foldRunViews = (
     if (previous === undefined) {
       lastAdmittedAt = admittedAt;
     }
+    const from = kept?.length ?? 0;
+    const messages =
+      appended === undefined
+        ? previous?.messages
+        : [...(previous?.messages ?? []), { id: appended, from, to: from + chunks.length }];
     views = {
       ...views,
       [row.runId]: {
         admittedAt,
-        chunks: [
-          ...(reopened ? previous.chunks.filter((chunk) => chunk.type === 'start') : (previous?.chunks ?? [])),
-          ...chunks,
-        ],
+        chunks: [...(kept ?? []), ...chunks],
+        ...(messages === undefined ? {} : { messages }),
+        ...(previous?.rewound === undefined ? {} : { rewound: previous.rewound }),
         ...(previous?.user === undefined && user === undefined ? {} : { user: user ?? previous?.user }),
         ...(row.type === 'run.lifecycle'
           ? terminal === undefined
@@ -466,6 +538,7 @@ export const selectTranscriptSource = (
   projection: ChatProjection,
 ): ReadonlyArray<RunView & { readonly runId: string }> =>
   Object.entries({ ...projection.remote?.views, ...projection.views })
+    .filter(([, view]) => view.rewound !== true)
     .map(([runId, view]) => ({ runId, ...view }))
     .toSorted((left, right) => left.admittedAt.localeCompare(right.admittedAt));
 

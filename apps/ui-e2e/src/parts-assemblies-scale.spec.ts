@@ -985,6 +985,13 @@ type MixedOwnedActivity = Readonly<{
 type S15BridgeWindow = typeof globalThis & {
   __TAU_SECTION_VIEW_TEST__?: Omit<AssemblyTestBridgeApi, 'getCadActivity'> & {
     getCadActivity(options?: Readonly<{ entryPath: string }>): MixedOwnedActivity | undefined;
+    getTaggedResourceInventory():
+      | Readonly<{
+          measurementUi: S16TaggedResourceCounts;
+          sectionViewHelper: S16TaggedResourceCounts;
+          union: S16TaggedResourceCounts;
+        }>
+      | undefined;
   };
 };
 const readMixedCadSubject = async () =>
@@ -2041,6 +2048,57 @@ declare module 'vitest' {
   }
 }
 
+type S16TaggedResourceCounts = Readonly<{
+  objectCount: number;
+  geometryCount: number;
+  materialCount: number;
+  attributeHandleCount: number;
+  bufferCount: number;
+  backingBytes: number;
+  payloadBytes: number;
+}>;
+
+/** Untimed mounted helper census, joined to the exact current committed draw on both sides of traversal. */
+const readS16MountedHelperResources = async () =>
+  target.evaluate(() => {
+    const bridge = (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__;
+    const subject = bridge?.getCommittedAssembly();
+    const draw = bridge?.getCommittedDrawInventory();
+    if (
+      !bridge ||
+      !subject?.assemblyDisplay ||
+      !subject.isCurrent() ||
+      !draw ||
+      draw.key !== subject.assemblyDisplay.root.digest
+    ) {
+      throw new Error('The current recovery helper census has no committed assembly draw.');
+    }
+    const taggedResources = bridge.getTaggedResourceInventory();
+    const current = bridge.getCommittedDrawInventory();
+    if (
+      !taggedResources ||
+      !subject.isCurrent() ||
+      current?.key !== draw.key ||
+      current.candidateSceneId !== draw.candidateSceneId ||
+      current.presentationRevision !== draw.presentationRevision ||
+      current.unitId !== draw.unitId ||
+      current.poseRevision !== draw.poseRevision ||
+      (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__ !== bridge
+    ) {
+      throw new Error('The recovery helper census changed its committed candidate during observation.');
+    }
+    return {
+      identity: {
+        root: subject.assemblyDisplay.root.digest,
+        candidateSceneId: draw.candidateSceneId,
+        presentationRevision: draw.presentationRevision,
+        unitId: draw.unitId,
+        poseRevision: draw.poseRevision,
+      },
+      taggedResources,
+    };
+  });
+
 // This explicit untimed loss control uses the existing 123-part named view and real admitted S15 draw capture.
 test.each(['WebGL', 'WebGPU'])(
   'S16 pinned viewport recovery %s should retire lost authority and restore the same pinned draw',
@@ -2175,6 +2233,19 @@ test.each(['WebGL', 'WebGPU'])(
     ).toBe(true);
     expect(before.inventory.surfaces.reduce((total, { drawTriangles }) => total + drawTriangles, 0)).toBeGreaterThan(0);
     const beforeImage = await captureS15Frame(`s16-${backend}-recovery-before.png`, before);
+    const mountedBefore = await readS16MountedHelperResources();
+    expect(mountedBefore.identity).toMatchObject({
+      root: before.root.digest,
+      candidateSceneId: before.inventory.candidateSceneId,
+      presentationRevision: before.inventory.presentationRevision,
+      unitId: before.inventory.unitId,
+      poseRevision: before.inventory.poseRevision,
+    });
+    for (const counts of Object.values(mountedBefore.taggedResources)) {
+      for (const value of Object.values(counts)) {
+        expect(Number.isSafeInteger(value) && value >= 0).toBe(true);
+      }
+    }
     const beforeVisiblePixels = await captureVisibleGeometry(`s16-${backend}-recovery-before`, before);
     const nativeBefore = backend === 'webgpu' ? await captureScaleViewportEvidence(true) : undefined;
     if (nativeBefore) {
@@ -2300,6 +2371,9 @@ test.each(['WebGL', 'WebGPU'])(
                 if (bridge.getCommittedDrawInventory() !== undefined) {
                   throw new Error('The retired bridge still exposes a committed draw.');
                 }
+                if (bridge.getTaggedResourceInventory() !== undefined) {
+                  throw new Error('The retired bridge still exposes mounted helper resources.');
+                }
                 let readDenied = false;
                 try {
                   await subject.readRawBytes(subject.assemblyDisplay.root.path);
@@ -2344,6 +2418,7 @@ test.each(['WebGL', 'WebGPU'])(
                   retiredCanvasDisconnected: !canvas.isConnected,
                   retiredSubjectCurrent: subject.isCurrent(),
                   retiredDrawUnavailable: bridge.getCommittedDrawInventory() === undefined,
+                  retiredTaggedResourcesUnavailable: bridge.getTaggedResourceInventory() === undefined,
                   retiredReaderDenied: readDenied,
                   newCanvas: (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__?.getViewportCanvas() !== canvas,
                 };
@@ -2376,6 +2451,7 @@ test.each(['WebGL', 'WebGPU'])(
         retiredCanvasDisconnected: true,
         retiredSubjectCurrent: false,
         retiredDrawUnavailable: true,
+        retiredTaggedResourcesUnavailable: true,
         retiredReaderDenied: true,
         newCanvas: true,
       };
@@ -2424,6 +2500,20 @@ test.each(['WebGL', 'WebGPU'])(
       expect(pinAfter.byteDenominators).toEqual(pinBefore.byteDenominators);
       expect(pinAfter.sampledGlb).toEqual(pinBefore.sampledGlb);
       expect(pinAfter.diagnostics.projectId).toBe(pinBefore.diagnostics.projectId);
+      const mountedAfter = await readS16MountedHelperResources();
+      expect(mountedAfter.identity).toMatchObject({
+        root: restored.root.digest,
+        candidateSceneId: restored.inventory.candidateSceneId,
+        presentationRevision: restored.inventory.presentationRevision,
+        unitId: restored.inventory.unitId,
+        poseRevision: restored.inventory.poseRevision,
+      });
+      expect(mountedAfter.identity.candidateSceneId).not.toBe(mountedBefore.identity.candidateSceneId);
+      for (const counts of Object.values(mountedAfter.taggedResources)) {
+        for (const value of Object.values(counts)) {
+          expect(Number.isSafeInteger(value) && value >= 0).toBe(true);
+        }
+      }
       const nativeAfter = backend === 'webgpu' ? await captureScaleViewportEvidence(true) : undefined;
       if (nativeAfter) {
         expect(nativeAfter.identity).toMatchObject({
@@ -2465,6 +2555,12 @@ test.each(['WebGL', 'WebGPU'])(
             nativeLoss: outcome.value,
             nativeBefore,
             nativeAfter,
+            mountedHelperResources: {
+              before: mountedBefore,
+              restored: mountedAfter,
+              semantics:
+                'Current mounted tagged CPU views and handles only; detached worker, WASM, material textures, renderer and driver storage excluded.',
+            },
             before,
             restored,
             pinBefore,

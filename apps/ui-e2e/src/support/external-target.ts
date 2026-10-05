@@ -37,6 +37,7 @@ export type TargetWebGpuViewportLoss = Readonly<{
   retiredCanvasDisconnected: boolean;
   retiredSubjectCurrent: boolean;
   retiredDrawUnavailable: boolean;
+  retiredTaggedResourcesUnavailable: boolean;
   retiredReaderDenied: boolean;
   newCanvas: boolean;
 }>;

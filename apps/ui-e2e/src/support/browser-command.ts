@@ -2342,7 +2342,9 @@ export const uiCrashGpuProcess: BrowserCommand<
     throw new Error('Native viewport loss requires the existing Vitest-owned product page.');
   }
   const held = await page.evaluateHandle((binding) => {
-    const browser: typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: AssemblyTestBridgeApi } = globalThis;
+    const browser: typeof globalThis & {
+      __TAU_SECTION_VIEW_TEST__?: AssemblyTestBridgeApi & { getTaggedResourceInventory(): unknown };
+    } = globalThis;
     const bridge = browser.__TAU_SECTION_VIEW_TEST__;
     const subject = bridge?.getCommittedAssembly();
     const draw = bridge?.getCommittedDrawInventory();
@@ -2510,6 +2512,9 @@ export const uiCrashGpuProcess: BrowserCommand<
           if (captured.bridge.getCommittedDrawInventory() !== undefined) {
             throw new Error('The retired WebGPU bridge still exposes a committed draw.');
           }
+          if (captured.bridge.getTaggedResourceInventory() !== undefined) {
+            throw new Error('The retired WebGPU bridge still exposes mounted helper resources.');
+          }
           let readDenied = false;
           try {
             await captured.subject.readRawBytes(captured.binding.rootPath);
@@ -2526,6 +2531,7 @@ export const uiCrashGpuProcess: BrowserCommand<
             retiredCanvasDisconnected: !captured.canvas.isConnected,
             retiredSubjectCurrent: captured.subject.isCurrent(),
             retiredDrawUnavailable: captured.bridge.getCommittedDrawInventory() === undefined,
+            retiredTaggedResourcesUnavailable: captured.bridge.getTaggedResourceInventory() === undefined,
             retiredReaderDenied: readDenied,
           };
         }, held);

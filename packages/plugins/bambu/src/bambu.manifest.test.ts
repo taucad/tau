@@ -32,7 +32,7 @@ describe('bambuX1cManifest', () => {
     ]);
   });
 
-  it('should declare every action once, with the run actions, the light and homing hardware-qualified and the rest designed', () => {
+  it('should declare every action once, with the run actions, light, fans, homing and jog hardware-qualified and the rest designed', () => {
     const ids = actionIds(bambuX1cManifest);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toEqual([
@@ -69,8 +69,19 @@ describe('bambuX1cManifest', () => {
       'run.pause': bambuX1cHardwareProfile,
       'run.resume': bambuX1cHardwareProfile,
       'run.cancel': bambuX1cHardwareProfile,
+      'level.set': bambuX1cTestingProfile,
       'motion.home': bambuX1cTestingProfile,
+      'motion.jog': bambuX1cTestingProfile,
     });
+    expect(
+      bambuX1cManifest.actions
+        .filter(({ id }) => id === 'level.set')
+        .map(({ label, qualification }) => [label, qualification.status]),
+    ).toEqual([
+      ['Part fan', 'qualified'],
+      ['Auxiliary fan', 'qualified'],
+      ['Chamber fan', 'qualified'],
+    ]);
     expect(bambuX1cManifest.qualifications.map(({ id }) => id)).toEqual([
       bambuX1cHardwareProfile,
       bambuX1cTestingProfile,

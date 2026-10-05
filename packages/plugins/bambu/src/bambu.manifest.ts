@@ -134,6 +134,8 @@ const routines = {
   'A1 mini': ['bed-levelling', 'vibration', 'motor-noise'],
 } as const;
 
+const fanLabels = { 'part-fan': 'Part fan', 'aux-fan': 'Auxiliary fan', 'chamber-fan': 'Chamber fan' } as const;
+
 const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] => {
   const x1c = model === 'X1C';
   const runQualification = x1c ? { qualification: proven } : {};
@@ -198,10 +200,11 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       standardMachineAction({
         id: 'level.set',
         componentId,
-        label: 'Fan speed',
+        label: fanLabels[componentId],
         when: anyState,
         effects: ['thermal'],
         schema: fanLevel,
+        ...(x1c ? { qualification: provenInTesting } : {}),
       }),
     ),
     standardMachineAction({
@@ -330,6 +333,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       consequence: 'One relative move inside the printer’s soft limits.',
       confirms: 'acknowledgement',
       schema: jog,
+      ...(x1c ? { qualification: provenInTesting } : {}),
     }),
     defineMachineAction(
       {
@@ -553,7 +557,7 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
             firmware: ['01.12.00.00'],
             attachments: ['filament', 'camera'],
             evidence:
-              'The operator switched the chamber light and homed the axes on the workshop X1C from the Print pane in Testing mode (2026-10-05).',
+              'The operator switched the chamber light, homed and jogged X, Y and Z, and set the part, auxiliary and chamber fans on the workshop X1C from the Print pane in Testing mode (2026-10-05).',
           },
         ]
       : [],

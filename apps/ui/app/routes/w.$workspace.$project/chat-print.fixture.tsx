@@ -292,8 +292,7 @@ export function ParametersFake({
 }): React.JSX.Element {
   const shown = mergeFormDefaults(jsonSchema, defaultParameters, parameters);
   const toggles = Object.entries(jsonSchema.properties ?? {}).filter(
-    ([, property]) =>
-      property !== null && typeof property === 'object' && 'type' in property && property.type === 'boolean',
+    ([, property]) => typeof property === 'object' && 'type' in property && property.type === 'boolean',
   );
   return (
     <div>

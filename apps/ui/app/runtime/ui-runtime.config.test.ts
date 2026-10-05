@@ -71,6 +71,7 @@ describe('createUiRuntimeConfig', () => {
       'sha256:cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27',
     ]);
     for (const definition of [runtime, debugRuntime]) {
+      // eslint-disable-next-line no-await-in-loop -- Verify each definition's resolved engine pair independently.
       const resolvedRuntime = await resolveRuntimeDefinition(definition, {
         tauApiUrl: 'https://api.tau.test',
         tauWebSocketUrl: 'wss://api.tau.test',

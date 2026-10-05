@@ -1,5 +1,5 @@
-import { Box3, BufferAttribute, BufferGeometry, Matrix4, Object3D, Quaternion, Sphere, Vector3 } from 'three';
-import type { InterleavedBuffer, InterleavedBufferAttribute, Material, Texture } from 'three';
+import { Box3, BufferAttribute, BufferGeometry, Matrix4, Quaternion, Sphere, Vector3 } from 'three';
+import type { InterleavedBuffer, InterleavedBufferAttribute, Material, Object3D, Texture } from 'three';
 import { parseGltfBytes, readTopologyPayload } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import type {
   GltfJson,

@@ -98,7 +98,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
         const projection = assemblyDisplay && snapshot ? await resolveSettledCadGeometry(snapshot) : undefined;
         const artifact =
           projection?.geometry.format === 'gltf'
-            ? { mimeType: 'model/gltf-binary' as const, content: projection.geometry.content }
+            ? ({ mimeType: 'model/gltf-binary', content: projection.geometry.content } as const)
             : rendering?.success && !rendering.transient
               ? asKnownArtifact(rendering.artifact)
               : undefined;

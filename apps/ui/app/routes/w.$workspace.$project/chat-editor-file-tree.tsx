@@ -2668,6 +2668,7 @@ function PendingFolderInput({
     </div>
   );
 }
+// eslint-enable max-lines
 
 type PendingFileInputProps = {
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object

@@ -1481,7 +1481,7 @@ export const ConverterPanelBody = function ({
             </div>
           </section>
 
-          {display || hasExportableDocument ? (
+          {(display ?? hasExportableDocument) ? (
             availableFormats.length > 0 ? (
               <>
                 <section aria-label='Formats' className='overflow-hidden rounded-xl border border-border bg-card'>

@@ -81,7 +81,7 @@ export const getDiscriminatedUnionInfo = (schema: RJSFSchema): DiscriminatedUnio
   if (!definitions || definitions.length < 2) {
     return undefined;
   }
-  const branches = definitions.filter(isRjsfSchema);
+  const branches = definitions.filter((definition) => isRjsfSchema(definition));
   if (branches.length !== definitions.length) {
     return undefined;
   }

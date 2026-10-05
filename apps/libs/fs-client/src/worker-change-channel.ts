@@ -1,4 +1,6 @@
 import { Topic } from '@taucad/events';
+import type { WatchRequest, WatchEvent } from '@taucad/filesystem';
+import type { ObservationWatch } from '#observation-service.js';
 import type { ChangeEvent, FileSystemBackend } from '@taucad/types';
 
 /**
@@ -9,6 +11,12 @@ import type { ChangeEvent, FileSystemBackend } from '@taucad/types';
  */
 export type WorkerChangeChannelTransport = {
   listen: (event: string, handler: (data: unknown) => void) => () => void;
+  /** Actual authority registration; omitted only by local synchronous sources. */
+  watchReady?: (
+    request: WatchRequest,
+    handler: (event: WatchEvent) => void,
+  ) => { ready: Promise<void>; closed: Promise<void>; unsubscribe(): void };
+  closed?: Promise<void>;
 };
 
 /**
@@ -152,6 +160,8 @@ function isChangeEvent(value: unknown): value is ChangeEvent {
  */
 export class WorkerChangeChannel {
   private readonly unlisten: () => void;
+  private readonly transport: WorkerChangeChannelTransport;
+  private readonly closedSignal = Promise.withResolvers<void>();
   readonly #fileWritten = new Topic<{ type: 'fileWritten'; path: string; backend: FileSystemBackend }>({
     name: 'WorkerChangeChannel.fileWritten',
   });
@@ -179,7 +189,16 @@ export class WorkerChangeChannel {
     name: 'WorkerChangeChannel.backendChanged',
   });
 
+  /** Whether exact authority watches own observation invalidation. @returns True for a real watch transport. */
+  public get hasAuthorityWatch(): boolean {
+    return this.transport.watchReady !== undefined;
+  }
+
   public constructor(deps: { transport: WorkerChangeChannelTransport }) {
+    this.transport = deps.transport;
+    if (deps.transport.closed) {
+      void this.forwardClosure(deps.transport.closed);
+    }
     this.unlisten = deps.transport.listen('fileChanged', (data: unknown) => {
       this.#dispatch(data);
     });
@@ -368,7 +387,13 @@ export class WorkerChangeChannel {
   /**
    * Detach the underlying `fileChanged` listener and drop subscriber lists.
    */
+  /** Captured observation source lifetime. */
+  public get closed(): Promise<void> {
+    return this.closedSignal.promise;
+  }
+
   public dispose(): void {
+    this.closedSignal.resolve();
     this.unlisten();
     this.#fileWritten.dispose();
     this.#fileDeleted.dispose();
@@ -380,6 +405,114 @@ export class WorkerChangeChannel {
     this.#directoryCopied.dispose();
     this.#directoryChanged.dispose();
     this.#backendChanged.dispose();
+  }
+
+  /**
+   * Register a captured resource watch before its authoritative read.
+   * @param request - Root-relative paths and matching scope.
+   * @param handler - Exact changes, both rename edges, or explicit reset.
+   * @returns Actual registration acknowledgement and closure.
+   */
+  public watchReady(request: WatchRequest, handler: (event: WatchEvent) => void): ObservationWatch {
+    if (this.transport.watchReady) {
+      const watch = this.transport.watchReady(request, handler);
+      return { ready: watch.ready, closed: watch.closed, dispose: watch.unsubscribe };
+    }
+    /* Local Topic sources are registered synchronously; this fallback is not
+     * used to acknowledge a remote watch registration. */
+    const matches = (path: string): boolean =>
+      request.paths.some(
+        (root) =>
+          path === '' ||
+          path === root ||
+          root.startsWith(`${path}/`) ||
+          (request.recursive === true && (root === '' || path.startsWith(`${root}/`))),
+      );
+    const unsubscriptions = [
+      this.onFileWritten({
+        interestedIn: matches,
+        handler: ({ path }) => {
+          handler({ type: 'change', path });
+        },
+      }),
+      this.onFileDeleted({
+        interestedIn: matches,
+        handler: ({ path }) => {
+          handler({ type: 'delete', path });
+        },
+      }),
+      this.onFileCopied({
+        handler: ({ targetPath }) => {
+          if (matches(targetPath)) {
+            handler({ type: 'change', path: targetPath });
+          }
+        },
+      }),
+      this.onFileRenamed({
+        interestedIn: matches,
+        handler: ({ oldPath, newPath }) => {
+          if (oldPath !== undefined && newPath !== undefined) {
+            handler({ type: 'rename', oldPath, newPath });
+          } else if (oldPath !== undefined) {
+            handler({ type: 'delete', path: oldPath });
+          } else if (newPath !== undefined) {
+            handler({ type: 'change', path: newPath });
+          }
+        },
+      }),
+      this.onDirectoryCreated({
+        interestedIn: matches,
+        handler: ({ path }) => {
+          handler({ type: 'change', path });
+        },
+      }),
+      this.onDirectoryDeleted({
+        interestedIn: matches,
+        handler: ({ path }) => {
+          handler({ type: 'delete', path });
+        },
+      }),
+      this.onDirectoryChanged({
+        interestedIn: matches,
+        handler: ({ path }) => {
+          handler({ type: 'change', path });
+        },
+      }),
+      this.onDirectoryCopied({
+        handler: ({ targetPath }) => {
+          if (matches(targetPath)) {
+            handler({ type: 'change', path: targetPath });
+          }
+        },
+      }),
+      this.onDirectoryRenamed({
+        interestedIn: matches,
+        handler: () => {
+          handler({ type: 'reset' });
+        },
+      }),
+      this.onBackendChanged(() => {
+        handler({ type: 'reset' });
+      }),
+    ];
+    return {
+      ready: Promise.resolve(),
+      closed: this.closed,
+      dispose: () => {
+        for (const unsubscribe of unsubscriptions) {
+          unsubscribe();
+        }
+      },
+    };
+  }
+
+  private async forwardClosure(closed: Promise<void>): Promise<void> {
+    try {
+      await closed;
+    } catch {
+      /* A failed transport also closes this captured source. */
+    }
+    this.closedSignal.resolve();
   }
 
   #dispatch(data: unknown): void {

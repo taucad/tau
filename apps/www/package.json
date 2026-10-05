@@ -1,0 +1,28 @@
+{
+  "name": "@taucad/www",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Static Tau marketing website",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "dev": "node scripts/serve.mjs"
+  },
+  "dependencies": {
+    "@taucad/utils": "workspace:*",
+    "three": "catalog:"
+  },
+  "devDependencies": {
+    "axe-core": "catalog:",
+    "esbuild": "catalog:",
+    "playwright": "catalog:",
+    "sharp": "catalog:"
+  },
+  "imports": {
+    "#www/*.js": "./src/*.mjs",
+    "#tools/*.js": "./scripts/*.mjs",
+    "#tools/tooling.js": "./scripts/tooling.js"
+  }
+}

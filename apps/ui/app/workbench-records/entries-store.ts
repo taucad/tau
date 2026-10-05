@@ -94,6 +94,8 @@ export function createWorkbenchEntriesStore(
   }>,
 ): Readonly<{
   read: (notify?: boolean) => Promise<boolean>;
+  /** Fence a pending read as soon as its source changes. */
+  invalidateRead: () => void;
   /** *Try again* after reads stopped: a fresh set of attempts. */
   retryRead: () => Promise<boolean>;
   edit: (path: string, next: Entry) => Promise<boolean>;
@@ -408,6 +410,9 @@ export function createWorkbenchEntriesStore(
   };
   return {
     read,
+    invalidateRead: () => {
+      generation++;
+    },
     edit: async (path, next) => {
       if (isDisposed()) {
         return false;

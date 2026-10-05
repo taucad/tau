@@ -29,8 +29,9 @@ vi.mock('#components/code/diff-viewer.js', () => ({
 }));
 const imageHash = 'c'.repeat(64);
 const attachmentDirectory = '/projects/p1/.tau/chats/c1/attachments';
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useOptionalFileManager: () => ({
+vi.mock('#hooks/use-file-manager.js', () => {
+  // The provider memoizes its record client; attachment sources are keyed by that identity.
+  const fileManager = {
     recordFiles: {
       readFile: async (path: string) => {
         if (path === `${attachmentDirectory}/${imageHash}.png`) {
@@ -39,8 +40,9 @@ vi.mock('#hooks/use-file-manager.js', () => ({
         throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
       },
     },
-  }),
-}));
+  };
+  return { useOptionalFileManager: () => fileManager };
+});
 vi.mock('#components/code/code-viewer.js', () => ({
   CodeViewer: ({ text }: { readonly text: string }) => <pre>{text}</pre>,
 }));

@@ -96,9 +96,8 @@ jobs:
       - name: Plan artifact prerequisites from expanded tasks
         id: geospec
         env:
-          # Planning only expands the graph. On the hosted runner these graph commands
-          # segfault intermittently as they exit; the same commands without Nx Cloud
-          # never crashed locally. Planning needs neither Nx Cloud nor the task database.
+          # Planning only expands the graph, so it needs neither Nx Cloud nor the task
+          # database.
           NX_NO_CLOUD: 'true'
           NX_DISABLE_DB: 'true'
           PLAN_API: ${{ steps.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push') }}
@@ -290,7 +289,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24' }}
+          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24.20.0' }}
 
       - &download-geospec
         name: Download same-run GeoSpec transport

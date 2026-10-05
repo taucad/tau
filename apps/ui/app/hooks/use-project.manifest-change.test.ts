@@ -44,6 +44,20 @@ const observe = ({
 };
 
 describe('createProjectManifestChangeObserver', () => {
+  it('does not report or reload a read invalidated before it resolves', async () => {
+    const gate = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+    const { observer, reload, report } = observe({
+      current: project('Current'),
+      readManifest: async () => gate.promise,
+    });
+    const pending = observer.check();
+    observer.invalidate();
+    gate.resolve(serializeProjectManifest(project('Obsolete')));
+    await pending;
+    expect(reload).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
+  });
+
   it('does not reload when a local write matches the current project', async () => {
     const current = project('Current');
     const { observer, reload, report } = observe({

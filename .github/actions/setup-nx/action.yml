@@ -3,9 +3,9 @@ description: 'Sets up Node.js, pnpm, dependencies, and Nx SHAs for CI workflows'
 
 inputs:
   node-version:
-    description: 'Node.js version used by this job'
+    description: 'Node.js version used by this job. 24.21 segfaults Nx as it exits, so the default stays on 24.20.0.'
     required: false
-    default: '24'
+    default: '24.20.0'
 
 outputs:
   no-previous-build:

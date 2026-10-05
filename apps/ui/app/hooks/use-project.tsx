@@ -1,5 +1,6 @@
 /* oxlint-disable typescript/no-restricted-types -- Workbench record entry paths are nullable by schema. */
 /* oxlint-disable eslint/no-await-in-loop -- Producer flushes must finish in owner order before project close. */
+import { ObservationService } from '@taucad/fs-client/observation-service';
 import { findEntryGraphics } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import type { ReactNode } from 'react';
 import {
@@ -244,8 +245,9 @@ export const createProjectManifestChangeObserver = ({
   readonly getCurrent: () => ObservedManifestState;
   readonly reload: () => void;
   readonly report: (issue: ProjectManifestParseIssue) => void;
-}): { readonly check: () => Promise<void>; readonly dispose: () => void } => {
+}): { readonly check: () => Promise<void>; readonly invalidate: () => void; readonly dispose: () => void } => {
   let disposed = false;
+  let generation = 0;
   let lastObserved: string | undefined;
 
   const reportIssue = (issue: ProjectManifestParseIssue): void => {
@@ -255,12 +257,16 @@ export const createProjectManifestChangeObserver = ({
   };
 
   return {
+    invalidate: () => {
+      generation++;
+    },
     check: async () => {
+      const attempt = ++generation;
       let bytes: Uint8Array<ArrayBuffer>;
       try {
         bytes = await readManifest();
       } catch (error) {
-        if (!disposed) {
+        if (!disposed && attempt === generation) {
           reportIssue(
             error instanceof FileNotFoundError || isNotFound(error)
               ? { code: 'manifest-missing' }
@@ -269,7 +275,7 @@ export const createProjectManifestChangeObserver = ({
         }
         return;
       }
-      if (disposed) {
+      if (disposed || attempt !== generation) {
         return;
       }
       const read = readProjectManifestBytes(bytes, { id: projectId });
@@ -363,7 +369,20 @@ export function ProjectProvider({
       createParameterSetService({
         rootDirectory: fileSystemRoot,
         client: fileManager.parameterFiles,
-        subscribe: (path, listener) => fileManager.contentService?.subscribe(path, listener) ?? (() => undefined),
+        watchReady: (request, onEvent) => {
+          const content = fileManager.contentService;
+          if (!content) {
+            throw new Error('The parameter filesystem is not ready.');
+          }
+          const watch = content.watchReady(request, onEvent);
+          return {
+            ready: watch.ready,
+            closed: (async () => {
+              await watch.closed;
+            })(),
+            unsubscribe: watch.dispose,
+          };
+        },
         onError: (error) => {
           toast.error(errorMessage(error));
         },
@@ -755,14 +774,23 @@ export function ProjectProvider({
         actorRef.send({ type: 'manifestIssueObserved', issue });
       },
     });
-    const unsubscribe = contentService.subscribe('tau.json', () => {
-      void observer.check();
+    const observation = new ObservationService({
+      resource: 'tau.json',
+      watch: (invalidate, reset) =>
+        contentService.watchReady({ paths: ['tau.json'] }, (event) => {
+          if (event.type === 'reset') {
+            reset();
+          } else {
+            invalidate();
+          }
+        }),
+      invalidate: observer.invalidate,
+      read: async () => observer.check(),
     });
-    // Close the gap between loading the project and attaching this listener.
-    void observer.check();
+    const lease = observation.acquire();
     return () => {
+      lease.release();
       observer.dispose();
-      unsubscribe();
     };
   }, [actorRef, fileManager, projectId, projectIsReady]);
 

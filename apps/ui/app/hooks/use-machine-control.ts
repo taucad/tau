@@ -65,6 +65,8 @@ type HoldLease = { holdId?: string; timer?: ReturnType<typeof setInterval>; rele
 export type MachineControl = Readonly<{
   entry: MachineDirectoryEntry;
   attended: boolean;
+  /** Change the person's presence; what a control that asks inline calls. */
+  setAttended: (attended: boolean) => void;
   /** What the person may do with one control now; the pure check the host repeats. */
   check: (componentId: string, action: string, kind?: 'action' | 'hold') => MachineActionCheck;
   /** Apply one declared action once; resolves true when the machine accepted it. */
@@ -85,7 +87,8 @@ export type MachineControl = Readonly<{
  * as the presence says) and then `applyAction` with a fresh operation id, the capability revision and the run the
  * person saw; `stop` as its own operation; and jog holds renewed every half lease until released.
  *
- * @param input - The client, the machine as observed, the presence and what to call when a control is used.
+ * @param input - The client, the machine as observed, the presence, how to change it and what to call when a control
+ * is used.
  * @returns The controls.
  * @public
  */
@@ -93,11 +96,13 @@ export const useMachineControl = ({
   client,
   entry,
   attended,
+  setAttended,
   onUsed,
 }: {
   readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
   readonly attended: boolean;
+  readonly setAttended: (attended: boolean) => void;
   readonly onUsed?: () => void;
 }): MachineControl => {
   const [pending, setPending] = useState<string>();
@@ -282,5 +287,5 @@ export const useMachineControl = ({
 
   useEffect(() => endHold, [endHold]);
 
-  return { entry, attended, check, apply, pending, error, stop, isStopping, beginHold, endHold, hold };
+  return { entry, attended, setAttended, check, apply, pending, error, stop, isStopping, beginHold, endHold, hold };
 };

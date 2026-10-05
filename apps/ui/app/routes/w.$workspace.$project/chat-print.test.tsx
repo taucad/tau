@@ -2908,10 +2908,32 @@ describe('Print pane with the Bambu provider’s own manifests', () => {
       expect(within(slots).getAllByRole('listitem')).toHaveLength(5);
       expect(screen.getByRole('button', { name: /^Control/u })).toBeInTheDocument();
       expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
-      // Nothing to stop on an idle printer.
+      // Nothing to stop on an idle printer, and nothing above the stages asks whether the person is there.
       expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('switch', { name: 'I am at the machine' })).not.toBeInTheDocument();
     },
   );
+
+  it('asks "I am at the machine" beside the X1C’s motion, and sends Home with it once ticked', async () => {
+    const machine = machineEntry({ manifest: bambuX1cManifest, snapshot: entry().snapshot, testing: true });
+    const fixture = createFixture({ entries: [machine] });
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+
+    await findMachine('Ready');
+    openDisclosure(/^Control/u);
+    const motion = screen.getByRole('group', { name: 'Motion' });
+    const home = within(motion).getByRole('button', { name: /^Home/u });
+    expect(home).toBeDisabled();
+    await user.click(within(motion).getByRole('switch', { name: 'I am at the machine' }));
+    expect(home).toBeEnabled();
+    await user.click(home);
+    await waitFor(() => {
+      expect(fixture.applyAction).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ action: 'motion.home', attended: true }),
+      );
+    });
+  });
 });
 
 describe('Print pane without printers', () => {

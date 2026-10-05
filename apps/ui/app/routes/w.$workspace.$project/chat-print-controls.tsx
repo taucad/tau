@@ -191,7 +191,45 @@ export function RemedyButton({
 }
 
 /**
- * Why a group of controls cannot act now, with the way out, said once above the group.
+ * Whether the pane asks "I am at the machine" once, above everything: only where starting a job needs someone there.
+ * Elsewhere a control that needs someone watching asks beside itself, when it is used.
+ *
+ * @param entry - The machine as observed.
+ * @returns True when the machine's job start is attended.
+ * @public
+ */
+export const asksPresenceAtPane = (entry: MachineDirectoryEntry): boolean => {
+  const { jobs } = entry.descriptor.capabilities;
+  return jobs.type === 'supported' && jobs.safety.attended;
+};
+
+/**
+ * "I am at the machine" beside the controls that need it, on a machine whose pane does not ask above. It sets the
+ * same presence the pane would, so the request carries it the same way.
+ *
+ * @param properties - The control.
+ * @returns The switch.
+ */
+function InlinePresence({ control }: { readonly control: MachineControl }): React.JSX.Element {
+  return (
+    <div className='-my-1.5 flex min-w-0 flex-col'>
+      <PrintSetupRow
+        label='I am at the machine'
+        description={
+          control.attended
+            ? 'Tau asks again after 10 minutes without a control being used.'
+            : 'These controls need someone who can see the machine.'
+        }
+      >
+        <ParametersBoolean aria-label='I am at the machine' value={control.attended} onChange={control.setAttended} />
+      </PrintSetupRow>
+    </div>
+  );
+}
+
+/**
+ * Why a group of controls cannot act now, with the way out, said once above the group. Where the group's action
+ * needs someone watching and the pane does not ask, "I am at the machine" is asked here instead of the refusal.
  *
  * @param properties - The control, the action that speaks for the group, and whether to show its remedy.
  * @returns The line, or nothing while the action is available or undeclared.
@@ -212,15 +250,24 @@ export function Blocked({
   readonly hasRemedy?: boolean;
 }): React.JSX.Element | undefined {
   const check = control.check(componentId, action, kind);
-  if (check.status !== 'unavailable' || check.code === 'MACHINE_ACTION_UNDECLARED') {
-    return undefined;
-  }
+  const asksHere =
+    machineActionOf(control.entry, { componentId, action, kind })?.safety.attended === true &&
+    !asksPresenceAtPane(control.entry);
+  const isReasonShown =
+    check.status === 'unavailable' &&
+    check.code !== 'MACHINE_ACTION_UNDECLARED' &&
+    !(asksHere && check.code === 'MACHINE_ACTION_ATTENDANCE_REQUIRED');
   return (
-    <div className='flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground'>
-      <CircleAlert aria-hidden className='size-3.5 shrink-0 text-warning' />
-      <span className='min-w-0 flex-1'>{check.message}</span>
-      {check.remedy === undefined || !hasRemedy ? null : <RemedyButton control={control} remedy={check.remedy} />}
-    </div>
+    <>
+      {isReasonShown ? (
+        <div className='flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+          <CircleAlert aria-hidden className='size-3.5 shrink-0 text-warning' />
+          <span className='min-w-0 flex-1'>{check.message}</span>
+          {check.remedy === undefined || !hasRemedy ? null : <RemedyButton control={control} remedy={check.remedy} />}
+        </div>
+      ) : null}
+      {asksHere ? <InlinePresence control={control} /> : null}
+    </>
   );
 }
 

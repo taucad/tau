@@ -21,7 +21,12 @@ import { isOpenJob, useMachinesJobs } from '#hooks/use-machines-jobs.js';
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { Activities, ControlStage, isRunOwned } from '#routes/w.$workspace.$project/chat-print-controls.js';
+import {
+  Activities,
+  ControlStage,
+  asksPresenceAtPane,
+  isRunOwned,
+} from '#routes/w.$workspace.$project/chat-print-controls.js';
 import { PressureAdvanceStage } from '#routes/w.$workspace.$project/chat-print-materials.js';
 import {
   HistoryStage,
@@ -221,7 +226,8 @@ function ObservationNotice({ entry }: { readonly entry: MachineDirectoryEntry })
 }
 
 /**
- * The person's statement that they are at the machine, shown only when the machine declares something that needs it.
+ * The person's statement that they are at the machine, asked once above everything only where starting a job needs
+ * it. Other controls that need it ask beside themselves.
  *
  * @param properties - The control and the presence.
  * @returns The switch, or nothing.
@@ -233,11 +239,7 @@ function PresenceRow({
   readonly control: MachineControl;
   readonly presence: Presence;
 }): React.JSX.Element | undefined {
-  const { capabilities } = control.entry.descriptor;
-  const needsPresence =
-    [...capabilities.actions, ...capabilities.holds].some((descriptor) => descriptor.safety.attended) ||
-    (capabilities.jobs.type === 'supported' && capabilities.jobs.safety.attended);
-  if (!needsPresence) {
+  if (!asksPresenceAtPane(control.entry)) {
     return undefined;
   }
   return (
@@ -247,7 +249,7 @@ function PresenceRow({
         description={
           presence.attended
             ? 'Controls that need someone watching are enabled. Tau asks again after 10 minutes without a control being used.'
-            : 'Moving the machine, its spindle and starting a job need someone who can see it.'
+            : 'Moving the machine and starting a job need someone who can see it.'
         }
       >
         <ParametersBoolean aria-label='I am at the machine' value={presence.attended} onChange={presence.setAttended} />
@@ -522,7 +524,13 @@ function MachinePanel({
   readonly header: (stop: React.ReactNode) => React.JSX.Element;
   readonly errors: ReadonlyArray<string | undefined>;
 }): React.JSX.Element {
-  const control = useMachineControl({ client, entry, attended: presence.attended, onUsed: presence.touch });
+  const control = useMachineControl({
+    client,
+    entry,
+    attended: presence.attended,
+    setAttended: presence.setAttended,
+    onUsed: presence.touch,
+  });
   const isFff = fffProcessOf(entry.descriptor.capabilities) !== undefined;
   const prepare = usePrintPrepare({
     client,

@@ -65,7 +65,13 @@ function Harness({
   readonly isAttended: boolean;
   readonly children: (control: MachineControl) => React.ReactNode;
 }): React.JSX.Element {
-  const control = useMachineControl({ client, entry: machine, attended: isAttended });
+  const presence = usePresence();
+  const control = useMachineControl({
+    client,
+    entry: machine,
+    attended: isAttended || presence.attended,
+    setAttended: presence.setAttended,
+  });
   return (
     <PrintStages>
       {children(control)}

@@ -103,7 +103,13 @@ function createCadActor(capabilities: CapabilitiesManifest): ActorRefFrom<typeof
   };
   return {
     getSnapshot: () => ({
-      context: { kernelClient, activeKernelId: 'replicad', capabilities, document: mockDocument },
+      context: {
+        kernelClient,
+        activeKernelId: 'replicad',
+        capabilities,
+        document: mockDocument,
+        latestRenderingOutcome: 'success',
+      },
     }),
   } as unknown as ActorRefFrom<typeof cadMachine>;
 }

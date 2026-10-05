@@ -27,11 +27,26 @@ export const clientEnvironmentNames = [
 /** Names without which the renderer throws on its first API call. */
 export const requiredClientEnvironmentNames = ['TAU_API_URL', 'TAU_WEBSOCKET_URL', 'TAU_FRONTEND_URL'] as const;
 
-const productionClientEnvironment = {
-  TAU_API_URL: 'https://api.tau.new',
-  TAU_WEBSOCKET_URL: 'wss://api.tau.new',
-  TAU_FRONTEND_URL: 'https://tau.new',
-} as const;
+/**
+ * The release channel a packaged build was assembled for.
+ *
+ * A `staging` package (`TAU_DESKTOP_CHANNEL=staging` at packaging time) talks to
+ * taucad.dev and never takes production updates; everything else is `production`.
+ */
+export type DesktopChannel = 'production' | 'staging';
+
+const channelClientEnvironment = {
+  production: {
+    TAU_API_URL: 'https://api.tau.new',
+    TAU_WEBSOCKET_URL: 'wss://api.tau.new',
+    TAU_FRONTEND_URL: 'https://tau.new',
+  },
+  staging: {
+    TAU_API_URL: 'https://api.taucad.dev',
+    TAU_WEBSOCKET_URL: 'wss://api.taucad.dev',
+    TAU_FRONTEND_URL: 'https://taucad.dev',
+  },
+} as const satisfies Record<DesktopChannel, Record<(typeof requiredClientEnvironmentNames)[number], string>>;
 
 /**
  * Names a locked packaged build never takes from its environment.
@@ -70,6 +85,20 @@ export const stripPackagedOverrides = (target: NodeJS.ProcessEnv): void => {
   }
 };
 
+type PackagedOptions = { readonly environmentOverrides?: unknown; readonly channel?: unknown };
+
+/** The packaged manifest's `tauDesktop` block, or `undefined` when it is missing or unreadable. */
+const readPackagedOptions = (appPath: string): PackagedOptions | undefined => {
+  try {
+    const manifest = JSON.parse(readFileSync(join(appPath, 'package.json'), 'utf8')) as {
+      readonly tauDesktop?: PackagedOptions;
+    };
+    return manifest.tauDesktop;
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * Whether a packaged app was assembled to honour environment overrides.
  *
@@ -82,35 +111,42 @@ export const stripPackagedOverrides = (target: NodeJS.ProcessEnv): void => {
  * @param appPath - `app.getAppPath()`, the directory holding the packaged `package.json`.
  * @returns True only when the packaged manifest opts in.
  */
-export const packagedOverridesEnabled = (appPath: string): boolean => {
-  try {
-    const manifest = JSON.parse(readFileSync(join(appPath, 'package.json'), 'utf8')) as {
-      readonly tauDesktop?: { readonly environmentOverrides?: unknown };
-    };
-    return manifest.tauDesktop?.environmentOverrides === true;
-  } catch {
-    return false;
-  }
-};
+export const packagedOverridesEnabled = (appPath: string): boolean =>
+  readPackagedOptions(appPath)?.environmentOverrides === true;
+
+/**
+ * The channel a packaged app was assembled for.
+ *
+ * The packaging scripts write `tauDesktop.channel: 'staging'` into the staged
+ * `package.json` for a staging package; any other value, or a missing or
+ * unreadable manifest, is `production`.
+ *
+ * @param appPath - `app.getAppPath()`, the directory holding the packaged `package.json`.
+ * @returns The packaged channel.
+ */
+export const packagedChannel = (appPath: string): DesktopChannel =>
+  readPackagedOptions(appPath)?.channel === 'staging' ? 'staging' : 'production';
 
 /**
  * Resolve the desktop main-process environment.
  *
  * @param source - Main's inherited environment.
- * @param options - `locked` drops every packaged-locked name first (a packaged build without the override opt-in).
- * @returns A copy with production endpoints wherever an endpoint was absent or blank.
+ * @param options - `locked` drops every packaged-locked name first (a packaged build without the override opt-in);
+ *   `channel` picks the endpoints that fill the gaps (`production` when omitted).
+ * @returns A copy with the channel's endpoints wherever an endpoint was absent or blank.
  */
 export const desktopEnvironment = (
   source: NodeJS.ProcessEnv = process.env,
-  options: { readonly locked?: boolean | undefined } = {},
+  options: { readonly locked?: boolean | undefined; readonly channel?: DesktopChannel | undefined } = {},
 ): NodeJS.ProcessEnv => {
   const environment = { ...source };
   if (options.locked) {
     stripPackagedOverrides(environment);
   }
+  const defaults = channelClientEnvironment[options.channel ?? 'production'];
   for (const name of requiredClientEnvironmentNames) {
     if (!environment[name]?.trim()) {
-      environment[name] = productionClientEnvironment[name];
+      environment[name] = defaults[name];
     }
   }
   return environment;

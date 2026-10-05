@@ -69,9 +69,9 @@ const statePresentation: Readonly<
   error: {
     label: 'Error',
     icon: CircleAlert,
-    rail: 'before:bg-destructive',
-    tone: 'border-destructive/30 bg-destructive/10 text-destructive',
-    iconClassName: 'text-destructive',
+    rail: 'before:bg-feature',
+    tone: 'border-feature/30 bg-feature/10 text-feature',
+    iconClassName: 'text-feature',
   },
   idle: {
     label: 'Idle',
@@ -128,7 +128,7 @@ export const AgentsPanelBody = ({
         {error && agents.length === 0 ? (
           <PanelEmptyState
             icon={CircleAlert}
-            iconClassName='text-destructive'
+            iconClassName='text-feature'
             title='Agents unavailable'
             description={error}
             role='alert'

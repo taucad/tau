@@ -10,7 +10,7 @@ export const selectControlVariants = cva(
       size: { default: 'h-9', sm: 'h-7' },
       part: {
         trigger:
-          'w-fit border-input bg-transparent transition-colors focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 dark:bg-input/30 dark:hover:bg-input/50',
+          'w-fit border-input bg-transparent transition-colors focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-feature data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 dark:bg-input/30 dark:hover:bg-input/50',
         item: 'w-full min-w-0 border-transparent *:[span]:last:col-start-1 *:[span]:last:row-start-1 *:[span]:last:flex *:[span]:last:min-w-0 *:[span]:last:items-center *:[span]:last:gap-2 *:[span]:last:truncate',
       },
     },

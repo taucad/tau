@@ -61,6 +61,8 @@ export const cookieName = {
   /* Chat Tools */
   // Whether GeoSpec testing tools are enabled.
   chatTestingEnabled: 'chat-testing-enabled',
+  // Whether the agent sheet's Settings disclosure is open.
+  chatOpAgentSettings: 'chat-op-agent-settings',
 
   /* Projects */
   // The last selected project view mode.

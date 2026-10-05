@@ -210,12 +210,12 @@ function ChatToolCardHeader({ children, className }: ChatToolCardHeaderProps): R
 // ChatToolCardIcon
 // ============================================================================
 
-type ChatToolIconTone = 'success' | 'warning' | 'destructive';
+type ChatToolIconTone = 'success' | 'warning' | 'error';
 
 const toneClass: Record<ChatToolIconTone, string> = {
   success: 'text-success',
   warning: 'text-warning',
-  destructive: 'text-destructive',
+  error: 'text-feature',
 };
 
 type ChatToolCardIconProps = {

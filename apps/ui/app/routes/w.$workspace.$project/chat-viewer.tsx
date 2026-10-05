@@ -1099,7 +1099,7 @@ const ViewerContent = memo(function ({
         {artifact && overlayFailureMessage ? (
           <RuntimeErrorOverlay
             message={overlayFailureMessage}
-            className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-destructive/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'
+            className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-feature/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'
           />
         ) : null}
       </div>

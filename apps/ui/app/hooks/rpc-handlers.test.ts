@@ -1363,6 +1363,7 @@ describe('rpc-handlers', () => {
             context: {
               enableSurfaces: false,
               enableLines: true,
+              gltfPresentation: { presentedKey: undefined },
               isSectionViewActive: true,
               committedSectionCuts: cuts,
               modelInteractionUnitId: 'file:src/pen.ts',

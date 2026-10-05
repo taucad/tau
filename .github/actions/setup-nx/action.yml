@@ -26,6 +26,13 @@ runs:
       run: corepack enable
       shell: bash
 
+    # Nx's native PTY command runner intermittently segfaults a few seconds into
+    # `nx run-many`, before any task output (SIGSEGV, seen on Node 24.10 and
+    # 24.20). Child-process execution keeps Nx caching and orchestration.
+    - name: Run Nx tasks without the native PTY runner
+      run: echo 'NX_NATIVE_COMMAND_RUNNER=false' >> "$GITHUB_ENV"
+      shell: bash
+
     # Native revision suites, the CLI and every disk host record with `git` and
     # `git lfs` (`resolveGitToolchain`). The GitHub-hosted images ship git-lfs;
     # this states that dependency and fails here, by name, on an image without it,

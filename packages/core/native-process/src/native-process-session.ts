@@ -444,7 +444,7 @@ export class NativeProcessSession<Issue> {
       return;
     }
     await this.verifyResources();
-    // cleanup() may have run during verification; a lease taken now would never be released.
+    // A cleanup() during verification already closed the session; a lease taken now would never be released.
     if (this.closed) {
       throw new Error(`${this.options.sessionName} session is closed.`);
     }

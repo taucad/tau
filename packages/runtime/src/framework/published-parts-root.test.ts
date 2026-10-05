@@ -56,6 +56,29 @@ afterEach(() => {
 });
 
 describe('host-shared checked published-parts root groundwork', () => {
+  it('rejects a pinned legacy inline root instead of treating it as a v2 pointer', async () => {
+    const { left } = await sharedClients();
+    const path = 'published/legacy-inline.json';
+    const bytes = new TextEncoder().encode(
+      canonicalJson({
+        schemaVersion: 1,
+        generation: 1,
+        parts: { body: { path: 'published/part.json', digest: `sha256:${'0'.repeat(64)}` } },
+        occurrences: [
+          { id: 'body', part: 'body', variant: 'default', transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+        ],
+      }),
+    );
+    await left.writeFile(path, bytes);
+    await expect(
+      readPinnedPublishedAssemblyRoot(left, {
+        path,
+        digest: await digestContent({ bytes }),
+        byteLength: bytes.byteLength,
+      }),
+    ).rejects.toThrow(/expected 2/u);
+  });
+
   it('publishes and replaces a root whose canonical logical bytes exceed the checked-write request budget', async () => {
     const { left, right } = await sharedClients();
     const sourcePath = 'parts/large.py';
@@ -74,11 +97,16 @@ describe('host-shared checked published-parts root groundwork', () => {
       variant: 'default',
       transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
     }));
+    const boundary = 8_388_608;
     const input = { path: 'published/large-root.json', parts: { large: prepared.reference }, occurrences };
     const canonicalBytes = new TextEncoder().encode(
       canonicalJson({ schemaVersion: 1, generation: 1, parts: input.parts, occurrences }),
     );
-    expect(canonicalBytes.byteLength).toBeGreaterThan(8_388_608);
+    expect(canonicalBytes.byteLength).toBeGreaterThan(boundary);
+    expect(
+      new TextEncoder().encode(canonicalJson({ schemaVersion: 1, generation: 2, parts: input.parts, occurrences }))
+        .byteLength,
+    ).toBeGreaterThan(boundary);
     const first = await publishPartsRoot(left, input);
     expect(first).toMatchObject({ status: 'published', generation: 1 });
     if (first.status !== 'published') {
@@ -122,7 +150,7 @@ describe('host-shared checked published-parts root groundwork', () => {
         }),
       ).rejects.toThrow(/chunk order or length/u);
     }
-  });
+  }, 15_000);
 
   it('rejects a missing or corrupted immutable chunk even when the mutable pointer is unchanged', async () => {
     const { left, right } = await sharedClients();

@@ -41,13 +41,13 @@ Check invalid dimensions, open/self-intersecting sketches, coincident boolean fa
 
 ## API reference
 
-All 756 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+All 804 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
 - `api-functions.md` — Functions
 - `api-classes.md` — Classes
 - `api-classes-2.md` — Classes (2)
 - `api-types.md` — Types
-- `api-interfaces.md` — Interfaces
 - `api-constants.md` — Constants
+- `api-interfaces.md` — Interfaces
 
 Read ranges, not whole files. Never copy a reference into a source file.

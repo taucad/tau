@@ -33,7 +33,7 @@ MeshShape: export declare class MeshShape extends WrappingObj<ManifoldInstance> 
   translateZ(distance: number): MeshShape;
 
   // MeshShape.rotate (method)
-  rotate(angle: number, position?: Point, direction?: Point): MeshShape;
+  rotate(angle: number, position?: Point, direction?: Direction): MeshShape;
   rotate(vector: Point): MeshShape;
 
   // MeshShape.scale (method)
@@ -100,7 +100,7 @@ Plane: export declare class Plane
   zDir: Vector
 
   // Plane.constructor (constructor)
-  constructor(origin: Point, xDirection?: Point | null, normal?: Point);
+  constructor(origin: Point, xDirection?: Direction | null, normal?: Direction);
 
   // Plane.delete (method)
   delete(): void;
@@ -144,7 +144,7 @@ Plane: export declare class Plane
 ProjectionCamera: export declare class ProjectionCamera extends WrappingObj<gp_Ax2>
 
   // ProjectionCamera.constructor (constructor)
-  constructor(position?: Point, direction?: Point, xAxis?: Point);
+  constructor(position?: Point, direction?: Direction, xAxis?: Direction);
 
   position
 
@@ -161,10 +161,10 @@ ProjectionCamera: export declare class ProjectionCamera extends WrappingObj<gp_A
   setPosition(position: Point): this;
 
   // ProjectionCamera.setXAxis (method)
-  setXAxis(xAxis: Point): this;
+  setXAxis(xAxis: Direction): this;
 
   // ProjectionCamera.setYAxis (method)
-  setYAxis(yAxis: Point): this;
+  setYAxis(yAxis: Direction): this;
 
   // ProjectionCamera.lookAt (method)
   lookAt(shape: {
@@ -191,6 +191,11 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
 
   // Shape.isEqual (method)
   isEqual(other: AnyShape): boolean;
+
+  // Splits the solid parts of this shape with an oriented plane and groups them by side
+  // Remarks: `offset` translates the splitting plane along its normal. Each side is `null` when empty, the resulting shape when it contains one piece, or a `Compound` when it contains multiple disconnected pieces. Positive is the direction of the plane's normal.
+  // Shape.split (method)
+  split(plane?: Plane | PlaneName, offset?: number, tolerance?: number): PlaneSplitResult<Solid | Compound>;
 
   // Asserts that this shape is a 3D shape (Shell, Solid, CompSolid, or Compound) and returns it typed as Shape3D
   // Remarks: Useful for chaining after operations that return a generic shape type.
@@ -220,7 +225,7 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
 
   // Rotates the shape
   // Shape.rotate (method)
-  rotate(angle: number, position?: Point, direction?: Point): this;
+  rotate(angle: number, position?: Point, direction?: Direction): this;
 
   // Mirrors the shape through a plane
   // Shape.mirror (method)
@@ -234,30 +239,19 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
 
   faces
 
+  solids
+
   wires
 
   boundingBox
 
   // Exports the current shape as a set of triangle
   // Shape.mesh (method)
-  mesh({ tolerance, angularTolerance }?: {
-          tolerance?: number | undefined;
-          angularTolerance?: number | undefined;
-      }): ShapeMesh;
+  mesh(options?: MeshOptions): ShapeMesh;
 
   // Exports the current shape as a set of lines
   // Shape.meshEdges (method)
-  meshEdges({ tolerance, angularTolerance }?: {
-          tolerance?: number | undefined;
-          angularTolerance?: number | undefined;
-      }): {
-          lines: number[];
-          edgeGroups: {
-              start: number;
-              count: number;
-              edgeId: number;
-          }[];
-      };
+  meshEdges(options?: MeshOptions): ShapeEdgeMesh;
 
   // Exports the current shape as a STEP file as a Blob
   // Shape.blobSTEP (method)
@@ -266,11 +260,7 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
   // Exports the current shape as a STL file as a Blob
   // Remarks: In order to create a STL file, the shape needs to be meshed. The tolerances correspond to the values used to mesh the shape.
   // Shape.blobSTL (method)
-  blobSTL({ tolerance, angularTolerance, binary, }?: {
-          tolerance?: number | undefined;
-          angularTolerance?: number | undefined;
-          binary?: boolean | undefined;
-      }): Blob;
+  blobSTL(options?: STLExportOptions): Blob;
 
 Shell: export declare class Shell extends _3DShape<TopoDS_Shell>
 
@@ -553,7 +543,7 @@ Transformation: export declare class Transformation extends WrappingObj<gp_Trsf>
   translate(vector: Point): Transformation;
 
   // Transformation.rotate (method)
-  rotate(angle: number, position?: Point, direction?: Point): Transformation;
+  rotate(angle: number, position?: Point, direction?: Direction): Transformation;
 
   // Transformation.mirror (method)
   mirror(inputPlane?: Plane | PlaneName | Point, inputOrigin?: Point): this;
@@ -634,7 +624,7 @@ Vector: export declare class Vector extends WrappingObj<gp_Vec>
   toDir(): gp_Dir;
 
   // Vector.rotate (method)
-  rotate(angle: number, center?: Point, direction?: Point): Vector;
+  rotate(angle: number, center?: Point, direction?: Direction): Vector;
 
 Vertex: export declare class Vertex extends Shape<TopoDS_Vertex>
 

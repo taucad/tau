@@ -1,15 +1,12 @@
 # replicad — Functions
 
-116 top-level symbols. Signatures are verbatim typescript.
+125 top-level symbols. Signatures are verbatim typescript.
 
 // asDir (function)
-export declare function asDir(coords: Point): gp_Dir;
+export declare function asDir(direction: Direction): gp_Dir;
 
 // asPnt (function)
 export declare function asPnt(coords: Point): gp_Pnt;
-
-// cast (function)
-export declare function cast(shape: TopoDS_Shape): AnyShape;
 
 // complexExtrude (function)
 export declare function complexExtrude(wire: Wire, center: Point, normal: Point, profileShape: ExtrusionProfile | undefined, shellMode: true): [Shape3D, Wire, Wire];
@@ -101,12 +98,12 @@ export declare function getSingleFace(f: SingleFace, shape: AnyShape): Face;
 
 // Creates a new shapes from a STEP file (as a Blob or a File)
 // importSTEP (function)
-export declare function importSTEP(STLBlob: Blob): Promise<AnyShape>;
+export declare function importSTEP(STLBlob: Blob): Promise< AnyShape>;
 
 // Creates a new shapes from a STL file (as a Blob or a File)
 // Remarks: This process can be relatively long depending on how much tesselation has been done to your STL. This function tries to clean a bit the triangulation of faces, but can fail in bad ways.
 // importSTL (function)
-export declare function importSTL(STLBlob: Blob): Promise<AnyShape>;
+export declare function importSTL(STLBlob: Blob): Promise< AnyShape>;
 
 // Imports an STL file (as a Blob or a File) and creates a MeshShape
 // Remarks: Unlike `importSTL` which converts through OpenCascade's BRep representation, this function directly creates a MeshShape from the triangle data, which is faster and preserves the original mesh. Supports both binary and ASCII STL formats.
@@ -128,16 +125,19 @@ export declare function isShape3D(shape: AnyShape): shape is Shape3D;
 // isWire (function)
 export declare function isWire(shape: AnyShape): shape is Wire;
 
+// iterTopo (function)
+export declare function iterTopo<Entity extends TopoEntity>(shape: TopoDS_Shape, topo: Entity): IterableIterator<TopologyMap[Entity]>;
+
 // Import a font in the text system
 // Remarks: The font should be in TTF
 // loadFont (function)
-export declare function loadFont(fontPath: string | ArrayBuffer, fontFamily?: string, force?: boolean): Promise<opentype_2.Font>;
+export declare function loadFont(fontPath: string | ArrayBuffer, fontFamily?: string, force?: boolean): Promise<default_2.Font>;
 
 // lookFromPlane (function)
 export declare function lookFromPlane(projectionPlane: ProjectionPlane): ProjectionCamera;
 
-// makeDirection (function)
-export declare function makeDirection(p: Direction): Point;
+// makeDirVector (function)
+export declare function makeDirVector(direction: Direction): Vector;
 
 // makePlane (function)
 export declare function makePlane(plane: Plane): Plane;
@@ -146,7 +146,7 @@ export declare function makePlane(plane: Plane | PlaneName): Plane;
 export declare function makePlane(plane?: PlaneName, origin?: Point | number): Plane;
 
 // makePln (function)
-export declare function makePln(origin: Point, dir: Point): gp_Pln;
+export declare function makePln(origin: Point, dir: Direction): gp_Pln;
 
 // makeProjectedEdges (function)
 export declare function makeProjectedEdges(shape: AnyShape, camera: ProjectionCamera, withHiddenLines?: boolean): {
@@ -187,8 +187,11 @@ export declare function measureVolume(shape: Shape3D): number;
 // mirror (function)
 export declare function mirror(shape: TopoDS_Shape, inputPlane?: Plane | PlaneName | Point, origin?: Point): TopoDS_Shape;
 
+// resolveDirection (function)
+export declare function resolveDirection(direction: Direction): Point;
+
 // rotate (function)
-export declare function rotate(shape: TopoDS_Shape, angle: number, position?: Point, direction?: Point): TopoDS_Shape;
+export declare function rotate(shape: TopoDS_Shape, angle: number, position?: Point, direction?: Direction): TopoDS_Shape;
 
 // scale (function)
 export declare function scale(shape: TopoDS_Shape, center: Point, scale: number): TopoDS_Shape;
@@ -233,11 +236,32 @@ export declare function weldShellsAndFaces(facesOrShells: Array<Face | Shell>, i
 // assembleWire (function)
 (listOfEdges: (Edge | Wire)[]) => Wire
 
+// Creates a predicate for a finder's `when` method that selects elements touching an axis-aligned bounding-box extreme of a shape
+// Remarks: An element is selected when its bounding-box minimum or maximum is within `tolerance` of the corresponding bound of `shape`. This means that a side face touching the top of a shape is considered top-most too. Combine this predicate with an orientation filter when only horizontal or vertical elements should be selected. The shape bounds are calculated once when the predicate is created. Element bounds are calculated whenever the predicate is evaluated.
+// atShapeExtremum (function)
+(shape: AnyShape, axis: CartesianAxis, extremum: "min" | "max", tolerance?: number) => ShapeExtremumFilter
+//   shape: Shape whose bounds define the extremum
+//   axis: Cartesian axis along which to compare bounds
+//   extremum: Whether to compare the minimum or maximum bound
+//   tolerance: Maximum difference between bounds
+
 // axis2d (function)
 (point: Point2D, direction: Point2D) => gp_Ax2d
 
+// Creates a predicate selecting elements touching the shape's minimum Y bound
+// Remarks: "Back" is defined as the negative Y direction.
+// backMost (function)
+(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
+
 // basicFaceExtrusion (function)
 (face: Face, extrusionVec: Vector) => Solid
+
+// Creates a predicate selecting elements touching the shape's minimum Z bound
+// bottomMost (function)
+(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
+
+// cast (function)
+(shape: TopoDS_Shape) => AnyShape
 
 // Combine a set of finder filters (defined with radius) to pass as a filter function
 // combineFinderFilters (function)
@@ -282,6 +306,11 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
     ry?: number;
 }): Drawing;
 
+// Creates a predicate selecting elements touching the shape's maximum Y bound
+// Remarks: "Front" is defined as the positive Y direction.
+// frontMost (function)
+(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
+
 // fuse2D (function)
 (first: Shape2D, second: Shape2D) => Blueprint | Blueprints | CompoundBlueprint | null
 
@@ -295,7 +324,7 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 () => <Type extends Deletable>(value: Type) => Type
 
 // getFont (function)
-(fontFamily?: string) => opentype_2.Font
+(fontFamily?: string) => default_2.Font
 
 // getManifold (function)
 () => ManifoldToplevel
@@ -306,8 +335,9 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 // intersectBlueprints (function)
 (first: Blueprint, second: Blueprint) => null | Blueprint | Blueprints
 
-// iterTopo (function)
-(shape: TopoDS_Shape, topo: TopoEntity) => IterableIterator<TopoDS_Shape>
+// Creates a predicate selecting elements touching the shape's minimum X bound
+// leftMost (function)
+(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
 
 // localGC (function)
 (debug?: boolean) => [<T extends Deletable>(v: T) => T, () => void, Set<Deletable> | undefined]
@@ -316,14 +346,16 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 (wires: Wire[], { ruled, startPoint, endPoint }?: LoftConfig, returnShell?: boolean) => Shape3D
 
 // makeAx1 (function)
-(center: Point, dir: Point) => gp_Ax1
+(center: Point, dir: Direction) => gp_Ax1
 
 // makeAx2 (function)
-(center: Point, dir: Point, xDir?: Point) => gp_Ax2
+(center: Point, dir: Direction, xDir?: Direction) => gp_Ax2
 
 // makeAx3 (function)
-(center: Point, dir: Point, xDir?: Point) => gp_Ax3
+(center: Point, dir: Direction, xDir?: Direction) => gp_Ax3
 
+// Builds a rectangular box of the given lengths
+// Remarks: The box is centred on the origin in X and Y (spanning `[-x/2, +x/2]` and `[-y/2, +y/2]`) and corner-based in Z (spanning `[0, +z]`). Translate by `[0, 0, -z/2]` to centre the box fully, or use {@link makeBox} when you want explicit two-corner control.
 // makeBaseBox (function)
 (xLength: number, yLength: number, zLength: number) => Shape3D
 
@@ -338,22 +370,25 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 (points: Point[], { tolerance, smoothing, degMax, degMin, }?: BSplineApproximationConfig) => Edge
 
 // makeCircle (function)
-(radius: number, center?: Point, normal?: Point) => Edge
+(radius: number, center?: Point, normal?: Direction) => Edge
 
 // makeCompound (function)
 (shapeArray: AnyShape[]) => AnyShape
 
 // Creates a cylinder with the given radius and height
 // makeCylinder (function)
-(radius: number, height: number, location?: Point, direction?: Point) => Solid
+(radius: number, height: number, location?: Point, direction?: Direction) => Solid
+
+// makeDirection (function)
+export declare function resolveDirection(direction: Direction): Point;
 
 // makeEllipse (function)
-(majorRadius: number, minorRadius: number, center?: Point, normal?: Point, xDir?: Point) => Edge
+(majorRadius: number, minorRadius: number, center?: Point, normal?: Direction, xDir?: Direction) => Edge
 
 // makeEllipseArc (function)
-(majorRadius: number, minorRadius: number, startAngle: number, endAngle: number, center?: Point, normal?: Point, xDir?: Point) => Edge
+(majorRadius: number, minorRadius: number, startAngle: number, endAngle: number, center?: Point, normal?: Direction, xDir?: Direction) => Edge
 
-// Creates an ellipsoid with the given lengths of the axes
+// Creates an ellipsoid with the given lengths of the axes, centred on the origin
 // makeEllipsoid (function)
 (aLength: number, bLength: number, cLength: number) => Solid
 
@@ -361,7 +396,7 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 (wire: Wire, holes?: Wire[]) => Face
 
 // makeHelix (function)
-(pitch: number, height: number, radius: number, center?: Point, dir?: Point, lefthand?: boolean) => Wire
+(pitch: number, height: number, radius: number, center?: Point, dir?: Direction, lefthand?: boolean) => Wire
 
 // makeLine (function)
 (v1: Point, v2: Point) => Edge
@@ -376,12 +411,12 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 (face: Face, offset: number, tolerance?: number) => Shape3D
 
 // makePlaneFromFace (function)
-(face: Face, originOnSurface?: Point2D) => Plane
+(face: PlaneFace, originOnSurface?: Point2D) => Plane
 
 // makePolygon (function)
 (points: Point[]) => Face
 
-// Creates a sphere with the given radius
+// Creates a sphere with the given radius, centred on the origin
 // makeSphere (function)
 (radius: number) => Solid
 
@@ -407,7 +442,11 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 (radius: number, sidesCount: number, sagitta?: number) => Blueprint
 
 // revolution (function)
-(face: Face, center?: Point, direction?: Point, angle?: number) => Shape3D
+(face: Face, center?: Point, direction?: Direction, angle?: number) => Shape3D
+
+// Creates a predicate selecting elements touching the shape's maximum X bound
+// rightMost (function)
+(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter
 
 // roundedRectangleBlueprint (function)
 (width: number, height: number, r?: number | {
@@ -438,7 +477,7 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 
 // Creates the `Sketch` of a helix
 // sketchHelix (function)
-(pitch: number, height: number, radius: number, center?: Point, dir?: Point, lefthand?: boolean) => Sketch
+(pitch: number, height: number, radius: number, center?: Point, dir?: Direction, lefthand?: boolean) => Sketch
 
 // Creates the `Sketch` of parametric function in a specified plane
 // Remarks: The sketch will be a spline approximating the function
@@ -467,3 +506,7 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 
 // supportExtrude (function)
 (wire: Wire, center: Point, normal: Point, support: TopoDS_Shape) => Shape3D
+
+// Creates a predicate selecting elements touching the shape's maximum Z bound
+// topMost (function)
+(shape: AnyShape, tolerance?: number) => ShapeExtremumFilter

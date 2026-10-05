@@ -143,6 +143,16 @@ jobs:
             echo "::notice::POSTHOG_CLI_TOKEN or POSTHOG_CLI_ENV_ID is not set on this environment; the build uses the site's variables."
           fi
 
+      # The CLI resolves the site base (`apps/ui`) and then joins the workspace
+      # package (`apps/ui`) onto it for everything under `.netlify/`: framework
+      # functions, the functions and edge-function bundles. Its deploy step reads
+      # them from `apps/ui/.netlify/` without the doubling, so a direct build
+      # shipped no server function and no marketing edge function. Linking the
+      # doubled path back makes both sides use the same directory.
+      - name: Point the Netlify CLI's package path at apps/ui/.netlify
+        working-directory: apps/ui
+        run: mkdir -p apps/ui && ln -sfn ../../.netlify apps/ui/.netlify
+
       # The CLI comes from the workspace lockfile (`scripts` owns it); its build
       # runs `apps/ui/netlify.toml`'s production command with the site's variables.
       - name: Build and deploy with the Netlify CLI

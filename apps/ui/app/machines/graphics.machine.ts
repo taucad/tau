@@ -130,7 +130,13 @@ export type GltfPresentationTelemetry = Readonly<{
   /** Candidate-local resource accounting; GPU/image/BVH fields are estimates, not browser heap measurements. */
   assemblyResources?: Readonly<{
     validatedSourceBytes: number;
+    /** Peak returned source views held during preparation; excludes pre-return reader allocations. */
+    preparedSourceBufferCount: number;
+    preparedSourcePayloadBytes: number;
     residentCompressedBytes: number;
+    /** Unique compressed backing buffers and the union of their live byte-view ranges. */
+    residentCompressedBufferCount: number;
+    residentCompressedPayloadBytes: number;
     geometryCpuBytes: number;
     geometryGpuBytesEstimate: number;
     instanceAttributeCpuBytes: number;
@@ -138,7 +144,13 @@ export type GltfPresentationTelemetry = Readonly<{
     instanceSlotDescriptorsSerializedBytes: number;
     /** Exact unique resident ArrayBuffer sizes; excludes object heaps and unmeasured transients. */
     exactResidentBufferCpuBytes: number;
+    /** Compressed, geometry, parser and instance buffers only; view ranges may cover less than backing capacity. */
+    exactResidentBufferCount: number;
+    exactResidentPayloadCpuBytes: number;
+    /** Peak of the same tracked categories across current and candidate, not live post-commit residency. */
     currentAndCandidateExactBufferCpuBytes: number;
+    currentAndCandidateExactBufferCount: number;
+    currentAndCandidateExactPayloadCpuBytes: number;
     detailGeometryCount: number;
     detailUploadGpuBytesEstimate: number;
     detailDecisionSerializedBytes: number;
@@ -148,6 +160,8 @@ export type GltfPresentationTelemetry = Readonly<{
       selectedFullEvidenceCount: number;
     }>;
     edgeCpuBytes: number;
+    edgeBufferCount: number;
+    edgePayloadBytes: number;
     edgeGpuBytesEstimate: number;
     surfaceBatchCount: number;
     edgeBatchCount: number;
@@ -158,6 +172,9 @@ export type GltfPresentationTelemetry = Readonly<{
     mandatoryEdgeTriangleCount: number;
     unmeasuredInventory: readonly string[];
     textureCpuBytesEstimate: number;
+    /** Only typed pixel views are exact; decoded bitmap storage remains estimated or unknown. */
+    textureTypedBufferCount: number;
+    textureTypedPayloadBytes: number;
     textureGpuBytesEstimate: number;
     texturesWithUnknownSize: number;
     bvhTreeCount: number;

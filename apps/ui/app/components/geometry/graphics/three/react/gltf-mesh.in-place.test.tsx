@@ -278,6 +278,7 @@ async function residentAssembly({
   occurrencePlacement,
   spacing = 2,
   withEdges = false,
+  sharedSourceBacking = false,
 }: {
   changed?: boolean;
   appearance?: boolean;
@@ -293,6 +294,7 @@ async function residentAssembly({
   occurrencePlacement?: number[];
   spacing?: number;
   withEdges?: boolean;
+  sharedSourceBacking?: boolean;
 } = {}): Promise<CadAssemblyDisplay> {
   const definitionBytes = (other: boolean): Uint8Array<ArrayBuffer> => {
     const grid = sourceGrid ? new PlaneGeometry(10, 10, sourceGrid, sourceGrid) : undefined;
@@ -384,6 +386,15 @@ async function residentAssembly({
       return { bytes, digest: contentDigest({ value: `sha256:${await hashing.sha256Bytes(bytes)}` }) };
     }),
   );
+  if (sharedSourceBacking) {
+    const [first, second] = preparedAssets;
+    const gap = 4096;
+    const backing = new Uint8Array(first!.bytes.byteLength + gap + second!.bytes.byteLength);
+    backing.set(first!.bytes);
+    backing.set(second!.bytes, first!.bytes.byteLength + gap);
+    first!.bytes = backing.subarray(0, first!.bytes.byteLength);
+    second!.bytes = backing.subarray(first!.bytes.byteLength + gap);
+  }
   for (const { bytes, digest } of preparedAssets) {
     assets.set(digest, bytes);
     variants.push({
@@ -1086,6 +1097,52 @@ describe('GltfMesh in-place updates', () => {
     }
   });
 
+  it('counts shared source payload ranges once without replacing backing-capacity accounting', async () => {
+    const display = await residentAssembly({ sharedSourceBacking: true });
+    const retainedAsset = display.admitted.publication.parts['retained']!.variants['default']!.glb;
+    const source = await display.admitted.readAsset(retainedAsset.digest);
+    const expectedPayloadBytes = Object.values(display.admitted.publication.parts).reduce(
+      (sum, part) => sum + part.variants['default']!.glb.byteLength,
+      0,
+    );
+    mocks.observePreparation = vi.fn((scene: Object3D) => {
+      const position = findSurface(scene).geometry.getAttribute('position') as BufferAttribute;
+      const alias = new Float32Array(source.buffer, source.byteLength, position.array.length);
+      alias.set(position.array);
+      position.array = alias;
+    });
+    const view = render(
+      <GltfMesh
+        assemblyDisplay={display}
+        geometryHash={display.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    act(() => mocks.frameCallback?.());
+    const resources = measuredResources();
+    expect(resources).toMatchObject({
+      definitionCount: 2,
+      preparedSourceBufferCount: 1,
+      preparedSourcePayloadBytes: expectedPayloadBytes,
+      residentCompressedBufferCount: 1,
+      residentCompressedPayloadBytes: expectedPayloadBytes,
+      residentCompressedBytes: expectedPayloadBytes + 4096,
+    });
+    expect(resources?.exactResidentBufferCount).toBeGreaterThan(0);
+    expect(resources?.exactResidentPayloadCpuBytes).toBeGreaterThan(0);
+    expect(resources?.currentAndCandidateExactBufferCount).toBeGreaterThanOrEqual(resources!.exactResidentBufferCount);
+    expect(resources!.exactResidentPayloadCpuBytes).toBeLessThan(resources!.exactResidentBufferCpuBytes);
+    expect(resources!.exactResidentPayloadCpuBytes).toBeGreaterThan(resources!.residentCompressedPayloadBytes);
+    expect(resources!.currentAndCandidateExactPayloadCpuBytes).toBeGreaterThanOrEqual(
+      resources!.exactResidentPayloadCpuBytes,
+    );
+    view.unmount();
+  });
+
   it('indexes a thousand occurrence identities with bounded full metadata scans and one definition parser', async () => {
     const validate = geometryCore.validateAdmittedAssemblyGlb;
     let entriesVisited = 0;
@@ -1168,6 +1225,8 @@ describe('GltfMesh in-place updates', () => {
     expect(singleSurface.instanceMatrix.array.buffer).not.toBe(thousandSurface.instanceMatrix.array.buffer);
     expect(one?.currentAndCandidateExactBufferCpuBytes).toBeGreaterThan(thousand!.exactResidentBufferCpuBytes);
     expect(one?.currentAndCandidateExactBufferCpuBytes).toBeGreaterThan(one!.exactResidentBufferCpuBytes);
+    expect(one?.currentAndCandidateExactBufferCount).toBeGreaterThan(one!.exactResidentBufferCount);
+    expect(one?.currentAndCandidateExactPayloadCpuBytes).toBeGreaterThan(one!.exactResidentPayloadCpuBytes);
     expect(one?.unmeasuredInventory).toEqual(thousand?.unmeasuredInventory);
     expect(one?.unmeasuredInventory).toHaveLength(6);
     expect(one).toMatchObject({
@@ -3330,6 +3389,9 @@ describe('actual assembly detail producer oracle', () => {
     expect(inventory?.canonicalSurfaceTriangleCount).toBe((20 * canonical.index!.count) / 3);
     expect(inventory?.mandatoryEdgeTriangleCount).toBe(20 * 6);
     expect(inventory?.edgeCpuBytes).toBeGreaterThan(0);
+    expect(inventory?.edgeBufferCount).toBeGreaterThan(0);
+    expect(inventory?.edgePayloadBytes).toBeGreaterThan(0);
+    expect(inventory!.edgePayloadBytes).toBeLessThanOrEqual(inventory!.edgeCpuBytes);
     expect(inventory?.currentAndCandidateExactBufferCpuBytes).toBeGreaterThanOrEqual(
       inventory!.exactResidentBufferCpuBytes,
     );

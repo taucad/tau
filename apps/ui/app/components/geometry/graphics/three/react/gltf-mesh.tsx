@@ -2486,6 +2486,27 @@ function countAssemblyResources(
     const compressedBuffers = new Set<ArrayBufferLike>();
     const geometryBuffers = new Set<ArrayBufferLike>();
     const parserBuffers = new Set<ArrayBufferLike>();
+    const preparedSourceBuffers = new Set<ArrayBufferLike>();
+    const fullPayloadBuffers = new Set<ArrayBufferLike>();
+    const payloadRanges = new Map<ArrayBufferLike, Array<readonly [number, number]>>();
+    const compressedPayloadRanges = new Map<ArrayBufferLike, Array<readonly [number, number]>>();
+    const sourcePayloadRanges = new Map<ArrayBufferLike, Array<readonly [number, number]>>();
+    const edgePayloadRanges = new Map<ArrayBufferLike, Array<readonly [number, number]>>();
+    const texturePayloadRanges = new Map<ArrayBufferLike, Array<readonly [number, number]>>();
+    const capturePayload = (
+      view: ArrayBufferView,
+      rangesByBuffer: Map<ArrayBufferLike, Array<readonly [number, number]>>,
+    ): void => {
+      const ranges = rangesByBuffer.get(view.buffer) ?? [];
+      ranges.push([view.byteOffset, view.byteOffset + view.byteLength]);
+      rangesByBuffer.set(view.buffer, ranges);
+    };
+    if (values === presentations) {
+      for (const bytes of sourceBytes?.values() ?? []) {
+        preparedSourceBuffers.add(bytes.buffer);
+        capturePayload(bytes, sourcePayloadRanges);
+      }
+    }
     const parsedInventories = new Set<ParsedGltfInventory>();
     const parserGeometries = new Set<BufferGeometry>();
     const parserTextures = new Set<Texture>();
@@ -2557,6 +2578,7 @@ function countAssemblyResources(
         ]) {
           const owner = 'data' in attribute ? attribute.data : attribute;
           edgeBuffers.add(owner.array.buffer);
+          capturePayload(owner.array, edgePayloadRanges);
           if (!edgeGpuAttributes.has(owner)) {
             edgeGpuAttributes.add(owner);
             edgeGpuBytesEstimate += owner.array.byteLength;
@@ -2568,6 +2590,7 @@ function countAssemblyResources(
         instanceSlotDescriptorsSerializedBytes += getModelComponentInstanceDescriptorBytes(object);
         for (const attribute of [object.instanceMatrix, ...(object.instanceColor ? [object.instanceColor] : [])]) {
           instanceBuffers.add(attribute.array.buffer);
+          capturePayload(attribute.array, payloadRanges);
           // WebGPU InstanceNode may allocate a distinct upload wrapper per draw object even for
           // the same CPU attribute. Count each draw owner conservatively; backend binding bytes remain unmeasured.
           instanceAttributeGpuBytesEstimate += attribute.array.byteLength;
@@ -2610,12 +2633,15 @@ function countAssemblyResources(
       }
       for (const definition of value.definitions?.values() ?? []) {
         compressedBuffers.add(definition.bytes.buffer);
+        capturePayload(definition.bytes, payloadRanges);
+        capturePayload(definition.bytes, compressedPayloadRanges);
         if (!parsedInventories.has(definition.parsedInventory)) {
           parsedInventories.add(definition.parsedInventory);
           parserJsonSerializedBytes += definition.parsedInventory.jsonSerializedBytes;
           parserObjectCount += definition.parsedInventory.objectCount;
           for (const buffer of definition.parsedInventory.buffers) {
             parserBuffers.add(buffer);
+            fullPayloadBuffers.add(buffer);
           }
           for (const resource of definition.parsedInventory.resources) {
             if (isGltfBufferGeometry(resource)) {
@@ -2655,6 +2681,7 @@ function countAssemblyResources(
       for (const attribute of attributes) {
         const owner = 'data' in attribute ? attribute.data : attribute;
         geometryBuffers.add(owner.array.buffer);
+        capturePayload(owner.array, payloadRanges);
         if (!gpuAttributes.has(owner)) {
           gpuAttributes.add(owner);
           geometryGpuBytesEstimate += owner.array.byteLength;
@@ -2673,6 +2700,7 @@ function countAssemblyResources(
       ]) {
         const owner = 'data' in attribute ? attribute.data : attribute;
         geometryBuffers.add(owner.array.buffer);
+        capturePayload(owner.array, payloadRanges);
       }
     }
     for (const geometry of new Set([...geometries, ...parserGeometries])) {
@@ -2720,6 +2748,7 @@ function countAssemblyResources(
         textureCpuBytesEstimate += pixelBytes;
         if (ArrayBuffer.isView(data)) {
           textureTypedBuffers.add(data.buffer);
+          capturePayload(data, texturePayloadRanges);
           textureTypedViewBytes += pixelBytes;
         }
       }
@@ -2749,13 +2778,32 @@ function countAssemblyResources(
     }
     const sumBytes = (buffers: ReadonlySet<ArrayBufferLike>): number =>
       [...buffers].reduce((sum, buffer) => sum + buffer.byteLength, 0);
+    const sumPayload = (
+      buffers: ReadonlySet<ArrayBufferLike>,
+      rangesByBuffer: ReadonlyMap<ArrayBufferLike, Array<readonly [number, number]>>,
+      fullBuffers?: ReadonlySet<ArrayBufferLike>,
+    ): number => {
+      let payloadBytes = 0;
+      for (const buffer of buffers) {
+        const ranges = rangesByBuffer.get(buffer);
+        if (!ranges || fullBuffers?.has(buffer)) {
+          payloadBytes += buffer.byteLength;
+          continue;
+        }
+        let end = 0;
+        for (const [start, stop] of ranges.toSorted((left, right) => left[0] - right[0])) {
+          payloadBytes += Math.max(0, stop - Math.max(start, end));
+          end = Math.max(end, stop);
+        }
+      }
+      return payloadBytes;
+    };
     const geometryCpuBytes = sumBytes(geometryBuffers);
     const residentCompressedBytes = sumBytes(compressedBuffers);
     const parsedDependencyCpuBytes = sumBytes(parserBuffers);
     const instanceAttributeCpuBytes = sumBytes(instanceBuffers);
-    const residentCpuBytes = sumBytes(
-      new Set([...compressedBuffers, ...geometryBuffers, ...parserBuffers, ...instanceBuffers]),
-    );
+    const residentBuffers = new Set([...compressedBuffers, ...geometryBuffers, ...parserBuffers, ...instanceBuffers]);
+    const residentCpuBytes = sumBytes(residentBuffers);
     if (resourceBudget && values === presentations) {
       const exactCpuBuffers = new Set([
         ...compressedBuffers,
@@ -2797,16 +2845,24 @@ function countAssemblyResources(
     }
     return {
       validatedSourceBytes,
+      preparedSourceBufferCount: preparedSourceBuffers.size,
+      preparedSourcePayloadBytes: sumPayload(preparedSourceBuffers, sourcePayloadRanges),
       residentCompressedBytes,
+      residentCompressedBufferCount: compressedBuffers.size,
+      residentCompressedPayloadBytes: sumPayload(compressedBuffers, compressedPayloadRanges),
       geometryCpuBytes,
       geometryGpuBytesEstimate,
       instanceAttributeCpuBytes,
       instanceAttributeGpuBytesEstimate,
       exactResidentBufferCpuBytes: residentCpuBytes,
+      exactResidentBufferCount: residentBuffers.size,
+      exactResidentPayloadCpuBytes: sumPayload(residentBuffers, payloadRanges, fullPayloadBuffers),
       detailGeometryCount: detailGeometries.size,
       detailUploadGpuBytesEstimate,
       detailDecisionSerializedBytes,
       edgeCpuBytes: sumBytes(edgeBuffers),
+      edgeBufferCount: edgeBuffers.size,
+      edgePayloadBytes: sumPayload(edgeBuffers, edgePayloadRanges),
       edgeGpuBytesEstimate,
       surfaceBatchCount,
       edgeBatchCount,
@@ -2816,6 +2872,8 @@ function countAssemblyResources(
       mandatoryEdgeTriangleCount,
       instanceSlotDescriptorsSerializedBytes,
       textureCpuBytesEstimate,
+      textureTypedBufferCount: textureTypedBuffers.size,
+      textureTypedPayloadBytes: sumPayload(textureTypedBuffers, texturePayloadRanges),
       textureGpuBytesEstimate,
       texturesWithUnknownSize,
       bvhTreeCount: bvhTrees.size,
@@ -2849,6 +2907,8 @@ function countAssemblyResources(
   const overlap = inventory(presentations);
   return {
     ...candidate,
+    preparedSourceBufferCount: overlap.preparedSourceBufferCount,
+    preparedSourcePayloadBytes: overlap.preparedSourcePayloadBytes,
     detailCalibration: bundle.detailCalibration,
     /** Known resource inventories only; these allowances have no defensible numeric bound yet. */
     unmeasuredInventory: [
@@ -2860,6 +2920,8 @@ function countAssemblyResources(
       'measurement/section worker and external emphasis proxy buffers',
     ],
     currentAndCandidateExactBufferCpuBytes: overlap.exactResidentBufferCpuBytes,
+    currentAndCandidateExactBufferCount: overlap.exactResidentBufferCount,
+    currentAndCandidateExactPayloadCpuBytes: overlap.exactResidentPayloadCpuBytes,
     currentAndCandidateBytesEstimate: Math.max(totalBytesEstimate, overlap.totalBytesEstimate),
     definitionCount: bundle.definitions?.size ?? 0,
     residentOccurrenceCount: bundle.residentOccurrences?.size ?? 0,
@@ -3969,9 +4031,25 @@ export function GltfMesh({
         });
         bundle.assemblyResources = {
           ...measured,
+          preparedSourceBufferCount: Math.max(
+            measured.preparedSourceBufferCount,
+            bundle.assemblyResources?.preparedSourceBufferCount ?? 0,
+          ),
+          preparedSourcePayloadBytes: Math.max(
+            measured.preparedSourcePayloadBytes,
+            bundle.assemblyResources?.preparedSourcePayloadBytes ?? 0,
+          ),
           currentAndCandidateExactBufferCpuBytes: Math.max(
             measured.currentAndCandidateExactBufferCpuBytes,
             bundle.assemblyResources?.currentAndCandidateExactBufferCpuBytes ?? 0,
+          ),
+          currentAndCandidateExactBufferCount: Math.max(
+            measured.currentAndCandidateExactBufferCount,
+            bundle.assemblyResources?.currentAndCandidateExactBufferCount ?? 0,
+          ),
+          currentAndCandidateExactPayloadCpuBytes: Math.max(
+            measured.currentAndCandidateExactPayloadCpuBytes,
+            bundle.assemblyResources?.currentAndCandidateExactPayloadCpuBytes ?? 0,
           ),
           currentAndCandidateBytesEstimate: Math.max(
             measured.currentAndCandidateBytesEstimate,

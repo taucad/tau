@@ -7,6 +7,7 @@ import type { RuntimeInitializePayload } from '#transport/runtime-transport.type
 import { webWorkerClient } from '#transport/web-worker-client.js';
 import { resolveRuntimeFileSystem, wrapAsRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { inProcessClient } from '#transport/in-process-client.js';
+import { runtimeInitializeArgsSchema } from '#types/runtime-wire-common.schemas.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
 import type { ComputeGeneration, ComputeStore, ComputeStoreControl } from '#types/runtime-compute.types.js';
@@ -146,6 +147,71 @@ describe('worker transport initialize filesystem bridge retries', () => {
     mocks.channel.close.mockReset();
     mocks.createChannelClient.mockClear();
   });
+
+  it.each(['web', 'node', 'in-process'])(
+    'releases the publication sibling when %s evaluator disposal throws and remints both on retry',
+    async (kind) => {
+      const evaluator = createChannelBackedFileSystem();
+      const publication = createChannelBackedFileSystem();
+      const openEvaluator = evaluator.openConnection.getMockImplementation();
+      const openPublication = publication.openConnection.getMockImplementation();
+      if (!openEvaluator || !openPublication) {
+        throw new Error('Expected actual channel-backed fixture factories.');
+      }
+      const evaluatorDisposed = vi.fn();
+      const publicationDisposed = vi.fn();
+      evaluator.openConnection.mockImplementation(() => {
+        const connection = openEvaluator();
+        return {
+          port: connection.port,
+          dispose: () => {
+            connection.dispose();
+            evaluatorDisposed();
+            throw new Error('Evaluator disposal failed');
+          },
+        };
+      });
+      publication.openConnection.mockImplementation(() => {
+        const connection = openPublication();
+        return {
+          port: connection.port,
+          dispose: () => {
+            connection.dispose();
+            publicationDisposed();
+          },
+        };
+      });
+      const options = { fileSystem: evaluator.fileSystem, publicationFileSystem: publication.fileSystem };
+      const { workerCtor } = createNodeWorkerCtor();
+      const client =
+        kind === 'web'
+          ? webWorkerClient({ ...options, createWorker: createWebWorker })
+          : kind === 'node'
+            ? nodeWorkerClient({ ...options, url: new URL('about:blank'), workerCtor })
+            : inProcessClient({ ...options, runtime: defineRuntime({}) });
+      mocks.channel.call.mockRejectedValueOnce(new Error('Original initialize failure')).mockResolvedValueOnce({});
+      await expect(client.initialize(initializePayload)).rejects.toThrow('Original initialize failure');
+      expect(evaluatorDisposed).toHaveBeenCalledOnce();
+      expect(publicationDisposed).toHaveBeenCalledOnce();
+      await client.initialize(initializePayload);
+      const firstPayload: unknown = mocks.channel.call.mock.calls[0]?.[1];
+      const secondPayload: unknown = mocks.channel.call.mock.calls[1]?.[1];
+      const first = runtimeInitializeArgsSchema.parse(
+        firstPayload && typeof firstPayload === 'object' && 'value' in firstPayload ? firstPayload.value : firstPayload,
+      );
+      const second = runtimeInitializeArgsSchema.parse(
+        secondPayload && typeof secondPayload === 'object' && 'value' in secondPayload
+          ? secondPayload.value
+          : secondPayload,
+      );
+      expect(first.memoryHandle?.publicationFileSystemPort).toBeInstanceOf(MessagePort);
+      expect(second.memoryHandle?.publicationFileSystemPort).not.toBe(first.memoryHandle?.publicationFileSystemPort);
+      expect(second.memoryHandle?.publicationFileSystemPort).not.toBe(second.memoryHandle?.fileSystemPort);
+      await client.close();
+      expect(evaluatorDisposed).toHaveBeenCalledTimes(2);
+      expect(publicationDisposed).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('public worker factories bind modes and mint independent durable authority ports', async () => {
     const store = registeredComputeStore();

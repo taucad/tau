@@ -6,6 +6,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { safeDispose } from '@taucad/utils/dispose';
 
 import type {
   ForkOptions,
@@ -59,6 +60,8 @@ export type ElectronRuntimeForkResolver = (context: Record<string, string>) => {
   readonly compute?: ComputeBinding;
   /** Application-minted rooted filesystem capability for this admitted fork. */
   readonly fileSystemPort?: MessagePortMain;
+  /** Separate host-minted checked publication authority; never evaluator access. */
+  readonly publicationFileSystemPort?: MessagePortMain;
   /**
    * Environment merged over `env`; every key must be in the allowlist.
    * A plain string record, not `NodeJS.ProcessEnv`: a resolver returns the two
@@ -656,6 +659,15 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       if (resolved.fileSystemPort !== undefined && !isMessagePortMain(resolved.fileSystemPort)) {
         throw new TypeError('registerElectronRuntimeMain: resolveFork returned an invalid filesystem port');
       }
+      if (resolved.publicationFileSystemPort !== undefined && !isMessagePortMain(resolved.publicationFileSystemPort)) {
+        throw new TypeError('registerElectronRuntimeMain: resolveFork returned an invalid publication filesystem port');
+      }
+      if (
+        resolved.publicationFileSystemPort !== undefined &&
+        resolved.publicationFileSystemPort === resolved.fileSystemPort
+      ) {
+        throw new TypeError('registerElectronRuntimeMain: evaluator and publication filesystem ports must be distinct');
+      }
       for (const name of Object.keys(resolved.env ?? {})) {
         if (!forkEnvAllowlist.has(name)) {
           throw new Error(`registerElectronRuntimeMain: resolveFork returned disallowed environment key "${name}"`);
@@ -663,7 +675,10 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       }
     } catch (error) {
       if (isMessagePortMain(resolved.fileSystemPort)) {
-        resolved.fileSystemPort.close();
+        safeDispose(() => resolved.fileSystemPort?.close());
+      }
+      if (isMessagePortMain(resolved.publicationFileSystemPort)) {
+        safeDispose(() => resolved.publicationFileSystemPort?.close());
       }
       throw error;
     }
@@ -675,7 +690,8 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     try {
       record = acquireUtility(utilityEntry, env, key);
     } catch (error) {
-      resolved.fileSystemPort?.close();
+      safeDispose(() => resolved.fileSystemPort?.close());
+      safeDispose(() => resolved.publicationFileSystemPort?.close());
       throw error;
     }
     const spawnedUtility = record.utility;
@@ -699,6 +715,7 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       const compute = resolved.compute ?? options.compute;
       let computeStorePortIndex: number | undefined;
       let fileSystemPortIndex: number | undefined;
+      let publicationFileSystemPortIndex: number | undefined;
       if (compute?.mode === 'durable') {
         const authority = _resolveComputeStore(compute.store);
         if (!authority) {
@@ -720,12 +737,16 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       if (resolved.fileSystemPort !== undefined) {
         fileSystemPortIndex = transferred.push(resolved.fileSystemPort) - 1;
       }
+      if (resolved.publicationFileSystemPort !== undefined) {
+        publicationFileSystemPortIndex = transferred.push(resolved.publicationFileSystemPort) - 1;
+      }
       spawnedUtility.postMessage(
         {
           taucadRuntime: true,
           runtimePortIndex,
           ...(computeStorePortIndex === undefined ? {} : { computeStorePortIndex }),
           ...(fileSystemPortIndex === undefined ? {} : { fileSystemPortIndex }),
+          ...(publicationFileSystemPortIndex === undefined ? {} : { publicationFileSystemPortIndex }),
           ...(compute?.mode === 'off' ? { computeBindingMode: 'off' } : {}),
         },
         transferred,
@@ -738,15 +759,12 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       }
       return { hostId, port: ports.port1 };
     } catch (error) {
-      try {
-        ports?.port1.close();
-        ports?.port2.close();
-        computePorts?.port1.close();
-        computePorts?.port2.close();
-        resolved.fileSystemPort?.close();
-      } catch {
-        /* Best-effort */
-      }
+      safeDispose(() => ports?.port1.close());
+      safeDispose(() => ports?.port2.close());
+      safeDispose(() => computePorts?.port1.close());
+      safeDispose(() => computePorts?.port2.close());
+      safeDispose(() => resolved.fileSystemPort?.close());
+      safeDispose(() => resolved.publicationFileSystemPort?.close());
       releaseUtility(hostId);
       throw error;
     }

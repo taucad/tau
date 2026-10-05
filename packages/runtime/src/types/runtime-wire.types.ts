@@ -24,6 +24,7 @@ export type InitializeMemoryHandle = {
   signalBuffer?: SignalBufferHandle;
   geometryPoolBuffer?: GeometryPoolHandle;
   fileSystemPort?: MessagePortLike;
+  publicationFileSystemPort?: MessagePortLike;
   computeStorePort?: MessagePortLike;
   computeBindingMode?: 'off' | 'memory' | 'durable';
   devtoolsTelemetry?: boolean;

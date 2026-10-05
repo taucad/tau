@@ -631,6 +631,11 @@ export function createMockRuntimeClient<
     connect: vi.fn(async () => undefined),
     transcode: vi.fn(async (): Promise<TranscodeResult> => ({ success: false, issues: [] })),
     snapshotSource: vi.fn(async (): Promise<RuntimeSourceSnapshotResult> => ({ success: false, issues: [] })),
+    publishAssembly: vi.fn<RuntimeClient<Runtime>['publishAssembly']>(async () => ({ status: 'invalid', issues: [] })),
+    openAssembly: vi.fn(async () => {
+      throw new TypeError('Mock published assembly admission is not configured.');
+    }),
+    exportPublished: vi.fn<RuntimeClient<Runtime>['exportPublished']>(async () => ({ success: false, issues: [] })),
     open: vi.fn<RuntimeClient<Runtime>['open']>(),
     describe: vi.fn(async (): Promise<Description> => ({ success: false, kernelId: undefined, issues: [] })),
     setOperationTimeout: vi.fn(),

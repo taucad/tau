@@ -295,6 +295,7 @@
     "@taucad/project-core": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/rpc": "workspace:*",
+    "@taucad/spatial": "workspace:*",
     "@taucad/units": "workspace:*",
     "@types/json-schema": "catalog:",
     "cdn-resolve": "catalog:",

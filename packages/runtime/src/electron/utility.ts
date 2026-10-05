@@ -6,6 +6,7 @@
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- public Electron utility subpath */
 
+import type { AssemblyDisplayProjector } from '#types/runtime-assembly.types.js';
 import type { RuntimeFileSystem } from '#filesystem/index.js';
 import { createRuntimeHost } from '#host/create-runtime-host.js';
 import type { RuntimeHostHandle } from '#host/runtime-host.types.js';
@@ -27,6 +28,10 @@ export type { ElectronUtilityHostOptions } from '#electron/electron-utility-tran
 export type ServeElectronRuntimeOptions = {
   /** Rooted static filesystem, omitted when main transfers one in the boot frame. */
   readonly fileSystem?: RuntimeFileSystem;
+  /** Scoped host publication authority, never installed as evaluator filesystem. */
+  readonly publicationFileSystem?: RuntimeFileSystem;
+  /** Trusted utility-local display admission adapter. */
+  readonly admitAssemblyDisplay?: AssemblyDisplayProjector;
   /** Install a process-exit disposer. Defaults to true. */
   readonly installProcessTeardown?: boolean;
   /** Executable runtime definition owned by this utility host. */
@@ -52,10 +57,11 @@ export type ServeElectronRuntimeOptions = {
  * ```
  */
 export const serveElectronRuntime = (options: ServeElectronRuntimeOptions): RuntimeHostHandle => {
-  const worker = createRuntimeWorker({ runtime: options.runtime });
+  const worker = createRuntimeWorker({ runtime: options.runtime, admitAssemblyDisplay: options.admitAssemblyDisplay });
   const host = createRuntimeHost({
     transport: electronUtilityHost({
       ...(options.fileSystem === undefined ? {} : { fileSystem: options.fileSystem }),
+      ...(options.publicationFileSystem === undefined ? {} : { publicationFileSystem: options.publicationFileSystem }),
       worker,
     } satisfies ElectronUtilityHostOptions),
   });

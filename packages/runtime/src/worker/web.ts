@@ -38,6 +38,7 @@ import { webWorkerHost } from '#transport/web-worker-host.js';
 import { createRuntimeWorker } from '#worker/index.js';
 import type { TransportHostReady } from '#transport/runtime-transport.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
+import type { AssemblyDisplayProjector } from '#types/runtime-assembly.types.js';
 
 /**
  * Options for serving a runtime from an app-owned browser module worker.
@@ -46,6 +47,8 @@ import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
  */
 export type ServeWebWorkerRuntimeOptions = {
   readonly runtime: AnyRuntimeDefinition;
+  /** Host-local display gate, required when publishing assemblies. */
+  readonly admitAssemblyDisplay?: AssemblyDisplayProjector;
 };
 
 /**
@@ -60,6 +63,6 @@ export type ServeWebWorkerRuntimeOptions = {
  * @public
  */
 export async function serveWebWorkerRuntime(options: ServeWebWorkerRuntimeOptions): Promise<TransportHostReady> {
-  const worker = createRuntimeWorker({ runtime: options.runtime });
+  const worker = createRuntimeWorker({ runtime: options.runtime, admitAssemblyDisplay: options.admitAssemblyDisplay });
   return webWorkerHost({ worker }).open();
 }

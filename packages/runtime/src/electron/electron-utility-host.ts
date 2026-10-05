@@ -1,3 +1,6 @@
+import { safeDispose } from '@taucad/utils/dispose';
+import { createFileSystemBridgePort } from '@taucad/fs-bridge';
+import { buildFileSystemBridge } from '#transport/_internal/file-system-bridge.js';
 /**
  * Electron utility-process transport — utility host factory (Topology C).
  *
@@ -52,10 +55,13 @@ export const electronUtilityHost = (
 
   let openPromise: Promise<TransportHostReady> | undefined;
   let dispatcherHandle: ChannelServerHandle<RuntimeDocumentProtocol> | undefined;
+  let publicationBridge: ReturnType<typeof buildFileSystemBridge>;
   let transferredFileSystem: WorkerFileSystemProxy | undefined;
+  let transferredPublicationFileSystem: WorkerFileSystemProxy | undefined;
   let receivedPortHandles: Array<{ close(): void }> = [];
   let fileSystemDisposed = false;
   let isClosed = false;
+  const isFileSystemClosed = (): boolean => isClosed || fileSystemDisposed;
   let rejectOpen: ((reason?: unknown) => void) | undefined;
 
   const disposeFileSystem = (): void => {
@@ -63,13 +69,18 @@ export const electronUtilityHost = (
       return;
     }
     fileSystemDisposed = true;
-    transferredFileSystem?.dispose();
+    safeDispose(() => publicationBridge?.dispose());
+    publicationBridge = undefined;
+    safeDispose(() => transferredFileSystem?.dispose());
+    safeDispose(() => transferredPublicationFileSystem?.dispose());
     for (const portHandle of receivedPortHandles) {
-      portHandle.close();
+      safeDispose(portHandle.close);
     }
     receivedPortHandles = [];
     if (utilityFsBase && 'dispose' in utilityFsBase && typeof utilityFsBase.dispose === 'function') {
-      utilityFsBase.dispose();
+      safeDispose(() => {
+        utilityFsBase.dispose();
+      });
     }
   };
 
@@ -129,6 +140,7 @@ export const electronUtilityHost = (
             readonly computeBindingMode?: 'off' | 'memory' | 'durable';
             readonly computeStorePortIndex?: number;
             readonly fileSystemPortIndex?: number;
+            readonly publicationFileSystemPortIndex?: number;
             readonly runtimePortIndex?: number;
           };
         }) => {
@@ -139,12 +151,18 @@ export const electronUtilityHost = (
           }
           const runtimePortIndex = event.data?.runtimePortIndex ?? 0;
           const fileSystemPortIndex = event.data?.fileSystemPortIndex;
+          const publicationFileSystemPortIndex = event.data?.publicationFileSystemPortIndex;
           const computeStorePortIndex =
             event.data?.computeStorePortIndex ??
-            (fileSystemPortIndex === undefined && event.ports.length > 1 ? 1 : undefined);
-          const indices = [runtimePortIndex, computeStorePortIndex, fileSystemPortIndex].filter(
-            (index): index is number => index !== undefined,
-          );
+            (fileSystemPortIndex === undefined && publicationFileSystemPortIndex === undefined && event.ports.length > 1
+              ? 1
+              : undefined);
+          const indices = [
+            runtimePortIndex,
+            computeStorePortIndex,
+            fileSystemPortIndex,
+            publicationFileSystemPortIndex,
+          ].filter((index): index is number => index !== undefined);
           debugLog('utility:host', 'parent-port-message-received', {
             portCount: event.ports.length,
           });
@@ -160,6 +178,16 @@ export const electronUtilityHost = (
           const utilityPort = event.ports[runtimePortIndex];
           const computeStorePort = computeStorePortIndex === undefined ? undefined : event.ports[computeStorePortIndex];
           const fileSystemPort = fileSystemPortIndex === undefined ? undefined : event.ports[fileSystemPortIndex];
+          const publicationFileSystemPort =
+            publicationFileSystemPortIndex === undefined ? undefined : event.ports[publicationFileSystemPortIndex];
+          if (hostOptions.publicationFileSystem && publicationFileSystemPort) {
+            closeReceivedPorts(event.ports);
+            disposeFileSystem();
+            reject(
+              new Error('electronUtilityHost: static and transferred publication filesystems are mutually exclusive'),
+            );
+            return;
+          }
           if (!utilityPort || (!utilityFsBase && !fileSystemPort) || (utilityFsBase && fileSystemPort)) {
             closeReceivedPorts(event.ports);
             disposeFileSystem();
@@ -181,9 +209,16 @@ export const electronUtilityHost = (
             computeStorePort === undefined
               ? undefined
               : wrapMessagePortMain(computeStorePort, { label: 'utility:compute' });
-          receivedPortHandles = [wireport, wrappedFileSystemPort, wrappedComputeStorePort].filter(
-            (handle): handle is NonNullable<typeof handle> => handle !== undefined,
-          );
+          const wrappedPublicationFileSystemPort =
+            publicationFileSystemPort === undefined
+              ? undefined
+              : wrapMessagePortMain<unknown>(publicationFileSystemPort, { label: 'utility:publication-filesystem' });
+          receivedPortHandles = [
+            wireport,
+            wrappedFileSystemPort,
+            wrappedComputeStorePort,
+            wrappedPublicationFileSystemPort,
+          ].filter((handle): handle is NonNullable<typeof handle> => handle !== undefined);
           // async-iife: bootstrap -- Electron event callbacks cannot return initialization settlement.
           void (async (): Promise<void> => {
             try {
@@ -201,10 +236,43 @@ export const electronUtilityHost = (
                 }
                 transferredFileSystem = proxy;
               }
+              if (isFileSystemClosed()) {
+                throw new Error('electronUtilityHost: closed before publication binding');
+              }
+              if (wrappedPublicationFileSystemPort) {
+                const proxy = await createWorkerFileSystemProxy({
+                  port: wrappedPublicationFileSystemPort,
+                  dispose: () => {
+                    wrappedPublicationFileSystemPort.close();
+                  },
+                });
+                if (isFileSystemClosed()) {
+                  safeDispose(() => {
+                    proxy.dispose();
+                  });
+                  throw new Error('electronUtilityHost: closed during publication filesystem handshake');
+                }
+                if (proxy.capabilities.writable) {
+                  transferredPublicationFileSystem = proxy;
+                  const bridge = createFileSystemBridgePort(proxy);
+                  publicationBridge = { ...bridge, kind: 'inline' };
+                } else {
+                  safeDispose(() => {
+                    proxy.dispose();
+                  });
+                }
+              } else {
+                publicationBridge = buildFileSystemBridge(hostOptions.publicationFileSystem);
+              }
+              if (isFileSystemClosed()) {
+                safeDispose(() => publicationBridge?.dispose());
+                throw new Error('electronUtilityHost: closed during publication binding');
+              }
               const { worker } = hostOptions;
               debugLog('utility:host', 'kernel-runtime-worker-instantiated');
               const dispatcher = createDocumentWorkerDispatcher(worker, wireport, {
                 inlineFileSystem: transferredFileSystem ?? utilityFsBase!,
+                publicationFileSystem: { port: publicationBridge?.port },
                 computeBindingMode: event.data?.computeBindingMode === 'off' ? 'off' : 'memory',
                 ...(wrappedComputeStorePort ? { computeStorePort: wrappedComputeStorePort } : {}),
                 encodeBinary: encodeBinaryAsOwnedCopy,

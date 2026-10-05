@@ -15,6 +15,7 @@ export type BinaryEncoder = (key: string, bytes: Uint8Array<ArrayBuffer>) => Enc
 /** Host bindings required by the document protocol dispatcher. @internal */
 export type DocumentWorkerDispatcherOptions = {
   readonly inlineFileSystem?: RuntimeFileSystemBase;
+  readonly publicationFileSystem?: { readonly port?: MessagePortLike };
   readonly computeStorePort?: MessagePortLike | Port<unknown>;
   readonly computeBindingMode?: 'off' | 'memory';
   readonly encodeBinary?: BinaryEncoder;

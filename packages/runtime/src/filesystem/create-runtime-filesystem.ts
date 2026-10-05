@@ -38,6 +38,17 @@ export function createRuntimeFileSystem(base: RuntimeFileSystemBase): KernelFile
 
   const writeFile = async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> =>
     base.writeFile(assertRootedPath(path), data);
+  const writeFileChecked: KernelFileSystem['writeFileChecked'] | undefined = base.writeFileChecked
+    ? async (input) =>
+        base.writeFileChecked!({
+          ...input,
+          path: assertRootedPath(input.path),
+          preconditions: input.preconditions.map((precondition) => ({
+            ...precondition,
+            path: assertRootedPath(precondition.path),
+          })),
+        })
+    : undefined;
   const readdir = async (path: string): Promise<string[]> => base.readdir(assertRootedPath(path));
   const stat = async (path: string): Promise<FileStat> => base.stat(assertRootedPath(path));
   const mkdir = async (path: string, options?: { recursive?: boolean }): Promise<void> =>
@@ -102,6 +113,7 @@ export function createRuntimeFileSystem(base: RuntimeFileSystemBase): KernelFile
     dispose: base.dispose.bind(base),
     readFile,
     writeFile,
+    ...(writeFileChecked ? { writeFileChecked } : {}),
     readdir,
     stat,
     lstat,

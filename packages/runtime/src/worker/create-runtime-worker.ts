@@ -1,5 +1,6 @@
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
+import type { AssemblyDisplayProjector } from '#types/runtime-assembly.types.js';
 
 /**
  * Options for constructing a runtime worker inside an app-owned worker entry.
@@ -8,6 +9,8 @@ import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
  */
 export type CreateRuntimeWorkerOptions = {
   readonly runtime: AnyRuntimeDefinition;
+  /** Host-local adapter eligibility gate. Public assembly publication is unavailable without it. */
+  readonly admitAssemblyDisplay?: AssemblyDisplayProjector;
 };
 
 /**
@@ -20,5 +23,6 @@ export type CreateRuntimeWorkerOptions = {
 export function createRuntimeWorker(options: CreateRuntimeWorkerOptions): KernelRuntimeWorker {
   return new KernelRuntimeWorker({
     runtime: options.runtime,
+    admitAssemblyDisplay: options.admitAssemblyDisplay,
   });
 }

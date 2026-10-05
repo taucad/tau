@@ -3,6 +3,12 @@ import type { TelemetryEntry } from '#types/runtime-wire.types.js';
 
 type SpanAttributes = Record<string, string | number | boolean>;
 
+type SpanFrame = {
+  id: string;
+  parent: SpanFrame | undefined;
+  ended: boolean;
+};
+
 /**
  * Lightweight span tracker for the runtime worker.
  *
@@ -17,7 +23,7 @@ type SpanAttributes = Record<string, string | number | boolean>;
 export class RuntimeTracer implements RuntimeSpanTracer {
   private nextId = 0;
   private epoch = 0;
-  private activeSpanId: string | undefined;
+  private activeSpan: SpanFrame | undefined;
   private entrySink: ((entry: TelemetryEntry) => void) | undefined;
   private devtoolsTimelineEnabled = false;
 
@@ -40,18 +46,23 @@ export class RuntimeTracer implements RuntimeSpanTracer {
    */
   public startSpan(name: string, attributes?: SpanAttributes): SpanHandle {
     const id = String(this.nextId++);
-    const parentId = this.activeSpanId;
+    const parentId = this.activeSpan?.id;
+    const frame: SpanFrame = { id, parent: this.activeSpan, ended: false };
     const spanEpoch = this.epoch;
     const startTime = performance.now();
-    let ended = false;
-    this.activeSpanId = id;
+    this.activeSpan = frame;
 
     return {
       end: (endAttributes?: SpanAttributes) => {
-        if (ended || spanEpoch !== this.epoch) {
+        if (frame.ended || spanEpoch !== this.epoch) {
           return;
         }
-        ended = true;
+        frame.ended = true;
+        // Overlapping scopes can finish out of order. Keep a live descendant,
+        // but never restore a completed ancestor, including during sink callbacks.
+        while (this.activeSpan?.ended) {
+          this.activeSpan = this.activeSpan.parent;
+        }
 
         const mergedAttributes = {
           ...attributes,
@@ -99,8 +110,6 @@ export class RuntimeTracer implements RuntimeSpanTracer {
             // DevTools mirroring is optional and must not change runtime outcomes.
           }
         }
-
-        this.activeSpanId = parentId;
       },
     };
   }
@@ -108,6 +117,6 @@ export class RuntimeTracer implements RuntimeSpanTracer {
   /** Reset span ancestry without mutating the realm-wide Performance Timeline. */
   public reset(): void {
     this.epoch++;
-    this.activeSpanId = undefined;
+    this.activeSpan = undefined;
   }
 }

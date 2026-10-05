@@ -47,6 +47,9 @@ const allowedMembers: ReadonlySet<string> = new Set([
   'connect',
   'open',
   'describe',
+  'publishAssembly',
+  'openAssembly',
+  'exportPublished',
   'setOperationTimeout',
   'setTranscodeTimeout',
   'transcode',
@@ -172,7 +175,11 @@ failures.push(...auditRuntimeClient());
 
 if (process.argv.includes('--self-test')) {
   const source = readFileSync(runtimeClientPath, 'utf8');
-  const memberMarker = '  readonly lifecycleState: RuntimeLifecycleState;\n';
+  const memberMarker = '  lifecycleState: RuntimeLifecycleState;\n';
+  if (source.split(memberMarker).length !== 2) {
+    console.error('FAIL: RuntimeClient lifecycleState mutation marker must occur exactly once.');
+    process.exit(1);
+  }
   const forbidden = source.replace(memberMarker, `  readonly openFile: string;\n${memberMarker}`);
   const unexpected = source.replace(memberMarker, `  readonly surpriseMember: string;\n${memberMarker}`);
   const missing = source.replace(memberMarker, '');
@@ -210,6 +217,9 @@ const allowedBarrelExports: ReadonlySet<string> = new Set([
   'FilesystemRuntimeSource',
   'InlineRuntimeSource',
   'RuntimeDocument',
+  'PublishedAssemblyDocument',
+  'selectPublishedExportRoute',
+  'PublishedExportRoute',
   'OpenInput',
   'DocumentViewRequest',
   'DocumentExportRequest',

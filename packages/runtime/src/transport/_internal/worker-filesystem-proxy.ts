@@ -49,6 +49,7 @@ export const createWorkerFileSystemProxy = async (
     dispose: bridge.dispose,
     readFile,
     writeFile: bridge.writeFile.bind(bridge),
+    writeFileChecked: bridge.writeFileChecked.bind(bridge),
     readdir: bridge.readdir.bind(bridge),
     stat: bridge.stat.bind(bridge),
     mkdir: bridge.mkdir.bind(bridge),

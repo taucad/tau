@@ -4,8 +4,20 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import { isJsonSchema, isWireJson } from '#types/runtime-metadata-validation.js';
 import type { ParameterManifest } from '@taucad/parameters';
 import { isParameterManifestShape } from '@taucad/parameters';
-import { cadLengthUnits } from '@taucad/types/constants';
+import { cadLengthUnits, fileExtensions } from '@taucad/types/constants';
 import { runtimeContentSchema } from '#types/runtime-content.types.js';
+import {
+  preparedPublishedPartSchema,
+  publishedPartRecordSchema,
+  publishedPartReferenceSchema,
+  publishedPartAssetSchema,
+  publishedPartsRootOutcomeSchema,
+  publishedPartsRootRequestSchema,
+  publishedAuthoredRootReceiptSchema,
+  publishedAssemblyRootSnapshotSchema,
+  publishedAssemblyAdmissionSchema,
+  publishedAssemblyComponentPlacementSchema,
+} from '#types/runtime-assembly.schemas.js';
 import { assertRootedPath } from '@taucad/utils/path';
 import { validateArtifactPaths } from '#types/export-artifact-validation.js';
 import {
@@ -39,16 +51,14 @@ const intent = z.number().int().min(0);
 const values = z.record(z.string(), z.unknown());
 const issue = runtimeIssueSchema;
 const issues = z.array(issue).readonly();
-const rootedFile = z
-  .string()
-  .min(1)
-  .superRefine((value, context) => {
-    try {
-      assertRootedPath(value);
-    } catch {
-      context.addIssue({ code: 'custom', message: 'Expected a rooted file path.' });
-    }
-  });
+const rootedPath = z.string().superRefine((value, context) => {
+  try {
+    assertRootedPath(value);
+  } catch {
+    context.addIssue({ code: 'custom', message: 'Expected a rooted file path.' });
+  }
+});
+const rootedFile = rootedPath.min(1);
 const file = z.object({ path: z.string(), filename: id });
 const stage = z.record(rootedFile, z.instanceof(Uint8Array));
 const provenance = { sourceRevision: runtimeSourceRevisionSchema.optional() };
@@ -180,6 +190,33 @@ const exportResult = discriminatedWireUnion('success', [
     .strip(),
   z.object({ success: z.literal(false), issues, ...provenance }).strip(),
 ]);
+const publishedExportArgs = z.union([
+  z
+    .object({
+      publishedPart: z.object({ reference: publishedPartReferenceSchema, variant: id.optional() }).strict(),
+      format: z.enum(fileExtensions),
+      exportOptions: values.optional(),
+      content: runtimeContentSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      publishedAssembly: z
+        .object({
+          root: publishedPartAssetSchema,
+          placements: z.array(publishedAssemblyComponentPlacementSchema).readonly().optional(),
+        })
+        .strict(),
+      format: z.enum(fileExtensions),
+      exportOptions: values.optional(),
+      content: runtimeContentSchema.optional(),
+    })
+    .strict(),
+]);
+const publishedExportResult = discriminatedWireUnion('success', [
+  z.object({ success: z.literal(true), exportId: id, files: exportFiles, issues, ...provenance }).strip(),
+  z.object({ success: z.literal(false), issues, ...provenance }).strip(),
+]);
 const describeArgs = z
   .object({
     stage: stage.optional(),
@@ -296,6 +333,29 @@ export const runtimeDocumentProtocolSchemas = {
         })
         .strip(),
       result: exportResult,
+    },
+    exportPublished: { args: publishedExportArgs, result: publishedExportResult },
+    preparePublishedPart: {
+      args: z.object({ sourcePath: rootedFile, directory: rootedPath }).strict(),
+      result: preparedPublishedPartSchema,
+    },
+    admitPublishedPart: { args: publishedPartReferenceSchema, result: publishedPartRecordSchema },
+    readPublishedPartAsset: {
+      args: z.object({ reference: publishedPartReferenceSchema, digest: runtimeContentDigestSchema }).strict(),
+      result: z.instanceof(Uint8Array),
+    },
+    publishPartsRoot: { args: publishedPartsRootRequestSchema, result: publishedPartsRootOutcomeSchema },
+    publishAuthoredAssemblyRoot: {
+      args: z.object({ authoredPath: rootedFile, publicationPath: rootedFile, directory: rootedPath }).strict(),
+      result: publishedAuthoredRootReceiptSchema,
+    },
+    readPublishedAssemblyRoot: {
+      args: z.object({ publicationPath: rootedFile }).strict(),
+      result: publishedAssemblyRootSnapshotSchema,
+    },
+    openPublishedAssembly: {
+      args: z.object({ root: publishedPartAssetSchema }).strict(),
+      result: publishedAssemblyAdmissionSchema,
     },
     snapshotSource: { args: snapshotArgs, result: snapshotResult },
     transcode: { args: transcodeArgs, result: transcodeResult },

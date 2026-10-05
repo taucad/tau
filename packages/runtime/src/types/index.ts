@@ -90,6 +90,26 @@ export type {
   SourceRevision,
   TransportCapabilities,
 } from '#types/runtime.types.js';
+export type {
+  ExportOutcome,
+  PublishedExportInput,
+  PublishedPartAsset,
+  PublishedAssemblyComponentPlacement,
+  PublishedPartExact,
+  PublishedPartVariant,
+  PublishedPartRecord,
+  PublishedPartReference,
+  AuthoredAssemblySource,
+  AuthoredPartRecipe,
+  AuthoredPartOccurrence,
+  AuthoredAssembly,
+  PublishedPartOccurrence,
+  AssemblyDisplayProjector,
+  PublishedAssembly,
+  PublishedAssemblyRootSnapshot,
+  AdmittedAssembly,
+  PublishAssemblyOutcome,
+} from '#types/runtime-assembly.types.js';
 export { asKnownArtifact } from '#types/runtime-artifact.js';
 export type { KnownArtifact } from '#types/runtime-artifact.js';
 export type * from '#types/runtime-tracer.types.js';
@@ -249,3 +269,9 @@ export type {
   ResidentCacheStats,
   ResidentExportEntry,
 } from '#types/runtime-compute.types.js';
+
+export type { PublishedAssemblyDocument } from '#client/runtime-document.types.js';
+
+export { publishedPartRecordSchema } from '#types/runtime-assembly.schemas.js';
+
+export type { PublishedExportRoute } from '#client/published-export-routes.js';

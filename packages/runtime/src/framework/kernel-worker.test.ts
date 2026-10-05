@@ -38,6 +38,7 @@ import {
 } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
 import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
+import type { KernelMiddlewareV2 } from '#types/runtime-middleware-v2.types.js';
 import { createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { createKernelParameterDeclaration } from '#kernels/kernel-module-helpers.js';
 import { abortReason } from '#types/runtime-wire.types.js';
@@ -670,8 +671,10 @@ describe('KernelWorker lifecycle', () => {
             expect(sidecar?.role).toBe('middleware-dependency');
             expect(sidecar?.content).toEqual(contents[sidecarPath]);
             expect(sidecar?.sha256).toMatch(/^[0-9a-f]{64}$/u);
+            expect(result.sourceRevision?.files[sidecarPath]).toBe(`sha256:${sidecar?.sha256}`);
           } else {
             expect(sidecar).toBeUndefined();
+            expect(result.sourceRevision?.files[sidecarPath]).toBe('missing');
           }
           expect(filesystem.mocks.exists).toHaveBeenCalledWith(sidecarPath);
           expect(worker.createGeometryCalls).toBe(0);
@@ -3070,6 +3073,121 @@ public static class Params
 });
 
 describe('document cancellation', () => {
+  it('should discard an aborted projection memo and reuse its live successor on the same evaluation', async () => {
+    const entered = Promise.withResolvers<AbortSignal>();
+    const release = Promise.withResolvers<void>();
+    const wrapRender = vi.fn<NonNullable<KernelMiddlewareV2['wrapRender']>>(async (input, handler, runtime) => {
+      if (wrapRender.mock.calls.length === 1) {
+        entered.resolve(runtime.signal);
+        await release.promise;
+      }
+      runtime.signal.throwIfAborted();
+      return handler(input);
+    });
+    const middleware = defineMiddleware({ id: 'held-projection', name: 'Held projection', wrapRender });
+    const worker = createConfiguredWorker({ middleware: [middleware] });
+    type Rendered = Parameters<NonNullable<typeof worker.onRendered>>[0];
+    const delivered: Rendered[] = [];
+    const successor = Promise.withResolvers<Rendered>();
+    const reused = Promise.withResolvers<Rendered>();
+    worker.onRendered = (event) => {
+      delivered.push(event);
+      if (event.subscriptionId === 'successor-view') {
+        successor.resolve(event);
+      } else if (event.subscriptionId === 'reused-view') {
+        reused.resolve(event);
+      }
+    };
+    try {
+      const evaluation = await openDocument(worker);
+      expect(evaluation.success).toBe(true);
+      worker.handleOpenView({
+        documentId: 'test-document',
+        subscriptionId: 'closed-view',
+        requestId: 'closed-request',
+        view: 'model',
+        options: {},
+        content: {},
+      });
+      const signal = await entered.promise;
+      expect(signal.aborted).toBe(false);
+      worker.handleCloseView({ subscriptionId: 'closed-view' });
+      expect(signal.aborted).toBe(true);
+      worker.handleOpenView({
+        documentId: 'test-document',
+        subscriptionId: 'successor-view',
+        requestId: 'successor-request',
+        view: 'model',
+        options: {},
+        content: {},
+      });
+      release.resolve();
+      const current = await successor.promise;
+      expect(current).toMatchObject({ success: true, evaluationId: evaluation.id, requestId: 'successor-request' });
+      expect(wrapRender).toHaveBeenCalledTimes(2);
+      expect(worker.createGeometryCalls).toBe(1);
+
+      worker.handleOpenView({
+        documentId: 'test-document',
+        subscriptionId: 'reused-view',
+        requestId: 'reused-request',
+        view: 'model',
+        options: {},
+        content: {},
+      });
+      const cached = await reused.promise;
+      expect(cached).toMatchObject({ success: true, evaluationId: evaluation.id, requestId: 'reused-request' });
+      if (!current.success || !cached.success) {
+        throw new Error('Expected the live successor and memoized projection to succeed.');
+      }
+      expect(cached.hash).toBe(current.hash);
+      expect(cached.artifact).toEqual(current.artifact);
+      expect(wrapRender).toHaveBeenCalledTimes(2);
+      expect(worker.createGeometryCalls).toBe(1);
+      expect(delivered.map(({ subscriptionId, requestId }) => ({ subscriptionId, requestId }))).toEqual([
+        { subscriptionId: 'successor-view', requestId: 'successor-request' },
+        { subscriptionId: 'reused-view', requestId: 'reused-request' },
+      ]);
+    } finally {
+      release.resolve();
+      await worker.cleanup();
+    }
+  });
+
+  it('should retain a non-aborted projection failure memo on the same evaluation', async () => {
+    const refusal = new Error('Deliberate projection refusal');
+    const wrapRender = vi.fn<NonNullable<KernelMiddlewareV2['wrapRender']>>(async () => {
+      throw refusal;
+    });
+    const middleware = defineMiddleware({ id: 'refused-projection', name: 'Refused projection', wrapRender });
+    const worker = createConfiguredWorker({ middleware: [middleware] });
+    try {
+      const evaluation = await openDocument(worker);
+      expect(evaluation.success).toBe(true);
+      const first = await openView(worker, {});
+      const second = await openView(worker, {});
+      const expected = {
+        success: false,
+        evaluationId: evaluation.id,
+        issues: [
+          {
+            code: 'MIDDLEWARE_FAILED',
+            type: 'kernel',
+            severity: 'error',
+            message: 'Middleware error in Refused projection: Deliberate projection refusal',
+          },
+        ],
+      };
+      expect(first).toMatchObject(expected);
+      expect(second).toMatchObject(expected);
+      expect(second.requestId).not.toBe(first.requestId);
+      expect(wrapRender).toHaveBeenCalledOnce();
+      expect(worker.createGeometryCalls).toBe(1);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it('publishes only the latest intent after a superseded native evaluation', async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();

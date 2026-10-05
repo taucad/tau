@@ -6,13 +6,16 @@ import type { ExportFile } from '@taucad/types';
 import type { WatchEvent } from '@taucad/filesystem';
 import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
+import { emptyGlb } from '#framework/published-part-test-fixture.js';
+import { publishPartsRoot } from '#framework/published-parts-root.js';
+import { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import type { RuntimeTranscodeArgs, TelemetryEntry } from '#types/runtime-wire.types.js';
-import type { KernelRuntime } from '#types/runtime-kernel.types.js';
+import type { KernelRuntime, RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { TranscodeInput, TranscodeResult, TranscoderDefinition } from '#types/runtime-transcoder.types.js';
 import type { CapabilitiesManifest, KernelIssue } from '#types/runtime.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
@@ -41,6 +44,7 @@ import type {
   KernelExportDeclarations,
   ResolveInput,
   ExportOutput,
+  ComposeHandlesInput,
 } from '#types/runtime-kernel-v2.types.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 
@@ -137,7 +141,7 @@ async function createMultiKernelWorker(
     builtinModuleNames?: string[];
   }>,
   transcoders: TestTranscoderPlugin[] = [],
-  middleware: MiddlewarePlugin[] = [],
+  middlewareOrFileSystem: MiddlewarePlugin[] | RuntimeFileSystemBase = [],
 ): Promise<KernelRuntimeWorker> {
   const runtime = defineRuntime({
     kernels: modules.map((m) =>
@@ -151,11 +155,13 @@ async function createMultiKernelWorker(
         () => m.definition,
       ),
     ),
-    middleware,
+    middleware: Array.isArray(middlewareOrFileSystem) ? middlewareOrFileSystem : [],
     transcoders,
   });
   const worker = new KernelRuntimeWorker({ runtime });
-  await initializeWorkerForTesting(worker);
+  await initializeWorkerForTesting(worker, {
+    fileSystem: Array.isArray(middlewareOrFileSystem) ? undefined : middlewareOrFileSystem,
+  });
   return worker;
 }
 
@@ -1471,6 +1477,120 @@ describe('provider content projection', () => {
       await worker.cleanup();
     }
   });
+
+  it('routes declared content through selected v2 views and rejects unsupported physical requests', async () => {
+    await seedTestFileSystem({ 'model.plain': 'plain', 'model.phys': 'physical' });
+    const plainMesh = vi.fn(async () => ({ content: emptyGlb() }));
+    const physicalMesh = vi.fn(async () => ({ content: emptyGlb() }));
+    const plain = createMockKernelDefinition('plain', {
+      views: { display: { title: 'Display', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },
+      render: plainMesh,
+    });
+    const physical = createMockKernelDefinition('physical', {
+      views: {
+        display: { title: 'Display', mimeType: 'model/gltf-binary', content: ['includeEdges', 'includePhysical'] },
+      },
+      render: physicalMesh,
+    });
+    const worker = await createMultiKernelWorker([
+      { id: 'plain', extensions: ['plain'], definition: plain },
+      { id: 'physical', extensions: ['phys'], definition: physical },
+    ]);
+    try {
+      await openWorkerDocument(worker, 'plain-document', 'model.plain');
+      await openWorkerDocument(worker, 'physical-document', 'model.phys');
+      const plainEdges = await requestWorkerView(worker, {
+        documentId: 'plain-document',
+        subscriptionId: 'plain-edges',
+        content: { includeEdges: true },
+      });
+      const physicalFacts = await requestWorkerView(worker, {
+        documentId: 'physical-document',
+        subscriptionId: 'physical-facts',
+        content: { includeEdges: true, includePhysical: true },
+      });
+      expect(plainEdges.success).toBe(true);
+      expect(physicalFacts.success).toBe(true);
+      expect(plainMesh).toHaveBeenCalledWith(
+        expect.objectContaining({ content: { includeEdges: true } }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+      expect(physicalMesh).toHaveBeenCalledWith(
+        expect.objectContaining({ content: { includeEdges: true, includePhysical: true } }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+      const unsupported = await requestWorkerView(worker, {
+        documentId: 'plain-document',
+        subscriptionId: 'unsupported-physical',
+        content: { includePhysical: true },
+      });
+      expect(unsupported.issues[0]?.code).toBe('RUNTIME_CONTENT_UNSUPPORTED');
+      expect(plainMesh).toHaveBeenCalledOnce();
+      const disabledEdges = await requestWorkerView(worker, {
+        documentId: 'plain-document',
+        subscriptionId: 'disabled-edges',
+        content: { includeEdges: false },
+      });
+      expect(disabledEdges.success).toBe(true);
+      expect(plainMesh).toHaveBeenLastCalledWith(
+        expect.objectContaining({ content: { includeEdges: false } }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('requests physical facts for committed part publication only on supporting kernels', async () => {
+    await seedTestFileSystem({ 'model.plain': 'plain', 'model.phys': 'physical' });
+    const base = getTestFileSystem();
+    const fileSystem: RuntimeFileSystemBase = {
+      ...base,
+      async writeFileChecked({ path, data }) {
+        await base.writeFile(path, data);
+        return { status: 'applied', content: typeof data === 'string' ? bytesFor(data) : new Uint8Array(data) };
+      },
+    };
+    const plainMesh = vi.fn(async (_input: Parameters<NonNullable<AnyKernelDefinitionV2['render']>>[0]) => ({
+      content: emptyGlb(),
+    }));
+    const physicalMesh = vi.fn(async () => ({ content: emptyGlb() }));
+    const plain = createMockKernelDefinition('plain', {
+      render: plainMesh,
+    });
+    const physical = createMockKernelDefinition('physical', {
+      views: { display: { title: 'Display', mimeType: 'model/gltf-binary', content: ['includePhysical'] } },
+      render: physicalMesh,
+    });
+    const worker = await createMultiKernelWorker(
+      [
+        { id: 'plain', extensions: ['plain'], definition: plain },
+        { id: 'physical', extensions: ['phys'], definition: physical },
+      ],
+      [],
+      fileSystem,
+    );
+    try {
+      await expect(
+        worker.preparePublishedPart({ sourcePath: 'model.plain', directory: 'published' }),
+      ).resolves.toBeDefined();
+      await expect(
+        worker.preparePublishedPart({ sourcePath: 'model.phys', directory: 'published' }),
+      ).resolves.toBeDefined();
+      expect(plainMesh).toHaveBeenCalledOnce();
+      expect(plainMesh.mock.calls[0]?.[0]).not.toHaveProperty('content');
+      expect(physicalMesh).toHaveBeenCalledWith(
+        expect.objectContaining({ content: { includePhysical: true } }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    } finally {
+      await worker.cleanup();
+    }
+  });
 });
 
 describe('create-options projection', () => {
@@ -2120,6 +2240,116 @@ describe('KernelRuntimeWorker kernel selection', () => {
 // ===================================================================
 
 describe('lazy capabilities manifest', () => {
+  it.each(['unique', 'ambiguous', 'key-wins'] as const)(
+    'binds capability IDs to the actual extension planner with %s declarations',
+    async (mode) => {
+      const ambiguous = mode === 'ambiguous';
+      const expectedId = mode === 'key-wins' ? 'step' : 'solid';
+      await seedTestFileSystem({ 'model.mock': 'model' });
+      const write = vi.fn<NonNullable<AnyKernelDefinitionV2['export']>>(async ({ exportId }) => ({
+        files: [exportFile(`${exportId}.step`, new Uint8Array([1]), 'application/step')] as const,
+      }));
+      const definition = createMockKernelDefinition('route-owner', {
+        export: write,
+        exports: {
+          solid: { title: 'Solid', extension: 'step', mimeType: 'application/step' },
+          ...(mode === 'unique'
+            ? {}
+            : { alternate: { title: 'Alternate', extension: 'step', mimeType: 'application/step' } }),
+          ...(mode === 'key-wins'
+            ? { step: { title: 'Preferred', extension: 'step', mimeType: 'application/step' } }
+            : {}),
+        },
+      });
+
+      const worker = await createMultiKernelWorker([{ id: 'route-owner', extensions: ['mock'], definition }]);
+      try {
+        await openWorkerDocument(worker, 'route-document', 'model.mock');
+        const route = worker.capabilitiesManifest.routes.find((item) => item.targetFormat === 'step');
+        expect(route?.exportId).toBe(ambiguous ? undefined : expectedId);
+        const result = await worker.exportDocument({
+          documentId: 'route-document',
+          operationId: 'route-export',
+          target: 'step',
+        });
+        if (ambiguous) {
+          expect(result.success).toBe(false);
+          expect(result.issues[0]?.code).toBe('EXPORT_AMBIGUOUS');
+          expect(write).not.toHaveBeenCalled();
+        } else {
+          expect(result.success).toBe(true);
+          if (!result.success) {
+            throw new Error(JSON.stringify(result.issues));
+          }
+          expect(result.exportId).toBe(expectedId);
+          expect(write).toHaveBeenCalledWith(
+            expect.objectContaining({ exportId: expectedId }),
+            expect.any(Object),
+            expect.any(Object),
+          );
+        }
+      } finally {
+        await worker.cleanup();
+      }
+    },
+  );
+
+  it('advertises the actual source declaration ID separately from a transcoded target', async () => {
+    await seedTestFileSystem({ 'model.mock': 'model' });
+    const write = vi.fn<NonNullable<AnyKernelDefinitionV2['export']>>(async ({ exportId }) => ({
+      files: [exportFile(`${exportId}.glb`, emptyGlb(), 'model/gltf-binary')] as const,
+    }));
+    const definition = createMockKernelDefinition('route-owner', {
+      export: write,
+      exports: { displayBytes: { title: 'Display bytes', extension: 'glb', mimeType: 'model/gltf-binary' } },
+    });
+
+    const converter: TranscoderDefinition = {
+      name: 'Route converter',
+      version: '1',
+      edges: [{ from: 'glb', to: 'usdz', fidelity: 'mesh' }],
+      async initialize() {
+        return {};
+      },
+      async transcode() {
+        return {
+          success: true,
+          data: [exportFile('model.usdz', new Uint8Array([1]), 'model/vnd.usdz+zip')],
+          issues: [],
+        };
+      },
+    };
+    const worker = await createMultiKernelWorker(
+      [{ id: 'route-owner', extensions: ['mock'], definition }],
+      [attachRuntimePluginDefinition({ id: 'route-converter' }, () => converter)],
+    );
+    try {
+      await openWorkerDocument(worker, 'route-document', 'model.mock');
+      expect(worker.capabilitiesManifest.routes.find((item) => item.targetFormat === 'usdz')).toMatchObject({
+        sourceFormat: 'glb',
+        targetFormat: 'usdz',
+        exportId: 'displayBytes',
+      });
+      const result = await worker.exportDocument({
+        documentId: 'route-document',
+        operationId: 'converted-export',
+        target: 'usdz',
+      });
+      expect(result.success).toBe(true);
+      if (!result.success) {
+        throw new Error(JSON.stringify(result.issues));
+      }
+      expect(result.exportId).toBe('displayBytes');
+      expect(write).toHaveBeenCalledWith(
+        expect.objectContaining({ exportId: 'displayBytes' }),
+        expect.any(Object),
+        expect.any(Object),
+      );
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   beforeEach(async () => {
     await seedTestFileSystem({
       'model.scad': 'cube([1,1,1]);',
@@ -2271,6 +2501,109 @@ describe('lazy capabilities manifest', () => {
 // ===================================================================
 
 describe('native-handle snapshot restoration', () => {
+  it('should discover a cold declared nested assembly route before native acquisition without authored source evaluation', async () => {
+    await seedTestFileSystem({ 'model.mock': 'published source' });
+    const evaluate = vi.fn(async () => ({ handle: { value: 'native' } }));
+    const restore = vi.fn(({ serialized }: TestDeserializeInput) => serialized);
+    const compose = vi.fn(async ({ occurrences }: ComposeHandlesInput<unknown>) => ({ occurrences }));
+    const definition = createMockKernelDefinition('cold-published-kernel', {
+      exports: { step: { title: 'STEP', extension: 'step', mimeType: 'model/step', optionsSchema: z.object({}) } },
+      evaluate,
+      render: async () => ({ content: emptyGlb() }),
+      serializeHandle: ({ handle }: { handle: unknown }) => handle,
+      deserializeHandle: restore,
+      describeHandleSnapshot: () => ({
+        provider: 'cold-published-kernel',
+        providerVersion: '1.0.0',
+        codec: 'test.native',
+        codecVersion: '1',
+        unit: 'millimeter',
+        linearToleranceMm: 0,
+        angularToleranceRad: 0,
+      }),
+      composeHandles: compose,
+    });
+    const modules = [{ id: 'cold-published-kernel', extensions: ['mock'], definition }];
+    const fileSystem = getTestFileSystem();
+    fileSystem.writeFileChecked ??= async ({ path, data, preconditions }) => {
+      const actuals = await Promise.all(
+        preconditions.map(async (condition) =>
+          (await fileSystem.exists(condition.path)) ? fileSystem.readFile(condition.path) : null,
+        ),
+      );
+      for (const [index, condition] of preconditions.entries()) {
+        const actual = actuals[index] ?? null;
+        const expected = typeof condition.expected === 'string' ? bytesFor(condition.expected) : condition.expected;
+        if (
+          actual === null
+            ? expected !== null
+            : expected === null || !actual.every((byte, index) => byte === expected[index])
+        ) {
+          return { status: 'conflict', conflicts: [{ path: condition.path, actual }] };
+        }
+      }
+      const content = typeof data === 'string' ? bytesFor(data) : new Uint8Array(data);
+      await fileSystem.writeFile(path, content);
+      return { status: 'applied', content: new Uint8Array(content) };
+    };
+    const producer = await createMultiKernelWorker(modules, [], fileSystem);
+    let outcome: Awaited<ReturnType<typeof publishPartsRoot>>;
+    try {
+      const part = await producer.preparePublishedPart({ sourcePath: 'model.mock', directory: 'published' });
+      const transform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+      outcome = await publishPartsRoot(createRuntimeFileSystem(getTestFileSystem()), {
+        path: 'published/cold-root.json',
+        parts: { part: part.reference },
+        occurrences: [
+          { id: 'group', transform, children: [{ id: 'leaf', part: 'part', variant: 'default', transform }] },
+        ],
+      });
+    } finally {
+      await producer.cleanup();
+    }
+    if (outcome.status !== 'published') {
+      throw new Error('Expected a pinned nested assembly fixture.');
+    }
+    await getTestFileSystem().unlink('model.mock');
+    evaluate.mockClear();
+    getInitSpy(definition).mockClear();
+    const consumer = await createMultiKernelWorker(modules, [], fileSystem);
+    try {
+      expect(consumer.capabilitiesManifest.routes).toEqual([]);
+      expect(getInitSpy(definition)).not.toHaveBeenCalled();
+      const result = await consumer.exportPublished({ publishedAssembly: { root: outcome.root }, format: 'step' });
+      expect(result.success, JSON.stringify(result.issues)).toBe(true);
+      if (!result.success) {
+        throw new Error('Expected the cold declared STEP route.');
+      }
+      expect(result.exportId).toBe('step');
+      expect(new TextDecoder().decode(result.files[0].bytes)).toBe('default');
+      expect(getInitSpy(definition)).toHaveBeenCalledOnce();
+      expect(restore).toHaveBeenCalledOnce();
+      expect(compose).toHaveBeenCalledOnce();
+      expect(evaluate).not.toHaveBeenCalled();
+      expect(await getTestFileSystem().exists('model.mock')).toBe(false);
+    } finally {
+      await consumer.cleanup();
+    }
+    getInitSpy(definition).mockClear();
+    restore.mockClear();
+    compose.mockClear();
+    const unavailable = await createMultiKernelWorker(modules, [], fileSystem);
+    try {
+      expect(unavailable.capabilitiesManifest.routes).toEqual([]);
+      const denied = await unavailable.exportPublished({ publishedAssembly: { root: outcome.root }, format: 'iges' });
+      expect(denied.success).toBe(false);
+      expect(denied.issues[0]?.code).toBe('EXPORT_UNKNOWN');
+      expect(getInitSpy(definition)).not.toHaveBeenCalled();
+      expect(restore).not.toHaveBeenCalled();
+      expect(compose).not.toHaveBeenCalled();
+      expect(evaluate).not.toHaveBeenCalled();
+    } finally {
+      await unavailable.cleanup();
+    }
+  });
+
   beforeEach(async () => {
     await seedTestFileSystem({
       'model.mock': 'mock geometry',

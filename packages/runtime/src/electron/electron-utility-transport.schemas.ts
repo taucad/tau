@@ -67,5 +67,7 @@ export const electronUtilityMainClientOptionsSchema = z.object({
 export type ElectronUtilityHostOptions = {
   /** Static filesystem for callers that do not transfer one in the boot frame. */
   readonly fileSystem?: RuntimeFileSystem;
+  /** Host-only scoped checked publication authority. */
+  readonly publicationFileSystem?: RuntimeFileSystem;
   readonly worker: KernelRuntimeWorker;
 };

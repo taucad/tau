@@ -3,12 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 import { digestContent } from '@taucad/cache-core';
+import { canonicalJson, sha256String } from '@taucad/utils/hash';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
 import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 import type { MiddlewarePlugin } from '#plugins/plugin-types.js';
 import type { MaterializedRender } from '#framework/render-artifact.js';
+import type { TelemetryEntry } from '#types/runtime-wire.types.js';
+import type { KernelRuntime } from '#types/runtime-kernel.types.js';
+import type { ComputeReuseScope, ResidentCacheBinding } from '#types/runtime-compute.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture. */
 import { createMockFileSystem, createGeometryFile } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
@@ -33,7 +37,13 @@ const declaration = {
 const createHarness = async (
   initial: Record<string, string>,
   middleware: readonly MiddlewarePlugin[] = [],
-  options: { measured?: boolean; construction?: boolean } = {},
+  options: {
+    measured?: boolean;
+    construction?: boolean;
+    onResolve?: () => Promise<void>;
+    onDescribe?: (runtime: KernelRuntime) => Promise<void>;
+    onEvaluate?: (runtime: KernelRuntime) => void;
+  } = {},
 ) => {
   const files = new Map(Object.entries(initial));
   const filesystem = createMockFileSystem({
@@ -78,12 +88,15 @@ const createHarness = async (
       return {};
     },
     async resolve({ entryPath }) {
+      await options.onResolve?.();
       return { resolved: [entryPath], unresolved: [] };
     },
-    async describe() {
+    async describe(_input, runtime) {
+      await options.onDescribe?.(runtime);
       return { success: true, data: { parameters: declaration }, issues: [] };
     },
-    async evaluate({ entryPath }) {
+    async evaluate({ entryPath }, runtime) {
+      options.onEvaluate?.(runtime);
       counts.evaluations++;
       return { handle: { value: files.get('geometry.flag') ?? files.get(entryPath) ?? '' } };
     },
@@ -179,6 +192,368 @@ const createHarness = async (
 };
 
 describe('document results name the source revision they evaluated (R4)', () => {
+  it('should attribute describe evaluate and render spans to actual document operations without inventing cached mesh work', async () => {
+    const dependencyDigests: string[] = [];
+    const middleware = defineMiddleware({
+      id: 'document-trace',
+      name: 'DocumentTrace',
+      wrapDescribe: async (input, handler) => handler(input),
+      wrapEvaluate: async (input, handler) => handler(input),
+      wrapRender: async (input, handler, runtime) => {
+        dependencyDigests.push(await sha256String(canonicalJson(runtime.dependencies)));
+        return handler(input);
+      },
+    });
+    const { worker, evaluate, render } = await createHarness({ 'main.ts': 'same' }, [middleware()]);
+    const entries: TelemetryEntry[] = [];
+    worker.setTelemetrySend((batch) => entries.push(...batch));
+    const drain = () => {
+      worker.flushTelemetry();
+      return entries.splice(0);
+    };
+    const evaluation = await evaluate();
+    expect(evaluation.success).toBe(true);
+    const evaluationDetails = {
+      documentId: 'live',
+      evaluationId: evaluation.id,
+      operationId: `evaluate:live:${evaluation.id}`,
+      entryPath: 'main.ts',
+      kernelId: 'provenance',
+    };
+    const evaluated = drain();
+    for (const name of ['kernel.resolve-deps', 'kernel.extract-params', 'kernel.compute']) {
+      const span = evaluated.find((entry) => entry.name === name);
+      expect(span?.detail).toMatchObject(evaluationDetails);
+    }
+    const evaluationWrappers = evaluated.filter((entry) => entry.name === 'middleware.wrap(DocumentTrace)');
+    expect(evaluationWrappers).toHaveLength(2);
+    for (const span of evaluationWrappers) {
+      expect(span.detail).toMatchObject({
+        documentId: 'live',
+        evaluationId: evaluation.id,
+        operationId: evaluationDetails.operationId,
+      });
+    }
+    const first = await render();
+    expect(first.success).toBe(true);
+    const expectRenderTrace = (spans: TelemetryEntry[], requestId: string) => {
+      const details = {
+        documentId: 'live',
+        evaluationId: evaluation.id,
+        subscriptionId: first.subscriptionId,
+        requestId,
+        operationId: `render:${first.subscriptionId}:${evaluation.id}:${requestId}`,
+      };
+      for (const name of ['kernel.mesh', 'kernel.mesh-compute', 'middleware.wrap(DocumentTrace)']) {
+        expect(spans.find((entry) => entry.name === name)?.detail).toMatchObject(details);
+      }
+      expect(spans.find((entry) => entry.name === 'kernel.mesh-compute')?.detail).toMatchObject({
+        entryPath: 'main.ts',
+        kernelId: 'provenance',
+      });
+    };
+    const rendered = drain();
+    expectRenderTrace(rendered, first.requestId);
+    const renderHash = rendered.find(
+      (entry) => entry.name === 'deps.content-hash' && entry.detail?.['requestId'] === first.requestId,
+    );
+    expect(renderHash?.detail).toMatchObject({
+      documentId: 'live',
+      evaluationId: evaluation.id,
+      operationId: `render:${first.subscriptionId}:${evaluation.id}:${first.requestId}`,
+      subscriptionId: first.subscriptionId,
+      requestId: first.requestId,
+      entryPath: 'main.ts',
+      kernelId: 'provenance',
+      dependencyHash: dependencyDigests.at(0),
+    });
+    expect(renderHash?.detail?.['parentSpanId']).toBeUndefined();
+    if (!first.success) {
+      throw new Error('Expected a materialized view.');
+    }
+    expect(renderHash?.detail?.['dependencyHash']).not.toBe(first.hash);
+    const update = async (options?: { quality: number }) => {
+      const completed = Promise.withResolvers<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]>();
+      const requestId = randomUUID();
+      worker.onRendered = (event) => {
+        if (event.requestId === requestId) {
+          completed.resolve(event);
+        }
+      };
+      worker.handleUpdateView({ subscriptionId: first.subscriptionId, requestId, ...(options ? { options } : {}) });
+      return completed.promise;
+    };
+    const cached = await update();
+    expect(cached.success).toBe(true);
+    if (!cached.success) {
+      throw new Error('Expected an ordinary rendering and its cached projection.');
+    }
+    expect(cached.artifact).toEqual(first.artifact);
+    const cachedTrace = drain();
+    expect(
+      cachedTrace.filter((entry) =>
+        ['kernel.mesh', 'kernel.mesh-compute', 'middleware.wrap(DocumentTrace)'].includes(entry.name),
+      ),
+    ).toEqual([]);
+    expect(cachedTrace.find((entry) => entry.name === 'deps.content-hash')?.detail).toMatchObject({
+      requestId: cached.requestId,
+      operationId: `render:${first.subscriptionId}:${evaluation.id}:${cached.requestId}`,
+      dependencyHash: dependencyDigests.at(0),
+    });
+    // @ts-expect-error Runtime-private materialized artifact fixture.
+    const artifact: MaterializedRender = worker.documents.get('live')?.current?.artifact;
+    expect(artifact).toBeDefined();
+    artifact.liveNativeHandleSlot = undefined;
+    artifact.serializedNativeHandleSlot = undefined;
+    const reheated = await update({ quality: 2 });
+    expect(reheated.success).toBe(true);
+    const reheatTrace = drain();
+    expectRenderTrace(reheatTrace, reheated.requestId);
+    const meshCompute = reheatTrace.find((entry) => entry.name === 'kernel.mesh-compute');
+    expect(meshCompute?.detail?.['spanId']).toBeDefined();
+    expect(reheatTrace.find((entry) => entry.name === 'kernel.export-reheat')?.detail?.['parentSpanId']).toBe(
+      meshCompute?.detail?.['spanId'],
+    );
+    expect(
+      reheatTrace.find(
+        (entry) => entry.name === 'deps.content-hash' && entry.detail?.['requestId'] === reheated.requestId,
+      )?.detail?.['dependencyHash'],
+    ).toBe(dependencyDigests.at(1));
+    const standalone = await worker.describe({ file: createGeometryFile('main.ts') });
+    expect(standalone.success).toBe(true);
+    const standaloneHashes = drain().filter((entry) => entry.name === 'deps.content-hash');
+    expect(standaloneHashes.length).toBeGreaterThan(0);
+    for (const hash of standaloneHashes) {
+      expect(hash.detail?.['dependencyHash']).toMatch(/^[a-f\d]{64}$/u);
+      for (const key of ['documentId', 'evaluationId', 'operationId', 'requestId', 'subscriptionId']) {
+        expect(hash.detail?.[key]).toBeUndefined();
+      }
+    }
+  });
+
+  it('should retain the admitted render hash owner across a dependency await and a foreign document admission', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let blocked = false;
+    const middleware = defineMiddleware({
+      id: 'await-render-dependencies',
+      name: 'AwaitRenderDependencies',
+      resolve: async () => {
+        if (blocked) {
+          entered.resolve();
+          await release.promise;
+        }
+        return [];
+      },
+      wrapRender: async (input, handler) => handler(input),
+    });
+    const { worker, evaluate, render } = await createHarness({ 'main.ts': 'same', 'second.ts': 'same' }, [
+      middleware(),
+    ]);
+    const evaluation = await evaluate();
+    expect(evaluation.success).toBe(true);
+    const entries: TelemetryEntry[] = [];
+    worker.setTelemetrySend((batch) => entries.push(...batch));
+    blocked = true;
+    const pendingRender = render();
+    await entered.promise;
+    const foreignEvaluation = Promise.withResolvers<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]>();
+    worker.onEvaluated = (event) => {
+      if (event.documentId === 'second') {
+        foreignEvaluation.resolve(event);
+      }
+    };
+    worker.handleOpenDocument({
+      documentId: 'second',
+      intent: 0,
+      file: createGeometryFile('second.ts'),
+      parameters: {},
+      watch: false,
+    });
+    blocked = false;
+    release.resolve();
+    const rendering = await pendingRender;
+    expect(rendering.success).toBe(true);
+    const foreign = await foreignEvaluation.promise;
+    expect(foreign.success).toBe(true);
+    worker.flushTelemetry();
+    const hashes = entries.filter(
+      (entry) => entry.name === 'deps.content-hash' && entry.detail?.['requestId'] === rendering.requestId,
+    );
+    expect(hashes).toHaveLength(1);
+    expect(hashes.at(0)?.detail).toMatchObject({
+      documentId: 'live',
+      evaluationId: evaluation.id,
+      operationId: `render:${rendering.subscriptionId}:${evaluation.id}:${rendering.requestId}`,
+      requestId: rendering.requestId,
+      subscriptionId: rendering.subscriptionId,
+      entryPath: 'main.ts',
+      kernelId: 'provenance',
+    });
+    expect(hashes.at(0)?.detail?.['dependencyHash']).toMatch(/^[a-f\d]{64}$/u);
+    expect(hashes.at(0)?.detail?.['evaluationId']).not.toBe(foreign.id);
+  });
+
+  it('freezes real capability admission across another document await and omits document IDs after a failed evaluation', async () => {
+    const resident: ResidentCacheBinding = {
+      contains: () => false,
+      importEntries: async () => ({ imported: [], omitted: [] }),
+      exportEntries: async () => ({ entries: [], omitted: [] }),
+      stats: () => ({
+        entries: 0,
+        logicalBytes: 0,
+        encodedBytes: { status: 'unsupported' },
+        evictions: 0,
+        omissions: 0,
+      }),
+      clear: () => undefined,
+    };
+    const scopes: ComputeReuseScope[] = [];
+    const openScope = (runtime: KernelRuntime) => {
+      if (runtime.compute.status !== 'on') {
+        throw new Error('Expected the actual worker compute capability.');
+      }
+      const scope = runtime.compute.openScope({
+        namespace: 'provenance.scope',
+        producer: { id: 'provenance', version: '1.0.0', implementationAssets: [] },
+        environment: {},
+        resident,
+      });
+      scopes.push(scope);
+      return scope;
+    };
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let blocked = false;
+    let failed = false;
+    let standalone = false;
+    const { worker, evaluate } = await createHarness({ 'main.ts': 'same', 'second.ts': 'same' }, [], {
+      onEvaluate: (runtime) => {
+        openScope(runtime);
+      },
+      onResolve: async () => {
+        if (blocked) {
+          entered.resolve();
+          await release.promise;
+        }
+      },
+      onDescribe: async (runtime) => {
+        if (failed) {
+          throw new Error('Actual document description failed');
+        }
+        if (standalone) {
+          openScope(runtime);
+        }
+      },
+    });
+    worker.setComputeBinding({ mode: 'memory' });
+    const entries: TelemetryEntry[] = [];
+    worker.setTelemetrySend((batch) => entries.push(...batch));
+    const first = await evaluate();
+    expect(first.success).toBe(true);
+    const firstScope = scopes.at(0);
+    if (!firstScope) {
+      throw new Error('The first actual evaluation did not open its scope.');
+    }
+    const secondCompleted = Promise.withResolvers<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]>();
+    worker.onEvaluated = (event) => {
+      if (event.documentId === 'second') {
+        secondCompleted.resolve(event);
+      }
+    };
+    blocked = true;
+    worker.handleOpenDocument({
+      documentId: 'second',
+      intent: 0,
+      file: createGeometryFile('second.ts'),
+      parameters: {},
+      watch: false,
+    });
+    await entered.promise;
+    const firstReceipt = firstScope.close({ outcome: 'failed' });
+    worker.permitComputePublication();
+    await expect(firstReceipt.settled).resolves.toMatchObject({ status: 'abandoned', reason: 'failed' });
+    release.resolve();
+    const second = await secondCompleted.promise;
+    expect(second.success).toBe(true);
+    blocked = false;
+    const secondScope = scopes.at(1);
+    if (!secondScope) {
+      throw new Error('The second actual evaluation did not open its scope.');
+    }
+    const secondReceipt = secondScope.close({ outcome: 'cancelled' });
+    worker.permitComputePublication();
+    await expect(secondReceipt.settled).resolves.toMatchObject({ status: 'abandoned', reason: 'cancelled' });
+    failed = true;
+    const failedEvaluation = await evaluate();
+    expect(failedEvaluation.success).toBe(false);
+    failed = false;
+    standalone = true;
+    const standaloneDescription = await worker.describe({ file: createGeometryFile('main.ts') });
+    expect(standaloneDescription.success).toBe(true);
+    const standaloneScope = scopes.at(2);
+    if (!standaloneScope) {
+      throw new Error('The standalone description did not open its actual scope.');
+    }
+    const standaloneReceipt = standaloneScope.close({ outcome: 'cancelled' });
+    worker.permitComputePublication();
+    await standaloneReceipt.settled;
+    worker.flushTelemetry();
+    const settlements = entries.filter((entry) => entry.name === 'kernel.compute.reuse');
+    expect(settlements).toHaveLength(3);
+    const [firstSettlement, secondSettlement, standaloneSettlement] = settlements;
+    expect(firstSettlement?.detail).toMatchObject({
+      documentId: 'live',
+      evaluationId: first.id,
+      documentOperationId: `evaluate:live:${first.id}`,
+      entryPath: 'main.ts',
+      kernelId: 'provenance',
+      status: 'abandoned',
+    });
+    expect(secondSettlement?.detail).toMatchObject({
+      documentId: 'second',
+      evaluationId: second.id,
+      documentOperationId: `evaluate:second:${second.id}`,
+      entryPath: 'second.ts',
+      kernelId: 'provenance',
+    });
+    const secondDependencyRoot = entries.find(
+      (entry) => entry.name === 'kernel.resolve-deps' && entry.detail?.['documentId'] === 'second',
+    );
+    expect(secondDependencyRoot).toBeDefined();
+    const firstParentId = firstSettlement?.detail?.['parentSpanId'];
+    let actualAncestor =
+      typeof firstParentId === 'string'
+        ? entries.find((entry) => entry.detail?.['spanId'] === firstParentId)
+        : undefined;
+    while (actualAncestor && actualAncestor !== secondDependencyRoot) {
+      const parentId = actualAncestor.detail?.['parentSpanId'];
+      actualAncestor =
+        typeof parentId === 'string' ? entries.find((entry) => entry.detail?.['spanId'] === parentId) : undefined;
+    }
+    expect(actualAncestor).toBe(secondDependencyRoot);
+    for (const settlement of settlements) {
+      expect(settlement.detail?.['operationId']).toEqual(expect.any(String));
+      expect(settlement.detail?.['operationId']).not.toBe(settlement.detail?.['documentOperationId']);
+    }
+    for (const key of ['documentId', 'evaluationId', 'documentOperationId', 'requestId', 'subscriptionId']) {
+      expect(standaloneSettlement?.detail?.[key]).toBeUndefined();
+    }
+    const dependencies = entries.filter(
+      (entry) => entry.name === 'kernel.resolve-deps' && entry.detail?.['documentId'] === 'second',
+    );
+    expect(dependencies).toHaveLength(2);
+    for (const dependency of dependencies) {
+      expect(dependency.detail).toMatchObject({
+        documentId: 'second',
+        evaluationId: second.id,
+        operationId: `evaluate:second:${second.id}`,
+        entryPath: 'second.ts',
+        kernelId: 'provenance',
+      });
+    }
+  });
+
   it('should keep pinned evaluation bytes and export-cache identity after external source rewrites', async () => {
     const dependencies: Array<{ hash: string; files: string[] }> = [];
     const middleware = defineMiddleware({

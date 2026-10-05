@@ -1,3 +1,4 @@
+import { safeDispose } from '@taucad/utils/dispose';
 /**
  * In-process transport — standalone client factory.
  *
@@ -86,7 +87,9 @@ export const inProcessClientDescribe = (
 export const inProcessClient = (
   options: InProcessClientSchemaOptions,
 ): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, typeof inProcessId> => {
-  const { fileSystem, runtime } = options as InProcessClientSchemaOptions & { readonly runtime?: AnyRuntimeDefinition };
+  const { fileSystem, runtime, admitAssemblyDisplay } = options as InProcessClientSchemaOptions & {
+    readonly runtime?: AnyRuntimeDefinition;
+  };
   if (fileSystem !== undefined && !isRuntimeFileSystem(fileSystem)) {
     throw new TypeError('inProcessTransport: `fileSystem` must be produced by a `fromX` factory');
   }
@@ -94,6 +97,7 @@ export const inProcessClient = (
   const inlineFileSystem = fileSystemHandle?.kind === 'inline' ? fileSystemHandle.create() : undefined;
   let pooled: AllocatedPools | undefined;
   let bridge: ReturnType<typeof buildFileSystemBridge>;
+  let publicationBridge: ReturnType<typeof buildFileSystemBridge>;
   let computeBridge: ReturnType<typeof buildComputeStoreBridge> | undefined;
   let channelPair: MessageChannel | undefined;
   let wrappedClientPort: ReturnType<typeof wrapMessagePort<unknown>> | undefined;
@@ -163,7 +167,7 @@ export const inProcessClient = (
       if (!runtime) {
         throw new Error('inProcessTransport: `runtime` is required so the in-process host can own executable modules');
       }
-      worker = new kernelWorkerModule.KernelRuntimeWorker({ runtime });
+      worker = new kernelWorkerModule.KernelRuntimeWorker({ runtime, admitAssemblyDisplay });
       dispatcher = createDocumentWorkerDispatcher(worker, hostPort, {
         inlineFileSystem,
         encodeBinary,
@@ -197,31 +201,34 @@ export const inProcessClient = (
       if (!channel || !pooled) {
         throw new Error('inProcessTransport: channel unavailable after open()');
       }
-      if (fileSystemHandle?.kind === 'channel') {
-        bridge ??= buildFileSystemBridge(fileSystem);
-      }
-      computeBridge ??= buildComputeStoreBridge(options.compute);
-      const memoryHandle: RuntimeInitializeMemoryHandle = {
-        ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
-        ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
-        ...(bridge ? { fileSystemPort: bridge.port } : {}),
-        ...computeBridge.memoryHandle,
-        ...(options.devtoolsTelemetry === true ? { devtoolsTelemetry: true } : {}),
-        ...(options.compiledWasmModules ? { compiledWasmModules: options.compiledWasmModules } : {}),
-      };
-      const args = { ...input, memoryHandle };
       try {
-        const transferables = [...(bridge ? [bridge.port] : []), ...computeBridge.transfer];
+        if (fileSystemHandle?.kind === 'channel') {
+          bridge ??= buildFileSystemBridge(fileSystem);
+        }
+        publicationBridge ??= buildFileSystemBridge(options.publicationFileSystem);
+        computeBridge ??= buildComputeStoreBridge(options.compute);
+        const memoryHandle: RuntimeInitializeMemoryHandle = {
+          ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
+          ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
+          ...(bridge ? { fileSystemPort: bridge.port } : {}),
+          ...(publicationBridge ? { publicationFileSystemPort: publicationBridge.port } : {}),
+          ...computeBridge.memoryHandle,
+          ...(options.devtoolsTelemetry === true ? { devtoolsTelemetry: true } : {}),
+          ...(options.compiledWasmModules ? { compiledWasmModules: options.compiledWasmModules } : {}),
+        };
+        const args = { ...input, memoryHandle };
+        const transferables = [
+          ...(bridge ? [bridge.port] : []),
+          ...(publicationBridge ? [publicationBridge.port] : []),
+          ...computeBridge.transfer,
+        ];
         return await channel.call('initialize', transferables.length > 0 ? { value: args, transferables } : args);
       } catch (error) {
-        if (bridge) {
-          try {
-            bridge.dispose();
-          } finally {
-            bridge = undefined;
-          }
-        }
-        computeBridge.dispose();
+        safeDispose(() => bridge?.dispose());
+        bridge = undefined;
+        safeDispose(() => publicationBridge?.dispose());
+        publicationBridge = undefined;
+        safeDispose(() => computeBridge?.dispose());
         computeBridge = undefined;
         throw error;
       }
@@ -266,7 +273,8 @@ export const inProcessClient = (
         } finally {
           worker = undefined;
           try {
-            bridge?.dispose();
+            safeDispose(() => bridge?.dispose());
+            safeDispose(() => publicationBridge?.dispose());
           } catch {
             /* Best-effort */
           }

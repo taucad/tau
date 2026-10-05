@@ -158,6 +158,19 @@ describe('v2 kernel authoring', () => {
       // @ts-expect-error -- evaluation options must be an object schema.
       evaluateOptionsSchema: z.string(),
     });
+    // @ts-expect-error -- exact descriptors cannot advertise restoration without paired snapshot hooks.
+    defineKernelV2({
+      ...sourceOnly,
+      describeHandleSnapshot() {
+        return undefined;
+      },
+    });
+    defineKernelV2({
+      ...sourceOnly,
+      async composeHandles({ occurrences }) {
+        return { source: occurrences[0]?.handle.source ?? '' };
+      },
+    });
     // @ts-expect-error -- durable handle snapshots require both serializer and deserializer.
     defineKernelV2({
       ...sourceOnly,

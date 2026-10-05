@@ -1,3 +1,9 @@
+import type {
+  AdmittedAssembly,
+  PublishedPartAsset,
+  PublishedExportInput,
+  ExportOutcome,
+} from '#types/runtime-assembly.types.js';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import type {
@@ -468,3 +474,12 @@ export type OpenInput<
     signal?: AbortSignal;
   } & EvaluateOptionsField<Kernels>
 >;
+
+/** Source-free admitted assembly session, closed independently from authored documents. @public */
+export type PublishedAssemblyDocument = Readonly<{
+  projection: 'assembly';
+  root: PublishedPartAsset;
+  admitted: AdmittedAssembly;
+  exportPublished(input: PublishedExportInput & { signal?: AbortSignal }): Promise<ExportOutcome>;
+  close(): void;
+}>;

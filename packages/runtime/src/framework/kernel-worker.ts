@@ -3,6 +3,7 @@
 import deepmerge from 'deepmerge';
 import { logLevels, lookupExportFidelity } from '@taucad/types/constants';
 import { randomUuid } from '@taucad/utils/id';
+import { safeDispose } from '@taucad/utils/dispose';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { admitKernelOptions } from '#framework/kernel-option-admission.js';
@@ -88,6 +89,45 @@ import {
   nextDocumentAbortSequence,
 } from '#framework/document-abort-state.js';
 import { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.js';
+import {
+  admitPublishedPart as admitPinnedPart,
+  preparePublishedPartVariants as persistCompletedPartVariants,
+  readPublishedPartAsset as readPinnedPartAsset,
+  readPublishedGlbSourceComponentIds,
+} from '#framework/published-part-store.js';
+import {
+  publishPartsRoot as commitPinnedPartsRoot,
+  publishAuthoredAssemblyRoot as commitAuthoredAssemblyRoot,
+  readPublishedAssemblyRoot as readCommittedAssemblyRoot,
+  readPinnedPublishedAssemblyRoot,
+  admitPublishedAssemblyRoot,
+} from '#framework/published-parts-root.js';
+import {
+  readAuthoredAssembly,
+  resolveAuthoredAssembly as resolveAuthoredGraph,
+  resolvePinnedAssembly,
+  occurrenceTupleId,
+  normalizeExactComponentPlacement,
+} from '#framework/published-assembly-graph.js';
+import type {
+  AssemblyDisplayProjector,
+  AuthoredAssembly,
+  AuthoredAssemblySource,
+  AuthoredPartRecipe,
+  PreparedPublishedPart,
+  PublishedPartAsset,
+  PublishedPartExact,
+  PublishedPartRecord,
+  PublishedPartOccurrence,
+  PublishedPartReference,
+  PublishedPartsRootOutcome,
+  PublishedAssemblyRootSnapshot,
+  PublishedAssemblyAdmission,
+  PublishedAssemblyComponentPlacement,
+  PublishedExportInput,
+  ExportOutcome,
+} from '#types/runtime-assembly.types.js';
+import { authoredAssemblySourceSchema } from '#types/runtime-assembly.schemas.js';
 import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import type { ComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import { toJSONSchema, z } from 'zod';
@@ -116,6 +156,8 @@ import type {
   KernelOffers,
   RenderResult,
   KernelExportResult,
+  HandleSnapshotExactDescriptor,
+  ComposeHandlesInput,
 } from '#types/runtime-kernel-v2.types.js';
 import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
@@ -163,6 +205,7 @@ import { createNativeHandleIdentityKey, nativeBuildInputSymbol } from '#framewor
 import { finalizeExportArtifactSet } from '#framework/export-artifact-finalizer.js';
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 import { loadWasmBinary } from '#framework/wasm-loader.js';
+import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 
 type FileSystemProxy = WorkerFileSystemProxy;
 
@@ -171,6 +214,29 @@ type ObservedFileRevision = {
   readonly content?: Uint8Array<ArrayBuffer>;
   readonly expectedPrior?: Readonly<{ hash: string | undefined }>;
 };
+
+type AssemblyBinding = {
+  readonly input: { authoredPath: string; publicationPath: string; directory: string };
+  readonly revisions: Map<string, string>;
+  readonly parts: Map<string, { recipe: string; reference: PublishedPartReference; revisions: Map<string, string> }>;
+  generation: number;
+  controller?: AbortController;
+  timer?: ReturnType<typeof setTimeout>;
+  armTimer?: ReturnType<typeof setTimeout>;
+};
+
+/** Eligibility captured only by the outer authored-publication operation. */
+type AuthoredPublicationOperation = Readonly<{
+  operationId: number;
+  signal: AbortSignal;
+}>;
+
+/** The independently double-read BEFORE source for one child in that operation. */
+type VerifiedPublicationSource = Readonly<{
+  publication: AuthoredPublicationOperation;
+  entryPath: string;
+  sourceRevision: SourceRevision;
+}>;
 
 /** The paths one settled dependency set was resolved from, and whether they feed parameter extraction. */
 type DependencyPaths = {
@@ -369,6 +435,7 @@ type TranscoderPluginEntry = TranscoderPlugin<Record<string, unknown>> &
 
 /** Runtime plugins and host services available to one worker. */
 export type KernelWorkerOptions = {
+  readonly admitAssemblyDisplay?: AssemblyDisplayProjector;
   readonly kernels?: ReadonlyArray<KernelPlugin<Record<string, unknown>, unknown>>;
   readonly middleware?: readonly MiddlewarePlugin[];
   readonly bundlers?: readonly BundlerPlugin[];
@@ -439,6 +506,7 @@ function adaptInlineFileSystem(fs: RuntimeFileSystemBase): FileSystemProxy {
     capabilities: fs.capabilities,
     readFile: fs.readFile.bind(fs),
     writeFile: fs.writeFile.bind(fs),
+    ...(fs.writeFileChecked ? { writeFileChecked: fs.writeFileChecked.bind(fs) } : {}),
     mkdir: fs.mkdir.bind(fs),
     readdir: fs.readdir.bind(fs),
     unlink: fs.unlink.bind(fs),
@@ -753,12 +821,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Currently watched dependency paths. Used for incremental watch-set diffing. */
   private watchedPaths = new Set<string>();
 
+  /** Authorized live authored roots; old immutable root pins remain independent of these bindings. */
+  private readonly assemblyBindings = new Map<string, AssemblyBinding>();
+
   /** Unsubscribe function for the current watch subscription. */
   private watchUnsubscribe?: () => void;
 
   /** One serialized lane for kernel/cache/watch/native state. */
   private operationTail: Promise<void> = Promise.resolve();
+
+  /** Trusted worker-entry display projector, never supplied by an RPC caller. */
+  private readonly admitAssemblyDisplay: AssemblyDisplayProjector | undefined;
   private readonly documentTasks = new Set<Promise<void>>();
+  /** Host publication binding is never installed on runtime/kernel evaluator contexts. */
+  private publicationFileSystem: KernelFileSystem | undefined;
+  private publicationFileSystemPort: MessagePortLike | undefined;
   /** Serializes authoritative watch rereads before they enter the operation lane. */
   private watchReconciliationTail: Promise<void> = Promise.resolve();
   /** Holds same-path watch echoes until staged bytes and their cache revision publish together. */
@@ -781,6 +858,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private operationSignal: AbortSignal | undefined;
   private activeDocumentEvaluationController: AbortController | undefined;
   private activeDocumentEvaluationSequence = 0;
+  private activeDocumentOperation:
+    | Readonly<{ documentId: string; evaluationId: string; operationId: string }>
+    | Readonly<{
+        documentId: string;
+        evaluationId: string;
+        operationId: string;
+        subscriptionId: string;
+        requestId: string;
+      }>
+    | undefined;
   private activeDocumentNativeOperation:
     | {
         controller: AbortController;
@@ -822,6 +909,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly bundlerInitInProgress = new Map<string, Promise<{ definition: BundlerDefinition; ctx: unknown }>>();
 
   public constructor(options: KernelWorkerOptions = {}) {
+    this.admitAssemblyDisplay = options.admitAssemblyDisplay;
     this.manifestKernelPlugins = options.kernels ?? [];
     this.middlewarePlugins = options.middleware ?? [];
     this.bundlerPlugins = options.bundlers ?? [];
@@ -866,6 +954,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     transferables: {
       fileSystemPort?: MessagePortLike;
       inlineFileSystem?: RuntimeFileSystemBase;
+      publicationFileSystemPort?: MessagePortLike;
     };
     options?: Options;
     config?: unknown;
@@ -902,6 +991,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     } else if (input.transferables.fileSystemPort) {
       this.fileSystem = await createWorkerFileSystemProxy(input.transferables.fileSystemPort);
       this._filesystem = this.createFileSystem();
+    }
+
+    if (input.transferables.publicationFileSystemPort) {
+      this.publicationFileSystemPort = input.transferables.publicationFileSystemPort;
+      const publication = await createWorkerFileSystemProxy(input.transferables.publicationFileSystemPort);
+      if (!this.operationAdmissionOpen) {
+        publication.dispose();
+        throw new Error('Runtime was disposed while opening publication authority.');
+      }
+      if (publication.capabilities.writable) {
+        this.publicationFileSystem = createRuntimeFileSystem(publication);
+      } else {
+        publication.dispose();
+        this.publicationFileSystemPort = undefined;
+      }
     }
 
     const bootstrapSpan = this.tracer.startSpan('kernel.bootstrap');
@@ -1467,6 +1571,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const previousProgress = this.onProgress;
       this.activeDocumentEvaluationController = controller;
       this.activeDocumentEvaluationSequence = Number(evaluationId) >>> 0;
+      this.activeDocumentOperation = { documentId: document.id, evaluationId, operationId };
       this.onProgress = (phase, detail) => {
         this.onDocumentProgressUpdate?.({
           documentId: document.id,
@@ -1654,6 +1759,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       } finally {
         this.activeDocumentEvaluationController = undefined;
         this.activeDocumentEvaluationSequence = 0;
+        this.activeDocumentOperation = undefined;
         this.onProgress = previousProgress;
       }
     }, controller.signal);
@@ -1831,6 +1937,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         );
         if (selected.success) {
           const { selection } = selected;
+          const renderOwner = {
+            documentId: document.id,
+            evaluationId: evaluation.id,
+            operationId,
+            subscriptionId: view.id,
+            requestId,
+            entryPath: assertRootedPath(joinRelativePath(artifact.owner.file.path, artifact.owner.file.filename)),
+            ...(artifact.owner.binding ? { kernelId: artifact.owner.binding.kernelId } : {}),
+          };
           const key = canonicalJson([selection, view.options, view.content]);
           const meshMiddleware = this.getMeshExecutionList(artifact.owner, view.content ?? {});
           const dependencies = await this.computeDependencies({
@@ -1860,7 +1975,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             }
           }
           const projectionHash = await sha256String(
-            canonicalJson([await this.computeDependencyHash(dependencies), key]),
+            canonicalJson([await this.computeDependencyHash(dependencies, renderOwner), key]),
           );
           evaluation.projections ??= new Map();
           let projected = evaluation.projections.get(projectionHash);
@@ -1896,6 +2011,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               },
             };
             try {
+              this.activeDocumentOperation = {
+                documentId: document.id,
+                evaluationId: evaluation.id,
+                operationId,
+                subscriptionId: view.id,
+                requestId,
+              };
               projected = await this.runMeshPhase({
                 owner: artifact.owner,
                 identity,
@@ -1911,6 +2033,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 renderArtifact: artifact,
               });
             } finally {
+              this.activeDocumentOperation = undefined;
               this.activeDocumentNativeOperation = undefined;
             }
             if (projected.success) {
@@ -1930,7 +2053,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 ]);
               }
             }
-            evaluation.projections.set(projectionHash, projected);
+            const { signal } = controller;
+            if (!signal.aborted) {
+              evaluation.projections.set(projectionHash, projected);
+            }
           }
           result = projected.success
             ? {
@@ -2292,57 +2418,90 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         expectedPresent.push(path);
       }
     }
-    /* The revision each divergent path moved to, not merely the fact that it moved: the
-     * ledger has to keep saying which revision this worker last observed.
-     * `readChangedObservedRevisions` reads a path with no retained hash as one no render has
-     * looked at yet and records its event as a baseline, so dropping the entry here would
-     * spend the preview's next change event re-establishing that baseline and lose the edit
-     * behind it — this lane revalidates the whole retained closure, including paths it never
-     * re-reads itself. Same reasoning as the refused-arm branch of `reconcileWatchSet`. */
-    const revisions = new Map<string, ObservedFileRevision>();
-    const noteIfMoved = (path: string, revision: ObservedFileRevision): void => {
-      if (revision.hash !== this.fileHashCache.get(path)) {
-        revisions.set(path, revision);
-      }
-    };
-    if (expectedPresent.length > 0) {
-      let contents: Record<string, Uint8Array<ArrayBuffer>> | undefined;
-      try {
-        contents = await this.filesystem.readFiles(expectedPresent);
-      } catch (error) {
-        if (!isNotFoundError(error)) {
-          throw error;
+    const validationSpan = this.tracer.startSpan('kernel.revalidate-retained', {
+      retainedPresentCount: expectedPresent.length,
+      retainedMissingCount: expectedMissing.length,
+    });
+    let observedBodyBytes = 0;
+    let bodyByteCoverageComplete = true;
+    let completed = false;
+    try {
+      /* The revision each divergent path moved to, not merely the fact that it moved: the
+       * ledger has to keep saying which revision this worker last observed.
+       * `readChangedObservedRevisions` reads a path with no retained hash as one no render has
+       * looked at yet and records its event as a baseline, so dropping the entry here would
+       * spend the preview's next change event re-establishing that baseline and lose the edit
+       * behind it — this lane revalidates the whole retained closure, including paths it never
+       * re-reads itself. Same reasoning as the refused-arm branch of `reconcileWatchSet`. */
+      const revisions = new Map<string, ObservedFileRevision>();
+      const noteIfMoved = (path: string, revision: ObservedFileRevision): void => {
+        if (revision.hash !== this.fileHashCache.get(path)) {
+          revisions.set(path, revision);
         }
-        /* One of them is gone, and the batch cannot say which. */
+      };
+      if (expectedPresent.length > 0) {
+        let contents: Record<string, Uint8Array<ArrayBuffer>> | undefined;
+        try {
+          contents = await this.filesystem.readFiles(expectedPresent);
+        } catch (error) {
+          // A rejected batch may have read partial bodies that the existing helper cannot return.
+          bodyByteCoverageComplete = false;
+          if (!isNotFoundError(error)) {
+            throw error;
+          }
+          /* One of them is gone, and the batch cannot say which. */
+        }
+        const current = contents;
+        if (current) {
+          for (const path of expectedPresent) {
+            observedBodyBytes += current[path]?.byteLength ?? 0;
+          }
+        }
+        const observed = await Promise.all(
+          expectedPresent.map(async (path): Promise<ObservedFileRevision> => {
+            const bytes = current?.[path];
+            if (bytes === undefined) {
+              const revision = await this.readObservedRevision(path);
+              observedBodyBytes += revision.content?.byteLength ?? 0;
+              return revision;
+            }
+            return { hash: await this.hashContent(bytes), content: bytes };
+          }),
+        );
+        for (const [index, path] of expectedPresent.entries()) {
+          noteIfMoved(path, observed[index]!);
+        }
       }
-      const current = contents;
-      const observed = await Promise.all(
-        expectedPresent.map(async (path): Promise<ObservedFileRevision> => {
-          const bytes = current?.[path];
-          return bytes === undefined
-            ? this.readObservedRevision(path)
-            : { hash: await this.hashContent(bytes), content: bytes };
-        }),
-      );
-      for (const [index, path] of expectedPresent.entries()) {
-        noteIfMoved(path, observed[index]!);
+      if (expectedMissing.length > 0) {
+        const present = await Promise.all(expectedMissing.map(async (path) => this.filesystem.exists(path)));
+        const appeared = expectedMissing.filter((_, index) => present[index] === true);
+        const observed = await Promise.all(
+          appeared.map(async (path) => {
+            const revision = await this.readObservedRevision(path);
+            observedBodyBytes += revision.content?.byteLength ?? 0;
+            return revision;
+          }),
+        );
+        for (const [index, path] of appeared.entries()) {
+          noteIfMoved(path, observed[index]!);
+        }
       }
-    }
-    if (expectedMissing.length > 0) {
-      const present = await Promise.all(expectedMissing.map(async (path) => this.filesystem.exists(path)));
-      const appeared = expectedMissing.filter((_, index) => present[index] === true);
-      const observed = await Promise.all(appeared.map(async (path) => this.readObservedRevision(path)));
-      for (const [index, path] of appeared.entries()) {
-        noteIfMoved(path, observed[index]!);
+      if (revisions.size === 0) {
+        completed = true;
+        return;
       }
+      /* Record the new hash so a watch echo for the same edit is deduplicated.
+       * Explicit document operations and watched documents share this observer. */
+      const divergent = [...revisions.keys()];
+      this._applyObservedRevisions(divergent, revisions);
+      completed = true;
+    } finally {
+      validationSpan.end({
+        observedBodyBytes,
+        bodyByteCoverageComplete: completed && bodyByteCoverageComplete,
+        status: completed ? 'completed' : this.operationSignal?.aborted ? 'aborted' : 'error',
+      });
     }
-    if (revisions.size === 0) {
-      return;
-    }
-    /* Record the new hash so a watch echo for the same edit is deduplicated.
-     * Explicit document operations and watched documents share this observer. */
-    const divergent = [...revisions.keys()];
-    this._applyObservedRevisions(divergent, revisions);
   }
 
   /**
@@ -2370,6 +2529,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return this.cleanupPromise;
     }
     this.operationAdmissionOpen = false;
+    safeDispose(() => this.publicationFileSystemPort?.close());
+    for (const binding of this.assemblyBindings.values()) {
+      this.cancelAssemblyRefresh(binding);
+    }
     for (const document of this.documents.values()) {
       document.closed = true;
       for (const controller of document.operations) {
@@ -2403,6 +2566,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.middlewareDependencyCache.clear();
     this.compiledWasmModules.clear();
     this.watchedPaths.clear();
+    this.assemblyBindings.clear();
     this.pendingNativeHandle = undefined;
     this.retainedEvaluation = undefined;
     // Nothing references the handles now — release them before onCleanup tears
@@ -2411,6 +2575,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.telemetryCollector?.dispose();
     this.telemetryCollector = undefined;
     this.tracer.setEntrySink(undefined);
+    safeDispose(() => this.fileSystem?.dispose());
+    this.fileSystem = undefined;
+    safeDispose(() => this.publicationFileSystem?.dispose());
+    this.publicationFileSystem = undefined;
+    safeDispose(() => this.publicationFileSystemPort?.close());
+    this.publicationFileSystemPort = undefined;
     await this.computeHost?.dispose();
     this.computeHost = undefined;
 
@@ -2444,8 +2614,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.loadedTranscoders.clear();
 
     await this.onCleanup();
-    this.fileSystem?.dispose();
-    this.fileSystem = undefined;
   }
 
   /**
@@ -2487,6 +2655,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       resolution?: ParameterResolutionOptions;
     }> = {},
   ): Promise<GetParametersResult> {
+    const documentOperation = this.activeDocumentOperation;
     const { dependencyContext, owner, resolution = {} } = options;
     const operationOwner = owner ?? (await this.createOperationOwner(file, 'request'));
     const entryPath = assertRootedPath(joinRelativePath(operationOwner.file.path, operationOwner.file.filename));
@@ -2503,6 +2672,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const depsSpan = this.tracer.startSpan('kernel.resolve-deps', {
       phase: 'resolvingDeps',
+      entryPath,
+      ...(operationOwner.binding ? { kernelId: operationOwner.binding.kernelId } : {}),
+      ...documentOperation,
     });
     const dependencies = await this.computeDependencies({
       operations: ['describe'],
@@ -2599,7 +2771,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             onLog: this.onLog,
             middlewareName: middleware.name,
             filesystem: this.filesystem,
-            compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal),
+            compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal, {
+              owner: operationOwner,
+              documentOperation,
+            }),
             dependencies,
             dependencyHash: parameterSemanticHash,
             stateSchema: middleware.stateSchema,
@@ -2617,8 +2792,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       async (handlerInput: DescribeInput): Promise<DescribeResult<ParameterManifest>> => {
         const parametersSpan = tracer.startSpan('kernel.extract-params', {
           phase: 'extractingParams',
+          entryPath,
+          ...(operationOwner.binding ? { kernelId: operationOwner.binding.kernelId } : {}),
+          ...documentOperation,
         });
-        const result = await this.onGetParametersForOwner(operationOwner, handlerInput, this.createRuntime());
+        const result = await this.onGetParametersForOwner(
+          operationOwner,
+          handlerInput,
+          this.createRuntime({ owner: operationOwner, documentOperation }),
+        );
         parametersSpan.end();
         if (!result.success) {
           return result;
@@ -2666,6 +2848,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         chain = named(`middleware(${middlewareName})`, async (handlerInput: DescribeInput) => {
           const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
             middleware: middlewareName,
+            entryPath,
+            ...(operationOwner.binding ? { kernelId: operationOwner.binding.kernelId } : {}),
+            ...documentOperation,
           });
           try {
             const result = await wrapHook(handlerInput, inner, runtime);
@@ -2797,13 +2982,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }, signal);
   }
 
-  private async snapshotSourceInLane(request: RuntimeSourceSnapshotArgs): Promise<RuntimeSourceSnapshotResult> {
+  private async snapshotSourceInLane(
+    request: RuntimeSourceSnapshotArgs,
+    onOptionalAbsent?: (paths: ReadonlySet<string>) => void,
+    verifiedPublicationSource?: VerifiedPublicationSource,
+  ): Promise<RuntimeSourceSnapshotResult> {
     const signal = this.operationSignal ?? neverAbortedSignal;
     signal.throwIfAborted();
     if (request.stage) {
+      if (verifiedPublicationSource) {
+        throw new Error('A verified publication source cannot stage replacement bytes.');
+      }
       await this.writeFilesAndInvalidate(request.stage);
     }
-    await this.revalidateRetainedFiles();
+    if (verifiedPublicationSource) {
+      this.assertVerifiedPublicationSource(request.file, verifiedPublicationSource);
+    } else {
+      await this.revalidateRetainedFiles();
+    }
     const owner = await this.createOperationOwner(request.file, 'request');
     const entryPath = assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename));
     const discover = async (): Promise<{
@@ -2949,8 +3145,31 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     // Middleware dependencies may be absent (the normal compute path hashes them as 'missing').
     // Keep them selected for existence/coherence checks; kernel dependencies still require bytes.
-    const missingDependencies = missingPaths.filter((path) => roles.get(path) === 'kernel-dependency');
-    const unresolvedPaths = [...new Set([...initial.unresolvedPaths, ...missingDependencies])].sort();
+    const missingDependencies = missingPaths.filter(
+      (path) => initial.kernelPaths.includes(path) || revalidated.kernelPaths.includes(path),
+    );
+    const unresolvedPaths = [
+      ...new Set([...initial.unresolvedPaths, ...revalidated.unresolvedPaths, ...missingDependencies]),
+    ].sort();
+    // This classification stays private: source-free readers cannot repeat dependency discovery.
+    // A declaration cannot bless a path required by either kernel discovery or an explicit selection.
+    const requiredOrAdditional = new Set([
+      ...initial.kernelPaths,
+      ...initial.unresolvedPaths,
+      ...revalidated.kernelPaths,
+      ...revalidated.unresolvedPaths,
+      ...(request.additionalPaths ?? []).map(({ path }) => assertRootedPath(path)),
+    ]);
+    onOptionalAbsent?.(
+      new Set(
+        missingPaths.filter(
+          (path) =>
+            initial.middlewarePaths.includes(path) &&
+            revalidated.middlewarePaths.includes(path) &&
+            !requiredOrAdditional.has(path),
+        ),
+      ),
+    );
     const issues: KernelIssue[] =
       unresolvedPaths.length === 0
         ? []
@@ -2987,7 +3206,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 }),
               ] as const,
           ),
-          ...unresolvedPaths.map((path) => [path, 'missing'] as const),
+          ...[...new Set([...missingPaths, ...unresolvedPaths])].map((path) => [path, 'missing'] as const),
         ]),
       },
     };
@@ -3026,6 +3245,610 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
     return [...new Set(paths)].sort();
+  }
+
+  /** Export one admitted immutable pin without evaluating its authored source. @internal */
+  public async exportPublished(input: PublishedExportInput, signal?: AbortSignal): Promise<ExportOutcome> {
+    return this.enqueueOperation(async () => {
+      const result = await this.exportPublishedModelInLane(input);
+      if (!result.success) {
+        return result;
+      }
+      if (!result.exportId) {
+        return createKernelError([
+          {
+            code: 'EXPORT_UNKNOWN',
+            message: 'Published export did not retain its selected route identity.',
+            type: 'runtime',
+            severity: 'error',
+          },
+        ]);
+      }
+      return {
+        success: true,
+        exportId: result.exportId,
+        files: nonemptyExportFiles(result.data),
+        issues: result.issues,
+        ...(result.sourceRevision ? { sourceRevision: result.sourceRevision } : {}),
+      };
+    }, signal);
+  }
+
+  private async exportPublishedDisplayInLane(
+    request: PublishedExportInput,
+    readDisplay: () => Promise<Uint8Array<ArrayBuffer> | void | undefined>,
+    name: string,
+  ): Promise<(ExportGeometryResult & { exportId?: string }) | undefined> {
+    if (lookupExportFidelity(request.format) === 'brep' || Object.values(request.content ?? {}).some(Boolean)) {
+      return undefined;
+    }
+    const options = request.exportOptions ?? {};
+    const plainGlb = request.format === 'glb' && Object.keys(options).length === 0;
+    const hasDisplayEdge = [...this.loadedTranscoders.values()].some(({ edges }) =>
+      edges.some(({ from, to, fidelity }) => from === 'glb' && to === request.format && fidelity === 'mesh'),
+    );
+    if (!plainGlb && !hasDisplayEdge) {
+      return undefined;
+    }
+    const bytes = await readDisplay();
+    if (!(bytes instanceof Uint8Array)) {
+      return createKernelError([
+        {
+          code: 'KERNEL_CAPABILITY_MISSING',
+          message: 'This host has no assembly GLB projection for pinned export.',
+          severity: 'error',
+          type: 'runtime',
+        },
+      ]);
+    }
+    if (plainGlb) {
+      return {
+        ...finalizeExportArtifactSet({
+          success: true,
+          data: [{ name, mimeType: 'model/gltf-binary', bytes }],
+          issues: [],
+        }),
+        exportId: 'glb',
+      };
+    }
+    return {
+      ...(await this.transcodeInLane({
+        from: 'glb',
+        to: request.format,
+        files: [{ name, mimeType: 'model/gltf-binary', bytes }],
+        options,
+      })),
+      exportId: 'glb',
+    };
+  }
+
+  private async exportPublishedModelInLane(
+    request: PublishedExportInput,
+  ): Promise<ExportGeometryResult & { exportId?: string }> {
+    const failure = (code: KernelIssue['code'], message: string): ExportGeometryResult =>
+      createKernelError([
+        {
+          code,
+          message,
+          severity: 'error',
+          type: 'runtime',
+        },
+      ]);
+    if (request.publishedAssembly) {
+      return this.exportPublishedAssemblyInLane(request);
+    }
+    const pin = request.publishedPart;
+    const variantName = pin.variant ?? 'default';
+    const runtime = this.createRuntime();
+    let owner: OperationOwner | undefined;
+    let nativeHandle: unknown;
+    let evaluationSlot: EvaluationSlot | undefined;
+    try {
+      const record = await admitPinnedPart(this.filesystem, pin.reference);
+      const variant = record.variants[variantName];
+      if (!variant) {
+        return failure('INVALID_REFERENCE', `Published part has no variant ${variantName}.`);
+      }
+      const display = await this.exportPublishedDisplayInLane(
+        request,
+        async () => readPinnedPartAsset(this.filesystem, pin.reference, variant.glb.digest),
+        'model.glb',
+      );
+      if (display) {
+        return display;
+      }
+      const { exact } = variant;
+      if (!exact) {
+        return failure(
+          'REPRESENTATION_UNSUPPORTED',
+          `Published part ${variantName} has no qualified exact native snapshot for ${request.format}.`,
+        );
+      }
+      const bytes = await readPinnedPartAsset(this.filesystem, pin.reference, exact.asset.digest);
+      const snapshot = msgpackCodec.decode(bytes);
+      owner = await this.bindPublishedExactOwner(exact.kernelId, variant.source.entry, runtime);
+      if (!owner || !this.hasNativeSnapshotDescriptorForOwner(owner)) {
+        return failure(
+          'REPRESENTATION_UNSUPPORTED',
+          `Published part ${variantName} has no compatible selected kernel ${exact.kernelId}.`,
+        );
+      }
+      const descriptor = this.describeNativeSnapshotForOwner(owner, snapshot, runtime);
+      const fields = [
+        'provider',
+        'providerVersion',
+        'codec',
+        'codecVersion',
+        'unit',
+        'linearToleranceMm',
+        'angularToleranceRad',
+      ] as const;
+      if (!descriptor || fields.some((key) => descriptor[key] !== exact[key])) {
+        return failure(
+          'REPRESENTATION_UNSUPPORTED',
+          `Published part ${variantName} has incompatible exact codec, implementation, unit or tolerance evidence.`,
+        );
+      }
+      const target = this.resolveDocumentExportTarget(owner, undefined, request.format);
+      if (!target.success) {
+        return target;
+      }
+      const plan = this.createExportRequestPlan(owner, {
+        format: target.format,
+        exportId: target.exportId,
+        options: request.exportOptions,
+        content: request.content,
+      });
+      if (!plan.success) {
+        return plan.result;
+      }
+      evaluationSlot = this.createEvaluationSlot(owner, exact.asset.digest);
+      nativeHandle = await this.deserializeNativeHandleForOwner(owner, snapshot, runtime, evaluationSlot);
+      if (nativeHandle === undefined || nativeHandle === null) {
+        return failure(
+          'REPRESENTATION_UNSUPPORTED',
+          `Published part ${variantName} exact native snapshot could not be restored.`,
+        );
+      }
+      this.captureNativeHandle(nativeHandle, owner, evaluationSlot);
+      this.pendingNativeHandle = undefined;
+      const identity: RenderIdentity = {
+        file: owner.file,
+        selectedKernelId: owner.binding?.kernelId,
+        selectedKernelVersion: owner.binding?.kernelVersion,
+        parameters: {},
+        renderOptions: {},
+        content: plan.route.content,
+        dependencies: [],
+        dependencyHash: exact.asset.digest,
+        nativeHandleKey: exact.asset.digest,
+      };
+      return {
+        ...finalizeExportArtifactSet(
+          await this.executeExportWithRoute(plan, {
+            input: { ...plan.input, nativeHandle },
+            runtime,
+            renderIdentity: identity,
+            evaluationSlot,
+          }),
+        ),
+        exportId: target.exportId,
+      };
+    } catch (error) {
+      this.operationSignal?.throwIfAborted();
+      return failure('INVALID_REFERENCE', error instanceof Error ? error.message : String(error));
+    } finally {
+      if (evaluationSlot) {
+        this.dropEvaluationHandle(evaluationSlot);
+      }
+    }
+  }
+
+  private async exportPublishedAssemblyInLane(
+    request: PublishedExportInput,
+  ): Promise<ExportGeometryResult & { exportId?: string }> {
+    const pin = request.publishedAssembly;
+    if (!pin) {
+      return createKernelError([
+        { code: 'INVALID_REFERENCE', message: 'Assembly pin is missing.', severity: 'error', type: 'runtime' },
+      ]);
+    }
+    const failure = (code: KernelIssue['code'], message: string): ExportGeometryResult =>
+      createKernelError([
+        {
+          code,
+          message,
+          severity: 'error',
+          type: 'runtime',
+        },
+      ]);
+    const runtime = this.createRuntime();
+    const restored: Array<{ owner: OperationOwner; handle: unknown; slot: EvaluationSlot }> = [];
+    const restoredByDigest = new Map<string, { owner: OperationOwner; handle: unknown; slot: EvaluationSlot }>();
+    const admittedExactAssets = new Set<string>();
+    let composed: { owner: OperationOwner; handle: unknown; slot: EvaluationSlot } | undefined;
+    try {
+      if (pin.placements !== undefined && request.format !== 'step' && request.format !== 'stp') {
+        return failure(
+          'REPRESENTATION_UNSUPPORTED',
+          'Component placement overlays are qualified only for STEP/stp export.',
+        );
+      }
+      const overlays =
+        pin.placements === undefined ? undefined : new Map<string, PublishedAssemblyComponentPlacement>();
+      for (const placement of pin.placements ?? []) {
+        if (overlays!.has(placement.componentId)) {
+          return failure('INVALID_REFERENCE', `Duplicate canonical component placement: ${placement.componentId}`);
+        }
+        overlays!.set(placement.componentId, {
+          ...placement,
+          worldTransform: normalizeExactComponentPlacement(placement.worldTransform),
+        });
+      }
+      const root = await readPinnedPublishedAssemblyRoot(this.filesystem, pin.root);
+      const admitted = await resolvePinnedAssembly(this.filesystem, {
+        schemaVersion: 1,
+        parts: Object.fromEntries(Object.entries(root.parts).map(([name, publishedPart]) => [name, { publishedPart }])),
+        occurrences: root.occurrences,
+      });
+      const readAsset = async (part: string, asset: PublishedPartAsset): Promise<Uint8Array<ArrayBuffer>> => {
+        const record = admitted.records[part];
+        const reference = admitted.parts[part];
+        if (
+          !record ||
+          !reference ||
+          !Object.values(record.variants).some(
+            (variant) =>
+              variant.glb.path === asset.path &&
+              variant.glb.digest === asset.digest &&
+              variant.glb.byteLength === asset.byteLength,
+          )
+        ) {
+          throw new Error('Assembly display projector requested an asset outside the admitted closure.');
+        }
+        return readPinnedPartAsset(this.filesystem, reference, asset.digest);
+      };
+      if (overlays) {
+        if (!this.admitAssemblyDisplay) {
+          return failure(
+            'REPRESENTATION_UNSUPPORTED',
+            'Exact component placement requires semantic admission of the pinned display closure.',
+          );
+        }
+        await this.admitAssemblyDisplay({
+          purpose: 'admission',
+          records: admitted.records,
+          occurrences: admitted.occurrences,
+          readAsset,
+        });
+        runtime.signal.throwIfAborted();
+      }
+      const display = await this.exportPublishedDisplayInLane(
+        request,
+        async () =>
+          this.admitAssemblyDisplay?.({
+            purpose: 'projection',
+            records: admitted.records,
+            occurrences: admitted.occurrences,
+            readAsset,
+          }),
+        'assembly.glb',
+      );
+      if (display) {
+        return display;
+      }
+      const leaves = Object.values(admitted.identities).filter((identity) => identity.part !== undefined);
+      if (leaves.length === 0) {
+        return failure('INVALID_REFERENCE', 'Published assembly has no placed part occurrences.');
+      }
+      await this.discoverPublishedCapabilities(
+        new Set(
+          leaves.flatMap((leaf) => {
+            const exact =
+              leaf.part !== undefined && leaf.variant !== undefined
+                ? admitted.records[leaf.part]?.variants[leaf.variant]?.exact
+                : undefined;
+            return exact ? [exact.kernelId] : [];
+          }),
+        ),
+        () => {
+          runtime.signal.throwIfAborted();
+        },
+        this.tracer,
+      );
+      const plannedOwners = new Set<string>();
+      for (const leaf of leaves) {
+        const variant =
+          leaf.part !== undefined && leaf.variant !== undefined
+            ? admitted.records[leaf.part]?.variants[leaf.variant]
+            : undefined;
+        if (!variant?.exact) {
+          return failure(
+            'REPRESENTATION_UNSUPPORTED',
+            `Assembly occurrence ${leaf.path.join('/')} has no qualified exact native snapshot for ${request.format}.`,
+          );
+        }
+        const { exact } = variant;
+        const ownerKey = canonicalJson([
+          exact.kernelId,
+          exact.provider,
+          exact.providerVersion,
+          exact.codec,
+          exact.codecVersion,
+          exact.unit,
+          exact.linearToleranceMm,
+          exact.angularToleranceRad,
+        ]);
+        if (plannedOwners.has(ownerKey)) {
+          continue;
+        }
+        const owner = this.getPublishedExportMetadataOwner(exact.kernelId, variant.source.entry);
+        if (!owner) {
+          return failure(
+            'REPRESENTATION_UNSUPPORTED',
+            `Assembly occurrence ${leaf.path.join('/')} has no compatible selected kernel ${exact.kernelId}.`,
+          );
+        }
+        const target = this.resolveDocumentExportTarget(owner, undefined, request.format);
+        if (!target.success) {
+          return target;
+        }
+        const plan = this.createExportRequestPlan(owner, {
+          format: target.format,
+          exportId: target.exportId,
+          options: request.exportOptions,
+          content: request.content,
+        });
+        if (!plan.success) {
+          return plan.result;
+        }
+        plannedOwners.add(ownerKey);
+      }
+      const occurrences: Array<ComposeHandlesInput<unknown>['occurrences'][number]> = [];
+      const sourceIdsByAsset = new Map<string, readonly string[]>();
+      const resolvedComponentIds = new Set<string>();
+      const effectivePlacements: PublishedAssemblyComponentPlacement[] = [];
+      const resolveComponents = async (
+        leaf: (typeof leaves)[number],
+      ): Promise<
+        Pick<ComposeHandlesInput<unknown>['occurrences'][number], 'displaySourceComponentIds' | 'components'>
+      > => {
+        if (!overlays) {
+          return {};
+        }
+        const variant = admitted.records[leaf.part!]!.variants[leaf.variant!]!;
+        let ids = sourceIdsByAsset.get(variant.glb.digest);
+        if (!ids) {
+          const bytes = await readAsset(leaf.part!, variant.glb);
+          runtime.signal.throwIfAborted();
+          // The preceding host semantic admission proves these active node IDs correspond exactly to the
+          // authoritative source topology and primitive ownership. This is an identity projection, not a validator.
+          ids = readPublishedGlbSourceComponentIds(bytes);
+          sourceIdsByAsset.set(variant.glb.digest, ids);
+        }
+        const defaultPlacement = normalizeExactComponentPlacement(leaf.worldTransform);
+        const components = ids.map((sourceComponentId) => {
+          const componentId = occurrenceTupleId('component', leaf.path, sourceComponentId);
+          if (resolvedComponentIds.has(componentId)) {
+            throw new TypeError(`Canonical component mapping is ambiguous: ${componentId}`);
+          }
+          resolvedComponentIds.add(componentId);
+          const worldTransform = overlays.get(componentId)?.worldTransform ?? defaultPlacement;
+          effectivePlacements.push({ componentId, worldTransform });
+          return { componentId, sourceComponentId, worldTransform };
+        });
+        return { displaySourceComponentIds: ids, components };
+      };
+      const componentMappings = new Map<string, Awaited<ReturnType<typeof resolveComponents>>>();
+      for (const leaf of leaves) {
+        // oxlint-disable-next-line no-await-in-loop -- Preflight the complete canonical mapping before restoring native assets.
+        componentMappings.set(leaf.id, await resolveComponents(leaf));
+      }
+      if (overlays && [...overlays.keys()].some((id) => !resolvedComponentIds.has(id))) {
+        return failure(
+          'INVALID_REFERENCE',
+          'Component placement references an unknown canonical component in this immutable root.',
+        );
+      }
+      let selected: { owner: OperationOwner; exact: PublishedPartExact } | undefined;
+      for (const leaf of leaves) {
+        const componentMapping = componentMappings.get(leaf.id)!;
+        const part = leaf.part!;
+        const variantName = leaf.variant!;
+        const reference = admitted.parts[part]!;
+        const variant = admitted.records[part]!.variants[variantName]!;
+        const { exact } = variant;
+        if (
+          overlays &&
+          (exact?.kernelId !== 'replicad' ||
+            exact.provider !== '@taucad/replicad' ||
+            exact.codec !== 'replicad.native-handle-msgpack' ||
+            exact.codecVersion !== '2')
+        ) {
+          return failure(
+            'REPRESENTATION_UNSUPPORTED',
+            'Component placement requires an installed Replicad codec-v2 snapshot with proven native/display identity.',
+          );
+        }
+        if (!exact) {
+          return failure(
+            'REPRESENTATION_UNSUPPORTED',
+            `Assembly occurrence ${leaf.path.join('/')} has no qualified exact native snapshot for ${request.format}.`,
+          );
+        }
+        const selectedExact = selected?.exact;
+        if (
+          selectedExact &&
+          (
+            [
+              'kernelId',
+              'provider',
+              'providerVersion',
+              'codec',
+              'codecVersion',
+              'unit',
+              'linearToleranceMm',
+              'angularToleranceRad',
+            ] as const
+          ).some((key) => selectedExact[key] !== exact[key])
+        ) {
+          return failure(
+            'REPRESENTATION_UNSUPPORTED',
+            `Assembly occurrence ${leaf.path.join('/')} has incompatible exact producer evidence.`,
+          );
+        }
+        const assetKey = `${reference.path}\u0000${exact.asset.path}\u0000${exact.asset.digest}`;
+        let bytes: Uint8Array<ArrayBuffer> | undefined;
+        if (!admittedExactAssets.has(assetKey)) {
+          // oxlint-disable-next-line no-await-in-loop -- Distinct pinned exact paths each need digest re-admission.
+          bytes = await readPinnedPartAsset(this.filesystem, reference, exact.asset.digest);
+          admittedExactAssets.add(assetKey);
+        }
+        const reused = restoredByDigest.get(exact.asset.digest);
+        if (reused) {
+          occurrences.push({
+            handle: reused.handle,
+            occurrencePath: leaf.path,
+            worldTransform: leaf.worldTransform,
+            ...componentMapping,
+          });
+          continue;
+        }
+        if (!bytes) {
+          return failure(
+            'INVALID_REFERENCE',
+            `Assembly occurrence ${leaf.path.join('/')} has no admitted native bytes.`,
+          );
+        }
+        const snapshot = msgpackCodec.decode(bytes);
+        // oxlint-disable-next-line no-await-in-loop -- Loading the exact selected kernel is ordered with restore.
+        const owner = await this.bindPublishedExactOwner(exact.kernelId, variant.source.entry, runtime);
+        if (!owner || !this.hasNativeSnapshotDescriptorForOwner(owner)) {
+          return failure(
+            'REPRESENTATION_UNSUPPORTED',
+            `Assembly occurrence ${leaf.path.join('/')} has no compatible selected kernel ${exact.kernelId}.`,
+          );
+        }
+        const descriptor = this.describeNativeSnapshotForOwner(owner, snapshot, runtime);
+        if (
+          !descriptor ||
+          (
+            [
+              'provider',
+              'providerVersion',
+              'codec',
+              'codecVersion',
+              'unit',
+              'linearToleranceMm',
+              'angularToleranceRad',
+            ] as const
+          ).some((key) => descriptor[key] !== exact[key])
+        ) {
+          return failure(
+            'REPRESENTATION_UNSUPPORTED',
+            `Assembly occurrence ${leaf.path.join('/')} has incompatible codec, implementation, unit or tolerance evidence.`,
+          );
+        }
+        const slot = this.createEvaluationSlot(owner, exact.asset.digest);
+        // eslint-disable-next-line no-await-in-loop -- Each exact restore owns the serialized kernel lane and its cleanup slot.
+        const handle = await this.deserializeNativeHandleForOwner(owner, snapshot, runtime, slot);
+        if (handle === undefined || handle === null) {
+          return failure(
+            'REPRESENTATION_UNSUPPORTED',
+            `Assembly occurrence ${leaf.path.join('/')} exact native snapshot could not be restored.`,
+          );
+        }
+        this.captureNativeHandle(handle, owner, slot);
+        this.pendingNativeHandle = undefined;
+        restored.push({ owner, handle, slot });
+        restoredByDigest.set(exact.asset.digest, { owner, handle, slot });
+        occurrences.push({
+          handle,
+          occurrencePath: leaf.path,
+          worldTransform: leaf.worldTransform,
+          ...componentMapping,
+        });
+        selected ??= { owner, exact };
+      }
+      if (!selected) {
+        return failure('INVALID_REFERENCE', 'Published assembly has no selected exact kernel.');
+      }
+      const target = this.resolveDocumentExportTarget(selected.owner, undefined, request.format);
+      if (!target.success) {
+        return target;
+      }
+      const plan = this.createExportRequestPlan(selected.owner, {
+        format: target.format,
+        exportId: target.exportId,
+        options: request.exportOptions,
+        content: request.content,
+      });
+      if (!plan.success) {
+        return plan.result;
+      }
+      let composedHandle: unknown;
+      try {
+        composedHandle = await this.composePublishedAssemblyForOwner(selected.owner, occurrences, runtime);
+      } catch (error) {
+        return failure(
+          'LEGACY_PROJECTION_LOSS',
+          `Assembly placement cannot be represented exactly: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (composedHandle === undefined || composedHandle === null) {
+        return failure(
+          'REPRESENTATION_UNSUPPORTED',
+          `Kernel ${selected.exact.kernelId} has no exact assembly composition route.`,
+        );
+      }
+      const composedSlot = this.createEvaluationSlot(selected.owner, pin.root.digest);
+      this.captureNativeHandle(composedHandle, selected.owner, composedSlot);
+      this.pendingNativeHandle = undefined;
+      composed = { owner: selected.owner, handle: composedHandle, slot: composedSlot };
+      const placementDigest = overlays
+        ? contentDigest({
+            value: `sha256:${await sha256String(
+              canonicalJson({
+                root: pin.root.digest,
+                placements: effectivePlacements.sort((a, b) =>
+                  a.componentId < b.componentId ? -1 : a.componentId > b.componentId ? 1 : 0,
+                ),
+              }),
+            )}`,
+            name: 'admitted assembly component placement digest',
+          })
+        : pin.root.digest;
+      runtime.signal.throwIfAborted();
+      const identity: RenderIdentity = {
+        file: selected.owner.file,
+        selectedKernelId: selected.owner.binding?.kernelId,
+        selectedKernelVersion: selected.owner.binding?.kernelVersion,
+        parameters: {},
+        renderOptions: {},
+        content: plan.route.content,
+        dependencies: [],
+        dependencyHash: placementDigest,
+        nativeHandleKey: placementDigest,
+      };
+      return {
+        ...finalizeExportArtifactSet(
+          await this.executeExportWithRoute(plan, {
+            input: { ...plan.input, nativeHandle: composedHandle },
+            runtime,
+            renderIdentity: identity,
+            evaluationSlot: composedSlot,
+          }),
+        ),
+        exportId: target.exportId,
+      };
+    } catch (error) {
+      this.operationSignal?.throwIfAborted();
+      return failure('INVALID_REFERENCE', error instanceof Error ? error.message : String(error));
+    } finally {
+      for (const owned of [...restored, ...(composed ? [composed] : [])]) {
+        this.dropEvaluationHandle(owned.slot);
+      }
+    }
   }
 
   /** Runs a registered transcoder directly, without a kernel render or filesystem. */
@@ -3126,6 +3949,1187 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
+   * Build one source through the existing create/mesh lifecycle, then persist
+   * an immutable completed-part display record. This does not publish a scene
+   * root; that requires the host's checked cross-client generation fence.
+   *
+   * @param input - Source entry and project-rooted durable output directory.
+   * @param signal - Request-scoped cancellation.
+   * @returns A serializable pinned record reference and admitted record.
+   * @internal
+   */
+  public async preparePublishedPart(
+    input: { sourcePath: string; directory: string },
+    signal?: AbortSignal,
+  ): Promise<PreparedPublishedPart> {
+    return this.preparePublishedPartVariants(
+      {
+        directory: input.directory,
+        sources: { default: input.sourcePath },
+      },
+      signal,
+    );
+  }
+
+  /** Evaluate every named recipe independently before pinning one per-variant provenance record. @internal */
+  public async preparePublishedPartVariants(
+    input: { directory: string; sources: Readonly<Record<string, string>> },
+    signal?: AbortSignal,
+  ): Promise<PreparedPublishedPart> {
+    return this.enqueueOperation(async () => this.preparePublishedPartVariantsInLane(input), signal);
+  }
+
+  /** Resolve an authored project file through this worker's rooted filesystem and producer lane. @internal */
+  public async resolveAuthoredAssembly(
+    input: { authoredPath: string; directory: string },
+    signal?: AbortSignal,
+  ): Promise<Awaited<ReturnType<typeof resolveAuthoredGraph>>> {
+    return this.enqueueOperation(async () => {
+      const authored = await readAuthoredAssembly(this.filesystem, input.authoredPath);
+      return resolveAuthoredGraph(this.filesystem, authored, {
+        produce: async (sources) => this.preparePublishedPartVariantsInLane({ directory: input.directory, sources }),
+      });
+    }, signal);
+  }
+
+  /** Resolve and commit an authored graph against a root snapshot captured before producer work. @internal */
+  public async publishAuthoredAssemblyRoot(
+    input: { authoredPath: string; publicationPath: string; directory: string },
+    signal?: AbortSignal,
+  ): Promise<Awaited<ReturnType<typeof commitAuthoredAssemblyRoot>>> {
+    const normalized = {
+      authoredPath: assertRootedPath(input.authoredPath),
+      publicationPath: assertRootedPath(input.publicationPath),
+      directory: assertRootedPath(input.directory),
+    };
+    const protectedPrefix = '.tau/artifacts/reusable-parts';
+    const requiresHostWriter =
+      normalized.publicationPath === protectedPrefix ||
+      normalized.publicationPath.startsWith(`${protectedPrefix}/`) ||
+      normalized.directory === protectedPrefix ||
+      normalized.directory.startsWith(`${protectedPrefix}/`);
+    if (!this.publicationFileSystem && (this.fileSystem?.capabilities.writable === false || requiresHostWriter)) {
+      return {
+        outcome: {
+          status: 'invalid',
+          issues: [
+            {
+              code: 'SCENE_REFERENCE_INVALID',
+              path: input.authoredPath,
+              message:
+                requiresHostWriter && this.fileSystem?.capabilities.writable !== false
+                  ? 'Protected authored assembly publication requires captured host publication authority.'
+                  : 'Authored assembly publication is unavailable for a read-only rooted authority.',
+              recovery: 'Open a writable project authority before publishing an authored assembly.',
+            },
+          ],
+        },
+      };
+    }
+    if (this.publicationFileSystem) {
+      const directory = `.tau/artifacts/reusable-parts/${await sha256String(normalized.authoredPath)}`;
+      if (normalized.directory !== directory || normalized.publicationPath !== `${directory}/scene.json`) {
+        return {
+          outcome: {
+            status: 'invalid',
+            issues: [
+              {
+                code: 'SCENE_REFERENCE_INVALID',
+                path: normalized.publicationPath,
+                message: 'Publication target must match the admitted authored entry managed parent.',
+                recovery: 'Use the canonical managed scene path derived from the admitted authored entry.',
+              },
+            ],
+          },
+        };
+      }
+    }
+    const path = normalized.publicationPath;
+    const prior = this.assemblyBindings.get(path);
+    if (prior) {
+      this.cancelAssemblyRefresh(prior);
+    }
+    return this.enqueueOperation(async () => this.publishAuthoredAssemblyInLane(normalized, prior), signal);
+  }
+
+  /** Restrict every delegated write and CAS guard to this publication's derived parent. */
+  private publicationWriterFor(directory: string): Pick<KernelFileSystem, 'ensureDir' | 'writeFileChecked'> {
+    const writer = this.publicationFileSystem;
+    if (!writer?.writeFileChecked) {
+      throw new Error('Checked host publication authority is unavailable.');
+    }
+    const checkedWrite = writer.writeFileChecked;
+    const signal = this.operationSignal ?? neverAbortedSignal;
+    const operationId = this.currentOperationId;
+    const within = (path: string): string => {
+      signal.throwIfAborted();
+      if (
+        !this.operationAdmissionOpen ||
+        this.publicationFileSystem !== writer ||
+        this.operationSignal !== signal ||
+        operationId === undefined ||
+        this.currentOperationId !== operationId
+      ) {
+        throw new Error('Captured publication authority is no longer active.');
+      }
+      const canonical = assertRootedPath(path);
+      if (canonical !== directory && !canonical.startsWith(`${directory}/`)) {
+        throw new Error('Publication operation escapes its admitted entry managed parent.');
+      }
+      return canonical;
+    };
+    return {
+      ensureDir: async (path) => writer.ensureDir(within(path)),
+      writeFileChecked: async (input) => {
+        const checked = {
+          ...input,
+          path: within(input.path),
+          preconditions: input.preconditions.map((condition) => ({ ...condition, path: within(condition.path) })),
+        };
+        within(checked.path);
+        return checkedWrite(checked);
+      },
+    };
+  }
+
+  /** Rebind an unchanged authored closure to its checked persisted root without production. */
+  private async reusePersistedAssemblyInLane(
+    input: AssemblyBinding['input'],
+  ): Promise<Awaited<ReturnType<typeof commitAuthoredAssemblyRoot>> | undefined> {
+    if (!this.admitAssemblyDisplay || input.authoredPath === input.publicationPath) {
+      return undefined;
+    }
+    const snapshot = await readCommittedAssemblyRoot(this.filesystem, input.publicationPath);
+    if (snapshot.status !== 'present') {
+      return undefined;
+    }
+    let candidateBinding: AssemblyBinding | undefined;
+    try {
+      let authoredBytes: Uint8Array<ArrayBuffer> | undefined;
+      const authored = await readAuthoredAssembly(this.filesystem, input.authoredPath, (_value, bytes) => {
+        authoredBytes = bytes;
+      });
+      const allInline = new Set<string>();
+      const fileBackedEntries = new Set<string>();
+      for (const recipe of Object.values(authored.parts)) {
+        if (!recipe.publishedPart) {
+          for (const source of [
+            recipe.source,
+            ...Object.values(recipe.variants ?? {}).map((variant) => variant.source),
+          ]) {
+            if (source.path !== undefined) {
+              const path = assertRootedPath(source.path);
+              if (path === input.authoredPath || path === input.publicationPath) {
+                return undefined;
+              }
+              fileBackedEntries.add(path);
+            }
+            for (const file of Object.keys(source.files ?? {})) {
+              const path = assertRootedPath(file);
+              if (path === input.authoredPath || path === input.publicationPath) {
+                return undefined;
+              }
+              allInline.add(path);
+            }
+          }
+        }
+      }
+      if ([...allInline].some((path) => fileBackedEntries.has(path))) {
+        return undefined;
+      }
+      const root = await readPinnedPublishedAssemblyRoot(this.filesystem, snapshot.root);
+      const persisted = await resolvePinnedAssembly(this.filesystem, {
+        schemaVersion: 1,
+        parts: Object.fromEntries(Object.entries(root.parts).map(([name, publishedPart]) => [name, { publishedPart }])),
+        occurrences: root.occurrences,
+      });
+      if (canonicalJson(Object.keys(authored.parts).sort()) !== canonicalJson(Object.keys(root.parts).sort())) {
+        return undefined;
+      }
+      const references = new Map<string, PublishedPartReference>();
+      for (const [name, recipe] of Object.entries(authored.parts)) {
+        const reference = root.parts[name];
+        const record = persisted.records[name];
+        if (!reference || !record) {
+          return undefined;
+        }
+        if (recipe.publishedPart) {
+          if (canonicalJson(recipe.publishedPart) !== canonicalJson(reference)) {
+            return undefined;
+          }
+          continue;
+        }
+        if (Object.hasOwn(recipe.variants ?? {}, 'default')) {
+          return undefined;
+        }
+        const sources = {
+          default: recipe.source,
+          ...Object.fromEntries(Object.entries(recipe.variants ?? {}).map(([name, value]) => [name, value.source])),
+        };
+        if (canonicalJson(Object.keys(sources).sort()) !== canonicalJson(Object.keys(record.variants).sort())) {
+          return undefined;
+        }
+        const recordedVariants = new Map(Object.entries(record.variants));
+        for (const [variantName, source] of Object.entries(sources)) {
+          const revision = recordedVariants.get(variantName)?.source;
+          const entry = source.path ?? source.entry ?? Object.keys(source.files)[0];
+          if (!revision || revision.entry !== entry) {
+            return undefined;
+          }
+          for (const path of Object.keys(source.files ?? {})) {
+            if (!Object.hasOwn(revision.files, path)) {
+              return undefined;
+            }
+          }
+          for (const [path, expected] of Object.entries(revision.files)) {
+            const inline = source.files?.[path];
+            if (inline === undefined) {
+              // A file-backed closure may not gain another recipe's inline staging authority.
+              if (allInline.has(path)) {
+                return undefined;
+              }
+              // oxlint-disable-next-line no-await-in-loop -- Verify each exact captured durable revision before reuse.
+              const current = await this.readObservedRevision(path);
+              if ((current.hash === 'missing' ? 'missing' : `sha256:${current.hash}`) !== expected) {
+                return undefined;
+              }
+            } else {
+              // oxlint-disable-next-line no-await-in-loop -- Verify each captured inline revision in the eligibility lane.
+              const inlineHash = await sha256String(inline);
+              if (expected !== `sha256:${inlineHash}`) {
+                return undefined;
+              }
+            }
+          }
+        }
+        references.set(name, reference);
+      }
+      const resolved = await resolveAuthoredGraph(this.filesystem, authored, {
+        reusePart: async (name) => references.get(name),
+        produce: async () => {
+          throw new Error('Persisted assembly reuse must not enter a producer lane.');
+        },
+      });
+      if (
+        canonicalJson(resolved.parts) !== canonicalJson(root.parts) ||
+        canonicalJson(resolved.occurrences) !== canonicalJson(root.occurrences) ||
+        !authoredBytes
+      ) {
+        return undefined;
+      }
+      const authoredHash = await sha256Bytes(authoredBytes);
+      const currentAuthored = await this.readObservedRevision(input.authoredPath);
+      if (currentAuthored.hash !== authoredHash) {
+        return undefined;
+      }
+      await readPinnedPublishedAssemblyRoot(this.filesystem, snapshot.root);
+      const admitted = await admitPublishedAssemblyRoot(this.filesystem, snapshot.root, this.admitAssemblyDisplay);
+      await this.discoverAdmittedAssemblyCapabilities(admitted);
+      const receipt: Awaited<ReturnType<typeof commitAuthoredAssemblyRoot>> = {
+        outcome: { status: 'published', root: snapshot.root, generation: snapshot.generation },
+        partRecords: admitted.partRecords,
+        publication: admitted.publication,
+      };
+      const binding = this.createAssemblyBinding({ input, authored, authoredHash, receipt });
+      candidateBinding = binding;
+      this.assemblyBindings.set(input.publicationPath, binding);
+      await this.ensureAssemblyWatch(binding);
+      for (const [path, expected] of binding.revisions) {
+        // oxlint-disable-next-line no-await-in-loop -- Verify the exact closure after the read-to-arm fence.
+        const currentRevision = await this.readObservedRevision(path);
+        if (currentRevision.hash !== expected) {
+          this.cancelAssemblyRefresh(binding);
+          return undefined;
+        }
+      }
+      const current = await readCommittedAssemblyRoot(this.filesystem, input.publicationPath);
+      this.operationSignal?.throwIfAborted();
+      if (current.status !== 'present' || canonicalJson(current.root) !== canonicalJson(snapshot.root)) {
+        this.cancelAssemblyRefresh(binding);
+        if (this.assemblyBindings.get(input.publicationPath) === binding) {
+          this.assemblyBindings.delete(input.publicationPath);
+          await this.reconcileObservedPaths();
+        }
+        return undefined;
+      }
+      return receipt;
+    } catch {
+      if (candidateBinding) {
+        this.cancelAssemblyRefresh(candidateBinding);
+        if (this.assemblyBindings.get(input.publicationPath) === candidateBinding) {
+          this.assemblyBindings.delete(input.publicationPath);
+          try {
+            await this.reconcileObservedPaths();
+          } catch {
+            // Normal publication owns retry; a cleanup refusal must not replace the original abort.
+          }
+        }
+      }
+      this.operationSignal?.throwIfAborted();
+      // Refused reuse proofs retain normal publication validation and repair outcomes.
+      return undefined;
+    }
+  }
+
+  private async publishAuthoredAssemblyInLane(
+    input: AssemblyBinding['input'],
+    prior?: AssemblyBinding,
+  ): Promise<Awaited<ReturnType<typeof commitAuthoredAssemblyRoot>>> {
+    this.tracer.reset();
+    const publicationSpan = this.tracer.startSpan('kernel.render', { file: input.authoredPath });
+    try {
+      if (!prior) {
+        const reused = await this.reusePersistedAssemblyInLane(input);
+        if (reused) {
+          publicationSpan.end({
+            status: reused.outcome.status,
+            ...(reused.outcome.status === 'published'
+              ? { digest: reused.outcome.root.digest, generation: reused.outcome.generation }
+              : {}),
+          });
+          return reused;
+        }
+        prior = this.assemblyBindings.get(input.publicationPath);
+      }
+      let authored: AuthoredAssembly | undefined;
+      let authoredBytes: Uint8Array<ArrayBuffer> | undefined;
+      const retryPaths = new Set<string>();
+      const publicationWriter = this.publicationFileSystem ? this.publicationWriterFor(input.directory) : undefined;
+      const { currentOperationId: operationId, operationSignal: signal } = this;
+      if (operationId === undefined || signal === undefined) {
+        throw new Error('Authored publication requires its current serialized operation.');
+      }
+      const publication: AuthoredPublicationOperation = { operationId, signal };
+      const receipt = await commitAuthoredAssemblyRoot(this.filesystem, input, {
+        publicationWriter,
+        produce: async (sources) =>
+          this.preparePublishedPartVariantsInLane({
+            directory: input.directory,
+            sources,
+            retryPaths,
+            publicationWriter,
+            publication,
+          }),
+        admitDisplay: this.admitAssemblyDisplay,
+        onReadAuthored: (value, bytes) => {
+          authored = value;
+          authoredBytes = bytes;
+        },
+        reusePart: async (name, recipe) => this.reuseAssemblyPart({ binding: prior, input, name, recipe }),
+        preflightSourceOwnership: async (value, inlineFiles) => {
+          if (inlineFiles.size === 0) {
+            return;
+          }
+          for (const recipe of Object.values(value.parts)) {
+            if (recipe.publishedPart) {
+              continue;
+            }
+            for (const source of [
+              recipe.source,
+              ...Object.values(recipe.variants ?? {}).map((variant) => variant.source),
+            ]) {
+              if (source.path === undefined) {
+                continue;
+              }
+              const path = assertRootedPath(source.path);
+              const separator = path.lastIndexOf('/');
+              const file = this.canonicalGeometryFile({
+                path: separator === -1 ? '' : path.slice(0, separator),
+                filename: path.slice(separator + 1),
+              });
+              // oxlint-disable-next-line no-await-in-loop -- Discovery precedes every source stage and producer call.
+              const snapshot = await this.snapshotSourceInLane({ file });
+              if (snapshot.success) {
+                for (const path of snapshot.data.unresolvedPaths) {
+                  retryPaths.add(path);
+                }
+              }
+              if (!snapshot.success || !snapshot.sourceRevision) {
+                throw new Error(`Cannot preflight file-backed source ${path}.`);
+              }
+              for (const dependency of Object.keys(snapshot.sourceRevision.files)) {
+                if (inlineFiles.has(assertRootedPath(dependency))) {
+                  throw new TypeError(`File-backed source ${path} depends on inline source file ${dependency}.`);
+                }
+              }
+              this.operationSignal?.throwIfAborted();
+            }
+          }
+        },
+        verifyBeforeCommit: async (value, resolved) => {
+          const authoredRevision = await this.readObservedRevision(input.authoredPath);
+          if (!authoredBytes || authoredRevision.hash !== (await sha256Bytes(authoredBytes))) {
+            throw new Error('Authored assembly changed during publication.');
+          }
+          const expected = new Map<string, string>();
+          for (const [name, recipe] of Object.entries(value.parts)) {
+            if (recipe.publishedPart) {
+              continue;
+            }
+            const record = resolved.records[name];
+            for (const [variantName, variant] of Object.entries(record?.variants ?? {})) {
+              const source = variantName === 'default' ? recipe.source : recipe.variants?.[variantName]?.source;
+              const inline = new Set(Object.keys(source?.files ?? {}).map((path) => assertRootedPath(path)));
+              for (const [path, digest] of Object.entries(variant.source.files)) {
+                const rooted = assertRootedPath(path);
+                if (inline.has(rooted)) {
+                  continue;
+                }
+                const hash = digest === 'missing' ? 'missing' : digest.slice('sha256:'.length);
+                const earlier = expected.get(rooted);
+                if (earlier !== undefined && earlier !== hash) {
+                  throw new Error(`Source ${rooted} has conflicting revisions in one assembly.`);
+                }
+                expected.set(rooted, hash);
+              }
+            }
+          }
+          for (const [path, hash] of expected) {
+            // oxlint-disable-next-line no-await-in-loop -- Verify the published closure immediately before root dispatch.
+            const revision = await this.readObservedRevision(path);
+            if (revision.hash !== hash) {
+              throw new Error(`Source ${path} changed during publication.`);
+            }
+          }
+        },
+        signal: this.operationSignal,
+      });
+      if (
+        receipt.outcome.status === 'published' &&
+        authored &&
+        authoredBytes &&
+        receipt.partRecords &&
+        receipt.publication
+      ) {
+        await this.discoverAdmittedAssemblyCapabilities({
+          publication: receipt.publication,
+          partRecords: receipt.partRecords,
+        });
+        const binding = this.createAssemblyBinding({
+          input,
+          authored,
+          authoredHash: await sha256Bytes(authoredBytes),
+          receipt,
+        });
+        this.assemblyBindings.set(assertRootedPath(input.publicationPath), binding);
+        this.pruneRetiredAssemblyPaths(prior, binding);
+        await this.ensureAssemblyWatch(binding);
+      } else if (receipt.outcome.status === 'invalid' && input.authoredPath !== input.publicationPath) {
+        const binding =
+          prior?.input.authoredPath === input.authoredPath && prior.input.directory === input.directory
+            ? prior
+            : {
+                input,
+                revisions: new Map<string, string>(),
+                parts: new Map(),
+                generation: 0,
+              };
+        if (!binding.revisions.has(input.authoredPath)) {
+          let authoredRevision: string;
+          if (authoredBytes) {
+            authoredRevision = await sha256Bytes(authoredBytes);
+          } else {
+            const observed = await this.readObservedRevision(input.authoredPath);
+            authoredRevision = observed.hash;
+          }
+          binding.revisions.set(input.authoredPath, authoredRevision);
+        }
+        await this.augmentAssemblyRetryPaths(binding, authored, retryPaths);
+        this.assemblyBindings.set(input.publicationPath, binding);
+        await this.ensureAssemblyWatch(binding);
+      }
+      publicationSpan.end({
+        status: receipt.outcome.status,
+        ...(receipt.outcome.status === 'published'
+          ? { digest: receipt.outcome.root.digest, generation: receipt.outcome.generation }
+          : {}),
+      });
+      return receipt;
+    } finally {
+      publicationSpan.end();
+      try {
+        this.flushTelemetry();
+      } catch (error) {
+        try {
+          this.logger.warn('Publication telemetry delivery failed', {
+            data: { error: error instanceof Error ? error.message : String(error) },
+          });
+        } catch {
+          // Host logging is observational and must preserve the publication outcome.
+        }
+      }
+    }
+  }
+
+  private async reuseAssemblyPart({
+    binding,
+    input,
+    name,
+    recipe,
+  }: {
+    binding: AssemblyBinding | undefined;
+    input: AssemblyBinding['input'];
+    name: string;
+    recipe: AuthoredPartRecipe;
+  }): Promise<PublishedPartReference | undefined> {
+    if (
+      !binding ||
+      binding.input.authoredPath !== input.authoredPath ||
+      binding.input.directory !== input.directory ||
+      recipe.publishedPart
+    ) {
+      return undefined;
+    }
+    const retained = binding.parts.get(name);
+    if (!retained || retained.recipe !== canonicalJson(recipe)) {
+      return undefined;
+    }
+    for (const [path, expected] of retained.revisions) {
+      // oxlint-disable-next-line no-await-in-loop -- One coherent part closure is checked before its receipt is reused.
+      const revision = await this.readObservedRevision(path);
+      if (revision.hash !== expected) {
+        return undefined;
+      }
+    }
+    this.operationSignal?.throwIfAborted();
+    return retained.reference;
+  }
+
+  private createAssemblyBinding({
+    input,
+    authored,
+    authoredHash,
+    receipt,
+  }: {
+    input: AssemblyBinding['input'];
+    authored: AuthoredAssembly;
+    authoredHash: string;
+    receipt: Awaited<ReturnType<typeof commitAuthoredAssemblyRoot>>;
+  }): AssemblyBinding {
+    const revisions = new Map<string, string>([[assertRootedPath(input.authoredPath), authoredHash]]);
+    const parts: AssemblyBinding['parts'] = new Map();
+    for (const [name, recipe] of Object.entries(authored.parts)) {
+      if (recipe.publishedPart) {
+        continue;
+      }
+      const record = receipt.publication?.parts[name];
+      const reference = receipt.partRecords?.[name];
+      if (!record || !reference) {
+        continue;
+      }
+      const partRevisions = new Map<string, string>();
+      for (const [variantName, variant] of Object.entries(record.variants)) {
+        const source = variantName === 'default' ? recipe.source : recipe.variants?.[variantName]?.source;
+        const inline = new Set(Object.keys(source?.files ?? {}).map((path) => assertRootedPath(path)));
+        for (const [path, digest] of Object.entries(variant.source.files)) {
+          const rooted = assertRootedPath(path);
+          if (!inline.has(rooted)) {
+            const hash = digest === 'missing' ? 'missing' : digest.slice('sha256:'.length);
+            partRevisions.set(rooted, hash);
+            revisions.set(rooted, hash);
+          }
+        }
+      }
+      parts.set(name, { recipe: canonicalJson(recipe), reference, revisions: partRevisions });
+    }
+    for (const [path, hash] of revisions) {
+      this.fileHashCache.set(path, hash);
+    }
+    return { input, revisions, parts, generation: 0 };
+  }
+
+  private pruneRetiredAssemblyPaths(prior: AssemblyBinding | undefined, replacement: AssemblyBinding): void {
+    if (!prior) {
+      return;
+    }
+    const retired: string[] = [];
+    for (const path of prior.revisions.keys()) {
+      if (
+        replacement.revisions.has(path) ||
+        [...this.documents.values()].some((document) => !document.closed && document.watchPaths.has(path)) ||
+        [...this.bundleResultCache.values()].some(
+          (result) => result.dependencies.includes(path) || result.unresolvedPaths.includes(path),
+        ) ||
+        [...this.assemblyBindings.values()].some((binding) => binding.revisions.has(path))
+      ) {
+        continue;
+      }
+      this.fileHashCache.delete(path);
+      this.fileContentCache.delete(path);
+      retired.push(path);
+    }
+    this._invalidateBundleCachesForPaths(retired);
+  }
+
+  private async augmentAssemblyRetryPaths(
+    binding: AssemblyBinding,
+    authored: AuthoredAssembly | undefined,
+    retryPaths: ReadonlySet<string>,
+  ): Promise<void> {
+    const candidates = new Set(retryPaths);
+    for (const recipe of Object.values(authored?.parts ?? {})) {
+      if (recipe.publishedPart) {
+        continue;
+      }
+      for (const source of [recipe.source, ...Object.values(recipe.variants ?? {}).map((variant) => variant.source)]) {
+        if (source.path !== undefined) {
+          candidates.add(assertRootedPath(source.path));
+        }
+      }
+    }
+    for (const result of this.bundleResultCache.values()) {
+      for (const path of result.unresolvedPaths) {
+        candidates.add(assertRootedPath(path));
+      }
+    }
+    for (const path of candidates) {
+      if (path === binding.input.publicationPath || binding.revisions.has(path)) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Each newly discovered retry path needs a baseline before watch arm.
+      const revision = await this.readObservedRevision(path);
+      binding.revisions.set(path, revision.hash);
+      this.fileHashCache.set(path, revision.hash);
+    }
+  }
+
+  private async ensureAssemblyWatch(binding: AssemblyBinding): Promise<void> {
+    if (!this.operationAdmissionOpen || this.assemblyBindings.get(binding.input.publicationPath) !== binding) {
+      return;
+    }
+    try {
+      const changed = new Map<string, ObservedFileRevision>();
+      for (const [path, expected] of binding.revisions) {
+        // oxlint-disable-next-line no-await-in-loop -- Re-read exact source bytes across the read-to-arm window.
+        const revision = await this.readObservedRevision(path);
+        if (revision.hash !== expected && this.fileHashCache.get(path) !== revision.hash) {
+          changed.set(path, revision);
+        }
+      }
+      if (changed.size > 0) {
+        const paths = [...changed.keys()];
+        this._applyObservedRevisions(paths, changed);
+        this.signalAssemblyChanges(paths);
+      }
+      if (await this.reconcileObservedPaths()) {
+        return;
+      }
+      this.reportAssemblyRefreshError(
+        binding.input.publicationPath,
+        new Error('Assembly source watch arm was refused; retrying.'),
+      );
+    } catch (error) {
+      this.reportAssemblyRefreshError(binding.input.publicationPath, error);
+    }
+    binding.armTimer ??= setTimeout(() => {
+      binding.armTimer = undefined;
+      void this.retryAssemblyWatch(binding);
+    }, fileChangeDebounce);
+  }
+
+  private async retryAssemblyWatch(binding: AssemblyBinding): Promise<void> {
+    if (!this.operationAdmissionOpen) {
+      return;
+    }
+    try {
+      await this.enqueueOperation(async () => this.ensureAssemblyWatch(binding));
+    } catch (error) {
+      this.reportAssemblyRefreshError(binding.input.publicationPath, error);
+    }
+  }
+
+  private cancelAssemblyRefresh(binding: AssemblyBinding): void {
+    binding.generation++;
+    binding.controller?.abort();
+    binding.controller = undefined;
+    if (binding.timer) {
+      clearTimeout(binding.timer);
+      binding.timer = undefined;
+    }
+    if (binding.armTimer) {
+      clearTimeout(binding.armTimer);
+      binding.armTimer = undefined;
+    }
+  }
+
+  private signalAssemblyChanges(paths: readonly string[]): void {
+    if (!this.operationAdmissionOpen) {
+      return;
+    }
+    for (const binding of this.assemblyBindings.values()) {
+      if (!paths.some((path) => binding.revisions.has(path))) {
+        continue;
+      }
+      this.cancelAssemblyRefresh(binding);
+      const { generation } = binding;
+      binding.timer = setTimeout(() => {
+        binding.timer = undefined;
+        void this.refreshAssembly(binding, generation);
+      }, fileChangeDebounce);
+    }
+  }
+
+  private async refreshAssembly(binding: AssemblyBinding, generation: number): Promise<void> {
+    if (!this.operationAdmissionOpen || this.assemblyBindings.get(binding.input.publicationPath) !== binding) {
+      return;
+    }
+    const controller = new AbortController();
+    binding.controller = controller;
+    try {
+      const receipt = await this.enqueueOperation(async () => {
+        controller.signal.throwIfAborted();
+        return this.publishAuthoredAssemblyInLane(binding.input, binding);
+      }, controller.signal);
+      if (generation !== binding.generation) {
+        return;
+      }
+      if (receipt.outcome.status === 'invalid') {
+        this.reportAssemblyRefreshError(
+          binding.input.publicationPath,
+          new Error(receipt.outcome.issues.map((issue) => issue.message).join('; ')),
+        );
+      } else if (receipt.outcome.status === 'superseded') {
+        this.reportAssemblyRefreshError(
+          binding.input.publicationPath,
+          new Error('Another publisher advanced the shared assembly root; publish again to rebase.'),
+        );
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        this.reportAssemblyRefreshError(binding.input.publicationPath, error);
+      }
+    } finally {
+      if (binding.controller === controller) {
+        binding.controller = undefined;
+      }
+    }
+  }
+
+  private reportAssemblyRefreshError(publicationPath: string, error: unknown): void {
+    if (this.operationAdmissionOpen) {
+      this.onDocumentError?.({
+        scope: 'connection',
+        error: {
+          issues: [
+            {
+              code: 'RUNTIME',
+              type: 'runtime',
+              severity: 'error',
+              message: `Assembly ${publicationPath}: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        },
+      });
+    }
+  }
+
+  /** Read the currently committed shared root after a caller loses its receipt. @internal */
+  public async readPublishedAssemblyRoot(
+    publicationPath: string,
+    signal?: AbortSignal,
+  ): Promise<PublishedAssemblyRootSnapshot> {
+    return this.enqueueOperation(async () => readCommittedAssemblyRoot(this.filesystem, publicationPath), signal);
+  }
+  /** Re-admit a pinned root and its required display closure in this project authority. @internal */
+  public async openPublishedAssembly(
+    root: PublishedPartAsset,
+    signal?: AbortSignal,
+  ): Promise<PublishedAssemblyAdmission> {
+    return this.enqueueOperation(async () => {
+      if (!this.admitAssemblyDisplay) {
+        throw new Error('Assembly display admission is unavailable on this host.');
+      }
+      const assertCurrent = (): void => {
+        signal?.throwIfAborted();
+        if (!this.operationAdmissionOpen) {
+          throw new Error('Runtime worker is closing');
+        }
+      };
+      assertCurrent();
+      const admission = await admitPublishedAssemblyRoot(this.filesystem, root, this.admitAssemblyDisplay);
+      assertCurrent();
+      await this.discoverAdmittedAssemblyCapabilities(admission);
+      assertCurrent();
+      return admission;
+    }, signal);
+  }
+
+  private async discoverAdmittedAssemblyCapabilities(admission: PublishedAssemblyAdmission): Promise<void> {
+    const assertCurrent = (): void => {
+      this.operationSignal?.throwIfAborted();
+      if (!this.operationAdmissionOpen) {
+        throw new Error('Runtime worker is closing');
+      }
+    };
+    const kernelIds = new Set<string>();
+    const visit = (occurrences: readonly PublishedPartOccurrence[]): void => {
+      for (const occurrence of occurrences) {
+        if (occurrence.children) {
+          visit(occurrence.children);
+        } else {
+          const exact = admission.publication.parts[occurrence.part]?.variants[occurrence.variant]?.exact;
+          if (exact) {
+            kernelIds.add(exact.kernelId);
+          }
+        }
+      }
+    };
+    visit(admission.publication.occurrences);
+    await this.discoverPublishedCapabilities(kernelIds, assertCurrent, this.tracer);
+    assertCurrent();
+  }
+
+  private assertVerifiedPublicationSource(file: RuntimeFileLocator, proof: VerifiedPublicationSource): void {
+    proof.publication.signal.throwIfAborted();
+    const entryPath = assertRootedPath(joinRelativePath(file.path, file.filename));
+    if (
+      !this.operationAdmissionOpen ||
+      this.currentOperationId !== proof.publication.operationId ||
+      this.operationSignal !== proof.publication.signal ||
+      entryPath !== proof.entryPath ||
+      !Object.hasOwn(proof.sourceRevision.files, entryPath) ||
+      proof.sourceRevision.files[entryPath] === 'missing'
+    ) {
+      throw new Error('The verified authored-publication source is no longer owned by this child.');
+    }
+  }
+
+  private async preparePublishedPartVariantsInLane(input: {
+    directory: string;
+    sources: Readonly<Record<string, string | AuthoredAssemblySource>>;
+    retryPaths?: Set<string>;
+    publicationWriter?: Pick<KernelFileSystem, 'ensureDir' | 'writeFileChecked'>;
+    publication?: AuthoredPublicationOperation;
+  }): Promise<PreparedPublishedPart> {
+    const directory = assertRootedPath(input.directory);
+    if (!Object.hasOwn(input.sources, 'default')) {
+      throw new Error('A published part requires a default source.');
+    }
+    const variants = new Map<
+      string,
+      {
+        source: SourceRevision;
+        glb: Uint8Array<ArrayBuffer>;
+        optionalAbsentPaths: ReadonlySet<string>;
+        exact?: Omit<PublishedPartExact, 'asset'> & { bytes: Uint8Array<ArrayBuffer> };
+      }
+    >();
+    for (const [name, rawSource] of Object.entries(input.sources)) {
+      if (name.length === 0) {
+        throw new Error('Published variant name must not be empty.');
+      }
+      const source = authoredAssemblySourceSchema.parse(
+        typeof rawSource === 'string' ? { path: rawSource } : rawSource,
+      );
+      const sourcePath =
+        'path' in source
+          ? assertRootedPath(source.path)
+          : assertRootedPath(source.entry ?? Object.keys(source.files)[0]!);
+      if (sourcePath.length === 0) {
+        throw new TypeError('Published part sourcePath must name a file.');
+      }
+      const separator = sourcePath.lastIndexOf('/');
+      const file = this.canonicalGeometryFile({
+        path: separator === -1 ? '' : sourcePath.slice(0, separator),
+        filename: sourcePath.slice(separator + 1),
+      });
+      // One kernel lane owns each producer operation; variants run in authored order.
+      const stage =
+        'files' in source
+          ? Object.fromEntries(
+              Object.entries(source.files).map(([path, content]) => [path, new TextEncoder().encode(content)]),
+            )
+          : undefined;
+      let optionalAbsentPaths: ReadonlySet<string> = new Set();
+      // eslint-disable-next-line no-await-in-loop -- Each variant must finish before the next source is staged.
+      const before = await this.snapshotSourceInLane({ file, ...(stage ? { stage } : {}) }, (paths) => {
+        optionalAbsentPaths = paths;
+      });
+      if (before.success) {
+        for (const path of before.data.unresolvedPaths) {
+          input.retryPaths?.add(path);
+        }
+      }
+      if (!before.success || !before.sourceRevision || before.data.unresolvedPaths.length > 0) {
+        throw new Error(`Cannot publish part ${sourcePath}: a complete source snapshot is unavailable.`);
+      }
+      // BEFORE still refreshes every retained file. Only this outer publication may
+      // avoid repeating that global walk; selected AFTER bytes and final ALL sources remain independent.
+      const verifiedPublicationSource: VerifiedPublicationSource | undefined = input.publication
+        ? { publication: input.publication, entryPath: sourcePath, sourceRevision: before.sourceRevision }
+        : undefined;
+      let exact: (Omit<PublishedPartExact, 'asset'> & { bytes: Uint8Array<ArrayBuffer> }) | undefined;
+      let producedArtifact: MaterializedRender | undefined;
+      /* eslint-disable no-await-in-loop -- One kernel lane owns ordered variant production. */
+      const result = await this.evaluateModelInLane(
+        { file, parameters: {}, options: {} },
+        (artifact) => {
+          producedArtifact = artifact;
+          exact = this.capturePublishedExactSnapshot(artifact);
+        },
+        { optionalContent: { includeEdges: true, includePhysical: true }, verifiedPublicationSource },
+      );
+      /* eslint-enable no-await-in-loop -- Ordered variant production ends here. */
+      if (!result.success) {
+        throw new Error(`Cannot publish part ${sourcePath}: ${result.issues.map((issue) => issue.message).join('; ')}`);
+      }
+      const display = asKnownArtifact(result.data);
+      if (display?.mimeType !== 'model/gltf-binary') {
+        throw new Error(`Cannot publish part ${sourcePath}: the completed display artifact is not a GLB.`);
+      }
+      const publishedFiles = before.sourceRevision.files;
+      const evaluatedFiles = [
+        ...Object.entries(result.sourceRevision?.files ?? {}).map(([path, digest]) => ({ path, digest })),
+        ...(producedArtifact?.identity.dependencies ?? [])
+          .filter((dependency) => dependency.type === 'file')
+          .map((dependency) => ({
+            path: dependency.path,
+            digest: dependency.contentHash === 'missing' ? 'missing' : `sha256:${dependency.contentHash}`,
+          })),
+      ];
+      if (
+        !producedArtifact ||
+        !result.sourceRevision ||
+        evaluatedFiles.some(
+          ({ path, digest }) => !Object.hasOwn(publishedFiles, path) || publishedFiles[path] !== digest,
+        )
+      ) {
+        throw new Error(
+          `Cannot publish part ${sourcePath}: evaluated dependency closure differs from its source snapshot.`,
+        );
+      }
+      // eslint-disable-next-line no-await-in-loop -- Match this variant's source before staging the next.
+      const after = await this.snapshotSourceInLane({ file }, undefined, verifiedPublicationSource);
+      if (
+        !after.success ||
+        !after.sourceRevision ||
+        after.data.unresolvedPaths.length > 0 ||
+        JSON.stringify(before.sourceRevision) !== JSON.stringify(after.sourceRevision)
+      ) {
+        throw new Error(`Cannot publish part ${sourcePath}: source changed during production.`);
+      }
+      variants.set(
+        name,
+        exact
+          ? { source: before.sourceRevision, glb: display.content, optionalAbsentPaths, exact }
+          : {
+              source: before.sourceRevision,
+              glb: display.content,
+              optionalAbsentPaths,
+            },
+      );
+      this.operationSignal?.throwIfAborted();
+    }
+    const prepared = await persistCompletedPartVariants({
+      filesystem: this.filesystem,
+      publicationWriter: input.publicationWriter,
+      directory,
+      variants: Object.fromEntries(variants),
+    });
+    await this.reconcileObservedPaths();
+    return prepared;
+  }
+
+  private capturePublishedExactSnapshot(
+    artifact: MaterializedRender,
+  ): (Omit<PublishedPartExact, 'asset'> & { bytes: Uint8Array<ArrayBuffer> }) | undefined {
+    if (!this.hasNativeSnapshotDescriptorForOwner(artifact.owner)) {
+      return undefined;
+    }
+    const slot = this.getSerializedNativeHandleSlotForIdentity(artifact.identity, artifact);
+    if (!slot || !this.serializedSlotMatchesOwner(slot, artifact.owner)) {
+      return undefined;
+    }
+    try {
+      const snapshot = slot.serializedNativeHandle;
+      if (snapshot === undefined || snapshot === null) {
+        return undefined;
+      }
+      const descriptor = this.describeNativeSnapshotForOwner(artifact.owner, snapshot, this.createRuntime());
+      if (!descriptor) {
+        return undefined;
+      }
+      if (!artifact.owner.binding?.kernelId) {
+        return undefined;
+      }
+      return { ...descriptor, kernelId: artifact.owner.binding.kernelId, bytes: msgpackCodec.encode(snapshot) };
+    } catch (error) {
+      this.logger.warn('Exact native snapshot unavailable; publishing display only', {
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+      return undefined;
+    }
+  }
+
+  private projectOptionalRenderContent(
+    owner: OperationOwner,
+    content: RuntimeContentInput | undefined,
+    optionalContent: RuntimeContentInput | undefined,
+  ): RuntimeContentInput {
+    const supported = this.getRenderContentKeys(owner);
+    const projected = Object.fromEntries(
+      Object.entries(optionalContent ?? {}).filter(([key]) => supported.includes(key as RuntimeContentKey)),
+    );
+    return { ...projected, ...content };
+  }
+
+  /** Admit a durable pinned record and its required display closure without running a producer. @internal */
+  public async admitPublishedPart(
+    reference: PublishedPartReference,
+    signal?: AbortSignal,
+  ): Promise<PublishedPartRecord> {
+    return this.enqueueOperation(async () => {
+      const assertCurrent = (): void => {
+        signal?.throwIfAborted();
+        if (!this.operationAdmissionOpen) {
+          throw new Error('Runtime worker is closing');
+        }
+      };
+      assertCurrent();
+      const record = await admitPinnedPart(this.filesystem, reference);
+      assertCurrent();
+      const kernelIds = new Set(
+        Object.values(record.variants).flatMap((variant) => (variant.exact ? [variant.exact.kernelId] : [])),
+      );
+      await this.discoverPublishedCapabilities(kernelIds, assertCurrent, this.tracer);
+      assertCurrent();
+      return record;
+    }, signal);
+  }
+
+  /** Read an owned asset copy only after the pinned record closure is reverified. @internal */
+  public async readPublishedPartAsset(
+    reference: PublishedPartReference,
+    digest: PublishedPartAsset['digest'],
+    signal?: AbortSignal,
+  ): Promise<Uint8Array<ArrayBuffer>> {
+    return this.enqueueOperation(async () => readPinnedPartAsset(this.filesystem, reference, digest), signal);
+  }
+
+  /** Commit pinned parts through the shared checked filesystem authority. @internal */
+  public async publishPartsRoot(
+    input: { path: string; parts: Readonly<Record<string, PublishedPartReference>> },
+    signal?: AbortSignal,
+  ): Promise<PublishedPartsRootOutcome> {
+    return this.enqueueOperation(
+      async () => commitPinnedPartsRoot(this.filesystem, input, this.operationSignal),
+      signal,
+    );
+  }
+
+  private async evaluateModelInLane(
+    input: {
+      file: RuntimeFileLocator;
+      parameters: Record<string, unknown>;
+      options?: Record<string, unknown>;
+      content?: RuntimeContentInput;
+      stage?: Record<string, Uint8Array<ArrayBuffer>>;
+    },
+    onArtifact?: (artifact: MaterializedRender) => void,
+    options?: {
+      optionalContent?: RuntimeContentInput;
+      verifiedPublicationSource?: VerifiedPublicationSource;
+    },
+  ): Promise<RenderResult> {
+    const renderSpan = this.tracer.startSpan('kernel.evaluate-model', {
+      file: input.file.filename,
+    });
+    const dependencyContext: DependencyResolutionContext = {};
+
+    try {
+      if (input.stage) {
+        if (options?.verifiedPublicationSource) {
+          throw new Error('A verified publication source cannot stage replacement bytes.');
+        }
+        await this.writeFilesAndInvalidate(input.stage);
+      }
+      if (options?.verifiedPublicationSource) {
+        this.assertVerifiedPublicationSource(input.file, options.verifiedPublicationSource);
+      } else {
+        await this.revalidateRetainedFiles();
+      }
+      const owner = await this.createOperationOwner(input.file, 'request');
+      const parametersResult = await this.getParametersInLane(input.file, { dependencyContext, owner });
+      if (!parametersResult.success) {
+        return parametersResult;
+      }
+
+      const extracted = parametersResult.data;
+      // R4/I5: everything this lane returns from here on was computed from that source revision,
+      // failures included — a render that failed against replaced bytes must not read as current.
+      const { sourceRevision } = parametersResult;
+      if (extracted.legacyProjection.status !== 'usable') {
+        return {
+          ...createKernelError([
+            {
+              message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+              code: 'RUNTIME',
+              type: 'kernel',
+              severity: 'error',
+              details: extracted.legacyProjection.diagnostics,
+            },
+          ]),
+          sourceRevision,
+        };
+      }
+      const callerParameters = mergeParameterDefaults({}, input.parameters, extracted.legacyProjection.schema);
+
+      const { artifact } = await this.materializeRender(
+        {
+          file: input.file,
+          parameters: callerParameters,
+          parameterDefaults: extracted.defaults,
+          parameterManifest: extracted,
+          parameterSchema: extracted.legacyProjection.schema,
+          options: input.options,
+          content: this.projectOptionalRenderContent(owner, input.content, options?.optionalContent),
+        },
+        { dependencyContext, owner },
+      );
+      const evaluated = artifact.result;
+      if (!evaluated.success) {
+        return { ...evaluated, sourceRevision };
+      }
+      const selection = this.selectDefaultViewForOwner(owner, artifact.evaluationSlot?.offers ?? {});
+      const requestedContent = this.projectOptionalRenderContent(owner, input.content, options?.optionalContent);
+      const resolvedMiddleware = this.getMeshExecutionList(owner, requestedContent);
+      const dependencies = await this.computeDependencies({
+        operations: ['evaluate', 'render'],
+        parameters: artifact.identity.parameters,
+        renderOptions: {},
+        content: requestedContent,
+        resolvedMiddleware: this.mergeExecutionLists(
+          this.getCreateExecutionList(owner, artifact.identity.content, false),
+          resolvedMiddleware,
+        ),
+        owner,
+      });
+      const identity = {
+        ...artifact.identity,
+        dependencies,
+        dependencyHash: await this.computeDependencyHash(dependencies),
+      };
+      const result = await this.runMeshPhase({
+        owner,
+        identity,
+        selection,
+        renderOptions: {},
+        requestedContent,
+        resolvedMiddleware,
+        createResult: { success: true, data: undefined, issues: evaluated.issues },
+        renderArtifact: artifact,
+      });
+      if (!result.success) {
+        return { ...result, sourceRevision };
+      }
+      onArtifact?.(artifact);
+      return { ...result, data: result.data, sourceRevision };
+    } finally {
+      renderSpan.end();
+    }
+  }
+
+  /**
    * Selectively invalidate file caches for changed paths.
    * Called by the kernel machine before render operations when files have changed.
    *
@@ -3133,6 +5137,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public async notifyFileChanged(changedPaths: readonly string[]): Promise<void> {
     const paths = [...new Set(changedPaths.map((path) => assertRootedPath(path)))];
+    this.signalAssemblyChanges(paths);
     await this.enqueueOperation(async () => this.routeExactChangedPaths(paths));
   }
 
@@ -3321,6 +5326,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       owner?: OperationOwner;
     },
   ): Promise<{ artifact: MaterializedRender }> {
+    const documentOperation = this.activeDocumentOperation;
     const owner = options.owner ?? (await this.createOperationOwner(entry.file, 'request'));
     const ownerFilePath = assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename));
     const start = performance.now();
@@ -3397,6 +5403,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const geoDepsSpan = this.tracer.startSpan('kernel.resolve-deps', {
       phase: 'resolvingDeps',
+      entryPath: ownerFilePath,
+      ...(owner.binding ? { kernelId: owner.binding.kernelId } : {}),
+      ...documentOperation,
     });
     const dependencies = await this.computeDependencies({
       operations: ['evaluate', ...(entry.export ? (['export'] as const) : [])],
@@ -3444,7 +5453,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             onLog: this.onLog,
             middlewareName: middleware.name,
             filesystem: this.filesystem,
-            compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal),
+            compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal, {
+              owner,
+              documentOperation,
+            }),
             dependencies: nativeHandleDependencies,
             dependencyHash: nativeHandleKey,
             stateSchema: middleware.stateSchema,
@@ -3459,7 +5471,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     let chain: (input: EvaluateRequest) => Promise<EvaluateResult> = named(
       'kernelHandler',
       async (handlerInput: EvaluateRequest) => {
-        const computeSpan = tracer.startSpan('kernel.compute');
+        const computeSpan = tracer.startSpan('kernel.compute', {
+          entryPath: ownerFilePath,
+          ...(owner.binding ? { kernelId: owner.binding.kernelId } : {}),
+          ...documentOperation,
+        });
         const createSchema = owner.binding?.kernelId
           ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
           : undefined;
@@ -3567,7 +5583,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
         let result: EvaluateResult;
         try {
-          result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
+          result = await this.onEvaluateForOwner(
+            owner,
+            kernelInput,
+            this.createRuntime({ owner, documentOperation }),
+            evaluationSlot,
+          );
           if (result.success) {
             evaluationSlot.terminalOffers = result.data;
             evaluationSlot.terminalIssues = [...result.issues];
@@ -3596,6 +5617,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         chain = named(`middleware(${middlewareName})`, async (handlerInput: EvaluateRequest) => {
           const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
             middleware: middlewareName,
+            ...documentOperation,
           });
           try {
             const result = await wrapHook(handlerInput, inner, runtime);
@@ -4137,6 +6159,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.onCapabilitiesUpdated?.(this._capabilitiesManifest);
   }
 
+  /** Discover installed export metadata after display admission, without initializing a native producer. */
+  protected async discoverPublishedCapabilities(
+    _kernelIds: ReadonlySet<string>,
+    _assertCurrent: () => void,
+    _tracer: KernelRuntime['tracer'],
+  ): Promise<void> {
+    // Base workers have no configured plugin registry to discover.
+  }
+
   protected async resolveKernelBinding(
     input: { entryPath: string },
     _runtime: KernelRuntime,
@@ -4301,6 +6332,52 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return undefined;
   }
 
+  /** Identify a durable exact snapshot only when the selected producer qualifies its codec and implementation. */
+  protected describeNativeSnapshotForOwner(
+    _owner: OperationOwner,
+    _serializedNativeHandle: unknown,
+    _runtime: KernelRuntime,
+  ): HandleSnapshotExactDescriptor | undefined {
+    return undefined;
+  }
+
+  /** Whether a selected kernel can describe a portable exact snapshot. */
+  protected hasNativeSnapshotDescriptorForOwner(_owner: OperationOwner): boolean {
+    return false;
+  }
+
+  /** Select declared export metadata without binding or initializing a native owner. */
+  protected getPublishedExportMetadataOwner(kernelId: string, entryPath: string): OperationOwner | undefined {
+    const kernelVersion = this.getActiveKernelId() === kernelId ? this.getActiveKernelVersion() : undefined;
+    if (!kernelVersion || !this.kernelExportZodSchemasMap.has(kernelId)) {
+      return undefined;
+    }
+    const slash = entryPath.lastIndexOf('/');
+    return {
+      kind: 'request',
+      file: { path: slash === -1 ? '' : entryPath.slice(0, slash), filename: entryPath.slice(slash + 1) },
+      binding: { kernelId, kernelVersion, entryPath },
+    };
+  }
+
+  /** Bind the persisted selected kernel without reading or executing its original source. */
+  protected async bindPublishedExactOwner(
+    _kernelId: string,
+    _entryPath: string,
+    _runtime: KernelRuntime,
+  ): Promise<OperationOwner | undefined> {
+    return undefined;
+  }
+
+  /** Compose restored exact occurrences without reading or evaluating any authored model. */
+  protected async composePublishedAssemblyForOwner(
+    _owner: OperationOwner,
+    _occurrences: ComposeHandlesInput<unknown>['occurrences'],
+    _runtime: KernelRuntime,
+  ): Promise<unknown | undefined> {
+    return undefined;
+  }
+
   /** Release a dropped native handle through the kernel that created it. */
   // oxlint-disable-next-line max-params -- Owner-bound hook also carries the evaluation slot.
   protected disposeNativeHandleForOwner(
@@ -4437,6 +6514,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     createResult: Extract<CreateGeometryResult, { success: true }>;
     renderArtifact: MaterializedRender;
   }): Promise<RenderResult> {
+    const documentOperation = this.activeDocumentOperation;
     const {
       owner,
       identity,
@@ -4476,9 +6554,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const meshSpan = this.tracer.startSpan('kernel.mesh', {
       phase: 'computingGeometry',
+      ...documentOperation,
     });
     try {
-      const runtime = this.createRuntime();
+      const runtime = this.createRuntime({ owner, documentOperation });
       const computeMesh = async (handlerInput: RenderRequest): Promise<RenderResult> => {
         const handle = await this.materializeNativeHandleForOwner({
           owner,
@@ -4516,7 +6595,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       let chain: (input: RenderRequest) => Promise<RenderResult> = named(
         'kernelHandler',
         async (handlerInput: RenderRequest) => {
-          const computeSpan = tracer.startSpan('kernel.mesh-compute');
+          const computeSpan = tracer.startSpan('kernel.mesh-compute', {
+            entryPath: assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename)),
+            ...(owner.binding ? { kernelId: owner.binding.kernelId } : {}),
+            ...documentOperation,
+          });
           const meshResult = await computeMesh(handlerInput);
           computeSpan.end();
           return meshResult;
@@ -4534,7 +6617,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               onLog: this.onLog,
               middlewareName: middleware.name,
               filesystem: this.filesystem,
-              compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal),
+              compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal, {
+                owner,
+                documentOperation,
+              }),
               dependencies: identity.dependencies,
               dependencyHash: identity.dependencyHash,
               stateSchema: middleware.stateSchema,
@@ -4554,6 +6640,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           chain = named(`middleware(${middlewareName})`, async (handlerInput: RenderRequest) => {
             const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
               middleware: middlewareName,
+              ...documentOperation,
             });
             try {
               const chainResult = await wrapHook(
@@ -4599,6 +6686,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       });
       if (!meshResult.success) {
         return meshResult;
+      }
+
+      try {
+        let glbDigest: string | undefined;
+        if (meshResult.data.mimeType === 'model/gltf-binary' && meshResult.data.content instanceof Uint8Array) {
+          try {
+            glbDigest = `sha256:${await this.hashContent(meshResult.data.content)}`;
+          } catch {
+            // Outcome metadata must not change an otherwise successful mesh result.
+          }
+        }
+        meshSpan.end({
+          entryPath: assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename)),
+          ...(owner.binding ? { kernelId: owner.binding.kernelId } : {}),
+          dependencyHash: identity.dependencyHash,
+          fileDependencies: JSON.stringify(identity.dependencies.filter((dependency) => dependency.type === 'file')),
+          ...(glbDigest ? { glbDigest } : {}),
+        });
+      } catch {
+        // Attribution is observational; retain the original return and final span close.
       }
 
       // Compose the display result: mesh-phase artifact plus create-phase warnings.
@@ -5643,6 +7750,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           return;
         }
         const changedPaths = [...revisions.keys()];
+        this.signalAssemblyChanges(changedPaths);
         // Proven external changes must retire unpinned evaluations before FIFO invalidation.
         // A committed export keeps its admitted operation; unrelated documents stay live.
         for (const document of this.documents.values()) {
@@ -5787,6 +7895,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
     for (const path of this.fileHashCache.keys()) {
       allDeps.set(assertRootedPath(path), fileChangeDebounce);
+    }
+    for (const binding of this.assemblyBindings.values()) {
+      for (const path of binding.revisions.keys()) {
+        if (path !== binding.input.publicationPath) {
+          allDeps.set(path, fileChangeDebounce);
+        }
+      }
     }
     return this.reconcileWatchSet(allDeps);
   }
@@ -5998,6 +8113,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @returns The computed capabilities manifest
    */
+  /** Return a declaration identity only when this exact advertised source/target follows the planner. */
+  protected getCapabilityExportId(kernelId: string, sourceFormat: string, _targetFormat: string): string | undefined {
+    if (this.kernelAmbiguousExportFormatsMap.get(kernelId)?.has(sourceFormat)) {
+      return undefined;
+    }
+    return this.kernelExportMetadataMap.get(kernelId)?.[sourceFormat]?.id;
+  }
+
   private buildCapabilitiesManifest(): CapabilitiesManifest {
     const routes: ExportRoute[] = [];
     type KernelExport = {
@@ -6038,11 +8161,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           contentKeys: [...contentKeys],
         });
 
+        const exportId = this.getCapabilityExportId(kernelId, format, format);
         routes.push({
           targetFormat: format,
           kernelId,
           sourceFormat: format,
           fidelity: lookupExportFidelity(format),
+          ...(exportId ? { exportId } : {}),
           exportOptions: { schema, defaults },
           ...(content ? { content } : {}),
         });
@@ -6086,12 +8211,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             cap.contentKeys.filter((key) => edgeKeys.has(key)),
           );
 
+          const exportId = this.getCapabilityExportId(cap.kernelId, edge.from, edge.to);
           routes.push({
             targetFormat: edge.to,
             kernelId: cap.kernelId,
             sourceFormat: edge.from,
             transcoderId: transcoder.id,
             fidelity: edge.fidelity,
+            ...(exportId ? { exportId } : {}),
             exportOptions: { schema, defaults },
             ...(content ? { content } : {}),
           });
@@ -6490,6 +8617,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         await fileSystem.writeFile(path, data);
         checkOperationAbort();
       },
+      ...(fileSystem.writeFileChecked
+        ? {
+            async writeFileChecked(input: Parameters<NonNullable<KernelFileSystem['writeFileChecked']>>[0]) {
+              checkOperationAbort();
+              // A successful CAS is the commit point; cancellation after it cannot undo the root.
+              return fileSystem.writeFileChecked!(input);
+            },
+          }
+        : {}),
       async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
         checkOperationAbort();
         await fileSystem.mkdir(path, options);
@@ -6738,7 +8874,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
     const depsResult = await this.onGetDependenciesForOwner(owner, discoverInput, this.createRuntime());
     const unresolvedPaths = [...new Set(depsResult.unresolved.map((path) => assertRootedPath(path)))];
-    const rootedPaths = [...new Set(depsResult.resolved.map((path) => assertRootedPath(path)))];
+    const rootedPaths = [...new Set([ownerFilePath, ...depsResult.resolved.map((path) => assertRootedPath(path))])];
     /* Absence is an observation: a request-scoped operation that retained "this import does
      * not resolve" has to notice the file appearing. */
     for (const path of unresolvedPaths) {
@@ -7038,15 +9174,31 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return facade;
   }
 
-  private createComputeRuntime(signal: AbortSignal): KernelComputeCapability {
+  private createComputeRuntime(
+    signal: AbortSignal,
+    options: Readonly<{ owner?: OperationOwner; documentOperation?: KernelWorker['activeDocumentOperation'] }> = {},
+  ): KernelComputeCapability {
     this.computeHost ??= createComputeCapabilityHost({
       binding: this.computeBinding,
       workspace: 'worker',
       onDiagnostic: (message) => {
         this.logger.warn(message);
       },
+    });
+    const { owner, documentOperation } = options;
+    const documentAttribution =
+      owner && documentOperation
+        ? {
+            ...documentOperation,
+            documentOperationId: documentOperation.operationId,
+            entryPath: assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename)),
+            ...(owner.binding ? { kernelId: owner.binding.kernelId } : {}),
+          }
+        : {};
+    const operationId = randomUuid();
+    return this.computeHost.capability(signal, operationId, {
       onScopeSettled: ({ operationId, generation, settlement }) => {
-        this.tracer.startSpan('kernel.compute.reuse', { operationId }).end({
+        this.tracer.startSpan('kernel.compute.reuse', { ...documentAttribution, operationId }).end({
           generation,
           status: settlement.status,
           published: settlement.published.length,
@@ -7056,8 +9208,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
       },
     });
-    const operationId = randomUuid();
-    return this.computeHost.capability(signal, operationId);
   }
 
   /**
@@ -7088,7 +9238,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @returns KernelRuntime instance
    */
-  private createRuntime(signal = this.operationSignal ?? neverAbortedSignal): KernelRuntime {
+  private createRuntime(
+    options: Readonly<{
+      signal?: AbortSignal;
+      owner?: OperationOwner;
+      documentOperation?: KernelWorker['activeDocumentOperation'];
+    }> = {},
+  ): KernelRuntime {
+    const signal = options.signal ?? this.operationSignal ?? neverAbortedSignal;
     return {
       signal,
       // A call outside any operation shares its identity with nothing.
@@ -7111,7 +9268,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return result;
       },
       tracer: this.tracer,
-      compute: this.createComputeRuntime(signal),
+      compute: this.createComputeRuntime(signal, options),
       getCompiledWasmModule: (url) => this.getCompiledWasmModule(url),
     };
   }
@@ -7540,10 +9697,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }));
   }
 
-  private async computeDependencyHash(dependencies: readonly Dependency[]): Promise<string> {
-    const contentHashSpan = this.tracer.startSpan('deps.content-hash');
+  private async computeDependencyHash(
+    dependencies: readonly Dependency[],
+    renderOwner?: Readonly<{
+      documentId: string;
+      evaluationId: string;
+      operationId: string;
+      subscriptionId: string;
+      requestId: string;
+      entryPath: string;
+      kernelId?: string;
+    }>,
+  ): Promise<string> {
+    const contentHashSpan = this.tracer.startSpan('deps.content-hash', renderOwner);
     const hex = await sha256String(canonicalJson(dependencies));
-    contentHashSpan.end();
+    contentHashSpan.end({ dependencyHash: hex });
     return hex;
   }
 }

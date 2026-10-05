@@ -1,3 +1,4 @@
+import { safeDispose } from '@taucad/utils/dispose';
 /**
  * Node-worker transport — client factory.
  *
@@ -64,6 +65,8 @@ export type NodeWorkerClientOptions = {
   readonly workerCtor?: unknown;
   readonly sharedMemory?: { readonly geometry?: { readonly bytes: number } };
   readonly fileSystem?: RuntimeFileSystem;
+  /** Host-only checked publication authority, separate from evaluator filesystem. */
+  readonly publicationFileSystem?: RuntimeFileSystem;
   /** Mirror runtime spans into the worker Performance Timeline for DevTools. */
   readonly devtoolsTelemetry?: boolean;
   /** Host-compiled WASM modules cloned into the worker during initialization. */
@@ -164,6 +167,7 @@ export const nodeWorkerClient = (
   };
 
   let bridge: ReturnType<typeof buildFileSystemBridge>;
+  let publicationBridge: ReturnType<typeof buildFileSystemBridge>;
   let computeBridge: ReturnType<typeof buildComputeStoreBridge> | undefined;
   let openPromise: Promise<TransportClientReady> | undefined;
   let worker: NodeWorkerLike | undefined;
@@ -203,7 +207,8 @@ export const nodeWorkerClient = (
       /* Best-effort */
     }
     try {
-      bridge?.dispose();
+      safeDispose(() => bridge?.dispose());
+      safeDispose(() => publicationBridge?.dispose());
     } catch {
       /* Best-effort */
     }
@@ -287,34 +292,37 @@ export const nodeWorkerClient = (
       if (!channel) {
         throw new Error('nodeWorkerTransport: channel unavailable after open()');
       }
-      bridge ??= buildFileSystemBridge(options.fileSystem);
-      computeBridge ??= buildComputeStoreBridge(options.compute);
-      const pooled = ensurePools();
-      const memoryHandle: RuntimeInitializeMemoryHandle = {
-        ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
-        ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
-        ...(bridge ? { fileSystemPort: bridge.port } : {}),
-        ...computeBridge.memoryHandle,
-        ...(options.devtoolsTelemetry === true ? { devtoolsTelemetry: true } : {}),
-        ...(options.compiledWasmModules ? { compiledWasmModules: options.compiledWasmModules } : {}),
-      };
-      const transferables: Transferable[] = [...(bridge ? [bridge.port] : []), ...computeBridge.transfer];
-      const args = { ...input, memoryHandle };
       try {
+        bridge ??= buildFileSystemBridge(options.fileSystem);
+        publicationBridge ??= buildFileSystemBridge(options.publicationFileSystem);
+        computeBridge ??= buildComputeStoreBridge(options.compute);
+        const pooled = ensurePools();
+        const memoryHandle: RuntimeInitializeMemoryHandle = {
+          ...(pooled.signalBuffer ? { signalBuffer: pooled.signalBuffer } : {}),
+          ...(pooled.geometryPoolBuffer ? { geometryPoolBuffer: pooled.geometryPoolBuffer } : {}),
+          ...(bridge ? { fileSystemPort: bridge.port } : {}),
+          ...(publicationBridge ? { publicationFileSystemPort: publicationBridge.port } : {}),
+          ...computeBridge.memoryHandle,
+          ...(options.devtoolsTelemetry === true ? { devtoolsTelemetry: true } : {}),
+          ...(options.compiledWasmModules ? { compiledWasmModules: options.compiledWasmModules } : {}),
+        };
+        const transferables: Transferable[] = [
+          ...(bridge ? [bridge.port] : []),
+          ...(publicationBridge ? [publicationBridge.port] : []),
+          ...computeBridge.transfer,
+        ];
+        const args = { ...input, memoryHandle };
         const result = await channel.call(
           'initialize',
           transferables.length > 0 ? { value: args, transferables } : args,
         );
         return result;
       } catch (error) {
-        if (bridge) {
-          try {
-            bridge.dispose();
-          } finally {
-            bridge = undefined;
-          }
-        }
-        computeBridge.dispose();
+        safeDispose(() => bridge?.dispose());
+        bridge = undefined;
+        safeDispose(() => publicationBridge?.dispose());
+        publicationBridge = undefined;
+        safeDispose(() => computeBridge?.dispose());
         computeBridge = undefined;
         throw error;
       }

@@ -50,11 +50,19 @@ export type RuntimeDocumentProtocol = {
   };
 };
 
-/** Six acknowledged calls. @public */
+/** Acknowledged document and published-representation calls. @public */
 export const documentProtocolCallNames = [
   'initialize',
   'describe',
   'export',
+  'exportPublished',
+  'preparePublishedPart',
+  'admitPublishedPart',
+  'readPublishedPartAsset',
+  'publishPartsRoot',
+  'publishAuthoredAssemblyRoot',
+  'readPublishedAssemblyRoot',
+  'openPublishedAssembly',
   'snapshotSource',
   'transcode',
   'dispose',

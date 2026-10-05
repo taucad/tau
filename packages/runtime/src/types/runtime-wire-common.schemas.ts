@@ -80,6 +80,7 @@ export const runtimeInitializeMemoryHandleSchema = z
     signalBuffer: sharedArrayBufferSchema.optional(),
     geometryPoolBuffer: sharedArrayBufferSchema.optional(),
     fileSystemPort: messagePortSchema.optional(),
+    publicationFileSystemPort: messagePortSchema.optional(),
     computeStorePort: messagePortSchema.optional(),
     computeBindingMode: z.enum(['off', 'memory', 'durable']).optional(),
     devtoolsTelemetry: z.boolean().optional(),

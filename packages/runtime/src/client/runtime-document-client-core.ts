@@ -3,6 +3,18 @@ import type { ParameterResolutionOptions } from '@taucad/parameters';
 import { Topic } from '@taucad/events';
 import type { ExportFile, LogEntry } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
+import { assertRootedPath } from '@taucad/utils/path';
+import { publishedPartAssetSchema } from '#types/runtime-assembly.schemas.js';
+import { nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
+import type {
+  PublishedPartAsset,
+  PublishedAssemblyAdmission,
+  AdmittedAssembly,
+  PublishAssemblyOutcome,
+  PublishedExportInput,
+  ExportOutcome,
+  PublishedPartReference,
+} from '#types/runtime-assembly.types.js';
 import type { MachineClient } from '#machines/machine-client.js';
 import type {
   CollectTranscodeRoutes,
@@ -27,11 +39,16 @@ import type {
   RuntimeMiddleware,
   RuntimeTranscoders,
 } from '#worker/runtime-definition.js';
-import type { OpenInput, RuntimeDocument, Description } from '#client/runtime-document.types.js';
+import type {
+  OpenInput,
+  RuntimeDocument,
+  Description,
+  PublishedAssemblyDocument,
+} from '#client/runtime-document.types.js';
 import type { RuntimeSource, RuntimeSourceFiles } from '#client/runtime-document-source.js';
 import { normalizeRuntimeSource, withStagedFiles } from '#client/runtime-document-source.js';
 import { RuntimeDocumentSessionClient } from '#client/runtime-document-session.js';
-import { RuntimeTerminatedError } from '#client/runtime-terminated-error.js';
+import { RuntimeTerminatedError, isRuntimeTerminatedError } from '#client/runtime-terminated-error.js';
 import { openDeferredDocument } from '#client/runtime-document-deferred.js';
 import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { validateProtocolHeader } from '#types/protocol-header.types.js';
@@ -40,7 +57,12 @@ import type { TranscodeResult } from '#types/runtime-transcoder.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeTranscodeArgs, TelemetryBatch } from '#types/runtime-wire.types.js';
-import { OperationAbortedError, OperationTimeoutError } from '#framework/runtime-operation-errors.js';
+import {
+  OperationAbortedError,
+  OperationTimeoutError,
+  isOperationAbortedError,
+  isOperationTimeoutError,
+} from '#framework/runtime-operation-errors.js';
 import { operationTimeoutRecoveryGrace } from '#framework/runtime-framework.constants.js';
 
 // oxlint-disable @typescript-eslint/no-explicit-any -- Transport and plugin existential carriers retain concrete tuples at the public overload.
@@ -125,6 +147,25 @@ export type RuntimeClientOptions<
 /** A runtime client lifecycle state. @public */
 export type RuntimeLifecycleState = 'unconnected' | 'connecting' | 'connected' | 'terminated';
 
+const publicationFailure = (
+  error: unknown,
+): Extract<PublishAssemblyOutcome, { status: 'commit-unknown' }>['failure'] => {
+  try {
+    if (isOperationAbortedError(error)) {
+      return { name: 'OperationAbortedError', code: 'RUNTIME_OPERATION_ABORTED' };
+    }
+    if (isOperationTimeoutError(error)) {
+      return { name: 'OperationTimeoutError', code: 'RUNTIME_OPERATION_TIMEOUT' };
+    }
+    if (isRuntimeTerminatedError(error)) {
+      return { name: 'RuntimeTerminatedError', code: 'RUNTIME_TERMINATED' };
+    }
+  } catch {
+    // Observation must not let an unsafe getter replace the publication outcome.
+  }
+  return { name: null, code: null };
+};
+
 const waitWithAbort = async <T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> => {
   if (!signal) {
     return promise;
@@ -168,6 +209,13 @@ export type RuntimeClient<
     resolution?: ParameterResolutionOptions;
     signal?: AbortSignal;
   }): Promise<Description>;
+  publishAssembly(input: {
+    authoredPath: string;
+    publicationPath: string;
+    signal?: AbortSignal;
+  }): Promise<PublishAssemblyOutcome>;
+  openAssembly(input: { root: PublishedPartAsset; signal?: AbortSignal }): Promise<PublishedAssemblyDocument>;
+  exportPublished(input: PublishedExportInput & { signal?: AbortSignal }): Promise<ExportOutcome>;
   setOperationTimeout(milliseconds: number): void;
   setTranscodeTimeout(milliseconds: number): void;
   routesFor<const Format extends string>(
@@ -421,6 +469,179 @@ export function createRuntimeClient(options: {
     }
     await transport.close();
   };
+  type PublishedCall =
+    | 'publishAuthoredAssemblyRoot'
+    | 'readPublishedAssemblyRoot'
+    | 'openPublishedAssembly'
+    | 'readPublishedPartAsset'
+    | 'exportPublished';
+  const callPublished = async <Name extends PublishedCall>(
+    name: Name,
+    args: RuntimeDocumentProtocol['calls'][Name]['args'],
+    options: { signal?: AbortSignal | undefined; onDispatch?: () => void } = {},
+  ): Promise<RuntimeDocumentProtocol['calls'][Name]['result']> => {
+    const { signal, onDispatch } = options;
+    await waitWithAbort(connectedSession(), signal);
+    const { channel } = await transport.open();
+    signal?.throwIfAborted();
+    if (lifecycleState === 'terminated') {
+      throw terminationFailure();
+    }
+    const controller = new AbortController();
+    const timed = Promise.withResolvers<never>();
+    const operationId = `${name}:${randomUuid()}`;
+    const onAbort = (): void => {
+      controller.abort();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const timer =
+      activeTimeout > 0
+        ? setTimeout(() => {
+            timed.reject(new OperationTimeoutError(name, 'Published representation operation timed out.'));
+            onTimeout(operationId);
+          }, activeTimeout)
+        : undefined;
+    try {
+      onDispatch?.();
+      const request = channel.call(name, args, controller.signal);
+      void clearRecoveryWhenSettled(request, operationId);
+      return await waitWithAbort(Promise.race([request, timed.promise, terminated.promise]), signal);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      signal?.removeEventListener('abort', onAbort);
+    }
+  };
+  const exportPublished = async (input: PublishedExportInput & { signal?: AbortSignal }): Promise<ExportOutcome> => {
+    const { signal, ...args } = input;
+    await waitWithAbort(connectedSession(), signal);
+    const { channel } = await transport.open();
+    signal?.throwIfAborted();
+    if (lifecycleState === 'terminated') {
+      throw terminationFailure();
+    }
+    const controller = new AbortController();
+    const timed = Promise.withResolvers<never>();
+    const operationId = `exportPublished:${randomUuid()}`;
+    const onAbort = (): void => {
+      controller.abort();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    const timer =
+      activeTimeout > 0
+        ? setTimeout(() => {
+            timed.reject(new OperationTimeoutError('exportPublished', 'Published export timed out.'));
+            onTimeout(operationId);
+          }, activeTimeout)
+        : undefined;
+    try {
+      const request = channel.call('exportPublished', args, controller.signal);
+      const finalizePublishedExport = async (): Promise<ExportOutcome> => {
+        const wire = await request;
+        if (!wire.success) {
+          return wire;
+        }
+        const files = await Promise.all(
+          wire.files.map(async (file) => ({
+            ...file,
+            bytes: await transport.resolveBinary(file.bytes),
+          })),
+        );
+        if (lifecycleState === 'terminated') {
+          throw terminationFailure();
+        }
+        controller.signal.throwIfAborted();
+        return { ...wire, files: nonemptyExportFiles(files) };
+      };
+      const operation = finalizePublishedExport();
+      void clearRecoveryWhenSettled(operation, operationId);
+      return await waitWithAbort(Promise.race([operation, timed.promise, terminated.promise]), signal);
+    } finally {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      signal?.removeEventListener('abort', onAbort);
+    }
+  };
+  const attachAssemblyReader = (
+    admission: PublishedAssemblyAdmission,
+    assertOpen: () => void = () => undefined,
+    signal?: AbortSignal,
+  ): AdmittedAssembly => {
+    const { publication, partRecords } = admission;
+    const references = new Map<PublishedPartAsset['digest'], PublishedPartReference>();
+    for (const [part, record] of Object.entries(publication.parts)) {
+      const reference = Object.hasOwn(partRecords, part) ? partRecords[part] : undefined;
+      if (!reference) {
+        throw new Error(`Admitted assembly is missing the pinned record for part ${part}.`);
+      }
+      for (const { glb, exact } of Object.values(record.variants)) {
+        references.set(glb.digest, reference);
+        if (exact) {
+          references.set(exact.asset.digest, reference);
+        }
+      }
+    }
+    const admitted = {
+      publication,
+      readAsset: async (digest: PublishedPartAsset['digest']) => {
+        assertOpen();
+        if (lifecycleState === 'terminated') {
+          throw terminationFailure();
+        }
+        const reference = references.get(digest);
+        if (!reference) {
+          throw new TypeError('Requested asset is outside the admitted assembly closure.');
+        }
+        const bytes = await callPublished('readPublishedPartAsset', { reference, digest }, { signal });
+        assertOpen();
+        return bytes;
+      },
+    };
+    // Host admission establishes the client-local opaque token; it never travels on the wire.
+    return admitted as AdmittedAssembly;
+  };
+  const createPublishedDocument = (
+    root: PublishedPartAsset,
+    admission: PublishedAssemblyAdmission,
+  ): PublishedAssemblyDocument => {
+    const documentLifetime = new AbortController();
+    const assertOpen = (): void => {
+      documentLifetime.signal.throwIfAborted();
+      if (lifecycleState === 'terminated') {
+        throw terminationFailure();
+      }
+    };
+    return {
+      projection: 'assembly',
+      root,
+      admitted: attachAssemblyReader(admission, assertOpen, documentLifetime.signal),
+      async exportPublished(request): Promise<ExportOutcome> {
+        assertOpen();
+        const pin = request.publishedAssembly?.root;
+        if (!pin || pin.path !== root.path || pin.digest !== root.digest || pin.byteLength !== root.byteLength) {
+          throw new TypeError("Published export must use this document's admitted root.");
+        }
+        const signal = request.signal
+          ? AbortSignal.any([request.signal, documentLifetime.signal])
+          : documentLifetime.signal;
+        const outcome = await exportPublished({ ...request, signal });
+        assertOpen();
+        return outcome;
+      },
+      close(): void {
+        documentLifetime.abort();
+      },
+    };
+  };
+  const readPublishedReceiptClosure = (receipt: Partial<PublishedAssemblyAdmission>): PublishedAssemblyAdmission => {
+    const { publication, partRecords } = receipt;
+    if (!publication || !partRecords) {
+      throw new Error('Published assembly receipt omitted its admitted closure.');
+    }
+    return { publication, partRecords };
+  };
   return {
     machines,
     jobs,
@@ -496,6 +717,69 @@ export function createRuntimeClient(options: {
         input.signal?.removeEventListener('abort', onAbort);
       }
     },
+    async publishAssembly(input): Promise<PublishAssemblyOutcome> {
+      const authoredPath = assertRootedPath(input.authoredPath);
+      const publicationPath = assertRootedPath(input.publicationPath);
+      if (!authoredPath || !publicationPath) {
+        throw new TypeError('Assembly publication paths must name files.');
+      }
+      const slash = publicationPath.lastIndexOf('/');
+      const directory = slash === -1 ? '' : publicationPath.slice(0, slash);
+      if (input.signal?.aborted) {
+        return { status: 'cancelled' };
+      }
+      const dispatchState = { dispatched: false };
+      let receipt;
+      try {
+        receipt = await callPublished(
+          'publishAuthoredAssemblyRoot',
+          { authoredPath, publicationPath, directory },
+          {
+            signal: input.signal,
+            onDispatch: () => {
+              dispatchState.dispatched = true;
+            },
+          },
+        );
+      } catch (error) {
+        if (!dispatchState.dispatched && input.signal?.aborted) {
+          return { status: 'cancelled' };
+        }
+        if (dispatchState.dispatched) {
+          return {
+            status: 'commit-unknown',
+            publicationPath,
+            failure: publicationFailure(error),
+            readCurrent: async () => callPublished('readPublishedAssemblyRoot', { publicationPath }),
+          };
+        }
+        throw error;
+      }
+      if (receipt.outcome.status === 'superseded' || receipt.outcome.status === 'invalid') {
+        return receipt.outcome;
+      }
+      const admission = readPublishedReceiptClosure(receipt);
+      const document = createPublishedDocument(receipt.outcome.root, admission);
+      return {
+        status: 'published',
+        root: receipt.outcome.root,
+        generation: receipt.outcome.generation,
+        partRecords: admission.partRecords,
+        admitted: document.admitted,
+        document,
+      };
+    },
+    async openAssembly(input): Promise<PublishedAssemblyDocument> {
+      input.signal?.throwIfAborted();
+      const root = publishedPartAssetSchema.parse(input.root);
+      const admission = await callPublished('openPublishedAssembly', { root }, { signal: input.signal });
+      input.signal?.throwIfAborted();
+      if (lifecycleState === 'terminated') {
+        throw terminationFailure();
+      }
+      return createPublishedDocument(root, admission);
+    },
+    exportPublished,
     setOperationTimeout(milliseconds): void {
       validateTimeout(milliseconds);
       activeTimeout = milliseconds;

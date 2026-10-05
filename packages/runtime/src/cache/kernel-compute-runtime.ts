@@ -81,7 +81,14 @@ type PendingEntry = {
   readonly announcedAt: number;
 };
 
+type ScopeSettlementObserver = (summary: {
+  readonly operationId: string;
+  readonly generation: ComputeGeneration;
+  readonly settlement: ComputeScopeSettlement;
+}) => void;
+
 type ScopeState = {
+  readonly onScopeSettled: ScopeSettlementObserver | undefined;
   readonly operationId: string;
   generation: ComputeGeneration;
   readonly generationPromise: Promise<ComputeGeneration>;
@@ -393,7 +400,11 @@ const adaptSession = (
 
 /** One worker's compute facet, resolved once from its transport binding. @internal */
 export type ComputeCapabilityHost = {
-  readonly capability: (signal: AbortSignal, operationId?: string) => KernelComputeCapability;
+  readonly capability: (
+    signal: AbortSignal,
+    operationId?: string,
+    options?: Readonly<{ onScopeSettled?: ScopeSettlementObserver }>,
+  ) => KernelComputeCapability;
   /**
    * Permit the publication tail of every closed scope.
    *
@@ -440,11 +451,7 @@ export const createComputeCapabilityHost = (input: {
   readonly binding: ComputeBinding;
   readonly workspace: string;
   readonly onDiagnostic?: (message: string) => void;
-  readonly onScopeSettled?: (summary: {
-    readonly operationId: string;
-    readonly generation: ComputeGeneration;
-    readonly settlement: ComputeScopeSettlement;
-  }) => void;
+  readonly onScopeSettled?: ScopeSettlementObserver;
 }): ComputeCapabilityHost => {
   if (input.binding.mode === 'off') {
     return offHost;
@@ -571,7 +578,13 @@ export const createComputeCapabilityHost = (input: {
     releaseHold(scope);
     scopes.delete(scope);
     scope.settle?.(settlement);
-    input.onScopeSettled?.({ operationId: scope.operationId, generation: scope.generation, settlement });
+    const summary = { operationId: scope.operationId, generation: scope.generation, settlement };
+    try {
+      scope.onScopeSettled?.(summary);
+    } catch {
+      // Capability telemetry is observational and must not change settlement or the host observer.
+    }
+    input.onScopeSettled?.(summary);
   };
 
   const publish = async (scope: ScopeState): Promise<void> => {
@@ -664,11 +677,13 @@ export const createComputeCapabilityHost = (input: {
       readonly signal: AbortSignal;
       readonly operationId: string;
       readonly generationPromise: Promise<ComputeGeneration>;
+      readonly onScopeSettled?: ScopeSettlementObserver;
     },
   ): ComputeReuseScope => {
     const { signal, operationId, generationPromise } = context;
     const generation = currentGeneration;
     const scope: ScopeState = {
+      onScopeSettled: context.onScopeSettled,
       operationId,
       generation,
       generationPromise,
@@ -844,7 +859,8 @@ export const createComputeCapabilityHost = (input: {
   };
 
   return {
-    capability: (signal, operationId = 'unobserved') => {
+    capability: (signal, operationId = 'unobserved', options = {}) => {
+      const { onScopeSettled } = options;
       return {
         status: 'on',
         mode,
@@ -892,7 +908,7 @@ export const createComputeCapabilityHost = (input: {
           const generationPromise = captureGeneration();
           /* A scope may not warm immediately; keep the original rejection for its later consumer. */
           void Promise.allSettled([generationPromise]);
-          return openScope(open, { signal, operationId, generationPromise });
+          return openScope(open, { signal, operationId, generationPromise, onScopeSettled });
         },
       };
     },

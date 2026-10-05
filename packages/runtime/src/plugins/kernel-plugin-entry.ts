@@ -15,6 +15,8 @@
 export { defineKernelV2 as defineKernel, nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
 export type {
   Artifact,
+  ComposeHandlesInput,
+  HandleSnapshotExactDescriptor,
   DescribeInput,
   DescribeResult,
   EvaluateInput,

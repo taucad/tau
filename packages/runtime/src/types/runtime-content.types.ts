@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const runtimeContentProperties = {
   includeEdges: z.boolean().describe('Include auxiliary visible edge overlays'),
   includeTopology: z.boolean().describe('Include Tau CAD topology metadata'),
+  includePhysical: z.boolean().describe('Include requested producer physical measurements'),
 } as const;
 
 /** Tolerant-reader request schema shared by the public API and worker protocol. @public */
@@ -19,8 +20,8 @@ export type RuntimeContentKey = keyof RuntimeContentInput;
 
 /** Operation-specific framework defaults; unsupported keys are never projected. @public */
 export const runtimeContentDefaults = {
-  render: { includeEdges: false, includeTopology: true },
-  export: { includeEdges: false, includeTopology: false },
+  render: { includeEdges: false, includeTopology: true, includePhysical: false },
+  export: { includeEdges: false, includeTopology: false, includePhysical: false },
 } as const satisfies Readonly<Record<'render' | 'export', Required<RuntimeContentInput>>>;
 
 /** Literal declaration used by kernel, middleware, and transcoder authors. @public */

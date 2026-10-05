@@ -33,10 +33,10 @@ vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proje
 vi.mock('#hooks/use-sidebar-status.js', () => ({ useChatSidebarStatus: vi.fn() }));
 /* The row warms and lazily loads the liquid-metal spinner, whose renderer imports the graphics backend. Left
  * real, that dynamic import can still be resolving when the environment tears down; this suite pins whether
- * the indicator shows, not how the spinner paints. */
-vi.mock('#components/geometry/loader/metal-morph-spinner.js', () => ({
-  MetalMorphSpinner: () => null,
-  warmMetalMorphSpinner: async () => undefined,
+ * the indicator shows, not how the spinner paints, so the row's spinner is replaced before any lazy boundary. */
+vi.mock('#components/chat/chat-activity-spinner.js', () => ({
+  ChatActivitySpinner: () => null,
+  warmChatActivitySpinner: async () => undefined,
 }));
 
 const setRun = (state: ChatSidebarState | undefined): void => {

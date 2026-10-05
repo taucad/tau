@@ -161,6 +161,7 @@ declare const admittedByHost: unique symbol;
 export type AdmittedAssembly = Readonly<{
   publication: PublishedAssembly;
   readAsset: (digest: PublishedPartAsset['digest']) => Promise<Uint8Array<ArrayBuffer>>;
+  /** @internal */
   [admittedByHost]: true;
 }>;
 

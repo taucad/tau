@@ -359,6 +359,41 @@ describe('mesh/build/export phase separation', () => {
     expect(counters.lastMeshedHandle).toEqual({ shapes: 2 });
   });
 
+  /* The viewer closes and reopens its view on every live option change, so a render a closed view abandons inside
+   * middleware must not leave a cached failure for the next view with the same options. */
+  it('renders the same options again after a closed view aborts its render inside middleware', async () => {
+    const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
+    const entered = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    let calls = 0;
+    const blocking = defineMiddleware({
+      id: 'blocking-render',
+      name: 'blocking-render',
+      async wrapRender(input, handler, runtime) {
+        if (++calls === 1) {
+          entered.resolve();
+          await gate.promise;
+          runtime.signal.throwIfAborted();
+        }
+        return handler(input);
+      },
+    });
+    const worker = await createWorker(createDeferredKernel(counters), [blocking()]);
+    const documentId = await openDocument(worker);
+    const abandoned: Rendering[] = [];
+    worker.onRendered = (event) => abandoned.push(event);
+    worker.handleOpenView({ documentId, subscriptionId: 'abandoned', requestId: 'abandoned' });
+    await entered.promise;
+    worker.handleCloseView({ subscriptionId: 'abandoned' });
+    gate.resolve();
+
+    const result = await renderView(worker);
+
+    expect(result).toMatchObject({ success: true, issues: [] });
+    expect(abandoned).toEqual([]);
+    expect(counters.mesh).toBe(1);
+  });
+
   it('uses create-only identity for the native build and the create-plus-mesh union for display', async () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     let createDependencies: readonly Dependency[] = [];

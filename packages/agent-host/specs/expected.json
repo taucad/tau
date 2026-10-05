@@ -289,7 +289,7 @@
         "violated": "OrphanApprovalCoded"
       },
       "kind": "defect",
-      "ref": "W10; L2a D9; L4 D-112: an external pause orphaned by a restart stays pending with no driver",
+      "ref": "W10; L2a D9; L4 D-112 (revised by resume everywhere): an external pause orphaned by a restart stays pending with no driver",
       "fixedBy": "W7"
     },
     "ChatRunSlot.today-PayloadDurable.cfg": {
@@ -1025,6 +1025,11 @@
         "tier": "pr",
         "expect": "pass",
         "ref": "apps/ui fixture (S6)"
+      },
+      "ChatLog/recorded/kinetic-regenerate-resume.jsonl": {
+        "tier": "pr",
+        "expect": "pass",
+        "ref": "apps/ui fixture (resume everywhere): regenerates, a Stop resumed, an orphaned approval; content redacted"
       },
       "ChatLog/seeded/sequence-gap.jsonl": {
         "tier": "pr",

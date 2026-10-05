@@ -36,7 +36,11 @@ const logs = [
   'recorded/daemon-reattach-hexnut-4runs',
   'seeded/legal-attempts',
   'seeded/cancel-after-settled-pause',
+  'recorded/kinetic-regenerate-resume',
 ] as const;
+
+const terminalChunk = new Set(['finish', 'error', 'abort']);
+const durable = (chunks: ReadonlyArray<{ type: string }>) => chunks.filter((chunk) => !terminalChunk.has(chunk.type));
 
 const readLog = (name: string): AgentLogEvent[] =>
   readFileSync(
@@ -365,7 +369,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(selectRunFailure(project(rows.slice(0, reopened + 1), 1), failed.runId)).toBeUndefined();
   });
 
-  it('should replay only the new attempt after a failed run reopens, while retaining a paused continuation', async () => {
+  it('should keep the committed attempt and drop only its terminal marker when a failed run reopens', async () => {
     const rows = readLog('seeded/legal-attempts');
     const failedAt = rows.findIndex((row) => row.type === 'run.lifecycle' && row.state === 'failed');
     const reopenedAt = rows.findIndex(
@@ -379,10 +383,10 @@ describe('chatProjectionLogic (PV-S7)', () => {
     );
     const { runId } = rows[failedAt]!;
     const failed = project(rows.slice(0, failedAt + 1), 1).views[runId]!;
-    expect(failed.chunks.some((chunk) => chunk.type === 'error')).toBe(true);
+    expect(failed.chunks.at(-1)?.type).toBe('error');
 
     const reopened = project(rows.slice(0, reopenedAt + 1), 1).views[runId]!;
-    expect(reopened.chunks.map((chunk) => chunk.type)).toEqual(['start', 'start-step']);
+    expect(reopened.chunks).toEqual([...durable(failed.chunks), { type: 'start-step' }]);
     const paused = project(rows.slice(0, pausedAt + 1), 1).views[runId]!;
     const continued = project(rows.slice(0, continuedAt + 1), 1).views[runId]!;
     expect(continued.chunks.slice(0, paused.chunks.length)).toEqual(paused.chunks);
@@ -391,6 +395,80 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(completed.views[runId]?.chunks.some((chunk) => chunk.type === 'error')).toBe(false);
     const messages = await materializeTranscript(completed);
     expect(messages.some((message) => message.role === 'assistant')).toBe(true);
+  });
+
+  /* The kinetic-desk-toy chat (sanitized): a failed first turn, two regenerates of it — the first stopped by the
+   * person, resumed and failed again, the second completed — then a turn orphaned while waiting for approval. */
+  it('should keep a stopped turn whole when it resumes, and show a regenerated turn once', async () => {
+    const rows = readLog('recorded/kinetic-regenerate-resume');
+    const stoppedAt = rows.findIndex((row) => row.type === 'run.lifecycle' && row.state === 'cancelled');
+    const { runId } = rows[stoppedAt]!;
+    const resumedAt = rows.findIndex(
+      (row, index) => index > stoppedAt && row.type === 'run.lifecycle' && row.state === 'running',
+    );
+    const before = project(rows.slice(0, stoppedAt + 1), 7).views[runId]!;
+    const after = project(rows.slice(0, resumedAt + 1), 7).views[runId]!;
+    expect(durable(before.chunks).length).toBeGreaterThan(20);
+    expect(after.chunks.slice(0, durable(before.chunks).length)).toEqual(durable(before.chunks));
+
+    const transcript = await materializeTranscript(project(rows, 7));
+    const users = transcript.filter((message) => message.role === 'user').map((message) => message.id);
+    expect(users).toEqual(['msg_1JskO6ClYBK41k3UxSBc9', 'msg_qhR4h2Hntr2ECEKBa5LFy']);
+    expect(transcript.map((message) => message.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+  });
+
+  /* Resume everywhere, over every corpus: a reopen never removes durable content, and a rewind leaves each user turn
+   * in the transcript at most once. */
+  it.each(logs)('should never lose durable chunks to a reopen, nor repeat a user turn, in %s', async (name) => {
+    const rows = readLog(name);
+    for (const [index, row] of rows.entries()) {
+      const before =
+        row.type === 'run.lifecycle' && row.state === 'running' ? project(rows.slice(0, index), 1) : undefined;
+      const view = before?.views[row.runId];
+      if (view?.terminal !== undefined) {
+        const after = project(rows.slice(0, index + 1), 1).views[row.runId]!;
+        expect(after.chunks.slice(0, durable(view.chunks).length)).toEqual(durable(view.chunks));
+      }
+    }
+    const transcript = await materializeTranscript(project(rows, 3));
+    const users = transcript.filter((message) => message.role === 'user').map((message) => message.id);
+    expect(new Set(users).size).toBe(users.length);
+  });
+
+  it('should hide a run whose user turn a regenerate dropped, but keep a turn a compaction evicted', async () => {
+    const user = (id: string) => ({ id, role: 'user', content: 'x' });
+    const assistant = (id: string) => ({ id, role: 'assistant', content: [{ type: 'text', text: id }] });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: user('u1') }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('a1') }),
+      lifecycleRow(4, 'completed', 'r1'),
+      lifecycleRow(5, 'admitted', 'r2'),
+      logRow(6, { runId: 'r2', type: 'message.appended', message: user('u2') }),
+      lifecycleRow(7, 'running', 'r2'),
+      logRow(8, {
+        runId: 'r2',
+        type: 'history.compacted',
+        evictedMessageIds: ['u1', 'a1'],
+        summary: { id: 's1', role: 'user', content: 'summary' },
+      }),
+      logRow(9, { runId: 'r2', type: 'message.appended', message: assistant('a2') }),
+      logRow(10, {
+        runId: 'r2',
+        type: 'run.lifecycle',
+        state: 'failed',
+        attempt: 1,
+        detail: { message: 'no', code: 'FATAL_TEST' },
+      }),
+      lifecycleRow(11, 'admitted', 'r3'),
+      logRow(12, { runId: 'r3', type: 'history.rewound', trigger: 'regenerate', retainedMessageIds: ['s1'] }),
+      logRow(13, { runId: 'r3', type: 'message.appended', message: user('u2') }),
+    ];
+    const projection = project(rows, 2);
+    expect(selectTranscriptSource(projection).map((run) => run.runId)).toEqual(['r1', 'r3']);
+    const transcript = await materializeTranscript(projection);
+    expect(transcript.filter((message) => message.role === 'user')).toHaveLength(2);
   });
 
   it('keeps the newest row that asks for the person, and never a cancelled run (PV-S8)', () => {

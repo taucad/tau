@@ -247,7 +247,7 @@ describe('NativeImageViewer', () => {
 
     fireEvent.error(image);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/browser could not decode/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be decoded/i);
     expect(screen.queryByRole('img', { name: 'broken.png' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'File actions for broken.png' })).toBeEmptyDOMElement();
     expect(URL.createObjectURL).toHaveBeenCalledOnce();

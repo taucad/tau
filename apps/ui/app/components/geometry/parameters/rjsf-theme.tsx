@@ -291,7 +291,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
               aria-label={`Parameter: ${prettyLabel}`}
             >
               <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
-              {required ? <span className='text-destructive/50'>*</span> : null}
+              {required ? <span className='text-feature/50'>*</span> : null}
             </span>
             {inferredHint ? (
               <Tooltip>
@@ -879,14 +879,14 @@ export const templates: TemplatesType<Record<string, unknown>, RJSFSchema, RJSFC
       {errors.map((error) => (
         <div
           key={`${error.schemaPath}-${error.property}-${error.name}-${JSON.stringify(error.params)}`}
-          className='text-sm text-destructive'
+          className='text-sm text-feature'
         >
           {error.stack}
         </div>
       ))}
     </div>
   ),
-  FieldErrorTemplate: ({ errors }) => (errors ? <div className='mt-1 text-xs text-destructive'>{errors}</div> : null),
+  FieldErrorTemplate: ({ errors }) => (errors ? <div className='mt-1 text-xs text-feature'>{errors}</div> : null),
   FieldHelpTemplate: ({ help }) => (help ? <div className='mt-1 text-xs text-muted-foreground'>{help}</div> : null),
   TitleFieldTemplate: ({ title }) => (title ? <h2 className='mb-2 text-lg font-medium'>{title}</h2> : null),
   UnsupportedFieldTemplate({ reason, schema }) {

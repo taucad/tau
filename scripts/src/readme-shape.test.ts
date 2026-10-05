@@ -8,13 +8,12 @@ import { publishable, workspace } from '@taucad/nx';
  * the npm landing page, so it must carry the required sections and a quick start
  * that imports real exports from the package's own name.
  *
- * Scope note: `packages/{cli,geospec,geospec-engine,react,runtime}` and
- * `packages/plugins/opencascade-native` do not satisfy Rule 8 yet and are owned
- * elsewhere; widen this gate to every publishable once those READMEs land.
+ * Scope note: `packages/{cli,geospec,geospec-engine,react,runtime}` do not satisfy
+ * Rule 8 yet and are owned elsewhere; widen this gate to every publishable once
+ * those READMEs land.
  */
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 const rule8Roots = ['packages/plugins/', 'packages/core/'];
-const pendingRule8 = new Set(['opencascade-native']);
 
 const requiredHeadings = ['## Install', '## Quick start', '## API', '## License'] as const;
 
@@ -33,8 +32,8 @@ const exportedNames = (source: string): Set<string> =>
 const quickStart = (readme: string): string =>
   /## Quick start\s+[\s\S]*?```typescript\n(?<source>[\s\S]*?)\n```/u.exec(readme)?.groups?.['source'] ?? '';
 
-const packages = publishable(await workspace()).filter(
-  (project) => rule8Roots.some((root) => project.root.startsWith(root)) && !pendingRule8.has(project.name),
+const packages = publishable(await workspace()).filter((project) =>
+  rule8Roots.some((root) => project.root.startsWith(root)),
 );
 
 describe('README shape (npm-policy Rule 8)', () => {

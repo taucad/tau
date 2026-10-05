@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments, Vector2 } from 'three';
 import type { Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import { LineMaterial } from 'three/addons';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import {
   applyFatLineSegments,
   createGltfFatLineMaterial,

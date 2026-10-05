@@ -61,6 +61,12 @@ type Outcomes = Record<
   string
 >;
 const denied = ['EPERM', 'EACCES'];
+// On Linux the sandbox hides each read-denied root (user homes, /tmp) behind an empty tmpfs, so a
+// hidden file reads as ENOENT rather than a permission error. A write there lands in that
+// throwaway tmpfs, and a write to the read-only root fails with EROFS. Neither reaches the host,
+// which the existsSync checks below prove. macOS denies all of these with EPERM.
+const hiddenRead = process.platform === 'linux' ? [...denied, 'ENOENT'] : denied;
+const containedWrite = process.platform === 'linux' ? [...denied, 'ENOENT', 'EROFS', 'allowed'] : denied;
 
 const worker = (
   paths: Record<
@@ -148,12 +154,12 @@ describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sa
         parseResult: (value) => value as Outcomes,
         signal: new AbortController().signal,
       });
-      expect(denied, `home_read ${outcome.home_read}`).toContain(outcome.home_read);
-      expect(denied, `temp_read ${outcome.temp_read}`).toContain(outcome.temp_read);
-      expect(denied, `outside_write ${outcome.outside_write}`).toContain(outcome.outside_write);
-      expect(denied, `home_write ${outcome.home_write}`).toContain(outcome.home_write);
-      expect(denied, `shared_temp_write ${outcome.shared_temp_write}`).toContain(outcome.shared_temp_write);
-      expect(denied, `debug_log_write ${outcome.debug_log_write}`).toContain(outcome.debug_log_write);
+      expect(hiddenRead, `home_read ${outcome.home_read}`).toContain(outcome.home_read);
+      expect(hiddenRead, `temp_read ${outcome.temp_read}`).toContain(outcome.temp_read);
+      expect(containedWrite, `outside_write ${outcome.outside_write}`).toContain(outcome.outside_write);
+      expect(containedWrite, `home_write ${outcome.home_write}`).toContain(outcome.home_write);
+      expect(containedWrite, `shared_temp_write ${outcome.shared_temp_write}`).toContain(outcome.shared_temp_write);
+      expect(containedWrite, `debug_log_write ${outcome.debug_log_write}`).toContain(outcome.debug_log_write);
       expect(outcome.socket).not.toBe('allowed');
       expect(outcome.child_read).not.toBe('exit:0');
       expect(outcome.artifact_write).toBe('allowed');

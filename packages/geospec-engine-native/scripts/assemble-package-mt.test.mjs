@@ -11,31 +11,33 @@ const script = new URL('assemble-package.sh', import.meta.url).pathname;
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 /** @type {(text: string) => unknown} */
 const parseJson = (text) => /** @type {unknown} */ (JSON.parse(text));
-/** @type {(value: unknown) => value is Record<string, unknown>} */
-const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+/** @type {(value: unknown) => asserts value is Record<string, unknown>} */
+const assertRecord = (value) => {
+  assert.ok(typeof value === 'object' && value !== null && !Array.isArray(value));
+};
 
 await it('should keep the source manifest ST-only', async () => {
   const manifest = parseJson(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.ok(isRecord(manifest));
-  assert.ok(isRecord(manifest.exports));
-  assert.ok(isRecord(manifest.publishConfig));
-  assert.ok(isRecord(manifest.publishConfig.exports));
-  assert.ok(isRecord(manifest.publishConfig.imports));
+  assertRecord(manifest);
+  assertRecord(manifest['exports']);
+  assertRecord(manifest['publishConfig']);
+  assertRecord(manifest['publishConfig']['exports']);
+  assertRecord(manifest['publishConfig']['imports']);
   assert.equal(
-    Object.keys(manifest.exports).some((name) => name.startsWith('./mt-assets/')),
+    Object.keys(manifest['exports']).some((name) => name.startsWith('./mt-assets/')),
     false,
   );
   assert.equal(
-    Object.keys(manifest.publishConfig.exports).some((name) => name.startsWith('./mt-assets/')),
+    Object.keys(manifest['publishConfig']['exports']).some((name) => name.startsWith('./mt-assets/')),
     false,
   );
-  assert.equal(manifest.exports['./wasm-binary'], './bindings/emscripten/generated/geospec_engine_native.wasm');
+  assert.equal(manifest['exports']['./wasm-binary'], './bindings/emscripten/generated/geospec_engine_native.wasm');
   assert.equal(
-    manifest.publishConfig.exports['./wasm-binary'],
+    manifest['publishConfig']['exports']['./wasm-binary'],
     './dist/bindings/mixed-wasm/geospec_engine_native.wasm',
   );
   assert.equal(
-    manifest.publishConfig.imports['#mixed-wasm-binding'],
+    manifest['publishConfig']['imports']['#mixed-wasm-binding'],
     './dist/bindings/mixed-wasm/geospec_engine_native.mjs',
   );
 });
@@ -117,13 +119,13 @@ await it('should stage only an explicitly qualified, hash-matched MT closure', a
     );
     assert.deepEqual(await readFile(join(target, 'qualification.json')), await readFile(qualificationPath));
     const stagedManifest = parseJson(await readFile(join(stage, 'package.json'), 'utf8'));
-    assert.ok(isRecord(stagedManifest));
-    assert.ok(isRecord(stagedManifest.exports));
-    assert.ok(isRecord(stagedManifest.publishConfig));
-    assert.ok(isRecord(stagedManifest.publishConfig.exports));
-    assert.equal(stagedManifest.exports['./mt-assets/permits-2/*'], './dist/bindings/mt-wasm/permits-2/*');
+    assertRecord(stagedManifest);
+    assertRecord(stagedManifest['exports']);
+    assertRecord(stagedManifest['publishConfig']);
+    assertRecord(stagedManifest['publishConfig']['exports']);
+    assert.equal(stagedManifest['exports']['./mt-assets/permits-2/*'], './dist/bindings/mt-wasm/permits-2/*');
     assert.equal(
-      stagedManifest.publishConfig.exports['./mt-assets/permits-2/*'],
+      stagedManifest['publishConfig']['exports']['./mt-assets/permits-2/*'],
       './dist/bindings/mt-wasm/permits-2/*',
     );
     const pack = spawnSync('npm', ['pack', '--json', '--dry-run'], { cwd: stage, encoding: 'utf8' });
@@ -131,16 +133,16 @@ await it('should stage only an explicitly qualified, hash-matched MT closure', a
     const packJson = parseJson(pack.stdout);
     assert.ok(Array.isArray(packJson));
     const firstPackage = /** @type {unknown} */ (packJson[0]);
-    assert.ok(isRecord(firstPackage));
+    assertRecord(firstPackage);
     const { files } = firstPackage;
     assert.ok(Array.isArray(files));
     /** @type {Set<string>} */
     const packedPaths = new Set();
     for (const file of files) {
       const entry = /** @type {unknown} */ (file);
-      assert.ok(isRecord(entry));
-      assert.equal(typeof entry.path, 'string');
-      packedPaths.add(entry.path);
+      assertRecord(entry);
+      assert.ok(typeof entry['path'] === 'string');
+      packedPaths.add(entry['path']);
     }
     for (const filename of [
       glueAsset.file,
@@ -154,7 +156,7 @@ await it('should stage only an explicitly qualified, hash-matched MT closure', a
 
     const qualified = await readFile(qualificationPath);
     const qualification = parseJson(qualified.toString());
-    assert.ok(isRecord(qualification));
+    assertRecord(qualification);
     await writeFile(qualificationPath, JSON.stringify({ ...qualification, verdict: 'rejected' }));
     assert.match(run().stderr, /independent qualification receipt/);
     await writeFile(qualificationPath, qualified);

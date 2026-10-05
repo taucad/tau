@@ -2,6 +2,8 @@ import * as React from 'react';
 import { Switch as SwitchPrimitive } from 'radix-ui';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
+import { menuItemVariants, menuSwitchRowVariants } from '#components/menu.variants.js';
+import { SwitchRowLabel } from '#components/switch-row-label.js';
 import { cn } from '#utils/cn.js';
 
 const switchVariants = cva(
@@ -65,4 +67,80 @@ function Switch({
   );
 }
 
-export { Switch };
+/**
+ * A full-width menu row that toggles a boolean setting: the whole row is the hit target and
+ * the switch sits at its trailing edge. It is `DropdownMenuSwitchItem` for surfaces that are
+ * not a dropdown menu — a popover, a sheet, a picker list — with the same classes, so a switch
+ * row looks and behaves the same everywhere. The title names the switch; the description, when
+ * given, describes it.
+ *
+ * @public
+ * @param properties - The checked state, its change handler, an optional icon and description, and the title.
+ * @returns A label holding the icon, title and description, with the switch at its trailing edge.
+ *
+ * @example <caption>Toggle a described setting in a popover</caption>
+ * ```typescript
+ * import { createElement } from 'react';
+ * import { SwitchRow } from '@taucad/ui/components/switch';
+ *
+ * export const example = createElement(
+ *   SwitchRow,
+ *   { isChecked: false, description: '1.5x speed, increased usage' },
+ *   'Fast mode',
+ * );
+ * ```
+ */
+function SwitchRow({
+  className,
+  children,
+  icon,
+  description,
+  isChecked,
+  onIsCheckedChange,
+  isDisabled = false,
+  ...properties
+}: Omit<React.ComponentProps<'label'>, 'children'> & {
+  /** The title: it names the switch. */
+  readonly children?: React.ReactNode;
+  /** A leading icon, drawn before the title (and beside both lines when there is a description). */
+  readonly icon?: React.ReactNode;
+  /** A second line under the title. */
+  readonly description?: React.ReactNode;
+  readonly isChecked: boolean;
+  readonly onIsCheckedChange?: (isChecked: boolean) => void;
+  readonly isDisabled?: boolean;
+}): React.JSX.Element {
+  const id = React.useId();
+  const isDescribed = description !== undefined;
+  return (
+    <label
+      data-slot='switch-row'
+      data-disabled={isDisabled ? '' : undefined}
+      className={cn(
+        menuItemVariants(),
+        menuSwitchRowVariants({ described: isDescribed }),
+        'has-focus-visible:bg-menu-highlight has-focus-visible:text-foreground',
+        className,
+      )}
+      {...properties}
+    >
+      <SwitchRowLabel
+        icon={icon}
+        description={description}
+        titleId={`${id}-title`}
+        descriptionId={`${id}-description`}
+      >
+        {children}
+      </SwitchRowLabel>
+      <Switch
+        checked={isChecked}
+        disabled={isDisabled}
+        aria-labelledby={`${id}-title`}
+        {...(isDescribed ? { 'aria-describedby': `${id}-description` } : {})}
+        onCheckedChange={onIsCheckedChange}
+      />
+    </label>
+  );
+}
+
+export { Switch, SwitchRow };

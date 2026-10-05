@@ -52,8 +52,8 @@ export function ErrorPage(): React.JSX.Element {
     return (
       <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-6 px-4 py-8'>
         <div className='flex flex-col items-center gap-3 text-center'>
-          <div className='flex size-12 items-center justify-center rounded-full bg-destructive/10'>
-            <AlertCircle className='size-6 text-destructive' />
+          <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
+            <AlertCircle className='size-6 text-feature' />
           </div>
           <h1 className='text-lg font-semibold text-foreground'>
             {error.status} {error.statusText}
@@ -82,8 +82,8 @@ export function ErrorPage(): React.JSX.Element {
       <div className='flex min-h-full flex-1 flex-col items-center justify-center px-4 py-8'>
         <div className='flex w-full max-w-lg flex-col items-center gap-4 p-6 text-center'>
           {/* Error Icon */}
-          <div className='flex size-12 items-center justify-center rounded-full bg-destructive/10'>
-            <AlertCircle className='size-6 text-destructive' />
+          <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
+            <AlertCircle className='size-6 text-feature' />
           </div>
 
           {/* Error Title */}

@@ -61,7 +61,7 @@ const markTone: Record<SidebarFacts['mark'], string> = {
   running: '',
   attention: 'text-warning/80',
   unread: '',
-  failed: 'text-destructive/80',
+  failed: 'text-feature/80',
 };
 
 /**

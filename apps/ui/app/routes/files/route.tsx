@@ -432,7 +432,7 @@ function WorkspaceConnectionStatus({
       aria-live='polite'
       className={cn(
         'flex items-center gap-2 rounded-md border bg-muted/35 px-3 py-2',
-        state.phase === 'failed' && 'border-destructive/30 bg-destructive/5',
+        state.phase === 'failed' && 'border-feature/30 bg-feature/5',
       )}
     >
       {state.phase === 'failed' ? (

@@ -2,7 +2,7 @@ import type React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 
-type ChatErrorCardTone = 'neutral' | 'warning' | 'destructive' | 'notice';
+type ChatErrorCardTone = 'neutral' | 'warning' | 'notice';
 
 /**
  * The consequence a kept turn states, outside every disclosure.
@@ -15,7 +15,6 @@ export const turnSavedSentence = 'Everything up to here is saved.';
 const iconClassName: Record<ChatErrorCardTone, string> = {
   neutral: 'text-muted-foreground',
   warning: 'text-feature',
-  destructive: 'text-destructive',
   notice: 'text-feature',
 };
 

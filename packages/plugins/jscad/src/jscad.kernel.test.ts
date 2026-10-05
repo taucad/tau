@@ -213,7 +213,7 @@ describe('JscadWorker', () => {
     const context = { modulesRegistered: true, modeling: testModeling };
     const handle = normalizeJscadParts(testJscadApi.primitives.cuboid({ size: [10, 10, 10] }), testModeling);
     const serialized = jscadDefinition.serializeHandle!({ handle }, runtime, context);
-    const fresh = jscadDefinition.deserializeHandle!({ serialized }, runtime, context);
+    const fresh = await jscadDefinition.deserializeHandle!({ serialized }, runtime, context);
     const render = async (shape: typeof handle, includeEdges: boolean) => {
       const projected = await jscadDefinition.render!(
         { handle: shape, view: 'model', options: {}, content: { includeEdges } },
@@ -2274,7 +2274,7 @@ describe('serializeHandle', () => {
     expect(decodedEntry?.data).not.toBeInstanceOf(Float32Array);
     expect(ArrayBuffer.isView(decodedEntry?.data)).toBe(true);
 
-    const restoredHandle = deserializeHandle(
+    const restoredHandle = await deserializeHandle(
       {
         serialized: decodedSerializedNativeHandle as JscadSerializedNativeHandleEntry[],
       },
@@ -2296,30 +2296,26 @@ describe('serializeHandle', () => {
     expect(exportResult.files[0].bytes.byteLength).toBeGreaterThan(0);
   });
 
-  it('should reject malformed serialized compact binary with precise errors', () => {
+  it('should reject malformed serialized compact binary with precise errors', async () => {
     const { deserializeHandle } = jscadDefinition;
     expect(deserializeHandle).toBeDefined();
     if (!deserializeHandle) {
       return;
     }
-    const deserializeInvalidHandle = (data: unknown): void => {
-      deserializeHandle({ serialized: data as JscadSerializedNativeHandleEntry[] }, createMockKernelRuntime(), {
+    const deserializeInvalidHandle = async (data: unknown): Promise<void> => {
+      await deserializeHandle({ serialized: data as JscadSerializedNativeHandleEntry[] }, createMockKernelRuntime(), {
         modulesRegistered: true,
         modeling: testModeling,
       });
     };
 
-    expect(() => {
-      deserializeInvalidHandle([{ type: 'geom3', data: new Uint8Array([1, 2, 3]) }]);
-    }).toThrow(
+    await expect(deserializeInvalidHandle([{ type: 'geom3', data: new Uint8Array([1, 2, 3]) }])).rejects.toThrow(
       'Invalid JSCAD serialized handle compact binary at entry 0 (geom3): byte length 3 is not divisible by 4.',
     );
-    expect(() => {
-      deserializeInvalidHandle([{ type: 'sphere', data: new Uint8Array([0, 0, 0, 0]) }]);
-    }).toThrow('Invalid JSCAD serialized handle entry 0: unsupported type "sphere"; expected geom2, geom3, or path2.');
-    expect(() => {
-      deserializeInvalidHandle([{ type: 'geom3', data: 'not-binary' }]);
-    }).toThrow(
+    await expect(deserializeInvalidHandle([{ type: 'sphere', data: new Uint8Array([0, 0, 0, 0]) }])).rejects.toThrow(
+      'Invalid JSCAD serialized handle entry 0: unsupported type "sphere"; expected geom2, geom3, or path2.',
+    );
+    await expect(deserializeInvalidHandle([{ type: 'geom3', data: 'not-binary' }])).rejects.toThrow(
       'Invalid JSCAD serialized handle compact binary at entry 0 (geom3): expected Float32Array, ArrayBuffer, or ArrayBuffer view; got string.',
     );
   });

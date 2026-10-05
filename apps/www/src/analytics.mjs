@@ -19,6 +19,19 @@ export const campaignCodes = new Set(['launch', 'journal', 'github', 'docs']);
  * @typedef {{name: unknown, page: unknown, placement?: unknown, campaign?: unknown, returning?: unknown, eventId: unknown}} EventInput
  */
 
+/** Every `data-placement` the templates emit; the site tests hold the two in step. */
+export const ctaPlacements = new Set([
+  'header',
+  'primary',
+  'hero',
+  'product',
+  'closing',
+  'download',
+  'download-web',
+  'pricing-free',
+  'pricing-pro',
+]);
+
 /**
  * Keep optional event properties within the first-party contract.
  * @internal
@@ -41,7 +54,7 @@ export const sanitizeEvent = ({ name, page, placement, campaign, returning, even
     event: name,
     event_id: eventId,
     page,
-    ...(typeof placement === 'string' && ['header', 'primary', 'download'].includes(placement) ? { placement } : {}),
+    ...(typeof placement === 'string' && ctaPlacements.has(placement) ? { placement } : {}),
     ...(typeof campaign === 'string' && campaignCodes.has(campaign) ? { campaign } : {}),
     ...(typeof returning === 'boolean' ? { returning } : {}),
   };

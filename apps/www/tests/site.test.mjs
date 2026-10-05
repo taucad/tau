@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { sanitizeEvent } from '#www/analytics.js';
+import { ctaPlacements, sanitizeEvent } from '#www/analytics.js';
 import { environmentHref, stagingDesktop } from '#www/environment.js';
 import { pages, renderPage } from '#www/templates.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -26,6 +26,20 @@ await test('analytics allowlists data and drops secrets, identifiers and unknown
   assert.equal(sanitizeEvent({ name: 'signup_completed', page: '/', eventId }), undefined);
   assert.equal(sanitizeEvent({ name: 'marketing_page_view', page: '/invitations/bearer', eventId }), undefined);
   assert.equal(sanitizeEvent({ name: 'marketing_page_view', page: '/', eventId: 'user@example.com' }), undefined);
+});
+await test('analytics keeps every CTA placement the pages emit', () => {
+  for (const page of pages) {
+    const html = renderPage({
+      page,
+      origin: 'https://preview.example',
+      launch: false,
+      asset: { css: '/a.css', js: '/a.js' },
+      analyticsEndpoint: '',
+    });
+    for (const [, placement] of html.matchAll(/data-placement="([^"]*)"/gu)) {
+      assert.ok(ctaPlacements.has(placement), `${page.path} emits unlisted placement ${placement}`);
+    }
+  }
 });
 await test('every page has one main, one heading, noindex and escaped metadata', () => {
   for (const page of pages) {

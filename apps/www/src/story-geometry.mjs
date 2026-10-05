@@ -147,6 +147,7 @@ export const parseVariantManifest = (value, base, byteLength) => {
       typeof offset !== 'number' ||
       typeof length !== 'number' ||
       !Number.isSafeInteger(offset) ||
+      offset < 0 ||
       offset % 4 !== 0 ||
       length * 3 !== part.position.length ||
       offset + length * 4 > byteLength

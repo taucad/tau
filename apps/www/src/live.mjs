@@ -35,11 +35,21 @@ const run = async ({ heroStage, storyStage, chapters }) => {
   for (const stage of [hero, story]) {
     stage?.setAttribute('aria-busy', 'true');
   }
-  const assembly = await loadAssembly(signal);
-  if (signal.aborted || reduced.matches) {
+  const idle = () => {
     for (const stage of [hero, story]) {
       stage?.removeAttribute('aria-busy');
     }
+  };
+  // A failed download leaves the static fallback, which is not busy.
+  let assembly;
+  try {
+    assembly = await loadAssembly(signal);
+  } catch (error) {
+    idle();
+    throw error;
+  }
+  if (signal.aborted || reduced.matches) {
+    idle();
     return;
   }
   const scene = createScene(assembly);

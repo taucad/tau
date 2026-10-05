@@ -78,25 +78,18 @@ const { ViewerRightActions, ViewerProjectionCommandItems } =
 const { ViewerProjectionPicker } = await import('#routes/w.$workspace.$project/chat-viewer-projection-picker.js');
 
 type Params = { viewId: string; entryPath: string };
-function BrowserViewerPane({ api, containerApi, params }: IDockviewPanelProps<Params>): React.JSX.Element {
+function BrowserViewerPane({ params }: IDockviewPanelProps<Params>): React.JSX.Element {
   return (
-    <div data-testid={`viewer-pane-${params.viewId}`} className='relative size-full overflow-hidden bg-background'>
+    <div
+      data-testid={`viewer-pane-${params.viewId}`}
+      data-viewer-frame
+      className='relative size-full overflow-hidden bg-background'
+    >
       <div className='absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)]'>
         <ViewerProjectionPicker
           viewId={params.viewId}
           entryPath={params.entryPath}
           cadActor={actor as ActorRefFrom<typeof cadMachine>}
-          onOpenBeside={(kernelViewId) => {
-            const viewId = `pane-${String(containerApi.panels.length)}`;
-            containerApi.addPanel({
-              id: viewId,
-              component: 'viewer',
-              title: 'main.tsx',
-              params: { viewId, entryPath: params.entryPath },
-              position: { direction: 'right', referenceGroup: api.group },
-            });
-            state.edits(viewId, () => ({ ...newViewRecord(params.entryPath), selectedKernelView: kernelViewId }));
-          }}
         />
       </div>
       <div className='flex size-full items-center justify-center'>Viewer content</div>
@@ -142,7 +135,6 @@ function DockFixture({
           cadActor={actor as ActorRefFrom<typeof cadMachine>}
           viewId='pane-0'
           entryPath='main.tsx'
-          api={api}
         />
       ) : null}
       <output data-testid='panel-count'>{api?.panels.length ?? 0}</output>
@@ -169,11 +161,11 @@ describe('viewer pane projection picker in Chromium', () => {
     );
     const first = await screen.findByTestId('viewer-pane-pane-0');
     const second = await screen.findByTestId('viewer-pane-pane-1');
-    expect(first.querySelector('button[aria-label^="Projection view"]')).toBeVisible();
-    expect(second.querySelector('button[aria-label^="Projection view"]')).toBeVisible();
-    expect(document.querySelector('.dv-tabs-container button[aria-label^="Projection view"]')).toBeNull();
+    expect(first.querySelector('button[aria-label^="View:"]')).toBeVisible();
+    expect(second.querySelector('button[aria-label^="View:"]')).toBeVisible();
+    expect(document.querySelector('.dv-tabs-container button[aria-label^="View:"]')).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Workspace actions' })).toHaveLength(2);
-    await userEvent.click(first.querySelector('button[aria-label^="Projection view"]')!);
+    await userEvent.click(first.querySelector('button[aria-label^="View:"]')!);
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Drawing' }));
     expect(state.edits).toHaveBeenCalledWith('pane-0', expect.any(Function));
     expect(state.edits).not.toHaveBeenCalledWith('pane-1', expect.any(Function));
@@ -184,30 +176,28 @@ describe('viewer pane projection picker in Chromium', () => {
       listener();
     }
     await vi.waitFor(() => {
-      expect(first.querySelector('button[aria-label="Projection view: Drawing"]')).toBeVisible();
-      expect(second.querySelector('button[aria-label="Projection view: Model"]')).toBeVisible();
+      expect(first.querySelector('button[aria-label="View: Drawing"]')).toBeVisible();
+      expect(second.querySelector('button[aria-label="View: Model"]')).toBeVisible();
     });
   });
 
-  it('keeps the command palette and pane-bound Open beside action', async () => {
+  it('keeps the command palette Show action and offers no Open beside', async () => {
     await page.viewport(760, 480);
     render(
       <TooltipProvider>
         <DockFixture width={720} />
       </TooltipProvider>,
     );
-    expect(state.paletteItems.map((item) => item.label)).toContain('Show PCB');
+    const labels = state.paletteItems.map((item) => item.label);
+    expect(labels).toContain('Show PCB');
+    expect(labels.filter((label) => label.includes('beside'))).toEqual([]);
     const first = await screen.findByTestId('viewer-pane-pane-0');
-    await userEvent.click(first.querySelector('button[aria-label^="Projection view"]')!);
-    await userEvent.hover(await screen.findByRole('menuitem', { name: 'Open beside…' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Drawing' }));
-    expect(state.edits).toHaveBeenCalledWith('pane-1', expect.any(Function));
-    await vi.waitFor(() => {
-      expect(document.querySelectorAll('.dv-tab')).toHaveLength(2);
-    });
+    await userEvent.click(first.querySelector('button[aria-label^="View:"]')!);
+    expect(await screen.findByRole('menuitemradio', { name: 'PCB' })).toBeVisible();
+    expect(screen.queryByRole('menuitem', { name: /beside/i })).toBeNull();
   });
 
-  it('keeps instance and options reachable in a narrow pane without overflow', async () => {
+  it('keeps the view and instance menus reachable in a narrow pane, with options left to Viewer settings', async () => {
     state.records.set('pane-0', { ...newViewRecord('main.tsx'), selectedKernelView: 'drawing' });
     await page.viewport(360, 520);
     render(
@@ -218,10 +208,17 @@ describe('viewer pane projection picker in Chromium', () => {
     const frame = screen.getByTestId('frame');
     const pane = await screen.findByTestId('viewer-pane-pane-0');
     expect(frame.scrollWidth).toBeLessThanOrEqual(320);
-    expect(pane.querySelector('button[aria-label="Projection view: Drawing"]')).toBeVisible();
-    expect(screen.getByRole('combobox', { name: 'Drawing instance' })).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Drawing options' }));
-    expect(screen.getByRole('checkbox', { name: 'Labels' })).toBeVisible();
+    expect(pane.querySelector('button[aria-label="View: Drawing"]')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Drawing instance: Whole view' })).toBeVisible();
+    // The view's options are Kernel settings in the viewer settings menu, not a toggle in this bar.
+    expect(screen.queryByRole('button', { name: /options/ })).toBeNull();
+    // The instance menu opens into the viewer and never past its edges.
+    await userEvent.click(screen.getByRole('button', { name: 'Drawing instance: Whole view' }));
+    const menu = await screen.findByRole('menu');
+    const viewer = (pane.querySelector('[data-viewer-frame]') ?? pane).getBoundingClientRect();
+    const bounds = menu.getBoundingClientRect();
+    expect(bounds.left).toBeGreaterThanOrEqual(viewer.left);
+    expect(bounds.right).toBeLessThanOrEqual(viewer.right);
   });
 
   it('opens by keyboard and returns focus on Escape', async () => {
@@ -231,7 +228,7 @@ describe('viewer pane projection picker in Chromium', () => {
         <DockFixture width={440} />
       </TooltipProvider>,
     );
-    const trigger = await screen.findByRole('button', { name: 'Projection view: Model' });
+    const trigger = await screen.findByRole('button', { name: 'View: Model' });
     trigger.focus();
     await userEvent.keyboard('{ArrowDown}');
     expect(await screen.findByRole('menuitemradio', { name: 'PCB' })).toBeVisible();

@@ -109,7 +109,7 @@ describe('ManifoldWorker', () => {
     const runtime = createMockKernelRuntime();
     const context = { manifoldCadModule: {} };
     const handle = { glb };
-    const fresh = definition.deserializeHandle!(
+    const fresh = await definition.deserializeHandle!(
       {
         serialized: definition.serializeHandle!({ handle }, runtime, context),
       },
@@ -555,7 +555,7 @@ describe('ManifoldWorker', () => {
         });
       const context = { manifoldCadModule: {} };
       const serializedHandle = serialize({ handle: nativeHandle }, runtime, context);
-      const restored = deserialize({ serialized: serializedHandle }, runtime, context);
+      const restored = await deserialize({ serialized: serializedHandle }, runtime, context);
 
       expect(restored.glb).toEqual(nativeHandle.glb);
       expect(restored.glb).not.toBe(nativeHandle.glb);

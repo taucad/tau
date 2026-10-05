@@ -198,7 +198,7 @@ export function PrintNotice({
   children,
   role = 'alert',
 }: {
-  readonly tone: 'warning' | 'destructive' | 'neutral';
+  readonly tone: 'warning' | 'error' | 'neutral';
   readonly children: React.ReactNode;
   readonly role?: 'alert' | 'status';
 }): React.JSX.Element {
@@ -208,7 +208,7 @@ export function PrintNotice({
       className={cn(
         'flex min-w-0 items-start gap-2 rounded-lg border p-2 text-xs',
         tone === 'warning' && 'border-warning/30 bg-warning/10',
-        tone === 'destructive' && 'border-destructive/30 bg-destructive/10',
+        tone === 'error' && 'border-feature/30 bg-feature/10',
         tone === 'neutral' && 'border-border/70 bg-muted/30',
       )}
     >
@@ -217,7 +217,7 @@ export function PrintNotice({
         className={cn(
           'mt-0.5 size-3.5 shrink-0',
           tone === 'warning' && 'text-warning',
-          tone === 'destructive' && 'text-destructive',
+          tone === 'error' && 'text-feature',
           tone === 'neutral' && 'text-muted-foreground',
         )}
       />

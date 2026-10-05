@@ -87,13 +87,9 @@ const acpAgentKey = (hostId: TauAgentHostId, agentId: string): string =>
  *
  * A **refused** agent still gets a row, carrying its code (V9): a user who
  * installed Codex and sees nothing cannot tell a missing feature from a stale
- * CLI. It is listed and not selectable, exactly as an offline host is.
- *
- * The copy is deliberate on both halves: **your local login** (the adapter
- * inherits the CLI's own credential — Tau never brokers a key, X6) and **this
- * project's tree** (V2: the agent works where the chat's revision mode says,
- * the host records the revision, and the UI must not promise per-action
- * approval — SP-4 proved ACP session modes are advisory).
+ * CLI. It is listed and not selectable, exactly as an offline host is. An
+ * agent that can start carries no note: "runs with your local login" told the
+ * person what they already knew on every row.
  */
 const acpAgentTarget = (placement: AgentHostPlacementTarget, agent: ExternalAgentDescriptor): TauHostTarget => ({
   key: acpAgentKey(placement.hostId, agent.id),
@@ -102,11 +98,9 @@ const acpAgentTarget = (placement: AgentHostPlacementTarget, agent: ExternalAgen
   placement,
   agentId: agent.id,
   agent,
-  note:
-    agent.refusal === undefined
-      ? `Runs with your local ${agent.displayName} login in this project's tree`
-      : `${externalAgentRefusalReasons[agent.refusal]} (${agent.refusal})`,
-  ...(agent.refusal === undefined ? {} : { noteIsRefusal: true }),
+  ...(agent.refusal === undefined
+    ? {}
+    : { note: `${externalAgentRefusalReasons[agent.refusal]} (${agent.refusal})`, noteIsRefusal: true }),
 });
 
 /** A descriptor for an agent no host has described yet, so a persisted selection still names itself. */
@@ -334,7 +328,7 @@ export const ChatExecutionSelector = memo(function ({
                     data-slot='chat-execution-tau-host-workspace'
                     className={cn(
                       'block truncate text-xs',
-                      target.noteIsRefusal ? 'text-destructive' : 'text-muted-foreground',
+                      target.noteIsRefusal ? 'text-feature' : 'text-muted-foreground',
                     )}
                     title={target.note}
                   >

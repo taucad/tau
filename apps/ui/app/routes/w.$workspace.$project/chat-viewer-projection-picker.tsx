@@ -3,21 +3,18 @@ import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { Evaluation } from '@taucad/runtime';
 import { workbenchRecords } from '@taucad/workbench';
-import { Box, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { Box, Boxes, ChevronDown } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
+import { Separator } from '@taucad/ui/components/separator';
 import { useProject } from '#hooks/use-project.js';
 import { selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -25,55 +22,69 @@ import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-recor
 import { newViewRecord } from '#workbench-records/projection.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 
+type ViewOffer = Extract<Evaluation, { success: true }>['views'][number];
+
+/** The bottom viewer bar's hairline (`chat-viewer-controls.tsx`). */
+const Hairline = (): React.JSX.Element => (
+  <Separator orientation='vertical' className='mx-0 first:hidden data-[orientation=vertical]:h-4' />
+);
+
+/** A labelled menu trigger in the bar: the bottom bar's ToolToggle at its labelled width. */
+const menuTriggerClassName = 'w-auto max-w-40 min-w-0 gap-1 px-2 text-xs data-[state=open]:bg-accent';
+
+/**
+ * The viewer's view bar, top left: a sibling of the bottom viewer bar holding the view menu (two or more views, or a
+ * pinned view the model no longer offers) and the instance menu (when the view offers instances). With neither it
+ * renders nothing. Its menus stay inside the viewer. A view's options are Kernel settings in Viewer settings.
+ */
 export function ViewerProjectionPicker({
   viewId,
   entryPath,
   cadActor,
-  onOpenBeside,
 }: {
   readonly viewId: string;
   readonly entryPath: string;
   readonly cadActor: ActorRefFrom<typeof cadMachine>;
-  readonly onOpenBeside?: (viewId: string) => void;
 }): React.JSX.Element | undefined {
   const evaluation = useSelector(cadActor, selectCadEvaluation);
   const { viewRecords } = useProject();
   const viewCommands = useWorkbenchViewCommands();
   const record = viewRecords.get(viewId);
   const selected = record?.selectedKernelView;
-  const [optionError, setOptionError] = useState<string | undefined>();
   const localChoice = useLocalInstanceChoice(viewId);
+  // The viewer frame bounds every menu and panel the bar opens.
+  const [boundary, setBoundary] = useState<HTMLElement>();
   if (!evaluation?.success) {
     return undefined;
   }
   const offered = selected ? evaluation.views.find((view) => view.id === selected) : evaluation.views[0];
   const state = record?.kernelViews?.find((view) => view.id === offered?.id);
-  const isUnavailable = Boolean(selected && !offered);
-  const showSwitch = evaluation.views.length > 1 || isUnavailable;
+  const showSwitch = evaluation.views.length > 1 || Boolean(selected && !offered);
   const localForView = localChoice?.viewId === offered?.id ? localChoice : undefined;
   const selectedInstance = localForView?.instanceId ?? state?.authoredInstance ?? '';
+  const showInstances = Boolean(offered?.instances?.length) || selectedInstance !== '';
+  if (!showSwitch && !showInstances) {
+    return undefined;
+  }
   const choose = (id: string): void => {
-    const nextId = id === '' ? undefined : id;
+    // The first view is the default: choosing it follows whatever the model offers first.
+    const nextId = id === evaluation.views[0]?.id ? undefined : id;
     setLocalInstanceChoice(viewId, undefined);
     chooseProjection({ viewCommands, viewId, entryPath, evaluation, nextId });
   };
-  const editViewState = (change: {
-    readonly options?: Record<string, unknown>;
-    readonly authoredInstance?: string | undefined;
-  }): void => {
-    if (!offered) {
-      return;
-    }
-    void viewCommands.edit(viewId, (current) => {
+  const editViewState = async (
+    kernelViewId: string,
+    change: { readonly authoredInstance?: string | undefined },
+  ): Promise<boolean> =>
+    viewCommands.edit(viewId, (current) => {
       const nextRecord = current ?? newViewRecord(entryPath);
       const states = nextRecord.kernelViews ?? [];
-      const prior = states.find((view) => view.id === offered.id) ?? { id: offered.id };
+      const prior = states.find((view) => view.id === kernelViewId) ?? { id: kernelViewId };
       return workbenchRecords.view.schema.parse({
         ...nextRecord,
-        kernelViews: [...states.filter((view) => view.id !== offered.id), { ...prior, ...change }],
+        kernelViews: [...states.filter((view) => view.id !== kernelViewId), { ...prior, ...change }],
       });
     });
-  };
   const chooseInstance = (id: string): void => {
     if (!offered) {
       return;
@@ -82,223 +93,152 @@ export function ViewerProjectionPicker({
       setLocalInstanceChoice(viewId, { evaluationId: evaluation.id, viewId: offered.id, instanceId: id });
     } else {
       setLocalInstanceChoice(viewId, undefined);
-      editViewState({ authoredInstance: id === '' ? undefined : id });
+      void editViewState(offered.id, { authoredInstance: id === '' ? undefined : id });
     }
   };
-  const schemaProperties = offered?.options?.schema.properties ?? {};
-  const values = { ...offered?.options?.defaults, ...state?.options };
-  const editOption = (key: string, value: unknown): void => {
-    const next = Object.fromEntries(Object.entries(values).filter(([name]) => name !== key));
-    if (value !== undefined) {
-      next[key] = value;
-    }
-    editViewState({ options: next });
-  };
-  if (!showSwitch && !offered?.instances?.length && !offered?.options && selectedInstance === '') {
-    return undefined;
-  }
+  const title = offered?.title ?? `${selected} unavailable`;
   return (
-    <div role='group' aria-label='Projection controls' className='flex max-w-full items-center gap-1'>
-      <DropdownMenu modal={false}>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type='button'
-            variant='overlay'
-            size='sm'
-            aria-label={`Projection view: ${offered?.title ?? `${selected} unavailable`}`}
-            className='max-w-36 min-w-0 gap-1.5 rounded-full shadow-sm'
-          >
-            <Box aria-hidden='true' className='size-4 shrink-0' />
-            <span className='truncate'>{offered?.title ?? `${selected} unavailable`}</span>
-            <ChevronDown aria-hidden='true' className='size-3 shrink-0 text-muted-foreground' />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align='start'
-          side='bottom'
-          className='w-48 max-w-[calc(100vw-1rem)] rounded-lg'
-          aria-label='Pane view'
-        >
-          <DropdownMenuRadioGroup value={selected ?? ''} onValueChange={choose}>
-            <DropdownMenuRadioItem value=''>Default ({evaluation.views[0]?.title ?? 'view'})</DropdownMenuRadioItem>
-            {isUnavailable ? (
-              <DropdownMenuRadioItem value={selected ?? ''} disabled>
-                {selected} (unavailable)
-              </DropdownMenuRadioItem>
-            ) : null}
-            {evaluation.views.map((view) => (
-              <DropdownMenuRadioItem key={view.id} value={view.id}>
-                {view.title}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-          {onOpenBeside && evaluation.views.length > 0 ? (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>Open beside…</DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  {evaluation.views.map((view) => (
-                    <DropdownMenuItem
-                      key={view.id}
-                      onSelect={() => {
-                        onOpenBeside(view.id);
-                      }}
-                    >
-                      {view.title}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            </>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {offered && (Boolean(offered.instances?.length) || selectedInstance !== '') ? (
-        <select
-          aria-label={`${offered.title} instance`}
-          className='h-7 max-w-28 min-w-0 rounded border border-border bg-background px-1 text-xs text-foreground focus-visible:focus-outline'
-          value={selectedInstance}
-          onChange={(event) => {
-            chooseInstance(event.target.value);
-          }}
-        >
-          <option value=''>Whole view</option>
-          {localForView && localForView.evaluationId !== evaluation.id ? (
-            <option value={localForView.instanceId}>{localForView.instanceId} (expired)</option>
-          ) : null}
-          {offered.instances?.map((instance) => (
-            <option key={instance.id} value={instance.id}>
-              {instance.title}
-            </option>
-          ))}
-        </select>
+    <div
+      ref={(node) => {
+        setBoundary(node?.closest<HTMLElement>('[data-viewer-frame]') ?? undefined);
+      }}
+      role='group'
+      aria-label='View controls'
+      data-slot='view-controls'
+      className='pointer-events-auto flex h-9 max-w-full min-w-0 items-center gap-1 rounded-lg border bg-sidebar p-1 text-muted-foreground shadow-xs [&_button]:font-normal [&_button:focus-visible]:text-foreground [&_button:hover]:text-foreground [&_button[data-state=open]]:text-foreground'
+    >
+      {showSwitch ? (
+        <ViewMenu views={evaluation.views} selected={selected} title={title} boundary={boundary} onChoose={choose} />
       ) : null}
-      {offered?.options ? (
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button size='icon-xs' variant='ghost' aria-label={`${offered.title} options`}>
-              <SlidersHorizontal aria-hidden='true' className='size-4' />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align='end' className='w-64'>
-            <fieldset className='flex flex-col gap-2'>
-              <legend className='mb-2 text-sm font-medium'>{offered.title} options</legend>
-              {Object.entries(schemaProperties).map(([key, property]) => {
-                if (typeof property === 'boolean') {
-                  return null;
-                }
-                const label = property.title ?? key;
-                const value = values[key];
-                if (property.type === 'boolean') {
-                  return (
-                    <label key={key} className='flex items-center gap-2 text-xs'>
-                      <input
-                        type='checkbox'
-                        checked={value === true}
-                        onChange={(event) => {
-                          editOption(key, event.target.checked);
-                        }}
-                      />
-                      {label}
-                    </label>
-                  );
-                }
-                if (property.enum) {
-                  const choices = property.enum.filter(
-                    (choice): choice is string | number | boolean =>
-                      typeof choice === 'string' || typeof choice === 'number' || typeof choice === 'boolean',
-                  );
-                  return (
-                    <label key={key} className='flex flex-col gap-1 text-xs'>
-                      {label}
-                      <select
-                        className='h-7 rounded border border-input bg-background px-1'
-                        value={
-                          typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-                            ? String(value)
-                            : ''
-                        }
-                        onChange={(event) => {
-                          editOption(
-                            key,
-                            choices.find((choice) => String(choice) === event.target.value),
-                          );
-                        }}
-                      >
-                        <option value=''>Choose…</option>
-                        {choices.map((choice) => (
-                          <option key={String(choice)} value={String(choice)}>
-                            {String(choice)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  );
-                }
-                if (property.type === 'number' || property.type === 'integer' || property.type === 'string') {
-                  return (
-                    <label key={key} className='flex flex-col gap-1 text-xs'>
-                      {label}
-                      <input
-                        type={property.type === 'string' ? 'text' : 'number'}
-                        className='h-7 rounded border border-input bg-background px-2'
-                        value={typeof value === 'string' || typeof value === 'number' ? value : ''}
-                        onChange={(event) => {
-                          editOption(
-                            key,
-                            event.target.type === 'number'
-                              ? event.target.value === ''
-                                ? undefined
-                                : Number(event.target.value)
-                              : event.target.value,
-                          );
-                        }}
-                      />
-                    </label>
-                  );
-                }
-                return (
-                  <label key={key} className='flex flex-col gap-1 text-xs'>
-                    {label} (JSON)
-                    <textarea
-                      className='min-h-16 rounded border border-input bg-background px-2'
-                      defaultValue={value === undefined ? '' : JSON.stringify(value)}
-                      onBlur={(event) => {
-                        try {
-                          editOption(
-                            key,
-                            event.target.value === '' ? undefined : (JSON.parse(event.target.value) as unknown),
-                          );
-                          setOptionError(undefined);
-                        } catch {
-                          setOptionError(`${label} must be valid JSON.`);
-                        }
-                      }}
-                    />
-                  </label>
-                );
-              })}
-              {optionError ? (
-                <p role='alert' className='text-xs text-destructive'>
-                  {optionError}
-                </p>
-              ) : null}
-              <Button
-                size='sm'
-                variant='outline'
-                type='button'
-                onClick={() => {
-                  editViewState({ options: offered.options?.defaults ?? {} });
-                }}
-              >
-                Restore view defaults
-              </Button>
-            </fieldset>
-          </PopoverContent>
-        </Popover>
+      {offered && showInstances ? (
+        <>
+          <Hairline />
+          <InstanceMenu
+            viewTitle={offered.title}
+            instances={offered.instances ?? []}
+            selected={selectedInstance}
+            expired={localForView && localForView.evaluationId !== evaluation.id ? localForView.instanceId : undefined}
+            boundary={boundary}
+            onChoose={chooseInstance}
+          />
+        </>
       ) : null}
     </div>
+  );
+}
+
+/** The view menu: each offered view once, with the viewer's 1–3 shortcuts. */
+function ViewMenu({
+  views,
+  selected,
+  title,
+  boundary,
+  onChoose,
+}: {
+  readonly views: readonly ViewOffer[];
+  /** The pinned view id; undefined follows the first view. */
+  readonly selected: string | undefined;
+  readonly title: string;
+  readonly boundary: HTMLElement | undefined;
+  readonly onChoose: (id: string) => void;
+}): React.JSX.Element {
+  const isUnavailable = selected !== undefined && !views.some((view) => view.id === selected);
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant='ghost' size='icon-sm' aria-label={`View: ${title}`} className={menuTriggerClassName}>
+          <Box aria-hidden='true' className='size-4 shrink-0' />
+          <span className='truncate'>{title}</span>
+          <ChevronDown aria-hidden='true' className='size-3 shrink-0' />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align='start'
+        side='bottom'
+        className='w-56'
+        collisionBoundary={boundary}
+        aria-label='Pane view'
+      >
+        <DropdownMenuLabel>View</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={selected ?? views[0]?.id ?? ''} onValueChange={onChoose}>
+          {isUnavailable ? (
+            <DropdownMenuRadioItem disabled value={selected}>
+              {selected} (unavailable)
+            </DropdownMenuRadioItem>
+          ) : null}
+          {views.map((view, index) => (
+            <DropdownMenuRadioItem key={view.id} value={view.id}>
+              {view.title}
+              {/* The viewer's 1–3 keys choose the first three views. */}
+              {index < 3 && views.length > 1 ? (
+                <DropdownMenuShortcut aria-hidden='true'>{index + 1}</DropdownMenuShortcut>
+              ) : null}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** The instance menu: the whole view or one of its instances, and a local choice a rebuild expired. */
+function InstanceMenu({
+  viewTitle,
+  instances,
+  selected,
+  expired,
+  boundary,
+  onChoose,
+}: {
+  readonly viewTitle: string;
+  readonly instances: NonNullable<ViewOffer['instances']>;
+  /** The chosen instance id; empty for the whole view. */
+  readonly selected: string;
+  /** A local instance from an earlier evaluation, still chosen. */
+  readonly expired: string | undefined;
+  readonly boundary: HTMLElement | undefined;
+  readonly onChoose: (id: string) => void;
+}): React.JSX.Element {
+  const label =
+    instances.find((instance) => instance.id === selected)?.title ??
+    (selected === '' ? 'Whole view' : `${selected}${expired === selected ? ' (expired)' : ''}`);
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant='ghost'
+          size='icon-sm'
+          aria-label={`${viewTitle} instance: ${label}`}
+          className={menuTriggerClassName}
+        >
+          <Boxes aria-hidden='true' className='size-4 shrink-0' />
+          <span className='truncate'>{label}</span>
+          <ChevronDown aria-hidden='true' className='size-3 shrink-0' />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align='start'
+        side='bottom'
+        className='w-56'
+        collisionBoundary={boundary}
+        aria-label={`${viewTitle} instance`}
+      >
+        <DropdownMenuLabel>Instance</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={selected} onValueChange={onChoose}>
+          <DropdownMenuRadioItem value=''>Whole view</DropdownMenuRadioItem>
+          {expired ? (
+            <DropdownMenuRadioItem disabled value={expired}>
+              {expired} (expired)
+            </DropdownMenuRadioItem>
+          ) : null}
+          {instances.map((instance) => (
+            <DropdownMenuRadioItem key={instance.id} value={instance.id}>
+              {instance.title}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

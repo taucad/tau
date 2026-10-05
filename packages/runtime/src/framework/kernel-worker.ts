@@ -1913,6 +1913,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             } finally {
               this.activeDocumentNativeOperation = undefined;
             }
+            // Never cache what an aborted render made of its abort: the same options must render again.
+            controller.signal.throwIfAborted();
             if (projected.success) {
               try {
                 projected = {
@@ -2673,6 +2675,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             return result;
           } catch (error) {
             span.end();
+            // A superseded or closed operation is aborted, not failed: its caller drops it.
+            if (runtime.signal.aborted) {
+              throw error;
+            }
             const errorMessage = error instanceof Error ? error.message : String(error);
             this.logger.error('Middleware failed', {
               data: { name: middlewareName, error: errorMessage },
@@ -3603,6 +3609,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             return result;
           } catch (error) {
             span.end();
+            // A superseded or closed operation is aborted, not failed: its caller drops it.
+            if (runtime.signal.aborted) {
+              throw error;
+            }
             const errorMessage = error instanceof Error ? error.message : String(error);
             this.logger.error('Middleware failed', {
               data: { name: middlewareName, error: errorMessage },
@@ -4569,6 +4579,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               return chainResult;
             } catch (error) {
               span.end();
+              // A superseded or closed operation is aborted, not failed: its caller drops it.
+              if (middlewareRuntime.signal.aborted) {
+                throw error;
+              }
               const errorMessage = error instanceof Error ? error.message : String(error);
               this.logger.error('Middleware failed', {
                 data: { name: middlewareName, error: errorMessage },
@@ -5350,6 +5364,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           return chainResult;
         } catch (error) {
           span.end();
+          // A superseded or closed operation is aborted, not failed: its caller drops it.
+          if (runtime.signal.aborted) {
+            throw error;
+          }
           const errorMessage = error instanceof Error ? error.message : String(error);
           this.logger.error('Middleware failed', {
             data: { name: middlewareName, error: errorMessage },
@@ -6337,6 +6355,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               middlewareRuntime,
             );
           } catch (error) {
+            // A superseded or closed operation is aborted, not failed: its caller drops it.
+            if (middlewareRuntime.signal.aborted) {
+              throw error;
+            }
             const message = error instanceof Error ? error.message : String(error);
             return createKernelError([
               {

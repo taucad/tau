@@ -48,7 +48,7 @@ import { githubProjectBinding } from '#lib/github-project-binding.js';
 import { formatStorageLimit } from '@taucad/billing';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
-import { Switch } from '@taucad/ui/components/switch';
+import { SwitchRow } from '@taucad/ui/components/switch';
 import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-collaborators.js';
 import { ActionButton, DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
@@ -739,11 +739,7 @@ export function RevisionSyncRegion({
               : GitBranch
         : WifiOff;
   const glyphTone =
-    GlyphIcon === CircleAlert
-      ? 'text-destructive'
-      : GlyphIcon === CloudAlert
-        ? 'text-warning'
-        : 'text-muted-foreground';
+    GlyphIcon === CircleAlert ? 'text-feature' : GlyphIcon === CloudAlert ? 'text-warning' : 'text-muted-foreground';
   const glyph = <GlyphIcon aria-hidden className={cn('size-4 shrink-0', glyphTone)} />;
   const includes = [
     'Files',
@@ -1009,14 +1005,14 @@ export function RevisionSyncRegion({
       ) : null}
 
       {changingBackup && choice === 'tau' ? (
-        <div className='flex items-center gap-2 rounded-md border bg-card p-2'>
-          <Switch aria-label='Sync chats' id='sync-chats' checked={syncChats} onCheckedChange={onSyncChatsChange} />
-          <Label htmlFor='sync-chats' className='flex-1 font-normal'>
-            <span className='block text-sm'>Sync chats</span>
-            <span className='block text-xs text-muted-foreground'>
-              Included by default; turn off before connecting to keep chats on this device.
-            </span>
-          </Label>
+        <div className='rounded-md border bg-card p-1'>
+          <SwitchRow
+            description='Included by default; turn off before connecting to keep chats on this device.'
+            isChecked={syncChats}
+            onIsCheckedChange={onSyncChatsChange}
+          >
+            Sync chats
+          </SwitchRow>
         </div>
       ) : null}
 
@@ -1217,7 +1213,7 @@ export function RevisionSyncRegion({
 
       {connectionError === undefined ? undefined : (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
-          <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
           <span className='min-w-0 flex-1'>{connectionError}</span>
           <Button
             size='xs'
@@ -1256,7 +1252,7 @@ export function RevisionSyncRegion({
       {remote.overQuota.length > 0 ? (
         <div className='flex flex-col gap-1.5'>
           <p className='flex items-center gap-2 text-sm'>
-            <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
+            <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
             <span>
               {role === 'write' || role === 'read'
                 ? 'These files did not fit in the project owner’s plan and were not backed up:'
@@ -1283,7 +1279,7 @@ export function RevisionSyncRegion({
       */}
       {remote.phase === 'failed' && remote.error !== undefined ? (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
-          <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
           <span className='min-w-0 flex-1'>{remote.error}</span>
           {renderFailureAction(syncFailureAction(remote, remote, role) ?? 'retry', () => {
             setChangingBackup(true);

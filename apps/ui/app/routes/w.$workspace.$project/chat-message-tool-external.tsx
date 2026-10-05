@@ -412,7 +412,7 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
 
   const header = (
     <ChatToolCardHeader>
-      <ChatToolCardIcon icon={icon} {...(exitCode !== undefined && exitCode !== 0 ? { tone: 'destructive' } : {})} />
+      <ChatToolCardIcon icon={icon} {...(exitCode !== undefined && exitCode !== 0 ? { tone: 'error' } : {})} />
       <ChatToolCardTitle>
         <ChatToolLabel verb={displayVerb}>
           <ChatToolDescription className={heading.isCommand ? 'font-mono' : undefined}>{detail}</ChatToolDescription>

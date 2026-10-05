@@ -84,11 +84,60 @@
     "replace": "else en.openInv.isSome"
   },
   {
+    "id": "M13",
+    "drift": "a deliberate Stop no longer reopens (T4: the reopen predicate loses its USER_STOPPED clause; the stopped turn's Resume is refused)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | some (.cancelled true) => en.committed && (!en.external || en.prompted)\n",
+    "replace": ""
+  },
+  {
+    "id": "M14",
+    "drift": "a Stop before the turn committed reopens (T4: the USER_STOPPED clause loses its committed guard)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | some (.cancelled true) => en.committed && (!en.external || en.prompted)\n",
+    "replace": "  | some (.cancelled true) => !en.external || en.prompted\n"
+  },
+  {
     "id": "undefined-key-skip",
     "drift": "S5 D1 (RV6-F2): the canonical form keeps undefined-valued keys again (W0.1 reverted; CL-S1 moved it to log/canonical-json.ts)",
     "file": "src/log/canonical-json.ts",
     "test": "src/log/chat-ledger.differential.test.ts",
     "find": "            .map((key) => [key, visit(record[key])]),\n",
     "replace": "            .map((key) => [key, record[key] === undefined ? 'undefined' : visit(record[key])]),\n"
+  },
+  {
+    "id": "M15",
+    "drift": "an external run reopens on a gateway failure (T4: failRests loses its kind split; the card offers a Resume ACP refuses)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .gateway => !external\n",
+    "replace": "  | .gateway => true\n"
+  },
+  {
+    "id": "M16",
+    "drift": "a Tau run reopens on an agent stop's code (T4: failRests loses its kind split)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .agentStop => external\n",
+    "replace": "  | .agentStop => true\n"
+  },
+  {
+    "id": "M17",
+    "drift": "an external Stop reopens before its prompt was issued (T4: the USER_STOPPED clause loses its prompted guard)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | some (.cancelled true) => en.committed && (!en.external || en.prompted)\n",
+    "replace": "  | some (.cancelled true) => en.committed\n"
+  },
+  {
+    "id": "M18",
+    "drift": "RUN_ABANDONED stops resuming an external run (T4: resume everywhere loses the abandoned driver)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .abandoned => true\n",
+    "replace": "  | .abandoned => !external\n"
+  },
+  {
+    "id": "M19",
+    "drift": "an external pause ends its attempt (CL-R9: attemptEnded loses its kind guard; a Resume would open a second attempt over a live agent)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | some .paused => !en.external\n",
+    "replace": "  | some .paused => true\n"
   }
 ]

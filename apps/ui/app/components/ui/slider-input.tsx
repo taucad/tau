@@ -339,7 +339,12 @@ export const SliderInput = ({
         return;
       }
       const delta = event.key === 'ArrowUp' ? step : -step;
-      const nextValue = clamp(snapToStep(value + delta, step, stepBase), min, max);
+      // Only a declared limit stops a step: past a drag window's end, a value keeps stepping from where it is.
+      const nextValue = clamp(
+        snapToStep(value + delta, step, stepBase),
+        lowerLimit ?? Number.NEGATIVE_INFINITY,
+        upperLimit ?? Number.POSITIVE_INFINITY,
+      );
       setText(String(nextValue));
       setHasUserEdit(false);
       onInputCommit?.(nextValue);

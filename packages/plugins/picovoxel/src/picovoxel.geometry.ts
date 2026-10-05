@@ -2,6 +2,8 @@ import { cadMaterialDefaults, tauCadTopologyExtension } from '@taucad/runtime/ty
 import type { KernelIssue } from '@taucad/runtime/types';
 import {
   formatComponentId,
+  formatNamedComponentId,
+  uniqueComponentId,
   formatPrimitiveSelector,
   toMechanismKernelIssue,
   transformNormalArray,
@@ -232,9 +234,13 @@ const buildNode = (shape: PicovoxelShapeSnapshot, options: GeometryOutputTransfo
 };
 
 const buildScene = (handle: PicovoxelNativeHandle, options: PicovoxelGltfOptions): GlbInput => {
+  const usedIds = new Map<string, number>();
+  const componentIds = handle.shapes.map((shape, index) =>
+    uniqueComponentId(formatNamedComponentId(shape.name, index) ?? formatComponentId(index), usedIds),
+  );
   const nodes = handle.shapes.map((shape, index) => ({
     ...buildNode(shape, options),
-    ...(options.includeTopology ? { extras: { tauComponentId: formatComponentId(index) } } : {}),
+    extras: { tauComponentId: componentIds[index]! },
   }));
   const scene: GlbInput = {
     nodes,
@@ -246,7 +252,7 @@ const buildScene = (handle: PicovoxelNativeHandle, options: PicovoxelGltfOptions
     return scene;
   }
   const components: TauCadTopologyPayload['components'] = handle.shapes.map(({ name }, nodeIndex) => ({
-    id: formatComponentId(nodeIndex),
+    id: componentIds[nodeIndex]!,
     name,
     kind: 'mesh',
     selector: formatPrimitiveSelector(nodeIndex, 'surface'),
@@ -268,7 +274,7 @@ const buildScene = (handle: PicovoxelNativeHandle, options: PicovoxelGltfOptions
         if (ids.has(shape.authoredName)) {
           duplicates.add(shape.authoredName);
         }
-        ids.set(shape.authoredName, formatComponentId(index));
+        ids.set(shape.authoredName, componentIds[index]!);
       }
     }
     // An ambiguous name has no binding, just like an absent name. Unreferenced duplicates stay valid.

@@ -942,11 +942,8 @@ async function downloadMotionRecipe(format: 'step' | 'png'): Promise<void> {
     `Installed ${format} route must be honest and present`,
   ).toBe(true);
   for (const toggle of toggles) {
-    if (
-      toggle.selected !==
-      (toggle.name.toLowerCase() === format)
-    ) /* oxlint-disable-next-line no-await-in-loop -- The real UI/pose observation is ordered on one viewport; the next gesture or frame depends on this settled result. */
-    {
+    if (toggle.selected !== (toggle.name.toLowerCase() === format)) {
+      // oxlint-disable-next-line no-await-in-loop -- Selection changes must settle in this viewport before export.
       await target.click(panel.getByRole('button', { name: toggle.name, exact: true }));
     }
   }
@@ -989,11 +986,10 @@ async function revealMotionFile(path: string): Promise<void> {
     const directory = motionFile(segments.slice(0, depth).join('/'));
     /* oxlint-disable-next-line no-await-in-loop -- Each real nested folder exists only after its parent has expanded. */
     await target.expectVisible(directory, 15_000);
-    /* oxlint-disable-next-line no-await-in-loop -- Expand ancestors in their actual hierarchy order. */
-    if (
-      (await target.getAttribute(directory, 'aria-expanded')) !== 'true'
-    ) /* oxlint-disable-next-line no-await-in-loop -- The real UI/pose observation is ordered on one viewport; the next gesture or frame depends on this settled result. */
-    {
+    // oxlint-disable-next-line no-await-in-loop -- Each nested folder exists only after its parent expands.
+    const expanded = await target.getAttribute(directory, 'aria-expanded');
+    if (expanded !== 'true') {
+      // oxlint-disable-next-line no-await-in-loop -- Expand ancestors in their actual hierarchy order.
       await target.click(directory, { position: { x: 8, y: 14 } });
     }
   }

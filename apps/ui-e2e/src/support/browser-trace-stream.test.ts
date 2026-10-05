@@ -13,7 +13,7 @@ import { transform } from 'esbuild';
 import { testBaseURL } from './base-url.ts';
 // oxlint-disable-next-line no-restricted-imports -- Node regression executes the actual config-time CDP drain owner.
 import { writeBrowserTraceStream } from './browser-trace-stream.ts';
-// oxlint-disable-next-line no-restricted-imports -- Real Node/CDP controls drive the existing config-time target/profile/diagnostics owners.
+/* oxlint-disable no-restricted-imports -- Real Node/CDP controls drive the existing config-time target/profile/diagnostics owners. */
 import {
   uiOpenTarget,
   uiCloseTarget,
@@ -21,6 +21,7 @@ import {
   uiCaptureTargetDiagnostics,
   uiScalePresentationProbe,
 } from './browser-command.ts';
+/* oxlint-enable no-restricted-imports */
 
 let directory: string;
 let tracePath: string;

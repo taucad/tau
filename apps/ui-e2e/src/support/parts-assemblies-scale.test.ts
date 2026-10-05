@@ -157,7 +157,10 @@ describe('actual published scale closure controls', () => {
             await consumerFs.writeFile(path, file.content);
           }
         },
-        async (root) => (await consumer.openAssembly({ root })).admitted,
+        async (root) => {
+          const opened = await consumer.openAssembly({ root });
+          return opened.admitted;
+        },
       );
       expect(admitted.publication).toEqual(published.admitted.publication);
       expect(await consumerFs.exists('scale/parts/p0000.js')).toBe(false);
@@ -170,7 +173,10 @@ describe('actual published scale closure controls', () => {
 
   it('denies changed immutable bytes and cross-parent targets before the first import write', async () => {
     const commit = vi.fn(async () => undefined);
-    const open = vi.fn(async (root: PublishedPartAsset) => (await client.openAssembly({ root })).admitted);
+    const open = vi.fn(async (root: PublishedPartAsset) => {
+      const opened = await client.openAssembly({ root });
+      return opened.admitted;
+    });
     const changed = closure.files.map((file, index) => ({
       ...file,
       bytes: new Uint8Array(file.bytes),
@@ -192,7 +198,10 @@ describe('actual published scale closure controls', () => {
 
   it('denies an incomplete immutable closure before the first consumer write', async () => {
     const commit = vi.fn(async () => undefined);
-    const open = vi.fn(async (root: PublishedPartAsset) => (await client.openAssembly({ root })).admitted);
+    const open = vi.fn(async (root: PublishedPartAsset) => {
+      const opened = await client.openAssembly({ root });
+      return opened.admitted;
+    });
     const leaf = Object.values(published.admitted.publication.parts['p0000']!.variants)[0]!.glb;
     await expect(
       importPublishedScaleClosure(

@@ -132,10 +132,8 @@ async function readPin() {
           // oxlint-disable-next-line no-await-in-loop -- Exact bytes are read from this actual admitted facade, never a source/kernel fallback.
           const native = await display.admitted.readAsset(recipe.exact.asset.digest);
           // oxlint-disable-next-line no-await-in-loop -- Reader integrity is fenced together with actual display bytes.
-          if (
-            native.byteLength !== recipe.exact.asset.byteLength ||
-            (await sha(native)) !== recipe.exact.asset.digest
-          ) {
+          const nativeDigest = await sha(native);
+          if (native.byteLength !== recipe.exact.asset.byteLength || nativeDigest !== recipe.exact.asset.digest) {
             throw new Error('Admitted native bytes changed.');
           }
         }

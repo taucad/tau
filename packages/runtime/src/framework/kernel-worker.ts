@@ -2507,6 +2507,30 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
+   * Refresh only the source graph about to enter one serialized authored-publication child.
+   * @param paths - Selected source paths, including unresolved observations.
+   * @returns When the selected revisions have been admitted to this worker's caches.
+   */
+  private async refreshPublishedSourcePaths(paths: readonly string[]): Promise<void> {
+    // An authored publication contains multiple children in one operation. A prior child's
+    // existence/stat observation cannot stand in for the next child's discovery.
+    this.fileExistsCache.clear();
+    this.fileStatCache.clear();
+    const revisions = new Map<string, ObservedFileRevision>();
+    for (const path of new Set(paths.map((value) => assertRootedPath(value)))) {
+      this.operationSignal?.throwIfAborted();
+      // oxlint-disable-next-line no-await-in-loop -- Changed source/cache state is admitted in selected-path order.
+      const revision = await this.readObservedRevision(path);
+      if (this.fileHashCache.get(path) !== revision.hash) {
+        revisions.set(path, revision);
+      }
+    }
+    if (revisions.size > 0) {
+      this._applyObservedRevisions([...revisions.keys()], revisions);
+    }
+  }
+
+  /**
    * What is at one path now, absence included.
    *
    * @param path - The rooted path to observe.
@@ -2991,18 +3015,43 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async snapshotSourceInLane(
     request: RuntimeSourceSnapshotArgs,
     onOptionalAbsent?: (paths: ReadonlySet<string>) => void,
-    verifiedPublicationSource?: VerifiedPublicationSource,
+    options?: {
+      verifiedPublicationSource?: VerifiedPublicationSource;
+      publicationBefore?: AuthoredPublicationOperation;
+    },
   ): Promise<RuntimeSourceSnapshotResult> {
+    const { verifiedPublicationSource, publicationBefore } = options ?? {};
     const signal = this.operationSignal ?? neverAbortedSignal;
     signal.throwIfAborted();
+    if (publicationBefore) {
+      publicationBefore.signal.throwIfAborted();
+      if (
+        !this.operationAdmissionOpen ||
+        this.currentOperationId !== publicationBefore.operationId ||
+        this.operationSignal !== publicationBefore.signal
+      ) {
+        throw new Error('The authored-publication source is no longer owned by this operation.');
+      }
+    }
     if (request.stage) {
       if (verifiedPublicationSource) {
         throw new Error('A verified publication source cannot stage replacement bytes.');
       }
       await this.writeFilesAndInvalidate(request.stage);
     }
+    let publicationKnownPaths: readonly string[] = [];
     if (verifiedPublicationSource) {
       this.assertVerifiedPublicationSource(request.file, verifiedPublicationSource);
+    } else if (publicationBefore) {
+      const entryPath = assertRootedPath(joinRelativePath(request.file.path, request.file.filename));
+      const known = this.bundleResultCache.get(entryPath);
+      publicationKnownPaths = [
+        entryPath,
+        ...(known?.dependencies ?? []),
+        ...(known?.unresolvedPaths ?? []),
+        ...(request.additionalPaths ?? []).map(({ path }) => path),
+      ];
+      await this.refreshPublishedSourcePaths(publicationKnownPaths);
     } else {
       await this.revalidateRetainedFiles();
     }
@@ -3019,7 +3068,36 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const middlewarePaths = await this.discoverSnapshotMiddlewarePaths(owner);
       return { kernelPaths, unresolvedPaths, middlewarePaths };
     };
-    const initial = await discover();
+    let initial = await discover();
+    if (publicationBefore) {
+      const refreshed = new Set(publicationKnownPaths);
+      let next = [
+        ...new Set([
+          ...initial.kernelPaths,
+          ...initial.unresolvedPaths,
+          ...initial.middlewarePaths,
+          ...(request.additionalPaths ?? []).map(({ path }) => assertRootedPath(path)),
+        ]),
+      ].filter((path) => !refreshed.has(path));
+      while (next.length > 0) {
+        signal.throwIfAborted();
+        // eslint-disable-next-line no-await-in-loop -- Discovery depends on each newly refreshed selected closure.
+        await this.refreshPublishedSourcePaths(next);
+        for (const path of next) {
+          refreshed.add(path);
+        }
+        // eslint-disable-next-line no-await-in-loop -- The next graph is resolved from the refreshed source bytes.
+        initial = await discover();
+        next = [
+          ...new Set([
+            ...initial.kernelPaths,
+            ...initial.unresolvedPaths,
+            ...initial.middlewarePaths,
+            ...(request.additionalPaths ?? []).map(({ path }) => assertRootedPath(path)),
+          ]),
+        ].filter((path) => !refreshed.has(path));
+      }
+    }
     signal.throwIfAborted();
     const roles = new Map<string, RuntimeSourceSnapshotFileRole>();
     const rolePriority: Record<RuntimeSourceSnapshotFileRole, number> = {
@@ -4344,7 +4422,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 filename: path.slice(separator + 1),
               });
               // oxlint-disable-next-line no-await-in-loop -- Discovery precedes every source stage and producer call.
-              const snapshot = await this.snapshotSourceInLane({ file });
+              const snapshot = await this.snapshotSourceInLane({ file }, undefined, { publicationBefore: publication });
               if (snapshot.success) {
                 for (const path of snapshot.data.unresolvedPaths) {
                   retryPaths.add(path);
@@ -4848,9 +4926,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           : undefined;
       let optionalAbsentPaths: ReadonlySet<string> = new Set();
       // eslint-disable-next-line no-await-in-loop -- Each variant must finish before the next source is staged.
-      const before = await this.snapshotSourceInLane({ file, ...(stage ? { stage } : {}) }, (paths) => {
-        optionalAbsentPaths = paths;
-      });
+      const before = await this.snapshotSourceInLane(
+        { file, ...(stage ? { stage } : {}) },
+        (paths) => {
+          optionalAbsentPaths = paths;
+        },
+        { publicationBefore: input.publication },
+      );
       if (before.success) {
         for (const path of before.data.unresolvedPaths) {
           input.retryPaths?.add(path);
@@ -4905,7 +4987,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         );
       }
       // eslint-disable-next-line no-await-in-loop -- Match this variant's source before staging the next.
-      const after = await this.snapshotSourceInLane({ file }, undefined, verifiedPublicationSource);
+      const after = await this.snapshotSourceInLane({ file }, undefined, { verifiedPublicationSource });
       if (
         !after.success ||
         !after.sourceRevision ||

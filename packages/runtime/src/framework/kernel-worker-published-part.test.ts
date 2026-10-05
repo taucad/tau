@@ -1623,7 +1623,7 @@ describe('KernelWorker completed part publication', () => {
       const earlierReads = entries.filter(
         (entry) => entry.name === 'fs.read' && entry.detail?.['path'] === 'parts/a.kcl',
       );
-      // A's initial production, B's global BEFORE and final independent source check remain real reads.
+      // A's initial production and final independent source check remain real reads.
       expect(earlierReads.length).toBeGreaterThan(0);
       expect(earlierReads.filter((entry) => isEvaluationChild(entry))).toHaveLength(0);
       expect(entries.at(-1)).toMatchObject({
@@ -1711,99 +1711,85 @@ describe('KernelWorker completed part publication', () => {
     },
   );
 
-  it.each([2, 4])(
-    'should reread an unrelated retained source once per authored child for %i children',
-    async (childCount) => {
-      const sentinelPath = 'retained/sentinel.kcl';
-      const sources = Array.from({ length: childCount }, (_, index) => ({
-        name: `part-${index}`,
-        path: `parts/part-${index}.kcl`,
-      }));
-      await seedTestFileSystem({
-        [sentinelPath]: 'sphere',
-        ...Object.fromEntries(sources.map(({ path }) => [path, 'cube'])),
-        'assembly.json': JSON.stringify({
-          schemaVersion: 1,
-          parts: Object.fromEntries(sources.map(({ name, path }) => [name, { source: { path } }])),
-          occurrences: [],
-        }),
+  it.each([2, 4, 8])('should refresh only each selected source before authored child %i', async (childCount) => {
+    const sentinelPath = 'retained/sentinel.kcl';
+    const sources = Array.from({ length: childCount }, (_, index) => ({
+      name: `part-${index}`,
+      path: `parts/part-${index}.kcl`,
+    }));
+    await seedTestFileSystem({
+      [sentinelPath]: 'sphere',
+      ...Object.fromEntries(sources.map(({ path }) => [path, 'cube'])),
+      'assembly.json': JSON.stringify({
+        schemaVersion: 1,
+        parts: Object.fromEntries(sources.map(({ name, path }) => [name, { source: { path } }])),
+        occurrences: [],
+      }),
+    });
+    const filesystem = getTestFileSystem();
+    const readFile = vi.spyOn(filesystem, 'readFile');
+    let worker: MockKernelWorker | undefined;
+    try {
+      worker = await createWorker(false, undefined, {
+        suppliedFileSystem: filesystem,
+        suppliedWorker: new PublicationContentWorker([], [], async () => undefined),
       });
-      const filesystem = getTestFileSystem();
-      const readFile = vi.spyOn(filesystem, 'readFile');
-      let worker: MockKernelWorker | undefined;
-      try {
-        worker = await createWorker(false, undefined, {
-          suppliedFileSystem: filesystem,
-          suppliedWorker: new PublicationContentWorker([], [], async () => undefined),
+      const entries: TelemetryEntry[] = [];
+      worker.setTelemetrySend((batch) => entries.push(...batch));
+      await worker.preparePublishedPart({ sourcePath: sentinelPath, directory: 'retained-published' });
+      expect(worker.createGeometryCalls).toBe(1);
+      worker.flushTelemetry();
+      expect(
+        entries.filter((entry) => entry.name === 'kernel.revalidate-retained').map((entry) => entry.detail),
+      ).toContainEqual(
+        expect.objectContaining({
+          retainedPresentCount: 0,
+          retainedMissingCount: 0,
+          observedBodyBytes: 0,
+          bodyByteCoverageComplete: true,
+          status: 'completed',
+        }),
+      );
+      entries.length = 0;
+      readFile.mockClear();
+      const published = await worker.publishAuthoredAssemblyRoot({
+        authoredPath: 'assembly.json',
+        publicationPath: 'published/root.json',
+        directory: 'published',
+      });
+      expect(published.outcome.status).toBe('published');
+      expect(worker.createGeometryCalls).toBe(childCount + 1);
+      expect(Object.keys(published.partRecords ?? {})).toEqual(sources.map(({ name }) => name));
+      const sourceDigest = `sha256:${await sha256String('cube')}`;
+      for (const { name, path } of sources) {
+        expect(published.publication?.parts[name]?.variants['default']?.source.files).toEqual({
+          [path]: sourceDigest,
         });
-        const entries: TelemetryEntry[] = [];
-        worker.setTelemetrySend((batch) => entries.push(...batch));
-        await worker.preparePublishedPart({ sourcePath: sentinelPath, directory: 'retained-published' });
-        expect(worker.createGeometryCalls).toBe(1);
-        worker.flushTelemetry();
-        expect(
-          entries.filter((entry) => entry.name === 'kernel.revalidate-retained').map((entry) => entry.detail),
-        ).toContainEqual(
-          expect.objectContaining({
-            retainedPresentCount: 0,
-            retainedMissingCount: 0,
-            observedBodyBytes: 0,
-            bodyByteCoverageComplete: true,
-            status: 'completed',
-          }),
-        );
-        entries.length = 0;
-        readFile.mockClear();
-        const published = await worker.publishAuthoredAssemblyRoot({
-          authoredPath: 'assembly.json',
-          publicationPath: 'published/root.json',
-          directory: 'published',
-        });
-        expect(published.outcome.status).toBe('published');
-        expect(worker.createGeometryCalls).toBe(childCount + 1);
-        expect(Object.keys(published.partRecords ?? {})).toEqual(sources.map(({ name }) => name));
-        const sourceDigest = `sha256:${await sha256String('cube')}`;
-        for (const { name, path } of sources) {
-          expect(published.publication?.parts[name]?.variants['default']?.source.files).toEqual({
-            [path]: sourceDigest,
-          });
-        }
-        // The sentinel is outside every selected snapshot and the final published source closure.
-        // Its real provider reads isolate each child's global BEFORE validation, without span ancestry.
-        expect(readFile.mock.calls.filter(([path]) => path === sentinelPath)).toHaveLength(childCount);
-        const recipeReadCounts = sources.map(
-          ({ path }) => readFile.mock.calls.filter(([readPath]) => readPath === path).length,
-        );
-        const lastRecipeReadCount = recipeReadCounts.at(-1);
-        if (lastRecipeReadCount === undefined) {
-          throw new Error('The final authored recipe provider read count is unavailable.');
-        }
-        expect(lastRecipeReadCount).toBeGreaterThan(0);
-        // Equal independent recipes share local snapshot/evaluation/final-fence work.
-        // Each earlier recipe additionally participates in every later child's global BEFORE walk.
-        const earlierRecipeExcess = recipeReadCounts.map((count) => count - lastRecipeReadCount);
-        expect(earlierRecipeExcess).toEqual(childCount === 2 ? [1, 0] : [3, 2, 1, 0]);
-        expect(earlierRecipeExcess.reduce((sum, count) => sum + count, 0)).toBe(childCount === 2 ? 1 : 6);
-        worker.flushTelemetry();
-        const validations = entries.filter((entry) => entry.name === 'kernel.revalidate-retained');
-        expect(validations).toHaveLength(childCount);
-        for (const [index, validation] of validations.entries()) {
-          expect(Number.isFinite(validation.duration)).toBe(true);
-          expect(validation.duration).toBeGreaterThanOrEqual(0);
-          expect(validation.detail).toMatchObject({
-            retainedPresentCount: index + 1,
-            retainedMissingCount: 0,
-            observedBodyBytes: 6 + index * 4,
-            bodyByteCoverageComplete: true,
-            status: 'completed',
-          });
-        }
-      } finally {
-        await worker?.cleanup();
-        readFile.mockRestore();
       }
-    },
-  );
+      // The sentinel is outside every selected snapshot and final published source closure.
+      // Its provider count detects an accidental global refresh during a child.
+      expect(readFile.mock.calls.filter(([path]) => path === sentinelPath)).toHaveLength(0);
+      const recipeReadCounts = sources.map(
+        ({ path }) => readFile.mock.calls.filter(([readPath]) => readPath === path).length,
+      );
+      const lastRecipeReadCount = recipeReadCounts.at(-1);
+      if (lastRecipeReadCount === undefined) {
+        throw new Error('The final authored recipe provider read count is unavailable.');
+      }
+      expect(lastRecipeReadCount).toBeGreaterThan(0);
+      // Equal independent recipes share local snapshot/evaluation/final-fence work.
+      // Earlier recipes must not acquire an additional read for every later child.
+      const earlierRecipeExcess = recipeReadCounts.map((count) => count - lastRecipeReadCount);
+      expect(earlierRecipeExcess).toEqual(Array.from({ length: childCount }, () => 0));
+      expect(earlierRecipeExcess.reduce((sum, count) => sum + count, 0)).toBe(0);
+      worker.flushTelemetry();
+      const validations = entries.filter((entry) => entry.name === 'kernel.revalidate-retained');
+      expect(validations).toHaveLength(0);
+    } finally {
+      await worker?.cleanup();
+      readFile.mockRestore();
+    }
+  });
 
   it.each(['error', 'missing-batch', 'abort'] as const)(
     'should close retained validation telemetry with truthful byte coverage after %s',
@@ -1965,6 +1951,147 @@ describe('KernelWorker completed part publication', () => {
     } finally {
       await worker.cleanup();
       stat.mockRestore();
+    }
+  });
+
+  it.each(['changed', 'appeared'] as const)(
+    'refreshes a %s selected import after an earlier dependency snapshot',
+    async (scenario) => {
+      const dependency = 'parts/new-dependency.kcl';
+      const original = 'old!';
+      const current = 'new!';
+      await seedTestFileSystem({
+        'parts/a.kcl': 'include new-dependency',
+        ...(scenario === 'changed' ? { [dependency]: original } : {}),
+        'assembly.json': JSON.stringify({
+          schemaVersion: 1,
+          parts: { a: { source: { path: 'parts/a.kcl' } } },
+          occurrences: [],
+        }),
+      });
+      const filesystem = getTestFileSystem();
+      const worker = await createWorker(false, undefined, {
+        suppliedWorker: new MissingTransitiveDependencyWorker({
+          middleware: [],
+          admitAssemblyDisplay: async () => undefined,
+          evaluationViewContent: emptyGlb(),
+        }),
+      });
+      const readFile = vi.spyOn(filesystem, 'readFile');
+      try {
+        const prior = await worker.snapshotSource({ file: { path: 'parts', filename: 'a.kcl' } });
+        expect(prior.success).toBe(true);
+        expect(prior.sourceRevision?.files[dependency]).toBe(
+          scenario === 'changed' ? `sha256:${await sha256String(original)}` : 'missing',
+        );
+        await filesystem.writeFile(dependency, current);
+        readFile.mockClear();
+        const published = await worker.publishAuthoredAssemblyRoot({
+          authoredPath: 'assembly.json',
+          publicationPath: 'published/root.json',
+          directory: 'published',
+        });
+        expect(published.outcome.status).toBe('published');
+        expect(published.publication?.parts['a']?.variants['default']?.source.files[dependency]).toBe(
+          `sha256:${await sha256String(current)}`,
+        );
+        expect(readFile.mock.calls.filter(([path]) => path === dependency).length).toBeGreaterThanOrEqual(2);
+      } finally {
+        readFile.mockRestore();
+        await worker.cleanup();
+      }
+    },
+  );
+
+  it('discovers a nested import revealed by a changed cached shared module', async () => {
+    const entry = 'parts/a.kcl';
+    const shared = 'parts/shared.kcl';
+    const first = 'parts/first.kcl';
+    const second = 'parts/second.kcl';
+    await seedTestFileSystem({
+      [entry]: 'include shared',
+      [shared]: 'include first',
+      [first]: 'old leaf',
+      [second]: 'new leaf',
+      'assembly.json': JSON.stringify({
+        schemaVersion: 1,
+        parts: { a: { source: { path: entry } } },
+        occurrences: [],
+      }),
+    });
+    class NestedImportWorker extends PublicationContentWorker {
+      protected override async onGetDependencies(
+        { entryPath }: GetDependenciesInput,
+        runtime: KernelRuntime,
+      ): Promise<GetDependenciesResult> {
+        const text = await runtime.filesystem.readFile(entryPath, 'utf8');
+        if (!text.includes('include shared')) {
+          return { resolved: [entryPath], unresolved: [] };
+        }
+        const module = await runtime.filesystem.readFile(shared, 'utf8');
+        return { resolved: [entryPath, shared, module.includes('include second') ? second : first], unresolved: [] };
+      }
+    }
+    const worker = await createWorker(false, undefined, {
+      suppliedWorker: new NestedImportWorker([], [], async () => undefined),
+    });
+    try {
+      const prior = await worker.snapshotSource({ file: { path: 'parts', filename: 'a.kcl' } });
+      expect(prior.success).toBe(true);
+      expect(prior.sourceRevision?.files[first]).toBe(`sha256:${await sha256String('old leaf')}`);
+      await getTestFileSystem().writeFile(shared, 'include second');
+      const published = await worker.publishAuthoredAssemblyRoot({
+        authoredPath: 'assembly.json',
+        publicationPath: 'published/root.json',
+        directory: 'published',
+      });
+      expect(published.outcome.status).toBe('published');
+      expect(published.publication?.parts['a']?.variants['default']?.source.files).toMatchObject({
+        [shared]: `sha256:${await sha256String('include second')}`,
+        [second]: `sha256:${await sha256String('new leaf')}`,
+      });
+      expect(published.publication?.parts['a']?.variants['default']?.source.files[first]).toBeUndefined();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('refuses the first selected provider read without committing a root', async () => {
+    await seedTestFileSystem({
+      'parts/a.kcl': 'cube',
+      'assembly.json': JSON.stringify({
+        schemaVersion: 1,
+        parts: { a: { source: { path: 'parts/a.kcl' } } },
+        occurrences: [],
+      }),
+    });
+    const filesystem = getTestFileSystem();
+    const originalReadFile = filesystem.readFile.bind(filesystem);
+    const readFile = vi.spyOn(filesystem, 'readFile');
+    const worker = await createWorker(false, undefined, {
+      suppliedFileSystem: filesystem,
+      suppliedWorker: new PublicationContentWorker([], [], async () => undefined),
+    });
+    try {
+      // The real provider overload is preserved; only the selected path is refused.
+      readFile.mockImplementation((async (path: string, encoding?: 'utf8') => {
+        if (path === 'parts/a.kcl') {
+          throw new Error('selected provider read failed');
+        }
+        return encoding === 'utf8' ? originalReadFile(path, 'utf8') : originalReadFile(path);
+      }) as typeof filesystem.readFile);
+      await expect(
+        worker.publishAuthoredAssemblyRoot({
+          authoredPath: 'assembly.json',
+          publicationPath: 'published/root.json',
+          directory: 'published',
+        }),
+      ).rejects.toThrow('selected provider read failed');
+      expect(await filesystem.exists('published/root.json')).toBe(false);
+      expect(worker.createGeometryCalls).toBe(0);
+    } finally {
+      readFile.mockRestore();
+      await worker.cleanup();
     }
   });
 

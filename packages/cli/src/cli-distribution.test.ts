@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -23,6 +23,12 @@ const picogkSphere = resolve(repoRoot, 'libs/tau-examples/src/kernels/picogk/par
 const picogkResourceRoot = resolve(repoRoot, 'apps/desktop/resources/picogk');
 const picogkResourceRootEnvironment = 'TAU_PICOGK_RESOURCE_ROOT';
 const picogkManifest = resolve(picogkResourceRoot, `${process.platform}-${process.arch}`, 'tau-runtime-manifest.json');
+// Linux payloads are worker-only: upstream ships no voxel library there, so exports need `picogk.<n>`.
+const picogkNativeEngine =
+  existsSync(picogkManifest) &&
+  (JSON.parse(readFileSync(picogkManifest, 'utf8')) as { resourceFiles: Array<{ path: string }> }).resourceFiles.some(
+    ({ path }) => /^picogk\.\d/u.test(path),
+  );
 
 const gltfMagicBytes = 0x46_54_6c_67;
 const zipLocalFileHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
@@ -231,7 +237,7 @@ describe('tau CLI dist (real binary)', () => {
     expect(summary.bounds.max[1]).toBeCloseTo(0.05, 4);
   }, 240_000);
 
-  describe.runIf(existsSync(picogkManifest))('PicoGK native resources', () => {
+  describe.runIf(picogkNativeEngine)('PicoGK native resources', () => {
     it.each(['3mf', 'usdz'])(
       'exports a .cs entry point to %s through the built CLI',
       async (extension) => {

@@ -1,9 +1,11 @@
 // @vitest-environment node
+import { spawn, execFileSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { expect, it } from 'vitest';
+import { expect, it, onTestFinished } from 'vitest';
 import { loadFixture } from '@taucad/tau-examples/fixtures';
 import { computeStats, runBenchmarks } from '#benchmarks/benchmark-runner.js';
 import type { BenchmarkRunResult } from '#benchmarks/benchmark-runner.js';
@@ -221,3 +223,275 @@ it.skipIf(process.env['TAU_E2E_CUSTOM_SMALL_MODEL_BASELINE'] !== 'true').each([
     }
   }
 });
+
+// Explicit cohort acquisition only; the earlier five failed fresh-client samples remain immutable.
+it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
+  'should compare exact Honeycomb cold processes, warmed-module fresh clients and warm cache without dropping samples',
+  async () => {
+    const lifecycle = new AbortController();
+    const activeChildren = new Set<ChildProcess>();
+    const assertActive = (): void => {
+      lifecycle.signal.throwIfAborted();
+    };
+    onTestFinished(() => {
+      lifecycle.abort(new Error('Honeycomb cohort test finished.'));
+      for (const child of activeChildren) {
+        child.kill('SIGKILL');
+      }
+    });
+    const workspace = resolve(import.meta.dirname, '../../../..');
+    const resourceRoot = resolve(workspace, 'apps/ui/public/assets/engines/replicad/density-single-v1');
+    const expectedAssets = [
+      { name: 'replicad_single.wasm', digest: '9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9' },
+      { name: 'replicad_single.mjs', digest: 'cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27' },
+    ];
+    const assets = await Promise.all(
+      expectedAssets.map(async ({ name, digest }) => {
+        const bytes = await readFile(resolve(resourceRoot, name));
+        expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
+        return { name, digest, byteLength: bytes.byteLength };
+      }),
+    );
+    const source = await readHoneycombSource();
+    const gitHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim();
+    const implementationSources = await Promise.all(
+      [
+        'packages/plugins/replicad/src/replicad.kernel.ts',
+        'packages/plugins/replicad/src/utils/replicad-to-gltf.ts',
+        'packages/runtime/src/framework/kernel-runtime-worker.ts',
+        'apps/runtime-e2e/src/benchmarks/benchmark-runner.ts',
+      ].map(async (path) => ({
+        path,
+        digest: createHash('sha256')
+          .update(await readFile(resolve(workspace, path)))
+          .digest('hex'),
+      })),
+    );
+    const wasm = {
+      wasmUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.wasm')).href,
+      wasmBindingsUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.mjs')).href,
+    };
+    const benchCase: BenchmarkCase = {
+      name: 'app-custom-honeycomb-cohort-v1',
+      category: 'app-small-model',
+      files: { 'public/models/honeycomb.js': source },
+      mainFile: 'public/models/honeycomb.js',
+      mode: 'first-call',
+      operation: 'render',
+    };
+    const directory = resolve(
+      workspace,
+      'out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb/cohort-v2',
+    );
+    await mkdir(directory, { recursive: true });
+    const inputPath = resolve(directory, 'cold-process-input.json');
+    const reportPath = resolve(directory, 'acquisition.json');
+    await writeFile(
+      inputPath,
+      JSON.stringify({
+        source,
+        sourceDigest: honeycombSourceDigest,
+        wasmUrl: wasm.wasmUrl,
+        wasmBindingsUrl: wasm.wasmBindingsUrl,
+        wasmDigest: assets[0]!.digest,
+        bindingsDigest: assets[1]!.digest,
+        gitHead,
+        implementationSources,
+      }),
+    );
+    type ColdProcessResult = {
+      processId: number;
+      bootToken: string;
+      startupToEntry: number;
+      setupBeforeCad: number;
+      moduleResolutionPathHash: string;
+      gitHead: string;
+      implementationSources: typeof implementationSources;
+      sourceDigest: string;
+      assetDigests: [string, string];
+      run: BenchmarkRunResult;
+      launchToExit: number;
+    };
+    const coldProcessRuns: ColdProcessResult[] = [];
+    const freshClientRuns: BenchmarkRunResult[] = [];
+    const cohortState: {
+      warmModulePrep?: BenchmarkRunResult;
+      warmRun?: BenchmarkRunResult;
+      coldProcessStats?: ReturnType<typeof computeStats>;
+      freshClientStats?: ReturnType<typeof computeStats>;
+    } = {};
+    const persist = async (status: string): Promise<void> => {
+      assertActive();
+      await writeFile(
+        reportPath,
+        JSON.stringify(
+          {
+            status,
+            sourceDigest: honeycombSourceDigest,
+            sourceByteLength: 347,
+            gitHead,
+            implementationSources,
+            assets,
+            measuredWindow: 'runBenchmarks first-call render only; OS startup and module setup separate',
+            warmModuleProtocol:
+              'one recorded prep, then five measured fresh clients, then one client with eight warmups and 15 measurements',
+            coldProcessRuns,
+            coldProcessStats: cohortState.coldProcessStats,
+            warmedModuleProcess: {
+              processId: process.pid,
+              moduleResolutionPathHash: createHash('sha256')
+                .update(import.meta.resolve('@taucad/replicad'))
+                .digest('hex'),
+            },
+            warmModulePrep: cohortState.warmModulePrep,
+            freshClientRuns,
+            freshClientStats: cohortState.freshClientStats,
+            warmRun: cohortState.warmRun,
+            cvCeiling: 0.1,
+          },
+          undefined,
+          2,
+        ),
+      );
+      assertActive();
+    };
+    assertActive();
+    await persist('prepared');
+    /* oxlint-disable no-await-in-loop -- Each fresh OS process must finish and persist before the next starts. */
+    for (let sample = 0; sample < 5; sample += 1) {
+      assertActive();
+      const resultPath = resolve(directory, `cold-process-${sample}.json`);
+      const log = await open(resolve(directory, `cold-process-${sample}.log`), 'w');
+      let launchToExit = 0;
+      const launchedAt = performance.now();
+      try {
+        assertActive();
+        const child = spawn(
+          process.execPath,
+          [
+            '--import=tsx',
+            resolve(import.meta.dirname, 'replicad-honeycomb-cold-process.fixture.ts'),
+            inputPath,
+            resultPath,
+          ],
+          { cwd: workspace, stdio: ['ignore', log.fd, log.fd] },
+        );
+        activeChildren.add(child);
+        const exit = await new Promise<number | undefined>((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', (code) => {
+            activeChildren.delete(child);
+            launchToExit = performance.now() - launchedAt;
+            resolve(code ?? undefined);
+          });
+        });
+        assertActive();
+        expect(exit).toBe(0);
+      } finally {
+        for (const child of activeChildren) {
+          child.kill('SIGKILL');
+        }
+        await log.close();
+      }
+      assertActive();
+      const childResult = JSON.parse(
+        await readFile(resultPath, { encoding: 'utf8', signal: lifecycle.signal }),
+      ) as Omit<ColdProcessResult, 'launchToExit'>;
+      assertActive();
+      expect(childResult.sourceDigest).toBe(honeycombSourceDigest);
+      expect(childResult.gitHead).toBe(gitHead);
+      expect(childResult.implementationSources).toEqual(implementationSources);
+      expect(childResult.assetDigests).toEqual(assets.map(({ digest }) => digest));
+      expect(childResult.run.results[0]?.timings).toHaveLength(1);
+      coldProcessRuns.push({ ...childResult, launchToExit });
+      await persist('cold-process-in-progress');
+    }
+    /* oxlint-enable no-await-in-loop */
+    expect(new Set(coldProcessRuns.map(({ bootToken }) => bootToken)).size).toBe(5);
+    expect(new Set(coldProcessRuns.map(({ processId }) => processId)).size).toBe(5);
+    expect(new Set(coldProcessRuns.map(({ moduleResolutionPathHash }) => moduleResolutionPathHash)).size).toBe(1);
+
+    // Predeclared module/WASM warmup is evidence, never a discarded member of the five-client distribution.
+    assertActive();
+    const warmModulePrep = await runBenchmarks([benchCase], {
+      iterations: 1,
+      operation: 'render',
+      includeEdges: true,
+      wasm,
+      onIterationProgress: assertActive,
+    });
+    cohortState.warmModulePrep = warmModulePrep;
+    await persist('warm-module-prepared');
+    for (let sample = 0; sample < 5; sample += 1) {
+      assertActive();
+      freshClientRuns.push(
+        // oxlint-disable-next-line no-await-in-loop -- Five fresh clients are one serial warmed-module cohort.
+        await runBenchmarks([benchCase], {
+          iterations: 1,
+          operation: 'render',
+          includeEdges: true,
+          wasm,
+          onIterationProgress: assertActive,
+        }),
+      );
+      // oxlint-disable-next-line no-await-in-loop -- Persist each genuine measurement before the next client.
+      await persist('fresh-client-in-progress');
+    }
+    assertActive();
+    const warmRun = await runBenchmarks([{ ...benchCase, mode: 'steady-state' }], {
+      iterations: 15,
+      operation: 'render',
+      includeEdges: true,
+      wasm,
+      onIterationProgress: assertActive,
+    });
+    const processDurations = coldProcessRuns.map(({ run }) => run.results[0]!.timings[0]!);
+    const clientDurations = freshClientRuns.map(({ results }) => results[0]!.timings[0]!);
+    const coldProcessStats = computeStats(processDurations);
+    const freshClientStats = computeStats(clientDurations);
+    cohortState.warmRun = warmRun;
+    cohortState.coldProcessStats = coldProcessStats;
+    cohortState.freshClientStats = freshClientStats;
+    await persist('complete-before-cv');
+
+    const allRuns = [...coldProcessRuns.map(({ run }) => run), warmModulePrep, ...freshClientRuns, warmRun];
+    const first = allRuns[0]!.results[0]!;
+    for (const run of allRuns) {
+      expect(run.measurement.wasmVariant).toBe(wasm.wasmUrl);
+      expect(run.results).toHaveLength(1);
+      const result = run.results[0]!;
+      expect(result.outputHash).toBe(first.outputHash);
+      expect(result.outputSizeBytes).toBe(first.outputSizeBytes);
+      expect(result.triangleCount).toBe(first.triangleCount);
+    }
+    expect(warmModulePrep.results[0]?.timings).toHaveLength(1);
+    expect(warmRun.results[0]?.warmupRuns).toBe(8);
+    expect(warmRun.results[0]?.timings).toHaveLength(15);
+    expect(await readHoneycombSource()).toBe(source);
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim()).toBe(gitHead);
+    await Promise.all(
+      implementationSources.map(async ({ path, digest }) => {
+        expect(
+          createHash('sha256')
+            .update(await readFile(resolve(workspace, path)))
+            .digest('hex'),
+        ).toBe(digest);
+      }),
+    );
+    /* oxlint-disable no-await-in-loop -- Recheck each selected implementation asset after the complete serial cohort. */
+    for (const { name, digest } of assets) {
+      expect(
+        createHash('sha256')
+          .update(await readFile(resolve(resourceRoot, name)))
+          .digest('hex'),
+      ).toBe(digest);
+    }
+    /* oxlint-enable no-await-in-loop */
+    expect(processDurations).toHaveLength(5);
+    expect(clientDurations).toHaveLength(5);
+    expect(coldProcessStats.coefficientOfVariation).toBeLessThanOrEqual(0.1);
+    expect(freshClientStats.coefficientOfVariation).toBeLessThanOrEqual(0.1);
+    expect(warmRun.results[0]!.coefficientOfVariation).toBeLessThanOrEqual(0.1);
+    await persist('qualified');
+  },
+);

@@ -1,3 +1,5 @@
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import type { WatchRequest, WatchEvent, ProjectRootConfiguration } from '@taucad/filesystem';
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
@@ -5,7 +7,6 @@ import { StrictMode, useEffect } from 'react';
 import { renderHook, render, screen, act } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
-import type { ProjectRootConfiguration } from '@taucad/filesystem';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import type * as WorkspaceTelemetryModule from '#utils/workspace-telemetry.utils.js';
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
@@ -173,6 +174,27 @@ vi.mock('@taucad/fs-bridge', () => ({
       bridgeProxyDisposals.set(bridge, dispose);
       return dispose;
     })(),
+    watchReady: (request: WatchRequest, handler: (event: WatchEvent) => void) => {
+      const channel = new WorkerChangeChannel({
+        transport: {
+          listen: (_event, listener) => {
+            const listeners = bridgeEventListeners.get(bridge) ?? new Set<(data: unknown) => void>();
+            listeners.add(listener);
+            bridgeEventListeners.set(bridge, listeners);
+            return () => listeners.delete(listener);
+          },
+        },
+      });
+      const watch = channel.watchReady(request, handler);
+      return {
+        ready: watch.ready,
+        closed: watch.closed,
+        unsubscribe: () => {
+          watch.dispose();
+          channel.dispose();
+        },
+      };
+    },
     listen: vi.fn((_event: string, handler: (data: unknown) => void) => {
       const listeners = bridgeEventListeners.get(bridge) ?? new Set<(data: unknown) => void>();
       listeners.add(handler);
@@ -670,13 +692,11 @@ describe('FileManagerProvider — client + workspace facades', () => {
           ? [bridge]
           : [];
       });
-    await vi.waitFor(() => {
-      expect(liveBridges()).toHaveLength(1);
-    });
-    const firstBridge = liveBridges()[0];
     const changed = vi.fn();
     const path = '.tau/workbench/layout.json';
-    const off = result.current.subscribeWorkbenchRecord(path, changed);
+    const watch = result.current.watchRecordFile(`/projects/p/${path}`, changed);
+    await watch.ready;
+    const firstBridge = liveBridges()[0];
     act(() => {
       for (const handler of bridgeEventListeners.get(firstBridge) ?? []) {
         handler({ type: 'fileWritten', path, backend: 'opfs' });
@@ -691,7 +711,7 @@ describe('FileManagerProvider — client + workspace facades', () => {
       }
     });
     expect(changed).toHaveBeenCalledTimes(3);
-    off();
+    watch.dispose();
     act(() => {
       for (const handler of bridgeEventListeners.get(firstBridge) ?? []) {
         handler({ type: 'fileDeleted', path, backend: 'opfs' });
@@ -705,12 +725,10 @@ describe('FileManagerProvider — client + workspace facades', () => {
     await vi.waitFor(() => {
       expect(result.current.contentService).not.toBe(firstService);
     });
-    await vi.waitFor(() => {
-      expect(liveBridges()).toHaveLength(2);
-    });
-    const secondBridge = liveBridges()[1];
     expect(bridgeEventListeners.get(firstBridge)?.size).toBe(0);
-    const offSecond = result.current.subscribeWorkbenchRecord(path, changed);
+    const secondWatch = result.current.watchRecordFile(`/projects/p/${path}`, changed);
+    await secondWatch.ready;
+    const secondBridge = liveBridges()[1];
     act(() => {
       for (const handler of bridgeEventListeners.get(secondBridge) ?? []) {
         handler({ type: 'fileWritten', path, backend: 'opfs' });
@@ -718,7 +736,7 @@ describe('FileManagerProvider — client + workspace facades', () => {
     });
     expect(changed).toHaveBeenCalledTimes(4);
     expect(bridgeProxyDisposals.get(firstBridge)).toHaveBeenCalledOnce();
-    offSecond();
+    secondWatch.dispose();
     unmount();
     expect(bridgeProxyDisposals.get(secondBridge)).toHaveBeenCalledOnce();
   });

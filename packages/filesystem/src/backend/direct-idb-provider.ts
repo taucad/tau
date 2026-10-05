@@ -8,13 +8,15 @@
  */
 
 import type { FileContentMetadata } from '@taucad/types';
-import type { DirectoryEntry, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
+import type { DirectoryEntry, FileStatOptions, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { indexDirectoryEntries } from '#backend/directory-entries.js';
 import { getFileContentMetadata, headFileStatFromStat } from '#content-metadata.js';
 
 const storeName = 'files';
-const dbVersion = 1;
+const metadataStoreName = 'file-metadata';
+const dbVersion = 2;
+type DurableFileMetadata = { size: number } & FileContentMetadata;
 const directoryKeyPrefix = '\0directory:';
 
 const toStoragePath = (path: string): string => `/${path}`;
@@ -57,15 +59,8 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   private _paths = new Set<string>();
   /** In-memory directory set: derived from file paths. */
   private _dirs = new Set<string>(['']);
-  /**
-   * Metadata for rows this provider has written or read, so `stat` does not
-   * fetch the whole blob again.
-   *
-   * ponytail: coherent because this provider is the only writer in its tab and
-   * {@link refresh} clears it; a peer tab's write is visible only after the
-   * refresh the cross-tab coordinator already triggers.
-   */
-  private _fileMeta = new Map<string, { size: number } & FileContentMetadata>();
+  /** Rebuildable projection; authoritative stat reads the durable metadata store. */
+  private _fileMeta = new Map<string, DurableFileMetadata>();
   /** Pending writes accumulated for the next batched IDB transaction. */
   private readonly _writeBatch: Array<{
     path: string;
@@ -139,7 +134,12 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
     const deferred = Promise.withResolvers<void>();
     this._pendingWritePaths.set(path, (this._pendingWritePaths.get(path) ?? 0) + 1);
-    this._writeBatch.push({ path, data: bytes, resolve: deferred.resolve, reject: deferred.reject });
+    this._writeBatch.push({
+      path,
+      data: bytes,
+      resolve: deferred.resolve,
+      reject: deferred.reject,
+    });
     this._flushActive ??= this._drainQueuedWrites();
     return deferred.promise.finally(() => {
       const remaining = (this._pendingWritePaths.get(path) ?? 1) - 1;
@@ -285,7 +285,10 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
     const present = result.filter((_, index) => !missingIndexes.has(index));
     return options?.content === 'head'
-      ? present.map(({ name, ...stat }) => ({ name, ...headFileStatFromStat(stat) }))
+      ? present.map(({ name, ...stat }) => ({
+          name,
+          ...headFileStatFromStat(stat),
+        }))
       : present;
   }
 
@@ -295,37 +298,30 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    * @param path - Absolute path to stat.
    * @returns Type/size/mtime for the entry at `path`.
    */
-  public async stat(path: string): Promise<FileStat> {
+  public async stat(path: string): Promise<FileStat>;
+  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
+  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
     this._ensureOpen();
     this._assertRootedPath(path);
-    if (this._dirs.has(path)) {
+    if (path === '' || (this._dirs.has(path) && (await this._idbHasStorageKey(directoryStorageKey(path))))) {
       return { type: 'dir', size: 0, mtimeMs: 0 };
     }
-    const cached = this._fileMeta.get(path);
-    if (cached && this._paths.has(path)) {
-      // The durable row still decides existence — `getKey` confirms it without
-      // transferring (and structured-cloning) the whole blob.
-      if (await this._idbHasKey(path)) {
-        return { type: 'file', mtimeMs: 0, ...cached };
+    const metadata = await this._readDurableFileMetadata(path);
+    if (!metadata) {
+      if (await this._idbHasStorageKey(directoryStorageKey(path))) {
+        this._dirs.add(path);
+        return { type: 'dir', size: 0, mtimeMs: 0 };
       }
+      this._dirs.delete(path);
       this._purgeFileProjection(path);
       throw this._enoent(path);
     }
-    if (this._paths.has(path)) {
-      const data = await this._idbGet(path);
-      if (data === undefined) {
-        this._purgeFileProjection(path);
-        throw this._enoent(path);
-      }
-      return { type: 'file', mtimeMs: 0, ...this._rememberFileMeta(path, data) };
-    }
-    const repaired = await this._idbGet(path);
-    if (repaired !== undefined) {
-      this._paths.add(path);
-      this._ensureParentDirs(path);
-      return { type: 'file', mtimeMs: 0, ...this._rememberFileMeta(path, repaired) };
-    }
-    throw this._enoent(path);
+    this._dirs.delete(path);
+    this._paths.add(path);
+    this._ensureParentDirs(path);
+    this._fileMeta.set(path, metadata);
+    const result: FileStat = { type: 'file', mtimeMs: 0, ...metadata };
+    return options?.content === 'head' ? headFileStatFromStat(result) : result;
   }
 
   /**
@@ -413,9 +409,14 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
       throw this._enoent(from);
     }
     await new Promise<void>((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readwrite');
+      const tx = this._db!.transaction([storeName, metadataStoreName], 'readwrite');
       const store = tx.objectStore(storeName);
       store.put(data, toStoragePath(to));
+      tx.objectStore(metadataStoreName).put(
+        { size: data.byteLength, ...getFileContentMetadata(data) },
+        toStoragePath(to),
+      );
+      tx.objectStore(metadataStoreName).delete(toStoragePath(from));
       store.delete(toStoragePath(from));
       this._putParentDirectoryRows(store, to);
       tx.addEventListener('complete', () => {
@@ -462,12 +463,17 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     }
 
     await new Promise<void>((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readwrite');
+      const tx = this._db!.transaction([storeName, metadataStoreName], 'readwrite');
       const store = tx.objectStore(storeName);
       for (const [oldPath, data] of fileData) {
         const newPath = to + oldPath.slice(from.length);
         store.delete(toStoragePath(oldPath));
         store.put(data, toStoragePath(newPath));
+        tx.objectStore(metadataStoreName).delete(toStoragePath(oldPath));
+        tx.objectStore(metadataStoreName).put(
+          { size: data.byteLength, ...getFileContentMetadata(data) },
+          toStoragePath(newPath),
+        );
       }
       for (const directory of directoriesToMove) {
         const newDirectory = to + directory.slice(from.length);
@@ -604,11 +610,15 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    */
   private async _flushBatch(batch: ReadonlyArray<{ path: string; data: Uint8Array<ArrayBuffer> }>): Promise<void> {
     await new Promise<void>((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readwrite');
+      const tx = this._db!.transaction([storeName, metadataStoreName], 'readwrite');
       const store = tx.objectStore(storeName);
       for (const { path, data } of batch) {
         this._putParentDirectoryRows(store, path);
         store.put(data, toStoragePath(path));
+        tx.objectStore(metadataStoreName).put(
+          { size: data.byteLength, ...getFileContentMetadata(data) },
+          toStoragePath(path),
+        );
       }
       tx.addEventListener('complete', () => {
         resolve();
@@ -635,16 +645,35 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   private async _openDb(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(this._dbName, dbVersion);
+      let blocked = false;
+      request.addEventListener('blocked', () => {
+        blocked = true;
+        reject(new Error(`IndexedDB upgrade blocked by an older connection: ${this._dbName}`));
+      });
 
       request.addEventListener('upgradeneeded', () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(storeName)) {
           db.createObjectStore(storeName);
         }
+        if (!db.objectStoreNames.contains(metadataStoreName)) {
+          db.createObjectStore(metadataStoreName);
+        }
       });
 
       request.addEventListener('success', () => {
-        resolve(request.result);
+        const db = request.result;
+        if (blocked) {
+          db.close();
+          return;
+        }
+        db.addEventListener('versionchange', () => {
+          db.close();
+          if (this._db === db) {
+            this._db = undefined;
+          }
+        });
+        resolve(db);
       });
 
       request.addEventListener('error', () => {
@@ -658,7 +687,10 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
    *
    * @returns Complete file and directory path indexes.
    */
-  private async _readPathIndexSnapshot(): Promise<{ paths: Set<string>; directories: Set<string> }> {
+  private async _readPathIndexSnapshot(): Promise<{
+    paths: Set<string>;
+    directories: Set<string>;
+  }> {
     const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
       const tx = this._db!.transaction(storeName, 'readonly');
       const store = tx.objectStore(storeName);
@@ -768,6 +800,52 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
     }
   }
 
+  /**
+   * Read current durable metadata, backfilling legacy bytes within the same
+   * transaction. Warm reads transfer only metadata and an existence key.
+   *
+   * @param path - Root-relative file path.
+   * @returns Metadata when the durable file exists.
+   */
+  private async _readDurableFileMetadata(path: string): Promise<DurableFileMetadata | undefined> {
+    return new Promise((resolve, reject) => {
+      const tx = this._db!.transaction([storeName, metadataStoreName], 'readwrite');
+      const files = tx.objectStore(storeName);
+      const metadata = tx.objectStore(metadataStoreName);
+      const key = toStoragePath(path);
+      let result: DurableFileMetadata | undefined;
+      const exists = files.getKey(key);
+      exists.addEventListener('success', () => {
+        if (exists.result === undefined) {
+          metadata.delete(key);
+          return;
+        }
+        const cached = metadata.get(key);
+        cached.addEventListener('success', () => {
+          if (cached.result !== undefined) {
+            result = cached.result as DurableFileMetadata;
+            return;
+          }
+          const bytes = files.get(key);
+          bytes.addEventListener('success', () => {
+            const data = bytes.result as Uint8Array<ArrayBuffer>;
+            result = { size: data.byteLength, ...getFileContentMetadata(data) };
+            metadata.put(result, key);
+          });
+        });
+      });
+      tx.addEventListener('complete', () => {
+        resolve(result);
+      });
+      tx.addEventListener('error', () => {
+        reject(tx.error ?? new Error(`Metadata read failed for '${path}'`));
+      });
+      tx.addEventListener('abort', () => {
+        reject(tx.error ?? new Error(`Metadata read aborted for '${path}'`));
+      });
+    });
+  }
+
   private async _idbGet(key: string): Promise<Uint8Array<ArrayBuffer> | undefined> {
     return new Promise((resolve, reject) => {
       const tx = this._db!.transaction(storeName, 'readonly');
@@ -784,30 +862,29 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   }
 
   /**
-   * Test for a durable row without reading its value.
-   *
-   * @param key - Row key to probe.
-   * @returns `true` when the row exists.
+   * Probe a durable directory row without transferring its value.
+   * @param key - Internal storage key.
+   * @returns Whether the row exists.
    */
-  private async _idbHasKey(key: string): Promise<boolean> {
+  private async _idbHasStorageKey(key: string): Promise<boolean> {
     return new Promise((resolve, reject) => {
       const tx = this._db!.transaction(storeName, 'readonly');
-      const request = tx.objectStore(storeName).getKey(toStoragePath(key));
-
+      const request = tx.objectStore(storeName).getKey(key);
       request.addEventListener('success', () => {
         resolve(request.result !== undefined);
       });
       request.addEventListener('error', () => {
-        reject(request.error ?? new Error(`IDB getKey failed for '${key}'`));
+        reject(request.error ?? new Error(`IDB directory probe failed for '${key}'`));
       });
     });
   }
 
   private async _idbDelete(key: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readwrite');
+      const tx = this._db!.transaction([storeName, metadataStoreName], 'readwrite');
       const store = tx.objectStore(storeName);
       store.delete(key);
+      tx.objectStore(metadataStoreName).delete(key);
 
       tx.addEventListener('complete', () => {
         resolve();

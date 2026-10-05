@@ -1,0 +1,83 @@
+{
+  "tool": "geospec-engine CLI (packages/geospec-engine/src/cli/main.ts run --workers 1 --json)",
+  "example": "libs/tau-examples/src/kernels/replicad/planetary-gear-system",
+  "commit": "e496c98812d9320d3112e47751288feb881c7ed2",
+  "modelSha256": "464caa7c826d12ace762c36cef7e61d279203d446827387192e52181a76b9f64",
+  "startedAt": "2026-10-02T23:52:31Z",
+  "durationMs": 18703,
+  "summary": {
+    "selected": 10,
+    "passed": 3,
+    "failed": 0,
+    "inconclusive": 7,
+    "skipped": 0,
+    "notRun": 0
+  },
+  "tests": [
+    {
+      "name": "has the specified 174 mm rim and 68 mm axial envelope",
+      "status": "passed",
+      "codes": []
+    },
+    {
+      "name": "contains closed manufactured solids",
+      "status": "passed",
+      "codes": []
+    },
+    {
+      "name": "contains the gears, two carriers and all support hardware",
+      "status": "inconclusive",
+      "codes": [
+        "GEOSPEC_EVIDENCE_UNSUPPORTED"
+      ]
+    },
+    {
+      "name": "places the three planet axes on a 96 mm pitch circle",
+      "status": "inconclusive",
+      "codes": [
+        "GEOSPEC_EVIDENCE_UNSUPPORTED"
+      ]
+    },
+    {
+      "name": "has no gear or hardware interference",
+      "status": "inconclusive",
+      "codes": [
+        "GEOSPEC_UNSUPPORTED_EVIDENCE"
+      ]
+    },
+    {
+      "name": "preserves clearance with a wider face and advanced input angle",
+      "status": "inconclusive",
+      "codes": [
+        "GEOSPEC_UNSUPPORTED_EVIDENCE"
+      ]
+    },
+    {
+      "name": "dimensions the removable bearing and thrust hardware",
+      "status": "inconclusive",
+      "codes": [
+        "GEOSPEC_EVIDENCE_UNSUPPORTED"
+      ]
+    },
+    {
+      "name": "clears intermediate tooth contact phases",
+      "status": "inconclusive",
+      "codes": [
+        "GEOSPEC_UNSUPPORTED_EVIDENCE"
+      ]
+    },
+    {
+      "name": "provides valid millimetre BRep solids",
+      "status": "passed",
+      "codes": []
+    },
+    {
+      "name": "has the mounting pattern and cylindrical shaft and bearing interfaces",
+      "status": "inconclusive",
+      "codes": [
+        "GEOSPEC_UNSUPPORTED_EVIDENCE"
+      ]
+    }
+  ],
+  "commitNote": "Local geospec checkout; the model file is byte-identical (same SHA-256) at public origin/geospec 199c8079d."
+}

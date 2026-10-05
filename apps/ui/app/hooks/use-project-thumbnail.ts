@@ -1,62 +1,74 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import { useObservationValue } from '@taucad/fs-client/react/use-observation';
+import { isNotFound } from '#db/attachment-store.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 
-/** Resolve the canonical local project thumbnail through the File Manager. */
-export function useProjectThumbnail(projectId: string | undefined): string | undefined {
-  const { recordFiles, workerChangeChannel } = useFileManager();
-  const [thumbnail, setThumbnail] = useState<{ projectId: string; url: string }>();
+type Thumbnail = { readonly bytes: Uint8Array<ArrayBuffer>; readonly url: string } | undefined;
+type Files = ReturnType<typeof useFileManager>['recordFiles'];
+type Watch = ReturnType<typeof useFileManager>['watchRecordFile'];
+const sources = new WeakMap<Files, WeakMap<Watch, Map<string, ObservationService<Thumbnail>>>>();
 
-  useEffect(() => {
-    if (!projectId) {
-      return;
-    }
-
-    const path = `/projects/${projectId}/thumbnail.webp`;
-    let currentUrl: string | undefined;
-    let cancelled = false;
-
-    const resolve = async (): Promise<void> => {
-      try {
-        const bytes = await recordFiles.readFile(path);
-        if (cancelled) {
-          return;
+function thumbnailFor(files: Files, watch: Watch, path: string): ObservationService<Thumbnail> {
+  let watchers = sources.get(files);
+  if (!watchers) {
+    watchers = new WeakMap();
+    sources.set(files, watchers);
+  }
+  let paths = watchers.get(watch);
+  if (!paths) {
+    paths = new Map();
+    watchers.set(watch, paths);
+  }
+  let service = paths.get(path);
+  if (!service) {
+    service = new ObservationService<Thumbnail>({
+      resource: path,
+      watch: (invalidate, reset) =>
+        watch(path, (event) => {
+          if (event.type === 'reset') {
+            reset();
+          } else {
+            invalidate();
+          }
+        }),
+      read: async ({ isCurrent, signal }) => {
+        try {
+          const bytes = await files.readFile(path);
+          signal.throwIfAborted();
+          if (!isCurrent()) {
+            return undefined;
+          }
+          return { bytes, url: URL.createObjectURL(new Blob([bytes], { type: 'image/webp' })) };
+        } catch (error) {
+          if (isNotFound(error)) {
+            return undefined;
+          }
+          throw error;
         }
-        const next = URL.createObjectURL(new Blob([bytes], { type: 'image/webp' }));
-        if (currentUrl) {
-          URL.revokeObjectURL(currentUrl);
+      },
+      equal: (previous, next) =>
+        previous === next ||
+        (previous?.bytes.length !== undefined &&
+          previous.bytes.length === next?.bytes.length &&
+          previous.bytes.every((byte, index) => byte === next.bytes[index])),
+      disposeValue: (value) => {
+        if (value) {
+          URL.revokeObjectURL(value.url);
         }
-        currentUrl = next;
-        setThumbnail({ projectId, url: next });
-      } catch {
-        if (!cancelled) {
-          setThumbnail(undefined);
-        }
-      }
-    };
-
-    void resolve();
-    const interestedIn = (changedPath: string): boolean => changedPath === path || changedPath === 'thumbnail.webp';
-    const unsubscribeWritten = workerChangeChannel?.onFileWritten({ interestedIn, handler: resolve });
-    const unsubscribeDeleted = workerChangeChannel?.onFileDeleted({
-      interestedIn,
-      handler: () => {
-        if (currentUrl) {
-          URL.revokeObjectURL(currentUrl);
-          currentUrl = undefined;
-        }
-        setThumbnail(undefined);
       },
     });
+    paths.set(path, service);
+  }
+  return service;
+}
 
-    return () => {
-      cancelled = true;
-      unsubscribeWritten?.();
-      unsubscribeDeleted?.();
-      if (currentUrl) {
-        URL.revokeObjectURL(currentUrl);
-      }
-    };
-  }, [recordFiles, projectId, workerChangeChannel]);
-
-  return thumbnail !== undefined && thumbnail.projectId === projectId ? thumbnail.url : undefined;
+/** Resolve one shared URL lease for the canonical project thumbnail and its actual source. */
+export function useProjectThumbnail(projectId: string | undefined): string | undefined {
+  const { recordFiles, watchRecordFile } = useFileManager();
+  const service = useMemo(
+    () => (projectId ? thumbnailFor(recordFiles, watchRecordFile, `/projects/${projectId}/thumbnail.webp`) : undefined),
+    [projectId, recordFiles, watchRecordFile],
+  );
+  return useObservationValue(service)?.url;
 }

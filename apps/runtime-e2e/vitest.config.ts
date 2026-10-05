@@ -26,7 +26,14 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { ...shared, name: 'suites', exclude: [...configDefaults.exclude, ...timingGates] },
+        test: {
+          ...shared,
+          name: 'suites',
+          exclude: [...configDefaults.exclude, ...timingGates],
+          ...(process.env['TAU_E2E_HONEYCOMB_WARM_TIER_TRACE'] === 'true'
+            ? { execArgv: ['--trace-opt', '--trace-deopt', '--trace-wasm-compilation-times'] }
+            : {}),
+        },
       },
       {
         extends: true,

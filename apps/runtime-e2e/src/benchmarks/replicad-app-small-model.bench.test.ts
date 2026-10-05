@@ -2,6 +2,7 @@
 import { spawn, execFileSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { writeSync } from 'node:fs';
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PerformanceObserver } from 'node:perf_hooks';
@@ -65,6 +66,11 @@ const readHoneycombSource = async (): Promise<string> => {
 };
 
 it('should bind the Honeycomb benchmark to the exact existing route seed without native acquisition', async () => {
+  if (process.env['TAU_E2E_HONEYCOMB_WARM_TIER_TRACE'] === 'true') {
+    expect(process.execArgv).toEqual(
+      expect.arrayContaining(['--trace-opt', '--trace-deopt', '--trace-wasm-compilation-times']),
+    );
+  }
   expect(await readHoneycombSource()).toBe(honeycombSource);
 });
 
@@ -177,10 +183,16 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_HOST_AWAIT'] !== 'true')(
   },
 );
 
-type HoneycombWarmDiagnosticMode = 'profile' | 'gc-host';
+type HoneycombWarmDiagnosticMode = 'profile' | 'gc-host' | 'tier-trace';
 
 const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Promise<void> => {
   const profile = mode === 'profile';
+  const tierTrace = mode === 'tier-trace';
+  if (tierTrace) {
+    expect(process.execArgv).toEqual(
+      expect.arrayContaining(['--trace-opt', '--trace-deopt', '--trace-wasm-compilation-times']),
+    );
+  }
   if (!profile) {
     expect(typeof process.threadCpuUsage).toBe('function');
   }
@@ -198,6 +210,8 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
   );
   const source = await readHoneycombSource();
   const boundaries: HostRenderBoundary[] = [];
+  let tierMarkerCount = 0;
+  let tierMarkerFailed = false;
   const gcEntries: Array<{ name: string; startTime: number; duration: number; timeOrigin: number; detail: unknown }> =
     [];
   const observer = new PerformanceObserver((entries) => {
@@ -217,7 +231,7 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
     wasmUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.wasm')).href,
     wasmBindingsUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.mjs')).href,
   };
-  const caseName = profile ? 'app-custom-honeycomb-warm-profile-v1' : 'app-custom-honeycomb-warm-gc-host-v1';
+  const caseName = `app-custom-honeycomb-warm-${mode}-v1`;
   let run: Awaited<ReturnType<typeof runBenchmarks>>;
   observer.observe({ entryTypes: ['gc'] });
   try {
@@ -240,6 +254,23 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
         ...(profile ? { cpuProfile: true, cpuProfileInterval: 100 } : {}),
         onHostRenderBoundary: (boundary) => {
           boundaries.push(boundary);
+          if (tierTrace && (boundary.phase === 'before-open' || boundary.phase === 'document-closed')) {
+            if (tierMarkerCount >= 32) {
+              tierMarkerFailed = true;
+              return;
+            }
+            try {
+              const marker = `TAU_WARM_TIER_EMIT_V1 ${process.pid} ${boundary.iteration} ${boundary.phase === 'before-open' ? 1 : 2} ${boundary.monotonic}\n`;
+              if (marker.length > 128 || writeSync(1, marker) !== marker.length) {
+                tierMarkerFailed = true;
+                return;
+              }
+              tierMarkerCount++;
+            } catch {
+              // Preserve the benchmark error and observer cleanup; reject incomplete marker evidence after the run.
+              tierMarkerFailed = true;
+            }
+          }
         },
       },
     );
@@ -288,9 +319,13 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
   if (!profile) {
     expect(boundaries).toHaveLength(16 * phases.length);
   }
+  if (tierTrace) {
+    expect(tierMarkerFailed).toBe(false);
+    expect(tierMarkerCount).toBe(32);
+  }
   const directory = resolve(
     workspace,
-    `out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb/${profile ? 'warm-profile-v1' : 'warm-gc-host-v1'}`,
+    `out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb/warm-${mode}-v1`,
   );
   await mkdir(directory, { recursive: true });
   await writeFile(
@@ -326,6 +361,18 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
         boundaries: boundaries.filter((boundary) => boundary.iteration === index + 1),
       })),
       gcEntries,
+      ...(tierTrace
+        ? {
+            tierTraceMarkers: {
+              prefix: 'TAU_WARM_TIER_EMIT_V1',
+              count: tierMarkerCount,
+              maximum: 32,
+              phases: { 1: 'before-open', 2: 'document-closed' },
+              interpretation:
+                'Synchronous stdout emission order only; V8 compiler events may be emitted asynchronously.',
+            },
+          }
+        : {}),
       ...(profile ? { cpuProfile: result!.cpuProfile, profileAnalysis: result!.profileAnalysis } : {}),
       workerSpans: result!.telemetry.flatMap((entries, index) =>
         entries.map(({ name, startTime, duration, workerTimeOrigin, detail }) => ({
@@ -339,17 +386,22 @@ const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Pr
             : {}),
         })),
       ),
-      limits: profile
+      limits: tierTrace
         ? [
-            'V8 samples cover the complete eight-operation measured window; they are not assigned to individual operations without verified clock alignment.',
-            'Profiler sampling, the explicit pre-measurement GC, and the GC observer can perturb timings. This run is diagnostic and cannot establish the original CV or its cause.',
-            'If this finite window has no slow operation, no slow-path attribution is possible.',
+            'Marker lines bracket synchronous emission in this Node worker, not the time of V8 optimization or compilation events; background work and buffering may reorder trace output.',
+            'V8 tracing and the GC observer can perturb timings. This single 8+8 window cannot replace the original CV cohort or prove its historical outlier cause.',
           ]
-        : [
-            'GC observations and host boundaries share this Node realm; worker telemetry clocks require their own verified origin before subtraction.',
-            'The observer can perturb timings. This finite diagnostic is not a replacement for the original CV cohort or proof of its historical outlier cause.',
-            'A window with no slow operation cannot attribute a slow path.',
-          ],
+        : profile
+          ? [
+              'V8 samples cover the complete eight-operation measured window; they are not assigned to individual operations without verified clock alignment.',
+              'Profiler sampling, the explicit pre-measurement GC, and the GC observer can perturb timings. This run is diagnostic and cannot establish the original CV or its cause.',
+              'If this finite window has no slow operation, no slow-path attribution is possible.',
+            ]
+          : [
+              'GC observations and host boundaries share this Node realm; worker telemetry clocks require their own verified origin before subtraction.',
+              'The observer can perturb timings. This finite diagnostic is not a replacement for the original CV cohort or proof of its historical outlier cause.',
+              'A window with no slow operation cannot attribute a slow path.',
+            ],
       implementationSources: await Promise.all(
         [
           'apps/runtime-e2e/src/benchmarks/benchmark-runner.ts',
@@ -373,6 +425,11 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_PROFILE'] !== 'true')(
 it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_GC_HOST'] !== 'true')(
   'should retain the exact Honeycomb warm-window GC and caller-thread boundaries without a V8 sampler',
   async () => runHoneycombWarmDiagnostic('gc-host'),
+);
+
+it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_TIER_TRACE'] !== 'true')(
+  'should retain bounded Honeycomb warm-window tier-trace emission brackets without a V8 sampler',
+  async () => runHoneycombWarmDiagnostic('tier-trace'),
 );
 
 // Existing runtime-e2e owner proposal; no default suite silently executes the opt-in native acquisition.

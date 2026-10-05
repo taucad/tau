@@ -93,14 +93,14 @@ it('admits and projects actual pinned GLB through the authenticated host and age
     });
     const exported = await registry.invoke({
       toolCallId: 'pin-export',
-      toolName: 'export_geometry',
-      input: { targetFile: 'scene.json', format: 'glb' },
+      toolName: 'export_model',
+      input: { targetFile: 'scene.json', to: 'glb' },
       signal: new AbortController().signal,
     });
     expect(exported.isError).toBe(false);
     const verdict = await registry.invoke({
       toolCallId: 'pin-verdict',
-      toolName: 'get_kernel_result',
+      toolName: 'evaluate_model',
       input: { targetFile: 'scene.json' },
       signal: new AbortController().signal,
     });

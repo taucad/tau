@@ -3,5 +3,10 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/plugins/esbuild",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"]
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "build": {
+      "dependsOn": ["copy-assets", "^copy-assets", "^build"]
+    }
+  }
 }

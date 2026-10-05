@@ -1357,9 +1357,13 @@ async function prepareAssemblyMetadata(
   {
     sourceFile,
     reserveResources,
+    readAsset,
+    onDemandIndex,
   }: Readonly<{
     sourceFile: string | undefined;
     reserveResources: (cpuBytes: number, gpuBytes: number) => void;
+    readAsset: (digest: PublishedPartAsset['digest']) => Promise<Uint8Array<ArrayBuffer>>;
+    onDemandIndex: () => void;
   }>,
 ): Promise<{
   metadata: AssemblyMetadata;
@@ -1441,7 +1445,7 @@ async function prepareAssemblyMetadata(
     occurrences: display.admitted.publication.occurrences,
     readAsset: async (_part, asset) => {
       const retained = bytes.get(asset.digest) ?? previous?.definitions?.get(asset.digest)?.bytes;
-      const value = retained ?? (await display.admitted.readAsset(asset.digest));
+      const value = retained ?? (await readAsset(asset.digest));
       if (value.byteLength > 64 * 1024 * 1024) {
         throw new RangeError('Assembly definition exceeds 64 MiB');
       }
@@ -1520,6 +1524,7 @@ async function prepareAssemblyMetadata(
     sourceFile,
     geometryHash: display.root.digest,
   });
+  onDemandIndex();
   return {
     metadata,
     layout,
@@ -1758,6 +1763,7 @@ async function prepareAssemblyDefinitions({
   assets,
   sourceBytes,
   reserveResources,
+  readAsset,
 }: {
   readonly display: CadAssemblyDisplay;
   readonly previous: PreparedGltfPresentation | undefined;
@@ -1769,6 +1775,7 @@ async function prepareAssemblyDefinitions({
   readonly assets: ReadonlySet<PublishedPartAsset['digest']>;
   readonly sourceBytes: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
   readonly reserveResources: (cpuBytes: number, gpuBytes: number) => void;
+  readonly readAsset: (digest: PublishedPartAsset['digest']) => Promise<Uint8Array<ArrayBuffer>>;
 }): Promise<ReadonlyMap<string, PreparedGltfDefinition>> {
   const definitions = new Map<string, PreparedGltfDefinition>();
   let verificationReserved = false;
@@ -1818,7 +1825,7 @@ async function prepareAssemblyDefinitions({
       }
     }
     // oxlint-disable-next-line no-await-in-loop -- Bound peak allocation to one definition during candidate preparation.
-    const bytes = suppliedBytes ?? (await display.admitted.readAsset(digest));
+    const bytes = suppliedBytes ?? (await readAsset(digest));
     if (!suppliedBytes) {
       reserveResources(Math.max(0, bytes.buffer.byteLength - advertisedBytes), 0);
     }
@@ -2351,6 +2358,74 @@ async function prepareAssemblyScene({
 type GltfPresentationTimings = Partial<Record<keyof GltfPresentationTelemetry['durations'], number>>;
 
 const committedGltfDrawInventory = Symbol('committedGltfDrawInventory');
+const liveGltfAssemblyResourceInventory = Symbol('liveGltfAssemblyResourceInventory');
+
+type AssemblyPreparationPhase =
+  | 'queued'
+  | 'source-validation'
+  | 'demand-index'
+  | 'definition-preparation'
+  | 'detail-preparation'
+  | 'scene-preparation'
+  | 'material-preparation'
+  | 'section-analysis'
+  | 'admission'
+  | 'committed'
+  | 'cancelled'
+  | 'failed';
+
+type AssemblyPreparationProgress = {
+  display: CadAssemblyDisplay;
+  key: string;
+  revision: number;
+  phase: AssemblyPreparationPhase;
+  requestedAssetReads: number;
+  completedAssetReads: number;
+};
+
+const assemblyPreparationOwners = new WeakMap<Object3D, Set<() => AssemblyPreparationProgress | undefined>>();
+
+/** Requested-owner phase only: no committed-draw or presentation claim before first admission. */
+export function captureRequestedGltfAssemblyPreparation(
+  root: Object3D,
+  requested: Readonly<{ display: CadAssemblyDisplay; key: string; revision: number }>,
+): Readonly<Omit<AssemblyPreparationProgress, 'display' | 'key'>> | undefined {
+  let matching: AssemblyPreparationProgress | undefined;
+  for (const read of assemblyPreparationOwners.get(root) ?? []) {
+    const progress = read();
+    if (
+      progress?.display === requested.display &&
+      progress.key === requested.key &&
+      progress.revision === requested.revision
+    ) {
+      if (matching) {
+        return undefined;
+      }
+      matching = progress;
+    }
+  }
+  return (
+    matching && {
+      revision: matching.revision,
+      phase: matching.phase,
+      requestedAssetReads: matching.requestedAssetReads,
+      completedAssetReads: matching.completedAssetReads,
+    }
+  );
+}
+
+type ExactAssemblyCpuResources = Readonly<{ bufferCount: number; backingBytes: number; payloadBytes: number }>;
+
+type LiveGltfAssemblyResourceInventory = Readonly<{
+  key: string;
+  presentationRevision: number;
+  candidateSceneId: string;
+  unitId: string;
+  current: ExactAssemblyCpuResources;
+  candidate?: ExactAssemblyCpuResources & Readonly<{ key: string; revision: number; sceneId: string; unitId: string }>;
+  union: ExactAssemblyCpuResources;
+  retiredOwnerCount: number;
+}>;
 
 type GltfAssemblyDrawCapture = Readonly<{
   display: CadAssemblyDisplay;
@@ -2401,7 +2476,10 @@ type GltfAssemblyDrawCapture = Readonly<{
   isCurrent(): boolean;
 }>;
 
-type GltfInventoryObject = Object3D & { [committedGltfDrawInventory]?: () => GltfAssemblyDrawCapture | undefined };
+type GltfInventoryObject = Object3D & {
+  [committedGltfDrawInventory]?: () => GltfAssemblyDrawCapture | undefined;
+  [liveGltfAssemblyResourceInventory]?: () => LiveGltfAssemblyResourceInventory | undefined;
+};
 
 /** Explicit readonly debug capture of the actual mounted producer; never derives identity from names or extras. */
 export function captureCommittedGltfDrawInventory(root: Object3D): GltfAssemblyDrawCapture | undefined {
@@ -2412,6 +2490,17 @@ export function captureCommittedGltfDrawInventory(root: Object3D): GltfAssemblyD
     }
     const owner: GltfInventoryObject = object;
     capture = owner[committedGltfDrawInventory]?.();
+  });
+  return capture;
+}
+
+/** On-demand owned CPU backing/range census; detached and retired presentations have no authority. */
+export function captureLiveGltfAssemblyResourceInventory(
+  root: Object3D,
+): LiveGltfAssemblyResourceInventory | undefined {
+  let capture: LiveGltfAssemblyResourceInventory | undefined;
+  root.traverse((object) => {
+    capture ??= (object as GltfInventoryObject)[liveGltfAssemblyResourceInventory]?.();
   });
   return capture;
 }
@@ -3828,12 +3917,32 @@ export function GltfMesh({
     candidateBundleHighWaterMark: 0,
   });
   const candidatePresentationRef = useRef<PreparedGltfPresentation | undefined>(undefined);
+  const preparationProgressRef = useRef<AssemblyPreparationProgress | undefined>(undefined);
   const preparationInFlightRef = useRef<Promise<void> | undefined>(undefined);
   const latestPreparationRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const retiredPresentationsRef = useRef<PreparedGltfPresentation[]>([]);
   const frameProbeRef = useRef<{ revision: number; modelEmptyFrames: number } | undefined>(undefined);
   const [topologyScheduler] = useState(createSectionTopologyScheduler);
   const { size, invalidate, scene: rootScene, camera } = useThree();
+  useLayoutEffect(() => {
+    if (!assemblyDisplay) {
+      return;
+    }
+    const readers =
+      assemblyPreparationOwners.get(rootScene) ?? new Set<() => AssemblyPreparationProgress | undefined>();
+    const read = () => preparationProgressRef.current;
+    readers.add(read);
+    assemblyPreparationOwners.set(rootScene, readers);
+    return () => {
+      readers.delete(read);
+      if (readers.size === 0) {
+        assemblyPreparationOwners.delete(rootScene);
+      }
+      if (preparationProgressRef.current?.display === assemblyDisplay) {
+        preparationProgressRef.current = undefined;
+      }
+    };
+  }, [assemblyDisplay, rootScene]);
   const assemblyCamera = assemblyDisplay ? camera : undefined;
   const assemblyCameraStateRef = useRef<string | undefined>(undefined);
   const { theme } = useTheme();
@@ -4168,6 +4277,31 @@ export function GltfMesh({
   useEffect(() => {
     // Cleanup may cancel across any awaited loader, task yield or analysis.
     const cancellation = { cancelled: false };
+    const progress: AssemblyPreparationProgress | undefined = assemblyDisplay
+      ? {
+          display: assemblyDisplay,
+          key: assemblyDisplay.root.digest,
+          revision: presentationRevision,
+          phase: 'queued',
+          requestedAssetReads: 0,
+          completedAssetReads: 0,
+        }
+      : undefined;
+    preparationProgressRef.current = progress;
+    const setPhase = (phase: AssemblyPreparationPhase): void => {
+      if (progress) {
+        progress.phase = phase;
+      }
+    };
+    const readAssemblyAsset = async (digest: PublishedPartAsset['digest']): Promise<Uint8Array<ArrayBuffer>> => {
+      if (!assemblyDisplay || !progress) {
+        throw new Error('Assembly source owner is unavailable.');
+      }
+      progress.requestedAssetReads += 1;
+      const bytes = await assemblyDisplay.admitted.readAsset(digest);
+      progress.completedAssetReads += 1;
+      return bytes;
+    };
     const preparationKey = assemblyPreparationKey;
     const isCancelled = (): boolean =>
       cancellation.cancelled ||
@@ -4318,6 +4452,7 @@ export function GltfMesh({
         barrier: bundle.barrier,
       });
       setPresentation(bundle);
+      setPhase('committed');
       invalidate();
       return true;
     };
@@ -4398,9 +4533,14 @@ export function GltfMesh({
           if (!assemblyCamera || !assemblyRenderFrame) {
             throw new Error('Assembly camera frame is unavailable');
           }
+          setPhase('source-validation');
           const preparedMetadata = await prepareAssemblyMetadata(assemblyDisplay, reuseFrom, {
             sourceFile,
             reserveResources,
+            readAsset: readAssemblyAsset,
+            onDemandIndex: () => {
+              setPhase('demand-index');
+            },
           });
           if (isCancelled()) {
             unpreparedDispose();
@@ -4478,6 +4618,7 @@ export function GltfMesh({
             const { part, variant } = occurrence.definition;
             assets.add(assemblyDisplay.admitted.publication.parts[part]!.variants[variant]!.glb.digest);
           }
+          setPhase('definition-preparation');
           definitions = await prepareAssemblyDefinitions({
             display: assemblyDisplay,
             previous: reuseFrom,
@@ -4489,11 +4630,13 @@ export function GltfMesh({
             assets,
             sourceBytes: preparedMetadata.bytes,
             reserveResources,
+            readAsset: readAssemblyAsset,
           });
           if (isCancelled()) {
             unpreparedDispose();
             return;
           }
+          setPhase('detail-preparation');
           definitions = await prepareAssemblyDetailDefinitions({
             definitions,
             previous: reuseFrom,
@@ -4528,6 +4671,7 @@ export function GltfMesh({
             previous: reuseFrom?.detailSelections,
             calibration: detailCalibration,
           });
+          setPhase('scene-preparation');
           const prepared = await prepareAssemblyScene({
             display: assemblyDisplay,
             definitions,
@@ -4634,6 +4778,7 @@ export function GltfMesh({
           includeSceneTextures: false,
           inventory: resources,
         });
+        setPhase('material-preparation');
         const materialsStartedAt = performance.now();
         const materialOptions = materialOptionsRef.current;
         if (materialOptions.enableMatcap) {
@@ -4700,6 +4845,52 @@ export function GltfMesh({
           const display = assemblyDisplay;
           const metadata = assemblyMetadata;
           const owner: GltfInventoryObject = candidateScene;
+          owner[liveGltfAssemblyResourceInventory] = () => {
+            if (bundle.disposed || committedPresentationRef.current !== bundle) {
+              return undefined;
+            }
+            const current = bundle;
+            const candidate = candidatePresentationRef.current;
+            const pending = candidate && candidate !== current && !candidate.disposed ? candidate : undefined;
+            const retired = retiredPresentationsRef.current.filter((value) => !value.disposed);
+            const exact = (value: PreparedGltfPresentation): ExactAssemblyCpuResources => {
+              const resources = countAssemblyResources(value, undefined, { queuedPreparationCount: 0 });
+              return {
+                bufferCount: resources.exactResidentBufferCount,
+                backingBytes: resources.exactResidentBufferCpuBytes,
+                payloadBytes: resources.exactResidentPayloadCpuBytes,
+              };
+            };
+            const overlap = countAssemblyResources(pending ?? current, pending ? current : undefined, {
+              queuedPreparationCount: 0,
+              retired,
+            });
+            const result: LiveGltfAssemblyResourceInventory = {
+              key: current.key,
+              presentationRevision: current.revision,
+              candidateSceneId: current.scene.uuid,
+              unitId: current.unitId,
+              current: exact(current),
+              ...(pending
+                ? {
+                    candidate: {
+                      ...exact(pending),
+                      key: pending.key,
+                      revision: pending.revision,
+                      sceneId: pending.scene.uuid,
+                      unitId: pending.unitId,
+                    },
+                  }
+                : {}),
+              union: {
+                bufferCount: overlap.currentAndCandidateExactBufferCount,
+                backingBytes: overlap.currentAndCandidateExactBufferCpuBytes,
+                payloadBytes: overlap.currentAndCandidateExactPayloadCpuBytes,
+              },
+              retiredOwnerCount: retired.length,
+            };
+            return committedPresentationRef.current === bundle ? result : undefined;
+          };
           owner[committedGltfDrawInventory] = () => {
             if (bundle.disposed || committedPresentationRef.current !== bundle) {
               return undefined;
@@ -4900,6 +5091,7 @@ export function GltfMesh({
           disposeResources();
         };
         candidatePresentationRef.current = bundle;
+        setPhase('section-analysis');
         preparingBundle = bundle;
         stats.candidateBundleHighWaterMark = Math.max(stats.candidateBundleHighWaterMark, 1);
         unpreparedDispose = undefined;
@@ -4913,6 +5105,7 @@ export function GltfMesh({
         if (bundle.barrier === 'analysis-ready') {
           const outcome = await ensureSectionAnalysis(bundle);
           if (outcome !== 'completed' || isCancelled()) {
+            setPhase(isCancelled() || outcome === 'discarded' ? 'cancelled' : 'failed');
             bundle.dispose();
             presentationAdmission.release();
             if (candidatePresentationRef.current === bundle) {
@@ -4930,6 +5123,7 @@ export function GltfMesh({
           }
         }
 
+        setPhase('admission');
         countAssemblyResources(bundle, committedPresentationRef.current, {
           queuedPreparationCount: 0,
           retired: retiredPresentationsRef.current,
@@ -5065,8 +5259,10 @@ export function GltfMesh({
           retiredPresentationsRef.current.push(previous);
         }
         setPresentation(bundle);
+        setPhase('committed');
         invalidate();
       } catch (error) {
+        setPhase(isCancelled() ? 'cancelled' : 'failed');
         presentationAdmission.release();
         if (!isCancelled()) {
           console.error('Failed to load GLTF:', error);
@@ -5117,6 +5313,7 @@ export function GltfMesh({
 
     return () => {
       cancellation.cancelled = true;
+      setPhase('cancelled');
       if (latestPreparationRef.current === prepare) {
         latestPreparationRef.current = undefined;
       }

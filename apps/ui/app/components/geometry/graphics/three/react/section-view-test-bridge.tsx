@@ -31,6 +31,8 @@ import { isAssemblyDetailCalibration } from '#machines/graphics.machine.js';
 import { rendererSpans } from '#lib/renderer-telemetry.js';
 import {
   captureCommittedGltfDrawInventory,
+  captureLiveGltfAssemblyResourceInventory,
+  captureRequestedGltfAssemblyPreparation,
   collectModelPickableSurfaceMeshes,
   resolveModelComponentHitFromRay,
 } from '#components/geometry/graphics/three/react/gltf-mesh.js';
@@ -1213,6 +1215,10 @@ export type SectionViewTestBridgeApi = Readonly<{
   getSectionHelperSummary(): SectionViewTestHelperSummary;
   /** Current mounted helper CPU views only; returns no census for a retired presentation. */
   getTaggedResourceInventory(): SectionViewTestTaggedResourceInventory | undefined;
+  /** Live committed/candidate/retired assembly-owned CPU buffers; excludes textures, demand, WASM and driver memory. */
+  getLiveAssemblyResourceInventory(): ReturnType<typeof captureLiveGltfAssemblyResourceInventory>;
+  /** Requested assembly preparation only; may exist before a current committed draw. */
+  getRequestedAssemblyPreparation(): ReturnType<typeof captureRequestedGltfAssemblyPreparation>;
   getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
   getSectionCapOverlapDiagnostics(): SectionCapOverlapDebugSummary | undefined;
   getSectionCapPerformanceDiagnostics(): SectionCapPerformanceDebugSummary | undefined;
@@ -2872,6 +2878,92 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
             current.unitId === draw.unitId
           );
         });
+      },
+      getLiveAssemblyResourceInventory() {
+        const subject = bridge.getCommittedAssembly();
+        const draw = bridge.getCommittedDrawInventory();
+        if (!subject.assemblyDisplay || !subject.isCurrent() || !draw) {
+          return undefined;
+        }
+        const resources = captureLiveGltfAssemblyResourceInventory(scene);
+        const current = bridge.getCommittedDrawInventory();
+        return resources &&
+          subject.isCurrent() &&
+          current?.key === draw.key &&
+          current.candidateSceneId === draw.candidateSceneId &&
+          current.presentationRevision === draw.presentationRevision &&
+          current.unitId === draw.unitId &&
+          current.poseRevision === draw.poseRevision &&
+          resources.key === draw.key &&
+          resources.candidateSceneId === draw.candidateSceneId &&
+          resources.presentationRevision === draw.presentationRevision &&
+          resources.unitId === draw.unitId
+          ? resources
+          : undefined;
+      },
+      getRequestedAssemblyPreparation() {
+        const cad = cadRef?.getSnapshot();
+        const selected = cad && selectCadDisplay(cad);
+        const display = selected && 'admitted' in selected ? selected : undefined;
+        const key = display?.root.digest;
+        const revision = graphicsActor.getSnapshot().context.gltfPresentation.requestedRevision;
+        const entryPath = cad?.context.entryPath;
+        const fileManagerRef = cad?.context.fileManagerRef;
+        const files: SnapshotFrom<typeof fileManagerMachine> | undefined = fileManagerRef?.getSnapshot();
+        const contentService: FileContentService | undefined = files?.matches('ready')
+          ? files.context.contentService
+          : undefined;
+        const rootDirectory: unknown = files?.context.rootDirectory;
+        if (
+          !display ||
+          !key ||
+          !entryPath ||
+          !fileManagerRef ||
+          !cadRef ||
+          !projectRef ||
+          !contentService ||
+          typeof rootDirectory !== 'string'
+        ) {
+          return undefined;
+        }
+        const contentServiceRoot = normalizePath(rootDirectory);
+        const isRequestedCurrent = (): boolean => {
+          const currentCad = cadRef.getSnapshot();
+          const currentProject = projectRef.getSnapshot();
+          const projectContext: ProjectContext = currentProject.context;
+          const currentFiles = fileManagerRef.getSnapshot();
+          const currentRootDirectory: unknown = currentFiles.context.rootDirectory;
+          const currentGraphics = graphicsActor.getSnapshot();
+          return (
+            live &&
+            currentCad.status === 'active' &&
+            currentProject.status === 'active' &&
+            currentProject.matches('ready') &&
+            currentFiles.status === 'active' &&
+            currentFiles.matches('ready') &&
+            currentFiles.context.contentService === contentService &&
+            typeof currentRootDirectory === 'string' &&
+            normalizePath(currentRootDirectory) === contentServiceRoot &&
+            currentGraphics.status === 'active' &&
+            projectContext.projectId === projectId &&
+            projectContext.geometryUnits.get(entryPath) === cadRef &&
+            [...projectContext.viewGraphics.values()].includes(graphicsActor) &&
+            currentCad.context.fileManagerRef === fileManagerRef &&
+            projectContext.fileManagerRef === fileManagerRef &&
+            currentCad.context.fileSystemRoot === projectContext.fileSystemRoot &&
+            currentCad.context.entryPath === entryPath &&
+            currentCad.context.latestRenderingOutcome === 'success' &&
+            currentCad.context.lastRequestedRenderId === currentCad.context.lastSettledRenderId &&
+            selectCadDisplay(currentCad) === display &&
+            currentGraphics.context.gltfPresentation.requestedKey === key &&
+            currentGraphics.context.gltfPresentation.requestedRevision === revision
+          );
+        };
+        if (!isRequestedCurrent()) {
+          return undefined;
+        }
+        const progress = captureRequestedGltfAssemblyPreparation(scene, { display, key, revision });
+        return isRequestedCurrent() ? progress : undefined;
       },
       getSectionCapCompleteness() {
         let completeness: SectionViewTestCapCompleteness | undefined;

@@ -192,6 +192,12 @@ describe('checked completed scale corpus handoff', () => {
       const connections: FileSystemBridgeConnection[] = [];
       const disposeCalls: Array<ReturnType<typeof vi.fn<() => void>>> = [];
       const phases: Array<Parameters<NonNullable<Parameters<typeof prepareScaleCorpus>[0]['onPhase']>>[0]> = [];
+      let stages:
+        | Extract<
+            Parameters<NonNullable<Parameters<typeof prepareScaleCorpus>[0]['onDiagnostic']>>[0],
+            { phase: 'preparation-stages' }
+          >['snapshot']
+        | undefined;
       try {
         const parent = await sha256String(fixture.entryPath);
         const completed = await prepareScaleCorpus({
@@ -203,6 +209,11 @@ describe('checked completed scale corpus handoff', () => {
             phases.push(phase);
             if (observer === 'throwing') {
               throw new Error('Phase observation failed.');
+            }
+          },
+          onDiagnostic: (diagnostic) => {
+            if (diagnostic.phase === 'preparation-stages') {
+              stages = diagnostic.snapshot;
             }
           },
           openProjectBridge: () => {
@@ -234,6 +245,14 @@ describe('checked completed scale corpus handoff', () => {
         ]);
         expect(phases.slice(0, 2).every(({ root }) => root === undefined)).toBe(true);
         expect(phases.slice(2).map(({ root }) => root)).toEqual([completed.root, completed.root, completed.root]);
+        const stageSnapshot = stages?.();
+        expect(stageSnapshot?.status).toBe('completed');
+        expect(stageSnapshot?.pending).toBeUndefined();
+        expect(stageSnapshot?.completed.map(({ phase }) => phase)).toEqual(phases.map(({ phase }) => phase));
+        expect(stageSnapshot?.completed.every(({ milliseconds }) => milliseconds >= 0)).toBe(true);
+        expect(stageSnapshot?.calls.publishAuthoredAssemblyRoot).toEqual({ requested: 1, completed: 1, refused: 0 });
+        expect(stageSnapshot?.calls.readPublishedAssemblyRoot).toEqual({ requested: 0, completed: 0, refused: 0 });
+        expect(stageSnapshot?.spans).toContainEqual(expect.objectContaining({ name: 'kernel.render', count: 1 }));
         expect(await digestContent({ bytes: await producer.fileSystem.readFile(completed.root.path) })).toBe(
           completed.root.digest,
         );
@@ -755,10 +774,33 @@ it.each([
           },
         ),
       ]);
+      if (mode === 'timeout') {
+        const stages = diagnostics.find((diagnostic) => diagnostic.phase === 'preparation-stages');
+        const live = stages?.phase === 'preparation-stages' ? stages.snapshot() : undefined;
+        expect(live?.status).toBe('running');
+        expect(live?.pending?.phase).toBe('publication');
+        expect(live?.pending?.milliseconds).toBeGreaterThanOrEqual(0);
+        expect(live?.calls.publishAuthoredAssemblyRoot).toEqual({ requested: 1, completed: 0, refused: 0 });
+      }
       await expect(pending).rejects.toThrow(
         mode === 'aborted' ? 'private abort reason' : 'Completed warehouse publication is unavailable: commit-unknown',
       );
       expect(observations.map(({ phase }) => phase)).toEqual(['authority', 'publication', 'shutdown']);
+      const stages = diagnostics.find((diagnostic) => diagnostic.phase === 'preparation-stages');
+      const finished = stages?.phase === 'preparation-stages' ? stages.snapshot() : undefined;
+      expect(finished?.status).toBe('failed');
+      expect(finished?.pending).toBeUndefined();
+      expect(finished?.completed.map(({ phase }) => phase)).toEqual(observations.map(({ phase }) => phase));
+      expect(finished?.calls.publishAuthoredAssemblyRoot).toEqual(
+        mode === 'terminated'
+          ? { requested: 1, completed: 1, refused: 0 }
+          : mode === 'refused'
+            ? { requested: 1, completed: 0, refused: 0 }
+            : { requested: 1, completed: 0, refused: 1 },
+      );
+      expect(finished?.calls.readPublishedAssemblyRoot.requested).toBe(
+        mode === 'terminated' || mode === 'refused' ? 0 : 1,
+      );
       const currentRoot = observations.at(-1)?.root;
       if (mode === 'unknown' || mode === 'terminated' || mode === 'timeout' || mode === 'aborted') {
         expect(currentRoot).toMatchObject({ path: publicationPath });
@@ -943,6 +985,11 @@ it('should retain a synchronous selected-channel rejection with nested private e
     ).rejects.toThrow('Completed warehouse publication is unavailable: commit-unknown');
     const rejection = diagnostics.find((diagnostic) => diagnostic.phase === 'transport-rejection');
     expect(rejection?.phase === 'transport-rejection' && rejection.error).toBe(origin);
+    const stages = diagnostics.find((diagnostic) => diagnostic.phase === 'preparation-stages');
+    const finished = stages?.phase === 'preparation-stages' ? stages.snapshot() : undefined;
+    expect(finished?.status).toBe('failed');
+    expect(finished?.pending).toBeUndefined();
+    expect(finished?.calls.publishAuthoredAssemblyRoot).toEqual({ requested: 1, completed: 0, refused: 1 });
     const evidence = JSON.stringify(rejection?.phase === 'transport-rejection' ? rejection.evidence : undefined);
     expect(evidence).toContain('PRIVATE_SYNC');
     expect(evidence).toContain('PRIVATE_NESTED');

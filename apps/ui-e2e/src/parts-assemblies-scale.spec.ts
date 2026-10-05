@@ -1064,6 +1064,15 @@ type MixedOwnedActivity = Readonly<{
 type S15BridgeWindow = typeof globalThis & {
   __TAU_SECTION_VIEW_TEST__?: Omit<AssemblyTestBridgeApi, 'getCadActivity'> & {
     getCadActivity(options?: Readonly<{ entryPath: string }>): MixedOwnedActivity | undefined;
+    getLiveAssemblyResourceInventory(): S16LiveAssemblyResources | undefined;
+    getRequestedAssemblyPreparation():
+      | Readonly<{
+          revision: number;
+          phase: string;
+          requestedAssetReads: number;
+          completedAssetReads: number;
+        }>
+      | undefined;
     getTaggedResourceInventory():
       | Readonly<{
           measurementUi: S16TaggedResourceCounts;
@@ -1890,12 +1899,38 @@ for (const backend of ['webgl', 'webgpu'] as const) {
     }
     const completedCorpusRoot = completion.corpus.root;
     const preparationPhaseMilliseconds = performance.now() - caseStarted;
+    const completedPreparationStages: unknown = await target.evaluate(() => {
+      const diagnostic = (
+        globalThis as typeof globalThis & { __TAU_WAREHOUSE_PREPARATION_TEST__?: { snapshot: () => unknown } }
+      ).__TAU_WAREHOUSE_PREPARATION_TEST__?.snapshot();
+      return diagnostic && typeof diagnostic === 'object' && 'preparationStages' in diagnostic
+        ? diagnostic.preparationStages
+        : undefined;
+    });
+    if (
+      !completedPreparationStages ||
+      typeof completedPreparationStages !== 'object' ||
+      !('status' in completedPreparationStages) ||
+      completedPreparationStages.status !== 'completed' ||
+      !('completed' in completedPreparationStages) ||
+      !Array.isArray(completedPreparationStages.completed) ||
+      completedPreparationStages.completed.length === 0 ||
+      !('calls' in completedPreparationStages) ||
+      typeof completedPreparationStages.calls !== 'object' ||
+      !('spans' in completedPreparationStages) ||
+      !Array.isArray(completedPreparationStages.spans)
+    ) {
+      throw new Error('The completed warehouse preparation stage snapshot is unavailable.');
+    }
     await target.writeArtifact(
       `s15-${backend}-warehouse-completed-corpus.json`,
       JSON.stringify(
         {
           completion,
           preparationPhaseMilliseconds,
+          preparationStages: completedPreparationStages,
+          preparationStageSemantics:
+            'Monotonic completed stage intervals and exact owner call counters; allowlisted completed worker spans may overlap and are not a wall-time partition.',
           qualification:
             'Actual cold production and checked complete immutable closure; every owned authored source retired after producer shutdown. Preparation remains inside the original 300-second whole case.',
         },
@@ -1924,7 +1959,21 @@ for (const backend of ['webgl', 'webgpu'] as const) {
         2,
       ),
     );
-    await openS15({ completedDestination }, backend, s15WarehouseCamera);
+    try {
+      await openS15({ completedDestination }, backend, s15WarehouseCamera);
+    } catch (error) {
+      // This requested-owner diagnostic remains available before any committed draw exists.
+      const phase = await target
+        .evaluate(() => (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__?.getRequestedAssemblyPreparation())
+        .catch(() => undefined);
+      await target
+        .writeArtifact(
+          `s15-${backend}-warehouse-requested-viewport-phase.json`,
+          JSON.stringify({ phase: phase ?? null, qualification: 'REQUESTED_ONLY_NO_COMMITTED_DRAW_CLAIM' }),
+        )
+        .catch(() => undefined);
+      throw error;
+    }
     await target.stopCpuProfile(`s15-${backend}-warehouse-startup.cpuprofile`);
     // Freeze the existing Model pane before image baselines so selection does not change the canvas dimensions.
     await openS15ModelPane();
@@ -2136,6 +2185,61 @@ type S16TaggedResourceCounts = Readonly<{
   backingBytes: number;
   payloadBytes: number;
 }>;
+
+type S16ExactAssemblyCpu = Readonly<{ bufferCount: number; backingBytes: number; payloadBytes: number }>;
+type S16LiveAssemblyResources = Readonly<{
+  key: string;
+  presentationRevision: number;
+  candidateSceneId: string;
+  unitId: string;
+  current: S16ExactAssemblyCpu;
+  candidate?: S16ExactAssemblyCpu & Readonly<{ key: string; revision: number; sceneId: string; unitId: string }>;
+  union: S16ExactAssemblyCpu;
+  retiredOwnerCount: number;
+}>;
+
+const readS16LiveAssemblyResources = async (surface: 'primary' | 'secondary' = 'primary') =>
+  target.evaluate(
+    () => {
+      const bridge = (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__;
+      const subject = bridge?.getCommittedAssembly();
+      const draw = bridge?.getCommittedDrawInventory();
+      const resources = bridge?.getLiveAssemblyResourceInventory();
+      const current = bridge?.getCommittedDrawInventory();
+      if (
+        !bridge ||
+        !subject?.assemblyDisplay ||
+        !subject.isCurrent() ||
+        !draw ||
+        !current ||
+        !resources ||
+        resources.key !== subject.assemblyDisplay.root.digest ||
+        resources.key !== draw.key ||
+        resources.candidateSceneId !== draw.candidateSceneId ||
+        resources.presentationRevision !== draw.presentationRevision ||
+        resources.unitId !== draw.unitId ||
+        current.candidateSceneId !== draw.candidateSceneId ||
+        current.poseRevision !== draw.poseRevision ||
+        (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__ !== bridge
+      ) {
+        throw new Error('The live assembly census lost its current committed root, draw or viewport.');
+      }
+      return {
+        projectId: subject.diagnostics.projectId,
+        identity: {
+          root: subject.assemblyDisplay.root.digest,
+          sceneId: draw.candidateSceneId,
+          revision: draw.presentationRevision,
+          unitId: draw.unitId,
+          poseRevision: draw.poseRevision,
+        },
+        resources,
+        visibleSurfaces: draw.surfaces.filter(({ visible }) => visible).length,
+      };
+    },
+    undefined,
+    surface,
+  );
 
 /** Untimed mounted helper census, joined to the exact current committed draw on both sides of traversal. */
 const readS16MountedHelperResources = async () =>
@@ -2660,6 +2764,205 @@ test.each(['WebGL', 'WebGPU'])(
       // Drain the already observed bounded evaluation even if a DOM action/assertion failed first.
       await observed;
     }
+  },
+);
+
+test.each(['WebGL', 'WebGPU'])(
+  'S16 live assembly CPU owners should release candidates and plateau across eviction with an isolated sibling on %s',
+  async (backendName) => {
+    const backend = backendName === 'WebGPU' ? 'webgpu' : 'webgl';
+    const nearCamera = { position: [0.2, 1, 0.2], target: [0.2, 0, 0.2], fov: 30, zoom: 1 } as const;
+    const farCamera = { ...nearCamera, position: [100, 1, 100], target: [100, 0, 100] } as const;
+    await openS15('scale-123', backend, nearCamera);
+    const initial = await readS16LiveAssemblyResources();
+    expect(initial.visibleSurfaces).toBeGreaterThan(0);
+    expect(initial.resources.current.bufferCount).toBeGreaterThan(0);
+    expect(initial.resources.current.payloadBytes).toBeGreaterThan(0);
+    expect(initial.resources.current.payloadBytes).toBeLessThanOrEqual(initial.resources.current.backingBytes);
+    expect(initial.resources.candidate).toBeUndefined();
+    expect(initial.resources.retiredOwnerCount).toBe(0);
+    expect(initial.resources.union).toEqual(initial.resources.current);
+
+    await target.openSecondary(`/__e2e/project-file-tree?main=scale-detail-calibration&graphicsBackend=${backend}`);
+    let receipt: Readonly<Record<string, unknown>> | undefined;
+    try {
+      await target.setViewport({ width: 1920, height: 1080 }, 'secondary');
+      await target.waitFor(
+        () => {
+          const bridge = (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__;
+          return Boolean(
+            bridge?.getCommittedAssembly().isCurrent() &&
+            bridge.getCommittedDrawInventory()?.surfaces.length &&
+            bridge.getLiveAssemblyResourceInventory(),
+          );
+        },
+        undefined,
+        { surface: 'secondary', timeout: 60_000 },
+      );
+      const sibling = await readS16LiveAssemblyResources('secondary');
+      expect(typeof initial.projectId).toBe('string');
+      expect(typeof sibling.projectId).toBe('string');
+      expect(sibling.projectId).not.toBe(initial.projectId);
+      expect(sibling.identity.root).not.toBe(initial.identity.root);
+      expect(sibling.resources.current.bufferCount).toBeGreaterThan(0);
+      const unchangedPrimary = await readS16LiveAssemblyResources();
+      expect(unchangedPrimary.resources).toEqual(initial.resources);
+
+      const policy = {
+        triangleRatio: 0.5,
+        approximateRelativeError: 0.05,
+        screenSpace: { maxApproximatePixelError: Number.MAX_VALUE, enterDetailRatio: 0.6 },
+      };
+      const overlap = await target.evaluate(async (next) => {
+        const bridge = (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__;
+        const held = bridge?.getCommittedDrawInventory();
+        const subject = bridge?.getCommittedAssembly();
+        if (!bridge || !held || !subject?.assemblyDisplay || !subject.isCurrent()) {
+          throw new Error('The live overlap has no current initial assembly owner.');
+        }
+        bridge.setAssemblyDetailCalibration(next);
+        const started = performance.now();
+        while (performance.now() - started < 30_000) {
+          const draw = bridge.getCommittedDrawInventory();
+          const live = bridge.getLiveAssemblyResourceInventory();
+          if (
+            !subject.isCurrent() ||
+            draw?.key !== held.key ||
+            draw.unitId !== held.unitId ||
+            draw.poseRevision !== held.poseRevision
+          ) {
+            throw new Error('The overlap changed its root, unit or pose before the candidate observation.');
+          }
+          if (live?.candidate) {
+            return { identity: { root: subject.assemblyDisplay.root.digest, sceneId: draw.candidateSceneId }, live };
+          }
+          if (draw.candidateSceneId !== held.candidateSceneId) {
+            break;
+          }
+          // The getter runs only for this bounded opt-in observation, never on a render frame.
+          // oxlint-disable-next-line no-await-in-loop -- Each yield observes the one actual candidate in order.
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 1);
+          });
+        }
+        throw new Error('The real current/candidate overlap was not observed before admission.');
+      }, policy);
+      const { candidate } = overlap.live;
+      if (!candidate) {
+        throw new Error('The candidate owner was absent from the overlap observation.');
+      }
+      expect(overlap.identity.root).toBe(initial.identity.root);
+      expect(overlap.identity.sceneId).toBe(initial.identity.sceneId);
+      expect(candidate.key).toBe(initial.identity.root);
+      expect(candidate.unitId).toBe(initial.identity.unitId);
+      expect(candidate.sceneId).not.toBe(initial.identity.sceneId);
+      for (const dimension of ['bufferCount', 'backingBytes', 'payloadBytes'] as const) {
+        expect(overlap.live.union[dimension]).toBeGreaterThanOrEqual(overlap.live.current[dimension]);
+        expect(overlap.live.union[dimension]).toBeGreaterThanOrEqual(candidate[dimension]);
+        expect(overlap.live.union[dimension]).toBeLessThanOrEqual(
+          overlap.live.current[dimension] + candidate[dimension],
+        );
+      }
+      await target.waitFor(
+        (oldScene) => {
+          const bridge = (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__;
+          const draw = bridge?.getCommittedDrawInventory();
+          const live = bridge?.getLiveAssemblyResourceInventory();
+          return Boolean(
+            draw && live && draw.candidateSceneId !== oldScene && !live.candidate && live.retiredOwnerCount === 0,
+          );
+        },
+        initial.identity.sceneId,
+        { timeout: 60_000 },
+      );
+      const admitted = await readS16LiveAssemblyResources();
+      expect(admitted.identity.root).toBe(initial.identity.root);
+      expect(admitted.identity.unitId).toBe(initial.identity.unitId);
+      expect(admitted.identity.poseRevision).toBe(initial.identity.poseRevision);
+      expect(admitted.resources.union).toEqual(admitted.resources.current);
+
+      const evictAndRestore = async (): Promise<Readonly<{ low: S16ExactAssemblyCpu; high: S16ExactAssemblyCpu }>> => {
+        const before = await readS16LiveAssemblyResources();
+        await target.evaluate((camera) => {
+          (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__?.setCamera(camera);
+        }, farCamera);
+        await target.waitFor(
+          (oldScene) => {
+            const bridge = (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__;
+            const draw = bridge?.getCommittedDrawInventory();
+            const live = bridge?.getLiveAssemblyResourceInventory();
+            return Boolean(
+              draw &&
+              live &&
+              draw.candidateSceneId !== oldScene &&
+              draw.surfaces.length === 0 &&
+              !live.candidate &&
+              live.retiredOwnerCount === 0,
+            );
+          },
+          before.identity.sceneId,
+          { timeout: 60_000 },
+        );
+        const evicted = await readS16LiveAssemblyResources();
+        expect(evicted.identity.root).toBe(initial.identity.root);
+        expect(evicted.resources.union).toEqual(evicted.resources.current);
+        expect(evicted.resources.current.backingBytes).toBeLessThan(admitted.resources.current.backingBytes);
+        await target.evaluate((camera) => {
+          (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__?.setCamera(camera);
+        }, nearCamera);
+        await target.waitFor(
+          (oldScene) => {
+            const bridge = (globalThis as S15BridgeWindow).__TAU_SECTION_VIEW_TEST__;
+            const draw = bridge?.getCommittedDrawInventory();
+            const live = bridge?.getLiveAssemblyResourceInventory();
+            return Boolean(
+              draw &&
+              live &&
+              draw.candidateSceneId !== oldScene &&
+              draw.surfaces.length > 0 &&
+              !live.candidate &&
+              live.retiredOwnerCount === 0,
+            );
+          },
+          evicted.identity.sceneId,
+          { timeout: 60_000 },
+        );
+        const restored = await readS16LiveAssemblyResources();
+        expect(restored.identity.root).toBe(initial.identity.root);
+        expect(restored.identity.unitId).toBe(initial.identity.unitId);
+        expect(restored.identity.poseRevision).toBe(initial.identity.poseRevision);
+        const unchangedSibling = await readS16LiveAssemblyResources('secondary');
+        expect(unchangedSibling.resources).toEqual(sibling.resources);
+        return { low: evicted.resources.current, high: restored.resources.current };
+      };
+      const firstCycle = await evictAndRestore();
+      const secondCycle = await evictAndRestore();
+      expect(secondCycle.low).toEqual(firstCycle.low);
+      expect(secondCycle.high).toEqual(firstCycle.high);
+      expect(secondCycle.high.backingBytes).toBeLessThanOrEqual(admitted.resources.current.backingBytes);
+      receipt = { initial, sibling, overlap, admitted, firstCycle, secondCycle };
+    } finally {
+      await target.closeSecondary();
+    }
+    const afterSiblingClose = await readS16LiveAssemblyResources();
+    expect(afterSiblingClose.identity.root).toBe(initial.identity.root);
+    expect(afterSiblingClose.resources.candidate).toBeUndefined();
+    await target.writeArtifact(
+      `s16-${backend}-live-assembly-cpu-owners.json`,
+      JSON.stringify(
+        {
+          backend,
+          ...receipt,
+          afterSiblingClose,
+          denominator:
+            'Actual live assembly-owned compressed, geometry, parser and instance typed-array backing bytes and deduplicated payload ranges. Candidate/retired counts are current owner snapshots, never retained telemetry maxima. Texture, demand-index, metadata, worker/WASM, Three object heap, backend upload and physical driver/GPU storage are excluded.',
+          qualification:
+            'Selected current/candidate overlap, two actual demand eviction/revisit cycles, and independent disposable sibling project; untimed private census only.',
+        },
+        undefined,
+        2,
+      ),
+    );
   },
 );
 

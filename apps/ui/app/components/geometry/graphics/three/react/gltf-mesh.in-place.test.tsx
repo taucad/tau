@@ -187,6 +187,8 @@ vi.mock('#components/geometry/graphics/three/react/kinematics-viewer.js', () => 
 const {
   GltfMesh,
   captureCommittedGltfDrawInventory,
+  captureLiveGltfAssemblyResourceInventory,
+  captureRequestedGltfAssemblyPreparation,
   isOpaqueAssemblyBatchMaterial,
   deriveAssemblyDetailGeometry,
   estimateAssemblyDetailPixelError,
@@ -525,6 +527,225 @@ describe('GltfMesh in-place updates', () => {
     delete mocks.observePreparation;
     vi.unstubAllGlobals();
     mocks.modelUnit = { ...mocks.modelUnit, selectedComponentIds: [] };
+  });
+
+  it('should count live assembly buffers for the mounted owner and deny retired and unmounted scenes', async () => {
+    const scenes: Object3D[] = [];
+    mocks.observePreparation = vi.fn((scene: Object3D) => {
+      scenes.push(scene);
+    });
+    const initial = await residentAssembly();
+    const replacement = await residentAssembly({ changed: true });
+    const view = render(
+      <GltfMesh
+        assemblyDisplay={initial}
+        geometryHash={initial.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const first = scenes.at(-1)!;
+    const live = captureLiveGltfAssemblyResourceInventory(first);
+    expect(live).toMatchObject({
+      key: initial.root.digest,
+      presentationRevision: 1,
+      candidateSceneId: first.uuid,
+      retiredOwnerCount: 0,
+    });
+    expect(live?.candidate).toBeUndefined();
+    expect(live?.current.bufferCount).toBeGreaterThan(0);
+    expect(live?.current.backingBytes).toBeGreaterThanOrEqual(live?.current.payloadBytes ?? Infinity);
+    expect(live?.union).toEqual(live?.current);
+
+    view.rerender(
+      <GltfMesh
+        assemblyDisplay={replacement}
+        geometryHash={replacement.root.digest}
+        presentationRevision={2}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1, 2]);
+    });
+    expect(captureLiveGltfAssemblyResourceInventory(first)).toBeUndefined();
+    const next = scenes.at(-1)!;
+    expect(captureLiveGltfAssemblyResourceInventory(next)?.key).toBe(replacement.root.digest);
+    view.unmount();
+    expect(captureLiveGltfAssemblyResourceInventory(next)).toBeUndefined();
+  });
+
+  it('should deduplicate the real current/candidate CPU union and release the retired owner after admission', async () => {
+    const scenes: Object3D[] = [];
+    mocks.observePreparation = vi.fn((scene: Object3D) => {
+      scenes.push(scene);
+    });
+    const register = vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
+    const initial = await residentAssembly();
+    const replacement = await residentAssembly({ changed: true, occurrenceCount: 20 });
+    const view = render(
+      <GltfMesh
+        assemblyDisplay={initial}
+        geometryHash={initial.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const first = scenes.at(-1)!;
+    mocks.sectionView = { isActive: true };
+    view.rerender(
+      <GltfMesh
+        assemblyDisplay={initial}
+        geometryHash={initial.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(register).toHaveBeenCalled();
+      expect(mocks.graphicsActor.send).toHaveBeenCalledWith({
+        type: 'gltfAnalysisReady',
+        revision: 1,
+        key: initial.root.digest,
+      });
+    });
+    const gate = Promise.withResolvers<void>();
+    register.mockImplementation(async () => {
+      await gate.promise;
+      return [];
+    });
+    view.rerender(
+      <GltfMesh
+        assemblyDisplay={replacement}
+        geometryHash={replacement.root.digest}
+        presentationRevision={2}
+        enableMatcap={false}
+      />,
+    );
+    let overlap: ReturnType<typeof captureLiveGltfAssemblyResourceInventory>;
+    await waitFor(() => {
+      overlap = captureLiveGltfAssemblyResourceInventory(first);
+      expect(overlap?.candidate).toBeDefined();
+    });
+    const candidate = overlap!.candidate!;
+    expect(overlap!.current.bufferCount).toBeGreaterThan(0);
+    expect(candidate.bufferCount).toBeGreaterThan(0);
+    expect(overlap!.union.bufferCount).toBeLessThanOrEqual(overlap!.current.bufferCount + candidate.bufferCount);
+    expect(overlap!.union.backingBytes).toBeLessThan(overlap!.current.backingBytes + candidate.backingBytes);
+    expect(overlap!.union.payloadBytes).toBeLessThanOrEqual(overlap!.current.payloadBytes + candidate.payloadBytes);
+    await act(async () => {
+      gate.resolve();
+    });
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1, 2]);
+    });
+    expect(captureLiveGltfAssemblyResourceInventory(first)).toBeUndefined();
+    const settled = captureLiveGltfAssemblyResourceInventory(scenes.at(-1)!);
+    expect(settled?.candidate).toBeUndefined();
+    expect(settled?.retiredOwnerCount).toBe(0);
+    expect(settled?.union).toEqual(settled?.current);
+    view.unmount();
+  });
+
+  it('should report only actual pending asset reads for the requested owner and clear the phase on teardown', async () => {
+    const display = await residentAssembly();
+    const gate = Promise.withResolvers<void>();
+    const readActual = display.admitted.readAsset;
+    const read = vi.spyOn(display.admitted, 'readAsset').mockImplementationOnce(async (digest) => {
+      await gate.promise;
+      return readActual(digest);
+    });
+    const view = render(
+      <GltfMesh
+        assemblyDisplay={display}
+        geometryHash={display.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(read).toHaveBeenCalledOnce();
+    });
+    const root = mocks.rootScene as Object3D;
+    expect(captureRequestedGltfAssemblyPreparation(root, { display, key: display.root.digest, revision: 1 })).toEqual({
+      revision: 1,
+      phase: 'source-validation',
+      requestedAssetReads: 1,
+      completedAssetReads: 0,
+    });
+    expect(
+      captureRequestedGltfAssemblyPreparation(root, { display, key: display.root.digest, revision: 2 }),
+    ).toBeUndefined();
+    await act(async () => {
+      gate.resolve();
+    });
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    expect(
+      captureRequestedGltfAssemblyPreparation(root, { display, key: display.root.digest, revision: 1 }),
+    ).toMatchObject({
+      phase: 'committed',
+      requestedAssetReads: 2,
+      completedAssetReads: 2,
+    });
+    const sibling = render(
+      <GltfMesh
+        assemblyDisplay={display}
+        geometryHash={display.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    expect(
+      captureRequestedGltfAssemblyPreparation(root, { display, key: display.root.digest, revision: 1 }),
+    ).toBeUndefined();
+    sibling.unmount();
+    expect(
+      captureRequestedGltfAssemblyPreparation(root, { display, key: display.root.digest, revision: 1 })?.phase,
+    ).toBe('committed');
+    view.unmount();
+    expect(
+      captureRequestedGltfAssemblyPreparation(root, { display, key: display.root.digest, revision: 1 }),
+    ).toBeUndefined();
+  });
+
+  it('should retain the first failed asset-read phase without a completed read or stale owner after unmount', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const display = await residentAssembly();
+    vi.spyOn(display.admitted, 'readAsset').mockRejectedValueOnce(new Error('Fixture asset refusal'));
+    const view = render(
+      <GltfMesh
+        assemblyDisplay={display}
+        geometryHash={display.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(mocks.graphicsActor.send).toHaveBeenCalledWith({
+        type: 'gltfPresentationFailed',
+        revision: 1,
+        key: display.root.digest,
+      });
+    });
+    const root = mocks.rootScene as Object3D;
+    expect(captureRequestedGltfAssemblyPreparation(root, { display, key: display.root.digest, revision: 1 })).toEqual({
+      revision: 1,
+      phase: 'failed',
+      requestedAssetReads: 1,
+      completedAssetReads: 0,
+    });
+    view.unmount();
+    expect(
+      captureRequestedGltfAssemblyPreparation(root, { display, key: display.root.digest, revision: 1 }),
+    ).toBeUndefined();
   });
 
   it('parses only camera-demanded definitions, retains full facts, and evicts safely without revalidating camera changes', async () => {

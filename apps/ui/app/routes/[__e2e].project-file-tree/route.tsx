@@ -384,7 +384,22 @@ type WarehousePreparationObservation = {
   readonly failure?: Extract<PublishAssemblyOutcome, { status: 'commit-unknown' }>['failure'];
 };
 
+type WarehousePreparationStages = {
+  readonly status: 'running' | 'completed' | 'failed';
+  readonly completed: ReadonlyArray<{ phase: WarehousePreparationObservation['phase']; milliseconds: number }>;
+  readonly pending?: { phase: WarehousePreparationObservation['phase']; milliseconds: number };
+  readonly calls: Readonly<
+    Record<
+      'publishAuthoredAssemblyRoot' | 'readPublishedAssemblyRoot',
+      { requested: number; completed: number; refused: number }
+    >
+  >;
+  /** Completed worker spans can overlap; their sum is not a partition of wall time. */
+  readonly spans: ReadonlyArray<{ name: string; count: number; durationSumMilliseconds: number }>;
+};
+
 type WarehousePreparationDiagnostic =
+  | { readonly phase: 'preparation-stages'; readonly snapshot: () => WarehousePreparationStages }
   | { readonly phase: 'transport-rejection'; readonly error: unknown; readonly evidence: unknown }
   | {
       readonly phase: 'pre-close-root';
@@ -427,6 +442,34 @@ export const prepareScaleCorpus = async ({
   }
   let observedRoot: PublishedPartAsset | undefined;
   let observedFailure: WarehousePreparationObservation['failure'];
+  const completedStages: Array<{ phase: WarehousePreparationObservation['phase']; milliseconds: number }> = [];
+  let pendingStage: { phase: WarehousePreparationObservation['phase']; startedAt: number } | undefined;
+  let stageStatus: WarehousePreparationStages['status'] = 'running';
+  let preparationSucceeded = false;
+  const calls: WarehousePreparationStages['calls'] = {
+    publishAuthoredAssemblyRoot: { requested: 0, completed: 0, refused: 0 },
+    readPublishedAssemblyRoot: { requested: 0, completed: 0, refused: 0 },
+  };
+  const spans = new Map<string, { count: number; durationSumMilliseconds: number }>();
+  const stageSnapshot = (): WarehousePreparationStages => ({
+    status: stageStatus,
+    completed: completedStages.map((stage) => ({ ...stage })),
+    ...(pendingStage
+      ? { pending: { phase: pendingStage.phase, milliseconds: performance.now() - pendingStage.startedAt } }
+      : {}),
+    calls: {
+      publishAuthoredAssemblyRoot: { ...calls.publishAuthoredAssemblyRoot },
+      readPublishedAssemblyRoot: { ...calls.readPublishedAssemblyRoot },
+    },
+    spans: [...spans].map(([name, value]) => ({ name, ...value })),
+  });
+  const finishStages = (): void => {
+    if (pendingStage) {
+      completedStages.push({ phase: pendingStage.phase, milliseconds: performance.now() - pendingStage.startedAt });
+      pendingStage = undefined;
+    }
+    stageStatus = preparationSucceeded ? 'completed' : 'failed';
+  };
   const errorEvidence = (origin: unknown): unknown => {
     const seen = new Set<unknown>();
     let remainingVisits = 96;
@@ -608,6 +651,11 @@ export const prepareScaleCorpus = async ({
     return visit(origin, 0);
   };
   const observe = (phase: WarehousePreparationObservation['phase']): void => {
+    const now = performance.now();
+    if (pendingStage) {
+      completedStages.push({ phase: pendingStage.phase, milliseconds: now - pendingStage.startedAt });
+    }
+    pendingStage = { phase, startedAt: now };
     try {
       onPhase?.({
         phase,
@@ -625,11 +673,18 @@ export const prepareScaleCorpus = async ({
       // Private evidence cannot change checked publication or cleanup.
     }
   };
+  diagnose({ phase: 'preparation-stages', snapshot: stageSnapshot });
   observe('authority');
-  const authority = await createAssemblyPublicationAuthority(() => {
-    assertCurrent();
-    return openProjectBridge('user');
-  }, signal);
+  let authority: Awaited<ReturnType<typeof createAssemblyPublicationAuthority>>;
+  try {
+    authority = await createAssemblyPublicationAuthority(() => {
+      assertCurrent();
+      return openProjectBridge('user');
+    }, signal);
+  } catch (error) {
+    finishStages();
+    throw error;
+  }
   try {
     assertCurrent();
     if (!authority.fileSystem) {
@@ -641,6 +696,22 @@ export const prepareScaleCorpus = async ({
     });
     const options = kernelOptions({ fileSystem, publicationFileSystem: authority.fileSystem });
     const selectedTransport = options.transport;
+    const observeSelectedCall = async (
+      result: Promise<unknown>,
+      operation: keyof WarehousePreparationStages['calls'],
+    ): Promise<unknown> => {
+      try {
+        const value: unknown = await result;
+        calls[operation].completed += 1;
+        return value;
+      } catch (error) {
+        calls[operation].refused += 1;
+        if (operation === 'publishAuthoredAssemblyRoot') {
+          diagnose({ phase: 'transport-rejection', error, evidence: errorEvidence(error) });
+        }
+        throw error;
+      }
+    };
     const client = createRuntimeClient({
       ...options,
       transport: {
@@ -661,22 +732,32 @@ export const prepareScaleCorpus = async ({
                     }
                     return new Proxy(channel.call, {
                       apply(call, _receiver, args: unknown[]) {
+                        const operation =
+                          args[0] === 'publishAuthoredAssemblyRoot' || args[0] === 'readPublishedAssemblyRoot'
+                            ? args[0]
+                            : undefined;
+                        if (operation) {
+                          calls[operation].requested += 1;
+                        }
                         let result: unknown;
                         try {
                           result = Reflect.apply(call, channel, args);
                         } catch (error) {
+                          if (operation) {
+                            calls[operation].refused += 1;
+                          }
                           if (args[0] === 'publishAuthoredAssemblyRoot') {
                             diagnose({ phase: 'transport-rejection', error, evidence: errorEvidence(error) });
                           }
                           throw error;
                         }
-                        if (args[0] !== 'publishAuthoredAssemblyRoot' || !(result instanceof Promise)) {
-                          return result;
+                        if (operation && result instanceof Promise) {
+                          return observeSelectedCall(result, operation);
                         }
-                        return result.catch((error: unknown) => {
-                          diagnose({ phase: 'transport-rejection', error, evidence: errorEvidence(error) });
-                          throw error;
-                        });
+                        if (operation) {
+                          calls[operation].completed += 1;
+                        }
+                        return result;
                       },
                     });
                   },
@@ -686,6 +767,28 @@ export const prepareScaleCorpus = async ({
           };
         },
       },
+    });
+    const unsubscribeTelemetry = client.on('telemetry', (batch) => {
+      try {
+        for (const entry of batch.entries) {
+          if (
+            entry.name !== 'kernel.render' &&
+            entry.name !== 'kernel.compute' &&
+            entry.name !== 'kernel.execute' &&
+            entry.name !== 'kernel.bundle' &&
+            entry.name !== 'kernel.mesh' &&
+            entry.name !== 'fs.read'
+          ) {
+            continue;
+          }
+          const span = spans.get(entry.name) ?? { count: 0, durationSumMilliseconds: 0 };
+          span.count += 1;
+          span.durationSumMilliseconds += entry.duration;
+          spans.set(entry.name, span);
+        }
+      } catch {
+        // Private telemetry cannot change publication or cleanup.
+      }
     });
     let completed: CompletedScaleCorpus;
     try {
@@ -902,7 +1005,11 @@ export const prepareScaleCorpus = async ({
       };
     } finally {
       observe('shutdown');
-      await client.shutdown();
+      try {
+        await client.shutdown();
+      } finally {
+        unsubscribeTelemetry();
+      }
     }
     assertCurrent();
     observe('source-retirement');
@@ -932,9 +1039,11 @@ export const prepareScaleCorpus = async ({
     } finally {
       retiredSourceWriter.dispose();
     }
+    preparationSucceeded = true;
     return completed;
   } finally {
     authority.dispose();
+    finishStages();
   }
 };
 
@@ -963,12 +1072,14 @@ const WarehouseCorpusPreparation = ({ preparation }: { preparation: WarehousePre
     let mounted = true;
     let rejectionObserved = false;
     let transportRejection: unknown;
+    let preparationStages: (() => WarehousePreparationStages) | undefined;
     const rootChecks: WarehousePreparationDiagnostic[] = [];
     const diagnosticHost = globalThis as typeof globalThis & {
       __TAU_WAREHOUSE_PREPARATION_TEST__?: { snapshot: () => unknown };
     };
     const privateDiagnostic = {
       snapshot: (): unknown => ({
+        preparationStages: preparationStages?.(),
         transportRejection: rejectionObserved
           ? { status: 'observed', error: transportRejection }
           : { status: 'not-observed' },
@@ -1024,7 +1135,9 @@ const WarehouseCorpusPreparation = ({ preparation }: { preparation: WarehousePre
               if (!mounted) {
                 return;
               }
-              if (diagnostic.phase === 'transport-rejection') {
+              if (diagnostic.phase === 'preparation-stages') {
+                preparationStages = diagnostic.snapshot;
+              } else if (diagnostic.phase === 'transport-rejection') {
                 rejectionObserved = true;
                 transportRejection = diagnostic.evidence;
               } else {

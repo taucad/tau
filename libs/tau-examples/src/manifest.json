@@ -1092,6 +1092,31 @@
   {
     "kind": "model",
     "geometry": "3d",
+    "kernel": "replicad",
+    "name": "jscad-part-reuse",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "assembly.json",
+      "assets.d.ts",
+      "assets/63bf3bbf0eabc8d3835731c9cbd3e1361234fee9b21b6f58a91651129d806d14.stl",
+      "assets/parts/sha256/37abc4a76a40d8a873508b9a6ffdd63e238ad97099974236d5407ac0aeff539a.json",
+      "assets/parts/sha256/832e0a232df8e856f41de7f14934ed12866a4463528d24d0b93d8ad8ad519b03.json",
+      "assets/sha256/8d4ee96e19ccb3dc342d49d48d3d3578ee976edde9891dd8d7e724851a4f1374.glb",
+      "assets/sha256/d1d3ef242297494b845679c84fdcbe1b0a27e97938d1720772a493885c7e0043.glb",
+      "downstream.settings.ts",
+      "main.ts",
+      "producer.json",
+      "scene.json",
+      "tau.json",
+      "upstream-asset.ts",
+      "upstream.settings.ts",
+      "upstream.ts"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
     "featured": true,
     "kernel": "replicad",
     "name": "kestrel-240-quadcopter",
@@ -1249,6 +1274,31 @@
       "generate-logo.ts",
       "main.ts",
       "picovoxel.svg"
+    ]
+  },
+  {
+    "kind": "model",
+    "geometry": "3d",
+    "kernel": "replicad",
+    "name": "picovoxel-part-reuse",
+    "mainFile": "main.ts",
+    "files": [
+      "README.md",
+      "assembly.json",
+      "assets.d.ts",
+      "assets/acfe1666f31a168abad79917b7619cdeac11621581e143223f1f5cbe795b2681.stl",
+      "assets/parts/sha256/1907deaeae2206ce81b1887708d285b70c4dfb254498c7ab8f6ecdf7cc21d370.json",
+      "assets/parts/sha256/1b2375ceb1e85a447db1574b7b7dc61ffa51fcde8e8477453024a3955d4cc840.json",
+      "assets/sha256/608b1367792a8930a2d4752ed6dacbfdbc09acb36f517f94169da1f4f9ad57fc.glb",
+      "assets/sha256/fdfc0f37e3614a0ebe01d8cfab5ac7e753186f9a76a81e9b5120215409b64e1e.glb",
+      "downstream.settings.ts",
+      "main.ts",
+      "producer.json",
+      "scene.json",
+      "tau.json",
+      "upstream-asset.ts",
+      "upstream.settings.ts",
+      "upstream.ts"
     ]
   },
   {

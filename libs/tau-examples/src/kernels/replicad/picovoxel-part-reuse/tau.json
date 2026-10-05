@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_83jwT2yvRbVBxuDWhYglS",
+  "name": "PicoVoxel Insert Reuse",
+  "description": "An editable upstream mesh insert reused by a Replicad mounting plate through a pinned STL dependency.",
+  "tags": ["replicad", "picovoxel", "assembly", "reuse"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -1,0 +1,98 @@
+solid AssimpScene
+ facet normal -1 0 0
+  outer loop
+  vertex -4 -3 -5
+  vertex -4 -3 5
+  vertex -4 3 5
+  endloop
+ endfacet
+
+ facet normal -1 0 0
+  outer loop
+  vertex -4 -3 -5
+  vertex -4 3 5
+  vertex -4 3 -5
+  endloop
+ endfacet
+
+ facet normal 1 0 0
+  outer loop
+  vertex 4 -3 -5
+  vertex 4 3 -5
+  vertex 4 3 5
+  endloop
+ endfacet
+
+ facet normal 1 0 0
+  outer loop
+  vertex 4 -3 -5
+  vertex 4 3 5
+  vertex 4 -3 5
+  endloop
+ endfacet
+
+ facet normal 0 -1 0
+  outer loop
+  vertex -4 -3 -5
+  vertex 4 -3 -5
+  vertex 4 -3 5
+  endloop
+ endfacet
+
+ facet normal 0 -1 0
+  outer loop
+  vertex -4 -3 -5
+  vertex 4 -3 5
+  vertex -4 -3 5
+  endloop
+ endfacet
+
+ facet normal 0 1 0
+  outer loop
+  vertex -4 3 -5
+  vertex -4 3 5
+  vertex 4 3 5
+  endloop
+ endfacet
+
+ facet normal 0 1 0
+  outer loop
+  vertex -4 3 -5
+  vertex 4 3 5
+  vertex 4 3 -5
+  endloop
+ endfacet
+
+ facet normal 0 0 -1
+  outer loop
+  vertex -4 -3 -5
+  vertex -4 3 -5
+  vertex 4 3 -5
+  endloop
+ endfacet
+
+ facet normal 0 0 -1
+  outer loop
+  vertex -4 -3 -5
+  vertex 4 3 -5
+  vertex 4 -3 -5
+  endloop
+ endfacet
+
+ facet normal 0 0 1
+  outer loop
+  vertex -4 -3 5
+  vertex 4 -3 5
+  vertex 4 3 5
+  endloop
+ endfacet
+
+ facet normal 0 0 1
+  outer loop
+  vertex -4 -3 5
+  vertex 4 3 5
+  vertex -4 3 5
+  endloop
+ endfacet
+
+endsolid AssimpScene

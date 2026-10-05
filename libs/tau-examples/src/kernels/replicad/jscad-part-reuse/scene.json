@@ -1,0 +1,34 @@
+{
+  "generation": 1,
+  "occurrences": [
+    {
+      "children": [
+        {
+          "id": "source-mesh",
+          "part": "upstream",
+          "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+          "variant": "default"
+        },
+        {
+          "id": "mount",
+          "part": "downstream",
+          "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+          "variant": "default"
+        }
+      ],
+      "id": "assembly",
+      "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
+    }
+  ],
+  "parts": {
+    "downstream": {
+      "digest": "sha256:832e0a232df8e856f41de7f14934ed12866a4463528d24d0b93d8ad8ad519b03",
+      "path": "assets/parts/sha256/832e0a232df8e856f41de7f14934ed12866a4463528d24d0b93d8ad8ad519b03.json"
+    },
+    "upstream": {
+      "digest": "sha256:37abc4a76a40d8a873508b9a6ffdd63e238ad97099974236d5407ac0aeff539a",
+      "path": "assets/parts/sha256/37abc4a76a40d8a873508b9a6ffdd63e238ad97099974236d5407ac0aeff539a.json"
+    }
+  },
+  "schemaVersion": 1
+}

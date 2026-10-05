@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_aMba5NukD81dDYfKYsNHf",
+  "name": "JSCAD Insert Reuse",
+  "description": "An editable upstream mesh insert reused by a Replicad mounting plate through a pinned STL dependency.",
+  "tags": ["replicad", "jscad", "assembly", "reuse"],
+  "assets": {
+    "main": {
+      "entryPath": "main.ts",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "family": "jscad",
+  "producerInputs": ["upstream.ts", "upstream.settings.ts"],
+  "inputs": {
+    "upstream.ts": "79380e83e85ef8750442497dd0421234148da61b240554263c230acc9c8365c0",
+    "upstream.settings.ts": "9837478c9eea098be68e06ae4085695897d43a6442d78752b02784775c2ffa64"
+  },
+  "stlDigest": "63bf3bbf0eabc8d3835731c9cbd3e1361234fee9b21b6f58a91651129d806d14",
+  "upstreamGlbDigest": "sha256:d1d3ef242297494b845679c84fdcbe1b0a27e97938d1720772a493885c7e0043",
+  "baseline": {
+    "builds": 2,
+    "meshes": 1,
+    "restores": 0
+  }
+}

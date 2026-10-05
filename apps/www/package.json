@@ -15,7 +15,7 @@
     "three": "catalog:"
   },
   "devDependencies": {
-    "@axe-core/playwright": "catalog:",
+    "axe-core": "catalog:",
     "esbuild": "catalog:",
     "playwright": "catalog:",
     "sharp": "catalog:"

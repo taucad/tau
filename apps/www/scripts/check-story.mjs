@@ -1,10 +1,10 @@
-import { loadPlaywright, loadAxe, serial } from '#tools/tooling.js';
+import { loadPlaywright, loadAxe, auditPage, serial } from '#tools/tooling.js';
 /** Real-browser checks for the shared live scene: hero interaction, story chapters and every fallback. */
 import { join, resolve } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 const { chromium } = await loadPlaywright();
-const { AxeBuilder } = await loadAxe();
+const axe = await loadAxe();
 const origin = process.env.WWW_TEST_URL ?? 'http://127.0.0.1:4173';
 const output = resolve(process.env.WWW_REPORT_DIR ?? 'out/research/marketing-www/oct2026-redesign/story');
 await mkdir(output, { recursive: true });
@@ -103,7 +103,7 @@ try {
         assert.equal(await stage.getAttribute('data-chapter'), String(index));
         assert.equal(await page.locator('[data-story-stage] canvas').count(), 1, 'One shared canvas in the story');
         assert.equal(await page.locator('canvas').count(), 1, 'Exactly one WebGL canvas on the page');
-        const audit = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+        const audit = await auditPage(page, axe, ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']);
         assert.deepEqual(
           audit.violations.map((v) => v.id),
           [],

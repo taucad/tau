@@ -62,7 +62,7 @@ Not run: hosted Lighthouse and checks on a deployed URL, real phones, Firefox an
 
 This selective follow-up starts from published `66b1ccda00c97e84aa8fa2fc6148296e2dceaecd`. It declares the existing QA tools, identifies marketing entry points for Knip, and corrects provenance recipe paths plus the formatted metadata's size/hash. No public asset, runtime source, test, rendering recipe or deployment configuration changed.
 
-Executed in a fresh cloud worktree with Node 24.19.0, pnpm 11.7.0, Playwright 1.62.1 from the existing catalog resolution, `@axe-core/playwright` 4.13.0, Sharp 0.34.5 and system Chromium 151.0.7922.173. Build, tests and browser checks used the declared dependencies without `WWW_RENDER_TOOLS`.
+Executed in a fresh cloud worktree with Node 24.19.0, pnpm 11.7.0, Playwright 1.62.1 from the existing catalog resolution, axe-core 4.13.0 through its Playwright adapter (since replaced by injecting the catalog axe-core directly), Sharp 0.34.5 and system Chromium 151.0.7922.173. Build, tests and browser checks used the declared dependencies without `WWW_RENDER_TOOLS`.
 
 | Check                | Follow-up result                                                                                                                                                                                          |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

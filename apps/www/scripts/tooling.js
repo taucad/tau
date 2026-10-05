@@ -24,8 +24,27 @@ export async function loadPlaywright() {
 /** Resolve the explicitly selected accessibility test dependency. */
 export async function loadAxe() {
   /** @type {unknown} */
-  const module = await import(pathToFileURL(resolveTool.resolve('@axe-core/playwright')).href);
-  return /** @type {typeof import('@axe-core/playwright')} */ (module);
+  const module = await import(pathToFileURL(resolveTool.resolve('axe-core')).href);
+  return /** @type {{default: typeof import('axe-core')}} */ (module).default;
+}
+
+/**
+ * Run axe-core in a page for the given WCAG tags.
+ * @param {import('playwright').Page} page
+ * @param {typeof import('axe-core')} axe
+ * @param {string[]} tags
+ * @returns {Promise<import('axe-core').AxeResults>}
+ */
+export async function auditPage(page, axe, tags) {
+  // Evaluated over the DevTools protocol, like the Playwright adapter did, so the page's CSP doesn't block it.
+  await page.evaluate(axe.source);
+  return page.evaluate(
+    async (runTags) =>
+      /** @type {{axe: typeof import('axe-core')}} */ (/** @type {unknown} */ (globalThis)).axe.run(document, {
+        runOnly: { type: 'tag', values: runTags },
+      }),
+    tags,
+  );
 }
 
 /** Resolve the explicitly selected image-processing dependency. */

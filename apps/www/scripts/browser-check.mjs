@@ -1,9 +1,9 @@
-import { loadPlaywright, loadAxe, serial } from '#tools/tooling.js';
+import { loadPlaywright, loadAxe, auditPage, serial } from '#tools/tooling.js';
 import { resolve, join } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 const { chromium } = await loadPlaywright();
-const { AxeBuilder } = await loadAxe();
+const axe = await loadAxe();
 const output = resolve(process.env.WWW_REPORT_DIR ?? 'out/research/marketing-www/oct2026');
 const origin = process.env.WWW_TEST_URL ?? 'http://127.0.0.1:4173';
 await mkdir(output, { recursive: true });
@@ -56,7 +56,7 @@ try {
         false,
         `${name} ${path} overflow`,
       );
-      const audit = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
+      const audit = await auditPage(page, axe, ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']);
       results.push({
         viewport: name,
         path,

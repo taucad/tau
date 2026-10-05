@@ -320,7 +320,6 @@ catalog:
   '@napi-rs/cli': 3.8.6
   '@parcel/watcher': ^2.6.0
   cheerio: 1.2.0
-  '@axe-core/playwright': 4.13.0
   sharp: 0.34.5
 catalogs:
   electron-vite7:

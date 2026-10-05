@@ -322,7 +322,7 @@ Library.Go(1f, () => {
       const serialize = definition.serializeHandle!;
       const serialized = serialize({ handle: { glb: bytes } }, createMockKernelRuntime(), mock());
       const freshDefinition = await resolveRuntimePluginDefinition('kernel', picogkKernel(options));
-      const restored = freshDefinition.deserializeHandle!(
+      const restored = await freshDefinition.deserializeHandle!(
         { serialized: structuredClone(serialized) },
         createMockKernelRuntime(),
         mock(),

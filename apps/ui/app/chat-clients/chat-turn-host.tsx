@@ -1,7 +1,7 @@
 /** Compose one focused chat's explicit Start/Resume command from its live selection and transcript. */
 import { useCallback, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { isResumableRunFailure, isUserStoppedRun } from '@taucad/agent-host';
+import { isResumableRun } from '@taucad/agent-host';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
@@ -49,13 +49,7 @@ export function ChatTurnHost(): ReactNode {
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
       try {
         /* The same runs the composer offers Resume for: a deliberate Stop that kept committed work, or a resumable failure. */
-        if (
-          gesture.kind === 'continue' &&
-          !(
-            isUserStoppedRun(projectedRun) ||
-            (projectedRun?.lifecycle === 'failed' && isResumableRunFailure(projectedRun.failure))
-          )
-        ) {
+        if (gesture.kind === 'continue' && !isResumableRun(projectedRun)) {
           throw new Error('This turn cannot be resumed. Choose Try again to replay it.');
         }
         const intent = turnIntentOf(

@@ -264,7 +264,7 @@ The token architecture is three-tier — primitive → semantic → component �
   sheen, including its high-contrast fallback. Its faint tint belongs to the
   existing action tokens; it does not authorize tinted structural neutrals or
   locally authored gradients.
-- "Soft error" states (recoverable, informational failures) use the muted purple ramp, not destructive red. Destructive red is reserved for actions that lose data and the confirmation surfaces guarding them.
+- Error, failure, invalid and alert states use the purple `feature` ramp, never destructive red. Destructive red is reserved for actions that lose data and the confirmation surfaces guarding them.
 - Never encode meaning in hue alone — pair color with an icon, label, or position (CVD safety; research doc Finding 3).
 
 ## Motion

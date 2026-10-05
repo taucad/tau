@@ -920,27 +920,107 @@ theorem t4_paused_continues (en : Entry) (hp : en.life = some .paused) (hq : en.
 
 /-- **T4** (a resolved pause reopens): a native pause with no pending request reopens on `running`, settled or not,
 and the table admits the row (the paused disjunct is live, unlike S5's `reopenable_paused_is_dead`). -/
-theorem t4_paused_reopens (en : Entry) (hp : en.life = some .paused) (hq : en.pending = []) :
+theorem t4_paused_reopens (en : Entry) (hp : en.life = some .paused) (hq : en.pending = [])
+    (hk : en.external = false) :
     lifecycleTable (condition en) .running = .ok ∧ reopens en .running 0 = true := by
   have : reopens en .running 0 = true := by
-    rw [reopens_def]; simp [reopenable, attemptEnded, rests, hp, hq]
+    rw [reopens_def]; simp [reopenable, attemptEnded, rests, hp, hq, hk]
   exact ⟨t4_reopens_legal en this, this⟩
+
+/-- **T4** (an external pause keeps its attempt; CL-R9): an external agent waiting on a person has not ended its
+attempt, so `running` never reopens it — the agent's own answer continues the same attempt. -/
+theorem t4_external_pause_open (en : Entry) (hp : en.life = some .paused) (hk : en.external = true) :
+    attemptEnded en = false ∧ reopens en .running 0 = false := by
+  have he : attemptEnded en = false := by simp [attemptEnded, hp, hk]
+  refine ⟨he, ?_⟩
+  cases h : reopens en .running 0
+  · rfl
+  · rw [reopens_def] at h
+    have := h.2.2
+    simp [reopenable, he] at this
 
 /-- **T4** (a resolved pause may be cancelled; V8, W8.a2 round 3): a native pause with no pending request admits
 `cancelled`, settled or not, so a denial's or a cancel's `cancelled` row ends the paused attempt without reopening it. -/
-theorem t4_paused_cancels (en : Entry) (hp : en.life = some .paused) (hq : en.pending = []) :
-    lifecycleTable (condition en) .cancelled = .ok := by
+theorem t4_paused_cancels (en : Entry) (hp : en.life = some .paused) (hq : en.pending = [])
+    (hk : en.external = false) : lifecycleTable (condition en) .cancelled = .ok := by
   unfold condition
   by_cases h2 : en.append = .settled
-  · simp [hp, hq, h2, attemptEnded, reopenable, rests, reopenableCond, lifecycleTable]
-  · simp [hp, h2, attemptEnded, lifecycleTable]
+  · simp [hp, hq, hk, h2, attemptEnded, reopenable, rests, reopenableCond, lifecycleTable]
+  · simp [hp, hk, h2, attemptEnded, lifecycleTable]
 
 /-- **T4** (a settled failure stays ended): the `paused-reopenable` state admits `cancelled`, but a settled failure,
 resumable or not, still refuses it `RUN_ID_TAKEN`. -/
-theorem t4_failed_cancel_refused (en : Entry) (r : Bool) (hf : en.life = some (.failed r))
+theorem t4_failed_cancel_refused (en : Entry) (c : Fail) (hf : en.life = some (.failed c))
     (hs : en.append = .settled) : lifecycleTable (condition en) .cancelled = .runIdTaken := by
   unfold condition
-  cases r <;> simp [hf, hs, attemptEnded, Life.ended, reopenable, rests, reopenableCond, lifecycleTable]
+  cases c <;> cases hx : en.external <;>
+    simp [hf, hs, hx, attemptEnded, Life.ended, reopenable, rests, failRests, reopenableCond, lifecycleTable]
+
+/-- **T4** (a deliberate Stop resumes; `isUserStoppedRun`): a `USER_STOPPED` cancel of a committed turn reopens on
+`running`, settled or not, and the table admits the row — the Resume a stopped turn's card offers is one the gate
+takes. -/
+theorem t4_user_stop_reopens (en : Entry) (hs : en.life = some (.cancelled true)) (hc : en.committed = true)
+    (hk : en.external = false) : lifecycleTable (condition en) .running = .ok ∧ reopens en .running 0 = true := by
+  have : reopens en .running 0 = true := by
+    rw [reopens_def]; simp [reopenable, attemptEnded, Life.ended, rests, hs, hc, hk]
+  exact ⟨t4_reopens_legal en this, this⟩
+
+/-- **T4** (an external Stop resumes once prompted; `isUserStoppedRun`): an external agent's committed `USER_STOPPED`
+cancel reopens when its prompt was issued — the session holds the turn the continuation nudges on. -/
+theorem t4_external_prompted_stop_reopens (en : Entry) (hs : en.life = some (.cancelled true))
+    (hc : en.committed = true) (hp : en.prompted = true) :
+    lifecycleTable (condition en) .running = .ok ∧ reopens en .running 0 = true := by
+  have : reopens en .running 0 = true := by
+    rw [reopens_def]; simp [reopenable, attemptEnded, Life.ended, rests, hs, hc, hp]
+  exact ⟨t4_reopens_legal en this, this⟩
+
+/-- **T4** (an external Stop before its prompt stays ended): the vendor session never saw the turn, so there is
+nothing for a continuation to resume. -/
+theorem t4_external_unprompted_stop_ended (en : Entry) (hs : en.life = some (.cancelled true))
+    (hk : en.external = true) (hp : en.prompted = false) : reopens en .running 0 = false := by
+  cases h : reopens en .running 0
+  · rfl
+  · rw [reopens_def] at h
+    have := h.2.2
+    simp [reopenable, rests, hs, hk, hp] at this
+
+/-- **T4** (an abandoned driver resumes, whatever the kind; resume everywhere): `RUN_ABANDONED` — a close, a crash
+while streaming, or a restart while an external agent waited on approval — reopens on `running` and the table admits
+the row. -/
+theorem t4_abandoned_reopens (en : Entry) (hf : en.life = some (.failed .abandoned)) :
+    lifecycleTable (condition en) .running = .ok ∧ reopens en .running 0 = true := by
+  have : reopens en .running 0 = true := by
+    rw [reopens_def]; simp [reopenable, attemptEnded, Life.ended, rests, failRests, hf]
+  exact ⟨t4_reopens_legal en this, this⟩
+
+/-- **T4** (kind-aware failures): an external run never reopens on a gateway failure, and a Tau run never on an agent
+stop — the ACP runner continues neither, so the gate refuses the Resume no card offers. -/
+theorem t4_failure_kind_refused (en : Entry) (c : Fail) (hf : en.life = some (.failed c))
+    (hk : (en.external = true ∧ c = .gateway) ∨ (en.external = false ∧ c = .agentStop)) :
+    reopens en .running 0 = false := by
+  cases h : reopens en .running 0
+  · rfl
+  · rw [reopens_def] at h
+    have := h.2.2
+    rcases hk with ⟨hx, rfl⟩ | ⟨hx, rfl⟩ <;> simp [reopenable, rests, failRests, hf, hx] at this
+
+/-- **T4** (a Stop before the turn committed stays ended): with nothing durable to continue, a `USER_STOPPED` cancel
+does not reopen. -/
+theorem t4_uncommitted_stop_ended (en : Entry) (hs : en.life = some (.cancelled true)) (hc : en.committed = false) :
+    reopens en .running 0 = false := by
+  cases h : reopens en .running 0
+  · rfl
+  · rw [reopens_def] at h
+    have := h.2.2
+    simp [reopenable, rests, hs, hc] at this
+
+/-- **T4** (any other cancel stays ended): a cancel that is not a deliberate Stop never reopens. -/
+theorem t4_cancel_ended (en : Entry) (hs : en.life = some (.cancelled false)) : reopens en .running 0 = false := by
+  cases h : reopens en .running 0
+  · rfl
+  · rw [reopens_def] at h
+    have := h.2.2
+    simp [reopenable, rests, hs] at this
 
 /-! ## T5: a reader detects every clamp, refusal and stale batch (foldReadAnswer) -/
 

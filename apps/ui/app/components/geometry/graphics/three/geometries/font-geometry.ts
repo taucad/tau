@@ -1,7 +1,7 @@
 import type { BufferGeometry } from 'three';
 import { ExtrudeGeometry } from 'three';
-import { FontLoader } from 'three/examples/jsm/Addons.js';
-import type { FontData } from 'three/examples/jsm/Addons.js';
+import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+import type { FontData } from 'three/addons/loaders/FontLoader.js';
 import fontTypeface from '#components/geometry/graphics/three/geometries/geist-mono.typeface.json?raw';
 
 const font = new FontLoader().parse(JSON.parse(fontTypeface) as FontData);

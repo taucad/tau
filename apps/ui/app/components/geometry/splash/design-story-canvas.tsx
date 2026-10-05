@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { z } from 'zod';
 import type { DesignStoryActor } from '#components/geometry/splash/design-story.machine.js';
 import { storyFrame, partLift } from '#components/geometry/splash/design-story-timeline.js';

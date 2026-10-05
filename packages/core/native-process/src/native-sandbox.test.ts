@@ -145,7 +145,14 @@ describe('nativeSandboxPolicy', () => {
       expect.arrayContaining([homedir(), '/Users', '/home', '/root', '/Volumes', '/mnt', '/media', '/tmp', tmpdir()]),
     );
     expect(policy.filesystem.denyRead).toContain(realpathSync(tmpdir()));
-    expect(policy.filesystem.allowRead).toEqual(['/opt/runtime', '/private/workspace', '/private/artifacts']);
+    // On Linux the runtime's own seccomp helper must stay readable under a denied root.
+    expect(policy.filesystem.allowRead.slice(0, 3)).toEqual([
+      '/opt/runtime',
+      '/private/workspace',
+      '/private/artifacts',
+    ]);
+    expect(policy.filesystem.allowRead.slice(3).every((path) => /[/\\]vendor[/\\]seccomp$/u.test(path))).toBe(true);
+    expect(policy.filesystem.allowRead.length > 3).toBe(process.platform === 'linux');
     expect(policy.filesystem.allowWrite).toEqual(['/private/artifacts']);
     // The runtime grants these to every command by default; a CAD worker must not inherit them.
     // Its `/dev` devices stay writable because the worker's stdio needs them.

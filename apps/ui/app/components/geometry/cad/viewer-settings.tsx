@@ -287,38 +287,28 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
               <PenLine />
               Lines
             </DropdownMenuSwitchItem>
-            <DropdownMenuSwitchItem className='h-10' isChecked={enableMatcap} onIsCheckedChange={handleMatcapToggle}>
-              <Sparkles />
-              <div className='flex flex-col'>
-                <span className='flex items-center gap-1'>
-                  Matcap{' '}
-                  <InfoTooltip>
-                    A material that gives models a consistent appearance independent of scene lighting.
-                    <br /> Rendering performance is improved with this enabled.
-                  </InfoTooltip>
-                </span>
-                <span className='text-xs font-medium text-muted-foreground/80'>
-                  Lighting effects are {enableMatcap ? 'inactive' : 'active'}
-                </span>
-              </div>
+            <DropdownMenuSwitchItem
+              icon={<Sparkles />}
+              description={`Lighting effects are ${enableMatcap ? 'inactive' : 'active'}`}
+              isChecked={enableMatcap}
+              onIsCheckedChange={handleMatcapToggle}
+            >
+              Matcap{' '}
+              <InfoTooltip>
+                A material that gives models a consistent appearance independent of scene lighting.
+                <br /> Rendering performance is improved with this enabled.
+              </InfoTooltip>
             </DropdownMenuSwitchItem>
             <DropdownMenuSwitchItem
-              className='h-10'
+              icon={<Layers />}
+              description={`Ambient occlusion is ${enablePostProcessing ? 'active' : 'inactive'}`}
               isChecked={enablePostProcessing}
               onIsCheckedChange={handlePostProcessingToggle}
             >
-              <Layers />
-              <div className='flex flex-col'>
-                <span className='flex items-center gap-1'>
-                  Post-processing{' '}
-                  <InfoTooltip>
-                    Enables screen-space ambient occlusion for more realistic depth and contact shadows.
-                  </InfoTooltip>
-                </span>
-                <span className='text-xs font-medium text-muted-foreground/80'>
-                  Ambient occlusion is {enablePostProcessing ? 'active' : 'inactive'}
-                </span>
-              </div>
+              Post-processing{' '}
+              <InfoTooltip>
+                Enables screen-space ambient occlusion for more realistic depth and contact shadows.
+              </InfoTooltip>
             </DropdownMenuSwitchItem>
             <DropdownMenuSeparator />
           </>

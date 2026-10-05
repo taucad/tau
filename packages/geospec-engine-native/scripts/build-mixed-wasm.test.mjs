@@ -8,16 +8,19 @@ await test('only the verified mixed ST route can claim an Emscripten producer id
   const input = { sourceRoot: '/src', manifestPath: '/prepared/inputs.json', manifestBytes: bytes };
   const st = mixedProducerEnvironment({ ...input, variant: 'st' });
   const mt = mixedProducerEnvironment({ ...input, variant: 'mt' });
-  assert.equal(st.GEOSPEC_PRODUCER_ROUTE, 'nx-build-mixed-st-release-v1');
-  assert.notEqual(mt.GEOSPEC_PRODUCER_ROUTE, st.GEOSPEC_PRODUCER_ROUTE);
-  assert.equal(st.GEOSPEC_PRODUCER_CARGO_CWD, '/src');
-  assert.equal(st.GEOSPEC_PRODUCER_MANIFEST, '/src/packages/geospec-engine-native/bindings/emscripten/Cargo.toml');
-  assert.equal(st.GEOSPEC_MIXED_INPUTS, '/prepared/inputs.json');
-  assert.match(st.GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256, /^[\da-f]{64}$/);
+  assert.equal(st['GEOSPEC_PRODUCER_ROUTE'], 'nx-build-mixed-st-release-v1');
+  assert.notEqual(mt['GEOSPEC_PRODUCER_ROUTE'], st['GEOSPEC_PRODUCER_ROUTE']);
+  assert.equal(st['GEOSPEC_PRODUCER_CARGO_CWD'], '/src');
+  assert.equal(st['GEOSPEC_PRODUCER_MANIFEST'], '/src/packages/geospec-engine-native/bindings/emscripten/Cargo.toml');
+  assert.equal(st['GEOSPEC_MIXED_INPUTS'], '/prepared/inputs.json');
+  const inputsSha256 = st['GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256'];
+  assert.ok(inputsSha256 !== undefined);
+  assert.match(inputsSha256, /^[\da-f]{64}$/);
   assert.notEqual(
-    mixedProducerEnvironment({ ...input, variant: 'st', manifestBytes: new Uint8Array() })
-      .GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256,
-    st.GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256,
+    mixedProducerEnvironment({ ...input, variant: 'st', manifestBytes: new Uint8Array() })[
+      'GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256'
+    ],
+    st['GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256'],
   );
 });
 

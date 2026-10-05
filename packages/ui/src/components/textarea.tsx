@@ -22,7 +22,7 @@ function Textarea({ className, ...properties }: React.ComponentProps<'textarea'>
     <textarea
       data-slot='textarea'
       className={cn(
-        'flex field-sizing-content min-h-16 w-full rounded-md border border-input bg-background px-3 py-2 text-base shadow-xs outline-none placeholder:text-muted-foreground focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive md:text-sm dark:bg-input/30',
+        'flex field-sizing-content min-h-16 w-full rounded-md border border-input bg-background px-3 py-2 text-base shadow-xs outline-none placeholder:text-muted-foreground focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-feature md:text-sm dark:bg-input/30',
         className,
       )}
       {...(properties.autoComplete === 'off'

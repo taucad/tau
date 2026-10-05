@@ -252,7 +252,7 @@ describe('ChatMessageToolTestModel — multi-file rendering', () => {
     }
   });
 
-  it('should render the failure header in the same minimal shape as the success header — `Tested N requirements` only, no header-level indicator chip, with the leading icon flipped to the destructive tone so failures are still flagged at a glance', () => {
+  it('should render the failure header in the same minimal shape as the success header — `Tested N requirements` only, no header-level indicator chip, with the leading icon flipped to the error tone so failures are still flagged at a glance', () => {
     const part = buildPart({
       passed: 9,
       total: 10,
@@ -288,15 +288,15 @@ describe('ChatMessageToolTestModel — multi-file rendering', () => {
       expect(indicator.closest('[data-target-file]')).not.toBeNull();
     }
 
-    // Leading FlaskConical icon carries the destructive tone whenever there
+    // Leading FlaskConical icon carries the error tone whenever there
     // are failures — the "only red icons indicate failure" convention is the
     // single visual cue that distinguishes failure from success now that the
     // header chrome is identical in both branches.
     const icon = screen.getByTestId('chat-tool-card-icon');
-    expect(icon.dataset['tone']).toBe('destructive');
+    expect(icon.dataset['tone']).toBe('error');
   });
 
-  it('should NOT apply the destructive icon tone when every requirement passes', () => {
+  it('should NOT apply the error icon tone when every requirement passes', () => {
     const part = buildPart({
       passed: 2,
       total: 2,

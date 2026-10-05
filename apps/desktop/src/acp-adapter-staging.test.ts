@@ -11,7 +11,7 @@
  * closure fails the handshake — nothing else in the suite would notice.
  */
 
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -60,7 +60,31 @@ const initialize = async (
     cwd,
     env: acpAdapterEnvironment(process.env, profile),
     stdio: ['pipe', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
   });
+  const closed = new Promise<void>((resolve) => {
+    child.once('close', () => {
+      resolve();
+    });
+  });
+  const killTree = (): void => {
+    if (child.pid === undefined) {
+      return;
+    }
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      return;
+    }
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) {
+        throw error;
+      }
+    }
+  };
+  const deadline = setTimeout(killTree, 30_000);
+  deadline.unref();
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk: string) => {
@@ -92,7 +116,9 @@ const initialize = async (
     }
     throw new Error(`${modulePath} answered no initialize result. stderr:\n${stderr}`);
   } finally {
-    child.kill();
+    clearTimeout(deadline);
+    killTree();
+    await closed;
   }
 };
 
@@ -252,12 +278,26 @@ describe('ACP adapter staging', () => {
       expect(entryStat.isFile()).toBe(true);
 
       const profile = acpAgentProfiles.find((candidate) => candidate.package === name)!;
+      let codexCliPath: string | undefined;
       if (name === '@agentclientprotocol/codex-acp') {
         const optionalName = `@openai/codex-${process.platform}-${process.arch}`;
         const fromInstalledAdapter = createRequire(require.resolve(`${name}/package.json`));
-        const fromInstalledCodex = createRequire(fromInstalledAdapter.resolve('@openai/codex/package.json'));
-        const installedOptional = await stat(fromInstalledCodex.resolve(`${optionalName}/package.json`));
+        const installedCodexManifest = fromInstalledAdapter.resolve('@openai/codex/package.json');
+        const fromInstalledCodex = createRequire(installedCodexManifest);
+        const installedOptionalManifest = fromInstalledCodex.resolve(`${optionalName}/package.json`);
+        const installedOptional = await stat(installedOptionalManifest);
         expect(installedOptional.isFile()).toBe(true);
+        const vendorRoot = resolve(dirname(installedOptionalManifest), 'vendor');
+        const vendorEntries = await readdir(vendorRoot, { withFileTypes: true });
+        const targets = vendorEntries.filter((entry) => entry.isDirectory());
+        expect(targets).toHaveLength(1);
+        const target = targets[0]?.name;
+        if (!target) {
+          throw new Error('Installed Codex platform package has no native target.');
+        }
+        codexCliPath = resolve(vendorRoot, target, 'bin', process.platform === 'win32' ? 'codex.exe' : 'codex');
+        const installedCli = await stat(codexCliPath);
+        expect(installedCli.isFile()).toBe(true);
         const fromStagedAdapter = createRequire(entry);
         expect(fromStagedAdapter.resolve('@openai/codex/package.json').startsWith(`${modulesRoot}/`)).toBe(true);
         const stagedPackages = await readdir(modulesRoot, { recursive: true, withFileTypes: true });
@@ -269,7 +309,11 @@ describe('ACP adapter staging', () => {
         ).toBe(false);
         expect(profile.spawnEnv?.['CODEX_PATH']).toBe('codex');
       }
-      const result = await initialize(entry, stageRoot, profile);
+      const testProfile = { ...profile, spawnEnv: { ...profile.spawnEnv } };
+      if (codexCliPath !== undefined) {
+        testProfile.spawnEnv['CODEX_PATH'] = codexCliPath;
+      }
+      const result = await initialize(entry, stageRoot, testProfile);
       expect(result).toMatchObject({ protocolVersion: 1 });
     },
     60_000,

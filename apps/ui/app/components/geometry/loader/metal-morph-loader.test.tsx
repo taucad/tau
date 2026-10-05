@@ -239,7 +239,10 @@ describe('MetalMorphLoader', () => {
       expect(screen.getByRole('status')).toHaveAttribute('data-state', 'ready');
     });
     const controller = lastController();
-    expect(controller.setTheme).toHaveBeenCalledWith('dark');
+    // The theme reaches the controller from a passive effect after the ready commit, so wait for it too.
+    await waitFor(() => {
+      expect(controller.setTheme).toHaveBeenCalledWith('dark');
+    });
     const measured = vi.mocked(controller.setSize).mock.calls[0]?.[0];
     expect(measured?.pixelRatio).toBeGreaterThan(0);
     expect(measured?.width).toBeGreaterThan(0);

@@ -388,7 +388,9 @@ export const createUiReactCompilerPlugin = (): Plugin => {
 export default defineConfig(({ mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   const isTest = mode === 'test';
-  const isNetlify = process.env['NETLIFY'] === 'true';
+  // Netlify's own CI sets NETLIFY=true; `netlify deploy` from GitHub Actions
+  // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
+  const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';
   const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
   const tauCloudEnabled = isTest ? true : resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 

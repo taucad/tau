@@ -249,6 +249,32 @@ class DisposingKernelWorker extends MockKernelWorker {
 // =============================================================================
 
 describe('KernelWorker lifecycle', () => {
+  it('should release the operation queue when native-handle cleanup throws', async () => {
+    const worker = createConfiguredWorker();
+    const cleanupError = new Error('native-handle cleanup failed');
+    // @ts-expect-error -- Fault-inject the private operation-boundary cleanup after a real describe.
+    const cleanup = vi.spyOn(worker, 'disposeUnreachableNativeHandles');
+    // @ts-expect-error -- Observe the protected operation body to prove FIFO ordering during cleanup.
+    const describeBody = vi.spyOn(worker, 'onGetParameters');
+    cleanup.mockImplementationOnce(() => {
+      expect(describeBody).toHaveBeenCalledTimes(1);
+      throw cleanupError;
+    });
+
+    try {
+      const first = worker.describe({ file: createGeometryFile('first.ts') });
+      const second = worker.describe({ file: createGeometryFile('second.ts') });
+
+      await expect(first).rejects.toBe(cleanupError);
+      await expect(second).resolves.toMatchObject({ success: true });
+      expect(cleanup).toHaveBeenCalledTimes(2);
+      expect(describeBody).toHaveBeenCalledTimes(2);
+    } finally {
+      cleanup.mockRestore();
+      describeBody.mockRestore();
+    }
+  });
+
   class ParameterBoundaryWorker extends MockKernelWorker {
     public receivedParameters: Record<string, unknown> | undefined;
 

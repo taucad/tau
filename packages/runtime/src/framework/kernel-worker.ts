@@ -2238,8 +2238,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       // Operations are serialized, so an operation boundary is the one point
       // where every surviving reference to a native handle lives in a worker
       // field. Anything else the operation created is garbage.
-      this.disposeUnreachableNativeHandles();
+      // A waiter resumes in the next microtask, after synchronous disposal, even if disposal throws.
       next.resolve();
+      this.disposeUnreachableNativeHandles();
     }
   }
 

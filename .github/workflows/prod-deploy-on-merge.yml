@@ -1,10 +1,12 @@
 # Production deploys, GitOps-triggered on push to `production` (made only by
 # `deploy-production.yml`): the API to Fly, and the UI built in Actions and
 # published to Netlify (`taucad-prod-us`, tau.new) with the GeoSpec artifact of
-# this commit's `ci.yml` run on `main`.
+# this commit's `ci.yml` run on `main`, and the docs (`taucad-docs-prod-us`,
+# docs.tau.new) through `deploy-docs.yml`.
 #
 # Manual hotfix: `gh workflow run deploy.yml -f environment=production -f app=api`
 # or `gh workflow run deploy-ui.yml --ref production -f environment=production`
+# or `gh workflow run deploy-docs.yml --ref production -f environment=production`
 name: Production Deploy (on merge to production)
 
 on:
@@ -31,4 +33,10 @@ jobs:
     with:
       environment: production
       transport: main-run
+    secrets: inherit
+
+  deploy-docs:
+    uses: ./.github/workflows/deploy-docs.yml
+    with:
+      environment: production
     secrets: inherit

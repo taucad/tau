@@ -17,7 +17,7 @@ describe('validateWorkflows', () => {
     const { violations, invocations } = validateWorkflows(resolved, [fixture('clean.yml')]);
 
     expect(violations).toEqual([]);
-    expect(invocations).toBe(6);
+    expect(invocations).toBe(10);
   });
 
   it('rejects every project a workflow names, whatever names it', () => {

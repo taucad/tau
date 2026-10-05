@@ -37,6 +37,7 @@ jobs:
       apps: ${{ steps.plan.outputs.apps }}
       api: ${{ steps.plan.outputs.api }}
       e2e: ${{ steps.plan.outputs.e2e }}
+      e2e-suites: ${{ steps.plan.outputs.e2e-suites }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
       geospec-required: ${{ steps.geospec.outputs.geospec-required }}
@@ -71,6 +72,19 @@ jobs:
             echo "$apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+          # One Browser end-to-end job per affected project and suite target.
+          suites='[]'
+          add_suites() {
+            suites=$(jq -c --arg target "$1" --argjson projects "$2" \
+              '. + [$projects[] | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$suites")
+          }
+          add_suites test:e2e "$(pnpm nx show projects --affected --with-target test:e2e --json | tail -1)"
+          add_suites test:e2e:development "$(pnpm nx show projects --affected --with-target test:e2e:development --json | tail -1)"
+          add_suites test:e2e:browser-host "$(pnpm nx show projects --affected --with-target test:e2e:browser-host --json | tail -1)"
+          add_suites test:e2e:daemon-host "$(pnpm nx show projects --affected --with-target test:e2e:daemon-host --json | tail -1)"
+          add_suites test:e2e:non-isolated "$(pnpm nx show projects --affected --with-target test:e2e:non-isolated --json | tail -1)"
+          echo "Affected end-to-end suites: $suites"
+          echo "e2e-suites=$suites" >> "$GITHUB_OUTPUT"
           for lane in "api=$api" "e2e=$e2e" "size=$size" "formal=$formal"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
@@ -254,32 +268,30 @@ jobs:
       - *darwin-host-suites
       - *retain-geospec-preparation
 
-  affected:
-    name: Run affected tasks
+  # The affected tasks run as parallel lanes on separate standard runners: lint,
+  # typecheck, build and its checks, and three test shards. One runner running every
+  # task in turn took 1 h 40 min on a full graph (run 37221169741, 2026-10-04); the
+  # lanes bring that down to the longest lane. Each lane keeps `--parallel=1`, which
+  # its own 16 GB runner still needs (see `Run the lane's tasks`).
+  affected-lane:
+    name: Affected (${{ matrix.lane }})
     needs: [plan, geospec-producer]
     # Not `always()`: that also ignores a cancel, so a superseded run kept this job
     # going for its full length and held the next run in the concurrency queue.
-    if: ${{ !cancelled() }}
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success')
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cloud-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [lint, typecheck, build, pkgcheck, test-1, test-2, test-3]
     steps:
-      # Preserve failure in this existing required job when a needed producer
-      # (including its host suites) fails. An unneeded producer may be skipped, and so
-      # may one whose products an earlier run already made (see `plan`).
-      - name: Require artifact producer success
-        env:
-          PLAN_RESULT: ${{ needs.plan.result }}
-          PRODUCER_RESULT: ${{ needs.geospec-producer.result }}
-          PRODUCER_REQUIRED: ${{ needs.plan.outputs.geospec-required }}
-          PRODUCTS_CACHED: ${{ needs.plan.outputs.geospec-cached }}
-        run: |
-          test "$PLAN_RESULT" = success
-          if [ "$PRODUCER_REQUIRED" = true ] && [ "$PRODUCTS_CACHED" != true ]; then test "$PRODUCER_RESULT" = success; fi
-
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -317,6 +329,7 @@ jobs:
       # including CI; a Linux runner needs the Bubblewrap toolchain and capability-bearing
       # user namespaces, which Ubuntu 24.04 restricts through AppArmor by default.
       - name: Install Linux sandbox prerequisites
+        if: startsWith(matrix.lane, 'test-')
         run: |
           sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -332,26 +345,23 @@ jobs:
       # `push`, where the release commit itself touches every manifest after consuming
       # the plans.
       - name: Check version plans
-        if: github.event_name == 'pull_request'
+        if: matrix.lane == 'build' && github.event_name == 'pull_request'
         run: pnpm nx release plan:check
-
-      # This enables task distribution via Nx Cloud
-      # Run this command as early as possible, before dependencies are installed
-      # Learn more at https://nx.dev/ci/reference/nx-cloud-cli#npx-nxcloud-startcirun
-      # Connect your workspace by running "nx connect" and uncomment this
-      # - run: npx nx-cloud start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
 
       # Nx Affected runs only tasks affected by the changes in this PR/commit.
       # Browser-backed targets are not in this list — they run in the `e2e` lane,
       # which is the only job that installs Chromium.
       # Learn more: https://nx.dev/ci/features/affected
       #
-      # `test` is invoked separately with `tag:scope:api` excluded, because this lane
-      # has no services. The API's default suite now carries the repository store, the
-      # git transport and the lifecycle jobs (charter W1, W2, W4, W6), which drive real
-      # PostgreSQL and real MinIO and refuse rather than skip when they are absent. The
-      # whole of `test` for that tag runs in the `api` lane below, which has both; this
-      # lane stays hermetic. The selector is a tag, never a project name.
+      # `test` excludes `tag:scope:api`, because these lanes have no services. The API's
+      # default suite carries the repository store, the git transport and the lifecycle
+      # jobs (charter W1, W2, W4, W6), which drive real PostgreSQL and real MinIO and
+      # refuse rather than skip when they are absent. The whole of `test` for that tag
+      # runs in the `api` lane below, which has both; these lanes stay hermetic.
+      #
+      # The three test shards split the affected projects with a `test` target by
+      # their test-file counts. The project list comes from the graph at run time,
+      # never from this file.
       #
       # `--parallel=1`: ui:lint and ui:typecheck each peak near 9.5 GB, so any two of
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
@@ -359,17 +369,56 @@ jobs:
       # this happened a few minutes in; at two it still happened once both overlapped.
       # `test` needs the same cap: overlapping WASM suites lost the VM the same way
       # a few minutes into `test` (tau#306 and tau#299, 2026-10-04).
-      - name: Run affected tasks
+      - name: Run the lane's tasks
+        env:
+          LANE: ${{ matrix.lane }}
         run: |
           set -o pipefail
-          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=1
-          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64 --parallel=1 --outputStyle=static 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
+          case "$LANE" in
+            lint) pnpm nx affected -t lint --parallel=1 ;;
+            typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
+            build) pnpm nx affected -t build size --parallel=1 ;;
+            pkgcheck)
+              # publint, attw, madge and the surface checks are light, so they run three at
+              # a time once their builds exist. The builds stay serial and land in the local
+              # cache, so the checks reuse them.
+              projects=$(pnpm nx show projects --affected --with-target pkgcheck --json | tail -1 | jq -r 'join(",")')
+              if [ -n "$projects" ]; then
+                pnpm nx run-many -t build --projects "$projects" --parallel=1
+              fi
+              pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --parallel=3
+              ;;
+            test-*)
+              projects=$(pnpm nx show projects --affected --with-target test --exclude tag:scope:api,tag:host:darwin-arm64 --json | tail -1)
+              pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null
+              # Weigh each project by its test files, then deal the heaviest first to the
+              # lightest shard, so the slowest suites land in different shards.
+              shard=$(echo "$projects" | jq -r '.[]' | while read -r project; do
+                root=$(jq -r --arg project "$project" '.graph.nodes[$project].data.root' "$RUNNER_TEMP/graph.json")
+                weight=1
+                if [ "$root" != . ]; then
+                  weight=$(( $(git ls-files -- "$root" | grep -cE '(\.(test|spec)\.[cm]?[jt]sx?|Tests?\.cs)$') + 1 ))
+                fi
+                echo "$weight $project"
+              done | sort -k1,1nr -k2,2 | awk -v shard="$(( ${LANE#test-} - 1 ))" '
+                { best = 0; for (s = 1; s < 3; s++) if (load[s] < load[best]) best = s
+                  load[best] += $1
+                  if (best == shard) { printf "%s%s", sep, $2; sep = "," } }')
+              if [ -z "$shard" ]; then
+                echo "No affected test projects in this shard."
+                exit 0
+              fi
+              echo "Shard projects: $shard"
+              pnpm nx run-many -t test --projects "$shard" --parallel=1 --outputStyle=static 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
+              ;;
+            *) echo "Unknown lane $LANE" >&2; exit 1 ;;
+          esac
 
       # The full log of a full-graph run is far longer than the API's log tail, so a failed
       # test phase repeats each failing suite's report (and the sandbox host facts the native
       # suites depend on) as the job's last output.
       - name: Summarize failed affected tests
-        if: failure()
+        if: failure() && startsWith(matrix.lane, 'test-')
         run: |
           echo '::group::Sandbox host'
           sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone user.max_user_namespaces 2>&1 || true
@@ -387,6 +436,7 @@ jobs:
 
       - name: Select affected Python checks
         id: benchmark-statistics
+        if: matrix.lane == 'build'
         run: |
           projects=$(pnpm nx show projects --affected --with-target test-benchmark-statistics --json | tail -1)
           delivery_projects=$(pnpm nx show projects --affected --with-target check-delivery-environment --json | tail -1)
@@ -401,34 +451,60 @@ jobs:
           fi
 
       - name: Setup affected checks Python
-        if: steps.benchmark-statistics.outputs.python-required == 'true'
+        if: matrix.lane == 'build' && steps.benchmark-statistics.outputs.python-required == 'true'
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.12.14'
 
       - name: Check affected pure artifact and delivery helpers
+        if: matrix.lane == 'build'
         run: pnpm nx affected -t check-ci-artifacts check-delivery-environment check-conformance-profile check-geospec-test-consumer test-m3-verdicts
 
       - name: Prepare benchmark statistics dependencies
-        if: steps.benchmark-statistics.outputs.required == 'true'
+        if: matrix.lane == 'build' && steps.benchmark-statistics.outputs.required == 'true'
         run: |
           python -m venv "$RUNNER_TEMP/geospec-benchmark-analysis"
           "$RUNNER_TEMP/geospec-benchmark-analysis/bin/python" -m pip install --disable-pip-version-check numpy==2.3.5
 
       - name: Check affected benchmark harnesses
+        if: matrix.lane == 'build'
         env:
           GEOSPEC_BENCH_ANALYSIS_PYTHON: ${{ runner.temp }}/geospec-benchmark-analysis/bin/python
         run: pnpm nx affected -t lint-benchmark-entry typecheck-benchmark-entry test-benchmark-entry test-benchmark-statistics
 
       - name: Check affected critical coverage gates
+        if: matrix.lane == 'build'
         run: pnpm nx affected -t check-coverage-gate
 
       - name: Check affected legacy reference fixtures
+        if: matrix.lane == 'build'
         run: pnpm nx affected -t prepare-legacy-reference typecheck-legacy-reference
 
       - name: Check workspace root hygiene
         if: always()
         run: pnpm nx run scripts:validate-workspace-root
+
+  # The required check. It passes only when every affected lane passed and, when this
+  # run needed the GeoSpec producer (including its host suites), the producer did too.
+  # An unneeded producer may be skipped, and so may one whose products an earlier run
+  # already made (see `plan`).
+  affected:
+    name: Run affected tasks
+    needs: [plan, geospec-producer, affected-lane]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every affected lane and the artifact producer
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          PRODUCER_RESULT: ${{ needs.geospec-producer.result }}
+          PRODUCER_REQUIRED: ${{ needs.plan.outputs.geospec-required }}
+          PRODUCTS_CACHED: ${{ needs.plan.outputs.geospec-cached }}
+          LANES_RESULT: ${{ needs.affected-lane.result }}
+        run: |
+          test "$PLAN_RESULT" = success
+          if [ "$PRODUCER_REQUIRED" = true ] && [ "$PRODUCTS_CACHED" != true ]; then test "$PRODUCER_RESULT" = success; fi
+          test "$LANES_RESULT" = success
 
   # Formal lane (docs/policy/formal-verification-policy.md): the Java and Lean tiers
   # of every affected project with a `formal` target. A known counterexample is an
@@ -480,20 +556,26 @@ jobs:
   # development-server qualifications. `nx affected` picks the projects — their
   # `implicitDependencies` make the selection correct — and target existence
   # picks the suites, so a new e2e project joins by declaring the targets.
+  # Each affected project and suite target runs as its own job (the plan job's
+  # `e2e-suites`): in one job they ran one after another for over 105 min
+  # (run 37221169741, 2026-10-04).
   e2e:
-    name: Browser end-to-end
+    name: Browser end-to-end (${{ matrix.suite.project }} ${{ matrix.suite.target }})
     runs-on: ubuntu-latest
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
-      (needs.plan.outputs.e2e == 'true')
+      (needs.plan.outputs.e2e == 'true' && needs.plan.outputs.e2e-suites != '[]')
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.e2e-suites) }}
     steps:
-      # `nx affected` below diffs against the PR base, so the checkout needs its history.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -529,11 +611,13 @@ jobs:
       # loses the runner ("The operation was canceled.") a few minutes in.
       # A step-level bound: a hung suite otherwise holds the job for the 6 h default
       # with no logs, while this still runs the always() diagnostics below.
-      - name: Run affected end-to-end suites
+      - name: Run the end-to-end suite
         timeout-minutes: 120
         env:
           TAU_E2E_WEBGPU_PROFILE: software
-        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated --parallel=1
+          PROJECT: ${{ matrix.suite.project }}
+          TARGET: ${{ matrix.suite.target }}
+        run: xvfb-run --auto-servernum pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1
 
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.
@@ -545,7 +629,9 @@ jobs:
 
       - name: Validate captured chat logs
         if: always()
-        run: pnpm nx affected -t formal:logs
+        env:
+          PROJECT: ${{ matrix.suite.project }}
+        run: pnpm nx run-many -t formal:logs --projects "$PROJECT"
 
       - name: Check workspace root hygiene
         if: always()
@@ -555,7 +641,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: vitest-browser-diagnostics
+          name: vitest-browser-diagnostics-${{ matrix.suite.slug }}
           path: |
             out/test-results/vitest-browser
             out/test-results/desktop-e2e
@@ -645,7 +731,11 @@ jobs:
         if: always()
         run: pnpm nx run scripts:validate-workspace-root
 
+      # The comparison rebuilds the base branch, which took 24 min on a full graph (run
+      # 37221169741, 2026-10-04), so it runs only on PRs labelled `size-compare`. A label
+      # alone does not start a run: push after adding it.
       - name: Compare bundle sizes with the base branch
+        if: contains(github.event.pull_request.labels.*.name, 'size-compare')
         continue-on-error: true
         uses: andresz1/size-limit-action@94bc357df29c36c8f8d50ea497c3e225c3c95d1d # v1.8.0
         with:

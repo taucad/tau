@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import '@taucad/geospec-engine/register/node';
+import { Engine } from '@taucad/geospec-engine-native/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
 import { createModelLoader } from 'geospec/model';
 import { createGeoSpecNodeRunner, createNodeVmFileSystem } from 'geospec/runner/node';
@@ -31,11 +32,14 @@ describe('Tau example model health', () => {
     const error = vi
       .spyOn(console, 'error')
       .mockImplementation((...values) => consoleDiagnostics.push(`error: ${values.map(String).join(' ')}`));
+    const engine = new Engine();
     const runner = createGeoSpecNodeRunner({
       filesystem: createNodeVmFileSystem(examplesRoot),
       projectPath: examplesRoot,
       cache,
+      nativeAssertions: { engine },
       modelLoader: createModelLoader({
+        engine,
         projectPath: examplesSource,
         runtime: async () => createExampleGeoSpecRuntimeClient(examplesRoot),
       }),
@@ -62,6 +66,7 @@ describe('Tau example model health', () => {
       expect(result.success).toBe(true);
     } finally {
       await runner.close();
+      engine.close();
       warn.mockRestore();
       error.mockRestore();
     }

@@ -288,8 +288,10 @@ const runTurn = async (
 
 const readLog = async (workspaceRoot: string, chatId: string): Promise<readonly AgentLogEvent[]> => {
   const raw = await readFile(join(workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl'), 'utf8');
+  // A line is complete once its newline lands; a poll can see the run still appending the last one.
+  const complete = raw.slice(0, raw.lastIndexOf('\n') + 1);
   return (
-    raw
+    complete
       .split('\n')
       .filter((line) => line.trim() !== '')
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log this test just wrote is the vocabulary by construction.
@@ -2079,7 +2081,7 @@ describe('one ACP session per chat', () => {
   }, 30_000);
 
   it('declines an elicitation that arrives between turns, and records it against nothing', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-late-login-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-between-turns-'));
     roots.push(cwd);
     const frames: AcpWireFrame[] = [];
     const appended: unknown[] = [];

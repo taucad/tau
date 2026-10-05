@@ -51,7 +51,17 @@ jobs:
           STAGING_SUPPORT_SHA: cd8f118318e7720aeace25d6871c6b478f352673
         run: |
           set -euo pipefail
-          sha=$(gh run list --workflow ci.yml --branch main --event push --status success --limit 1 --json headSha --jq '.[0].headSha // empty')
+          # Run listings come back in an unreliable order (a re-run keeps its
+          # old creation time), so walk main's history newest first and ask
+          # each commit whether its CI push run succeeded.
+          sha=
+          for candidate in $(gh api "repos/${GH_REPO}/commits?sha=main&per_page=50" --jq '.[].sha'); do
+            green=$(gh api "repos/${GH_REPO}/actions/workflows/ci.yml/runs?head_sha=${candidate}&branch=main&event=push" --jq 'any(.workflow_runs[]; .conclusion == "success")')
+            if [ "$green" = true ]; then
+              sha=$candidate
+              break
+            fi
+          done
           if [ -z "$sha" ]; then
             echo "::error::No ci.yml push run on main has succeeded yet."
             exit 1

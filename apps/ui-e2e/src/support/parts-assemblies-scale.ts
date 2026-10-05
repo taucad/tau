@@ -22,6 +22,36 @@ type ScaleClosure = Readonly<{
   requiredBytes: number;
 }>;
 
+/** Preserve a best-effort, bounded pin-read snapshot before the E2E target closes. */
+export const captureScalePinProgress = async <Snapshot>(
+  read: () => Promise<Snapshot | undefined>,
+  write: (snapshot: Snapshot) => Promise<void>,
+): Promise<void> => {
+  const capture = new AbortController();
+  let pinCaptureTimeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      (async (): Promise<void> => {
+        const snapshot = await read();
+        if (!capture.signal.aborted && snapshot !== undefined) {
+          await write(snapshot);
+        }
+      })(),
+      new Promise<void>((resolve) => {
+        pinCaptureTimeout = setTimeout(() => {
+          capture.abort();
+          resolve();
+        }, 5000);
+      }),
+    ]);
+  } catch {
+    // The original test failure, including its timeout, owns the result.
+  } finally {
+    capture.abort();
+    clearTimeout(pinCaptureTimeout);
+  }
+};
+
 /** Reconstruct the private, pinned root storage closure from actual project bytes. */
 export const readPublishedRootStorage = async (
   root: PublishedPartAsset,

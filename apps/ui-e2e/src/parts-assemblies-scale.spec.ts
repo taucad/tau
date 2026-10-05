@@ -1,6 +1,6 @@
 import { WebIO } from '@gltf-transform/core';
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
-import { expect, inject, test } from 'vitest';
+import { expect, inject, onTestFinished, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type {
   AdmittedAssembly,
@@ -11,7 +11,7 @@ import type {
 import * as target from '#support/external-target.js';
 import { expandPath, treeItem } from '#support/file-tree.js';
 import { classifyWebGpuAdapter } from '#support/webgpu-profile.js';
-import { compareScalePngFrames } from '#support/parts-assemblies-scale.js';
+import { captureScalePinProgress, compareScalePngFrames } from '#support/parts-assemblies-scale.js';
 import {
   publicationSpanKey as spanKey,
   capturedPublicationGraph,
@@ -173,15 +173,48 @@ const readScaleCommittedPin = async (
     if (!capture || !display || !heldIsCurrentAtCapture) {
       throw new Error('Actual committed scale pin is unavailable.');
     }
+    const progress = {
+      status: 1,
+      phase: 0,
+      ordinal: 0,
+      requested: 0,
+      completed: 0,
+      requestedByPhase: Array.from({ length: 10 }, () => 0),
+      completedByPhase: Array.from({ length: 10 }, () => 0),
+      awaitMillisecondsByPhase: Array.from({ length: 10 }, () => 0),
+      timeOrigin: performance.timeOrigin,
+      startedAt: performance.now(),
+      requestedAt: 0,
+      completedAt: 0,
+    };
+    (
+      globalThis as typeof globalThis & { __TAU_SCALE_PIN_PROGRESS_TEST__?: typeof progress }
+    ).__TAU_SCALE_PIN_PROGRESS_TEST__ = progress;
+    const observe = async <Result>(phase: number, operation: () => Promise<Result>): Promise<Result> => {
+      progress.phase = phase;
+      progress.ordinal += 1;
+      progress.requested += 1;
+      progress.requestedByPhase[phase] = (progress.requestedByPhase[phase] ?? 0) + 1;
+      const requestedAt = performance.now();
+      progress.requestedAt = requestedAt;
+      const result = await operation();
+      progress.completed += 1;
+      progress.completedByPhase[phase] = (progress.completedByPhase[phase] ?? 0) + 1;
+      const completedAt = performance.now();
+      progress.completedAt = completedAt;
+      progress.awaitMillisecondsByPhase[phase] =
+        (progress.awaitMillisecondsByPhase[phase] ?? 0) + completedAt - requestedAt;
+      return result;
+    };
     let managedReadPath = display.root.path;
     try {
       const digest = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
-        `sha256:${[...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
+        `sha256:${[...new Uint8Array(await observe(8, async () => crypto.subtle.digest('SHA-256', bytes)))].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
       const parent = display.root.path.slice(0, display.root.path.lastIndexOf('/') + 1);
       if (!/^\.tau\/artifacts\/reusable-parts\/[0-9a-f]{64}\/$/u.test(parent)) {
         throw new Error('Scale pin has no canonical managed parent.');
       }
-      const rootBytes = await capture.readRawBytes(display.root.path);
+      const rootBytes = await observe(1, async () => capture.readRawBytes(display.root.path));
       if (
         rootBytes.byteLength > 4096 ||
         rootBytes.byteLength !== display.root.byteLength ||
@@ -226,7 +259,7 @@ const readScaleCommittedPin = async (
           throw new Error('Scale root subject or managed path changed.');
         }
         managedReadPath = asset.path;
-        const bytes = await capture.readRawBytes(asset.path);
+        const bytes = await observe(kind === 'manifest' ? 2 : 3, async () => capture.readRawBytes(asset.path));
         if (bytes.byteLength !== asset.byteLength || (await digest(bytes)) !== asset.digest || !capture.isCurrent()) {
           throw new Error('Scale root immutable asset changed.');
         }
@@ -295,7 +328,9 @@ const readScaleCommittedPin = async (
         let bytes: Uint8Array<ArrayBuffer>;
         if (asset.path.startsWith(parent)) {
           managedReadPath = asset.path;
-          bytes = await capture.readRawBytes(asset.path);
+          bytes = await observe(kind === 'record' ? 4 : kind === 'glb' ? 5 : 6, async () =>
+            capture.readRawBytes(asset.path),
+          );
         } else {
           const original = externalFiles.find((file) => file.path === asset.path);
           if (!original) {
@@ -339,7 +374,7 @@ const readScaleCommittedPin = async (
           await retain(variant.glb, 'glb');
           managedReadPath = variant.glb.path;
           /* oxlint-disable-next-line no-await-in-loop -- Read the owned immutable closure sequentially with a current-subject fence and bounded retained bytes after each asset. */
-          const bytes = await display.admitted.readAsset(variant.glb.digest);
+          const bytes = await observe(7, async () => display.admitted.readAsset(variant.glb.digest));
           /* oxlint-disable-next-line no-await-in-loop -- The current-subject byte check finishes before following the next original asset. */
           const actualDigest = await digest(bytes);
           const captureCurrent = capture.isCurrent();
@@ -385,7 +420,7 @@ const readScaleCommittedPin = async (
       const parts = Object.values(display.admitted.publication.parts);
       const sample = Object.values(parts.at(-1)!.variants)[0]!.glb;
       managedReadPath = sample.path;
-      const sampleBytes = await display.admitted.readAsset(sample.digest);
+      const sampleBytes = await observe(9, async () => display.admitted.readAsset(sample.digest));
       if (
         sampleBytes.byteLength !== sample.byteLength ||
         (await digest(sampleBytes)) !== sample.digest ||
@@ -393,6 +428,7 @@ const readScaleCommittedPin = async (
       ) {
         throw new Error('Actual admitted scale sample changed during preparation.');
       }
+      progress.status = 2;
       return {
         root: display.root,
         generation: rootRecord.generation,
@@ -405,6 +441,7 @@ const readScaleCommittedPin = async (
           'complete immutable pointer/manifest/ordered-chunk and record/asset byte digest and length checks under the current admitted root; external original references use project-fenced actual Explorer Downloads; semantic admission belongs to the actual host facade',
       };
     } catch (error) {
+      progress.status = 3;
       // Diagnostic acquisition must never replace the original rejection, including undefined.
       try {
         let current: ReturnType<NonNullable<typeof bridge>['getCommittedAssembly']> | undefined;
@@ -1946,6 +1983,88 @@ for (const backend of ['webgl', 'webgpu'] as const) {
       throw new Error('The actual completed warehouse corpus or preparation timing is incomplete.');
     }
     const completedCorpusRoot = completion.corpus.root;
+    onTestFinished(async () => {
+      await captureScalePinProgress(
+        async () =>
+          target.evaluate((expectedDigest) => {
+            const page = globalThis as typeof globalThis & {
+              __TAU_SCALE_PIN_PROGRESS_TEST__?: {
+                status: number;
+                phase: number;
+                ordinal: number;
+                requested: number;
+                completed: number;
+                requestedByPhase: number[];
+                completedByPhase: number[];
+                awaitMillisecondsByPhase: number[];
+                timeOrigin: number;
+                startedAt: number;
+                requestedAt: number;
+                completedAt: number;
+              };
+              __TAU_SECTION_VIEW_TEST__?: {
+                getCommittedAssembly(): {
+                  assemblyDisplay: { root: { digest: string } } | undefined;
+                  isCurrent(): boolean;
+                };
+              };
+            };
+            const progress = page.__TAU_SCALE_PIN_PROGRESS_TEST__;
+            if (!progress) {
+              return undefined;
+            }
+            const current = page.__TAU_SECTION_VIEW_TEST__?.getCommittedAssembly();
+            if (!current?.isCurrent() || current.assemblyDisplay?.root.digest !== expectedDigest) {
+              throw new Error('Scale pin progress no longer belongs to the current root.');
+            }
+            const hasFinitePhaseValues = (values: number[]): boolean =>
+              Array.isArray(values) &&
+              values.length === 10 &&
+              values.every((value) => Number.isFinite(value) && value >= 0);
+            if (
+              ![1, 2, 3].includes(progress.status) ||
+              !Number.isInteger(progress.phase) ||
+              progress.phase < 0 ||
+              progress.phase > 9 ||
+              !Number.isSafeInteger(progress.ordinal) ||
+              progress.ordinal !== progress.requested ||
+              !Number.isSafeInteger(progress.completed) ||
+              progress.completed > progress.requested ||
+              !hasFinitePhaseValues(progress.requestedByPhase) ||
+              !hasFinitePhaseValues(progress.completedByPhase) ||
+              !hasFinitePhaseValues(progress.awaitMillisecondsByPhase) ||
+              !progress.requestedByPhase.every(
+                (value, phase) =>
+                  Number.isSafeInteger(value) &&
+                  Number.isSafeInteger(progress.completedByPhase[phase]) &&
+                  (progress.completedByPhase[phase] ?? 0) <= value,
+              ) ||
+              progress.requestedByPhase.reduce((sum, value) => sum + value, 0) !== progress.requested ||
+              progress.completedByPhase.reduce((sum, value) => sum + value, 0) !== progress.completed ||
+              ![progress.timeOrigin, progress.startedAt, progress.requestedAt, progress.completedAt].every(
+                (value) => Number.isFinite(value) && value >= 0,
+              )
+            ) {
+              throw new Error('Scale pin progress has invalid numeric bounds.');
+            }
+            const capturedAt = performance.now();
+            return {
+              ...progress,
+              capturedAt,
+              pendingMilliseconds: progress.requested > progress.completed ? capturedAt - progress.requestedAt : 0,
+            };
+          }, completedCorpusRoot.digest),
+        async (snapshot) =>
+          target.writeArtifact(
+            `s15-${backend}-warehouse-pin-progress.json`,
+            JSON.stringify({
+              ...snapshot,
+              semantics:
+                'Fixed numeric phase counters and completed same-realm await durations; pendingMilliseconds is current capturedAt minus requestedAt and is excluded from completed durations.',
+            }),
+          ),
+      );
+    });
     const preparationPhaseMilliseconds = performance.now() - caseStarted;
     const completedPreparationStages: unknown = await target.evaluate(() => {
       const diagnostic = (

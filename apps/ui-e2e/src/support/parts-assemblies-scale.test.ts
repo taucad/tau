@@ -20,6 +20,7 @@ import {
   importPublishedScaleClosure,
   readPublishedRootStorage,
   scrubScaleProducerSources,
+  captureScalePinProgress,
 } from './parts-assemblies-scale.js';
 /* oxlint-enable no-restricted-imports */
 /* oxlint-enable import/extensions */
@@ -246,6 +247,110 @@ describe('actual published scale closure controls', () => {
     });
     await expect(collectCommittedScaleClosure({ ...capture, readRawBytes: changedRead })).rejects.toThrow(/during/u);
     expect(changedRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('should capture an actual pending closure read before cleanup and preserve the primary failure', async () => {
+    let releaseRead = (): void => undefined;
+    const blockedRead = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let signalRead = (): void => undefined;
+    const readStarted = new Promise<void>((resolve) => {
+      signalRead = resolve;
+    });
+    let requested = 0;
+    let completed = 0;
+    const requestedByPhase = Array.from({ length: 10 }, () => 0);
+    const completedByPhase = Array.from({ length: 10 }, () => 0);
+    let targetOpen = true;
+    const collected = collectCommittedScaleClosure({
+      assemblyDisplay: { root: published.root, admitted: published.admitted },
+      isCurrent: () => targetOpen,
+      readRawBytes: async (path) => {
+        requested += 1;
+        requestedByPhase[1] = (requestedByPhase[1] ?? 0) + 1;
+        signalRead();
+        await blockedRead;
+        const bytes = await producer.fileSystem.readFile(path);
+        completed += 1;
+        completedByPhase[1] = (completedByPhase[1] ?? 0) + 1;
+        return bytes;
+      },
+    });
+    try {
+      await readStarted;
+      const written: Array<{
+        requested: number;
+        completed: number;
+        requestedByPhase: readonly number[];
+        completedByPhase: readonly number[];
+      }> = [];
+      await captureScalePinProgress(
+        async () => {
+          if (!targetOpen) {
+            throw new Error('The target closed before the pending read was captured.');
+          }
+          return {
+            requested,
+            completed,
+            requestedByPhase: [...requestedByPhase],
+            completedByPhase: [...completedByPhase],
+          };
+        },
+        async (snapshot) => {
+          written.push(snapshot);
+        },
+      );
+      expect(written).toEqual([
+        {
+          requested: 1,
+          completed: 0,
+          requestedByPhase: [0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+          completedByPhase: Array.from({ length: 10 }, () => 0),
+        },
+      ]);
+      releaseRead();
+      await expect(collected).resolves.toMatchObject({ root: published.root });
+      targetOpen = false;
+      expect(completed).toBeGreaterThan(1);
+
+      const original = new Error('Original scale pin timeout');
+      const failingTest = async (): Promise<void> => {
+        try {
+          throw original;
+        } finally {
+          await captureScalePinProgress(
+            async () => {
+              throw new Error('Target snapshot unavailable during cleanup.');
+            },
+            async () => {
+              throw new Error('Secondary artifact write must not run.');
+            },
+          );
+        }
+      };
+      await expect(failingTest()).rejects.toBe(original);
+
+      vi.useFakeTimers();
+      try {
+        const neverReturns = captureScalePinProgress(
+          async () =>
+            new Promise<undefined>(() => {
+              // The page read remains pending until the bounded capture interval expires.
+            }),
+          async () => {
+            throw new Error('A timed-out snapshot must not write after cleanup.');
+          },
+        );
+        await vi.advanceTimersByTimeAsync(5000);
+        await expect(neverReturns).resolves.toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    } finally {
+      releaseRead();
+      await collected.catch(() => undefined);
+    }
   });
 
   it('requires the actual complete admitted part set during collection', async () => {

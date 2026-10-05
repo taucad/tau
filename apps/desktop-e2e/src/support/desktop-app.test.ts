@@ -5,10 +5,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type * as Electron from 'electron';
 import type { IpcMain, IpcMainEvent, MessagePortMain, UtilityProcess, WebContents, WebFrameMain } from 'electron';
-import { _electron as electron } from 'playwright';
-import type { BrowserContext, ElectronApplication, Page } from 'playwright';
+import type { _electron as electron, BrowserContext, ElectronApplication, Page } from 'playwright';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { mock } from 'vitest-mock-extended';
+import { mock, mockDeep } from 'vitest-mock-extended';
 import { desktopDescendants, installDesktopRuntimeLeaseObservation, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopRuntimeLease } from '#support/desktop-app.js';
 
@@ -77,7 +76,7 @@ const mockedLaunch = (firstWindow: () => Promise<Page>) => {
   application.process.mockReturnValue(child);
   application.context.mockReturnValue(mock<BrowserContext>());
   application.firstWindow.mockImplementation(firstWindow);
-  const launch = vi.spyOn(electron, 'launch').mockResolvedValue(application);
+  const launch = vi.fn<typeof electron.launch>().mockResolvedValue(application);
   return { application, child, launch };
 };
 
@@ -90,7 +89,9 @@ describe('desktop startup ownership before a session is returned', () => {
       throw primary;
     });
     try {
-      await expect(launchDesktopApp({ token: 'unit-test-only', profileRoot })).rejects.toMatchObject({
+      await expect(
+        launchDesktopApp({ token: 'unit-test-only', profileRoot, launchElectron: launch }),
+      ).rejects.toMatchObject({
         cause: primary,
       });
       expect(child.kill).toHaveBeenCalledWith('SIGKILL');
@@ -153,7 +154,7 @@ describe('desktop startup ownership before a session is returned', () => {
     });
     observation.failure = (async (): Promise<unknown> => {
       try {
-        await launchDesktopApp({ token: 'unit-test-only', profileRoot });
+        await launchDesktopApp({ token: 'unit-test-only', profileRoot, launchElectron: launch });
         return undefined;
       } catch (error) {
         return error;
@@ -194,6 +195,11 @@ describe('desktop startup ownership before a session is returned', () => {
           pid: number;
         };
         expect(stage).toMatchObject({ stage: 'trace-start', status: 'failed', pid: 12_345 });
+        const report = JSON.parse(await readFile(join(startupRoot, created[0]!, 'trace-pending.json'), 'utf8')) as {
+          status: string;
+          samples: unknown[];
+        };
+        expect(report).toMatchObject({ status: 'test-finished', samples: [] });
         await rm(join(startupRoot, created[0]!), { recursive: true, force: true });
       } finally {
         const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
@@ -205,7 +211,12 @@ describe('desktop startup ownership before a session is returned', () => {
     });
     observation.result = (async (): Promise<unknown> => {
       try {
-        await launchDesktopApp({ token: 'unit-test-only', profileRoot });
+        await launchDesktopApp({
+          token: 'unit-test-only',
+          profileRoot,
+          startupDiagnostic: true,
+          launchElectron: launch,
+        });
         return undefined;
       } catch (error) {
         return error;
@@ -222,6 +233,186 @@ describe('desktop startup ownership before a session is returned', () => {
     };
     expect(pending).toMatchObject({ stage: 'trace-start', status: 'pending' });
   });
+
+  it('should retain two renderer CPU samples with the same process identity while tracing remains pending', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-startup-test-'));
+    const before = await startupEntries();
+    let resolveTracing: (() => void) | undefined;
+    const tracingStarted = new Promise<void>((resolve) => {
+      resolveTracing = resolve;
+    });
+    const tracing = mock<BrowserContext['tracing']>();
+    tracing.start.mockReturnValue(tracingStarted);
+    const context = mock<BrowserContext>({ tracing });
+    const page = mock<Page>();
+    page.context.mockReturnValue(context);
+    const { application, child, launch } = mockedLaunch(async () => page);
+    const sample = (cpu: number) => ({
+      status: 'selected',
+      windowCount: 1,
+      webContentsId: 7,
+      rendererPid: 31,
+      creationTime: 42,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Electron's CPU fields keep their external names.
+      cpu: { percentCPUUsage: cpu, cumulativeCPUUsage: cpu },
+    });
+    application.evaluate
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(sample(0))
+      .mockResolvedValueOnce(sample(1.25));
+    const observation: { result?: Promise<unknown> } = {};
+    onTestFinished(async () => {
+      try {
+        resolveTracing?.();
+        const error: unknown = await observation.result;
+        expect(error).toMatchObject({
+          cause: new Error('Desktop startup finished before a session was returned.'),
+        });
+        expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+        const created = [...(await startupEntries())].filter((entry) => !before.has(entry));
+        expect(created).toHaveLength(1);
+        const stage = JSON.parse(await readFile(join(startupRoot, created[0]!, 'stage.json'), 'utf8')) as {
+          stage: string;
+          status: string;
+        };
+        expect(stage).toMatchObject({ stage: 'trace-start', status: 'failed' });
+        await rm(join(startupRoot, created[0]!), { recursive: true, force: true });
+      } finally {
+        const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+        if (picked) {
+          await rm(dirname(picked), { recursive: true, force: true });
+        }
+        await rm(profileRoot, { recursive: true, force: true });
+      }
+    });
+    observation.result = (async (): Promise<unknown> => {
+      try {
+        await launchDesktopApp({
+          token: 'unit-test-only',
+          profileRoot,
+          startupDiagnostic: true,
+          launchElectron: launch,
+        });
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    })();
+    await vi.waitFor(
+      async () => {
+        const created = [...(await startupEntries())].filter((entry) => !before.has(entry));
+        expect(created).toHaveLength(1);
+        const report = JSON.parse(await readFile(join(startupRoot, created[0]!, 'trace-pending.json'), 'utf8')) as {
+          status: string;
+          samples: Array<{ rendererPid: number; creationTime: number; cpu: { cumulativeCPUUsage: number } }>;
+        };
+        expect(report.status).toBe('selected');
+        expect(report.samples).toHaveLength(2);
+        expect(report.samples.map((sample) => [sample.rendererPid, sample.creationTime])).toEqual([
+          [31, 42],
+          [31, 42],
+        ]);
+        expect(report.samples.map((sample) => sample.cpu.cumulativeCPUUsage)).toEqual([0, 1.25]);
+      },
+      { timeout: 6000 },
+    );
+    const readMain = application.evaluate.mock.calls[1]?.[0];
+    if (typeof readMain !== 'function') {
+      throw new TypeError('The main-side observation callback was not installed.');
+    }
+    const electronMain = mockDeep<typeof Electron>();
+    electronMain.BrowserWindow.getAllWindows.mockReturnValue([]);
+    expect(readMain(electronMain, undefined)).toEqual({ status: 'missing-window', windowCount: 0 });
+    electronMain.BrowserWindow.getAllWindows.mockReturnValue([
+      mock<Electron.BrowserWindow>(),
+      mock<Electron.BrowserWindow>(),
+    ]);
+    expect(readMain(electronMain, undefined)).toEqual({ status: 'ambiguous-window', windowCount: 2 });
+  }, 10_000);
+
+  it.each([
+    [
+      'main-evaluate-refused',
+      async (): Promise<never> => {
+        throw new Error('private main refusal');
+      },
+    ],
+    [
+      'main-evaluate-timeout',
+      async (): Promise<never> =>
+        new Promise<never>(() => {
+          // Deliberately unresolved: the bounded main-side observation must time out.
+        }),
+    ],
+  ])(
+    'should retain %s without replacing a later tracing failure',
+    async (status, mainEvaluation) => {
+      const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-startup-test-'));
+      const before = await startupEntries();
+      let rejectTracing: ((error: Error) => void) | undefined;
+      const tracingStarted = new Promise<void>((_resolve, reject) => {
+        rejectTracing = reject;
+      });
+      const tracing = mock<BrowserContext['tracing']>();
+      tracing.start.mockReturnValue(tracingStarted);
+      const context = mock<BrowserContext>({ tracing });
+      const page = mock<Page>();
+      page.context.mockReturnValue(context);
+      const { application, child, launch } = mockedLaunch(async () => page);
+      application.evaluate.mockResolvedValueOnce(undefined).mockImplementationOnce(mainEvaluation);
+      const original = new Error('original trace failure');
+      const result = (async (): Promise<unknown> => {
+        try {
+          await launchDesktopApp({
+            token: 'unit-test-only',
+            profileRoot,
+            startupDiagnostic: true,
+            launchElectron: launch,
+          });
+          return undefined;
+        } catch (error) {
+          return error;
+        }
+      })();
+      let created: string | undefined;
+      try {
+        await vi.waitFor(
+          async () => {
+            const entries = [...(await startupEntries())].filter((entry) => !before.has(entry));
+            expect(entries).toHaveLength(1);
+            created = entries[0];
+            const report = JSON.parse(await readFile(join(startupRoot, created!, 'trace-pending.json'), 'utf8')) as {
+              status: string;
+              samples: unknown[];
+              errorName?: string;
+            };
+            expect(report.status).toBe(status);
+            expect(report.samples).toEqual([]);
+            if (status === 'main-evaluate-refused') {
+              expect(report.errorName).toBe('Error');
+            }
+          },
+          { timeout: 9000 },
+        );
+        rejectTracing?.(original);
+        const failure = await result;
+        expect(failure).toMatchObject({ cause: original });
+        expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+      } finally {
+        rejectTracing?.(original);
+        await result;
+        if (created) {
+          await rm(join(startupRoot, created), { recursive: true, force: true });
+        }
+        const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+        if (picked) {
+          await rm(dirname(picked), { recursive: true, force: true });
+        }
+        await rm(profileRoot, { recursive: true, force: true });
+      }
+    },
+    12_000,
+  );
 });
 
 describe('actual desktop runtime lease observation', () => {

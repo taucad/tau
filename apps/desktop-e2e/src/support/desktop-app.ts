@@ -38,6 +38,128 @@ const clientRoot = process.env['TAU_DESKTOP_CLIENT_ROOT'] ?? join(workspaceRoot,
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
 const defaultPackagedExecutable = join(desktopRoot, 'package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau');
 const diagnosticsRoot = join(workspaceRoot, 'out/test-results/desktop-e2e');
+/** Milliseconds. The opt-in startup probe begins only if tracing remains pending. */
+const traceProbeDelay = 2000;
+/** Milliseconds. A main-process observation cannot extend a failed startup indefinitely. */
+const traceProbeMainLimit = 5000;
+/** Milliseconds between the two renderer CPU samples. */
+const traceProbeCpuInterval = 1000;
+
+const observePendingTrace = async (
+  application: ElectronApplication,
+  directory: string,
+  signal: AbortSignal,
+): Promise<void> => {
+  const observation: {
+    status: string;
+    samples: unknown[];
+    errorName?: string;
+  } = { status: 'waiting', samples: [] };
+  const path = join(directory, 'trace-pending.json');
+  const persist = async (): Promise<void> => writeFile(path, JSON.stringify(observation));
+  const read = async () => {
+    const mainDeadlineController = new AbortController();
+    try {
+      const mainDeadline = async (): Promise<never> => {
+        await wait(traceProbeMainLimit, undefined, {
+          signal: AbortSignal.any([signal, mainDeadlineController.signal]),
+        });
+        throw new Error('main-evaluate-timeout');
+      };
+      return await Promise.race([
+        application.evaluate(({ app, BrowserWindow }) => {
+          const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+          if (windows.length !== 1) {
+            return {
+              status: windows.length === 0 ? 'missing-window' : 'ambiguous-window',
+              windowCount: windows.length,
+            } as const;
+          }
+          const contents = windows[0]!.webContents;
+          const rendererPid = contents.getOSProcessId();
+          const frames = contents.mainFrame.framesInSubtree;
+          const selected = {
+            windowCount: 1,
+            webContentsId: contents.id,
+            rendererPid,
+            loading: contents.isLoading(),
+            loadingMainFrame: contents.isLoadingMainFrame(),
+            waitingForResponse: contents.isWaitingForResponse(),
+            crashed: contents.isCrashed(),
+            appDocument: contents.getURL().startsWith('app://tau/'),
+            frameCount: frames.length,
+            frames: frames.slice(0, 16).map((frame) => ({
+              processId: frame.processId,
+              routingId: frame.routingId,
+              detached: frame.detached,
+            })),
+          };
+          if (rendererPid <= 0) {
+            return { status: 'missing-renderer', ...selected } as const;
+          }
+          const metrics = app.getAppMetrics().filter((metric) => metric.pid === rendererPid);
+          if (metrics.length !== 1) {
+            return {
+              status: metrics.length === 0 ? 'missing-metric' : 'ambiguous-metric',
+              ...selected,
+            } as const;
+          }
+          const metric = metrics[0]!;
+          return {
+            status: 'selected',
+            ...selected,
+            creationTime: metric.creationTime,
+            cpu: {
+              percentCPUUsage: metric.cpu.percentCPUUsage,
+              cumulativeCPUUsage: metric.cpu.cumulativeCPUUsage,
+            },
+          } as const;
+        }),
+        mainDeadline(),
+      ]);
+    } finally {
+      mainDeadlineController.abort();
+    }
+  };
+  try {
+    await persist();
+    await wait(traceProbeDelay, undefined, { signal });
+    const first = await read();
+    signal.throwIfAborted();
+    observation.samples.push(first);
+    await persist();
+    if (first.status !== 'selected') {
+      observation.status = first.status;
+      return;
+    }
+    await wait(traceProbeCpuInterval, undefined, { signal });
+    const second = await read();
+    signal.throwIfAborted();
+    observation.samples.push(second);
+    observation.status =
+      second.status === 'selected' &&
+      second.rendererPid === first.rendererPid &&
+      second.creationTime === first.creationTime &&
+      second.webContentsId === first.webContentsId
+        ? 'selected'
+        : second.status === 'selected'
+          ? 'renderer-changed'
+          : second.status;
+  } catch (error) {
+    observation.status = signal.aborted
+      ? signal.reason === 'test-finished'
+        ? 'test-finished'
+        : 'trace-settled'
+      : error instanceof Error && error.message === 'main-evaluate-timeout'
+        ? 'main-evaluate-timeout'
+        : 'main-evaluate-refused';
+    if (!signal.aborted) {
+      observation.errorName = error instanceof Error ? error.name : typeof error;
+    }
+  } finally {
+    await persist();
+  }
+};
 
 /** Select the complete descendant command records from one successful ps snapshot. */
 export const desktopDescendants = (
@@ -508,6 +630,10 @@ export const launchDesktopApp = async (options: {
   readonly preserveProfile?: boolean | undefined;
   /** Capture startup traffic before Playwright can attach its request listener. */
   readonly captureStartupNetwork?: boolean | undefined;
+  /** Collect private renderer state only while the original tracing call is pending. */
+  readonly startupDiagnostic?: boolean | undefined;
+  /** Unit tests supply an owned launcher without starting a native process. */
+  readonly launchElectron?: typeof electron.launch | undefined;
   /** WAV input for Chromium's fake capture driver; leaves the OS microphone unchanged. */
   readonly fakeMicrophonePath?: string | undefined;
 }): Promise<DesktopSession> => {
@@ -566,7 +692,7 @@ export const launchDesktopApp = async (options: {
   };
   await recordStartup(startupStage);
 
-  const launch = electron.launch({
+  const launchOptions = {
     ...(packaged ? { executablePath: packagedExecutable } : {}),
     args: [
       ...(packaged ? [] : [desktopRoot]),
@@ -613,7 +739,8 @@ export const launchDesktopApp = async (options: {
       TAU_E2E_HIDE_WINDOW: '1',
       ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
     },
-  });
+  };
+  const launch = options.launchElectron ? options.launchElectron(launchOptions) : electron.launch(launchOptions);
   let application: ElectronApplication;
   try {
     application = await launch;
@@ -625,16 +752,20 @@ export const launchDesktopApp = async (options: {
   owner.child = child;
   let sessionReturned = false;
   let startupFinished = false;
+  let traceProbeAbort: AbortController | undefined;
+  let traceProbe: Promise<void> | undefined;
   const assertStartupActive = (): void => {
     if (startupFinished) {
       throw new Error('Desktop startup finished before a session was returned.');
     }
   };
-  onTestFinished(() => {
+  onTestFinished(async () => {
     startupFinished = true;
+    traceProbeAbort?.abort('test-finished');
     if (!sessionReturned && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
     }
+    await traceProbe?.catch(() => undefined);
   });
   /* Installed before the first window loads, and kept for the whole session, so
    * startup and late traffic are both observed. */
@@ -710,7 +841,19 @@ export const launchDesktopApp = async (options: {
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     await recordStartup('trace-start');
     assertStartupActive();
-    await page.context().tracing.start({ screenshots: true, snapshots: true });
+    const tracingStart = page.context().tracing.start({ screenshots: true, snapshots: true });
+    if (options.startupDiagnostic) {
+      traceProbeAbort = new AbortController();
+      traceProbe = observePendingTrace(application, startupDirectory, traceProbeAbort.signal);
+      // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- Attach before the original tracing promise settles.
+      void traceProbe.catch(() => undefined);
+    }
+    try {
+      await tracingStart;
+    } finally {
+      traceProbeAbort?.abort('trace-settled');
+      await traceProbe?.catch(() => undefined);
+    }
     assertStartupActive();
   } catch (error) {
     child.kill('SIGKILL');

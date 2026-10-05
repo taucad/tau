@@ -7,6 +7,7 @@
  * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE for packaged mode; absolute TAU_E2E_BROWSER_PHYSICAL_CLOSURE for --unpackaged-writer-control.
  * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only);
  * TAU_E2E_BROWSER_PHYSICAL_CLOSURE forwards the absolute physical pin artifact path; --test-name-pattern selects tests.
+ * TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC=1 explicitly enables the installed startup-only diagnostic.
  * Usage: pnpm nx run desktop-e2e:test:e2e:desktop:completed-artifact [--args='--test-name-pattern="pattern" [--isolated-cloud-gateway]']
  * Exit codes: 0 when package tests pass; non-zero on preflight, infrastructure, migration, or test failure.
  */
@@ -50,6 +51,10 @@ const main = async (): Promise<void> => {
     throw new Error('Unpackaged isolated mode selects only the actual missing-writer utility control.');
   }
   const isolatedCloudGateway = values['isolated-cloud-gateway'] || unpackagedWriterControl;
+  const startupDiagnostic = process.env['TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC'];
+  if (startupDiagnostic !== undefined && !['0', '1', 'false'].includes(startupDiagnostic)) {
+    throw new Error('TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC accepts only 1, 0, or false.');
+  }
   const executable = process.env['TAU_E2E_DESKTOP_EXECUTABLE'];
   if (!unpackagedWriterControl && (!executable || !isAbsolute(executable) || !existsSync(executable))) {
     throw new Error('TAU_E2E_DESKTOP_EXECUTABLE must name an existing absolute packaged executable.');
@@ -342,6 +347,7 @@ const main = async (): Promise<void> => {
           }
         : {}),
       ...(executable === undefined ? {} : { TAU_E2E_DESKTOP_EXECUTABLE: executable }),
+      ...(startupDiagnostic === '1' ? { TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC: '1' } : {}),
       ...(browserClosure === undefined ? {} : { TAU_E2E_BROWSER_PHYSICAL_CLOSURE: browserClosure }),
       TAU_E2E_EXTERNAL_SERVICES: 'true',
       TAU_E2E_POSTGRES_CONTAINER: postgresContainer,

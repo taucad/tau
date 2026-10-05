@@ -305,6 +305,28 @@ afterEach(async ({ task }) => {
   }
 });
 
+test.skipIf(!desktopE2ECompletedArtifact || process.env['TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC'] !== '1')(
+  '[startup-diagnostic] observes installed startup through the original tracing call only',
+  async () => {
+    if (!desktopE2ECompletedArtifact) {
+      throw new Error('Startup diagnostic requires the selected completed desktop artifact.');
+    }
+    const account = tauTestAccount('published-part-startup');
+    seededEmail = account.email;
+    const token = await seedTauTestUser(account);
+    fixture = await startGatewayFixture();
+    session = await launchDesktopApp({
+      token,
+      packaged: true,
+      startupDiagnostic: true,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Native launch environment uses these external keys.
+      env: { TAU_DEBUG: 'true', TAU_E2E_DISABLE_CREDENTIAL_PERSISTENCE: '1' },
+    });
+    expect(session.page.isClosed()).toBe(false);
+  },
+  60_000,
+);
+
 const packaged = desktopE2ECompletedArtifact || process.env['TAU_E2E_PUBLISHED_PACKAGED'] === 'true';
 test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
   `${packaged ? '[completed-artifact]' : '[unpackaged-interim]'} reopens the browser custom native pin through a fresh trusted Electron lease`,

@@ -1,10 +1,12 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import type { WatchEvent } from '@taucad/filesystem';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 
 const mockReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
 const mockListDirectory = vi.fn<(path: string) => Promise<ListedDirectoryEntry[]>>();
 const mockUnsubscribe = vi.fn<() => void>();
+let watchCallback: ((event: WatchEvent) => void) | undefined;
 let treeCallback: (() => void) | undefined;
 const mockSubscribeTree = vi.fn<(callback: () => void) => () => void>((callback) => {
   treeCallback = callback;
@@ -15,6 +17,9 @@ let treeSnapshot = new Map<string, { path: string; type: 'file'; size: number; m
 let treeWrites = 0;
 
 const mockTreeService = {
+  closed: new Promise<void>(() => {
+    /* This watch stays open until fixture disposal. */
+  }),
   getTreeSnapshot: () => treeSnapshot,
   listDirectory: mockListDirectory,
   subscribeTree: mockSubscribeTree,
@@ -25,12 +30,24 @@ function writeTreeFile(path: string): void {
   treeWrites += 1;
   treeSnapshot = new Map(treeSnapshot).set(path, { path, type: 'file', size: treeWrites, mtimeMs: treeWrites });
   treeCallback?.();
+  if (path === '.agents' || path.startsWith('.agents/')) {
+    watchCallback?.({ type: 'change', path });
+  }
 }
+
+const mockContentService = {
+  watchReady: (_request: unknown, listener: (event: WatchEvent) => void) => {
+    watchCallback = listener;
+    mockSubscribeTree(() => undefined);
+    return { ready: Promise.resolve(), closed: mockTreeService.closed, dispose: mockUnsubscribe };
+  },
+};
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     readFile: mockReadFile,
     treeService: mockTreeService,
+    contentService: mockContentService,
   }),
 }));
 
@@ -100,6 +117,55 @@ describe('usePromptSkillsCatalog', () => {
     });
   });
 
+  it('refreshes equal-metadata skill bytes and reset without rerendering equal values', async () => {
+    serveSingleSkill('alpha', 'Alpha');
+    let renders = 0;
+    const { result } = renderHook(() => {
+      renders++;
+      return useSkillsCatalog();
+    });
+    await waitFor(() => {
+      expect(result.current.find((skill) => skill.name === 'alpha')?.description).toBe('Alpha');
+    });
+    const initialRenders = renders;
+    const initialReads = mockReadFile.mock.calls.length;
+    act(() => {
+      watchCallback?.({ type: 'change', path: '.agents/skills/alpha/SKILL.md' });
+    });
+    await waitFor(() => {
+      expect(mockReadFile).toHaveBeenCalledTimes(initialReads * 2);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(renders).toBe(initialRenders);
+    serveSingleSkill('alpha', 'Bravo');
+    act(() => {
+      watchCallback?.({ type: 'change', path: '.agents/skills/alpha/SKILL.md' });
+    });
+    await waitFor(() => {
+      expect(result.current.find((skill) => skill.name === 'alpha')?.description).toBe('Bravo');
+    });
+    serveSingleSkill('alpha', 'Delta');
+    act(() => {
+      watchCallback?.({ type: 'reset' });
+    });
+    await waitFor(() => {
+      expect(result.current.find((skill) => skill.name === 'alpha')?.description).toBe('Delta');
+    });
+  });
+
+  it('shares command and prompt acquisition while retaining distinct selections', async () => {
+    serveSingleSkill('alpha', 'Alpha');
+    const { result } = renderHook(() => ({ commands: useSkillsCatalog(), prompt: usePromptSkillsCatalog() }));
+    await waitFor(() => {
+      expect(result.current.commands.some((skill) => skill.name === 'alpha')).toBe(true);
+    });
+    expect(result.current.prompt.some((skill) => skill.name === 'alpha')).toBe(true);
+    expect(mockListDirectory.mock.calls.filter(([path]) => path === '.agents/skills')).toHaveLength(1);
+    expect(mockReadFile.mock.calls.filter(([path]) => path === '.agents/skills/alpha/SKILL.md')).toHaveLength(1);
+  });
+
   it('should re-read the listing when the file tree changes mid-session', async () => {
     serveSingleSkill('alpha', 'Alpha v1');
 
@@ -153,17 +219,19 @@ describe('usePromptSkillsCatalog', () => {
     act(() => {
       writeTreeFile('.agents/skills/beta/SKILL.md');
     });
+    expect(mockListDirectory.mock.calls.filter(([path]) => path === '.agents/skills')).toHaveLength(1);
+    await act(async () => {
+      first.resolve([skillDirectoryRow('alpha')]);
+      await first.promise;
+    });
     await waitFor(() => {
       expect(mockListDirectory.mock.calls.filter(([path]) => path === '.agents/skills')).toHaveLength(2);
     });
+    expect(result.current.some((skill) => skill.name === 'alpha')).toBe(false);
 
     second.resolve([skillDirectoryRow('beta')]);
     await waitFor(() => {
       expect(result.current.some((skill) => skill.name === 'beta')).toBe(true);
-    });
-    await act(async () => {
-      first.resolve([skillDirectoryRow('alpha')]);
-      await first.promise;
     });
     expect(result.current.some((skill) => skill.name === 'beta')).toBe(true);
     expect(result.current.some((skill) => skill.name === 'alpha')).toBe(false);

@@ -2,9 +2,18 @@ import { expectTypeOf, it, describe } from 'vitest';
 import type { FileStat } from '@taucad/types';
 import type { FileSystemProvider, HeadFileStat } from '#types.js';
 
+declare const provider: FileSystemProvider;
+
 describe('FileSystemProvider wire types', () => {
   it('stat and lstat resolve to FileStat from @taucad/types', () => {
-    expectTypeOf<Awaited<ReturnType<FileSystemProvider['stat']>>>().toEqualTypeOf<FileStat>();
+    expectTypeOf(provider.stat('log')).resolves.toEqualTypeOf<FileStat>();
+    expectTypeOf(provider.stat('log', { content: 'head' })).resolves.toEqualTypeOf<FileStat | HeadFileStat>();
+    const legacy: FileSystemProvider['stat'] = async (_path: string): Promise<FileStat> => ({
+      type: 'dir',
+      size: 0,
+      mtimeMs: 0,
+    });
+    expectTypeOf(legacy).toExtend<FileSystemProvider['stat']>();
     expectTypeOf<Awaited<ReturnType<FileSystemProvider['lstat']>>>().toEqualTypeOf<FileStat>();
   });
 

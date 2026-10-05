@@ -69,6 +69,8 @@ export function createWorkbenchLayoutStore(
   }>,
 ): Readonly<{
   read: (notify?: boolean) => Promise<boolean>;
+  /** Fence a pending read as soon as its source changes. */
+  invalidateRead: () => void;
   /** *Try again* after reads stopped: a fresh set of attempts. */
   retryRead: () => Promise<boolean>;
   edit: (next: WorkbenchLayout) => Promise<boolean>;
@@ -401,6 +403,9 @@ export function createWorkbenchLayoutStore(
   };
   return {
     read,
+    invalidateRead: () => {
+      readGeneration++;
+    },
     edit: async (next) => {
       if (isDisposed()) {
         return false;

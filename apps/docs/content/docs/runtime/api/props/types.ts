@@ -57,9 +57,7 @@ export type {
   AuthoredAssemblySource,
   AuthoredPartOccurrence,
   AuthoredPartRecipe,
-  ComposeHandlesInput,
   ExportOutcome,
-  HandleSnapshotExactDescriptor,
   PublishAssemblyOutcome,
   PublishedAssembly,
   PublishedAssemblyComponentPlacement,
@@ -74,6 +72,7 @@ export type {
   PublishedPartReference,
   PublishedPartVariant,
 } from '@taucad/runtime/types';
+export type { ComposeHandlesInput, HandleSnapshotExactDescriptor } from '@taucad/runtime/kernel';
 export type { RuntimeFileSystem } from '@taucad/runtime';
 export type {
   Description,

@@ -43,7 +43,7 @@ export function PrintStages({ children }: { readonly children: React.ReactNode }
   return (
     <div
       data-slot='print-stages'
-      className='flex min-w-0 flex-col divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70 bg-background'
+      className='flex min-w-0 shrink-0 flex-col divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70 bg-background'
       onKeyDown={(event) => {
         const move = stageKeys[event.key];
         if (move === undefined || !(event.target instanceof HTMLElement) || !event.target.dataset['printStage']) {

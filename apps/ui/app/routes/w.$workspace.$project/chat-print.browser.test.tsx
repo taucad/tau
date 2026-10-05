@@ -209,6 +209,18 @@ describe('Print pane screenshots', () => {
     },
   );
 
+  it('should scroll the pane to every stage instead of clipping the stages to its height', async () => {
+    await mount('router', 720);
+    const control = await screen.findByRole('region', { name: 'Control' });
+    // A pane shorter than its stages, as a docked pane often is.
+    screen.getByTestId('frame').style.height = '400px';
+    const stages = control.closest<HTMLElement>('[data-slot="print-stages"]')!;
+    const scroller = stages.parentElement!;
+    // A stage list that shrinks to the pane hides what is below it and leaves nothing to scroll.
+    expect(stages.scrollHeight - stages.clientHeight).toBeLessThanOrEqual(1);
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+  });
+
   it('should space the Prepare setup rows evenly', async () => {
     await page.viewport(800, 1200);
     await mount('studio', 720);

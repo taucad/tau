@@ -1091,7 +1091,8 @@ export const grblSimulatorMachine = defineMachine({
       stream: createVirtualGrblStream(controller),
       runtime,
       manifest: machineManifestOf(manifest, grblSubmissionConfiguration.manifest),
-      id: input.candidate.id,
+      // The host binds the claimed serial as the physical identity; the session must report the same.
+      id: input.candidate.claimedIdentity.serial ?? input.candidate.id,
       name: input.candidate.name,
       pollInterval: grblSimulatorDefaults.pollInterval,
       lid: (button) => {

@@ -296,7 +296,7 @@
     "test:e2e": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "Chromium suites for worker capabilities and the CAD viewer's real Dockview and SVG interactions. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium."
+        "description": "Chromium suites for worker capabilities and the CAD viewer's real Dockview, SVG and GPU resize interactions. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium."
       },
       "dependsOn": ["copy-assets", "^copy-assets"],
       "options": {
@@ -306,7 +306,8 @@
           "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/svg/svg-viewer.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts",
           "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts",
-          "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts"
+          "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/three/viewer-resize.vitest.browser.config.ts"
         ],
         "parallel": false
       }

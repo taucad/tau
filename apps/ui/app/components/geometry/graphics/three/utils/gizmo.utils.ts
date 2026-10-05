@@ -7,7 +7,7 @@
 
 import { useThree } from '@react-three/fiber';
 import type { ViewportGizmo } from 'three-viewport-gizmo';
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import * as THREE from 'three';
 import {
   calculateGizmoFovFromAngle,
@@ -82,7 +82,7 @@ type GizmoRefLike = Readonly<{
  */
 export function useGizmoResizeSync(gizmoRef: GizmoRefLike): void {
   const size = useThree((state) => state.size);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (size.width > 0 && size.height > 0) {
       gizmoRef.current?.update();
     }

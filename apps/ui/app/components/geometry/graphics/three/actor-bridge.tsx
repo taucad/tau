@@ -56,7 +56,8 @@ export function ActorBridge(): ReactNode {
   const setRenderFrame = useSetRenderFrame();
   const synchronizingControlsRef = useRef(false);
   const lastPublicationRef = useRef<
-    { camera: ThreeCamera; controls: unknown; revision: number; near: number; far: number } | undefined
+    | { camera: ThreeCamera; controls: unknown; revision: number; near: number; far: number; verticalSpan: number }
+    | undefined
   >(undefined);
 
   useLayoutEffect(() => {
@@ -109,7 +110,9 @@ export function ActorBridge(): ReactNode {
       const state = get();
       state.raycaster.near = camera.near;
       state.raycaster.far = camera.far;
-      graphicsActor.send({ type: 'cameraViewChanged', verticalSpan: snapshot.view.verticalSpan });
+      if (previous?.verticalSpan !== snapshot.view.verticalSpan) {
+        graphicsActor.send({ type: 'cameraViewChanged', verticalSpan: snapshot.view.verticalSpan });
+      }
       if (state.camera !== camera) {
         set({ camera });
       }
@@ -117,6 +120,7 @@ export function ActorBridge(): ReactNode {
         camera,
         controls: currentControls,
         revision: snapshot.revision,
+        verticalSpan: snapshot.view.verticalSpan,
         near: camera.near,
         far: camera.far,
       };

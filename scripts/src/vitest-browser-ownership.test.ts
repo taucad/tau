@@ -205,6 +205,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/code/code-editor.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/graphics/svg/svg-viewer.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts',
+        'apps/ui/app/components/geometry/graphics/three/viewer-resize.vitest.browser.config.ts',
         'apps/ui/app/components/panes/editor-layout.vitest.browser.config.ts',
         'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',

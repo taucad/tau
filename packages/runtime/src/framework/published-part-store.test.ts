@@ -90,12 +90,29 @@ describe('completed part publication groundwork', () => {
     });
     expect(second.reference).toEqual(first.reference);
     expect(writes).toHaveLength(2);
+    const { readFile } = filesystem;
+    const providerBuffers: ArrayBuffer[] = [];
+    function observedReadFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+    function observedReadFile(path: string, encoding: 'utf8'): Promise<string>;
+    async function observedReadFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+      if (encoding === 'utf8') {
+        return readFile(path, encoding);
+      }
+      const bytes = await readFile(path);
+      if (path === first.record.variants['default']!.glb.path) {
+        providerBuffers.push(bytes.buffer);
+      }
+      return bytes;
+    }
     const asset = await readPublishedPartAsset(
-      filesystem,
+      { ...filesystem, readFile: observedReadFile },
       first.reference,
       first.record.variants['default']!.glb.digest,
     );
     expect(asset).toEqual(glb);
+    expect(providerBuffers.length).toBeGreaterThan(0);
+    expect(asset.buffer).not.toBe(providerBuffers.at(-1));
+    expect(asset.byteLength).toBe(glb.byteLength);
     asset[0] = 0;
     expect(
       await readPublishedPartAsset(filesystem, first.reference, first.record.variants['default']!.glb.digest),

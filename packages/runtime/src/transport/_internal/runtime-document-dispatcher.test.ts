@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
+import { digestContent } from '@taucad/cache-core';
 import type { OnWorkerLog } from '@taucad/types';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
@@ -171,6 +172,36 @@ describe('document worker dispatcher', () => {
         expect.any(AbortSignal),
       );
       expect(source).toEqual(new Uint8Array([7, 8]));
+    } finally {
+      client.close();
+      server.dispose();
+    }
+  });
+
+  it('transfers published asset bytes through the document channel without retaining the sender buffer', async () => {
+    const ports = new MessageChannel();
+    const source = new Uint8Array([7, 8, 9]);
+    const digest = await digestContent({ bytes: source });
+    const reference = { path: 'published/part.json', digest };
+    const readPublishedPartAsset = vi.fn(async () => source);
+    const worker = {
+      readPublishedPartAsset,
+      setTelemetrySend: vi.fn(),
+      permitComputePublication: vi.fn(),
+    } as unknown as KernelWorker;
+    const server = createDocumentWorkerDispatcher(worker, wrapMessagePort(ports.port1));
+    const client = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2),
+      sessionKey: 'tau.runtime/v1',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    try {
+      await client.ready;
+      const received = await client.call('readPublishedPartAsset', { reference, digest });
+      expect(readPublishedPartAsset).toHaveBeenCalledWith(reference, digest, expect.any(AbortSignal));
+      expect(received).toEqual(new Uint8Array([7, 8, 9]));
+      expect(source.buffer.byteLength).toBe(0);
+      expect(received.buffer.byteLength).toBe(3);
     } finally {
       client.close();
       server.dispose();

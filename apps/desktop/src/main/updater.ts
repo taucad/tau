@@ -1,10 +1,13 @@
 /**
- * Desktop updates from the repository's latest GitHub Release.
+ * Desktop updates from a fixed feed in the repository's GitHub Releases.
  *
- * `release-build.yml` attaches one feed per platform to a desktop release
- * (`desktop-update-<platform>-<arch>.json`, in the Squirrel.Mac JSON shape) and
- * marks the release "latest" only after every archive is attached, so
- * `/releases/latest/download/<feed>` always names a complete release.
+ * `release-build.yml` writes one feed per platform
+ * (`desktop-update-<platform>-<arch>.json`, in the Squirrel.Mac JSON shape) to
+ * the fixed `desktop-feed` prerelease only after every archive of a desktop
+ * release is attached, so the feed always names a complete release. The feed
+ * does not depend on the repository's "Latest" badge, which UI and API
+ * releases share. Desktop releases still become latest and carry their own
+ * feeds, for builds that read `/releases/latest/download/<feed>`.
  *
  * - macOS (signed): Electron's `autoUpdater` (Squirrel.Mac) downloads the ZIP,
  *   verifies it carries the running app's code signature, and installs it on
@@ -14,8 +17,8 @@
  *   release page; the person downloads the new archive themselves.
  *
  * Unpackaged runs, staging packages and `TAU_DESKTOP_UPDATES=off` never check:
- * a staging build ships as a prerelease, which is never "latest", so the latest
- * feed would only ever offer it a production build.
+ * a staging build ships as a prerelease that writes no feed, so the feed would
+ * only ever offer it a production build.
  */
 import { z } from 'zod';
 
@@ -41,9 +44,12 @@ const updateFeedSchema = z.object({
 /** An available update: the release's version, tag and page. */
 export type AvailableUpdate = { readonly version: string; readonly tag: string; readonly releasePage: string };
 
-/** The feed a platform reads from the latest release. */
+/** The release tag whose assets are the update feeds; release-build.yml replaces them. */
+export const updateFeedTag = 'desktop-feed';
+
+/** The fixed feed a platform reads. */
 export const updateFeedUrl = (platform: string, arch: string, repository = updateRepository): string =>
-  `https://github.com/${repository}/releases/latest/download/desktop-update-${platform}-${arch}.json`;
+  `https://github.com/${repository}/releases/download/${updateFeedTag}/desktop-update-${platform}-${arch}.json`;
 
 const versionPattern = /^(\d+)\.(\d+)\.(\d+)$/u;
 

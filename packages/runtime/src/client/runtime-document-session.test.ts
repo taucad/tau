@@ -585,6 +585,18 @@ describe('document channel session', () => {
   it('keeps transient evaluation current and rejects only the matching view operation', async () => {
     const ports = new MessageChannel();
     const commands: Array<{ name: string; args: unknown }> = [];
+    /* Port messages and timers are separate queues, so one `nextTurn` does not prove the
+     * server has seen a notify; wait for the command sent after `from` instead. */
+    const commandAfter = async <Name extends keyof RuntimeDocumentProtocol['notifies']>(
+      name: Name,
+      from: number,
+    ): Promise<RuntimeDocumentProtocol['notifies'][Name]['args']> => {
+      await vi.waitFor(() => {
+        expect(commands.slice(from).some((command) => command.name === name)).toBe(true);
+      });
+      return commands.slice(from).find((command) => command.name === name)
+        ?.args as RuntimeDocumentProtocol['notifies'][Name]['args'];
+    };
     const server = createChannelServer<RuntimeDocumentProtocol>({
       port: wrapMessagePort(ports.port1, { label: 'document-server' }),
       sessionKey: 'document-session-test',
@@ -686,10 +698,9 @@ describe('document channel session', () => {
     expect(await updated).toMatchObject({ superseded: false, evaluation: { id: 'e2', transient: true } });
     expect(await document.evaluation()).toMatchObject({ superseded: false, evaluation: { id: 'e2', transient: true } });
 
+    const staleOpenFrom = commands.length;
     const staleView = document.view('board');
-    await nextTurn();
-    const staleOpen = commands.find((command) => command.name === 'openView')
-      ?.args as RuntimeDocumentProtocol['notifies']['openView']['args'];
+    const staleOpen = await commandAfter('openView', staleOpenFrom);
     server.notify('rendered', {
       subscriptionId: staleOpen.subscriptionId,
       intent: 1,
@@ -703,10 +714,9 @@ describe('document channel session', () => {
       artifact: { mimeType: 'application/octet-stream', content: { delivery: 'pooled', key: 'old-pool' } },
     });
     await nextTurn();
+    const newerRequestFrom = commands.length;
     const newerView = staleView.update({ options: { scale: 2 } });
-    await nextTurn();
-    const newerRequest = commands.findLast((command) => command.name === 'updateView')
-      ?.args as RuntimeDocumentProtocol['notifies']['updateView']['args'];
+    const newerRequest = await commandAfter('updateView', newerRequestFrom);
     staleBinary.resolve();
     await vi.waitFor(() => {
       expect(pool.has('old-pool')).toBe(false);
@@ -726,10 +736,9 @@ describe('document channel session', () => {
     await expect(newerView).resolves.toMatchObject({ superseded: false, rendering: { hash: 'new' } });
     staleView.close();
 
+    const openedViewFrom = commands.length;
     const view = document.view('board');
-    await nextTurn();
-    const openedView = commands.findLast((command) => command.name === 'openView')
-      ?.args as RuntimeDocumentProtocol['notifies']['openView']['args'];
+    const openedView = await commandAfter('openView', openedViewFrom);
     const rendered = view.rendering();
     server.notify('rendering', {
       subscriptionId: openedView.subscriptionId,

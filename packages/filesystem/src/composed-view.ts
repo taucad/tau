@@ -37,6 +37,7 @@ import type {
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { getErrno } from '@taucad/utils/error';
 import type {
+  FileStatOptions,
   DirectoryEntry,
   FileReadStreamOptions,
   FileSystemProvider,
@@ -315,13 +316,18 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return path;
   };
 
-  const upperStat = async (path: string): Promise<FileStat | undefined> => {
+  async function upperStat(path: string): Promise<FileStat | undefined>;
+  async function upperStat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat | undefined>;
+  async function upperStat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat | undefined> {
     try {
-      return await base.stat(path);
-    } catch {
+      return options ? await base.stat(path, options) : await base.stat(path);
+    } catch (error) {
+      if (options && !(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+        throw error;
+      }
       return undefined;
     }
-  };
+  }
 
   /**
    * Whether the checkout's own tree owns an overlay unit, and therefore the
@@ -470,17 +476,24 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     return names;
   };
 
-  const statAt = async (path: string, route: Route): Promise<FileStat> => {
+  async function statAt(path: string, route: Route): Promise<FileStat>;
+  async function statAt(path: string, route: Route, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
+  async function statAt(path: string, route: Route, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
     if (route.kind === 'overlay') {
-      return overlayStat(overlayNode(route.overlay, path));
+      const stat = overlayStat(overlayNode(route.overlay, path));
+      return options ? headFileStatFromStat(stat) : stat;
     }
-    const stat = await upperStat(path);
+    const stat = options ? await upperStat(path, options) : await upperStat(path);
     if (stat !== undefined) {
       return stat;
     }
     /* A merge directory the checkout does not have is still a directory. */
-    return route.kind === 'merge' ? { type: 'dir', size: 0, mtimeMs: immutableMtimeMs } : base.stat(path);
-  };
+    return route.kind === 'merge'
+      ? { type: 'dir', size: 0, mtimeMs: immutableMtimeMs }
+      : options
+        ? base.stat(path, options)
+        : base.stat(path);
+  }
 
   /** Every row the checkout holds in a directory, hidden ones included, batched when the base offers it. */
   function baseEntries(path: string): Promise<Array<{ name: string } & FileStat>>;
@@ -825,11 +838,12 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       return namesFor(target, await routeFor(target));
     },
     readdirWithStats,
-    async stat(path) {
+    stat: (async (path: string, options?: FileStatOptions) => {
       const target = readablePath(canonical(path));
       const route = await routeFor(target);
-      return { ...(await statAt(target, route)), provenance: provenanceForRoute(target, route) };
-    },
+      const stat = options ? await statAt(target, route, options) : await statAt(target, route);
+      return { ...stat, provenance: provenanceForRoute(target, route) };
+    }) as FileSystemProvider['stat'],
     async lstat(path) {
       const target = readablePath(canonical(path));
       const route = await routeFor(target);

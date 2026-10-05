@@ -1,3 +1,4 @@
+import type { FileStatOptions } from '@taucad/filesystem';
 /**
  * Content through the root that owns the path (charter D5, D12).
  *
@@ -256,10 +257,10 @@ export const createRootedContentClient = <Consumer extends string>(input: {
         const { files, relative } = await rooted([absolutePath]);
         return files.readdir(relative(absolutePath));
       },
-      stat: async (absolutePath) => {
+      stat: (async (absolutePath: string, options?: FileStatOptions) => {
         const { files, relative } = await rooted([absolutePath]);
-        return files.stat(relative(absolutePath));
-      },
+        return options ? files.stat(relative(absolutePath), options) : files.stat(relative(absolutePath));
+      }) as RootedFiles['stat'],
       exists: async (absolutePath) => {
         const { files, relative } = await rooted([absolutePath]);
         return files.exists(relative(absolutePath));

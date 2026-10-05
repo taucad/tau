@@ -218,6 +218,7 @@ describe('machine identity across telemetry', () => {
     expect(panes.result.current.preview.selected?.machineId).toBe('mini');
     expect(panes.result.current.other.selected?.machineId).toBe('x1');
     panes.unmount();
-    globalThis.localStorage.removeItem('tau:print:selected-machine:selection-sync');
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- Node26/jsdom can omit storage; the selection owner intentionally supports that environment.
+    globalThis.localStorage?.removeItem('tau:print:selected-machine:selection-sync');
   });
 });

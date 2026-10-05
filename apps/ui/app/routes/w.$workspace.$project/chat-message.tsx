@@ -11,7 +11,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
 import type { DynamicToolUIPart } from 'ai';
@@ -649,6 +649,29 @@ const activityIcons: Record<ActivityFamily, LucideIcon> = {
   other: Wrench,
 };
 
+const AssistantActivityGroup = memo(function AssistantActivityGroup({
+  group,
+  groupIndex,
+  messageId,
+  lastMeaningfulIndex,
+  isActiveGroup,
+  isMessageActive,
+}: {
+  readonly group: ActivityGroup;
+  readonly groupIndex: number;
+  readonly messageId: string;
+  readonly lastMeaningfulIndex: number;
+  readonly isActiveGroup: boolean;
+  readonly isMessageActive: boolean;
+}): React.JSX.Element | undefined {
+  return renderActivityGroup(group, groupIndex, {
+    messageId,
+    lastMeaningfulIndex,
+    isActiveGroup,
+    isMessageActive,
+  });
+});
+
 function AssistantParts({
   parts,
   messageId,
@@ -663,21 +686,20 @@ function AssistantParts({
     (state) => state.messageOrder.at(-1) === messageId && state.status === 'streaming',
   );
 
-  const renderContextForGroup = useCallback(
-    (absoluteIndex: number): PartRenderContext => {
-      const isLastGroup = absoluteIndex === lastGroupIndex;
-      return {
-        messageId,
-        lastMeaningfulIndex,
-        isActiveGroup: isLastGroup && isMessageActive,
-        isMessageActive,
-      };
-    },
-    [messageId, lastMeaningfulIndex, lastGroupIndex, isMessageActive],
-  );
-
   return (
-    <>{groups.map((group, groupIndex) => renderActivityGroup(group, groupIndex, renderContextForGroup(groupIndex)))}</>
+    <>
+      {groups.map((group, groupIndex) => (
+        <AssistantActivityGroup
+          key={group.kind === 'singleton' ? group.partIndex : group.partIndices[0]}
+          group={group}
+          groupIndex={groupIndex}
+          messageId={messageId}
+          lastMeaningfulIndex={lastMeaningfulIndex}
+          isActiveGroup={groupIndex === lastGroupIndex && isMessageActive}
+          isMessageActive={isMessageActive}
+        />
+      ))}
+    </>
   );
 }
 

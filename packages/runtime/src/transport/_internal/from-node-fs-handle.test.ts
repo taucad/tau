@@ -258,12 +258,13 @@ describe('fromNodeFS', () => {
   });
 });
 
-describe('fromNodeFS watch', () => {
-  /* FSEvents/inotify deliver asynchronously and, under machine load, well past
-   * vi.waitFor's 1 s default; the budget is generous because these tests assert
-   * delivery, never latency. */
-  const watchDeliveryBudget = { timeout: 10_000 } as const;
+/* FSEvents/inotify deliver asynchronously and, under machine load, well past
+ * vi.waitFor's 1 s default; the budget is generous because these tests assert
+ * delivery, never latency. A test waits for at most two deliveries, so its own
+ * timeout has to cover both budgets, or the 5 s default cuts them short. */
+const watchDeliveryBudget = { timeout: 10_000 } as const;
 
+describe('fromNodeFS watch', { timeout: 3 * watchDeliveryBudget.timeout }, () => {
   const roots: string[] = [];
 
   const createRoot = async (): Promise<string> => {

@@ -159,6 +159,62 @@ Framework-owned content requirements stay separate from plugin-owned option sche
 
 <auto-type-table path='./props/types.ts' name='CapabilitiesManifest' />
 
+## Published parts and assemblies
+
+An authored assembly names source recipes and occurrences under the client's rooted project filesystem. `AuthoredAssemblySource` selects either a project path or an in-memory file map; `AuthoredPartRecipe` selects source or an already issued part reference. Each `AuthoredPartOccurrence` is a group or a leaf. Publication resolves each leaf to an explicit variant in `PublishedPartOccurrence`.
+
+<auto-type-table path='./props/types.ts' name='AuthoredAssembly' />
+
+<auto-type-table path='./props/types.ts' name='AuthoredAssemblySource' />
+
+<auto-type-table path='./props/types.ts' name='AuthoredPartRecipe' />
+
+<auto-type-table path='./props/types.ts' name='AuthoredPartOccurrence' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartOccurrence' />
+
+`PublishedPartRecord` is the durable, versioned set of effective recipes. Each `PublishedPartVariant` pins a display GLB through `PublishedPartAsset`; `PublishedPartExact` adds optional native evidence and its producer-qualified codec. The host issues a digest-pinned `PublishedPartReference` to the record. `publishedPartRecordSchema` validates the record at wire and durable boundaries, including its asset and exact metadata.
+
+<auto-type-table path='./props/types.ts' name='PublishedPartRecord' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartVariant' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartAsset' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartExact' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartReference' />
+
+`PublishedAssembly` carries checked records and occurrences. `AssemblyDisplayProjector` is the trusted host-local admission/projection callback: admission validates the immutable closure, while projection returns flattened display bytes. `AdmittedAssembly` adds a client-local asset reader after host admission; callers do not construct its token. A `PublishedAssemblyRootSnapshot` observes the current shared root and generation, but cannot reconstruct a lost caller receipt. `PublishAssemblyOutcome` distinguishes published, superseded, cancelled, invalid, and commit-unknown outcomes; after commit-unknown, use its `readCurrent` callback before deciding what to do next.
+
+<auto-type-table path='./props/types.ts' name='PublishedAssembly' />
+
+<auto-type-table path='./props/types.ts' name='AssemblyDisplayProjector' />
+
+<auto-type-table path='./props/types.ts' name='AdmittedAssembly' />
+
+<auto-type-table path='./props/types.ts' name='PublishedAssemblyRootSnapshot' />
+
+<auto-type-table path='./props/types.ts' name='PublishAssemblyOutcome' />
+
+`PublishedAssemblyDocument` is the source-free session returned for an admitted root. Close it independently of an authored document. `PublishedExportInput` selects either a part reference and variant or an assembly root with optional `PublishedAssemblyComponentPlacement` values. A placement moves restored native geometry for one admitted canonical component without changing the pinned root. `ExportOutcome` carries admitted files or issues. `selectPublishedExportRoute` examines admitted metadata and declared capabilities to choose an eligible route; execution still validates immutable assets and the exact codec.
+
+<auto-type-table path='./props/types.ts' name='PublishedAssemblyDocument' />
+
+<auto-type-table path='./props/types.ts' name='PublishedExportInput' />
+
+<auto-type-table path='./props/types.ts' name='PublishedAssemblyComponentPlacement' />
+
+<auto-type-table path='./props/types.ts' name='ExportOutcome' />
+
+<auto-type-table path='./props/types.ts' name='PublishedExportRoute' />
+
+For kernel snapshot hooks, `HandleSnapshotExactDescriptor` reports portable producer/codec metadata without an asset address; the runtime attaches the immutable asset after serialization. `ComposeHandlesInput` gives a kernel the restored handles and placement for admitted occurrences, including any component-level mappings needed for exact assembly export.
+
+<auto-type-table path='./props/types.ts' name='HandleSnapshotExactDescriptor' />
+
+<auto-type-table path='./props/types.ts' name='ComposeHandlesInput' />
+
 ## Related
 
 - [Handle Errors](../guides/error-handling)

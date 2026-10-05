@@ -553,7 +553,7 @@ for (const workload of [
     // This first bounded recording freezes raw target/compositor/heap provenance. It is not a presented-frame verdict.
     const trajectoryBefore = await captureScaleViewportEvidence();
     expect(trajectoryBefore.identity.root).toBe(pin.root.digest);
-    const profile10k = workload.name === 'scale-10k' && process.env['TAU_E2E_SCALE_CPU_DIAGNOSTIC'] === '1';
+    const profile10k = workload.name === 'scale-10k' && inject('scaleCpuDiagnostic');
     if (profile10k) {
       await target.startCpuProfile('primary');
     }
@@ -2205,6 +2205,7 @@ for (const backend of ['webgl', 'webgpu'] as const) {
 declare module 'vitest' {
   /* eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- Vitest's ProvidedContext requires interface declaration merging. */ /* oxlint-disable-next-line typescript/consistent-type-definitions -- Vitest's ProvidedContext requires interface declaration merging. */
   export interface ProvidedContext {
+    scaleCpuDiagnostic: boolean;
     s15ReviewedCalibration: Readonly<
       Partial<
         Record<

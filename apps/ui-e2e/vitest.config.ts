@@ -78,6 +78,7 @@ export default defineConfig({
     provide: {
       crossOriginIsolation: !disableCoi,
       picovoxelExactPins,
+      scaleCpuDiagnostic: process.env['TAU_E2E_SCALE_CPU_DIAGNOSTIC'] === '1',
     },
     browser: {
       enabled: true,

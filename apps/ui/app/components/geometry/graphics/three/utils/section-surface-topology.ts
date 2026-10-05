@@ -1082,14 +1082,17 @@ const createParticipant = (options: {
   order: number;
   association?: GltfAssociation;
   sourceBinding?: GltfSectionSourceBinding;
+  worldMatricesCurrent?: boolean;
 }): SectionSurfaceParticipant => {
   const geometry = getModelComponentSourceGeometry(options.mesh, options.instanceId);
   if (!geometry) {
     throw new Error('Section participant has no live canonical source geometry');
   }
   getOrBuildBvh(geometry);
-  options.root.updateWorldMatrix(true, true);
-  options.mesh.updateWorldMatrix(true, false);
+  if (!options.worldMatricesCurrent) {
+    options.root.updateWorldMatrix(true, true);
+    options.mesh.updateWorldMatrix(true, false);
+  }
   const rootInverse = new THREE.Matrix4().copy(options.root.matrixWorld).invert();
   const placement = getModelComponentWorldMatrix(options.mesh, options.instanceId, new THREE.Matrix4());
   if (!placement) {
@@ -1603,6 +1606,7 @@ export const registerGltfSectionSurfaceSources = async (options: {
           instanceId,
           root: options.scene,
           order: participants.length,
+          worldMatricesCurrent: true,
           sourceBinding,
           association: getAssociation(
             evidence?.sourceObject ?? mesh,

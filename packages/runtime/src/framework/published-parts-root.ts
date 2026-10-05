@@ -1,15 +1,16 @@
 import { digestContent } from '@taucad/cache-core';
 import { canonicalJson } from '@taucad/utils/hash';
-import { assertRootedPath } from '@taucad/utils/path';
+import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
+import { z } from 'zod';
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
-import { readPublishedPartAsset } from '#framework/published-part-store.js';
+import { readPublishedPartAsset, writePublishedImmutableAsset } from '#framework/published-part-store.js';
 import {
   readAuthoredAssembly,
   resolveAuthoredAssembly,
   resolvePinnedAssembly,
 } from '#framework/published-assembly-graph.js';
 import type { KernelFileSystem } from '#types/runtime-kernel.types.js';
-import { publishedPartsRootSchema } from '#types/runtime-assembly.schemas.js';
+import { publishedPartAssetSchema, publishedPartsRootSchema } from '#types/runtime-assembly.schemas.js';
 import type {
   AuthoredAssemblySource,
   AuthoredPartRecipe,
@@ -25,6 +26,86 @@ import type {
   PublishedAssemblyAdmission,
 } from '#types/runtime-assembly.types.js';
 
+// The logical v1 root is stored in bounded immutable pieces; only this small v2 pointer is mutable.
+const chunkBytes = 1_048_576;
+const maximumPointerBytes = 4096;
+// The selected 100k-occurrence corpus is 10,704,060 canonical bytes (11 chunks).
+// 32 chunks bound the allocation while leaving room for longer real part/occurrence names.
+const maximumChunks = 32;
+const maximumRootBytes = chunkBytes * maximumChunks;
+const pointerSchema = z
+  .object({ schemaVersion: z.literal(2), generation: z.number().int().positive(), manifest: publishedPartAssetSchema })
+  .strict();
+const manifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    content: z
+      .object({ digest: publishedPartAssetSchema.shape.digest, byteLength: z.number().int().positive() })
+      .strict(),
+    chunks: z.array(publishedPartAssetSchema).min(1).max(maximumChunks),
+  })
+  .strict();
+type RootPointer = z.infer<typeof pointerSchema>;
+
+const storagePath = (rootPath: string, digest: PublishedPartAsset['digest'], extension: string): string => {
+  const slash = rootPath.lastIndexOf('/');
+  const parent = slash === -1 ? '' : rootPath.slice(0, slash);
+  return joinRelativePath(parent, `roots/sha256/${digest.slice('sha256:'.length)}.${extension}`);
+};
+
+const readPinnedBytes = async (
+  filesystem: KernelFileSystem,
+  asset: PublishedPartAsset,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const bytes = await filesystem.readFile(asset.path);
+  if (bytes.byteLength !== asset.byteLength || (await digestContent({ bytes })) !== asset.digest) {
+    throw new Error(`Published assembly content does not match its pinned digest and length: ${asset.path}`);
+  }
+  return bytes;
+};
+
+const decodeJson = (bytes: Uint8Array<ArrayBuffer>): unknown =>
+  JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+
+const readContent = async (
+  filesystem: KernelFileSystem,
+  path: string,
+  pointer: RootPointer,
+): Promise<PublishedPartsRoot> => {
+  if (
+    pointer.manifest.path !== storagePath(path, pointer.manifest.digest, 'json') ||
+    pointer.manifest.byteLength > chunkBytes
+  ) {
+    throw new Error('Published assembly manifest is outside its bounded root closure.');
+  }
+  const manifest = manifestSchema.parse(decodeJson(await readPinnedBytes(filesystem, pointer.manifest)));
+  if (
+    manifest.content.byteLength > maximumRootBytes ||
+    manifest.chunks.length !== Math.ceil(manifest.content.byteLength / chunkBytes)
+  ) {
+    throw new Error('Published assembly content exceeds its bounded root closure.');
+  }
+  const content = new Uint8Array(manifest.content.byteLength);
+  let offset = 0;
+  for (const chunk of manifest.chunks) {
+    const expectedLength = Math.min(chunkBytes, manifest.content.byteLength - offset);
+    if (chunk.path !== storagePath(path, chunk.digest, 'chunk') || chunk.byteLength !== expectedLength) {
+      throw new Error('Published assembly chunk order or length is invalid.');
+    }
+    // Read pinned chunks serially to bound outstanding buffers.
+    content.set(await readPinnedBytes(filesystem, chunk), offset);
+    offset += expectedLength;
+  }
+  if ((await digestContent({ bytes: content })) !== manifest.content.digest) {
+    throw new Error('Published assembly reconstructed content has a mismatched digest.');
+  }
+  const root = publishedPartsRootSchema.parse(decodeJson(content));
+  if (root.generation !== pointer.generation) {
+    throw new Error('Published assembly generation differs from its checked pointer.');
+  }
+  return root;
+};
+
 const readCurrent = async (
   filesystem: KernelFileSystem,
   path: string,
@@ -32,16 +113,21 @@ const readCurrent = async (
   bytes: Uint8Array<ArrayBuffer> | undefined;
   generation: number;
 }> => {
+  let bytes: Uint8Array<ArrayBuffer>;
   try {
-    const bytes = await filesystem.readFile(path);
-    const root = publishedPartsRootSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
-    return { bytes, generation: root.generation };
+    bytes = await filesystem.readFile(path);
   } catch (error) {
     if (isNotFoundError(error)) {
       return { bytes: undefined, generation: 0 };
     }
     throw error;
   }
+  if (bytes.byteLength > maximumPointerBytes) {
+    throw new Error('Published assembly pointer exceeds its bounded metadata limit.');
+  }
+  const pointer = pointerSchema.parse(decodeJson(bytes));
+  await readContent(filesystem, path, pointer);
+  return { bytes, generation: pointer.generation };
 };
 
 /** Re-read one shared project root after a caller loses its commit receipt. @internal */
@@ -73,11 +159,11 @@ export const readPinnedPublishedAssemblyRoot = async (
   if (path.length === 0) {
     throw new TypeError('Published root pin must name a file.');
   }
-  const bytes = await filesystem.readFile(path);
-  if (bytes.byteLength !== asset.byteLength || (await digestContent({ bytes })) !== asset.digest) {
-    throw new Error(`Published assembly root does not match its pinned digest and length: ${path}`);
+  const bytes = await readPinnedBytes(filesystem, asset);
+  if (bytes.byteLength > maximumPointerBytes) {
+    throw new Error('Published assembly pointer exceeds its bounded metadata limit.');
   }
-  return publishedPartsRootSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+  return readContent(filesystem, path, pointerSchema.parse(decodeJson(bytes)));
 };
 
 /** Re-admit one pinned root and all required display assets without reading authored source. @internal */
@@ -195,7 +281,47 @@ const commitPartsRoot = async (
     parts: admitted.parts,
     occurrences: admitted.occurrences,
   };
-  const bytes = new TextEncoder().encode(canonicalJson(publishedPartsRootSchema.parse(root)));
+  const content = new TextEncoder().encode(canonicalJson(publishedPartsRootSchema.parse(root)));
+  if (content.byteLength > maximumRootBytes) {
+    throw new Error('Published assembly root exceeds its bounded content limit.');
+  }
+  const chunks: PublishedPartAsset[] = [];
+  for (let offset = 0; offset < content.byteLength; offset += chunkBytes) {
+    const bytes = content.slice(offset, offset + chunkBytes);
+    // Admit each immutable chunk before the manifest and root pointer.
+    const digest = await digestContent({ bytes });
+    const asset = { path: storagePath(path, digest, 'chunk'), digest, byteLength: bytes.byteLength };
+    // Bounded checked writes preserve content-before-pointer order.
+    await writePublishedImmutableAsset(filesystem, { asset, bytes, publicationWriter: writer });
+    signal?.throwIfAborted();
+    chunks.push(asset);
+  }
+  const manifestBytes = new TextEncoder().encode(
+    canonicalJson(
+      manifestSchema.parse({
+        schemaVersion: 1,
+        content: { digest: await digestContent({ bytes: content }), byteLength: content.byteLength },
+        chunks,
+      }),
+    ),
+  );
+  if (manifestBytes.byteLength > chunkBytes) {
+    throw new Error('Published assembly manifest exceeds its bounded content limit.');
+  }
+  const manifestDigest = await digestContent({ bytes: manifestBytes });
+  const manifest = {
+    path: storagePath(path, manifestDigest, 'json'),
+    digest: manifestDigest,
+    byteLength: manifestBytes.byteLength,
+  };
+  await writePublishedImmutableAsset(filesystem, { asset: manifest, bytes: manifestBytes, publicationWriter: writer });
+  signal?.throwIfAborted();
+  const bytes = new TextEncoder().encode(
+    canonicalJson(pointerSchema.parse({ schemaVersion: 2, generation: root.generation, manifest })),
+  );
+  if (bytes.byteLength > maximumPointerBytes) {
+    throw new Error('Published assembly pointer exceeds its bounded metadata limit.');
+  }
   const slash = path.lastIndexOf('/');
   if (slash !== -1) {
     await writer.ensureDir(path.slice(0, slash));

@@ -18,6 +18,7 @@ import {
   summarizeScaleClosureBytes,
   collectCommittedScaleClosure,
   importPublishedScaleClosure,
+  readPublishedRootStorage,
   scrubScaleProducerSources,
 } from './parts-assemblies-scale.js';
 /* oxlint-enable no-restricted-imports */
@@ -108,6 +109,13 @@ afterAll(async () => {
 });
 
 describe('actual published scale closure controls', () => {
+  it('rejects an oversized pointer pin before reading closure bytes', async () => {
+    const read = vi.fn(async (_path: string) => new Uint8Array());
+    await expect(readPublishedRootStorage({ ...closure.root, byteLength: 4097 }, read)).rejects.toThrow(
+      /pointer exceeds its bounded metadata limit/u,
+    );
+    expect(read).not.toHaveBeenCalled();
+  });
   it('measures emitted JSCAD millimeters and placed world-meter spacing from actual admitted GLBs', async () => {
     const glb = published.admitted.publication.parts['p0000']?.variants['default']?.glb;
     if (!glb) {
@@ -135,7 +143,7 @@ describe('actual published scale closure controls', () => {
     expect(published.admitted.publication.occurrences[1]?.transform[12]).toBe(0.04);
   });
   it('retains the real root/record/GLB bytes and reopens them without producer source', async () => {
-    expect(closure.files).toHaveLength(3);
+    expect(closure.files).toHaveLength(5);
     expect(published.admitted.publication.parts['p0000']?.variants['default']?.exact).toBeUndefined();
     const consumerProject = await createOwnedProject();
     const consumerFs = consumerProject.fileSystem;
@@ -274,7 +282,7 @@ describe('actual scale closure byte denominators', () => {
     const result = summarizeScaleClosureBytes(closure);
     expect(result.completeClosureBytes).toBe(closure.files.reduce((sum, file) => sum + file.bytes.byteLength, 0));
     expect(result.completeClosureBytes).toBe(
-      result.rootBytes + result.partRecordBytes + result.allVariantGlbBytes + result.allVariantExactBytes,
+      result.rootStorageBytes + result.partRecordBytes + result.allVariantGlbBytes + result.allVariantExactBytes,
     );
     expect(result.assets.map(({ digest, byteLength }) => ({ digest, byteLength }))).toEqual(
       closure.files.map(({ digest, bytes }) => ({ digest, byteLength: bytes.byteLength })),

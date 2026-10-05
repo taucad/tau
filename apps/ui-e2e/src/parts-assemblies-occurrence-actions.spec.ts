@@ -163,13 +163,77 @@ async function readPin() {
     }
     const sha = async (bytes: Uint8Array<ArrayBuffer>) =>
       `sha256:${[...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
-    const rootBytes = await capture.readRawBytes(display.root.path);
-    if (rootBytes.byteLength !== display.root.byteLength || (await sha(rootBytes)) !== display.root.digest) {
-      throw new Error('Actual root digest/length changed.');
+    const parent = display.root.path.slice(0, display.root.path.lastIndexOf('/') + 1);
+    if (!/^\.tau\/artifacts\/reusable-parts\/[0-9a-f]{64}\/$/u.test(parent)) {
+      throw new Error('Actual root has no canonical managed parent.');
     }
-    const graph = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(rootBytes)) as {
+    const readPinned = async (asset: { path: string; digest: string; byteLength: number }) => {
+      if (!capture.isCurrent() || !asset.path.startsWith(parent) || asset.path.split('/').includes('..')) {
+        throw new Error('Actual root subject or managed path changed.');
+      }
+      const bytes = await capture.readRawBytes(asset.path);
+      if (bytes.byteLength !== asset.byteLength || (await sha(bytes)) !== asset.digest || !capture.isCurrent()) {
+        throw new Error('Actual root closure digest/length changed.');
+      }
+      return bytes;
+    };
+    const decodeRoot = (bytes: Uint8Array<ArrayBuffer>): unknown =>
+      JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    const rootBytes = await readPinned(display.root);
+    const pointer = decodeRoot(rootBytes) as {
+      schemaVersion: number;
+      generation: number;
+      manifest: { path: string; digest: string; byteLength: number };
+    };
+    const storagePath = (digest: string, extension: string): string =>
+      `${parent}roots/sha256/${digest.slice('sha256:'.length)}.${extension}`;
+    if (
+      rootBytes.byteLength > 4096 ||
+      pointer.schemaVersion !== 2 ||
+      !Number.isSafeInteger(pointer.generation) ||
+      pointer.generation < 1 ||
+      pointer.manifest.path !== storagePath(pointer.manifest.digest, 'json') ||
+      pointer.manifest.byteLength < 1 ||
+      pointer.manifest.byteLength > 1_048_576
+    ) {
+      throw new Error('Actual root pointer is invalid.');
+    }
+    const manifest = decodeRoot(await readPinned(pointer.manifest)) as {
+      schemaVersion: number;
+      content: { digest: string; byteLength: number };
+      chunks: Array<{ path: string; digest: string; byteLength: number }>;
+    };
+    if (
+      manifest.schemaVersion !== 1 ||
+      !Number.isSafeInteger(manifest.content.byteLength) ||
+      manifest.content.byteLength < 1 ||
+      manifest.content.byteLength > 32 * 1_048_576 ||
+      manifest.chunks.length !== Math.ceil(manifest.content.byteLength / 1_048_576)
+    ) {
+      throw new Error('Actual root manifest is invalid.');
+    }
+    const content = new Uint8Array(manifest.content.byteLength);
+    let offset = 0;
+    for (const chunk of manifest.chunks) {
+      const length = Math.min(1_048_576, content.byteLength - offset);
+      if (chunk.path !== storagePath(chunk.digest, 'chunk') || chunk.byteLength !== length) {
+        throw new Error('Actual root chunk order or length changed.');
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Reconstruct actual ordered immutable bytes under one captured authority.
+      content.set(await readPinned(chunk), offset);
+      offset += length;
+    }
+    if ((await sha(content)) !== manifest.content.digest || !capture.isCurrent()) {
+      throw new Error('Actual logical root digest or subject changed.');
+    }
+    const graph = decodeRoot(content) as {
+      schemaVersion: number;
+      generation: number;
       parts: Record<string, PublishedPartReference>;
     };
+    if (graph.schemaVersion !== 1 || graph.generation !== pointer.generation) {
+      throw new Error('Actual logical root generation changed.');
+    }
     const assets: Array<{ part: string; variant: string; glb: string; exact?: string }> = [];
     for (const [part, record] of Object.entries(display.admitted.publication.parts)) {
       for (const [variant, recipe] of Object.entries(record.variants)) {

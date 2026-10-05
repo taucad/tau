@@ -195,20 +195,78 @@ test('delivers custom native physical facts and a source-free browser pin for El
         throw new Error(`Physical closure identity failed: ${asset.path}`);
       }
       const previous = files.get(asset.path);
-      if (previous && previous.digest !== asset.digest) {
+      if (previous && (previous.digest !== asset.digest || previous.byteLength !== bytes.byteLength)) {
         throw new Error('Physical closure has conflicting identities.');
+      }
+      const encoded = await base64(bytes);
+      if (!capture.isCurrent()) {
+        throw new Error('Physical closure retired during byte encoding.');
       }
       files.set(asset.path, {
         path: asset.path,
         digest: asset.digest,
         byteLength: bytes.byteLength,
-        base64: await base64(bytes),
+        base64: encoded,
       });
       return bytes;
     };
     const rootBytes = await retain(display.root);
-    // Project references from the bytes of the actual admitted root, never construct a publication.
-    const root = JSON.parse(new TextDecoder().decode(rootBytes)) as { parts: Record<string, PublishedPartReference> };
+    const decode = (bytes: Uint8Array<ArrayBuffer>): unknown =>
+      JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    const pointer = decode(rootBytes) as {
+      schemaVersion: number;
+      generation: number;
+      manifest: PublishedPartAsset;
+    };
+    const storagePath = (digest: string, extension: string): string =>
+      `${parent}roots/sha256/${digest.slice('sha256:'.length)}.${extension}`;
+    if (
+      rootBytes.byteLength > 4096 ||
+      pointer.schemaVersion !== 2 ||
+      !Number.isSafeInteger(pointer.generation) ||
+      pointer.generation < 1 ||
+      pointer.manifest.path !== storagePath(pointer.manifest.digest, 'json') ||
+      pointer.manifest.byteLength < 1 ||
+      pointer.manifest.byteLength > 1_048_576
+    ) {
+      throw new Error('Physical root pointer is invalid.');
+    }
+    const manifest = decode(await retain(pointer.manifest)) as {
+      schemaVersion: number;
+      content: { digest: string; byteLength: number };
+      chunks: PublishedPartAsset[];
+    };
+    if (
+      manifest.schemaVersion !== 1 ||
+      !Number.isSafeInteger(manifest.content.byteLength) ||
+      manifest.content.byteLength < 1 ||
+      manifest.content.byteLength > 32 * 1_048_576 ||
+      manifest.chunks.length !== Math.ceil(manifest.content.byteLength / 1_048_576)
+    ) {
+      throw new Error('Physical root manifest is invalid.');
+    }
+    const content = new Uint8Array(manifest.content.byteLength);
+    let offset = 0;
+    for (const chunk of manifest.chunks) {
+      const length = Math.min(1_048_576, content.byteLength - offset);
+      if (chunk.path !== storagePath(chunk.digest, 'chunk') || chunk.byteLength !== length) {
+        throw new Error('Physical root chunk order or length changed.');
+      }
+      content.set(await retain(chunk), offset);
+      offset += length;
+    }
+    if ((await hash(content)) !== manifest.content.digest || !capture.isCurrent()) {
+      throw new Error('Physical logical root digest or subject changed.');
+    }
+    // Project references from checked logical bytes, never reconstruct a publication.
+    const root = decode(content) as {
+      schemaVersion: number;
+      generation: number;
+      parts: Record<string, PublishedPartReference>;
+    };
+    if (root.schemaVersion !== 1 || root.generation !== pointer.generation) {
+      throw new Error('Physical logical root generation changed.');
+    }
     const names = Object.keys(display.admitted.publication.parts);
     if (names.length !== Object.keys(root.parts).length || names.some((name) => !Object.hasOwn(root.parts, name))) {
       throw new Error('Incomplete actual part references.');

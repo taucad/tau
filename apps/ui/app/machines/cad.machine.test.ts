@@ -1194,7 +1194,9 @@ describe('published assembly authority and connection lifecycle', () => {
         const isAuthored = route !== 'published';
         const entryPath = isAuthored ? 'assembly.json' : publicationPath;
         let authoredBytes = new TextEncoder().encode('{"schemaVersion":1,"parts":{},"occurrences":[]}');
-        let publishedBytes = new TextEncoder().encode('{"schemaVersion":1,"generation":1,"parts":{},"occurrences":[]}');
+        let publishedBytes = new TextEncoder().encode(
+          '{"schemaVersion":2,"generation":1,"manifest":{"path":"roots/sha256/a.json","digest":"a","byteLength":1}}',
+        );
         const root = {
           path: publicationPath,
           digest: await cache.digestContent({ bytes: publishedBytes }),
@@ -1290,7 +1292,9 @@ describe('published assembly authority and connection lifecycle', () => {
           if (isAuthored) {
             const rootListeners = listeners.get(publicationPath);
             expect(rootListeners?.size).toBe(1);
-            publishedBytes = new TextEncoder().encode('{"schemaVersion":1,"generation":2,"parts":{},"occurrences":[]}');
+            publishedBytes = new TextEncoder().encode(
+              '{"schemaVersion":2,"generation":2,"manifest":{"path":"roots/sha256/b.json","digest":"b","byteLength":1}}',
+            );
             for (const listener of rootListeners ?? []) {
               listener();
             }

@@ -177,25 +177,104 @@ const readScaleCommittedPin = async (
     try {
       const digest = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
         `sha256:${[...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
+      const parent = display.root.path.slice(0, display.root.path.lastIndexOf('/') + 1);
+      if (!/^\.tau\/artifacts\/reusable-parts\/[0-9a-f]{64}\/$/u.test(parent)) {
+        throw new Error('Scale pin has no canonical managed parent.');
+      }
       const rootBytes = await capture.readRawBytes(display.root.path);
-      if (rootBytes.byteLength !== display.root.byteLength || (await digest(rootBytes)) !== display.root.digest) {
+      if (
+        rootBytes.byteLength > 4096 ||
+        rootBytes.byteLength !== display.root.byteLength ||
+        (await digest(rootBytes)) !== display.root.digest ||
+        !capture.isCurrent()
+      ) {
         throw new Error('Actual committed root bytes changed before scale preparation.');
       }
-      // Project references only from the exact already admitted root, then check every original byte before timing.
-      const rootRecord = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(rootBytes)) as {
-        readonly parts: Readonly<Record<string, PublishedPartReference>>;
-        readonly generation: number;
-      };
-      const rootReferences = rootRecord.parts;
       const closureFiles = new Map<
         string,
-        { digest: string; byteLength: number; kind: 'root' | 'record' | 'glb' | 'native' }
+        { digest: string; byteLength: number; kind: 'root' | 'manifest' | 'chunk' | 'record' | 'glb' | 'native' }
       >();
       closureFiles.set(display.root.path, {
         digest: display.root.digest,
         byteLength: rootBytes.byteLength,
         kind: 'root',
       });
+      const decodeRoot = (bytes: Uint8Array<ArrayBuffer>): unknown =>
+        JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      const pointer = decodeRoot(rootBytes) as {
+        schemaVersion: number;
+        generation: number;
+        manifest: { path: string; digest: string; byteLength: number };
+      };
+      const storagePath = (contentDigest: string, extension: string): string =>
+        `${parent}roots/sha256/${contentDigest.slice('sha256:'.length)}.${extension}`;
+      if (
+        pointer.schemaVersion !== 2 ||
+        !Number.isSafeInteger(pointer.generation) ||
+        pointer.generation < 1 ||
+        pointer.manifest.path !== storagePath(pointer.manifest.digest, 'json') ||
+        pointer.manifest.byteLength < 1 ||
+        pointer.manifest.byteLength > 1_048_576
+      ) {
+        throw new Error('Scale root pointer is invalid.');
+      }
+      const readRootAsset = async (
+        asset: { path: string; digest: string; byteLength: number },
+        kind: 'manifest' | 'chunk',
+      ): Promise<Uint8Array<ArrayBuffer>> => {
+        if (!capture.isCurrent() || !asset.path.startsWith(parent) || asset.path.split('/').includes('..')) {
+          throw new Error('Scale root subject or managed path changed.');
+        }
+        managedReadPath = asset.path;
+        const bytes = await capture.readRawBytes(asset.path);
+        if (bytes.byteLength !== asset.byteLength || (await digest(bytes)) !== asset.digest || !capture.isCurrent()) {
+          throw new Error('Scale root immutable asset changed.');
+        }
+        const previous = closureFiles.get(asset.path);
+        if (previous && (previous.digest !== asset.digest || previous.byteLength !== bytes.byteLength)) {
+          throw new Error('Scale root has conflicting immutable asset identities.');
+        }
+        closureFiles.set(asset.path, { digest: asset.digest, byteLength: bytes.byteLength, kind });
+        return bytes;
+      };
+      const manifest = decodeRoot(await readRootAsset(pointer.manifest, 'manifest')) as {
+        schemaVersion: number;
+        content: { digest: string; byteLength: number };
+        chunks: Array<{ path: string; digest: string; byteLength: number }>;
+      };
+      if (
+        manifest.schemaVersion !== 1 ||
+        !Number.isSafeInteger(manifest.content.byteLength) ||
+        manifest.content.byteLength < 1 ||
+        manifest.content.byteLength > 32 * 1_048_576 ||
+        manifest.chunks.length !== Math.ceil(manifest.content.byteLength / 1_048_576)
+      ) {
+        throw new Error('Scale root manifest is invalid.');
+      }
+      const content = new Uint8Array(manifest.content.byteLength);
+      let offset = 0;
+      for (const chunk of manifest.chunks) {
+        const length = Math.min(1_048_576, content.byteLength - offset);
+        if (chunk.path !== storagePath(chunk.digest, 'chunk') || chunk.byteLength !== length) {
+          throw new Error('Scale root chunk order or length changed.');
+        }
+        // oxlint-disable-next-line no-await-in-loop -- Bounded ordered chunks are checked under one captured authority.
+        content.set(await readRootAsset(chunk, 'chunk'), offset);
+        offset += length;
+      }
+      if ((await digest(content)) !== manifest.content.digest || !capture.isCurrent()) {
+        throw new Error('Scale logical root digest or subject changed.');
+      }
+      // Project references only from checked logical bytes, then check each original asset before timing.
+      const rootRecord = decodeRoot(content) as {
+        readonly schemaVersion: number;
+        readonly parts: Readonly<Record<string, PublishedPartReference>>;
+        readonly generation: number;
+      };
+      if (rootRecord.schemaVersion !== 1 || rootRecord.generation !== pointer.generation) {
+        throw new Error('Scale logical root generation changed.');
+      }
+      const rootReferences = rootRecord.parts;
       const retain = async (
         asset: { path: string; digest: string; byteLength?: number },
         kind: 'record' | 'glb' | 'native',
@@ -213,7 +292,6 @@ const readScaleCommittedPin = async (
           }
           return;
         }
-        const parent = display.root.path.slice(0, display.root.path.lastIndexOf('/') + 1);
         let bytes: Uint8Array<ArrayBuffer>;
         if (asset.path.startsWith(parent)) {
           managedReadPath = asset.path;
@@ -299,9 +377,10 @@ const readScaleCommittedPin = async (
           (sum, entry) => sum + (entry.kind === 'native' ? entry.byteLength : 0),
           0,
         ),
-        rootBytes: rootBytes.byteLength,
+        rootBytes: content.byteLength,
+        rootPointerBytes: rootBytes.byteLength,
         semantics:
-          'complete checked immutable closure bytes; physical copy count/read-cache/metadata-object/WASM/GPU memory remains separate',
+          'unique checked immutable closure bytes, with logical root and pointer lengths separate; physical copy count/read-cache/metadata-object/WASM/GPU memory remains separate',
       };
       const parts = Object.values(display.admitted.publication.parts);
       const sample = Object.values(parts.at(-1)!.variants)[0]!.glb;
@@ -323,7 +402,7 @@ const readScaleCommittedPin = async (
         occurrences: display.admitted.publication.occurrences.length,
         sampledGlb: { digest: sample.digest, byteLength: sampleBytes.byteLength },
         proof:
-          'complete immutable record/asset byte digest and length checks under the current admitted root; external original references use project-fenced actual Explorer Downloads; semantic admission belongs to the actual host facade',
+          'complete immutable pointer/manifest/ordered-chunk and record/asset byte digest and length checks under the current admitted root; external original references use project-fenced actual Explorer Downloads; semantic admission belongs to the actual host facade',
       };
     } catch (error) {
       // Diagnostic acquisition must never replace the original rejection, including undefined.

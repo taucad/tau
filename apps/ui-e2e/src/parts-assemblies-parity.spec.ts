@@ -120,9 +120,13 @@ async function readPin() {
     const sha = async (bytes: Uint8Array<ArrayBuffer>) =>
       `sha256:${[...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
     const files = new Map<string, { path: string; digest: string; byteLength: number }>();
+    const parent = display.root.path.slice(0, display.root.path.lastIndexOf('/') + 1);
+    if (!/^\.tau\/artifacts\/reusable-parts\/[0-9a-f]{64}\/$/u.test(parent)) {
+      throw new Error('Parity pin has no canonical managed parent.');
+    }
     const retain = async (asset: { path: string; digest: string; byteLength?: number }) => {
-      if (!capture.isCurrent()) {
-        throw new Error('Pin changed before raw read.');
+      if (!capture.isCurrent() || !asset.path.startsWith(parent) || asset.path.split('/').includes('..')) {
+        throw new Error('Parity pin or managed path changed before raw read.');
       }
       const bytes = await capture.readRawBytes(asset.path);
       if (
@@ -132,13 +136,69 @@ async function readPin() {
       ) {
         throw new Error('Raw parity asset changed.');
       }
+      const previous = files.get(asset.path);
+      if (previous && (previous.digest !== asset.digest || previous.byteLength !== bytes.byteLength)) {
+        throw new Error('Parity closure has conflicting immutable identities.');
+      }
       files.set(asset.path, { path: asset.path, digest: asset.digest, byteLength: bytes.byteLength });
       return bytes;
     };
     const rootBytes = await retain(display.root);
-    const root = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(rootBytes)) as {
+    const decodeRoot = (bytes: Uint8Array<ArrayBuffer>): unknown =>
+      JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    const pointer = decodeRoot(rootBytes) as {
+      schemaVersion: number;
+      generation: number;
+      manifest: { path: string; digest: string; byteLength: number };
+    };
+    const storagePath = (digest: string, extension: string): string =>
+      `${parent}roots/sha256/${digest.slice('sha256:'.length)}.${extension}`;
+    if (
+      rootBytes.byteLength > 4096 ||
+      pointer.schemaVersion !== 2 ||
+      !Number.isSafeInteger(pointer.generation) ||
+      pointer.generation < 1 ||
+      pointer.manifest.path !== storagePath(pointer.manifest.digest, 'json') ||
+      pointer.manifest.byteLength < 1 ||
+      pointer.manifest.byteLength > 1_048_576
+    ) {
+      throw new Error('Parity pointer is not a bounded immutable root.');
+    }
+    const manifest = decodeRoot(await retain(pointer.manifest)) as {
+      schemaVersion: number;
+      content: { digest: string; byteLength: number };
+      chunks: Array<{ path: string; digest: string; byteLength: number }>;
+    };
+    if (
+      manifest.schemaVersion !== 1 ||
+      !Number.isSafeInteger(manifest.content.byteLength) ||
+      manifest.content.byteLength < 1 ||
+      manifest.content.byteLength > 32 * 1_048_576 ||
+      manifest.chunks.length !== Math.ceil(manifest.content.byteLength / 1_048_576)
+    ) {
+      throw new Error('Parity root manifest is invalid.');
+    }
+    const content = new Uint8Array(manifest.content.byteLength);
+    let offset = 0;
+    for (const chunk of manifest.chunks) {
+      const length = Math.min(1_048_576, content.byteLength - offset);
+      if (chunk.path !== storagePath(chunk.digest, 'chunk') || chunk.byteLength !== length) {
+        throw new Error('Parity root chunk order or length changed.');
+      }
+      content.set(await retain(chunk), offset);
+      offset += length;
+    }
+    if ((await sha(content)) !== manifest.content.digest || !capture.isCurrent()) {
+      throw new Error('Parity logical root digest or subject changed.');
+    }
+    const root = decodeRoot(content) as {
+      schemaVersion: number;
+      generation: number;
       parts: Readonly<Record<string, PublishedPartReference>>;
     };
+    if (root.schemaVersion !== 1 || root.generation !== pointer.generation) {
+      throw new Error('Parity logical root generation changed.');
+    }
     const sources: Array<{ part: string; variant: string; digest: string; base64: string }> = [];
     if (Object.keys(root.parts).length !== 3 || Object.keys(display.admitted.publication.parts).length !== 3) {
       throw new Error('Finite parity publication must contain the three actual definitions.');

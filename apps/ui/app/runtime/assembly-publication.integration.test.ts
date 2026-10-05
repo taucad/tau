@@ -48,6 +48,73 @@ let producerCalls = 0;
 const disposers: Array<() => void> = [];
 const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const encoder = new TextEncoder();
+type RootedProject = Awaited<ReturnType<typeof project>>['rooted'];
+
+const readStoredLogicalRoot = async (rooted: RootedProject, path: string) => {
+  const pointer = z
+    .object({
+      generation: z.number(),
+      manifest: z.object({ path: z.string(), digest: z.string(), byteLength: z.number() }),
+    })
+    .loose()
+    .parse(JSON.parse(new TextDecoder().decode(await rooted.readFile(path))));
+  const manifestBytes = await rooted.readFile(pointer.manifest.path);
+  expect(manifestBytes.byteLength).toBe(pointer.manifest.byteLength);
+  expect(await digestContent({ bytes: manifestBytes })).toBe(pointer.manifest.digest);
+  const manifest = z
+    .object({ chunks: z.array(z.object({ path: z.string(), digest: z.string(), byteLength: z.number() })) })
+    .loose()
+    .parse(JSON.parse(new TextDecoder().decode(manifestBytes)));
+  const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+  for (const asset of manifest.chunks) {
+    const bytes = await rooted.readFile(asset.path);
+    expect(bytes.byteLength).toBe(asset.byteLength);
+    expect(await digestContent({ bytes })).toBe(asset.digest);
+    chunks.push(bytes);
+  }
+  const content = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    content.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return z
+    .object({
+      schemaVersion: z.literal(1),
+      generation: z.number(),
+      parts: z.record(z.string(), z.object({ path: z.string(), digest: z.string() })),
+      occurrences: z.array(z.unknown()),
+    })
+    .parse(JSON.parse(new TextDecoder().decode(content)));
+};
+
+const writeStoredLogicalRoot = async (
+  rooted: RootedProject,
+  path: string,
+  logical: Awaited<ReturnType<typeof readStoredLogicalRoot>>,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const content = encoder.encode(JSON.stringify(logical));
+  expect(content.byteLength).toBeLessThanOrEqual(1_048_576);
+  const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+  const storage = parent ? `${parent}/roots/sha256` : 'roots/sha256';
+  await rooted.mkdir(storage, { recursive: true });
+  const digest = await digestContent({ bytes: content });
+  const chunk = { path: `${storage}/${digest.slice(7)}.chunk`, digest, byteLength: content.byteLength };
+  await rooted.writeFile(chunk.path, content);
+  const manifestBytes = encoder.encode(
+    JSON.stringify({ schemaVersion: 1, content: { digest, byteLength: content.byteLength }, chunks: [chunk] }),
+  );
+  const manifestDigest = await digestContent({ bytes: manifestBytes });
+  const manifest = {
+    path: `${storage}/${manifestDigest.slice(7)}.json`,
+    digest: manifestDigest,
+    byteLength: manifestBytes.byteLength,
+  };
+  await rooted.writeFile(manifest.path, manifestBytes);
+  const pointer = encoder.encode(JSON.stringify({ schemaVersion: 2, generation: logical.generation, manifest }));
+  await rooted.writeFile(path, pointer);
+  return pointer;
+};
 const triangle = writeGlb({
   nodes: [
     {
@@ -248,13 +315,24 @@ it.each(['jscad', 'picovoxel'])(
     await rooted.writeFile('scene.json', rootBytes);
     const assets = await readdir(fileURLToPath(new URL('assets/', example)), { recursive: true });
     await Promise.all(
-      assets
-        .filter((path) => /\.(?:json|glb|stl)$/u.test(path))
-        .map(async (path) => {
-          const relative = `assets/${path}`;
-          await rooted.mkdir(parentDirectory(relative), { recursive: true });
-          await rooted.writeFile(relative, new Uint8Array(await readFile(fileURLToPath(new URL(relative, example)))));
-        }),
+      ['assets', 'roots'].map(async (directory) => {
+        const files =
+          directory === 'assets'
+            ? assets
+            : await readdir(fileURLToPath(new URL('roots/', example)), { recursive: true });
+        await Promise.all(
+          files
+            .filter((path) => /\.(?:json|glb|stl|chunk)$/u.test(path))
+            .map(async (path) => {
+              const relative = `${directory}/${path}`;
+              await rooted.mkdir(parentDirectory(relative), { recursive: true });
+              await rooted.writeFile(
+                relative,
+                new Uint8Array(await readFile(fileURLToPath(new URL(relative, example)))),
+              );
+            }),
+        );
+      }),
     );
     expect(await rooted.exists('main.ts')).toBe(false);
     expect(await rooted.exists('upstream.ts')).toBe(false);
@@ -482,13 +560,7 @@ it.each(['jscad', 'picovoxel'])(
       expect(actor.getSnapshot().context.kernelIssues.size).toBe(0);
       expect(ordinaryOpen).not.toHaveBeenCalled();
       expect(publish).not.toHaveBeenCalled();
-      const rootDocument = z
-        .object({
-          generation: z.number(),
-          parts: z.record(z.string(), z.object({ path: z.string(), digest: z.string() })),
-        })
-        .loose()
-        .parse(JSON.parse(new TextDecoder().decode(rootBytes)));
+      const rootDocument = await readStoredLogicalRoot(rooted, 'scene.json');
       // A changed root must not admit a closure whose required GLB lost its pinned digest.
       const displayAsset = assets.find((path) => path.endsWith('.glb'));
       if (!displayAsset) {
@@ -497,10 +569,7 @@ it.each(['jscad', 'picovoxel'])(
       const displayPath = `assets/${displayAsset}`;
       const displayBytes = await rooted.readFile(displayPath);
       await rooted.writeFile(displayPath, encoder.encode('digest mismatch'));
-      await rooted.writeFile(
-        'scene.json',
-        encoder.encode(JSON.stringify({ ...rootDocument, generation: rootDocument.generation + 1 })),
-      );
+      await writeStoredLogicalRoot(rooted, 'scene.json', { ...rootDocument, generation: rootDocument.generation + 1 });
       notifyRoot?.();
       await waitFor(actor, (snapshot) => snapshot.matches('error'));
       expect(actor.getSnapshot().context.latestRenderingOutcome).toBe('failure');
@@ -520,7 +589,7 @@ it.each(['jscad', 'picovoxel'])(
           ]),
         ),
       };
-      await rooted.writeFile('scene.json', encoder.encode(JSON.stringify(missingRecordRoot)));
+      await writeStoredLogicalRoot(rooted, 'scene.json', missingRecordRoot);
       notifyRoot?.();
       await waitFor(actor, (snapshot) => snapshot.matches('error'));
       expect(actor.getSnapshot().context.latestRenderingOutcome).toBe('failure');
@@ -529,8 +598,10 @@ it.each(['jscad', 'picovoxel'])(
       expect(actor.getSnapshot().context.publishedAssemblyRoot?.digest).toBe(await digestContent({ bytes: rootBytes }));
 
       // A valid same-path generation replaces geometry and its exact root pin together.
-      const nextBytes = encoder.encode(JSON.stringify({ ...rootDocument, generation: rootDocument.generation + 1 }));
-      await rooted.writeFile('scene.json', nextBytes);
+      const nextBytes = await writeStoredLogicalRoot(rooted, 'scene.json', {
+        ...rootDocument,
+        generation: rootDocument.generation + 1,
+      });
       notifyRoot?.();
       await waitFor(actor, (snapshot) => snapshot.context.latestRenderingOutcome === 'success');
       const replacement = actor.getSnapshot().context.committedAssemblyDisplay;
@@ -934,12 +1005,11 @@ it('publishes an authored CAD entry through host authority and refreshes its roo
     expect(publish).toHaveBeenCalledOnce();
     expect(listeners.has(root.path)).toBe(true);
     const calls = producerCalls;
-    const current = z
-      .object({ generation: z.number() })
-      .loose()
-      .parse(JSON.parse(new TextDecoder().decode(await rooted.readFile(root.path))));
-    const nextBytes = encoder.encode(JSON.stringify({ ...current, generation: current.generation + 1 }));
-    await rooted.writeFile(root.path, nextBytes);
+    const current = await readStoredLogicalRoot(rooted, root.path);
+    const nextBytes = await writeStoredLogicalRoot(rooted, root.path, {
+      ...current,
+      generation: current.generation + 1,
+    });
     listeners.get(root.path)?.();
     await waitFor(
       actor,

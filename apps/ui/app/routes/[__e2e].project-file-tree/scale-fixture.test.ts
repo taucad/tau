@@ -8,7 +8,7 @@ import {
   estimateAssemblyDetailPixelError,
   shouldUseAssemblyDetail,
 } from '#components/geometry/graphics/three/react/gltf-mesh.js';
-import type { AuthoredAssembly } from '@taucad/runtime/types';
+import type { AuthoredAssembly, PublishedPartAsset } from '@taucad/runtime/types';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
@@ -40,6 +40,24 @@ vi.mock('#environment.config.js', () => ({
 /* eslint-enable @typescript-eslint/naming-convention -- Resume ordinary naming rules after the external ENV contract fixture. */
 
 const decoder = new TextDecoder();
+
+const rootStorageAssets = async (
+  root: PublishedPartAsset,
+  readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>,
+): Promise<PublishedPartAsset[]> => {
+  const pointerBytes = await readFile(root.path);
+  expect(pointerBytes.byteLength).toBe(root.byteLength);
+  expect(await digestContent({ bytes: pointerBytes })).toBe(root.digest);
+  const pointer = JSON.parse(decoder.decode(pointerBytes)) as { schemaVersion: number; manifest: PublishedPartAsset };
+  expect(pointer.schemaVersion).toBe(2);
+  const manifestBytes = await readFile(pointer.manifest.path);
+  expect(manifestBytes.byteLength).toBe(pointer.manifest.byteLength);
+  expect(await digestContent({ bytes: manifestBytes })).toBe(pointer.manifest.digest);
+  const manifest = JSON.parse(decoder.decode(manifestBytes)) as { schemaVersion: number; chunks: PublishedPartAsset[] };
+  expect(manifest.schemaVersion).toBe(1);
+  expect(manifest.chunks.length).toBeGreaterThan(0);
+  return [pointer.manifest, ...manifest.chunks];
+};
 
 describe('finite authored scale fixtures', () => {
   it.each([undefined, 'physical-inspection', 'scale-1000000', '__proto__', 'constructor'])(
@@ -206,7 +224,7 @@ describe('checked completed scale corpus handoff', () => {
             }),
           }),
         });
-        expect(completed).toMatchObject({ definitions: 2, occurrences: 2, closureAssets: 5 });
+        expect(completed).toMatchObject({ definitions: 2, occurrences: 2, closureAssets: 7 });
         expect(phases.map(({ phase }) => phase)).toEqual([
           'authority',
           'publication',
@@ -543,10 +561,11 @@ it('publishes actual finite curved GLBs and reopens their checked closure withou
         expect(torus.bounds.max[0]).toBeCloseTo(0.3 + torusRadialHalfExtent, 7);
         const assets = [
           published.root,
+          ...(await rootStorageAssets(published.root, async (path) => producer.fileSystem.readFile(path))),
           ...Object.values(published.partRecords),
           ...Object.values(publication.parts).flatMap((record) => Object.values(record.variants).map(({ glb }) => glb)),
         ];
-        expect(new Set(assets.map(({ path }) => path)).size).toBe(5);
+        expect(new Set(assets.map(({ path }) => path)).size).toBe(7);
         const consumerProject = await createCurvedProject({});
         try {
           for (const asset of assets) {
@@ -1079,8 +1098,13 @@ it('should publish the actual scale-123 cuboid with twelve crease segments and r
         ] as const) {
           expect(bounds.max[axis] - bounds.min[axis]).toBeCloseTo(size, 7);
         }
-        const assets = [published.root, ...Object.values(published.partRecords), variant.glb];
-        expect(new Set(assets.map(({ path }) => path)).size).toBe(3);
+        const assets = [
+          published.root,
+          ...(await rootStorageAssets(published.root, async (path) => producer.fileSystem.readFile(path))),
+          ...Object.values(published.partRecords),
+          variant.glb,
+        ];
+        expect(new Set(assets.map(({ path }) => path)).size).toBe(5);
         const consumerProject = await createCurvedProject({});
         try {
           for (const asset of assets) {
@@ -1091,7 +1115,7 @@ it('should publish the actual scale-123 cuboid with twelve crease segments and r
             if ('byteLength' in asset) {
               expect(assetBytes.byteLength).toBe(asset.byteLength);
             }
-            // eslint-disable-next-line no-await-in-loop -- Complete this three-file closure before source-free admission.
+            // eslint-disable-next-line no-await-in-loop -- Complete this checked closure before source-free admission.
             await consumerProject.fileSystem.writeFile(asset.path, assetBytes);
           }
           const consumer = createRuntimeClient({
@@ -1274,7 +1298,12 @@ it('should publish a real sharp curved cylinder with positive lines and strictly
           detail?.geometry.dispose();
           canonical.dispose();
         }
-        const assets = [published.root, ...Object.values(published.partRecords), variant.glb];
+        const assets = [
+          published.root,
+          ...(await rootStorageAssets(published.root, async (path) => producer.fileSystem.readFile(path))),
+          ...Object.values(published.partRecords),
+          variant.glb,
+        ];
         const closureDigests: string[] = [];
         for (const asset of assets) {
           // eslint-disable-next-line no-await-in-loop -- Inspect every actual immutable checked closure byte, not an imagined denominator.
@@ -1287,7 +1316,7 @@ it('should publish a real sharp curved cylinder with positive lines and strictly
           }
           closureDigests.push(digest);
         }
-        expect(closureDigests).toHaveLength(3);
+        expect(closureDigests).toHaveLength(5);
         expect(await digestContent({ bytes: await published.admitted.readAsset(variant.glb.digest) })).toBe(
           variant.glb.digest,
         );
@@ -1512,7 +1541,12 @@ it('should qualify hybrid authored edges at the frozen WebGL camera before produ
           }
         }
         expect(observations.filter(({ curved }) => curved)).toHaveLength(1);
-        const assets = [published.root, ...Object.values(published.partRecords), variant.glb];
+        const assets = [
+          published.root,
+          ...(await rootStorageAssets(published.root, async (path) => producer.fileSystem.readFile(path))),
+          ...Object.values(published.partRecords),
+          variant.glb,
+        ];
         const closureDigests: string[] = [];
         for (const asset of assets) {
           // eslint-disable-next-line no-await-in-loop -- Inspect every actual immutable checked closure byte, not an imagined denominator.
@@ -1525,7 +1559,7 @@ it('should qualify hybrid authored edges at the frozen WebGL camera before produ
           }
           closureDigests.push(digest);
         }
-        expect(closureDigests).toHaveLength(3);
+        expect(closureDigests).toHaveLength(5);
         expect(await digestContent({ bytes: await published.admitted.readAsset(variant.glb.digest) })).toBe(
           variant.glb.digest,
         );

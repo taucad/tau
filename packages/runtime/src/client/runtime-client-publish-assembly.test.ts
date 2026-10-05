@@ -372,8 +372,20 @@ describe('RuntimeClient.publishAssembly', () => {
     const portable = await project();
     const record = published.partRecords['screw']!;
     const { glb } = published.admitted.publication.parts['screw']!.variants['default']!;
-    for (const path of [published.root.path, record.path, glb.path]) {
-      // oxlint-disable-next-line no-await-in-loop -- Copy exactly the three pinned fixture files in closure order.
+    const pointer = JSON.parse(await original.rooted.readFile(published.root.path, 'utf8')) as {
+      manifest: { path: string };
+    };
+    const manifest = JSON.parse(await original.rooted.readFile(pointer.manifest.path, 'utf8')) as {
+      chunks: Array<{ path: string }>;
+    };
+    for (const path of new Set([
+      published.root.path,
+      pointer.manifest.path,
+      ...manifest.chunks.map(({ path }) => path),
+      record.path,
+      glb.path,
+    ])) {
+      // oxlint-disable-next-line no-await-in-loop -- Copy each actual pinned closure file before portable admission.
       await portable.rooted.writeFile(path, await original.rooted.readFile(path));
     }
     const consumer = createRuntimeClient({
@@ -400,7 +412,7 @@ describe('RuntimeClient.publishAssembly', () => {
   it('should reject an empty pinned root like the publication boundary', async () => {
     const { rooted, fileSystem } = await project();
     const { runtime, produce } = makeRuntime();
-    const bytes = new TextEncoder().encode(
+    const content = new TextEncoder().encode(
       JSON.stringify({
         schemaVersion: 1,
         generation: 1,
@@ -408,6 +420,29 @@ describe('RuntimeClient.publishAssembly', () => {
         occurrences: [],
       }),
     );
+    const contentDigest = await digestContent({ bytes: content });
+    const chunk = {
+      path: `roots/sha256/${contentDigest.slice(7)}.chunk`,
+      digest: contentDigest,
+      byteLength: content.byteLength,
+    };
+    await rooted.mkdir('roots/sha256', { recursive: true });
+    await rooted.writeFile(chunk.path, content);
+    const manifestBytes = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 1,
+        content: { digest: contentDigest, byteLength: content.byteLength },
+        chunks: [chunk],
+      }),
+    );
+    const manifestDigest = await digestContent({ bytes: manifestBytes });
+    const manifest = {
+      path: `roots/sha256/${manifestDigest.slice(7)}.json`,
+      digest: manifestDigest,
+      byteLength: manifestBytes.byteLength,
+    };
+    await rooted.writeFile(manifest.path, manifestBytes);
+    const bytes = new TextEncoder().encode(JSON.stringify({ schemaVersion: 2, generation: 1, manifest }));
     await rooted.writeFile('scene.json', bytes);
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem, admitAssemblyDisplay: async () => undefined }),

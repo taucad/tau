@@ -80,10 +80,84 @@ const preflight = (closure: BrowserClosure): ReadonlyMap<string, Uint8Array<Arra
   if (!root || digest(root) !== closure.root.digest || root.byteLength !== closure.root.byteLength) {
     throw new Error('Browser root pin bytes are missing.');
   }
-  // Read only the existing reference field of the pinned root; do not invent or rewrite its record.
-  const references = (
-    JSON.parse(new TextDecoder().decode(root)) as { parts: Readonly<Record<string, PublishedPartReference>> }
-  ).parts;
+  if (root.byteLength > 4096) {
+    throw new Error('Browser root pointer exceeds its bounded metadata limit.');
+  }
+  const pointer = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(root)) as {
+    schemaVersion: number;
+    generation: number;
+    manifest: PublishedPartAsset;
+  };
+  const storagePath = (assetDigest: string, extension: string): string =>
+    `${parent}roots/sha256/${assetDigest.slice('sha256:'.length)}.${extension}`;
+  if (
+    pointer.schemaVersion !== 2 ||
+    !Number.isSafeInteger(pointer.generation) ||
+    pointer.manifest.path !== storagePath(pointer.manifest.digest, 'json') ||
+    pointer.manifest.byteLength > 1_048_576
+  ) {
+    throw new Error('Browser root pointer has an invalid bounded manifest.');
+  }
+  const manifestBytes = files.get(pointer.manifest.path);
+  if (
+    !manifestBytes ||
+    manifestBytes.byteLength !== pointer.manifest.byteLength ||
+    digest(manifestBytes) !== pointer.manifest.digest
+  ) {
+    throw new Error('Browser root manifest pin bytes are missing.');
+  }
+  const manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(manifestBytes)) as {
+    schemaVersion: number;
+    content: { digest: string; byteLength: number };
+    chunks: PublishedPartAsset[];
+  };
+  if (
+    manifest.schemaVersion !== 1 ||
+    !Number.isSafeInteger(manifest.content.byteLength) ||
+    manifest.content.byteLength < 1 ||
+    manifest.content.byteLength > 32 * 1_048_576 ||
+    !Array.isArray(manifest.chunks) ||
+    manifest.chunks.length !== Math.ceil(manifest.content.byteLength / 1_048_576)
+  ) {
+    throw new Error('Browser root manifest has invalid bounded content.');
+  }
+  const content = new Uint8Array(manifest.content.byteLength);
+  let offset = 0;
+  const storagePaths = new Set([closure.root.path, pointer.manifest.path]);
+  for (const chunk of manifest.chunks) {
+    const bytes = files.get(chunk.path);
+    const length = Math.min(1_048_576, content.byteLength - offset);
+    if (
+      chunk.path !== storagePath(chunk.digest, 'chunk') ||
+      chunk.byteLength !== length ||
+      !bytes ||
+      bytes.byteLength !== length ||
+      digest(bytes) !== chunk.digest
+    ) {
+      throw new Error('Browser root ordered chunk is missing or corrupt.');
+    }
+    content.set(bytes, offset);
+    offset += length;
+    storagePaths.add(chunk.path);
+  }
+  if (digest(content) !== manifest.content.digest) {
+    throw new Error('Browser root reconstructed content differs from its manifest.');
+  }
+  const logical = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(content)) as {
+    schemaVersion: number;
+    generation: number;
+    parts: unknown;
+  };
+  if (
+    logical.schemaVersion !== 1 ||
+    logical.generation !== pointer.generation ||
+    logical.parts === null ||
+    typeof logical.parts !== 'object' ||
+    Array.isArray(logical.parts)
+  ) {
+    throw new Error('Browser root logical content differs from its checked pointer.');
+  }
+  const references = logical.parts as Readonly<Record<string, PublishedPartReference>>;
   const names = Object.keys(closure.publication.parts);
   if (
     canonicalJson(references) !== canonicalJson(closure.partRecords) ||
@@ -92,7 +166,7 @@ const preflight = (closure: BrowserClosure): ReadonlyMap<string, Uint8Array<Arra
   ) {
     throw new Error('Browser closure does not cover its complete part set.');
   }
-  const expected = new Set([closure.root.path]);
+  const expected = storagePaths;
   const requireAsset = (asset: PublishedPartAsset): void => {
     const bytes = files.get(asset.path);
     if (!bytes || bytes.byteLength !== asset.byteLength || digest(bytes) !== asset.digest) {

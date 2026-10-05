@@ -33,6 +33,8 @@ An authored assembly names source recipes and occurrences under the client's roo
 
 `PublishedAssembly` carries checked records and occurrences. `AssemblyDisplayProjector` is the trusted host-local admission/projection callback: admission validates the immutable closure, while projection returns flattened display bytes. `AdmittedAssembly` adds a client-local asset reader after host admission; callers do not construct its token. A `PublishedAssemblyRootSnapshot` observes the current shared root and generation, but cannot reconstruct a lost caller receipt. `PublishAssemblyOutcome` distinguishes published, superseded, cancelled, invalid, and commit-unknown outcomes; after commit-unknown, use its `readCurrent` callback before deciding what to do next.
 
+The shared root file is a small generation pointer. Its digest pins an immutable manifest and ordered content chunks containing the complete logical assembly root. Publication writes and verifies every chunk and the manifest before advancing the pointer with a checked write. A source-free reader must retain and verify the entire pointer, manifest, chunk, part-record, and display-asset closure; a missing or mismatched byte invalidates admission. `readCurrent` reports the current verified generation, including after an uncertain commit, without claiming which caller wrote it.
+
 <auto-type-table path='./props/types.ts' name='PublishedAssembly' />
 
 <auto-type-table path='./props/types.ts' name='AssemblyDisplayProjector' />

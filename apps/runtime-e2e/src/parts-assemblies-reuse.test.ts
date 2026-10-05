@@ -48,6 +48,73 @@ const spyOnRender = (producer: { readonly render?: unknown }) => {
 const encoder = new TextEncoder();
 const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const digest = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+const storedRootClosurePaths = async (
+  root: { path: string; digest: string; byteLength: number },
+  read: (path: string) => Promise<Uint8Array<ArrayBuffer>>,
+): Promise<Set<string>> => {
+  const checked = async (asset: { path: string; digest: string; byteLength: number }) => {
+    const bytes = await read(asset.path);
+    if (bytes.byteLength !== asset.byteLength || `sha256:${digest(bytes)}` !== asset.digest) {
+      throw new Error('Stored root closure differs from its pinned length or digest.');
+    }
+    return bytes;
+  };
+  const decode = (bytes: Uint8Array<ArrayBuffer>): unknown =>
+    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  const rootBytes = await checked(root);
+  const pointer = decode(rootBytes) as {
+    schemaVersion: number;
+    generation: number;
+    manifest: { path: string; digest: string; byteLength: number };
+  };
+  const parent = root.path.slice(0, root.path.lastIndexOf('/') + 1);
+  const storagePath = (hash: string, extension: string): string =>
+    `${parent}roots/sha256/${hash.slice('sha256:'.length)}.${extension}`;
+  if (
+    rootBytes.byteLength > 4096 ||
+    pointer.schemaVersion !== 2 ||
+    !Number.isSafeInteger(pointer.generation) ||
+    pointer.generation < 1 ||
+    pointer.manifest.path !== storagePath(pointer.manifest.digest, 'json') ||
+    pointer.manifest.byteLength < 1 ||
+    pointer.manifest.byteLength > 1_048_576
+  ) {
+    throw new Error('Stored scene is not a bounded v2 pointer.');
+  }
+  const manifest = decode(await checked(pointer.manifest)) as {
+    schemaVersion: number;
+    content: { digest: string; byteLength: number };
+    chunks: Array<{ path: string; digest: string; byteLength: number }>;
+  };
+  if (
+    manifest.schemaVersion !== 1 ||
+    !Number.isSafeInteger(manifest.content.byteLength) ||
+    manifest.content.byteLength < 1 ||
+    manifest.content.byteLength > 32 * 1_048_576 ||
+    manifest.chunks.length !== Math.ceil(manifest.content.byteLength / 1_048_576)
+  ) {
+    throw new Error('Stored scene manifest is not a bounded ordered closure.');
+  }
+  const content = new Uint8Array(manifest.content.byteLength);
+  let offset = 0;
+  for (const chunk of manifest.chunks) {
+    const length = Math.min(1_048_576, content.byteLength - offset);
+    if (chunk.path !== storagePath(chunk.digest, 'chunk') || chunk.byteLength !== length) {
+      throw new Error('Stored scene chunk path or order changed.');
+    }
+    // oxlint-disable-next-line no-await-in-loop -- Check each ordered immutable chunk before following the next.
+    content.set(await checked(chunk), offset);
+    offset += length;
+  }
+  if (`sha256:${digest(content)}` !== manifest.content.digest) {
+    throw new Error('Stored scene logical bytes changed.');
+  }
+  const logical = decode(content) as { schemaVersion: number; generation: number };
+  if (logical.schemaVersion !== 1 || logical.generation !== pointer.generation) {
+    throw new Error('Stored scene logical generation changed.');
+  }
+  return new Set([root.path, pointer.manifest.path, ...manifest.chunks.map(({ path }) => path)]);
+};
 const admitAssemblyDisplay: AssemblyDisplayProjector = async ({ records, occurrences, readAsset }) => {
   const flattened = await flattenAdmittedAssemblyGlb({
     parts: records,
@@ -258,7 +325,10 @@ for (const family of ['jscad', 'picovoxel'] as const) {
           throw new Error(`Mixed publication failed: ${JSON.stringify(scene)}`);
         }
         const initialSceneClosure = new Map<string, Uint8Array<ArrayBuffer>>();
-        const initialScenePaths = new Set([scene.root.path]);
+        const initialRootPaths = await storedRootClosurePaths(scene.root, async (path) =>
+          original.rooted.readFile(path),
+        );
+        const initialScenePaths = new Set(initialRootPaths);
         for (const [part, record] of Object.entries(scene.admitted.publication.parts)) {
           initialScenePaths.add(scene.partRecords[part]!.path);
           for (const variant of Object.values(record.variants)) {
@@ -650,7 +720,7 @@ for (const family of ['jscad', 'picovoxel'] as const) {
             meshes: meshes.mock.calls.length,
             restores: restores.mock.calls.length,
           }).toEqual(baseline);
-          const paths = new Set([finalScene.root.path]);
+          const paths = await storedRootClosurePaths(finalScene.root, async (path) => original.rooted.readFile(path));
           for (const [part, record] of Object.entries(finalScene.admitted.publication.parts)) {
             paths.add(finalScene.partRecords[part]!.path);
             for (const variant of Object.values(record.variants)) {
@@ -749,6 +819,83 @@ for (const family of ['jscad', 'picovoxel'] as const) {
           expect(digest(changedStl.files[0].bytes)).not.toBe(stlDigest);
           expect(builds.mock.calls.length).toBeGreaterThan(baseline.builds);
           expect(meshes.mock.calls.length).toBeGreaterThan(baseline.meshes);
+          // The package entry is a fresh, source-free publication of the checked immutable records.
+          // Let the runtime write its pointer, manifest and ordered chunks; never hand-author scene.json.
+          const fixtureRootClosure = new Map<string, Uint8Array<ArrayBuffer>>();
+          const packaging = await project();
+          try {
+            for (const [path, bytes] of initialSceneClosure) {
+              if (initialRootPaths.has(path)) {
+                continue;
+              }
+              const recordPath = Object.values(scene.partRecords).some((pin) => pin.path === path);
+              const destination = recordPath ? `assets/${path}` : path;
+              // oxlint-disable-next-line no-await-in-loop -- Copy each checked immutable asset before source-free publication.
+              await packaging.rooted.mkdir(destination.slice(0, destination.lastIndexOf('/')), { recursive: true });
+              // oxlint-disable-next-line no-await-in-loop -- Copy each checked immutable asset before source-free publication.
+              await packaging.rooted.writeFile(destination, bytes);
+            }
+            const packagedParts = Object.fromEntries(
+              Object.entries(scene.partRecords).map(([name, pin]) => [
+                name,
+                { publishedPart: { ...pin, path: `assets/${pin.path}` } },
+              ]),
+            );
+            await packaging.rooted.writeFile(
+              'assembly.json',
+              encoder.encode(
+                JSON.stringify({
+                  schemaVersion: 1,
+                  parts: packagedParts,
+                  occurrences: scene.admitted.publication.occurrences,
+                }),
+              ),
+            );
+            expect(await packaging.rooted.exists('main.ts')).toBe(false);
+            expect(await packaging.rooted.exists('upstream.ts')).toBe(false);
+            expect(await packaging.rooted.exists('.tau/cache')).toBe(false);
+            const counts = { upstream: builds.mock.calls.length, downstream: downstreamBuilds.mock.calls.length };
+            const fixtureClient = createRuntimeClient({
+              transport: inProcessTransport({
+                runtime: downstreamRuntime,
+                fileSystem: packaging.fileSystem,
+                publicationFileSystem: packaging.fileSystem,
+                admitAssemblyDisplay,
+              }),
+            });
+            try {
+              const published = await fixtureClient.publishAssembly({
+                authoredPath: 'assembly.json',
+                publicationPath: 'scene.json',
+              });
+              if (published.status !== 'published') {
+                throw new Error(`Source-free packaged scene publication failed: ${JSON.stringify(published)}`);
+              }
+              expect(published.admitted.publication).toEqual(scene.admitted.publication);
+              expect(published.partRecords).toEqual(
+                Object.fromEntries(
+                  Object.entries(scene.partRecords).map(([name, pin]) => [
+                    name,
+                    { ...pin, path: `assets/${pin.path}` },
+                  ]),
+                ),
+              );
+              const paths = await storedRootClosurePaths(published.root, async (path) =>
+                packaging.rooted.readFile(path),
+              );
+              for (const path of paths) {
+                // oxlint-disable-next-line no-await-in-loop -- Retain the actual source-free pointer closure before shutdown.
+                fixtureRootClosure.set(path, await packaging.rooted.readFile(path));
+              }
+              expect({ upstream: builds.mock.calls.length, downstream: downstreamBuilds.mock.calls.length }).toEqual(
+                counts,
+              );
+            } finally {
+              await fixtureClient.shutdown();
+            }
+          } finally {
+            packaging.service.dispose();
+          }
           const fixture = new URL(
             `../../../out/research/parts-assemblies-execution/2026-09-30/s08-runtime/mixed/${family}/`,
             import.meta.url,
@@ -774,7 +921,7 @@ for (const family of ['jscad', 'picovoxel'] as const) {
             await writeFile(asset, bytes);
           }
           for (const [path, bytes] of initialSceneClosure) {
-            if (path === scene.root.path) {
+            if (initialRootPaths.has(path)) {
               continue;
             }
             const recordPath = Object.values(scene.partRecords).some((pin) => pin.path === path);
@@ -784,17 +931,13 @@ for (const family of ['jscad', 'picovoxel'] as const) {
             // oxlint-disable-next-line no-await-in-loop -- Preserve the verified full scene closure for the product entry.
             await writeFile(asset, bytes);
           }
-          await writeFile(
-            new URL('scene.json', fixture),
-            JSON.stringify({
-              schemaVersion: 1,
-              generation: scene.generation,
-              parts: Object.fromEntries(
-                Object.entries(scene.partRecords).map(([name, pin]) => [name, { ...pin, path: `assets/${pin.path}` }]),
-              ),
-              occurrences: scene.admitted.publication.occurrences,
-            }),
-          );
+          for (const [path, bytes] of fixtureRootClosure) {
+            const asset = new URL(path, fixture);
+            // oxlint-disable-next-line no-await-in-loop -- Emit only the runtime's checked source-free pointer closure.
+            await mkdir(new URL('.', asset), { recursive: true });
+            // oxlint-disable-next-line no-await-in-loop -- Emit only the runtime's checked source-free pointer closure.
+            await writeFile(asset, bytes);
+          }
           await writeFile(
             new URL('upstream-asset.ts', fixture),
             `import bytes from './${stlPath}' with { type: 'bytes' };\nexport const stlBytes = bytes;\n`,

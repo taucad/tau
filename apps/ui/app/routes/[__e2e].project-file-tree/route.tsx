@@ -815,6 +815,70 @@ export const prepareScaleCorpus = async ({
       try {
         await reader.ready;
         assertCurrent();
+        const rootBytes = await reader.readFile(published.root.path);
+        assertCurrent();
+        if (
+          rootBytes.byteLength !== published.root.byteLength ||
+          (await digestContent({ bytes: rootBytes })) !== published.root.digest
+        ) {
+          throw new Error('The completed warehouse pointer changed before closure collection.');
+        }
+        const pointer = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(rootBytes)) as {
+          schemaVersion: number;
+          generation: number;
+          manifest: PublishedPartAsset;
+        };
+        const parent = published.root.path.slice(0, published.root.path.lastIndexOf('/') + 1);
+        const storagePath = (digest: string, extension: string): string =>
+          `${parent}roots/sha256/${digest.slice('sha256:'.length)}.${extension}`;
+        if (
+          pointer.schemaVersion !== 2 ||
+          pointer.generation !== published.generation ||
+          pointer.manifest.path !== storagePath(pointer.manifest.digest, 'json') ||
+          pointer.manifest.byteLength > 1_048_576
+        ) {
+          throw new Error('The completed warehouse pointer has no bounded manifest.');
+        }
+        const manifestBytes = await reader.readFile(pointer.manifest.path);
+        assertCurrent();
+        if (
+          manifestBytes.byteLength !== pointer.manifest.byteLength ||
+          (await digestContent({ bytes: manifestBytes })) !== pointer.manifest.digest
+        ) {
+          throw new Error('The completed warehouse manifest changed before closure collection.');
+        }
+        const manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(manifestBytes)) as {
+          schemaVersion: number;
+          content: { byteLength: number };
+          chunks: PublishedPartAsset[];
+        };
+        if (
+          manifest.schemaVersion !== 1 ||
+          manifest.content.byteLength < 1 ||
+          manifest.content.byteLength > 32 * 1_048_576 ||
+          manifest.chunks.length !== Math.ceil(manifest.content.byteLength / 1_048_576)
+        ) {
+          throw new Error('The completed warehouse manifest has no bounded ordered content.');
+        }
+        assets.set(pointer.manifest.path, pointer.manifest);
+        let offset = 0;
+        for (const chunk of manifest.chunks) {
+          if (
+            chunk.path !== storagePath(chunk.digest, 'chunk') ||
+            chunk.byteLength !== Math.min(1_048_576, manifest.content.byteLength - offset)
+          ) {
+            throw new Error('The completed warehouse manifest has an invalid ordered chunk.');
+          }
+          const previous = assets.get(chunk.path);
+          if (
+            previous &&
+            (('byteLength' in previous && previous.byteLength !== chunk.byteLength) || previous.digest !== chunk.digest)
+          ) {
+            throw new Error('The completed warehouse has conflicting chunk identities.');
+          }
+          assets.set(chunk.path, chunk);
+          offset += chunk.byteLength;
+        }
         for (const asset of assets.values()) {
           assertCurrent();
           // eslint-disable-next-line no-await-in-loop -- Finish each real immutable closure member before exposing the destination.

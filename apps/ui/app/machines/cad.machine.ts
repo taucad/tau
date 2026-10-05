@@ -672,7 +672,18 @@ const renderModelActor = fromSafeAsync<CadEvent | void, RenderModelInput>(async 
       Object.hasOwn(candidate, 'schemaVersion') &&
       Object.hasOwn(candidate, 'parts') &&
       Object.hasOwn(candidate, 'occurrences');
-    if (knownRoute !== undefined || assemblyShape) {
+    const publishedPointerShape =
+      candidate !== null &&
+      typeof candidate === 'object' &&
+      'schemaVersion' in candidate &&
+      candidate.schemaVersion === 2 &&
+      'generation' in candidate &&
+      typeof candidate.generation === 'number' &&
+      Number.isSafeInteger(candidate.generation) &&
+      'manifest' in candidate &&
+      candidate.manifest !== null &&
+      typeof candidate.manifest === 'object';
+    if (knownRoute !== undefined || assemblyShape || publishedPointerShape) {
       const { sha256String } = await import('@taucad/utils/hash');
       signal.throwIfAborted();
       const digest = await digestContent({ bytes });

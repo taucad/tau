@@ -1022,13 +1022,75 @@ const readPreviewRecoveryPin = async () =>
           })}`,
         );
       }
+      const previous = files.get(asset.path);
+      if (previous && (previous.digest !== asset.digest || previous.byteLength !== bytes.byteLength)) {
+        throw new Error('Preview closure has conflicting immutable identities.');
+      }
       files.set(asset.path, { path: asset.path, digest: asset.digest, byteLength: bytes.byteLength });
       return bytes;
     };
     const rootBytes = await retain(display.root);
-    // This projects references from an already admitted root; it is not a second admission validator.
-    const root: unknown = JSON.parse(new TextDecoder().decode(rootBytes));
-    if (typeof root !== 'object' || root === null || !('parts' in root)) {
+    const decodeRoot = (bytes: Uint8Array<ArrayBuffer>): unknown =>
+      JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    const pointer = decodeRoot(rootBytes) as {
+      schemaVersion: number;
+      generation: number;
+      manifest: { path: string; digest: string; byteLength: number };
+    };
+    const storagePath = (digest: string, extension: string): string =>
+      `${parent}roots/sha256/${digest.slice('sha256:'.length)}.${extension}`;
+    if (
+      rootBytes.byteLength > 4096 ||
+      pointer.schemaVersion !== 2 ||
+      !Number.isSafeInteger(pointer.generation) ||
+      pointer.generation < 1 ||
+      pointer.manifest.path !== storagePath(pointer.manifest.digest, 'json') ||
+      pointer.manifest.byteLength < 1 ||
+      pointer.manifest.byteLength > 1_048_576
+    ) {
+      throw new Error('Preview pointer is not a bounded immutable root.');
+    }
+    const manifest = decodeRoot(await retain(pointer.manifest)) as {
+      schemaVersion: number;
+      content: { digest: string; byteLength: number };
+      chunks: Array<{ path: string; digest: string; byteLength: number }>;
+    };
+    if (
+      manifest.schemaVersion !== 1 ||
+      !Number.isSafeInteger(manifest.content.byteLength) ||
+      manifest.content.byteLength < 1 ||
+      manifest.content.byteLength > 32 * 1_048_576 ||
+      manifest.chunks.length !== Math.ceil(manifest.content.byteLength / 1_048_576)
+    ) {
+      throw new Error('Preview root manifest is invalid.');
+    }
+    const content = new Uint8Array(manifest.content.byteLength);
+    let offset = 0;
+    for (const chunk of manifest.chunks) {
+      const length = Math.min(1_048_576, content.byteLength - offset);
+      if (chunk.path !== storagePath(chunk.digest, 'chunk') || chunk.byteLength !== length) {
+        throw new Error('Preview root chunk order or length changed.');
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Keep the current captured pin across ordered immutable reads.
+      content.set(await retain(chunk), offset);
+      offset += length;
+    }
+    if ((await hash(content)) !== manifest.content.digest || !capture.isCurrent()) {
+      throw new Error('Preview logical root digest or subject changed.');
+    }
+    // This projects references from checked logical bytes; semantic admission remains with the host.
+    const root: unknown = decodeRoot(content);
+    if (
+      typeof root !== 'object' ||
+      root === null ||
+      !('schemaVersion' in root) ||
+      root.schemaVersion !== 1 ||
+      !('generation' in root) ||
+      root.generation !== pointer.generation
+    ) {
+      throw new TypeError('Preview logical root generation changed.');
+    }
+    if (!('parts' in root)) {
       throw new TypeError('Admitted root has no part references.');
     }
     const references = root.parts;

@@ -13,6 +13,7 @@ import {
 import { emptyGlb } from '#framework/published-part-test-fixture.js';
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import { digestContent } from '@taucad/cache-core';
+import { canonicalJson } from '@taucad/utils/hash';
 import type { PublishedPartAsset, PublishedPartRecord } from '#types/runtime-assembly.types.js';
 
 const disposers: Array<() => void> = [];
@@ -55,6 +56,180 @@ afterEach(() => {
 });
 
 describe('host-shared checked published-parts root groundwork', () => {
+  it('publishes and replaces a root whose canonical logical bytes exceed the checked-write request budget', async () => {
+    const { left, right } = await sharedClients();
+    const sourcePath = 'parts/large.py';
+    const prepared = await preparePublishedPart({
+      filesystem: left,
+      directory: 'published',
+      source: {
+        entry: sourcePath,
+        files: { [sourcePath]: await digestContent({ bytes: new TextEncoder().encode('large') }) },
+      },
+      glb: emptyGlb(),
+    });
+    const occurrences = Array.from({ length: 100_000 }, (_, index) => ({
+      id: `placed-${index.toString().padStart(6, '0')}`,
+      part: 'large',
+      variant: 'default',
+      transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+    }));
+    const input = { path: 'published/large-root.json', parts: { large: prepared.reference }, occurrences };
+    const canonicalBytes = new TextEncoder().encode(
+      canonicalJson({ schemaVersion: 1, generation: 1, parts: input.parts, occurrences }),
+    );
+    expect(canonicalBytes.byteLength).toBeGreaterThan(8_388_608);
+    const first = await publishPartsRoot(left, input);
+    expect(first).toMatchObject({ status: 'published', generation: 1 });
+    if (first.status !== 'published') {
+      return;
+    }
+    const firstRoot = await readPinnedPublishedAssemblyRoot(right, first.root);
+    expect(firstRoot.occurrences).toHaveLength(occurrences.length);
+    const second = await publishPartsRoot(right, input);
+    expect(second).toMatchObject({ status: 'published', generation: 2 });
+    if (second.status === 'published') {
+      const secondRoot = await readPinnedPublishedAssemblyRoot(left, second.root);
+      expect(secondRoot.occurrences).toHaveLength(occurrences.length);
+      const pointer = JSON.parse(await left.readFile(second.root.path, 'utf8')) as {
+        schemaVersion: number;
+        generation: number;
+        manifest: PublishedPartAsset;
+      };
+      const manifest = JSON.parse(await left.readFile(pointer.manifest.path, 'utf8')) as {
+        schemaVersion: number;
+        content: { digest: string; byteLength: number };
+        chunks: PublishedPartAsset[];
+      };
+      expect(manifest.chunks.length).toBeGreaterThan(1);
+      const reordered = new TextEncoder().encode(
+        canonicalJson({ ...manifest, chunks: [...manifest.chunks].reverse() }),
+      );
+      const digest = await digestContent({ bytes: reordered });
+      const badManifest = {
+        path: `published/roots/sha256/${digest.slice(7)}.json`,
+        digest,
+        byteLength: reordered.byteLength,
+      };
+      await right.writeFile(badManifest.path, reordered);
+      const badPointerBytes = new TextEncoder().encode(canonicalJson({ ...pointer, manifest: badManifest }));
+      await right.writeFile(second.root.path, badPointerBytes);
+      await expect(
+        readPinnedPublishedAssemblyRoot(left, {
+          path: second.root.path,
+          digest: await digestContent({ bytes: badPointerBytes }),
+          byteLength: badPointerBytes.byteLength,
+        }),
+      ).rejects.toThrow(/chunk order or length/u);
+    }
+  });
+
+  it('rejects a missing or corrupted immutable chunk even when the mutable pointer is unchanged', async () => {
+    const { left, right } = await sharedClients();
+    const sourcePath = 'parts/checked.py';
+    const prepared = await preparePublishedPart({
+      filesystem: left,
+      directory: 'published',
+      source: {
+        entry: sourcePath,
+        files: { [sourcePath]: await digestContent({ bytes: new TextEncoder().encode('checked') }) },
+      },
+      glb: emptyGlb(),
+    });
+    const outcome = await publishPartsRoot(left, {
+      path: 'published/checked-root.json',
+      parts: { checked: prepared.reference },
+    });
+    if (outcome.status !== 'published') {
+      throw new Error('Expected a checked root.');
+    }
+    const pointer = JSON.parse(await right.readFile(outcome.root.path, 'utf8')) as { manifest: PublishedPartAsset };
+    const manifest = JSON.parse(await right.readFile(pointer.manifest.path, 'utf8')) as {
+      chunks: PublishedPartAsset[];
+    };
+    const chunk = manifest.chunks[0]!;
+    const original = await right.readFile(chunk.path);
+    await right.unlink(chunk.path);
+    await expect(readPinnedPublishedAssemblyRoot(left, outcome.root)).rejects.toThrow();
+    await right.writeFile(chunk.path, original);
+    const corrupted = new Uint8Array(original);
+    corrupted[0] = ((corrupted[0] ?? 0) + 1) % 256;
+    await right.writeFile(chunk.path, corrupted);
+    await expect(readPinnedPublishedAssemblyRoot(left, outcome.root)).rejects.toThrow(/pinned digest and length/u);
+  });
+
+  it('keeps the pointer absent when cancelled after a chunk and reports a completed checked commit despite late cancellation', async () => {
+    const { left, right } = await sharedClients();
+    const sourcePath = 'parts/cancel.py';
+    const prepared = await preparePublishedPart({
+      filesystem: left,
+      directory: 'published',
+      source: {
+        entry: sourcePath,
+        files: { [sourcePath]: await digestContent({ bytes: new TextEncoder().encode('cancel') }) },
+      },
+      glb: emptyGlb(),
+    });
+    const path = 'published/cancel-root.json';
+    const beforeCommit = new AbortController();
+    const checked = left.writeFileChecked!.bind(left);
+    const staged = vi.spyOn(left, 'writeFileChecked').mockImplementation(async (input) => {
+      const result = await checked(input);
+      if (input.path.endsWith('.chunk')) {
+        beforeCommit.abort(new Error('cancel after content staging'));
+      }
+      return result;
+    });
+    await expect(
+      publishPartsRoot(left, { path, parts: { cancel: prepared.reference } }, beforeCommit.signal),
+    ).rejects.toThrow('cancel after content staging');
+    expect(await right.exists(path)).toBe(false);
+    staged.mockRestore();
+    const afterCommit = new AbortController();
+    const committed = vi.spyOn(left, 'writeFileChecked').mockImplementation(async (input) => {
+      const result = await checked(input);
+      if (input.path === path) {
+        afterCommit.abort(new Error('cancel after checked commit'));
+      }
+      return result;
+    });
+    const outcome = await publishPartsRoot(left, { path, parts: { cancel: prepared.reference } }, afterCommit.signal);
+    committed.mockRestore();
+    expect(outcome).toMatchObject({ status: 'published', generation: 1 });
+    if (outcome.status === 'published') {
+      expect(await readPinnedPublishedAssemblyRoot(right, outcome.root)).toMatchObject({ generation: 1 });
+    }
+  });
+
+  it('refuses an oversized but JSON-valid pointer before its bytes can become a replacement CAS precondition', async () => {
+    const { left, right } = await sharedClients();
+    const entry = 'parts/bounded.py';
+    const prepared = await preparePublishedPart({
+      filesystem: left,
+      directory: 'published',
+      source: { entry, files: { [entry]: await digestContent({ bytes: new TextEncoder().encode('bounded') }) } },
+      glb: emptyGlb(),
+    });
+    const path = 'published/bounded-root.json';
+    const published = await publishPartsRoot(left, { path, parts: { bounded: prepared.reference } });
+    if (published.status !== 'published') {
+      throw new Error('Expected a checked root.');
+    }
+    const padded = new TextEncoder().encode(`${await left.readFile(path, 'utf8')}${' '.repeat(4096)}`);
+    await right.writeFile(path, padded);
+    await expect(
+      readPinnedPublishedAssemblyRoot(left, {
+        path,
+        digest: await digestContent({ bytes: padded }),
+        byteLength: padded.byteLength,
+      }),
+    ).rejects.toThrow(/bounded metadata limit/u);
+    await expect(publishPartsRoot(left, { path, parts: { bounded: prepared.reference } })).rejects.toThrow(
+      /bounded metadata limit/u,
+    );
+    expect(await right.readFile(path)).toEqual(padded);
+  });
+
   it('rejects a pinned root after its mutable path is overwritten, even at equal byte length', async () => {
     const { left, right } = await sharedClients();
     const sourcePath = 'parts/screw.py';
@@ -112,10 +287,11 @@ describe('host-shared checked published-parts root groundwork', () => {
     const competing = { path: input.path, parts: { bolt: bolt.reference } };
     const [first, second] = await Promise.all([publishPartsRoot(left, input), publishPartsRoot(right, competing)]);
     expect([first.status, second.status].sort()).toEqual(['published', 'superseded']);
-    const root = JSON.parse(await left.readFile(input.path, 'utf8')) as {
-      generation: number;
-      parts: Record<string, unknown>;
-    };
+    const winner = first.status === 'published' ? first : second;
+    if (winner.status !== 'published') {
+      throw new Error('One checked writer must commit the root.');
+    }
+    const root = await readPinnedPublishedAssemblyRoot(left, winner.root);
     expect(root.generation).toBe(1);
     expect(root.parts).toEqual(first.status === 'published' ? input.parts : competing.parts);
     const next = await publishPartsRoot(right, input);
@@ -275,21 +451,23 @@ describe('host-shared checked published-parts root groundwork', () => {
     });
     const parts = Object.fromEntries([['__proto__', prepared.reference]]);
     const path = 'published/key-root.json';
-    expect(
-      await publishPartsRoot(left, {
-        path,
-        parts,
-        occurrences: [
-          {
-            id: 'special',
-            part: '__proto__',
-            variant: 'default',
-            transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-          },
-        ],
-      }),
-    ).toMatchObject({ status: 'published', generation: 1 });
-    const stored = JSON.parse(await left.readFile(path, 'utf8')) as { parts: Record<string, unknown> };
+    const published = await publishPartsRoot(left, {
+      path,
+      parts,
+      occurrences: [
+        {
+          id: 'special',
+          part: '__proto__',
+          variant: 'default',
+          transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        },
+      ],
+    });
+    expect(published).toMatchObject({ status: 'published', generation: 1 });
+    if (published.status !== 'published') {
+      throw new Error('The checked writer must commit the root.');
+    }
+    const stored = await readPinnedPublishedAssemblyRoot(left, published.root);
     expect(Object.hasOwn(stored.parts, '__proto__')).toBe(true);
   });
 

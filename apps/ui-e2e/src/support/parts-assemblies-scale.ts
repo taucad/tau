@@ -22,6 +22,112 @@ type ScaleClosure = Readonly<{
   requiredBytes: number;
 }>;
 
+/** Reconstruct the private, pinned root storage closure from actual project bytes. */
+export const readPublishedRootStorage = async (
+  root: PublishedPartAsset,
+  readRawBytes: (path: string) => Promise<Uint8Array<ArrayBuffer>>,
+): Promise<{
+  parts: Readonly<Record<string, PublishedPartReference>>;
+  generation: number;
+  files: readonly ClosureFile[];
+}> => {
+  const parent = root.path.slice(0, root.path.lastIndexOf('/') + 1);
+  const files = new Map<string, ClosureFile>();
+  const retain = async (asset: PublishedPartAsset): Promise<Uint8Array<ArrayBuffer>> => {
+    const path = assertRootedPath(asset.path);
+    if (!path.startsWith(parent)) {
+      throw new Error('Published root storage escapes its captured parent.');
+    }
+    const previous = files.get(path);
+    if (previous) {
+      if (previous.digest !== asset.digest || previous.bytes.byteLength !== asset.byteLength) {
+        throw new Error('Published root storage has conflicting pinned identities.');
+      }
+      return previous.bytes;
+    }
+    const bytes = new Uint8Array(await readRawBytes(path));
+    if (bytes.byteLength !== asset.byteLength || (await digestContent({ bytes })) !== asset.digest) {
+      throw new Error('Published root storage has mismatched pinned bytes.');
+    }
+    files.set(path, { path, digest: asset.digest, bytes });
+    return bytes;
+  };
+  const decode = (bytes: Uint8Array<ArrayBuffer>): unknown =>
+    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  if (root.byteLength > 4096) {
+    throw new Error('Published root pointer exceeds its bounded metadata limit.');
+  }
+  const pointerBytes = await retain(root);
+  if (pointerBytes.byteLength > 4096) {
+    throw new Error('Published root pointer exceeds its bounded metadata limit.');
+  }
+  const pointer = decode(pointerBytes) as {
+    schemaVersion: number;
+    generation: number;
+    manifest: PublishedPartAsset;
+  };
+  if (pointer.schemaVersion !== 2 || !Number.isSafeInteger(pointer.generation) || pointer.generation < 1) {
+    throw new Error('Published root has an invalid checked pointer.');
+  }
+  const storagePath = (digest: string, extension: string): string =>
+    `${parent}roots/sha256/${digest.slice('sha256:'.length)}.${extension}`;
+  if (
+    pointer.manifest.path !== storagePath(pointer.manifest.digest, 'json') ||
+    pointer.manifest.byteLength > 1_048_576
+  ) {
+    throw new Error('Published root has an invalid manifest pin.');
+  }
+  const manifest = decode(await retain(pointer.manifest)) as {
+    schemaVersion: number;
+    content: { digest: PublishedPartAsset['digest']; byteLength: number };
+    chunks: PublishedPartAsset[];
+  };
+  if (
+    manifest.schemaVersion !== 1 ||
+    !Number.isSafeInteger(manifest.content.byteLength) ||
+    manifest.content.byteLength < 1 ||
+    manifest.content.byteLength > 32 * 1_048_576 ||
+    !Array.isArray(manifest.chunks) ||
+    manifest.chunks.length !== Math.ceil(manifest.content.byteLength / 1_048_576)
+  ) {
+    throw new Error('Published root has an invalid bounded content manifest.');
+  }
+  const content = new Uint8Array(manifest.content.byteLength);
+  let offset = 0;
+  for (const chunk of manifest.chunks) {
+    const expectedLength = Math.min(1_048_576, content.byteLength - offset);
+    if (chunk.path !== storagePath(chunk.digest, 'chunk') || chunk.byteLength !== expectedLength) {
+      throw new Error('Published root has an invalid ordered chunk.');
+    }
+    content.set(await retain(chunk), offset);
+    offset += expectedLength;
+  }
+  if ((await digestContent({ bytes: content })) !== manifest.content.digest) {
+    throw new Error('Published root reconstructed digest differs from its manifest.');
+  }
+  const logical = decode(content) as {
+    schemaVersion: number;
+    generation: number;
+    parts: unknown;
+  };
+  if (
+    logical.schemaVersion !== 1 ||
+    logical.generation !== pointer.generation ||
+    !logical.parts ||
+    typeof logical.parts !== 'object' ||
+    Array.isArray(logical.parts)
+  ) {
+    throw new Error('Published root logical content differs from its checked pointer.');
+  }
+  const parts = Object.fromEntries(
+    Object.entries(logical.parts).map(([name, reference]) => [
+      name,
+      runtimeDocumentProtocolSchemas.calls.admitPublishedPart.args.parse(reference),
+    ]),
+  );
+  return { parts, generation: logical.generation, files: [...files.values()] };
+};
+
 /** Read binary bytes below one already captured, owned test-project directory. */
 export const readScaleDirectoryBytes = async (
   directory: FileSystemDirectoryHandle,
@@ -73,7 +179,13 @@ const collectScaleClosure = async (
     files.set(path, { path, digest, bytes });
     return bytes;
   };
-  await retain(outcome.root.path, outcome.root.digest, outcome.root.byteLength);
+  const storage = await readPublishedRootStorage(outcome.root, readRawBytes);
+  for (const file of storage.files) {
+    files.set(file.path, file);
+  }
+  if (canonicalJson(storage.parts) !== canonicalJson(outcome.partRecords)) {
+    throw new Error('Scale root references differ from its admitted part receipts.');
+  }
   for (const [part, reference] of Object.entries(outcome.partRecords)) {
     const record = outcome.admitted.publication.parts[part];
     if (!record) {
@@ -131,28 +243,7 @@ export const collectCommittedScaleClosure = async (
     }
     return bytes;
   };
-  const bytes = await readRawBytes(display.root.path);
-  if (bytes.byteLength !== display.root.byteLength || (await digestContent({ bytes })) !== display.root.digest) {
-    throw new Error('Committed scale root byte identity mismatch.');
-  }
-  // This exact digest was admitted by the existing runtime; project only its existing reference field.
-  const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-  if (
-    value === null ||
-    typeof value !== 'object' ||
-    !('parts' in value) ||
-    value.parts === null ||
-    typeof value.parts !== 'object' ||
-    Array.isArray(value.parts)
-  ) {
-    throw new TypeError('The admitted scale root has no reference record.');
-  }
-  const partRecords = Object.fromEntries(
-    Object.entries(value.parts).map(([name, reference]) => [
-      name,
-      runtimeDocumentProtocolSchemas.calls.admitPublishedPart.args.parse(reference),
-    ]),
-  );
+  const { parts: partRecords } = await readPublishedRootStorage(display.root, readRawBytes);
   const closure = await collectScaleClosure({ ...display, partRecords }, readRawBytes);
   if (!capture.isCurrent()) {
     throw new Error('Committed scale subject changed after collection.');
@@ -194,11 +285,14 @@ export const importPublishedScaleClosure = async (
   ) {
     throw new Error('Scale import is missing its immutable root bytes.');
   }
-  const rootValue: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(root));
-  if (rootValue === null || typeof rootValue !== 'object' || !('parts' in rootValue)) {
-    throw new TypeError('Scale import root omits its admitted part references.');
-  }
-  const rootReferences: unknown = rootValue.parts;
+  const storage = await readPublishedRootStorage(closure.root, async (path) => {
+    const bytes = files[path]?.content;
+    if (!bytes) {
+      throw new Error('Scale import is missing pinned root storage.');
+    }
+    return bytes;
+  });
+  const rootReferences = storage.parts;
   const names = Object.keys(closure.publication.parts);
   if (
     canonicalJson(rootReferences) !== canonicalJson(closure.partRecords) ||
@@ -207,7 +301,7 @@ export const importPublishedScaleClosure = async (
   ) {
     throw new Error('Scale import does not cover its complete admitted part set.');
   }
-  const expectedPaths = new Set([closure.root.path]);
+  const expectedPaths = new Set(storage.files.map(({ path }) => path));
   const requireAsset = (asset: PublishedPartAsset): void => {
     const bytes = files[asset.path]?.content;
     if (!bytes || identities.get(asset.path) !== asset.digest || bytes.byteLength !== asset.byteLength) {
@@ -278,6 +372,7 @@ export const summarizeScaleClosureBytes = (
   definitions: number;
   occurrences: number;
   rootBytes: number;
+  rootStorageBytes: number;
   partRecordBytes: number;
   allVariantGlbBytes: number;
   allVariantExactBytes: number;
@@ -299,11 +394,14 @@ export const summarizeScaleClosureBytes = (
   );
   const sum = (paths: ReadonlySet<string>): number =>
     closure.files.reduce((total, file) => total + (paths.has(file.path) ? file.bytes.byteLength : 0), 0);
+  const storagePrefix = `${closure.root.path.slice(0, closure.root.path.lastIndexOf('/') + 1)}roots/sha256/`;
+  const storage = new Set(closure.files.filter(({ path }) => path.startsWith(storagePrefix)).map(({ path }) => path));
   return {
     root: closure.root,
     definitions: Object.keys(closure.publication.parts).length,
     occurrences: closure.publication.occurrences.length,
     rootBytes: closure.root.byteLength,
+    rootStorageBytes: closure.root.byteLength + sum(storage),
     partRecordBytes: sum(records),
     allVariantGlbBytes: sum(glbs),
     allVariantExactBytes: sum(exact),

@@ -1,34 +1,9 @@
 {
+  "schemaVersion": 2,
   "generation": 1,
-  "occurrences": [
-    {
-      "children": [
-        {
-          "id": "source-mesh",
-          "part": "upstream",
-          "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-          "variant": "default"
-        },
-        {
-          "id": "mount",
-          "part": "downstream",
-          "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-          "variant": "default"
-        }
-      ],
-      "id": "assembly",
-      "transform": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
-    }
-  ],
-  "parts": {
-    "downstream": {
-      "digest": "sha256:1907deaeae2206ce81b1887708d285b70c4dfb254498c7ab8f6ecdf7cc21d370",
-      "path": "assets/parts/sha256/1907deaeae2206ce81b1887708d285b70c4dfb254498c7ab8f6ecdf7cc21d370.json"
-    },
-    "upstream": {
-      "digest": "sha256:1b2375ceb1e85a447db1574b7b7dc61ffa51fcde8e8477453024a3955d4cc840",
-      "path": "assets/parts/sha256/1b2375ceb1e85a447db1574b7b7dc61ffa51fcde8e8477453024a3955d4cc840.json"
-    }
-  },
-  "schemaVersion": 1
+  "manifest": {
+    "path": "roots/sha256/613c91e596cf78b6393b7c640357d7b1a6d86476a4fdcbda4ad8d9b0f1e2f8f6.json",
+    "digest": "sha256:613c91e596cf78b6393b7c640357d7b1a6d86476a4fdcbda4ad8d9b0f1e2f8f6",
+    "byteLength": 339
+  }
 }

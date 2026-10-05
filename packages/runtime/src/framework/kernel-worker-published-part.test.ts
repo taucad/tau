@@ -9,7 +9,7 @@ import { emptyGlb } from '#framework/published-part-test-fixture.js';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 import * as partsRoot from '#framework/published-parts-root.js';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
-import { sha256Bytes, sha256String } from '@taucad/utils/hash';
+import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
 import { publishPartsRoot as commitPinnedPartsRoot } from '#framework/published-parts-root.js';
 import { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.js';
 import { defineMiddleware } from '#plugins/middleware-entry.js';
@@ -2233,11 +2233,13 @@ describe('KernelWorker completed part publication', () => {
       publicationPath: 'published/optional-watch-root.json',
       directory: 'published',
     };
-    const readRoot = async (): Promise<{ generation: number; parts: Record<string, PublishedPartReference> }> =>
-      JSON.parse(await getTestFileSystem().readFile(input.publicationPath, 'utf8')) as {
-        generation: number;
-        parts: Record<string, PublishedPartReference>;
-      };
+    const readRoot = async () => {
+      const snapshot = await worker.readPublishedAssemblyRoot(input.publicationPath);
+      if (snapshot.status !== 'present') {
+        throw new Error('Expected checked publication');
+      }
+      return partsRoot.readPinnedPublishedAssemblyRoot(createRuntimeFileSystem(getTestFileSystem()), snapshot.root);
+    };
     try {
       const publishedAgain = await worker.publishAuthoredAssemblyRoot(input);
       expect(publishedAgain.outcome.status).toBe('published');
@@ -2710,9 +2712,14 @@ describe('KernelWorker completed part publication', () => {
         { timeout: 5000 },
       );
       expect(second.createGeometryCalls).toBe(2);
-      const current = JSON.parse(await getTestFileSystem().readFile(input.publicationPath, 'utf8')) as {
-        parts: Record<string, PublishedPartReference>;
-      };
+      const snapshot = await second.readPublishedAssemblyRoot(input.publicationPath);
+      if (snapshot.status !== 'present') {
+        throw new Error('Expected checked publication');
+      }
+      const current = await partsRoot.readPinnedPublishedAssemblyRoot(
+        createRuntimeFileSystem(getTestFileSystem()),
+        snapshot.root,
+      );
       expect(current.parts['fixed']).toEqual(original.partRecords?.['fixed']);
       const oldReference = original.partRecords?.['edited'];
       const oldAsset = original.publication?.parts['edited']?.variants['named']?.glb;
@@ -2875,7 +2882,33 @@ describe('KernelWorker completed part publication', () => {
     if (!watch) {
       throw new Error('Expected watch-capable fixture');
     }
-    const root = JSON.parse(await filesystem.readFile(input.publicationPath, 'utf8')) as { generation: number };
+    const originalContent = await partsRoot.readPinnedPublishedAssemblyRoot(
+      createRuntimeFileSystem(filesystem),
+      original.outcome.root,
+    );
+    const nextContent = new TextEncoder().encode(canonicalJson({ ...originalContent, generation: generation + 1 }));
+    const contentDigest = `sha256:${await sha256Bytes(nextContent)}`;
+    const chunk = {
+      path: `published/roots/sha256/${contentDigest.slice(7)}.chunk`,
+      digest: contentDigest,
+      byteLength: nextContent.byteLength,
+    };
+    await filesystem.writeFile(chunk.path, nextContent);
+    const manifestBytes = new TextEncoder().encode(
+      canonicalJson({
+        schemaVersion: 1,
+        content: { digest: contentDigest, byteLength: nextContent.byteLength },
+        chunks: [chunk],
+      }),
+    );
+    const manifestDigest = `sha256:${await sha256Bytes(manifestBytes)}`;
+    const manifest = {
+      path: `published/roots/sha256/${manifestDigest.slice(7)}.json`,
+      digest: manifestDigest,
+      byteLength: manifestBytes.byteLength,
+    };
+    await filesystem.writeFile(manifest.path, manifestBytes);
+    const nextPointer = canonicalJson({ schemaVersion: 2, generation: generation + 1, manifest });
     let mutation: Promise<void> | undefined;
     filesystem.watch = (request, handler) => {
       const unsubscribe = watch.call(filesystem, request, handler);
@@ -2883,7 +2916,7 @@ describe('KernelWorker completed part publication', () => {
         mutation =
           change === 'source'
             ? filesystem.writeFile('parts/a.kcl', 'changed while arming')
-            : filesystem.writeFile(input.publicationPath, JSON.stringify({ ...root, generation: generation + 1 }));
+            : filesystem.writeFile(input.publicationPath, nextPointer);
       }
       return unsubscribe;
     };

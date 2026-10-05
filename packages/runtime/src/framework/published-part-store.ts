@@ -220,7 +220,8 @@ export const readPublishedGlbSourceComponentIds = (bytes: Uint8Array<ArrayBuffer
   return ids;
 };
 
-const writeImmutable = async (
+/** Persist one private digest-pinned publication asset before advancing a mutable root. @internal */
+export const writePublishedImmutableAsset = async (
   filesystem: KernelFileSystem,
   {
     asset,
@@ -331,7 +332,7 @@ export const preparePublishedPartVariants = async (input: {
       byteLength: bytes.byteLength,
     };
     // eslint-disable-next-line no-await-in-loop -- Each immutable asset must be verified before the record is written.
-    await writeImmutable(filesystem, { asset: glb, bytes, publicationWriter: input.publicationWriter });
+    await writePublishedImmutableAsset(filesystem, { asset: glb, bytes, publicationWriter: input.publicationWriter });
     let exact: PublishedPartExact | undefined;
     if (recipe.exact) {
       const { bytes: exactBytes, ...qualifier } = recipe.exact;
@@ -344,7 +345,11 @@ export const preparePublishedPartVariants = async (input: {
         byteLength: exactBytes.byteLength,
       };
       // eslint-disable-next-line no-await-in-loop -- Persist exact bytes before the record that advertises them.
-      await writeImmutable(filesystem, { asset, bytes: exactBytes, publicationWriter: input.publicationWriter });
+      await writePublishedImmutableAsset(filesystem, {
+        asset,
+        bytes: exactBytes,
+        publicationWriter: input.publicationWriter,
+      });
       exact = { ...qualifier, asset };
     }
     variants.set(name, exact ? { source, glb, exact } : { source, glb });
@@ -357,7 +362,7 @@ export const preparePublishedPartVariants = async (input: {
     path: assetPath(joinRelativePath(directory, 'parts/sha256'), digest, 'json'),
     digest,
   };
-  await writeImmutable(filesystem, {
+  await writePublishedImmutableAsset(filesystem, {
     asset: { ...reference, byteLength: recordBytes.byteLength },
     bytes: recordBytes,
     publicationWriter: input.publicationWriter,

@@ -305,6 +305,7 @@ describe('createServicesHost — machines', () => {
     const machines = await machinesHarness();
     try {
       const client = machines.connect();
+      // oxlint-disable no-await-in-loop -- one binding at a time, as a person adds them.
       for (const providerId of [
         'bambu-simulator',
         'bambu-a1-mini-simulator',
@@ -320,6 +321,7 @@ describe('createServicesHost — machines', () => {
         }
         await expect(machines.bindSimulator(client, undefined, providerId)).resolves.toEqual(expect.any(String));
       }
+      // oxlint-enable no-await-in-loop
     } finally {
       await machines.cleanup();
     }

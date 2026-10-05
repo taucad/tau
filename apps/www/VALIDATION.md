@@ -1,5 +1,19 @@
 # Marketing preview validation
 
+## Ambient occlusion and shadows — 2026-10-05
+
+Branch `claude/www-hero-ao-shadows-rimucd` from `9bff19b` on `main`. The parts now cast and receive a 2048 px variance shadow from a key light moved to the back left, so the carrier, hub and screws shadow the planets and the ring and planets shadow the floor. Ground-truth ambient occlusion (three's `GTAOPass`, 16 samples, Poisson-denoised) darkens tooth roots, the planets under the carrier and the floor at the base; one composite pass applies it, tone maps and encodes, and prints the floor occlusion as black coverage on the transparent canvas. Tuned over four screenshot rounds in light and dark at 1440 × 900 and 390 × 844; half-resolution occlusion was rejected because it grained the floor and haloed the teeth. Run in a cloud container without a GPU: Node 22.22.0, Playwright Chromium with SwiftShader software WebGL; poster, stills and social card captured from the shipped `scene.mjs` with a temporary SwiftShader launch override.
+
+| Check            | Result                                                                                                                           |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Static build     | 13 pages; noindex; analytics off                                                                                                 |
+| Unit tests       | 16 pass                                                                                                                          |
+| Live story       | All `check-story.mjs` gates pass with the two software-GL waits lengthened as before (hero settle 1.6 → 8 s, disposal 0.2 → 3 s) |
+| Fallbacks        | Governor drop to the direct render and a simulated device without half-float targets both render (PCF shadows, no occlusion)     |
+| Asset provenance | 10 refreshed size/hash pairs match the committed files                                                                           |
+
+Payloads: live bundle 538.2 → 571.8 KB (gzip 138.7 → 147.0 KB); hero poster 88.9 → 120.4 KB at 1200 px and 53.2 → 58.6 KB at 720 px; assembled stills 17–98 KB; social card 143.9 → 151.7 KB. SwiftShader frame time for a hero drag rose from about 720 to 2,670 ms at 2880 × 1800 and from 430 to 1,370 ms at 780 × 1688; that is CPU rasterisation, not a GPU measurement. On a device whose back-to-back frames fall below 25 fps the renderer halves the occlusion samples and then drops occlusion entirely. Not run: GPU or real-device frame timing, Lighthouse, Firefox and Safari.
+
 ## Hero copy and axial assembly — 2026-10-03
 
 Hero reads “Design Verify Print.” under an “AI-native CAD” kicker; the fine print under the hero and the closing band was removed, and the copy stays centred in the hero at 1440, 1840 and 390 px. The assembly now follows the gearbox axis: spacers, pins, washers, bushed planets, sun, front spacers, ring, front carrier and front screws enter from above in that order, and the rear screws come up from below. The exploded stack is laid out from each part's measured axial extent with a 6 mm gap, the lanes gather fully before anything seats, and the camera drops slightly so the stack reads as a column, and holds it until the front screws seat.

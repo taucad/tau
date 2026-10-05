@@ -43,7 +43,7 @@ function TestFailureItem({
   return (
     <div className='flex min-w-0 items-start gap-2 text-xs'>
       <div className='mt-0.5 shrink-0'>
-        <X className='size-3.5 text-destructive' />
+        <X className='size-3.5 text-feature' />
       </div>
       <div className='min-w-0 flex-1'>
         <div className='wrap-break-word text-foreground'>
@@ -211,7 +211,7 @@ export function ChatMessageToolTestModel({
           isCollapsible={totalRequirements > 0 || fullResult !== undefined}
         >
           <ChatToolCardHeader>
-            <ChatToolCardIcon icon={FlaskConical} tone={hasFailures ? 'destructive' : undefined} />
+            <ChatToolCardIcon icon={FlaskConical} tone={hasFailures ? 'error' : undefined} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Tested'>
                 <ChatToolDescription>

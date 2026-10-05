@@ -1,6 +1,11 @@
+import { isNotFound } from '#db/attachment-store.js';
+import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
+import { z } from 'zod';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import { useObservation } from '@taucad/fs-client/react/use-observation';
 import type { MetaFunction } from 'react-router';
 import { PageContent } from '#components/layout/page-content.js';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   Blocks,
   Check,
@@ -111,12 +116,24 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const manifestPath = '.agents/plugins/installed.json';
 
+const installedPluginManifestSchema = z.object({
+  skills: z
+    .record(
+      z.string(),
+      z.object({
+        status: z.enum(['installed', 'shadowed']),
+        source: z.literal('tau-store'),
+        installedPath: z.string(),
+        shadowPath: z.string().optional(),
+        version: z.string(),
+        updatedAt: z.string(),
+      }),
+    )
+    .optional(),
+});
+
 function parseManifest(bytes: Uint8Array<ArrayBuffer>): InstalledPluginManifest {
-  try {
-    return JSON.parse(textDecoder.decode(bytes)) as InstalledPluginManifest;
-  } catch {
-    return {};
-  }
+  return installedPluginManifestSchema.parse(JSON.parse(textDecoder.decode(bytes)));
 }
 
 function skillToStoreItem(skill: TauStoreSkill, index: number): StoreItem {
@@ -214,33 +231,41 @@ function StoreSection({
 }
 
 export default function PluginsRoute(): React.JSX.Element {
-  const { readFile, writeFiles, exists } = useFileManager();
+  const { readFile, writeFiles, exists, contentService } = useFileManager();
   const skillsCatalog = useSkillsCatalog();
-  const [manifest, setManifest] = useState<InstalledPluginManifest>({});
+  const manifestService = useMemo(
+    () =>
+      contentService
+        ? new ObservationService<InstalledPluginManifest>({
+            resource: manifestPath,
+            watch: (invalidate, reset) =>
+              contentService.watchReady({ paths: [manifestPath] }, (event) => {
+                if (event.type === 'reset') {
+                  reset();
+                } else {
+                  invalidate();
+                }
+              }),
+            read: async () => {
+              try {
+                return parseManifest(await readFile(manifestPath));
+              } catch (error) {
+                if (error instanceof FileNotFoundError || isNotFound(error)) {
+                  return {};
+                }
+                throw error;
+              }
+            },
+            equal: (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
+          })
+        : undefined,
+    [contentService, readFile],
+  );
+  const manifestSnapshot = useObservation(manifestService);
+  const manifest = manifestSnapshot.value ?? {};
 
   const systemSkills = useMemo(() => systemSkillsCatalog.map((skill) => systemSkillToStoreItem(skill)), []);
   const storeSkills = useMemo(() => tauStoreSkills.map((skill, index) => skillToStoreItem(skill, index)), []);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadManifest(): Promise<void> {
-      try {
-        const bytes = await readFile(manifestPath);
-        if (!cancelled) {
-          setManifest(parseManifest(bytes));
-        }
-      } catch {
-        if (!cancelled) {
-          setManifest({});
-        }
-      }
-    }
-
-    void loadManifest();
-    return () => {
-      cancelled = true;
-    };
-  }, [readFile]);
 
   const getSkillInstallStatus = useCallback(
     (item: StoreItem): 'available' | 'installed' | 'shadowed' => {
@@ -261,6 +286,9 @@ export default function PluginsRoute(): React.JSX.Element {
 
   const installSkill = useCallback(
     async (slug: string): Promise<void> => {
+      if (manifestSnapshot.status !== 'ready') {
+        return;
+      }
       const skill = tauStoreSkills.find((entry) => entry.slug === slug);
       if (!skill) {
         return;
@@ -289,9 +317,9 @@ export default function PluginsRoute(): React.JSX.Element {
         [targetPath]: { content: textEncoder.encode(skill.skillMarkdown) },
         [manifestPath]: { content: textEncoder.encode(JSON.stringify(nextManifest, null, 2) + '\n') },
       });
-      setManifest(nextManifest);
+      manifestService?.invalidate();
     },
-    [exists, manifest, writeFiles],
+    [exists, manifest, manifestService, manifestSnapshot.status, writeFiles],
   );
 
   return (
@@ -322,6 +350,11 @@ export default function PluginsRoute(): React.JSX.Element {
         }
       />
 
+      {manifestSnapshot.error && (
+        <p role='alert' className='text-sm text-destructive'>
+          {manifestSnapshot.error}
+        </p>
+      )}
       <StoreSection title='Featured' items={featuredPlugins} />
       <StoreSection title='System' items={systemSkills} />
       <StoreSection title='Skills' items={storeSkills} getStatus={getSkillInstallStatus} onInstall={installSkill} />

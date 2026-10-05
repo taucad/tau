@@ -33,6 +33,9 @@ import type { Chat } from '@ai-sdk/react';
 import { UIMessageStreamError } from 'ai';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import type { ObservationRead, ObservationWatch } from '@taucad/fs-client/observation-service';
+import type { WatchEvent } from '@taucad/filesystem';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
@@ -90,6 +93,7 @@ import {
   selectTranscriptSource,
   selectToolsInFlight,
   materializeTranscript,
+  chunksSince,
 } from '#machines/chat-projection.logic.js';
 import type {
   ChatProjection,
@@ -160,6 +164,12 @@ export type ChatSessionDeps = {
    * any route (D1, D13).
    */
   client: ComposerRecordClient;
+  /** Acknowledged observation through the root owning the chat records. */
+  watchRecordFile?: (
+    path: string,
+    listener: (event: WatchEvent) => void,
+    options?: { recursive?: boolean },
+  ) => ObservationWatch;
 };
 
 export type ChatSession = {
@@ -200,7 +210,48 @@ type CachedMessagePresentation = MessagePresentation & {
   readonly prefixInvocations: ReadonlySet<string>;
   readonly lastParts: MyUIMessage['parts'] | undefined;
   readonly lastMessage: MyUIMessage | undefined;
+  readonly lastRawMessage: MyUIMessage | undefined;
   readonly firstMessage: MyUIMessage | undefined;
+};
+
+/** SDK snapshots clone the active message; retain equal JSON-safe part values for memoized renderers. */
+const equalPartValue = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) {
+    return true;
+  }
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') {
+    return false;
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => equalPartValue(value, right[index]))
+    );
+  }
+  const first = left as Record<string, unknown>;
+  const second = right as Record<string, unknown>;
+  const keys = Object.keys(first);
+  return (
+    keys.length === Object.keys(second).length &&
+    keys.every((key) => Object.hasOwn(second, key) && equalPartValue(first[key], second[key]))
+  );
+};
+
+const shareMessageParts = (previous: MyUIMessage | undefined, current: MyUIMessage): MyUIMessage => {
+  if (previous?.id !== current.id || previous.role !== current.role) {
+    return current;
+  }
+  const parts = current.parts.map((part, index) =>
+    equalPartValue(previous.parts[index], part) ? previous.parts[index]! : part,
+  );
+  const unchanged =
+    parts.length === previous.parts.length && parts.every((part, index) => part === previous.parts[index]);
+  if (unchanged && equalPartValue(previous.metadata, current.metadata)) {
+    return previous;
+  }
+  return { ...current, parts: unchanged ? previous.parts : parts };
 };
 
 export type ChatHistoricalUsage = Readonly<{
@@ -330,12 +381,16 @@ type InternalSession = ChatSession & {
   commandAbort: AbortController | undefined;
   watch: Actor<typeof sdkWatch> | undefined;
   watchedRunId: string | undefined;
+  watchedSegmentId: string | undefined;
+  watchedStreamVersion: number | undefined;
   materializeVersion: number;
   transcriptMaterialization: Promise<void> | undefined;
   recoveredRunId: string | undefined;
   blockedPresentationRunId: string | undefined;
   recoveringPresentation: boolean;
   failedTranscriptProjection: ChatProjection | undefined;
+  transcriptSource: ChatProjection | undefined;
+  transcriptSourceVersion: number;
   commandInFlight: boolean;
   stopRequested: boolean;
   restoredStoppedRunId: string | undefined;
@@ -426,7 +481,11 @@ export type ChatSessionStoreOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   Readonly<{ chatSession?: typeof chatSessionMachine }>;
 
 /** The revision facts one project's chats show (the project's route reports them). @public */
-export type ChatRevisionFacts = Readonly<{ dirty: boolean; sync: ChatSyncState; branch?: string }>;
+export type ChatRevisionFacts = Readonly<{
+  dirty: boolean;
+  sync: ChatSyncState;
+  branch?: string;
+}>;
 
 type ObservedChat = {
   projectId: string;
@@ -442,7 +501,13 @@ export type ProjectClosePlan = Readonly<{
   stoppableRunCount: number;
   stoppableChatIds: readonly string[];
   liveChatIds: readonly string[];
-  continuingRuns: ReadonlyArray<Readonly<{ id: string; label: string; reason: 'other-build' | 'background-window' }>>;
+  continuingRuns: ReadonlyArray<
+    Readonly<{
+      id: string;
+      label: string;
+      reason: 'other-build' | 'background-window';
+    }>
+  >;
 }>;
 
 type ProjectHostConnector = Readonly<{
@@ -456,6 +521,7 @@ export class ChatSessionStore {
   readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
   readonly #remoteReadVersions = new Map<string, number>();
   readonly #remoteReadCompletedVersions = new Map<string, number>();
+  readonly #remoteObservations = new Map<string, ObservationService<void>>();
   readonly #projectRunKeys = new Map<string, string>();
   readonly #projectRunVersions = new Map<string, number>();
   readonly #chatSessionLogic: typeof chatSessionMachine;
@@ -593,7 +659,25 @@ export class ChatSessionStore {
    * time, so swapping never tears in-flight work.
    */
   public setDependencies(deps: ChatSessionDeps): void {
+    const replaced = deps.client !== this.#deps.client || deps.watchRecordFile !== this.#deps.watchRecordFile;
     this.#deps = deps;
+    if (replaced) {
+      for (const [chatId, observation] of this.#remoteObservations) {
+        observation.dispose();
+        this.#invalidateRemoteRead(chatId);
+      }
+      this.#remoteObservations.clear();
+      // The provider mirrors ports during render; native acquisition happens
+      // after that pass and captures the final capability incarnation.
+      queueMicrotask(() => {
+        for (const [chatId, chat] of this.#observed) {
+          this.#startRemoteObservation(chatId, chat.projectId);
+        }
+        for (const [chatId, chat] of this.#sessions) {
+          this.#startRemoteObservation(chatId, chat.projectId);
+        }
+      });
+    }
   }
 
   /** Observe a listed chat's log without acquiring its SDK transcript or composer. @public */
@@ -607,7 +691,9 @@ export class ChatSessionStore {
     if (existing === undefined) {
       this.#observed.set(chatId, observed);
       this.#projectionOf(chatId);
-      void this.#refreshRemoteSegmentsSafely(chatId, projectId);
+      if (!this.#startRemoteObservation(chatId, projectId)) {
+        void this.#refreshRemoteSegmentsSafely(chatId, projectId);
+      }
       this.#startObservedAttachment(chatId, observed);
       this.#notifyMembership();
     }
@@ -618,6 +704,7 @@ export class ChatSessionStore {
       }
       this.#stopObservedAttachment(chatId, observed);
       this.#observed.delete(chatId);
+      this.#stopRemoteObservationIfUnused(chatId);
       if (!this.#sessions.has(chatId)) {
         this.#historicalUsage.delete(chatId);
       }
@@ -633,39 +720,27 @@ export class ChatSessionStore {
 
   /** Refold fetched foreign log files into the one transcript projection; never cache their bytes in chat.json. @public */
   public async refreshRemoteSegments(chatId: string, projectId: string): Promise<void> {
-    if (this.#observed.get(chatId)?.projectId !== projectId && this.#sessions.get(chatId)?.projectId !== projectId) {
+    const observation = this.#remoteObservations.get(chatId);
+    if (observation === undefined) {
+      await this.#readRemoteSegments(chatId, projectId);
       return;
     }
-    const version = (this.#remoteReadVersions.get(chatId) ?? 0) + 1;
-    this.#remoteReadVersions.set(chatId, version);
-    const directory = `/projects/${projectId}/${chatRecordsPath(chatId)}/events`;
-    let entries: string[];
-    try {
-      entries = await this.#deps.client.readdir(directory);
-    } catch (error) {
-      if (getErrno(error) !== 'ENOENT' && getErrno(error) !== 'ENOTDIR') {
-        throw error;
-      }
-      entries = [];
-    }
-    const segments = await Promise.all(
-      entries
-        .filter((name) => /^[^/]+\.jsonl$/.test(name))
-        .map(async (name) => ({ deviceId: name, bytes: await this.#readForeignSegment(`${directory}/${name}`) })),
-    );
-    if (
-      this.#remoteReadVersions.get(chatId) === version &&
-      (this.#observed.get(chatId)?.projectId === projectId || this.#sessions.get(chatId)?.projectId === projectId)
-    ) {
-      this.#projectionOf(chatId).send({ type: 'remote', segments });
-      this.#remoteReadCompletedVersions.set(chatId, version);
-      this.#projectionTopics.get(chatId)?.emit();
-      const session = this.#sessions.get(chatId);
-      if (session?.pendingSeedGesture !== undefined) {
-        session.seedRemoteReadVersion = version;
-        this.startPendingSeed(chatId);
-      }
-    }
+    observation.invalidate();
+    await new Promise<void>((resolve, reject) => {
+      let unsubscribe = (): void => undefined;
+      const check = (): void => {
+        const snapshot = observation.getSnapshot();
+        if (snapshot.status === 'ready' || snapshot.status === 'closed') {
+          unsubscribe();
+          resolve();
+        } else if (snapshot.status === 'error') {
+          unsubscribe();
+          reject(new Error(snapshot.error));
+        }
+      };
+      unsubscribe = observation.subscribe(check);
+      check();
+    });
   }
 
   /** Publish the active project's real W6 connector to every listed chat. @public */
@@ -799,7 +874,11 @@ export class ChatSessionStore {
   public async respondToProjectedApproval(
     chatId: string,
     interruptId: string,
-    decision: Readonly<{ approved: boolean; reason?: string; optionId?: string }>,
+    decision: Readonly<{
+      approved: boolean;
+      reason?: string;
+      optionId?: string;
+    }>,
   ): Promise<boolean> {
     const projection = this.#projectionContext(chatId);
     if (projection === undefined || !selectCaughtUp(projection)) {
@@ -943,6 +1022,7 @@ export class ChatSessionStore {
 
     const session = this.#createSession(chatId, projectId);
     this.#sessions.set(chatId, session);
+    this.#startRemoteObservation(chatId, projectId);
     this.#refreshSnapshot();
     this.#notifyMembership();
     return session;
@@ -1016,20 +1096,29 @@ export class ChatSessionStore {
       cached?.length === messages.length &&
       cached.lastId === last?.id &&
       cached.lastRole === last?.role &&
-      cached.firstMessage === messages[0]
+      (messages.length === 1 || cached.firstMessage === messages[0])
     ) {
-      if (cached.lastMessage === last) {
+      if (cached.lastRawMessage === last) {
         return cached;
       }
+      const selected = last === undefined ? undefined : shareMessageParts(cached.lastMessage, last);
       if (last !== undefined) {
         // The map is an index over the authoritative SDK array, not another transcript.
-        cached.messagesById.set(last.id, last);
+        cached.messagesById.set(last.id, selected!);
       }
       const agentInvocations =
-        cached.lastParts === last?.parts
+        cached.lastParts === selected?.parts
           ? cached.agentInvocations
-          : [...new Set([...cached.prefixInvocations, ...invocationsOf(last === undefined ? [] : [last])])].join('\n');
-      const next = { ...cached, agentInvocations, lastParts: last?.parts, lastMessage: last };
+          : [
+              ...new Set([...cached.prefixInvocations, ...invocationsOf(selected === undefined ? [] : [selected])]),
+            ].join('\n');
+      const next = {
+        ...cached,
+        agentInvocations,
+        lastParts: selected?.parts,
+        lastMessage: selected,
+        lastRawMessage: last,
+      };
       this.#messagePresentations.set(chatId, next);
       return next;
     }
@@ -1048,6 +1137,7 @@ export class ChatSessionStore {
       prefixInvocations,
       lastParts: last?.parts,
       lastMessage: last,
+      lastRawMessage: last,
       firstMessage: messages[0],
     };
     this.#messagePresentations.set(chatId, next);
@@ -1589,7 +1679,7 @@ export class ChatSessionStore {
     await binding.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
   }
 
-  async #readForeignSegment(path: string): Promise<Uint8Array<ArrayBuffer>> {
+  async #readForeignSegment(path: string, client = this.#deps.client): Promise<Uint8Array<ArrayBuffer>> {
     if (this.#foreignReadsActive < 4) {
       this.#foreignReadsActive++;
     } else {
@@ -1598,7 +1688,7 @@ export class ChatSessionStore {
       });
     }
     try {
-      return await this.#deps.client.readFile(path);
+      return await client.readFile(path);
     } finally {
       const next = this.#foreignReadWaiters.shift();
       if (next === undefined) {
@@ -1607,6 +1697,59 @@ export class ChatSessionStore {
         next();
       }
     }
+  }
+
+  #invalidateRemoteRead(chatId: string): void {
+    this.#remoteReadVersions.set(chatId, (this.#remoteReadVersions.get(chatId) ?? 0) + 1);
+  }
+
+  #startRemoteObservation(chatId: string, projectId: string): boolean {
+    const watch = this.#deps.watchRecordFile;
+    if (watch === undefined) {
+      return false;
+    }
+    if (this.#remoteObservations.has(chatId)) {
+      return true;
+    }
+    const directory = `/projects/${projectId}/${chatRecordsPath(chatId)}/events`;
+    const observation = new ObservationService<void>({
+      resource: directory,
+      watch: (invalidate, reset) =>
+        watch(
+          directory,
+          (event) => {
+            if (event.type === 'reset') {
+              reset();
+              return;
+            }
+            const paths = event.type === 'rename' ? [event.oldPath, event.newPath] : [event.path];
+            // This is the foreign segment directory, not the owned events.jsonl
+            // writer or chat.json metadata. Ancestor deletion/rename also refolds it.
+            if (paths.some((path) => path.endsWith('.jsonl') || directory.endsWith(`/${path}`) || directory === path)) {
+              invalidate();
+            }
+          },
+          { recursive: true },
+        ),
+      invalidate: () => {
+        this.#invalidateRemoteRead(chatId);
+      },
+      read: async (fence) => {
+        await this.#readRemoteSegments(chatId, projectId, fence);
+      },
+    });
+    this.#remoteObservations.set(chatId, observation);
+    observation.acquire();
+    return true;
+  }
+
+  #stopRemoteObservationIfUnused(chatId: string): void {
+    if (this.#observed.has(chatId) || this.#sessions.has(chatId)) {
+      return;
+    }
+    this.#remoteObservations.get(chatId)?.dispose();
+    this.#remoteObservations.delete(chatId);
+    this.#invalidateRemoteRead(chatId);
   }
 
   async #refreshRemoteSegmentsSafely(chatId: string, projectId: string): Promise<void> {
@@ -2010,6 +2153,7 @@ export class ChatSessionStore {
     session.failedTranscriptProjection = undefined;
     session.activeCommand = command;
     session.watchedRunId = command.payload.runId;
+    session.watchedStreamVersion = 0;
     session.commandInFlight = true;
     session.stopRequested = false;
     session.commandAbort?.abort();
@@ -2146,7 +2290,12 @@ export class ChatSessionStore {
      * nothing, so a phase moves only once the projection holds the log to its end. */
     let presented: string | undefined;
     let attention: RowKey | undefined;
+    let published: ChatProjection | undefined;
     projection.subscribe(({ context }) => {
+      if (published === context) {
+        return;
+      }
+      published = context;
       const nextAttention = selectCaughtUp(context) ? selectAttentionRow(context) : attention;
       if (nextAttention !== attention) {
         attention = nextAttention;
@@ -2191,6 +2340,19 @@ export class ChatSessionStore {
     this.#syncTools(session, projection);
     const run = selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
     const phase = selectRunPhase(projection);
+    const view = run === undefined ? undefined : projection.views[run.runId];
+    if (
+      session.watchedRunId === run?.runId &&
+      (session.watchedSegmentId !== view?.segmentId ||
+        (session.watchedStreamVersion ?? 0) !== (view?.streamVersion ?? 0)) &&
+      !session.commandInFlight
+    ) {
+      session.watch?.stop();
+      session.watch = undefined;
+      session.watchedRunId = undefined;
+      session.materializeVersion++;
+      void session.chat.stop();
+    }
     if (
       run !== undefined &&
       session.watchedRunId !== undefined &&
@@ -2210,7 +2372,10 @@ export class ChatSessionStore {
     ) {
       session.restoredStoppedRunId = run.runId;
       const view = projection.views[run.runId];
-      if (view?.user !== undefined && view.chunks.every((chunk) => nonOutputChunkTypes.has(chunk.type))) {
+      if (
+        view?.user !== undefined &&
+        ![...chunksSince(view.chunks)].some((chunk) => !nonOutputChunkTypes.has(chunk.type))
+      ) {
         void this.#restoreStoppedDraft(session, view.user);
       }
     }
@@ -2221,6 +2386,7 @@ export class ChatSessionStore {
     if (
       run !== undefined &&
       opensRun(phase) &&
+      view?.user !== undefined &&
       session.watch === undefined &&
       session.watchedRunId === undefined &&
       !session.commandInFlight &&
@@ -2255,6 +2421,8 @@ export class ChatSessionStore {
   /** Reattach a viewed live run through its projection, never through the old host stream. */
   async #watchProjectedRun(session: InternalSession, projection: ChatProjection, runId: string): Promise<void> {
     session.watchedRunId = runId;
+    session.watchedSegmentId = projection.views[runId]?.segmentId;
+    session.watchedStreamVersion = projection.views[runId]?.streamVersion ?? 0;
     const version = ++session.materializeVersion;
     try {
       const messages = await materializeTranscript(projection, runId);
@@ -2379,11 +2547,16 @@ export class ChatSessionStore {
       session.watchedRunId !== undefined ||
       session.recoveringPresentation ||
       (session.failedTranscriptProjection?.views === projection.views &&
-        session.failedTranscriptProjection.remote?.views === projection.remote?.views)
+        session.failedTranscriptProjection.remote?.views === projection.remote?.views) ||
+      (session.transcriptSource?.views === projection.views &&
+        session.transcriptSource.remote?.views === projection.remote?.views &&
+        session.transcriptSourceVersion === session.materializeVersion)
     ) {
       return;
     }
     const version = ++session.materializeVersion;
+    session.transcriptSource = projection;
+    session.transcriptSourceVersion = version;
     session.transcriptMaterialization = this.#applyProjectedTranscript(session, projection, version);
   }
 
@@ -2400,8 +2573,11 @@ export class ChatSessionStore {
         session.watchedRunId === undefined &&
         session.materializeVersion === version
       ) {
-        this.#messagePresentations.delete(session.chatId);
-        session.chat.messages = this.#retainSeedUntilLogged(session, messages);
+        const retained = this.#retainSeedUntilLogged(session, messages);
+        const previous = session.chat.messages;
+        if (previous.length !== retained.length || retained.some((message, index) => message !== previous[index])) {
+          session.chat.messages = retained;
+        }
         session.failedTranscriptProjection = undefined;
       }
     } catch (error) {
@@ -2515,7 +2691,15 @@ export class ChatSessionStore {
    */
   #presentRun(
     session: InternalSession,
-    { runId, phase, reason }: Readonly<{ runId: string; phase: ProjectedRunPhase; reason: string | undefined }>,
+    {
+      runId,
+      phase,
+      reason,
+    }: Readonly<{
+      runId: string;
+      phase: ProjectedRunPhase;
+      reason: string | undefined;
+    }>,
   ): void {
     if (phase === 'none') {
       return;
@@ -2874,12 +3058,16 @@ export class ChatSessionStore {
       commandAbort: undefined,
       watch: undefined,
       watchedRunId: undefined,
+      watchedSegmentId: undefined,
+      watchedStreamVersion: undefined,
       materializeVersion: 0,
       transcriptMaterialization: undefined,
       recoveredRunId: undefined,
       blockedPresentationRunId: undefined,
       recoveringPresentation: false,
       failedTranscriptProjection: undefined,
+      transcriptSource: undefined,
+      transcriptSourceVersion: 0,
       commandInFlight: false,
       stopRequested: false,
       restoredStoppedRunId: undefined,
@@ -2968,6 +3156,7 @@ export class ChatSessionStore {
     void this.#drainComposer(session, drained);
     session.chatRoot.stop();
     this.#sessions.delete(session.chatId);
+    this.#stopRemoteObservationIfUnused(session.chatId);
     this.#messagePresentations.delete(session.chatId);
     if (!this.#observed.has(session.chatId)) {
       this.#historicalUsage.delete(session.chatId);
@@ -3023,5 +3212,46 @@ export class ChatSessionStore {
       this.#membershipNotifyScheduled = false;
       this.#membershipTopic.emit();
     });
+  }
+
+  async #readRemoteSegments(chatId: string, projectId: string, fence?: ObservationRead): Promise<void> {
+    if (this.#observed.get(chatId)?.projectId !== projectId && this.#sessions.get(chatId)?.projectId !== projectId) {
+      return;
+    }
+    const version = (this.#remoteReadVersions.get(chatId) ?? 0) + 1;
+    this.#remoteReadVersions.set(chatId, version);
+    const { client } = this.#deps;
+    const directory = `/projects/${projectId}/${chatRecordsPath(chatId)}/events`;
+    let entries: string[];
+    try {
+      entries = await client.readdir(directory);
+    } catch (error) {
+      if (getErrno(error) !== 'ENOENT' && getErrno(error) !== 'ENOTDIR') {
+        throw error;
+      }
+      entries = [];
+    }
+    const segments = await Promise.all(
+      entries
+        .filter((name) => /^[^/]+\.jsonl$/.test(name))
+        .map(async (name) => ({
+          deviceId: name,
+          bytes: await this.#readForeignSegment(`${directory}/${name}`, client),
+        })),
+    );
+    if (
+      this.#remoteReadVersions.get(chatId) === version &&
+      this.#deps.client === client &&
+      (fence === undefined || fence.isCurrent()) &&
+      (this.#observed.get(chatId)?.projectId === projectId || this.#sessions.get(chatId)?.projectId === projectId)
+    ) {
+      this.#projectionOf(chatId).send({ type: 'remote', segments });
+      this.#remoteReadCompletedVersions.set(chatId, version);
+      const session = this.#sessions.get(chatId);
+      if (session?.pendingSeedGesture !== undefined) {
+        session.seedRemoteReadVersion = version;
+        this.startPendingSeed(chatId);
+      }
+    }
   }
 }

@@ -3,6 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FileSelector, createStaticDataSource } from '#components/files/file-selector.js';
 import type { FileSelectorDataSource, FileSelectorEntry } from '#components/files/file-selector.js';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import { classifyDirectoryListingError } from '@taucad/fs-client/directory-listing';
+import type { DirectoryListing, ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 
 vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: () => false,
@@ -11,6 +14,29 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({
 vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: vi.fn(() => undefined),
 }));
+
+/** The tree service's shared listing projection over a scripted `listDirectory`, as `observeDirectory` builds it. */
+const observeListing =
+  (listDirectory: (path: string) => Promise<ListedDirectoryEntry[]>) =>
+  (path: string): ObservationService<DirectoryListing> =>
+    new ObservationService<DirectoryListing>({
+      resource: path,
+      watch: () => ({
+        ready: Promise.resolve(),
+        closed: new Promise<never>(() => {
+          // Never closes.
+        }),
+        dispose: () => undefined,
+      }),
+      read: async () => {
+        try {
+          const listing: DirectoryListing = { kind: 'ready', path, entries: await listDirectory(path) };
+          return listing;
+        } catch (error) {
+          return { kind: 'error', path, cause: classifyDirectoryListingError(error, path) };
+        }
+      },
+    });
 
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -294,6 +320,7 @@ describe('FileSelector (context auto-wiring)', () => {
         listDirectory,
         listDirectorySync: vi.fn().mockReturnValue(undefined),
         subscribePath: vi.fn().mockReturnValue(() => undefined),
+        observeDirectory: observeListing(listDirectory),
       },
     } as unknown as ReturnType<typeof useOptionalFileManager>);
 
@@ -352,6 +379,7 @@ describe('FileSelector (context auto-wiring)', () => {
         listDirectory,
         listDirectorySync,
         subscribePath: vi.fn().mockReturnValue(() => undefined),
+        observeDirectory: observeListing(listDirectory),
       },
     } as unknown as ReturnType<typeof useOptionalFileManager>);
 

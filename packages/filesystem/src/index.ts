@@ -6,6 +6,7 @@ export type {
   FileStat,
   FileStatEntry,
   HeadFileStat,
+  FileStatOptions,
   DirectoryStatRow,
   FileSystemProvider,
   FileReadStreamOptions,

@@ -1,0 +1,341 @@
+name: E2E nightly
+
+# The browser-backed suites, out of pull request and `main` CI: every `type:e2e`
+# project's Vitest Browser matrices and development-server qualifications, the
+# real-device WebGPU qualification and the funded desktop live turn. Each night they
+# run against the head of `main`, with the GeoSpec engine products a `main` CI run
+# cached for that commit's native source closure, whether or not the rest of that
+# run passed. A failure here is a red nightly, never a merge gate.
+# `workflow_dispatch` takes an optional commit to run against instead.
+
+on:
+  schedule:
+    - cron: '23 13 * * *' # 13:23 UTC, 02:23 in New Zealand
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'Commit to test; defaults to the head of main'
+        required: false
+        default: ''
+
+concurrency:
+  group: e2e-nightly
+  cancel-in-progress: false
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+  NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+  TAU_API_URL: http://localhost:4000
+  TAU_WEBSOCKET_URL: ws://localhost:4001
+  TAU_FRONTEND_URL: http://localhost:3000
+
+jobs:
+  # Picks the commit and lists every suite. Selectors are target names, so a new e2e
+  # project joins by declaring the targets; no job in this workflow names a project.
+  plan:
+    name: Plan nightly suites
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+      geospec-key: ${{ steps.geospec-key.outputs.key }}
+      suites: ${{ steps.suites.outputs.suites }}
+      webgpu: ${{ steps.suites.outputs.webgpu }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.sha || 'main' }}
+          persist-credentials: false
+
+      - name: Pin the commit under test
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      # The products depend only on the native source closure, so any `main` CI run
+      # whose producer built this closure cached them, even a run that went red later.
+      - name: Identify the GeoSpec engine product closure
+        id: geospec-key
+        run: echo "key=geospec-transport-v1-$(node packages/geospec-engine-native/scripts/ci-artifacts.mjs product-key)" >> "$GITHUB_OUTPUT"
+
+      - name: Look up the cached GeoSpec engine products
+        id: geospec-cache
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ steps.geospec-key.outputs.key }}
+          mode: lookup
+
+      - name: Stop when no main CI run has built them
+        if: steps.geospec-cache.outputs.cache-hit != 'true'
+        env:
+          KEY: ${{ steps.geospec-key.outputs.key }}
+        run: |
+          echo "::error::No main CI run has cached $KEY yet; the nightly runs once main's GeoSpec producer has built this closure."
+          exit 1
+
+      - name: List the end-to-end suites
+        id: suites
+        run: |
+          # `tail -1` keeps the JSON array and drops Nx's log lines.
+          suites='[]'
+          add_suites() {
+            suites=$(jq -c --arg target "$1" --argjson projects "$2" \
+              '. + [$projects[] | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$suites")
+          }
+          for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated; do
+            add_suites "$target" "$(pnpm nx show projects --with-target "$target" --json | tail -1)"
+          done
+          echo "End-to-end suites: $suites"
+          echo "suites=$suites" >> "$GITHUB_OUTPUT"
+          webgpu=$(pnpm nx show projects --with-target test:e2e:webgpu --json | tail -1)
+          echo "webgpu=$([ "$webgpu" = '[]' ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+
+  # One job per project and suite target: in one job they ran one after another for
+  # over 105 min (run 37221169741, 2026-10-04).
+  e2e:
+    name: Browser end-to-end (${{ matrix.suite.project }} ${{ matrix.suite.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    needs: [plan]
+    if: needs.plan.outputs.suites != '[]'
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
+    steps:
+      - &checkout
+        name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - &setup-nx
+        name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - &geospec
+        name: Restore the GeoSpec engine products
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: restore
+
+      - &verify-geospec
+        name: Verify GeoSpec products against this checkout
+        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
+
+      # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
+      # `test:e2e:non-isolated` runs PicoVoxel on Chromium and Firefox.
+      - name: Install browsers for Vitest Browser
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+
+      # `scripts:test:e2e` converts HTML references with Pandoc 3.1.4 or newer, and
+      # its expected Markdown follows current Pandoc; Ubuntu's package is 3.1.3.
+      - name: Install Pandoc for reference conversion
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-1-amd64.deb
+          echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
+          sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
+
+      # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
+      # `BILLING_*` development values; without them it refuses to start.
+      - name: Prepare API env file
+        run: cp apps/api/.env.example apps/api/.env
+
+      # `desktop-e2e:test:e2e` launches the *unpackaged* Electron shell, which is why
+      # xvfb is enough and `desktop:package-macos` is not in its dependency chain; it
+      # brings up its own Postgres/Redis/MinIO and publishes the development billing
+      # policy before its specs. `test:e2e:non-isolated` serves the UI without
+      # COOP/COEP: the mode production web runs in until go-live row X-5 closes (D19),
+      # so kernels must degrade to their serial builds there.
+      # `--parallel=1`: the suites' ui:build, ui:build:serve and ui:build:desktop
+      # prerequisites each peak near 10 GB, so building them together loses the runner.
+      # A step-level bound: a hung suite otherwise holds the job for the 6 h default
+      # with no logs, while this still runs the always() diagnostics below.
+      - name: Run the end-to-end suite
+        timeout-minutes: 120
+        env:
+          TAU_E2E_WEBGPU_PROFILE: software
+          PROJECT: ${{ matrix.suite.project }}
+          TARGET: ${{ matrix.suite.target }}
+        run: xvfb-run --auto-servernum pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1
+
+      # Field trace validation: every events.jsonl the suites above captured at
+      # teardown is validated against ChatLog.tla, including after a failed suite.
+      - name: Setup formal toolchains
+        if: always()
+        uses: ./.github/actions/setup-formal
+        with:
+          tools: tlc
+
+      - name: Validate captured chat logs
+        if: always()
+        env:
+          PROJECT: ${{ matrix.suite.project }}
+        run: pnpm nx run-many -t formal:logs --projects "$PROJECT"
+
+      - &root-hygiene
+        name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
+      - name: Upload Vitest Browser diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vitest-browser-diagnostics-${{ matrix.suite.slug }}
+          path: |
+            out/test-results/vitest-browser
+            out/test-results/desktop-e2e
+            out/test-results/chat-logs
+            out/reports/formal
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Real-device qualification. The runner label is an infrastructure contract: this
+  # lane must never silently fall back to SwiftShader. No `tau-webgpu` runner is
+  # registered yet, so the lane waits for `TAU_WEBGPU_RUNNER_ENABLED` rather than
+  # queueing until GitHub cancels it (the benchmark lane's pattern).
+  webgpu-hardware:
+    name: WebGPU hardware qualification
+    runs-on: [self-hosted, tau-webgpu]
+    needs: [plan]
+    if: needs.plan.outputs.webgpu == 'true' && vars.TAU_WEBGPU_RUNNER_ENABLED == 'true'
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    steps:
+      - *checkout
+      - *setup-nx
+      - *geospec
+      - *verify-geospec
+
+      - name: Install managed Chromium for Vitest Browser
+        run: pnpm exec playwright install chromium
+
+      - name: Run hardware WebGPU qualification
+        env:
+          TAU_E2E_WEBGPU_PROFILE: hardware
+        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:webgpu
+
+      - *root-hygiene
+
+      - name: Upload hardware WebGPU diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vitest-browser-webgpu-hardware-diagnostics
+          path: out/test-results/vitest-browser
+          if-no-files-found: error
+          retention-days: 14
+
+  # runtime-e2e's Darwin host suite, quarantined out of ci.yml's Darwin lane until its
+  # 11 failing tests pass here: https://github.com/taucad/tau/issues/342. The steps
+  # mirror ci.yml's `geospec-darwin` job.
+  runtime-e2e-darwin:
+    name: Runtime end-to-end on Darwin (quarantined, #342)
+    runs-on: macos-15
+    timeout-minutes: 150
+    needs: [plan]
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    steps:
+      - *checkout
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+
+      - *geospec
+
+      - name: Prepare GeoSpec engine products
+        uses: ./.github/actions/geospec-producer
+
+      - name: Prepare current installed GeoSpec consumer
+        env:
+          GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
+        run: |
+          pnpm nx run-many -t require-geospec-delivery --parallel=1
+          pnpm nx run-many -t build --projects tag:host:darwin-arm64 --parallel=1
+          pnpm nx run scripts:prepare-geospec-test-consumer
+          node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
+
+      - name: Run the runtime end-to-end suite
+        run: pnpm nx run-many -t test --projects tag:ci:quarantined --skip-nx-cache
+
+  # D19's funded cell: one real frontier turn placed on launcher 2, against a local
+  # API with real provider keys. Skipped without the key; the deterministic half of
+  # D19 runs in the `e2e` job, which stubs the provider upstream. Only the OpenAI key
+  # is needed: the seam stays armed for the Anthropic host in this tier, so the home
+  # composer's seeding turn lands on the suite's stub, and only the live turn spends
+  # on the frontier row the credit delta measures.
+  desktop-e2e-live:
+    name: Desktop live LLM (launcher 2)
+    runs-on: ubuntu-latest
+    needs: [plan]
+    permissions:
+      contents: 'read'
+      actions: 'read'
+    env:
+      OPENAI_API_KEY: ${{ secrets.TAU_E2E_OPENAI_API_KEY }}
+      TAU_E2E_WEBGPU_PROFILE: software
+    steps:
+      - name: Skip without live provider keys
+        id: gate
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "TAU_E2E_OPENAI_API_KEY not configured — skipping the live desktop lane."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/setup-nx
+
+      - name: Restore the GeoSpec engine products
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: restore
+
+      - name: Verify GeoSpec products against this checkout
+        if: steps.gate.outputs.enabled == 'true'
+        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
+
+      - name: Prepare API env file
+        if: steps.gate.outputs.enabled == 'true'
+        run: cp apps/api/.env.example apps/api/.env
+
+      - name: Run the live launcher-2 turn
+        if: steps.gate.outputs.enabled == 'true'
+        run: xvfb-run --auto-servernum pnpm nx run-many -t test:e2e:desktop:live
+
+      - name: Upload desktop diagnostics
+        if: always() && steps.gate.outputs.enabled == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-e2e-live-diagnostics
+          path: out/test-results/desktop-e2e
+          if-no-files-found: ignore
+          retention-days: 7

@@ -255,3 +255,47 @@ export const menuGroupHeadingSelectorClass =
  * ```
  */
 export const menuSearchWrapperClass = 'relative flex items-center p-1';
+
+/**
+ * Layout for a menu row whose trailing control is a switch. `DropdownMenuSwitchItem` and
+ * `SwitchRow` share it, so a switch row reads the same in every menu, popover and picker.
+ * A row with a description grows to two lines. An unchecked track is the same grey as the
+ * row's hover fill, so the row outlines it; a standalone `Switch` keeps no outline.
+ *
+ * @public
+ *
+ * @example <caption>Style a described switch row</caption>
+ * ```typescript
+ * import { menuSwitchRowVariants } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuSwitchRowVariants({ described: true });
+ * ```
+ */
+export const menuSwitchRowVariants = cva(
+  'justify-between [&_[data-slot=switch][data-state=unchecked]]:border-muted-foreground/30',
+  {
+    variants: {
+      described: {
+        true: 'min-h-10',
+        false: '',
+      },
+    },
+    defaultVariants: {
+      described: false,
+    },
+  },
+);
+
+/**
+ * The description line under a switch row's title.
+ *
+ * @public
+ *
+ * @example <caption>Style a switch row description</caption>
+ * ```typescript
+ * import { menuSwitchRowDescriptionClass } from '@taucad/ui/components/menu.variants';
+ *
+ * export const className = menuSwitchRowDescriptionClass;
+ * ```
+ */
+export const menuSwitchRowDescriptionClass = 'text-xs font-medium text-muted-foreground/80';

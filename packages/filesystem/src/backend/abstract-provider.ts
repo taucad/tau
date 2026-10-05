@@ -5,7 +5,7 @@
  * dispose) so concrete providers only implement storage-specific primitives.
  */
 
-import type { FileSystemProvider, FileStat, ProviderCapabilities } from '#types.js';
+import type { FileSystemProvider, FileStatOptions, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
 import { assertRootedPath } from '@taucad/utils/path';
 
 /**
@@ -145,6 +145,7 @@ export abstract class AbstractFileSystemProvider implements FileSystemProvider {
   public abstract writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
   public abstract readdir(path: string): Promise<string[]>;
   public abstract stat(path: string): Promise<FileStat>;
+  public abstract stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
   public abstract unlink(path: string): Promise<void>;
   public abstract rmdir(path: string): Promise<void>;
   public abstract rename(from: string, to: string): Promise<void>;

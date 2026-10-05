@@ -168,7 +168,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24' }}
+          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24.20.0' }}
 
       - name: Download same-run GeoSpec transport
         if: needs.plan.outputs.geospec-required == 'true'

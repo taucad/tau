@@ -93,6 +93,24 @@ vi.mock('#hooks/use-keyboard.js', () => ({
   },
 }));
 
+/* The Settings disclosure is a remembered preference; a remount reads what the last one wrote. */
+const preferences = vi.hoisted(() => new Map<string, unknown>());
+vi.mock('#hooks/use-cookie.js', async () => {
+  const { useState } = await import('react');
+  return {
+    useCookie: <T,>(name: string, fallback: T) => {
+      const [value, setValue] = useState<T>(() => (preferences.has(name) ? (preferences.get(name) as T) : fallback));
+      return [
+        value,
+        (next: T) => {
+          preferences.set(name, next);
+          setValue(next);
+        },
+      ] as const;
+    },
+  };
+});
+
 vi.mock('#hooks/use-settings-dialog.js', () => ({
   useSettingsDialog: () => ({ open: vi.fn() }),
 }));
@@ -122,12 +140,49 @@ const codex = (refusal?: ExternalAgentDescriptor['refusal']): AgentHostPlacement
 });
 
 const renderSheet = (focusEditor = vi.fn(), agentConfig: AgentConfig = noConfig) => {
-  render(
-    <TooltipProvider>
-      <ChatAgentSheet agentConfig={agentConfig} placements={state.placements} focusEditor={focusEditor} />
-    </TooltipProvider>,
-  );
-  return { focusEditor };
+  return {
+    focusEditor,
+    ...render(
+      <TooltipProvider>
+        <ChatAgentSheet agentConfig={agentConfig} placements={state.placements} focusEditor={focusEditor} />
+      </TooltipProvider>,
+    ),
+  };
+};
+
+/** Codex's options as it sends them to a client without boolean config options. */
+const codexConfig = (values: { readonly mode: string; readonly fast: string }, select = vi.fn()): AgentConfig => ({
+  options: [
+    {
+      type: 'select',
+      id: 'collaboration_mode',
+      name: 'Collaboration mode',
+      category: 'collaboration_mode',
+      currentValue: values.mode,
+      options: [
+        { value: 'default', name: 'Default' },
+        { value: 'plan', name: 'Plan', description: 'Plan before making changes' },
+      ],
+    },
+    {
+      type: 'select',
+      id: 'fast-mode',
+      name: 'Fast mode',
+      description: '1.5x speed, increased usage',
+      category: 'model_config',
+      currentValue: values.fast,
+      options: [
+        { value: 'off', name: 'Off' },
+        { value: 'on', name: 'On' },
+      ],
+    },
+  ],
+  valueOf: (option) => option.currentValue,
+  select,
+});
+
+const openSheet = async (): Promise<void> => {
+  await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
 };
 
 describe('ChatAgentSheet', () => {
@@ -140,6 +195,7 @@ describe('ChatAgentSheet', () => {
     state.placements = [];
     models.defaultExecution = { kind: 'tau', model: fable.id, effort: 'low' };
     models.catalog = { status: 'loaded', models: catalog };
+    preferences.clear();
   });
 
   it('names the trigger with the model and its level, and shows the model’s own glyph', () => {
@@ -428,5 +484,110 @@ describe('ChatAgentSheet', () => {
 
     await userEvent.keyboard('{Escape}');
     expect(focusEditor).toHaveBeenCalled();
+  });
+
+  it('keeps the agent’s options behind a closed Settings row that names what is not at its default', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    renderSheet(vi.fn(), codexConfig({ mode: 'plan', fast: 'on' }));
+    await openSheet();
+
+    const settings = screen.getByRole('button', { name: /^Settings/u });
+    expect(settings).toHaveAttribute('aria-expanded', 'false');
+    expect(settings).toHaveTextContent('Plan · Fast mode');
+    expect(screen.queryByRole('switch', { name: 'Fast mode' })).toBeNull();
+
+    await userEvent.click(settings);
+    expect(screen.getByRole('switch', { name: 'Fast mode' })).toBeChecked();
+    expect(screen.getByRole('tablist', { name: 'Collaboration mode' })).toBeInTheDocument();
+    expect(screen.getByText('Plan before making changes')).toBeInTheDocument();
+  });
+
+  it('remembers Settings open across a remount, as across a reload', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    const { unmount } = renderSheet(vi.fn(), codexConfig({ mode: 'default', fast: 'off' }));
+    await openSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Settings/u }));
+    unmount();
+
+    renderSheet(vi.fn(), codexConfig({ mode: 'default', fast: 'off' }));
+    await openSheet();
+    expect(screen.getByRole('button', { name: /^Settings/u })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('draws an Off/On choice as a switch row, writes the agent’s own values and marks the trigger', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    const select = vi.fn();
+    preferences.set('chat-op-agent-settings', true);
+    renderSheet(vi.fn(), codexConfig({ mode: 'default', fast: 'off' }, select));
+    await openSheet();
+
+    const fast = screen.getByRole('switch', { name: 'Fast mode' });
+    expect(fast).toHaveAccessibleDescription('1.5x speed, increased usage');
+    await userEvent.click(screen.getByText('1.5x speed, increased usage'));
+    expect(select).toHaveBeenCalledWith('fast-mode', 'on');
+    expect(screen.queryByRole('tab', { name: 'On' })).toBeNull();
+  });
+
+  it('names Codex Fast mode on the trigger when its Off/On choice is on', () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    renderSheet(vi.fn(), codexConfig({ mode: 'default', fast: 'on' }));
+
+    expect(screen.getByRole('button', { name: 'Agent and model: Codex, GPT-5.6-Sol, Fast mode' })).toBeInTheDocument();
+  });
+
+  it('offers no Settings row to an agent without options, and no credential note', async () => {
+    state.execution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    state.placements = [codex()];
+    renderSheet();
+    await openSheet();
+
+    expect(screen.queryByRole('button', { name: /^Settings/u })).toBeNull();
+    expect(screen.queryByText(/Runs with your local/u)).toBeNull();
+  });
+
+  it('puts Runs on under Settings and keeps an offline host’s notice on the sheet', async () => {
+    state.execution = { kind: 'tau', model: fable.id, hostId: 'workshop' };
+    state.placements = [{ hostId: 'workshop', rung: 2, label: 'Workshop', workspaceRoot: '/srv/tau', online: false }];
+    renderSheet();
+    await openSheet();
+
+    expect(screen.getByText('Workshop is offline')).toBeInTheDocument();
+    expect(screen.queryByRole('tablist', { name: 'Runs on' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: /^Settings/u }));
+    expect(screen.getByRole('tablist', { name: 'Runs on' })).toBeInTheDocument();
+  });
+
+  it('draws the model as one row, without its provider line', async () => {
+    renderSheet();
+    await openSheet();
+
+    const row = screen.getByRole('button', { name: 'Model: Fable 5.1. Change' });
+    expect(row).toHaveTextContent(/^ModelFable 5\.1$/u);
+  });
+
+  it('sizes the model list to its rows and opens it on the model in use', async () => {
+    renderSheet();
+    await openSheet();
+    await userEvent.click(screen.getByRole('button', { name: 'Model: Fable 5.1. Change' }));
+
+    const list = screen.getByRole('listbox').closest('[data-slot=sheet-models]');
+    expect(list).toHaveClass('max-h-[min(25rem,70vh)]');
+    expect(list).not.toHaveClass('h-[25rem]');
+    expect(screen.getByRole('option', { name: /^Fable 5\.1/u })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('heads an external agent’s single list only with the search field', async () => {
+    state.placements = [codex()];
+    renderSheet();
+    await openSheet();
+    await userEvent.click(screen.getByRole('button', { name: 'Agent: Tau. Change' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Codex' }));
+
+    expect(screen.getByPlaceholderText('Search Codex models…')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Codex' })).toBeNull();
   });
 });

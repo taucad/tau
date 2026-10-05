@@ -210,7 +210,11 @@ describe('an approval nobody answers', () => {
    * EA-S8 (W10 EA-A9): no child and no adapter survives a restart, so a durable `requested` row
    * without its `resolved` row is an orphan.
    */
-  const orphan = async () => {
+  /**
+   * @param samePath - Whether the restarted host finds the project where the first left it, as a real restart does:
+   *   the copy's durable records then name its own root, so the remembered session's cwd still matches.
+   */
+  const orphan = async (samePath = false) => {
     const first = await startHarness();
     const chatId = 'chat-orphaned-approval';
     const runId = 'run-orphaned-approval';
@@ -232,6 +236,11 @@ describe('an approval nobody answers', () => {
     );
     /* The crash: the durable state at the pause, under a host that never saw the run. */
     const restarted = await startHarness(first.workspaceRoot);
+    if (samePath) {
+      const log = join(restarted.workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl');
+      const copied = await readFile(log, 'utf8');
+      await writeFile(log, copied.replaceAll(first.workspaceRoot, restarted.workspaceRoot));
+    }
     /* `attach` is a read (RH-R1), but a paused external run with no driver is an orphan (M1's `isOrphaned`): the
      * attach asks leadership to claim, and the claim's rehydration settles it (W7 RA-S14, RH-R9). */
     await expect(
@@ -261,10 +270,10 @@ describe('an approval nobody answers', () => {
   }, 90_000);
 
   /*
-   * M1's rehydration (W7 RA-S14) resolves the orphan `cancelled` with EXTERNAL_AGENT_RECOVERY_UNKNOWN
-   * before the run's terminal row.
+   * M1's rehydration (W7 RA-S14) resolves the orphan `cancelled` before the run's terminal row, and abandons the run
+   * resumably: the agent's process died with its host, but its session did not (resume everywhere).
    */
-  it('resolves an orphaned approval with a code after a restart', async () => {
+  it('resolves an orphaned approval and abandons its run resumably after a restart', async () => {
     const { events, interruptId } = await orphan();
     const resolvedAt = events.findIndex(
       (event) =>
@@ -276,8 +285,29 @@ describe('an approval nobody answers', () => {
     const failedAt = events.findIndex((event) => event.type === 'run.lifecycle' && event.state === 'failed');
 
     expect(interruptId).toBeDefined();
-    expect(events[resolvedAt]).toMatchObject({ payload: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' } });
-    expect(events[failedAt]).toMatchObject({ detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' } });
+    expect(events[resolvedAt]).toMatchObject({ payload: { code: 'RUN_ABANDONED' } });
+    expect(events[failedAt]).toMatchObject({
+      detail: { code: 'RUN_ABANDONED', details: { cause: 'awaiting-approval' } },
+    });
     expect(resolvedAt).toBeLessThan(failedAt);
+  }, 90_000);
+
+  it('asks for the approval again when the person resumes an orphaned approval', async () => {
+    const { launcher, workspaceRoot, chatId, runId } = await orphan(true);
+
+    await expect(
+      launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } }),
+    ).resolves.toMatchObject({ status: 'applied' });
+    /* The vendor session is reattached and told to continue; the agent's next step is the gated write it was
+     * waiting on, so it asks again. */
+    await until(
+      async () =>
+        interruptsOf(await readLog(workspaceRoot, chatId)).filter((event) => event.phase === 'requested').length === 2,
+      'the approval asked again',
+      async () => readLog(workspaceRoot, chatId),
+    );
+    const events = await readLog(workspaceRoot, chatId);
+    expect(lifecycleOf(events).slice(-2)).toEqual(['running', 'paused']);
+    await launcher.execute({ type: 'cancel', commandId: 'cmd-cancel', payload: { chatId, runId } });
   }, 90_000);
 });

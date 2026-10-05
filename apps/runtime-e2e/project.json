@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/runtime-e2e/src",
   "projectType": "application",
-  "tags": ["scope:shared", "type:e2e", "host:darwin-arm64"],
+  "tags": ["scope:shared", "type:e2e", "host:darwin-arm64", "ci:quarantined"],
   "implicitDependencies": ["runtime", "tau-examples", "geospec", "geospec-engine", "scripts"],
   "targets": {
     "test:e2e": {
@@ -15,7 +15,23 @@
       "inputs": ["default", "^production", "{workspaceRoot}/scripts/src/check-pack-install.ts"],
       "dependsOn": [
         {
-          "projects": ["runtime", "tscircuit", "esbuild", "react"],
+          "projects": [
+            "runtime",
+            "tscircuit",
+            "esbuild",
+            "react",
+            "bundler-core",
+            "cache-core",
+            "filesystem",
+            "geometry-core",
+            "kinematics",
+            "parameters",
+            "project-core",
+            "revisions",
+            "rpc",
+            "spatial",
+            "units"
+          ],
           "target": "build"
         }
       ],

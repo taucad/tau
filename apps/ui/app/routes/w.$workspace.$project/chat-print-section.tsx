@@ -92,23 +92,30 @@ export function PrintStage({
   return (
     <Collapsible asChild open={toggled ?? isDefaultOpen} onOpenChange={setToggled}>
       <section aria-label={title} className='group/stage flex min-w-0 flex-col'>
-        <div className='flex min-w-0 items-center gap-1 transition-colors hover:bg-accent/50 motion-reduce:transition-none'>
+        <div className='grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 transition-colors hover:bg-accent/50 motion-reduce:transition-none'>
           <CollapsibleTrigger
             data-print-stage={title}
-            className='flex min-h-9 min-w-0 flex-1 cursor-action items-center gap-2 px-2.5 text-left text-xs focus-visible:focus-outline'
+            className='col-span-2 col-start-1 row-start-1 grid min-h-9 min-w-0 cursor-action grid-cols-subgrid items-center gap-x-2 px-2.5 text-left text-xs focus-visible:focus-outline'
           >
-            <Icon aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
-            {/* The title keeps its width; a long summary truncates instead. */}
-            <span className='shrink-0 font-medium'>{title}</span>
-            <span className='min-w-0 flex-1 truncate text-right text-muted-foreground tabular-nums group-data-[state=open]/stage:invisible'>
-              {summary}
+            <span className='flex items-center gap-2'>
+              <Icon aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
+              <span className='shrink-0 font-medium'>{title}</span>
             </span>
-            <ChevronDown
-              aria-hidden
-              className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/stage:rotate-180 motion-reduce:transition-none'
-            />
+            <span className='flex min-w-0 items-center gap-2'>
+              {/* Reserve space beside the title for the sibling reset button. */}
+              {aside === undefined ? null : <span aria-hidden className='size-4 shrink-0' />}
+              <span className='min-w-0 flex-1 truncate text-right text-muted-foreground tabular-nums group-data-[state=open]/stage:invisible'>
+                {summary}
+              </span>
+              <ChevronDown
+                aria-hidden
+                className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/stage:rotate-180 motion-reduce:transition-none'
+              />
+            </span>
           </CollapsibleTrigger>
-          {aside === undefined ? null : <div className='flex shrink-0 items-center pr-1.5'>{aside}</div>}
+          {aside === undefined ? null : (
+            <div className='relative col-start-2 row-start-1 flex items-center justify-self-start'>{aside}</div>
+          )}
         </div>
         <CollapsibleContent className={disclosureMotion}>
           {/* Padding sits inside the animated content, so the height animation starts without a jump. */}
@@ -198,7 +205,7 @@ export function PrintNotice({
   children,
   role = 'alert',
 }: {
-  readonly tone: 'warning' | 'destructive' | 'neutral';
+  readonly tone: 'warning' | 'error' | 'neutral';
   readonly children: React.ReactNode;
   readonly role?: 'alert' | 'status';
 }): React.JSX.Element {
@@ -208,7 +215,7 @@ export function PrintNotice({
       className={cn(
         'flex min-w-0 items-start gap-2 rounded-lg border p-2 text-xs',
         tone === 'warning' && 'border-warning/30 bg-warning/10',
-        tone === 'destructive' && 'border-destructive/30 bg-destructive/10',
+        tone === 'error' && 'border-feature/30 bg-feature/10',
         tone === 'neutral' && 'border-border/70 bg-muted/30',
       )}
     >
@@ -217,7 +224,7 @@ export function PrintNotice({
         className={cn(
           'mt-0.5 size-3.5 shrink-0',
           tone === 'warning' && 'text-warning',
-          tone === 'destructive' && 'text-destructive',
+          tone === 'error' && 'text-feature',
           tone === 'neutral' && 'text-muted-foreground',
         )}
       />

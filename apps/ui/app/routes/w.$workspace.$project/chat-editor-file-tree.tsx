@@ -2625,7 +2625,7 @@ function PendingFolderInput({
       </div>
       {error ? (
         <div
-          className='rounded-md bg-destructive/10 px-2 py-1 text-xs text-destructive'
+          className='rounded-md bg-feature/10 px-2 py-1 text-xs text-feature'
           style={{ marginLeft: `${paddingLeft}px` }}
         >
           {error}
@@ -2757,7 +2757,7 @@ function PendingFileInput({
       </div>
       {error ? (
         <div
-          className='rounded-md bg-destructive/10 px-2 py-1 text-xs text-destructive'
+          className='rounded-md bg-feature/10 px-2 py-1 text-xs text-feature'
           style={{ marginLeft: `${paddingLeft}px` }}
         >
           {error}

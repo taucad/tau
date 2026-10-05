@@ -141,6 +141,7 @@ export type BenchmarkRunnerOptions = {
   /** WASM variant or custom config. Defaults to `'auto'` (multi when supported, else single). */
   wasm?: 'auto' | 'single' | 'multi' | { wasmUrl: string; wasmBindingsUrl: string };
   onProgress?: (completed: number, total: number, caseName: string) => void;
+  onIterationStart?: (progress: { caseName: string; iteration: number; totalRuns: number; warmupRuns: number }) => void;
   onIterationProgress?: (progress: {
     caseName: string;
     iteration: number;
@@ -324,6 +325,7 @@ export async function runBenchmarks(
     includeEdges = false,
     wasm = 'auto',
     onProgress,
+    onIterationStart,
     onIterationProgress,
     cpuProfile: enableCpuProfile = false,
     cpuProfileInterval = 100,
@@ -419,6 +421,7 @@ export async function runBenchmarks(
           }
 
           const start = performance.now();
+          onIterationStart?.({ caseName: benchCase.name, iteration: iter + 1, totalRuns, warmupRuns });
           const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
           const committed = benchCase.stageSequence?.[iter % benchCase.stageSequence.length];
           let failureMessage: string | undefined;

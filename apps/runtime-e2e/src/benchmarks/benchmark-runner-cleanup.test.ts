@@ -4,7 +4,10 @@ import { createRuntimeClient } from '@taucad/runtime/client';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import { runBenchmarks } from '#benchmarks/benchmark-runner.js';
 
-vi.mock('@taucad/runtime/client', () => ({ createRuntimeClient: vi.fn() }));
+vi.mock('@taucad/runtime/client', async (importOriginal) => ({
+  ...(await importOriginal()),
+  createRuntimeClient: vi.fn(),
+}));
 
 const cases = [
   {
@@ -25,6 +28,7 @@ beforeEach(() => {
 it('should terminate its actual mock client when the render reports a geometry failure', async () => {
   const client = createMockRuntimeClient();
   const fixture = createMockRuntimeDocument();
+  const boundaries: string[] = [];
   vi.mocked(client.open).mockReturnValue(fixture.document);
   vi.mocked(createRuntimeClient).mockReturnValue(client);
   vi.mocked(fixture.view.rendering).mockResolvedValue({
@@ -37,7 +41,21 @@ it('should terminate its actual mock client when the render reports a geometry f
       issues: [{ severity: 'error', code: 'RUNTIME', message: 'selected render failed' }],
     },
   });
-  await expect(runBenchmarks(cases, options)).rejects.toThrow('selected render failed');
+  await expect(
+    runBenchmarks(cases, {
+      ...options,
+      onIterationStart: ({ iteration }) => {
+        boundaries.push(`start:${iteration}`);
+        expect(fixture.view.rendering).not.toHaveBeenCalled();
+      },
+      onIterationProgress: ({ iteration, elapsed }) => {
+        boundaries.push(`end:${iteration}`);
+        expect(elapsed).toBeGreaterThanOrEqual(0);
+        expect(fixture.view.rendering).toHaveBeenCalledOnce();
+      },
+    }),
+  ).rejects.toThrow('selected render failed');
+  expect(boundaries).toEqual(['start:1', 'end:1']);
   expect(client.terminate).toHaveBeenCalledOnce();
 });
 
@@ -73,7 +91,7 @@ it('should surface cleanup failure after the render operation succeeded', async 
   const fixture = createMockRuntimeDocument();
   vi.mocked(client.open).mockReturnValue(fixture.document);
   vi.mocked(createRuntimeClient).mockReturnValue(client);
-  // Only the cleanup boundary is under test: these mock result bytes never reach parsing/admission or an artifact.
+  // These bytes pass the media gate but never reach GLB parsing because cleanup fails first.
   vi.mocked(fixture.view.rendering).mockResolvedValue({
     superseded: false,
     rendering: {
@@ -83,7 +101,7 @@ it('should surface cleanup failure after the render operation succeeded', async 
       transient: false,
       view: 'model',
       issues: [],
-      artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array() },
+      artifact: { mimeType: 'model/gltf-binary', content: Uint8Array.of(1) },
       hash: 'cleanup-result',
     },
   });
@@ -100,7 +118,7 @@ it('should dispatch the configured render operation without a per-case override 
   const fixture = createMockRuntimeDocument();
   vi.mocked(client.open).mockReturnValue(fixture.document);
   vi.mocked(createRuntimeClient).mockReturnValue(client);
-  // As in the cleanup-success control, these bytes never reach parsing or admission: termination fails first.
+  // As in the cleanup-success control, these bytes never reach GLB parsing: termination fails first.
   vi.mocked(fixture.view.rendering).mockResolvedValue({
     superseded: false,
     rendering: {
@@ -110,7 +128,7 @@ it('should dispatch the configured render operation without a per-case override 
       transient: false,
       view: 'model',
       issues: [],
-      artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array() },
+      artifact: { mimeType: 'model/gltf-binary', content: Uint8Array.of(1) },
       hash: 'cleanup-result',
     },
   });

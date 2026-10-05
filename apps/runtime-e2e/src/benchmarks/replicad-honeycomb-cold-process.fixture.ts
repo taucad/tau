@@ -63,6 +63,16 @@ await Promise.all(
 );
 
 const beforeCad = performance.now();
+const cpuBeforeCad = process.cpuUsage();
+let cpuBeforeIteration: ReturnType<typeof process.cpuUsage> | undefined;
+const iterationProcessWindows: Array<{
+  iteration: number;
+  warmup: boolean;
+  /** Milliseconds. */
+  renderWall: number;
+  processUserMicros: number;
+  processSystemMicros: number;
+}> = [];
 const run = await runBenchmarks(
   [
     {
@@ -79,8 +89,31 @@ const run = await runBenchmarks(
     operation: 'render',
     includeEdges: true,
     wasm: { wasmUrl: input.wasmUrl, wasmBindingsUrl: input.wasmBindingsUrl },
+    onIterationStart: () => {
+      cpuBeforeIteration = process.cpuUsage();
+    },
+    onIterationProgress: ({ iteration, warmupRuns, elapsed }) => {
+      if (!cpuBeforeIteration) {
+        throw new Error('Cold-process CPU start boundary is absent.');
+      }
+      const cpu = process.cpuUsage(cpuBeforeIteration);
+      iterationProcessWindows.push({
+        iteration,
+        warmup: iteration <= warmupRuns,
+        renderWall: elapsed,
+        processUserMicros: cpu.user,
+        processSystemMicros: cpu.system,
+      });
+      cpuBeforeIteration = undefined;
+    },
   },
 );
+const cadCpu = process.cpuUsage(cpuBeforeCad);
+const runProcessWindow = {
+  runCallWall: performance.now() - beforeCad,
+  processUserMicros: cadCpu.user,
+  processSystemMicros: cadCpu.system,
+};
 await writeFile(
   resultPath,
   JSON.stringify({
@@ -96,5 +129,7 @@ await writeFile(
     sourceDigest: input.sourceDigest,
     assetDigests: [input.wasmDigest, input.bindingsDigest],
     run,
+    runProcessWindow,
+    iterationProcessWindows,
   }),
 );

@@ -45,6 +45,54 @@ const fixture = (count = 100) => {
 };
 
 describe('glTF surface batches', () => {
+  it('should read one owning and one live key per shared material for each sync', () => {
+    const root = new Group();
+    const geometry = new BoxGeometry();
+    const material = new MeshStandardMaterial();
+    const key = vi.spyOn(material, 'customProgramCacheKey');
+    qualifyGltfSurfaceMaterial(material);
+    const occurrences = Array.from({ length: 4 }, () => new Mesh(geometry, material));
+    for (const occurrence of occurrences) {
+      root.add(occurrence);
+    }
+    cleanup.push(() => {
+      geometry.dispose();
+      material.dispose();
+    });
+    const batches = createBatches(root, occurrences);
+    batches.sync();
+    const first = batches.group.children[0];
+    expect(first).toBeInstanceOf(InstancedMesh);
+    expect(first instanceof InstancedMesh && first.count).toBe(4);
+    expect(key).toHaveBeenCalledTimes(2);
+
+    material.color.setHex(0xff_00_00);
+    batches.sync();
+    expect(batches.group.children[0]).not.toBe(first);
+    expect(key).toHaveBeenCalledTimes(4);
+    expect(occurrences.every((occurrence) => occurrence.material === material)).toBe(true);
+  });
+
+  it('should leave native instances canonical without reading their material key', () => {
+    const root = new Group();
+    const geometry = new BoxGeometry();
+    const material = new MeshStandardMaterial();
+    const key = vi.spyOn(material, 'customProgramCacheKey');
+    qualifyGltfSurfaceMaterial(material);
+    const native = new InstancedMesh(geometry, material, 2);
+    root.add(native);
+    cleanup.push(() => {
+      native.dispose();
+      geometry.dispose();
+      material.dispose();
+    });
+    const batches = createBatches(root, [native]);
+    batches.sync();
+    expect(batches.group.children).toHaveLength(0);
+    expect(native.layers.mask).toBe(1);
+    expect(key).not.toHaveBeenCalled();
+  });
+
   it('should batch shared opaque surfaces without replacing canonical identities or picking layers', () => {
     const { root, geometry, occurrences } = fixture();
     const batches = createBatches(root, occurrences);

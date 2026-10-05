@@ -291,7 +291,12 @@
       "dependsOn": ["typegen"]
     },
     "lint": {
-      "dependsOn": ["typegen"]
+      "dependsOn": ["typegen"],
+      "options": {
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192"
+        }
+      }
     },
     "test:e2e": {
       "executor": "nx:run-commands",

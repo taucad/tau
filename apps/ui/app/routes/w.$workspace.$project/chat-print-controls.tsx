@@ -334,12 +334,12 @@ const jogFeed = 1000;
  * (the X1C), the up arrow raises the bed, which is Z− in machine coordinates, as in Bambu Studio.
  */
 const jogButtons = [
-  { axis: 'y', direction: 1, icon: ArrowUp, area: 'col-start-2 row-start-1' },
-  { axis: 'x', direction: -1, icon: ArrowLeft, area: 'col-start-1 row-start-2' },
-  { axis: 'x', direction: 1, icon: ArrowRight, area: 'col-start-3 row-start-2' },
-  { axis: 'y', direction: -1, icon: ArrowDown, area: 'col-start-2 row-start-3' },
-  { axis: 'z', direction: 1, icon: ChevronsUp, area: 'row-start-1' },
-  { axis: 'z', direction: -1, icon: ChevronsDown, area: 'row-start-3' },
+  { axis: 'y', direction: 1, icon: ArrowUp, area: 'col-start-2 row-start-1', isBeforeHome: true },
+  { axis: 'x', direction: -1, icon: ArrowLeft, area: 'col-start-1 row-start-2', isBeforeHome: true },
+  { axis: 'x', direction: 1, icon: ArrowRight, area: 'col-start-3 row-start-2', isBeforeHome: false },
+  { axis: 'y', direction: -1, icon: ArrowDown, area: 'col-start-2 row-start-3', isBeforeHome: false },
+  { axis: 'z', direction: 1, icon: ChevronsUp, area: 'row-start-1', isBeforeHome: true },
+  { axis: 'z', direction: -1, icon: ChevronsDown, area: 'row-start-3', isBeforeHome: false },
 ] as const;
 
 /** One square cell of the pad: an icon over its axis label. */
@@ -439,7 +439,7 @@ function JogPad({
   const vertical = jogButtons.filter((jog) => jog.axis === 'z' && present.has(jog.axis));
   return (
     <div className='flex min-w-0 flex-col gap-3'>
-      <PrintSetupRow label='Jog'>
+      <PrintSetupRow label='Jog' reading='mm'>
         <QualificationBadge
           descriptor={isHold ? holdDescriptor : declaredAction(control.entry, motion.id, 'motion.jog')}
         />
@@ -466,12 +466,12 @@ function JogPad({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
-        <span className='text-xs text-muted-foreground'>mm</span>
       </PrintSetupRow>
       <div className='flex items-start justify-center gap-6'>
         {planar.length > 0 || home !== undefined ? (
           <div className='grid grid-cols-3 grid-rows-3 gap-1.5' role='group' aria-label='Jog X and Y'>
-            {planar.map((jog) => button(jog))}
+            {/* Reading order follows the cross: Y+, X−, Home, X+, Y−. */}
+            {planar.filter((jog) => jog.isBeforeHome).map((jog) => button(jog))}
             {home === undefined ? null : (
               <Button
                 type='button'
@@ -493,6 +493,7 @@ function JogPad({
                 Home
               </Button>
             )}
+            {planar.filter((jog) => !jog.isBeforeHome).map((jog) => button(jog))}
           </div>
         ) : null}
         {vertical.length > 0 ? (

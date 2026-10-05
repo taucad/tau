@@ -324,6 +324,7 @@ describe('model component action menu', () => {
       // The menu opens on its part: a collapsed row with the name and a swatch; the factors wait inside.
       const partRow = screen.getByRole('menuitem', { name: /Planetary housing/ });
       expect(screen.getByRole('menu')).toHaveTextContent(/^Planetary housing/);
+      expect(within(partRow).getByText('Unnamed material')).toBeVisible();
       expect(partRow).toHaveAttribute('aria-expanded', 'false');
       expect(partRow.querySelector('[data-slot="material-swatch"]')).toBeInTheDocument();
       expect(screen.queryByRole('group', { name: 'Inspection for Planetary housing' })).not.toBeInTheDocument();

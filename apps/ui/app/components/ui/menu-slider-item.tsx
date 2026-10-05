@@ -20,6 +20,10 @@ export type MenuSliderItemProperties = {
   readonly min?: number;
   readonly max?: number;
   readonly step?: number;
+  /** False when `min` only starts the drag window, so a typed value may go below it. */
+  readonly hasMinimum?: boolean;
+  /** False when `max` only ends the drag window, so a typed value may go past it. */
+  readonly hasMaximum?: boolean;
   /** The unit shown after the value, such as `%`; also read aloud with it. */
   readonly trailingAdornment?: string;
   readonly 'aria-label': string;
@@ -46,6 +50,8 @@ export const MenuSliderItem = ({
   min = 0,
   max = 100,
   step = 1,
+  hasMinimum,
+  hasMaximum,
   trailingAdornment,
   'aria-label': ariaLabel,
   dataSlot,
@@ -55,6 +61,8 @@ export const MenuSliderItem = ({
     value={value}
     min={min}
     max={max}
+    hasMinimum={hasMinimum}
+    hasMaximum={hasMaximum}
     step={step}
     leadingContent={children}
     trailingAdornment={
@@ -116,6 +124,8 @@ const MenuSliderRow = ({ item: Item, ...properties }: MenuSliderRowProperties): 
     min = 0,
     max = 100,
     step = 1,
+    hasMinimum = true,
+    hasMaximum = true,
     trailingAdornment = '',
     onValueChange,
     onStep,
@@ -143,7 +153,12 @@ const MenuSliderRow = ({ item: Item, ...properties }: MenuSliderRowProperties): 
           onStep(direction, { shift: event.shiftKey });
           return;
         }
-        const nextValue = clamp(snapToStep(value + direction * step, step, min), min, max);
+        // Only a declared limit stops a step: past a drag window's end, a value keeps stepping from where it is.
+        const nextValue = clamp(
+          snapToStep(value + direction * step, step, min),
+          hasMinimum ? min : Number.NEGATIVE_INFINITY,
+          hasMaximum ? max : Number.POSITIVE_INFINITY,
+        );
         if (nextValue !== value) {
           onValueChange?.(nextValue);
         }
@@ -163,7 +178,7 @@ const MenuSliderRow = ({ item: Item, ...properties }: MenuSliderRowProperties): 
       input.focus();
       input.select();
     },
-    [max, min, onStep, onValueChange, step, value],
+    [hasMaximum, hasMinimum, max, min, onStep, onValueChange, step, value],
   );
 
   return (

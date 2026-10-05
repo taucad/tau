@@ -28,6 +28,7 @@ import { useFileContent } from '#hooks/use-file-content.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { Loader } from '#components/ui/loader.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
+import { useLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
 import { newViewRecord, viewTabTitle } from '#workbench-records/projection.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
@@ -43,6 +44,7 @@ import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
+import { ViewerKernelSettings } from '#routes/w.$workspace.$project/chat-viewer-kernel-settings.js';
 import { ViewerProjectionPicker } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { isEmptyGlb } from '#utils/inspect-glb.utils.js';
@@ -345,7 +347,6 @@ type ChatViewerProps = {
   /** Dockview panel API for updating title, etc. */
   readonly panelApi: IDockviewPanelHeaderProps['api'];
   readonly profile?: 'editor' | 'shared';
-  readonly onOpenProjectionBeside?: (kernelViewId: string) => void;
 };
 
 function MissingViewerFile({
@@ -386,7 +387,6 @@ export const ChatViewer = memo(function ({
   entryPath,
   panelApi,
   profile = 'editor',
-  onOpenProjectionBeside,
 }: ChatViewerProps): React.JSX.Element {
   const { projectRef, viewGraphics, viewRecords, entriesRecord, geometryUnits, mainEntryPath, setViewEntryPath } =
     useProject();
@@ -581,12 +581,7 @@ export const ChatViewer = memo(function ({
   return (
     <CadProvider cadRef={cadActor}>
       <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
-        <ViewerContent
-          viewId={viewId}
-          entryPath={entryPath}
-          profile={profile}
-          onOpenProjectionBeside={onOpenProjectionBeside}
-        />
+        <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
       </GraphicsProvider>
     </CadProvider>
   );
@@ -615,12 +610,10 @@ const ViewerContent = memo(function ({
   viewId,
   entryPath,
   profile,
-  onOpenProjectionBeside,
 }: {
   readonly viewId: string;
   readonly entryPath: string;
   readonly profile: 'editor' | 'shared';
-  readonly onOpenProjectionBeside?: (kernelViewId: string) => void;
 }): React.JSX.Element {
   const { projectRef, entriesRecord, viewRecords } = useProject();
   const viewCommands = useWorkbenchViewCommands();
@@ -634,6 +627,10 @@ const ViewerContent = memo(function ({
   const selectedKernelView = savedView?.selectedKernelView;
   const offeredViewId = selectedKernelView ?? (evaluation?.success ? evaluation.views[0]?.id : undefined);
   const selectedState = savedView?.kernelViews?.find((state) => state.id === offeredViewId);
+  // The options panel's live draft leads the saved record, so edits re-render as they happen.
+  const liveOptions = useLiveViewOptions(viewId);
+  const viewOptions =
+    liveOptions && liveOptions.viewId === offeredViewId ? liveOptions.options : selectedState?.options;
   const localInstance = useLocalInstanceChoice(viewId);
   const localForView = localInstance?.viewId === offeredViewId ? localInstance : undefined;
   const localExpired =
@@ -652,10 +649,10 @@ const ViewerContent = memo(function ({
     kernelId,
     selectedId:
       selectedKernelView ??
-      (Boolean(localForView) || Boolean(selectedState?.authoredInstance) || Boolean(selectedState?.options)
+      (Boolean(localForView) || Boolean(selectedState?.authoredInstance) || Boolean(viewOptions)
         ? offeredViewId
         : undefined),
-    options: selectedState?.options,
+    options: viewOptions,
     instance: localForView && !localExpired ? localForView.instanceId : selectedState?.authoredInstance,
     blocked: localExpired,
   });
@@ -1130,12 +1127,7 @@ const ViewerContent = memo(function ({
     >
       {profile === 'editor' && cadRef ? (
         <div className='absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)] items-center'>
-          <ViewerProjectionPicker
-            viewId={viewId}
-            entryPath={entryPath}
-            cadActor={cadRef}
-            onOpenBeside={onOpenProjectionBeside}
-          />
+          <ViewerProjectionPicker viewId={viewId} entryPath={entryPath} cadActor={cadRef} />
         </div>
       ) : null}
       {/* Status overlays */}
@@ -1261,7 +1253,15 @@ const ViewerContent = memo(function ({
             className='ml-auto shrink-0'
           />
         </div>
-        <ChatViewerControls shouldEnableCapture={profile === 'editor'} captureRendering={captureRendering} />
+        <ChatViewerControls
+          shouldEnableCapture={profile === 'editor'}
+          captureRendering={captureRendering}
+          kernelSettings={
+            profile === 'editor' && cadRef ? (
+              <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} />
+            ) : undefined
+          }
+        />
       </div>
     </div>
   );

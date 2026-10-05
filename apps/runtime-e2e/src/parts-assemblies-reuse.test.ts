@@ -859,7 +859,6 @@ for (const family of ['jscad', 'picovoxel'] as const) {
               transport: inProcessTransport({
                 runtime: downstreamRuntime,
                 fileSystem: packaging.fileSystem,
-                publicationFileSystem: packaging.fileSystem,
                 admitAssemblyDisplay,
               }),
             });
@@ -886,6 +885,19 @@ for (const family of ['jscad', 'picovoxel'] as const) {
               for (const path of paths) {
                 // oxlint-disable-next-line no-await-in-loop -- Retain the actual source-free pointer closure before shutdown.
                 fixtureRootClosure.set(path, await packaging.rooted.readFile(path));
+              }
+              const reopenedClient = createRuntimeClient({
+                transport: inProcessTransport({
+                  runtime: downstreamRuntime,
+                  fileSystem: packaging.fileSystem,
+                  admitAssemblyDisplay,
+                }),
+              });
+              try {
+                const reopened = await reopenedClient.openAssembly({ root: published.root });
+                expect(reopened.admitted.publication).toEqual(published.admitted.publication);
+              } finally {
+                await reopenedClient.shutdown();
               }
               expect({ upstream: builds.mock.calls.length, downstream: downstreamBuilds.mock.calls.length }).toEqual(
                 counts,

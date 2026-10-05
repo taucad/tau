@@ -6,6 +6,8 @@ description: 'Look up, restore or save the GeoSpec engine products under their p
 # digests, so one build serves every later run whose closure matches. A run can restore
 # entries saved by runs on its own ref, its pull request's base branch and `main`.
 # This file owns the cached path list: a different list is a different cache version.
+# Windows runners only see entries saved from Linux or macOS with enableCrossOsArchive,
+# which leaves the version on those hosts unchanged.
 
 inputs:
   key:
@@ -41,6 +43,7 @@ runs:
         key: ${{ inputs.key }}
         lookup-only: ${{ inputs.mode == 'lookup' }}
         fail-on-cache-miss: ${{ inputs.mode == 'restore' }}
+        enableCrossOsArchive: true
         path: |
           packages/geospec-engine-native/bindings/node/generated/index.d.ts
           packages/geospec-engine-native/bindings/node/generated/index.js
@@ -54,6 +57,7 @@ runs:
       uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         key: ${{ inputs.key }}
+        enableCrossOsArchive: true
         path: |
           packages/geospec-engine-native/bindings/node/generated/index.d.ts
           packages/geospec-engine-native/bindings/node/generated/index.js

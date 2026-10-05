@@ -32,6 +32,10 @@
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
 command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 publish = "build/client"
+# Netlify looks for default edge functions under base + workspace package
+# (`apps/ui/apps/ui`), like the server function below, and so deployed no
+# marketing proxy. Naming the directory makes Netlify bundle it.
+edge_functions = "netlify/edge-functions"
 
 [build.environment]
 # Temporary: current Netlify plan cannot create Builds-scoped secrets.

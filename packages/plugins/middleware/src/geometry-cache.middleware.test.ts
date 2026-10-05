@@ -376,11 +376,11 @@ describe('geometryCache', () => {
       actionDigest: computed['actionDigest'],
       contentDigest: computed['contentDigest'],
     });
-    runtime.dependencyHash = 'b'.repeat(64);
+    const changedRuntime = { ...runtime, dependencyHash: 'b'.repeat(64) };
     const changedHandler = vi.fn(async () =>
       successfulRender({ mimeType: 'model/gltf-binary', content: new Uint8Array([10]) }),
     );
-    await middleware.wrapRender!(input, changedHandler, runtime);
+    await middleware.wrapRender!(input, changedHandler, changedRuntime);
     expect(changedHandler).toHaveBeenCalledOnce();
     const changed = end.mock.calls[2]?.[0];
     if (!changed) {

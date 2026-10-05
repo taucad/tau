@@ -271,17 +271,20 @@ export const menuSearchWrapperClass = 'relative flex items-center p-1';
  * export const className = menuSwitchRowVariants({ described: true });
  * ```
  */
-export const menuSwitchRowVariants = cva('justify-between [&_[data-slot=switch][data-state=unchecked]]:border-muted-foreground/30', {
-  variants: {
-    described: {
-      true: 'min-h-10',
-      false: '',
+export const menuSwitchRowVariants = cva(
+  'justify-between [&_[data-slot=switch][data-state=unchecked]]:border-muted-foreground/30',
+  {
+    variants: {
+      described: {
+        true: 'min-h-10',
+        false: '',
+      },
+    },
+    defaultVariants: {
+      described: false,
     },
   },
-  defaultVariants: {
-    described: false,
-  },
-});
+);
 
 /**
  * The description line under a switch row's title.

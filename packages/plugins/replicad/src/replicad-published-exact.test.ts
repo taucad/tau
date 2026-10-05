@@ -416,6 +416,8 @@ describe('Replicad completed-part physical and exact publication', () => {
   );
 
   it.each([
+    'providerVersion',
+    'codecVersion',
     'unit',
     'linearToleranceMm',
     'angularToleranceRad',
@@ -515,10 +517,31 @@ describe('Replicad completed-part physical and exact publication', () => {
         const path = 'boundary-native.msgpack';
         project.replaceFile(path, bytes);
         incompatible = { ...exact, asset: { path, digest, byteLength: bytes.byteLength } };
-      } else if (boundary === 'unit') {
-        incompatible = { ...exact, unit: 'meter' };
       } else {
-        incompatible = { ...exact, [boundary]: 0.001 };
+        switch (boundary) {
+          case 'unit': {
+            incompatible = { ...exact, unit: 'meter' };
+            break;
+          }
+          case 'providerVersion': {
+            const providerIdentity = JSON.parse(exact.providerVersion) as { assets: string[] };
+            if (!Array.isArray(providerIdentity.assets) || providerIdentity.assets.length === 0) {
+              throw new Error('Expected the actual identified native implementation assets.');
+            }
+            const assets = [...providerIdentity.assets];
+            assets[0] = `sha256:${'0'.repeat(64)}`;
+            incompatible = { ...exact, providerVersion: JSON.stringify({ ...providerIdentity, assets }) };
+            break;
+          }
+          case 'codecVersion': {
+            incompatible = { ...exact, codecVersion: 'incompatible' };
+            break;
+          }
+          default: {
+            incompatible = { ...exact, [boundary]: 0.001 };
+            break;
+          }
+        }
       }
       const bytes = new TextEncoder().encode(
         JSON.stringify({ ...record, variants: { default: { ...variant, exact: incompatible } } }),

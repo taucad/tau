@@ -543,8 +543,9 @@ const minutes = (milliseconds: number): string =>
   `${String(Math.floor(milliseconds / 60_000))}:${String(Math.floor((milliseconds % 60_000) / 1000)).padStart(2, '0')}`;
 
 /**
- * The run in progress, or the one the machine last ended: its program and progress with how the counters are known,
- * and the run's own controls with what each does before it is pressed.
+ * The run in progress: its program and progress with how the counters are known, and the run's own controls with what
+ * each does before it is pressed. A run the machine last ended is one quiet line until the next one starts: a printer
+ * keeps reporting it, and its counters and progress would read as live.
  *
  * @param properties - The control and this machine's jobs.
  * @returns The run block, or nothing without a run.
@@ -567,7 +568,24 @@ export function RunBlock({
     entry.descriptor.capabilities.components.find((component) => component.kind === 'controller')?.id ?? 'controller';
   const job = jobs.find((candidate) => candidate.jobId === run.jobId || candidate.run?.runId === run.runId);
   const name = job?.program.name ?? run.program?.name;
-  const isEnded = ['completed', 'cancelled', 'failed', 'unknown'].includes(run.state);
+  if (['completed', 'cancelled', 'failed', 'unknown'].includes(run.state)) {
+    return (
+      <section aria-label='Run' className='flex min-w-0 flex-col gap-1 text-xs text-muted-foreground'>
+        <p className='min-w-0 break-words'>
+          Last run: {run.state === 'unknown' ? 'Not reported' : runWords[run.state]}
+          {name === undefined ? null : (
+            <>
+              <span aria-hidden> · </span>
+              <span className='font-mono'>{name}</span>
+            </>
+          )}
+        </p>
+        {run.state === 'unknown' ? (
+          <p>{entry.name} did not report how this run ended, and Tau did not stop it. Check the machine.</p>
+        ) : null}
+      </section>
+    );
+  }
   const { progress } = run;
   const cancel = declaredAction(entry, controllerId, 'run.cancel');
   return (
@@ -580,7 +598,7 @@ export function RunBlock({
           </>
         )}
         {describeRun(entry)}
-        {run.origin === 'external' ? <span className='text-muted-foreground'> · started at the machine</span> : null}
+        {run.origin === 'external' ? <span className='text-muted-foreground'> · not started from Tau</span> : null}
       </p>
       {progress.fraction === undefined ? null : (
         <Progress
@@ -602,18 +620,12 @@ export function RunBlock({
           {progress.elapsed === undefined ? null : <span>{minutes(progress.elapsed)} elapsed</span>}
         </p>
       )}
-      {run.delivery === 'streamed' && !isEnded ? (
+      {run.delivery === 'streamed' ? (
         <p className='text-xs text-muted-foreground'>
           Tau feeds this program line by line: keep this computer awake and Tau open until it ends.
         </p>
       ) : null}
-      {isEnded ? (
-        run.state === 'unknown' ? (
-          <p className='text-xs text-muted-foreground'>
-            {entry.name} did not report how this run ended, and Tau did not stop it. Check the machine.
-          </p>
-        ) : null
-      ) : isConfirmingCancel ? (
+      {isConfirmingCancel ? (
         <div
           role='alertdialog'
           aria-label={`Confirm ${cancel?.label.toLowerCase() ?? 'cancel'}`}

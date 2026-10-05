@@ -1586,34 +1586,52 @@ describe('Print pane monitor and controls', () => {
     ).toBeInTheDocument();
   });
 
-  it('keeps a finished run in view without its controls until the printer reports the next one', async () => {
+  it.each([
+    { name: 'finished', state: 'completed', origin: 'tau', line: 'Last run: Finished · pyramid.gcode.3mf' },
+    { name: 'failed external', state: 'failed', origin: 'external', line: 'Last run: Failed · pyramid.gcode.3mf' },
+  ] as const)(
+    'reads a $name run the printer still reports as one quiet line, never as live',
+    async ({ state, origin, line }) => {
+      const run = printing();
+      // The X1C reported its failed run as layer 0 of 0 with a full bar until the next print.
+      const progress = {
+        ...printingRun.progress,
+        fraction: 1,
+        counters: [{ id: 'layer', label: 'Layer', current: 0, total: 0 }],
+      };
+      renderPane(
+        createFixture({
+          entries: [
+            {
+              ...run,
+              snapshot: {
+                ...run.snapshot,
+                state: { status: 'ready' },
+                run: { ...printingRun, state, origin, progress },
+              },
+            },
+          ],
+        }).client,
+      );
+      await findMachine('Ready');
+      const ended = await screen.findByRole('region', { name: 'Run' });
+      expect(ended).toHaveTextContent(new RegExp(`^${line}$`, 'u'));
+      expect(within(ended).queryByRole('progressbar')).not.toBeInTheDocument();
+      expect(within(ended).queryByRole('button')).not.toBeInTheDocument();
+    },
+  );
+
+  it('says a live run was not started from Tau rather than where it was started', async () => {
     const run = printing();
     renderPane(
       createFixture({
-        entries: [
-          {
-            ...run,
-            snapshot: {
-              ...run.snapshot,
-              state: { status: 'ready' },
-              run: {
-                ...printingRun,
-                state: 'completed',
-                progress: {
-                  ...printingRun.progress,
-                  fraction: 1,
-                  counters: [{ id: 'layer', label: 'Layer', current: 125, total: 125 }],
-                },
-              },
-            },
-          },
-        ],
+        entries: [{ ...run, snapshot: { ...run.snapshot, run: { ...printingRun, origin: 'external' } } }],
       }).client,
     );
-    await findMachine('Ready');
-    const finished = await screen.findByRole('region', { name: 'Run' });
-    expect(finished).toHaveTextContent('Layer 125 of 125');
-    expect(within(finished).queryByRole('button')).not.toBeInTheDocument();
+    await findMachine('Printing');
+    const live = screen.getByRole('region', { name: 'Run' });
+    expect(live).toHaveTextContent('not started from Tau');
+    expect(live).not.toHaveTextContent('started at the machine');
   });
 
   it("names the run by the program the person approved, not the printer's upload name", async () => {

@@ -4,7 +4,8 @@
  * A persisted export used to hide failures in source evaluation and placed
  * prototype preparation. This fixture starts in a new project with no `.tau`
  * directory, resolves a named face from live Replicad shapes, writes AP242,
- * and requires GeoSpec's native XDE reader to materialize that evidence.
+ * and requires GeoSpec's native XDE reader to materialize that evidence,
+ * checked through public matchers because the native subject is opaque.
  */
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -41,20 +42,29 @@ const source = `
 `;
 
 const specification = `
-  import { describe, it } from 'geospec';
+  import { describe, expectGeo, it } from 'geospec';
   import { loadModel } from 'geospec/model';
 
   describe('clean STEP lifecycle', () => {
     it('preserves named occurrences and faces', async () => {
       const subject = await loadModel({ file: 'main.ts', format: 'step', mesh: false });
-      const occurrences = subject.step?.xde?.occurrences.map((entry) => entry.instanceName);
-      const names = subject.step?.xde?.subshapeNames.map((entry) => entry.occurrencePath + '.' + entry.name);
-      if (JSON.stringify(occurrences) !== JSON.stringify(['bracketA', 'bracketB'])) {
-        throw new Error('Unexpected occurrences: ' + JSON.stringify(occurrences));
-      }
-      if (JSON.stringify(names) !== JSON.stringify(['bracketA.mount', 'bracketB.mount'])) {
-        throw new Error('Unexpected subshape names: ' + JSON.stringify(names));
-      }
+      await expectGeo(subject).toHaveAssemblyOccurrences({
+        uniqueNames: true,
+        occurrences: [
+          { name: 'bracketA', count: 1 },
+          { name: 'bracketB', count: 1 },
+        ],
+      });
+      await expectGeo(subject).toHaveSpatialRelationships({
+        relationships: [
+          {
+            id: 'mounts',
+            kind: 'coplanar',
+            subject: { kind: 'interface', name: 'bracketA.mount' },
+            target: { kind: 'interface', name: 'bracketB.mount' },
+          },
+        ],
+      });
     });
   });
 `;
@@ -75,15 +85,26 @@ describe('GeoSpec clean STEP lifecycle', () => {
     await writeFile(join(projectPath, 'main.geospec.ts'), specification);
     expect(existsSync(join(projectPath, '.tau'))).toBe(false);
 
-    const { stdout } = await execFileAsync(
+    // The CLI exits non-zero when the spec fails; its JSON report is still on
+    // stdout, so parse it to surface the diagnostics in the assertion.
+    const stdout = await execFileAsync(
       process.execPath,
       ['--import', 'tsx', geospecCli, 'run', projectPath, '--test-timeout', '120000', '--workers', '1', '--json'],
       { cwd: repoRoot, maxBuffer: 16 * 1024 * 1024 },
+    ).then(
+      (result) => result.stdout,
+      (error: unknown) => {
+        const { stdout: failedStdout } = error as { stdout?: string };
+        if (failedStdout) {
+          return failedStdout;
+        }
+        throw error;
+      },
     );
-    const report = JSON.parse(stdout) as { success: boolean; passed: number; failed: number };
+    const report = JSON.parse(stdout) as { success: boolean; passed: number; failed: number; files?: unknown };
 
     // Persistent evidence belongs outside the project under test.
     expect(existsSync(join(projectPath, '.tau'))).toBe(false);
-    expect(report).toMatchObject({ success: true, passed: 1, failed: 0 });
+    expect(report, JSON.stringify(report.files)).toMatchObject({ success: true, passed: 1, failed: 0 });
   });
 });

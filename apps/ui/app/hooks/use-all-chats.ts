@@ -1,3 +1,4 @@
+import { filesystemSourceIdentity } from '#services/filesystem-source-identity.js';
 import { useQuery } from '@tanstack/react-query';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { useProjectManager } from '#hooks/use-project-manager.js';
@@ -16,8 +17,12 @@ export function useAllChats(): AllChatsResult {
     isLoading,
     error,
   } = useQuery({
-    queryKey: ['all-chats', 'records'],
-    queryFn: async () => getAllChatRecords(),
+    queryKey: ['all-chats', 'records', filesystemSourceIdentity(getAllChatRecords)],
+    queryFn: async ({ signal }) => {
+      const records = await getAllChatRecords();
+      signal.throwIfAborted();
+      return records;
+    },
     enabled: !isWorkerLoading,
   });
 

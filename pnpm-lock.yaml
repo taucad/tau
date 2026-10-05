@@ -714,6 +714,9 @@ catalogs:
     semver:
       specifier: ^7.8.5
       version: 7.8.5
+    sharp:
+      specifier: 0.34.5
+      version: 0.34.5
     shiki:
       specifier: ^3.23.0
       version: 3.23.0
@@ -2108,7 +2111,13 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
+      xstate:
+        specifier: 'catalog:'
+        version: 6.0.0-alpha.59
     devDependencies:
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../../libs/xstate-testing
       '@testing-library/react':
         specifier: 'catalog:'
         version: 16.2.0(@testing-library/dom@10.4.1)(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -2706,6 +2715,28 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
+
+  apps/www:
+    dependencies:
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
+      three:
+        specifier: 'catalog:'
+        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+    devDependencies:
+      axe-core:
+        specifier: 'catalog:'
+        version: 4.12.1
+      esbuild:
+        specifier: 'catalog:'
+        version: 0.28.2
+      playwright:
+        specifier: 'catalog:'
+        version: 1.62.1
+      sharp:
+        specifier: 'catalog:'
+        version: 0.34.5
 
   examples/electron:
     dependencies:
@@ -26853,6 +26884,7 @@ packages:
 
   xstate@6.0.0-alpha.59:
     resolution: {integrity: sha512-IDBLFTCkMgRzoxecswgXKnZin6aca237WhogmMeuebGnYn+NeQUq9IcAeWKuf/Y0TDYZFwupnx5tP23GMSl1Ww==}
+    hasBin: true
 
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}

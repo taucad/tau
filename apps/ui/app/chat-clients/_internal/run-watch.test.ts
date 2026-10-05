@@ -2,7 +2,7 @@ import { readUIMessageStream } from 'ai';
 import type { MyUIMessage } from '@taucad/chat';
 import type { AgentLiveEvent } from '@taucad/agent-host';
 import { describe, expect, it, vi } from 'vitest';
-import { initialChatProjection, reduceChatProjection } from '#machines/chat-projection.logic.js';
+import { chunksOf, initialChatProjection, reduceChatProjection } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
 import { openRunWatch } from '#chat-clients/_internal/run-watch.js';
@@ -234,7 +234,7 @@ it.each([false, true])(
     notify();
     await consumed;
     expect(errors).toEqual([]);
-    const chunks = projection.live?.chunks ?? [];
+    const chunks = chunksOf(projection.live?.chunks);
     expect(chunks.filter((chunk) => chunk.type === 'tool-input-start')).toHaveLength(external ? 0 : 1);
     expect(chunks.filter((chunk) => chunk.type === 'tool-input-delta')).toHaveLength(external ? 0 : 2);
     const tools = parts.filter((part) => 'toolCallId' in part);

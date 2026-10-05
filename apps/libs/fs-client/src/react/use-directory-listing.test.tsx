@@ -1,3 +1,5 @@
+import type { DirectoryListing, ListedDirectoryEntry } from '#directory-listing.js';
+import { ObservationService } from '#observation-service.js';
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
@@ -68,6 +70,9 @@ describe('useDirectoryListing', () => {
     });
 
     expect(result.current.kind).toBe('loading');
+    await waitFor(() => {
+      expect(proxy.readDirectory).toHaveBeenCalled();
+    });
     resolveRead([]);
     await waitFor(() => {
       expect(result.current.kind).toBe('ready');
@@ -124,15 +129,38 @@ describe('useDirectoryListing', () => {
       message: 'Aborted',
       path: '.',
     });
-    const listDirectory = vi.fn().mockRejectedValue(aborted);
-    const listDirectorySync = vi.fn().mockReturnValue(undefined);
-    const subscribePath = vi.fn().mockReturnValue(() => undefined);
+    const listDirectory = vi.fn<FileTreeServiceType['listDirectory']>().mockRejectedValue(aborted);
+    const listDirectorySync = vi.fn<FileTreeServiceType['listDirectorySync']>().mockReturnValue(undefined);
+    const subscribePath = vi.fn<FileTreeServiceType['subscribePath']>().mockReturnValue(() => undefined);
 
-    const mockTree = {
+    const mockTree = mock<FileTreeServiceType>({
       listDirectory,
       listDirectorySync,
       subscribePath,
-    } as unknown as FileTreeServiceType;
+      observeDirectory: (path) =>
+        new ObservationService<DirectoryListing>({
+          resource: path,
+          watch: (invalidate) => ({
+            ready: Promise.resolve(),
+            closed: Promise.withResolvers<void>().promise,
+            dispose: subscribePath(path, invalidate),
+          }),
+          read: async () => {
+            try {
+              return { kind: 'ready', path, entries: await listDirectory(path) };
+            } catch (error) {
+              return {
+                kind: 'error',
+                path,
+                cause:
+                  error instanceof DirectoryListingFailedError
+                    ? error.listing
+                    : { code: DirectoryListingErrorCode.Unknown, message: String(error), path },
+              };
+            }
+          },
+        }),
+    });
 
     const { result } = renderHook(() => useDirectoryListing(mockTree, '.'));
 
@@ -147,7 +175,8 @@ describe('useDirectoryListing', () => {
   it('should not re-render when subscribePath notifies a different directory path', async () => {
     const pathListeners = new Map<string, Set<() => void>>();
 
-    const fixtureEntryOnlyA = {
+    const fixtureEntryOnlyA: ListedDirectoryEntry = {
+      contentKind: 'text',
       name: 'only-a',
       path: 'dir-a/only-a',
       isFolder: false,
@@ -176,11 +205,34 @@ describe('useDirectoryListing', () => {
       };
     });
 
-    const mockTree = {
+    const mockTree = mock<FileTreeServiceType>({
       listDirectory,
       listDirectorySync,
       subscribePath,
-    } as unknown as FileTreeServiceType;
+      observeDirectory: (path) =>
+        new ObservationService<DirectoryListing>({
+          resource: path,
+          watch: (invalidate) => ({
+            ready: Promise.resolve(),
+            closed: Promise.withResolvers<void>().promise,
+            dispose: subscribePath(path, invalidate),
+          }),
+          read: async () => {
+            try {
+              return { kind: 'ready', path, entries: await listDirectory(path) };
+            } catch (error) {
+              return {
+                kind: 'error',
+                path,
+                cause:
+                  error instanceof DirectoryListingFailedError
+                    ? error.listing
+                    : { code: DirectoryListingErrorCode.Unknown, message: String(error), path },
+              };
+            }
+          },
+        }),
+    });
 
     const { result } = renderHook(() => useDirectoryListing(mockTree, 'dir-a'));
 

@@ -131,3 +131,21 @@ describe('WorkerChangeChannel', () => {
     channel.dispose();
   });
 });
+
+describe('acknowledged observation watches', () => {
+  it('should preserve native registration and connection closure without substituting local readiness', async () => {
+    const ready = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const unsubscribe = vi.fn();
+    const watchReady = vi.fn().mockReturnValue({ ready: ready.promise, closed: closed.promise, unsubscribe });
+    const channel = new WorkerChangeChannel({ transport: { listen: vi.fn().mockReturnValue(vi.fn()), watchReady } });
+    const handler = vi.fn();
+    const watch = channel.watchReady({ paths: ['settings.json'] }, handler);
+    expect(watch.ready).toBe(ready.promise);
+    expect(watch.closed).toBe(closed.promise);
+    expect(watchReady).toHaveBeenCalledWith({ paths: ['settings.json'] }, handler);
+    watch.dispose();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    channel.dispose();
+  });
+});

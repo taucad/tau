@@ -15,8 +15,8 @@ import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode, FileStat, HeadFileStat } from '#types.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
 
-/** Wire version. Version 4 requires both checked deletion and head listing. @public */
-export const nodeFsProtocolVersion = 4;
+/** Wire version. Version 5 adds authoritative head stat. @public */
+export const nodeFsProtocolVersion = 5;
 
 /**
  * Watch event as it crosses the port. A superset of the library's
@@ -142,6 +142,7 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('readdirWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirHeadWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('stat'), path: z.string() }),
+  z.object({ ...rooted, op: z.literal('headStat'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('getFileMode'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('setFileMode'), path: z.string(), mode: z.enum(['100644', '100755']) }),
   z.object({ ...rooted, op: z.literal('mkdir'), path: z.string() }),
@@ -217,6 +218,7 @@ export const nodeFsResultSchemas = {
   readdirWithStats: z.array(z.object({ name: z.string() }).and(fileStatSchema)),
   readdirHeadWithStats: z.array(z.object({ name: z.string() }).and(headFileStatSchema)),
   stat: fileStatSchema,
+  headStat: headFileStatSchema,
   getFileMode: fileModeSchema,
   setFileMode: z.undefined(),
   mkdir: z.undefined(),

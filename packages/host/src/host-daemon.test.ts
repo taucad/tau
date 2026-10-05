@@ -1573,23 +1573,31 @@ describe('startHostDaemon', () => {
       throw new Error('Expected the accepted session agent splice.');
     }
 
-    /* The page closed its only socket. The daemon frees capacity when its
-     * agent splice closes, before the other routes and child grace drain. */
+    /* The page closed one route; session-1's other routes stay open, so its drain
+     * (and its `disconnected` event) cannot finish. Wait for the actual splice
+     * close, then re-offer on BUSY until capacity admits session-2. */
     const agentSocket = await relay.route(routePath('session-1', 'agent'));
     agentSocket.close(1000, 'page closed');
     await agentSplice.closed;
-    await new Promise<void>((resolve) => {
-      setImmediate(resolve);
-    });
     expect(events).not.toContainEqual(
       expect.objectContaining({ type: 'session', sessionId: 'session-1', state: 'disconnected' }),
     );
-    control.send(JSON.stringify(agentOffer(relay.url, 'session-2')));
-
-    await vi.waitFor(() => {
-      expect(relay.controlFrames).toContainEqual(expect.objectContaining({ sessionId: 'session-2' }));
-    });
-    expect(relay.controlFrames).toContainEqual({ v: 1, type: 'accept', sessionId: 'session-2' });
+    const session2Frames = (): unknown[] =>
+      relay.controlFrames.filter((frame) => (frame as { sessionId?: string }).sessionId === 'session-2');
+    await vi.waitFor(
+      async () => {
+        const answered = session2Frames().length;
+        control.send(JSON.stringify(agentOffer(relay.url, 'session-2')));
+        await vi.waitFor(() => {
+          expect(session2Frames().length).toBeGreaterThan(answered);
+        });
+        expect(session2Frames().at(-1)).toEqual({ v: 1, type: 'accept', sessionId: 'session-2' });
+      },
+      { timeout: 10_000, interval: 20 },
+    );
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'session', sessionId: 'session-1', state: 'disconnected' }),
+    );
 
     await daemon.close();
   }, 20_000);

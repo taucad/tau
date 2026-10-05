@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import '@taucad/geospec-engine/register/node';
+import { Engine } from '@taucad/geospec-engine-native/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
 import { runnerResultToTestModelOutput } from '@taucad/agent-tools/geospec';
 import type { TestModelOutput } from '@taucad/agent-tools/geospec';
@@ -70,10 +71,13 @@ describe('GeoSpec evidence to LLM closeout', () => {
       });
     `,
       );
+      const engine = new Engine();
       const serial = createGeoSpecNodeRunner({
         projectPath: root,
         filesystem: createNodeVmFileSystem(root),
+        nativeAssertions: { engine },
         modelLoader: createModelLoader({
+          engine,
           projectPath: root,
           runtime: async () => createExampleGeoSpecRuntimeClient(examplesRoot),
         }),
@@ -166,6 +170,7 @@ describe('GeoSpec evidence to LLM closeout', () => {
       } finally {
         await serial.close();
         await pool.close();
+        engine.close();
         await rm(root, { recursive: true, force: true });
       }
     },

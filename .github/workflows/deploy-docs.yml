@@ -4,8 +4,8 @@
 # builds them and a branch change there never leaves a site without a deploy.
 #
 #   - staging (docs.taucad.dev): after every green `CI` push run on `main`.
-#   - production (docs.tau.new): `prod-deploy-on-merge.yml` on every push to
-#     `production` (made only by `deploy-production.yml`).
+#   - production (docs.tau.new): `deploy-production.yml` dispatches this
+#     workflow at the `ui@x.y.z` tag it deploys.
 #
 # `netlify deploy` runs `apps/docs/netlify.toml`'s build command with the
 # site's variables, as the Netlify Git build did. Each run also asks Netlify to
@@ -13,8 +13,8 @@
 # only from its dashboard once DNS starts resolving.
 #
 # Manual redeploy: `gh workflow run deploy-docs.yml -f environment=staging`
-# from `main`, or `--ref production -f environment=production`; add
-# `-f tag=<tag>` to deploy a specific release.
+# from `main`; add `-f tag=<tag>` to deploy a specific commit. Production
+# redeploys go through `deploy-production.yml` with a `ui@` release tag.
 
 name: Deploy docs to Netlify
 
@@ -67,6 +67,20 @@ jobs:
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
     steps:
+      # Production deploys start only from deploy-production.yml, whose run a
+      # release manager approves; it dispatches this workflow at the release tag.
+      - name: Require a production deploy started by Deploy release to production
+        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+        env:
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$TRIGGERING_ACTOR" != 'github-actions[bot]' ] || ! [[ "$REF" =~ ^refs/tags/ui@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Deploy to production with Deploy release to production (deploy-production.yml); it dispatches this workflow at the release tag."
+            exit 1
+          fi
+
       - name: Resolve the Netlify site
         id: site
         env:

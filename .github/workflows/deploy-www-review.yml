@@ -1,0 +1,89 @@
+# Builds the marketing site (`apps/www`) in GitHub Actions and publishes it to
+# the separate taucad-marketing-review Netlify site, which the UI's marketing
+# edge function proxies on staging (`MARKETING_ORIGIN` in tau-cloud).
+#
+# That site is Git-linked in tau-cloud (`marketing-review.tf`), but its Git
+# builds stopped after the 2026-10-05 Netlify credit outage and it kept serving
+# an older build. This workflow publishes the exact commit a green `CI` push run
+# on `main` passed, so staging marketing tracks `main` either way. The site sets
+# `prevent_non_git_prod_deploys = false`, which allows CLI production deploys.
+#
+# The build matches `apps/www/netlify.toml`: launch metadata on, canonical
+# origin https://tau.new.
+#
+# Manual redeploy: `gh workflow run deploy-www-review.yml` from `main`.
+
+name: Deploy marketing review site to Netlify
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy marketing review site
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: staging
+    concurrency:
+      group: deploy-www-review
+      cancel-in-progress: false
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      SITE_ID: 17066c91-5b08-4cc0-b45c-32b0ea08b4e9
+      URL: https://taucad-marketing-review.netlify.app
+    steps:
+      - name: Require the Netlify token
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "::error::NETLIFY_AUTH_TOKEN is not set on the staging environment."
+            exit 1
+          fi
+
+      # A workflow_run event runs on the default branch's head; deploy the exact
+      # commit CI passed instead.
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      # Shows why Netlify's own Git builds stopped, without failing the deploy.
+      - name: List the site's recent deploys
+        continue-on-error: true
+        run: |
+          "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" api listSiteDeploys \
+            --data "{\"site_id\": \"$SITE_ID\", \"per_page\": 10}" |
+            jq -r '.[] | [.created_at, .state, .context, .branch, (.commit_ref // "-"), (.error_message // "-")] | @tsv'
+
+      - name: Build the marketing site
+        env:
+          WWW_LAUNCH: 'true'
+          WWW_ORIGIN: https://tau.new
+        run: node apps/www/scripts/build.mjs
+
+      # From the repository root the CLI finds every workspace package and stops
+      # unless `--filter` names the one being deployed.
+      - name: Deploy with the Netlify CLI
+        env:
+          MESSAGE: ${{ github.workflow }} ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
+            --prod --no-build --filter @taucad/www \
+            --dir "$GITHUB_WORKSPACE/apps/www/dist" \
+            --site "$SITE_ID" --message "$MESSAGE"
+
+      - name: Check the site answers
+        run: curl --fail --silent --show-error --location --retry 5 --retry-delay 10 --output /dev/null "$URL"

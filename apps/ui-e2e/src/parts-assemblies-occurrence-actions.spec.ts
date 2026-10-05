@@ -12,7 +12,22 @@ import {
 import { getMotionBodyCandidate, installMotionExactWorkerObservation } from '#support/parts-assemblies-motion.js';
 import type { MotionExactObservationWindow, AssemblyTestBridgeApi } from '#support/parts-assemblies-motion.js';
 
-type ActionsWindow = typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: AssemblyTestBridgeApi };
+type SectionTaggedCounts = Readonly<{
+  objectCount: number;
+  geometryCount: number;
+  materialCount: number;
+  attributeHandleCount: number;
+  bufferCount: number;
+  backingBytes: number;
+  payloadBytes: number;
+}>;
+type ActionsWindow = typeof globalThis & {
+  __TAU_SECTION_VIEW_TEST__?: AssemblyTestBridgeApi & {
+    getTaggedResourceInventory():
+      | Readonly<{ sectionViewHelper: SectionTaggedCounts; union: SectionTaggedCounts }>
+      | undefined;
+  };
+};
 const authoredPath = 'parity/flat-actions.assembly.json';
 const orderedIds = flatActionPlacements.map(({ id }) => id);
 const decode = (base64: string): Uint8Array<ArrayBuffer> => base64ToUint8Array(base64);
@@ -70,6 +85,42 @@ const held = (state: ActionState) => ({
   scene: state.draw.candidateSceneId,
   revision: state.draw.presentationRevision,
 });
+async function readCurrentSectionTaggedResources(expected: ReturnType<typeof held>) {
+  return target.evaluate((expected) => {
+    const api = (globalThis as ActionsWindow).__TAU_SECTION_VIEW_TEST__;
+    const subject = api?.getCommittedAssembly();
+    const draw = api?.getCommittedDrawInventory();
+    if (
+      !api ||
+      !subject?.assemblyDisplay ||
+      !subject.isCurrent() ||
+      !draw ||
+      subject.assemblyDisplay.root.digest !== expected.root.digest ||
+      draw.key !== expected.root.digest ||
+      draw.candidateSceneId !== expected.scene ||
+      draw.presentationRevision !== expected.revision ||
+      draw.unitId !== expected.unit ||
+      draw.poseRevision !== expected.pose
+    ) {
+      throw new Error('The section helper census has no matching current committed draw.');
+    }
+    const tagged = api.getTaggedResourceInventory();
+    const current = api.getCommittedDrawInventory();
+    if (
+      !tagged ||
+      !subject.isCurrent() ||
+      current?.key !== draw.key ||
+      current.candidateSceneId !== draw.candidateSceneId ||
+      current.presentationRevision !== draw.presentationRevision ||
+      current.unitId !== draw.unitId ||
+      current.poseRevision !== draw.poseRevision ||
+      (globalThis as ActionsWindow).__TAU_SECTION_VIEW_TEST__ !== api
+    ) {
+      throw new Error('The section helper census retired during observation.');
+    }
+    return tagged;
+  }, expected);
+}
 async function waitCurrent(path: string, priorKey?: string) {
   let qualified: ActionState | undefined;
   await expect
@@ -810,6 +861,18 @@ for (const backend of ['webgl', 'webgpu'] as const) {
             unsupportedSourceCount: 0,
           },
         });
+      if (backend === 'webgl' && index === 0) {
+        const tagged = await readCurrentSectionTaggedResources(held(sectionHeld));
+        const section = tagged.sectionViewHelper;
+        expect(section.geometryCount).toBeGreaterThan(0);
+        expect(section.materialCount).toBeGreaterThan(0);
+        expect(section.attributeHandleCount).toBeGreaterThan(0);
+        expect(section.bufferCount).toBeGreaterThan(0);
+        expect(section.payloadBytes).toBeGreaterThan(0);
+        expect(section.backingBytes).toBeGreaterThanOrEqual(section.payloadBytes);
+        expect(tagged.union.geometryCount).toBeGreaterThanOrEqual(section.geometryCount);
+        expect(tagged.union.payloadBytes).toBeGreaterThanOrEqual(section.payloadBytes);
+      }
       await target.writeArtifact(
         `s13-${backend}-partial-cap-${index}.json`,
         JSON.stringify(capObservation, undefined, 2),
@@ -1052,6 +1115,16 @@ for (const backend of ['webgl', 'webgpu'] as const) {
         throw original;
       }
       expect(edgeTriangles).toBeGreaterThan(0);
+      if (backend === 'webgl' && index === 0) {
+        const tagged = await readCurrentSectionTaggedResources(held(sectionHeld));
+        const section = tagged.sectionViewHelper;
+        expect(section.geometryCount).toBe(0);
+        expect(section.materialCount).toBe(0);
+        expect(section.attributeHandleCount).toBe(0);
+        expect(section.bufferCount).toBe(0);
+        expect(section.payloadBytes).toBe(0);
+        expect(section.backingBytes).toBe(0);
+      }
       actions.push({ id, extent: extent.distance, pointer, mandatoryEdges: edgeTriangles });
       await menu(id, 'Remove isolation');
       await expect

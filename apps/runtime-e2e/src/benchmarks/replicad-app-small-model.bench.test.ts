@@ -39,6 +39,25 @@ type IterationProcessWindow = {
   processSystemMicros: number;
 };
 
+const honeycombCohortMode = (cpuDiagnostic: boolean) => ({
+  directoryName: cpuDiagnostic ? 'cohort-cpu-diagnostic-v1' : 'cohort-v2',
+  finalStatus: cpuDiagnostic ? 'diagnostic-only' : 'qualified',
+  cpuDiagnostic,
+});
+
+it('should keep the qualified Honeycomb cohort separate from the opt-in CPU diagnostic', () => {
+  expect(honeycombCohortMode(false)).toEqual({
+    directoryName: 'cohort-v2',
+    finalStatus: 'qualified',
+    cpuDiagnostic: false,
+  });
+  expect(honeycombCohortMode(true)).toEqual({
+    directoryName: 'cohort-cpu-diagnostic-v1',
+    finalStatus: 'diagnostic-only',
+    cpuDiagnostic: true,
+  });
+});
+
 const readHoneycombSource = async (): Promise<string> => {
   const route = await readFile(
     resolve(import.meta.dirname, '../../../ui/app/routes/[__e2e].project-file-tree/route.tsx'),
@@ -242,6 +261,7 @@ it.skipIf(process.env['TAU_E2E_CUSTOM_SMALL_MODEL_BASELINE'] !== 'true').each([
 it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
   'should compare exact Honeycomb cold processes, warmed-module fresh clients and warm cache without dropping samples',
   async () => {
+    const cohortMode = honeycombCohortMode(process.env['TAU_E2E_HONEYCOMB_CPU_DIAGNOSTIC'] === 'true');
     const lifecycle = new AbortController();
     const activeChildren = new Set<ChildProcess>();
     const assertActive = (): void => {
@@ -329,7 +349,8 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
     };
     const directory = resolve(
       workspace,
-      'out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb/cohort-cpu-diagnostic-v1',
+      'out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb',
+      cohortMode.directoryName,
     );
     await mkdir(directory, { recursive: true });
     const inputPath = resolve(directory, 'cold-process-input.json');
@@ -345,6 +366,7 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
         bindingsDigest: assets[1]!.digest,
         gitHead,
         implementationSources,
+        cpuDiagnostic: cohortMode.cpuDiagnostic,
       }),
     );
     type ColdProcessResult = {
@@ -358,8 +380,8 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
       sourceDigest: string;
       assetDigests: [string, string];
       run: BenchmarkRunResult;
-      runProcessWindow: ReturnType<typeof processWindow>;
-      iterationProcessWindows: IterationProcessWindow[];
+      runProcessWindow?: ReturnType<typeof processWindow>;
+      iterationProcessWindows?: IterationProcessWindow[];
       launchToExit: number;
     };
     const coldProcessRuns: ColdProcessResult[] = [];
@@ -383,15 +405,19 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
         JSON.stringify(
           {
             status,
-            diagnosticOnly: true,
+            ...(cohortMode.cpuDiagnostic ? { diagnosticOnly: true } : {}),
             sourceDigest: honeycombSourceDigest,
             sourceByteLength: 347,
             gitHead,
             implementationSources,
             assets,
             measuredWindow: 'runBenchmarks first-call render only; OS startup and module setup separate',
-            processCpuScope:
-              'process.cpuUsage user/system microseconds for the whole Node process, including worker threads; runCallWall is milliseconds across each full runBenchmarks call, while renderWall is milliseconds for each timed render; CPU/wall may exceed one and does not isolate GC or scheduling',
+            ...(cohortMode.cpuDiagnostic
+              ? {
+                  processCpuScope:
+                    'process.cpuUsage user/system microseconds for the whole Node process, including worker threads; runCallWall is milliseconds across each full runBenchmarks call, while renderWall is milliseconds for each timed render; CPU/wall may exceed one and does not isolate GC or scheduling',
+                }
+              : {}),
             warmModuleProtocol:
               'one recorded prep, then five measured fresh clients, then one client with eight warmups and 15 measurements',
             coldProcessRuns,
@@ -403,15 +429,22 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
                 .digest('hex'),
             },
             warmModulePrep: cohortState.warmModulePrep,
-            warmModulePrepProcessWindow: cohortState.warmModulePrepProcessWindow,
-            warmModulePrepIterationProcessWindows: cohortState.warmModulePrepIterationProcessWindows,
+            ...(cohortMode.cpuDiagnostic
+              ? {
+                  warmModulePrepProcessWindow: cohortState.warmModulePrepProcessWindow,
+                  warmModulePrepIterationProcessWindows: cohortState.warmModulePrepIterationProcessWindows,
+                }
+              : {}),
             freshClientRuns,
-            freshClientProcessWindows,
-            freshClientIterationProcessWindows,
+            ...(cohortMode.cpuDiagnostic ? { freshClientProcessWindows, freshClientIterationProcessWindows } : {}),
             freshClientStats: cohortState.freshClientStats,
             warmRun: cohortState.warmRun,
-            warmRunProcessWindow: cohortState.warmRunProcessWindow,
-            warmRunIterationProcessWindows: cohortState.warmRunIterationProcessWindows,
+            ...(cohortMode.cpuDiagnostic
+              ? {
+                  warmRunProcessWindow: cohortState.warmRunProcessWindow,
+                  warmRunIterationProcessWindows: cohortState.warmRunIterationProcessWindows,
+                }
+              : {}),
             cvCeiling: 0.1,
           },
           undefined,
@@ -468,8 +501,10 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
       expect(childResult.implementationSources).toEqual(implementationSources);
       expect(childResult.assetDigests).toEqual(assets.map(({ digest }) => digest));
       expect(childResult.run.results[0]?.timings).toHaveLength(1);
-      expect(childResult.iterationProcessWindows).toHaveLength(1);
-      expect(childResult.iterationProcessWindows[0]?.renderWall).toBe(childResult.run.results[0]?.timings[0]);
+      if (cohortMode.cpuDiagnostic) {
+        expect(childResult.iterationProcessWindows).toHaveLength(1);
+        expect(childResult.iterationProcessWindows?.[0]?.renderWall).toBe(childResult.run.results[0]?.timings[0]);
+      }
       coldProcessRuns.push({ ...childResult, launchToExit });
       await persist('cold-process-in-progress');
     }
@@ -480,55 +515,61 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
 
     // Predeclared module/WASM warmup is evidence, never a discarded member of the five-client distribution.
     assertActive();
-    const prepIterations = observeProcessIterations();
-    const prepStartedAt = performance.now();
-    const prepCpuAtStart = process.cpuUsage();
+    const prepIterations = cohortMode.cpuDiagnostic ? observeProcessIterations() : undefined;
+    const prepStartedAt = cohortMode.cpuDiagnostic ? performance.now() : undefined;
+    const prepCpuAtStart = cohortMode.cpuDiagnostic ? process.cpuUsage() : undefined;
     const warmModulePrep = await runBenchmarks([benchCase], {
       iterations: 1,
       operation: 'render',
       includeEdges: true,
       wasm,
-      onIterationStart: prepIterations.onIterationStart,
-      onIterationProgress: prepIterations.onIterationProgress,
+      onIterationStart: prepIterations?.onIterationStart,
+      onIterationProgress: prepIterations?.onIterationProgress ?? assertActive,
     });
     cohortState.warmModulePrep = warmModulePrep;
-    cohortState.warmModulePrepProcessWindow = processWindow(prepStartedAt, prepCpuAtStart);
-    cohortState.warmModulePrepIterationProcessWindows = prepIterations.windows;
+    if (prepStartedAt !== undefined && prepCpuAtStart && prepIterations) {
+      cohortState.warmModulePrepProcessWindow = processWindow(prepStartedAt, prepCpuAtStart);
+      cohortState.warmModulePrepIterationProcessWindows = prepIterations.windows;
+    }
     await persist('warm-module-prepared');
     for (let sample = 0; sample < 5; sample += 1) {
       assertActive();
-      const iterations = observeProcessIterations();
-      const startedAt = performance.now();
-      const cpuAtStart = process.cpuUsage();
+      const iterations = cohortMode.cpuDiagnostic ? observeProcessIterations() : undefined;
+      const startedAt = cohortMode.cpuDiagnostic ? performance.now() : undefined;
+      const cpuAtStart = cohortMode.cpuDiagnostic ? process.cpuUsage() : undefined;
       // oxlint-disable-next-line no-await-in-loop -- Five fresh clients are one serial warmed-module cohort.
       const run = await runBenchmarks([benchCase], {
         iterations: 1,
         operation: 'render',
         includeEdges: true,
         wasm,
-        onIterationStart: iterations.onIterationStart,
-        onIterationProgress: iterations.onIterationProgress,
+        onIterationStart: iterations?.onIterationStart,
+        onIterationProgress: iterations?.onIterationProgress ?? assertActive,
       });
-      freshClientProcessWindows.push(processWindow(startedAt, cpuAtStart));
-      freshClientIterationProcessWindows.push(iterations.windows);
+      if (startedAt !== undefined && cpuAtStart && iterations) {
+        freshClientProcessWindows.push(processWindow(startedAt, cpuAtStart));
+        freshClientIterationProcessWindows.push(iterations.windows);
+      }
       freshClientRuns.push(run);
       // oxlint-disable-next-line no-await-in-loop -- Persist each genuine measurement before the next client.
       await persist('fresh-client-in-progress');
     }
     assertActive();
-    const warmIterations = observeProcessIterations();
-    const warmStartedAt = performance.now();
-    const warmCpuAtStart = process.cpuUsage();
+    const warmIterations = cohortMode.cpuDiagnostic ? observeProcessIterations() : undefined;
+    const warmStartedAt = cohortMode.cpuDiagnostic ? performance.now() : undefined;
+    const warmCpuAtStart = cohortMode.cpuDiagnostic ? process.cpuUsage() : undefined;
     const warmRun = await runBenchmarks([{ ...benchCase, mode: 'steady-state' }], {
       iterations: 15,
       operation: 'render',
       includeEdges: true,
       wasm,
-      onIterationStart: warmIterations.onIterationStart,
-      onIterationProgress: warmIterations.onIterationProgress,
+      onIterationStart: warmIterations?.onIterationStart,
+      onIterationProgress: warmIterations?.onIterationProgress ?? assertActive,
     });
-    cohortState.warmRunProcessWindow = processWindow(warmStartedAt, warmCpuAtStart);
-    cohortState.warmRunIterationProcessWindows = warmIterations.windows;
+    if (warmStartedAt !== undefined && warmCpuAtStart && warmIterations) {
+      cohortState.warmRunProcessWindow = processWindow(warmStartedAt, warmCpuAtStart);
+      cohortState.warmRunIterationProcessWindows = warmIterations.windows;
+    }
     const processDurations = coldProcessRuns.map(({ run }) => run.results[0]!.timings[0]!);
     const clientDurations = freshClientRuns.map(({ results }) => results[0]!.timings[0]!);
     const coldProcessStats = computeStats(processDurations);
@@ -549,16 +590,20 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
       expect(result.triangleCount).toBe(first.triangleCount);
     }
     expect(warmModulePrep.results[0]?.timings).toHaveLength(1);
-    expect(prepIterations.windows.map(({ renderWall }) => renderWall)).toEqual(warmModulePrep.results[0]?.timings);
-    expect(freshClientIterationProcessWindows).toHaveLength(5);
-    for (const [index, windows] of freshClientIterationProcessWindows.entries()) {
-      expect(windows.map(({ renderWall }) => renderWall)).toEqual(freshClientRuns[index]?.results[0]?.timings);
+    if (cohortMode.cpuDiagnostic) {
+      expect(prepIterations?.windows.map(({ renderWall }) => renderWall)).toEqual(warmModulePrep.results[0]?.timings);
+      expect(freshClientIterationProcessWindows).toHaveLength(5);
+      for (const [index, windows] of freshClientIterationProcessWindows.entries()) {
+        expect(windows.map(({ renderWall }) => renderWall)).toEqual(freshClientRuns[index]?.results[0]?.timings);
+      }
+      expect(warmRun.results[0]?.warmupRuns).toBe(8);
+      expect(warmRun.results[0]?.timings).toHaveLength(15);
     }
-    expect(warmRun.results[0]?.warmupRuns).toBe(8);
-    expect(warmRun.results[0]?.timings).toHaveLength(15);
-    expect(warmIterations.windows).toHaveLength(23);
-    expect(warmIterations.windows.slice(0, 8).every(({ warmup }) => warmup)).toBe(true);
-    expect(warmIterations.windows.slice(8).map(({ renderWall }) => renderWall)).toEqual(warmRun.results[0]?.timings);
+    if (cohortMode.cpuDiagnostic) {
+      expect(warmIterations?.windows).toHaveLength(23);
+      expect(warmIterations?.windows.slice(0, 8).every(({ warmup }) => warmup)).toBe(true);
+      expect(warmIterations?.windows.slice(8).map(({ renderWall }) => renderWall)).toEqual(warmRun.results[0]?.timings);
+    }
     expect(await readHoneycombSource()).toBe(source);
     expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim()).toBe(gitHead);
     await Promise.all(
@@ -584,6 +629,6 @@ it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
     expect(coldProcessStats.coefficientOfVariation).toBeLessThanOrEqual(0.1);
     expect(freshClientStats.coefficientOfVariation).toBeLessThanOrEqual(0.1);
     expect(warmRun.results[0]!.coefficientOfVariation).toBeLessThanOrEqual(0.1);
-    await persist('diagnostic-only');
+    await persist(cohortMode.finalStatus);
   },
 );

@@ -259,7 +259,7 @@ export const runMissingWriterUtility = async (input: MissingWriterUtilityInput):
       admittedPublication: admitted.admitted.publication,
       exact,
       publication,
-      stepBase64: uint8ArrayToBase64(exported.files[0]!.bytes),
+      stepBase64: uint8ArrayToBase64(exported.files[0].bytes),
       evaluatorWritable: provider.capabilities.writable,
       publicationPortTransferred: false,
       assetBytesUnchanged: true,

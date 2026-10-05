@@ -1211,6 +1211,8 @@ export type SectionViewTestBridgeApi = Readonly<{
   setMeasureActive(active: boolean): void;
   getMeasureState(): SectionViewTestMeasureState;
   getSectionHelperSummary(): SectionViewTestHelperSummary;
+  /** Current mounted helper CPU views only; returns no census for a retired presentation. */
+  getTaggedResourceInventory(): SectionViewTestTaggedResourceInventory | undefined;
   getSectionCapCompleteness(): SectionViewTestCapCompleteness | undefined;
   getSectionCapOverlapDiagnostics(): SectionCapOverlapDebugSummary | undefined;
   getSectionCapPerformanceDiagnostics(): SectionCapPerformanceDebugSummary | undefined;
@@ -1330,6 +1332,108 @@ export const getSectionViewTestMeasurementUiMeshCount = (scene: THREE.Object3D):
   }
 
   return meshes.size;
+};
+
+type TaggedResourceCounts = Readonly<{
+  objectCount: number;
+  geometryCount: number;
+  materialCount: number;
+  attributeHandleCount: number;
+  bufferCount: number;
+  backingBytes: number;
+  payloadBytes: number;
+}>;
+
+export type SectionViewTestTaggedResourceInventory = Readonly<{
+  measurementUi: TaggedResourceCounts;
+  sectionViewHelper: TaggedResourceCounts;
+  union: TaggedResourceCounts;
+}>;
+
+/** On-demand census of mounted helper objects. Detached worker, WASM and renderer storage are excluded. */
+export const getSectionViewTestTaggedResourceInventory = (
+  scene: THREE.Object3D,
+  isCurrent: () => boolean,
+): SectionViewTestTaggedResourceInventory | undefined => {
+  if (!isCurrent()) {
+    return undefined;
+  }
+  const measurement = new Set<THREE.Object3D>();
+  const section = new Set<THREE.Object3D>();
+  const hasTag = (object: THREE.Object3D, tag: (typeof sceneTag)['measurementUi' | 'sectionViewHelper']): boolean => {
+    let owner: THREE.Object3D | undefined = object;
+    while (owner) {
+      if (hasSceneTag(owner, tag)) {
+        return true;
+      }
+      owner = owner.parent ?? undefined;
+    }
+    return false;
+  };
+  for (const root of getSceneRenderRoots(scene as THREE.Scene)) {
+    root.traverse((object) => {
+      if (hasTag(object, sceneTag.measurementUi)) {
+        measurement.add(object);
+      }
+      if (hasTag(object, sceneTag.sectionViewHelper)) {
+        section.add(object);
+      }
+    });
+  }
+  const count = (objects: ReadonlySet<THREE.Object3D>): TaggedResourceCounts => {
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    const attributes = new Set<unknown>();
+    const ranges = new Map<ArrayBufferLike, Array<readonly [number, number]>>();
+    for (const object of objects) {
+      const geometry: unknown = 'geometry' in object ? object.geometry : undefined;
+      if (geometry instanceof THREE.BufferGeometry) {
+        geometries.add(geometry as THREE.BufferGeometry);
+      }
+      for (const material of getObjectMaterials(object)) {
+        materials.add(material);
+      }
+    }
+    for (const geometry of geometries) {
+      for (const attribute of [
+        ...Object.values(geometry.attributes),
+        ...(geometry.index ? [geometry.index] : []),
+        ...Object.values(geometry.morphAttributes).flat(),
+      ]) {
+        const owner = 'data' in attribute ? attribute.data : attribute;
+        attributes.add(owner);
+        const { array } = owner;
+        const views = ranges.get(array.buffer) ?? [];
+        views.push([array.byteOffset, array.byteOffset + array.byteLength]);
+        ranges.set(array.buffer, views);
+      }
+    }
+    let backingBytes = 0;
+    let payloadBytes = 0;
+    for (const [buffer, views] of ranges) {
+      backingBytes += buffer.byteLength;
+      let end = 0;
+      for (const [start, stop] of views.toSorted((left, right) => left[0] - right[0])) {
+        payloadBytes += Math.max(0, stop - Math.max(start, end));
+        end = Math.max(end, stop);
+      }
+    }
+    return {
+      objectCount: objects.size,
+      geometryCount: geometries.size,
+      materialCount: materials.size,
+      attributeHandleCount: attributes.size,
+      bufferCount: ranges.size,
+      backingBytes,
+      payloadBytes,
+    };
+  };
+  const result = {
+    measurementUi: count(measurement),
+    sectionViewHelper: count(section),
+    union: count(new Set([...measurement, ...section])),
+  };
+  return isCurrent() ? result : undefined;
 };
 
 /** A point in normalized device coordinates, in viewport pixels; visible inside the view volume. */
@@ -2751,6 +2855,23 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       },
       getSectionHelperSummary() {
         return getSectionViewTestHelperSummary(scene);
+      },
+      getTaggedResourceInventory() {
+        const draw = bridge.getCommittedDrawInventory();
+        if (!draw) {
+          return undefined;
+        }
+        return getSectionViewTestTaggedResourceInventory(scene, () => {
+          const current = bridge.getCommittedDrawInventory();
+          return (
+            current !== undefined &&
+            current.candidateSceneId === draw.candidateSceneId &&
+            current.key === draw.key &&
+            current.presentationRevision === draw.presentationRevision &&
+            current.poseRevision === draw.poseRevision &&
+            current.unitId === draw.unitId
+          );
+        });
       },
       getSectionCapCompleteness() {
         let completeness: SectionViewTestCapCompleteness | undefined;

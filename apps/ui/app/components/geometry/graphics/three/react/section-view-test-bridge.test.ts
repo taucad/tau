@@ -52,6 +52,7 @@ import {
   getSectionViewTestCapOverlapDiagnostics,
   getSectionViewTestCapPerformanceDiagnostics,
   getSectionViewTestHelperSummary,
+  getSectionViewTestTaggedResourceInventory,
   projectSectionViewTestHandle,
 } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
 import type { SectionViewTestBridgeApi } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
@@ -269,6 +270,69 @@ describe('readSectionViewTestDisplayedDocument', () => {
 });
 
 describe('getSectionViewTestControlState', () => {
+  it('counts only current mounted measurement and section resource views, including shared backing', () => {
+    const scene = new THREE.Scene();
+    const sibling = new THREE.Scene();
+    const backing = new Float32Array(64);
+    const material = new THREE.MeshBasicMaterial();
+    const geometries: THREE.BufferGeometry[] = [];
+    const makeHelper = (tag: (typeof sceneTag)['measurementUi' | 'sectionViewHelper'], offset: number) => {
+      const root = new THREE.Group();
+      root.userData = sceneTagData(tag);
+      const geometry = new THREE.BufferGeometry();
+      geometries.push(geometry);
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(backing.buffer, offset, 9), 3));
+      root.add(new THREE.Mesh(geometry, material));
+      return root;
+    };
+    const measurement = makeHelper(sceneTag.measurementUi, 0);
+    const section = makeHelper(sceneTag.sectionViewHelper, 128);
+    scene.add(measurement, section);
+    sibling.add(makeHelper(sceneTag.measurementUi, 0));
+    const current = () => true;
+    expect(getSectionViewTestTaggedResourceInventory(scene, () => false)).toBeUndefined();
+    const changed = vi.fn<() => boolean>().mockReturnValueOnce(true).mockReturnValueOnce(false);
+    expect(getSectionViewTestTaggedResourceInventory(scene, changed)).toBeUndefined();
+    expect(changed).toHaveBeenCalledTimes(2);
+    const inventory = getSectionViewTestTaggedResourceInventory(scene, current);
+    expect(inventory).toEqual({
+      measurementUi: {
+        objectCount: 2,
+        geometryCount: 1,
+        materialCount: 1,
+        attributeHandleCount: 1,
+        bufferCount: 1,
+        backingBytes: 256,
+        payloadBytes: 36,
+      },
+      sectionViewHelper: {
+        objectCount: 2,
+        geometryCount: 1,
+        materialCount: 1,
+        attributeHandleCount: 1,
+        bufferCount: 1,
+        backingBytes: 256,
+        payloadBytes: 36,
+      },
+      union: {
+        objectCount: 4,
+        geometryCount: 2,
+        materialCount: 1,
+        attributeHandleCount: 2,
+        bufferCount: 1,
+        backingBytes: 256,
+        payloadBytes: 72,
+      },
+    });
+    scene.remove(measurement, section);
+    expect(getSectionViewTestTaggedResourceInventory(scene, current)?.union.bufferCount).toBe(0);
+    expect(getSectionViewTestTaggedResourceInventory(sibling, current)?.union.payloadBytes).toBe(36);
+    for (const geometry of geometries) {
+      geometry.dispose();
+    }
+    material.dispose();
+  });
+
   it('should report CameraControls enabled state and viewport gizmo lock state', () => {
     const state = getSectionViewTestControlState({
       controls: { enabled: false },
@@ -638,6 +702,7 @@ describe('committed assembly bridge registration lifetime', () => {
         );
         view = render(React.createElement(SectionViewTestBridge, { isGeometryFramed: true }));
         const bridge = scope.__TAU_SECTION_VIEW_TEST__!;
+        expect(bridge.getTaggedResourceInventory()).toBeUndefined();
         const projectionCamera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
         projectionCamera.position.set(0, 0, 6);
         projectionCamera.updateMatrixWorld(true);
@@ -1272,6 +1337,7 @@ describe('committed assembly bridge registration lifetime', () => {
         view.unmount();
         expect(scope.__TAU_SECTION_VIEW_TEST__).toBeUndefined();
         expect(scope.__TAU_SECTION_VIEW_TEST_BRIDGES__).toBeUndefined();
+        expect(bridge.getTaggedResourceInventory()).toBeUndefined();
         expect(current.isCurrent()).toBe(false);
         releaseRead!(bytes);
         await expect(pendingRead).rejects.toThrow(/during/u);

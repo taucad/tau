@@ -624,7 +624,14 @@ export const launchDesktopApp = async (options: {
   const child = application.process();
   owner.child = child;
   let sessionReturned = false;
+  let startupFinished = false;
+  const assertStartupActive = (): void => {
+    if (startupFinished) {
+      throw new Error('Desktop startup finished before a session was returned.');
+    }
+  };
   onTestFinished(() => {
+    startupFinished = true;
     if (!sessionReturned && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
     }
@@ -652,13 +659,18 @@ export const launchDesktopApp = async (options: {
     /* A packaged launch releases main bootstrap before its first window exists.
      * Configure the main-process test overrides only after that startup boundary. */
     await recordStartup('first-window');
+    assertStartupActive();
     page = await application.firstWindow();
+    assertStartupActive();
     await recordStartup('dom-content-loaded');
+    assertStartupActive();
     await page.waitForLoadState('domcontentloaded');
+    assertStartupActive();
     if (options.fakeMicrophonePath) {
       // Chromium recommends disabling DSP for calibrated file microphone input.
       // Keep the real capture driver; change only its audio-processing constraints.
       await recordStartup('audio-init-script');
+      assertStartupActive();
       await page.addInitScript(() => {
         const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         navigator.mediaDevices.getUserMedia = async (constraints) => {
@@ -676,8 +688,10 @@ export const launchDesktopApp = async (options: {
           });
         };
       });
+      assertStartupActive();
     }
     await recordStartup('main-overrides');
+    assertStartupActive();
     await application.evaluate(({ dialog, shell }, selectedDirectory) => {
       const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
       shell.openExternal = async (url): Promise<void> => {
@@ -686,6 +700,7 @@ export const launchDesktopApp = async (options: {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
       dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
     }, pickedDirectory);
+    assertStartupActive();
     page.setDefaultTimeout(60_000);
     page.on('console', (message) => {
       if (message.type() === 'error') {
@@ -694,7 +709,9 @@ export const launchDesktopApp = async (options: {
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
     await recordStartup('trace-start');
+    assertStartupActive();
     await page.context().tracing.start({ screenshots: true, snapshots: true });
+    assertStartupActive();
   } catch (error) {
     child.kill('SIGKILL');
     await recordStartup(startupStage, 'failed').catch(() => undefined);
@@ -829,7 +846,15 @@ export const launchDesktopApp = async (options: {
     }
   };
 
-  await recordStartup('session-returned', 'returned');
+  try {
+    assertStartupActive();
+    await recordStartup('session-returned', 'returned');
+    assertStartupActive();
+  } catch (error) {
+    child.kill('SIGKILL');
+    await recordStartup(startupStage, 'failed').catch(() => undefined);
+    throw new Error(`The desktop shell did not survive launch.\n${output.join('')}`, { cause: error });
+  }
   sessionReturned = true;
   return {
     analyticsRequests,

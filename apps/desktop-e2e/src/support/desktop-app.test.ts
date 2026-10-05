@@ -163,6 +163,65 @@ describe('desktop startup ownership before a session is returned', () => {
       expect(application.firstWindow).toHaveBeenCalledOnce();
     });
   });
+
+  it('should refuse a session when tracing resolves after test finish killed its child', async () => {
+    const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-startup-test-'));
+    const before = await startupEntries();
+    let resolveTracing: (() => void) | undefined;
+    const tracingStarted = new Promise<void>((resolve) => {
+      resolveTracing = resolve;
+    });
+    const tracing = mock<BrowserContext['tracing']>();
+    tracing.start.mockReturnValue(tracingStarted);
+    const context = mock<BrowserContext>({ tracing });
+    const page = mock<Page>();
+    page.context.mockReturnValue(context);
+    const { child, launch } = mockedLaunch(async () => page);
+    const observation: { result?: Promise<unknown> } = {};
+    onTestFinished(async () => {
+      try {
+        resolveTracing?.();
+        const error: unknown = await observation.result;
+        expect(error).toMatchObject({
+          cause: new Error('Desktop startup finished before a session was returned.'),
+        });
+        expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+        const created = [...(await startupEntries())].filter((entry) => !before.has(entry));
+        expect(created).toHaveLength(1);
+        const stage = JSON.parse(await readFile(join(startupRoot, created[0]!, 'stage.json'), 'utf8')) as {
+          stage: string;
+          status: string;
+          pid: number;
+        };
+        expect(stage).toMatchObject({ stage: 'trace-start', status: 'failed', pid: 12_345 });
+        await rm(join(startupRoot, created[0]!), { recursive: true, force: true });
+      } finally {
+        const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+        if (picked) {
+          await rm(dirname(picked), { recursive: true, force: true });
+        }
+        await rm(profileRoot, { recursive: true, force: true });
+      }
+    });
+    observation.result = (async (): Promise<unknown> => {
+      try {
+        await launchDesktopApp({ token: 'unit-test-only', profileRoot });
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    })();
+    await vi.waitFor(() => {
+      expect(tracing.start).toHaveBeenCalledOnce();
+    });
+    const created = [...(await startupEntries())].filter((entry) => !before.has(entry));
+    expect(created).toHaveLength(1);
+    const pending = JSON.parse(await readFile(join(startupRoot, created[0]!, 'stage.json'), 'utf8')) as {
+      stage: string;
+      status: string;
+    };
+    expect(pending).toMatchObject({ stage: 'trace-start', status: 'pending' });
+  });
 });
 
 describe('actual desktop runtime lease observation', () => {

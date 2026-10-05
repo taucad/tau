@@ -666,7 +666,7 @@ const promptOf = (context: AcpSessionContext, lent: AcpLend): readonly ContentBl
   return (
     prompt ?? {
       code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN',
-      message: 'Tau restored the ACP session, but ACP cannot prove whether the interrupted turn completed.',
+      message: "Tau could not reopen the agent's earlier session, so this turn cannot continue where it stopped.",
     }
   );
 };

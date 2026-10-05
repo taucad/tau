@@ -175,7 +175,7 @@ describe('createGeoSpecNodePoolRunner', () => {
     expect(messages[1]).toMatchObject({ type: 'shard-complete', shardId: 1, file: 'a.geospec.ts' });
   });
 
-  it('should run STEP-backed GeoSpec files in four real worker isolates', async () => {
+  it('should run four STEP-backed GeoSpec files across up to four real worker isolates', async () => {
     const root = await mkdtemp(join(tmpdir(), 'geospec-four-worker-'));
     const model = join(root, 'model.step');
     await copyFile(fileURLToPath(new URL('../../../fixtures/xde/two-cube-assembly.step', import.meta.url)), model);
@@ -195,7 +195,9 @@ describe('createGeoSpecNodePoolRunner', () => {
         return file;
       }),
     );
-    const runner = createGeoSpecNodePoolRunner({ projectPath: root, workers: 4, cache: false, shardTimeout: 120_000 });
+    // One permit per worker must fit the host cap, which is 3 on the macOS arm64 runner.
+    const workers = Math.min(4, nativeHostCap());
+    const runner = createGeoSpecNodePoolRunner({ projectPath: root, workers, cache: false, shardTimeout: 120_000 });
 
     const result = await runner.run({ files });
     await runner.close();

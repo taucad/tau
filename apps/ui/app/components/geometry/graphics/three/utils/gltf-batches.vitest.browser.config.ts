@@ -20,7 +20,7 @@ export default defineConfig({
       enabled: true,
       headless: true,
       screenshotDirectory: '../../out/test-results/gltf-batches-browser',
-      provider: playwright({ launchOptions: { args: ['--enable-unsafe-webgpu'] } }),
+      provider: playwright({ launchOptions: { channel: 'chromium', args: ['--enable-unsafe-webgpu'] } }),
       instances: [{ browser: 'chromium' }],
     },
   },

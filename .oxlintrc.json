@@ -30,9 +30,6 @@
     "**/public/**",
     "**/content/docs/**",
     "experiments/**",
-    // Opt-in benchmark/parity CLIs run by hand against a locally built native
-    // addon; unpublished (`files` excludes them) and outside every tsconfig.
-    "packages/plugins/opencascade-native/bench/**",
     // Compute-reuse baseline harness (charter W0): opt-in benchmark code
     // reaching runtime-internal seams through a loader hook; outside tsconfig.
     "apps/runtime-e2e/src/compute-baseline/harness/**",

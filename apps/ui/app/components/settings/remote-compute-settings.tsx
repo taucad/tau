@@ -103,7 +103,7 @@ export function RemoteComputeSettings(): React.JSX.Element {
           <div>
             <p className='text-sm font-medium'>{placementCopy[placement.state]}</p>
             {placement.state !== 'local' && placement.message ? (
-              <p className='text-xs text-destructive'>{placement.message}</p>
+              <p className='text-xs text-feature'>{placement.message}</p>
             ) : null}
           </div>
           <Button size='sm' variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
@@ -145,7 +145,7 @@ export function RemoteComputeSettings(): React.JSX.Element {
         ))}
 
         {error ? (
-          <p role='alert' className='text-sm text-destructive'>
+          <p role='alert' className='text-sm text-feature'>
             {error}
           </p>
         ) : null}

@@ -32,6 +32,27 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { runTui } from '#tui/app.js';
 import * as agentClient from '#commands/agent/client.js';
 
+/*
+ * Ink reads `is-in-ci` once, when it is first imported, and under `CI` or
+ * `CONTINUOUS_INTEGRATION` writes nothing but the last frame on unmount. Every
+ * assertion here reads frames painted while the app runs, so Ink must load
+ * with both cleared; `vi.hoisted` runs before the imports above, and the
+ * originals come back once Ink has loaded so the daemon children see the
+ * runner's real environment.
+ */
+const ciEnvironment = vi.hoisted(() => {
+  const saved = { ci: process.env['CI'], continuousIntegration: process.env['CONTINUOUS_INTEGRATION'] };
+  delete process.env['CI'];
+  delete process.env['CONTINUOUS_INTEGRATION'];
+  return saved;
+});
+if (ciEnvironment.ci !== undefined) {
+  process.env['CI'] = ciEnvironment.ci;
+}
+if (ciEnvironment.continuousIntegration !== undefined) {
+  process.env['CONTINUOUS_INTEGRATION'] = ciEnvironment.continuousIntegration;
+}
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
 const binPath = resolvePath(repoRoot, 'packages/cli/src/bin.ts');

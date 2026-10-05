@@ -417,7 +417,7 @@ export const createRuntimeAgentClients = (
             }
             assertGlb(result.files[0].bytes);
           }
-          const publication = published.admitted.publication;
+          const { publication } = published.admitted;
           const eligible =
             includeCapabilities && result.success
               ? fileExtensions.flatMap((format) => {
@@ -547,7 +547,7 @@ export const createRuntimeAgentClients = (
         published = await input.openPublishedAssembly?.({ targetFile: rooted, signal: context?.signal });
         let result: ExportOutcome | ExportResult;
         if (published) {
-          const publication = published.admitted.publication;
+          const { publication } = published.admitted;
           const declaredRoute = fileExtensions.flatMap((format) => {
             const route = selectPublishedExportRoute({ publication, capabilities: runtime.capabilities, format });
             return route?.exportId === to && route.sourceFormat === route.targetFormat ? [route] : [];

@@ -160,12 +160,14 @@ describe('desktop runtime kernels', () => {
       expect(admitted.admitted.publication).toEqual(published.admitted.publication);
       const exported = await consumer.exportPublished({ format: 'step', publishedAssembly: { root: published.root } });
       expect(exported.success).toBe(true);
-      if (!exported.success) throw new Error(JSON.stringify(exported.issues));
-      expect(new TextDecoder().decode(exported.files[0]!.bytes)).toContain('ISO-10303-21');
-      expect(
-        (await consumer.openAssembly({ root: published.root })).admitted.publication.parts['part']!.variants['default']!
-          .exact?.providerVersion,
-      ).toBe(exact.providerVersion);
+      if (!exported.success) {
+        throw new Error(JSON.stringify(exported.issues));
+      }
+      expect(new TextDecoder().decode(exported.files[0].bytes)).toContain('ISO-10303-21');
+      const reopened = await consumer.openAssembly({ root: published.root });
+      expect(reopened.admitted.publication.parts['part']!.variants['default']!.exact?.providerVersion).toBe(
+        exact.providerVersion,
+      );
     } finally {
       try {
         await producer?.shutdown();

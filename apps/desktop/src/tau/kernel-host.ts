@@ -24,7 +24,8 @@ const admitAssemblyDisplay: AssemblyDisplayProjector = async ({ purpose, records
     await validateAdmittedAssemblyGlb(input);
     return;
   }
-  return (await flattenAdmittedAssemblyGlb(input)).geometry.content;
+  const result = await flattenAdmittedAssemblyGlb(input);
+  return result.geometry.content;
 };
 /* Attach `parentPort` synchronously: main posts the wire port immediately
  * after forking. Engine identity is recorded only if OpenRSCAD initializes. */

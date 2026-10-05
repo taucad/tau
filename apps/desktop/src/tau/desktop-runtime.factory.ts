@@ -51,8 +51,8 @@ const desktopReplicadWasm = (): { wasmUrl: string; wasmBindingsUrl: string } => 
       if (!statSync(path).isFile()) {
         throw new Error('Resource is not a file.');
       }
-    } catch (cause) {
-      throw new Error('The desktop Replicad engine pair is missing from the built UI payload.', { cause });
+    } catch (error) {
+      throw new Error('The desktop Replicad engine pair is missing from the built UI payload.', { cause: error });
     }
   }
   return { wasmUrl: pathToFileURL(wasm).href, wasmBindingsUrl: pathToFileURL(bindings).href };

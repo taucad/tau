@@ -536,8 +536,12 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           [channel.port2],
         );
       } catch (error) {
-        safeDispose(() => channel.port1.close());
-        safeDispose(() => channel.port2.close());
+        safeDispose(() => {
+          channel.port1.close();
+        });
+        safeDispose(() => {
+          channel.port2.close();
+        });
         throw error;
       }
       if (projectContext) {

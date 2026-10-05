@@ -353,8 +353,6 @@ export const SliderInput = ({
       disabled,
       isReadOnly,
       lowerLimit,
-      max,
-      min,
       onInputCommit,
       onInputEnter,
       onInputEscape,

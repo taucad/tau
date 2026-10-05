@@ -84,6 +84,25 @@ describe('AuthPage', () => {
     expect(screen.getByText('verify-email')).toBeInTheDocument();
   });
 
+  it.each(['sign-in', 'sign-up'])('continues a signed-in browser from %s to the held destination', (segment) => {
+    routeMocks.segment = segment;
+    routeMocks.search = '?redirectTo=%2Fauth%2Fdesktop%3Fstate%3Dabc';
+    routeMocks.session = { user: { id: 'user_1' } };
+
+    render(<AuthPage />);
+
+    expect(routeMocks.navigate).toHaveBeenCalledWith('/auth/desktop?state=abc', { replace: true });
+  });
+
+  it('keeps a signed-in browser on the other auth pages', () => {
+    routeMocks.segment = 'sign-out';
+    routeMocks.session = { user: { id: 'user_1' } };
+
+    render(<AuthPage />);
+
+    expect(routeMocks.navigate).not.toHaveBeenCalled();
+  });
+
   /*
    * The desktop window cannot host the flow: main sends the provider navigation
    * to the system browser, so a form rendered here can only end at the

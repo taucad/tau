@@ -40,7 +40,7 @@ afterEach(async () => {
   }
 });
 
-/** Select the user's on-screen composer; Home also mounts a library-empty-state composer below the fold. */
+/** Select the hero composer: Home also mounts a library-empty-state composer, on screen in tall windows. */
 const visibleComposer = async (page: Page): Promise<Locator> => {
   const composers = page.locator('[data-chat-composer="main"]');
   let visible: number[] = [];
@@ -52,9 +52,9 @@ const visibleComposer = async (page: Page): Promise<Locator> => {
           return bounds.width > 0 && bounds.top >= 0 && bounds.bottom <= window.innerHeight ? [index] : [];
         }),
       );
-      return visible;
+      return visible.length;
     }, poll)
-    .toHaveLength(1);
+    .toBeGreaterThan(0);
   return composers.nth(visible[0]!);
 };
 

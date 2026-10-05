@@ -1145,7 +1145,10 @@ describe('the page client of the worker revision root', () => {
       const secondRoot = await fixture.root(second.registry);
       expect(secondRoot.inspect().status).toBe('active');
     });
-    expect(firstRoot.inspect().status).toBe('stopped');
+    // The old root stops on its own teardown, which can land after the new root is active.
+    await waitFor(() => {
+      expect(firstRoot.inspect().status).toBe('stopped');
+    });
     // Closing waits for the operation log's last append, so the registry lets go after the root stops.
     await vi.waitFor(
       () => {

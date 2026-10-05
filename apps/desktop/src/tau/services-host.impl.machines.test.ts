@@ -161,7 +161,7 @@ const machinesHarness = async () => {
     if (outcome.status === 'bound') {
       return outcome.machineId;
     }
-    const result = await completeCeremony('bind-simulator', outcome.ceremonyId, code);
+    const result = await completeCeremony(`bind-${providerId}`, outcome.ceremonyId, code);
     if (!('outcome' in result) || result.outcome.status !== 'bound') {
       throw new Error(`The ceremony did not bind: ${JSON.stringify(result)}`);
     }
@@ -305,6 +305,7 @@ describe('createServicesHost — machines', () => {
     const machines = await machinesHarness();
     try {
       const client = machines.connect();
+      const bound: string[] = [];
       // oxlint-disable no-await-in-loop -- one binding at a time, as a person adds them.
       for (const providerId of [
         'bambu-simulator',
@@ -319,9 +320,10 @@ describe('createServicesHost — machines', () => {
             break;
           }
         }
-        await expect(machines.bindSimulator(client, undefined, providerId)).resolves.toEqual(expect.any(String));
+        bound.push(await machines.bindSimulator(client, undefined, providerId));
       }
       // oxlint-enable no-await-in-loop
+      expect(bound).toEqual(['simulated-x1c', 'bambu-a1-mini-simulator', 'grbl-simulator', 'makera-carvera-simulator']);
     } finally {
       await machines.cleanup();
     }

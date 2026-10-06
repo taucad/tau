@@ -59,6 +59,14 @@ const qualification = (): QualifiedBillableInvocation => ({
   },
 });
 
+/** The gen_ai instruments the funded terminal records on every invocation. */
+const genAiMetrics = () => ({
+  genAiTokenUsage: { record: vi.fn() },
+  genAiOperationDuration: { record: vi.fn() },
+  genAiTimeToFirstToken: { record: vi.fn() },
+  genAiCost: { add: vi.fn() },
+});
+
 const intent = (signal = new AbortController().signal): BillableInvocationIntent => ({
   environment: 'development',
   authUserId: 'user',
@@ -93,6 +101,7 @@ const exhaustedCapture = readFileSync(new URL('../llm/provider-account-stream.fi
 /** One admitted operation whose supplier answers a provider-account refusal. */
 const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {
   const metrics = {
+    ...genAiMetrics(),
     billingFundedOperationTerminals: { add: vi.fn() },
     billingProviderAccountRefusals: { add: vi.fn() },
   };
@@ -117,7 +126,7 @@ const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {
     markDispatchAccepted: vi.fn(async () => true),
     getDispatchTimeRemaining: vi.fn(async () => 30_000),
     recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
-    terminalizeOperation: vi.fn(),
+    terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
   };
   const service = new BillableModelInvocationService(
     ledger as unknown as CreditLedgerService,
@@ -556,7 +565,10 @@ describe('BillableModelInvocationService', () => {
           }),
         ),
     );
-    const metrics = { billingFundedOperationTerminals: { add: vi.fn() } };
+    const metrics = {
+      ...genAiMetrics(),
+      billingFundedOperationTerminals: { add: vi.fn() },
+    };
     const row = {
       ...qualified,
       id: 'operation',
@@ -578,7 +590,7 @@ describe('BillableModelInvocationService', () => {
       markDispatchAccepted: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
       recordInvocationEvidence: vi.fn(),
-      terminalizeOperation: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
     const service = new BillableModelInvocationService(
       ledger as unknown as CreditLedgerService,
@@ -668,7 +680,7 @@ describe('BillableModelInvocationService', () => {
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
       recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
       recordCancellation: vi.fn(),
-      terminalizeOperation: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
     const service = new BillableModelInvocationService(
       ledger as unknown as CreditLedgerService,
@@ -743,7 +755,7 @@ describe('BillableModelInvocationService', () => {
         getDispatchTimeRemaining: vi.fn(async () => 30_000),
         recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
         recordCancellation: vi.fn(),
-        terminalizeOperation: vi.fn(),
+        terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
       };
       const service = new BillableModelInvocationService(
         ledger as unknown as CreditLedgerService,
@@ -824,7 +836,10 @@ describe('BillableModelInvocationService', () => {
         jointInputMaximum: { version: 'joint-input-v1', quantity: '10' },
       },
     };
-    const metrics = { billingFundedOperationTerminals: { add: vi.fn() } };
+    const metrics = {
+      ...genAiMetrics(),
+      billingFundedOperationTerminals: { add: vi.fn() },
+    };
     const row = {
       ...qualified,
       id: 'operation',
@@ -850,7 +865,7 @@ describe('BillableModelInvocationService', () => {
       markDispatchAccepted: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
       recordInvocationEvidence: vi.fn(),
-      terminalizeOperation: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
     const service = new BillableModelInvocationService(
       ledger as unknown as CreditLedgerService,
@@ -895,6 +910,7 @@ describe('BillableModelInvocationService', () => {
   it('recovers an expired owner pool and retries the same admission once before dispatch', async () => {
     const qualified = qualification();
     const metrics = {
+      ...genAiMetrics(),
       billingFundedOperationRecoveries: { add: vi.fn() },
       billingFundedOperationTerminals: { add: vi.fn() },
     };
@@ -930,7 +946,7 @@ describe('BillableModelInvocationService', () => {
       markDispatchAccepted: vi.fn(async () => true),
       getDispatchTimeRemaining: vi.fn(async () => 30_000),
       recordInvocationEvidence: vi.fn(),
-      terminalizeOperation: vi.fn(),
+      terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
     };
     const service = new BillableModelInvocationService(
       ledger as unknown as CreditLedgerService,
@@ -975,6 +991,7 @@ describe('BillableModelInvocationService', () => {
   ] as const)('returns the trusted %s pool failsafe only after recovery and one retry', async (activity, code) => {
     const qualified = qualification();
     const metrics = {
+      ...genAiMetrics(),
       billingFundedOperationRecoveries: { add: vi.fn() },
       billingFundedOperationDenials: { add: vi.fn() },
     };
@@ -1061,7 +1078,10 @@ describe('BillableModelInvocationService', () => {
 
   it('should answer a voided attempt key with 409 ATTEMPT_VOIDED and never dispatch it', async () => {
     const qualified = qualification();
-    const metrics = { billingVoidedAdmissions: { add: vi.fn() } };
+    const metrics = {
+      ...genAiMetrics(),
+      billingVoidedAdmissions: { add: vi.fn() },
+    };
     const ledger = {
       getOperationForAttempt: vi.fn(async () => undefined),
       issueCurrentPromotion: vi.fn(),
@@ -1088,6 +1108,7 @@ describe('BillableModelInvocationService', () => {
   it('returns recovery-unavailable while another claimant owns an expired operation', async () => {
     const qualified = qualification();
     const metrics = {
+      ...genAiMetrics(),
       billingFundedOperationRecoveries: { add: vi.fn() },
       billingFundedOperationDenials: { add: vi.fn() },
     };
@@ -1372,5 +1393,86 @@ describe('BillableModelInvocationService', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  describe('gen_ai telemetry at the funded terminal', () => {
+    const labels = { 'gen_ai.request.model': 'model', 'gen_ai.provider.name': 'openai', 'tau.surface': 'gateway' };
+
+    const settle = async (meterItems: Extract<TerminalEvidence, { kind: 'final_usage' }>['meterItems']) => {
+      const qualified = qualification();
+      qualified.adapter.createEvidenceCollector = () => ({
+        accept: vi.fn(),
+        complete: () => ({ kind: 'final_usage', usageOccurredAt: new Date(), meterItems }),
+        failed: () => ({ kind: 'absorbed_unknown' }),
+      });
+      const harness = exhaustionHarness(qualified);
+      harness.ledger.terminalizeOperation.mockResolvedValue({ chargedAtoms: 2500n });
+      const result = await harness.service.invoke(intent());
+      if (result.state !== 'streaming') {
+        throw new Error('Invocation did not stream');
+      }
+      await result.response.text();
+      await result.completion;
+      return harness.metrics;
+    };
+
+    it('records tokens, the charged USD and a successful duration', async () => {
+      const metrics = await settle([
+        { dimension: 'uncached_input', tier: null, quantity: 7n },
+        { dimension: 'output', tier: null, quantity: 5n },
+      ]);
+
+      expect(metrics.genAiTokenUsage.record).toHaveBeenCalledWith(7, {
+        ...labels,
+        'gen_ai.token.type': 'input',
+        'tau.activity': 'agent',
+      });
+      expect(metrics.genAiTokenUsage.record).toHaveBeenCalledWith(5, {
+        ...labels,
+        'gen_ai.token.type': 'output',
+        'tau.activity': 'agent',
+      });
+      expect(metrics.genAiCost.add).toHaveBeenCalledExactlyOnceWith(0.0025, { ...labels, 'tau.activity': 'agent' });
+      expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        ...labels,
+        'error.type': '',
+      });
+    });
+
+    it('records cache reads and writes as their own token types', async () => {
+      const metrics = await settle([
+        { dimension: 'uncached_input', tier: null, quantity: 1n },
+        { dimension: 'cache_read', tier: null, quantity: 900n },
+        { dimension: 'cache_write', tier: '5m', quantity: 40n },
+        { dimension: 'output', tier: null, quantity: 2n },
+      ]);
+
+      expect(metrics.genAiTokenUsage.record).toHaveBeenCalledWith(
+        900,
+        expect.objectContaining({ 'gen_ai.token.type': 'cache_read' }),
+      );
+      expect(metrics.genAiTokenUsage.record).toHaveBeenCalledWith(
+        40,
+        expect.objectContaining({ 'gen_ai.token.type': 'cache_write' }),
+      );
+    });
+
+    it('records a refused admission as one errored duration with no tokens or cost', async () => {
+      const qualified = qualification();
+      const { ledger, metrics, service } = exhaustionHarness(qualified);
+      ledger.admitOperation.mockResolvedValue({ status: 'denied', reason: 'budget_unavailable' } as unknown as Awaited<
+        ReturnType<typeof ledger.admitOperation>
+      >);
+
+      await expect(service.invoke(intent())).rejects.toBeInstanceOf(LlmGatewayError);
+
+      expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        ...labels,
+        'error.type': 'budget_unavailable',
+      });
+      expect(metrics.genAiTokenUsage.record).not.toHaveBeenCalled();
+      expect(metrics.genAiCost.add).not.toHaveBeenCalled();
+      expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+    });
   });
 });

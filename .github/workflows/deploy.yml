@@ -58,17 +58,20 @@ jobs:
     concurrency: deploy-${{ inputs.app }}-${{ inputs.environment }}
 
     steps:
-      # Production deploys start only from deploy-production.yml, whose run a
-      # release manager approves; it dispatches this workflow at the release tag.
-      - name: Require a production deploy started by Deploy release to production
-        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+      # Production deploys run at a release tag: called by release-build.yml in
+      # the release's own run, or dispatched by deploy-production.yml for a
+      # rollback or redeploy. Either way the `production` environment waits for
+      # a release manager. A person dispatching this workflow directly is
+      # refused. (In a called workflow, `github.workflow_ref` names the caller.)
+      - name: Require a production deploy from a release
+        if: inputs.environment == 'production' && contains(github.workflow_ref, '/.github/workflows/deploy.yml@')
         env:
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           if [ "$TRIGGERING_ACTOR" != 'github-actions[bot]' ] || ! [[ "$REF" =~ ^refs/tags/api@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Deploy to production with Deploy release to production (deploy-production.yml); it dispatches this workflow at the release tag."
+            echo "::error::Production deploys come from a release: merge its release pull request, or roll back with Deploy release to production (deploy-production.yml)."
             exit 1
           fi
 

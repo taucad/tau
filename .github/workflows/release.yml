@@ -14,18 +14,20 @@
 #   - A release commit (subject `chore(release): <project> v<version>`, the
 #     squash merge of one of those pull requests) creates the application's tag
 #     and GitHub Release. Creating the release is what starts
-#     `release-build.yml`, which builds and verifies what the release ships.
+#     `release-build.yml`, which builds and verifies what the release ships and,
+#     once a release manager approves it in that run, deploys it to production.
 #   - Then, for every application, the release commit is regenerated on
 #     `release/<project>` and one pull request titled with its subject is
 #     upserted. An application with nothing to release has its pull request
 #     closed and its branch deleted. A branch whose release commit would not
 #     change is left alone, so an unrelated push to `main` starts no CI on it.
 #
-# Merging a release pull request is the release act for that application.
-# Production is a separate, explicit act per application:
-# `deploy-production.yml`, dispatched from GitHub or the Command Center with a
-# `ui@` or `api@` release tag. A desktop release reaches installed apps through
-# its update feed once `release-build.yml` has packaged it.
+# Merging a release pull request is the whole release act for that application:
+# the UI and API reach production when a release manager approves the
+# `production` environment in its `release-build.yml` run, and a desktop
+# release reaches installed apps through its update feed once the `desktop`
+# environment is approved and it is packaged. `deploy-production.yml` rolls an
+# application back or redeploys it.
 #
 # Modelled on taucad/nanoraster's `release-pr.yml`. Every write uses a minted
 # `tau-release-bot` token: the default GITHUB_TOKEN can neither trigger CI on the
@@ -116,8 +118,9 @@ jobs:
               continue
             fi
             # Only a desktop release becomes "latest", and only once
-            # release-build.yml has attached its assets: the desktop updater
-            # reads its feed from the latest release.
+            # release-build.yml has attached its assets, so the repository's
+            # download link always has archives. Installed apps read the fixed
+            # `desktop-feed` prerelease instead.
             gh release create "$tag" --target "$TARGET" --title "$tag" \
               --notes-file "$RUNNER_TEMP/notes.md" --latest=false
             echo "Released $tag"
@@ -226,7 +229,7 @@ jobs:
               "$RUNNER_TEMP/plan.json" > "$RUNNER_TEMP/releases.md"
             {
               echo "Releases \`$app\`. Merging this pull request creates its tag and GitHub"
-              echo "Release, which start \`release-build.yml\`; it deploys nothing to production."
+              echo "Release, which start the **Release build** run that builds and ships it."
               echo
               cat "$RUNNER_TEMP/releases.md"
               echo
@@ -237,8 +240,8 @@ jobs:
               echo "  \`$branch\` or enable auto-merge."
               echo "- Squash merge it with the title unchanged; the release workflow keys on it."
               case "$app" in
-                ui|api) echo "- Production deploys this release with **Deploy release to production** (\`deploy-production.yml\`), from GitHub or the Command Center." ;;
-                desktop) echo "- The macOS build waits for a release manager's approval on the \`desktop\` environment; installed apps update once its assets are attached." ;;
+                ui|api) echo "- That run deploys it to production once a release manager approves the \`production\` environment there. Roll back with **Deploy release to production** (\`deploy-production.yml\`)." ;;
+                desktop) echo "- That run's macOS build waits for a release manager's approval on the \`desktop\` environment; installed apps update once its assets are attached." ;;
               esac
             } > "$RUNNER_TEMP/body.md"
 

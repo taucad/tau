@@ -104,4 +104,4 @@ Here are some specific rules to be aware of, and why they are important:
 
 ### Production releases
 
-Each application (UI, API, desktop) has its own bot-managed release pull request on `release/<app>`; merging one creates that application's `<app>@<version>` tag and GitHub Release. Production is a separate, approved act per application: a maintainer dispatches [`.github/workflows/deploy-production.yml`](.github/workflows/deploy-production.yml) with a `ui@` or `api@` tag, and it deploys only that application at its tag. Do **not** push to the `release/*` branches.
+Each application (UI, API, desktop) has its own bot-managed release pull request on `release/<app>`; merging one creates that application's `<app>@<version>` tag and GitHub Release, whose release build deploys it to production once a release manager approves that run. Rollbacks go through [`.github/workflows/deploy-production.yml`](.github/workflows/deploy-production.yml) with an earlier `ui@` or `api@` tag; each deploys only that application. Do **not** push to the `release/*` branches.

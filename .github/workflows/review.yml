@@ -5,7 +5,7 @@ on:
   # Deploy, redeploy or destroy a PR's API review app by running this workflow
   # by hand with the PR number. Closing a PR still destroys its app if one exists; the
   # close path never creates one. Trail PRs targeting `production` never get a
-  # review app: production rolls out via `deploy-production.yml` against the
+  # review app: production rolls out from each release's `release-build.yml` run against the
   # long-lived `tau-api` Fly app and the `taucad-prod-us` Netlify site.
   workflow_dispatch:
     inputs:

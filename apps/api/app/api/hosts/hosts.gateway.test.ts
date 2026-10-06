@@ -20,7 +20,14 @@ import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
 
 /** A `ws` socket as the gateway uses one: it closes, listens, and holds its frames while paused. */
 const routeSocket = (): WebSocket =>
-  ({ close: vi.fn(), on: vi.fn(), pause: vi.fn(), resume: vi.fn() }) as unknown as WebSocket;
+  ({
+    close: vi.fn(),
+    on: vi.fn(),
+    once: vi.fn(),
+    send: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+  }) as unknown as WebSocket;
 
 /**
  * Drives the gateway through its dev-mode prefix registration so the admitted prefix and the route
@@ -408,6 +415,8 @@ describe('HostsGateway control message failures', () => {
               frames.push(listener);
             }
           }),
+          once: vi.fn(),
+          send: vi.fn(),
           pause: vi.fn(),
           resume: vi.fn(),
         } as unknown as WebSocket;

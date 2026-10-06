@@ -13,6 +13,7 @@ type Harness = {
   gateway: KernelsGateway;
   socket: WebSocket;
   closeSpy: ReturnType<typeof vi.fn>;
+  sendSpy: ReturnType<typeof vi.fn>;
   request: IncomingMessage;
 };
 
@@ -36,9 +37,10 @@ const createGateway = (options: { userId?: string; sessionError?: boolean; pro?:
   const gateway = new KernelsGateway(service, mock<DevWebSocketService>(), auth, entitlements, mock<HttpAdapterHost>());
 
   const closeSpy = vi.fn();
-  const socket = { close: closeSpy, on: vi.fn(), send: vi.fn() } as unknown as WebSocket;
+  const sendSpy = vi.fn();
+  const socket = { close: closeSpy, on: vi.fn(), once: vi.fn(), send: sendSpy } as unknown as WebSocket;
   const request = { headers: {} } as unknown as IncomingMessage;
-  return { gateway, socket, closeSpy, request };
+  return { gateway, socket, closeSpy, sendSpy, request };
 };
 
 describe('KernelsGateway.handleZooProxy', () => {
@@ -51,13 +53,13 @@ describe('KernelsGateway.handleZooProxy', () => {
   });
 
   it('should preserve a Pro project while the supplier limit remains unqualified (S6)', async () => {
-    const { gateway, socket, closeSpy, request } = createGateway({ userId: 'u_pro' });
+    const { gateway, socket, closeSpy, sendSpy, request } = createGateway({ userId: 'u_pro' });
 
     await gateway.handleZooProxy(socket, new URLSearchParams('pool=default'), request);
 
     expect(closeSpy).toHaveBeenCalledTimes(1);
     expect(closeSpy).toHaveBeenCalledWith(1013, 'ZOO_SUPPLIER_LIMIT_UNQUALIFIED');
-    expect(socket.send).not.toHaveBeenCalled();
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 
   it('should deny Free execution before the kernel service sees the request', async () => {

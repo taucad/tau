@@ -39,7 +39,9 @@ export const TauMetrics = {
     name: 'ws.connections.active',
     unit: '{connection}',
     description: 'Active WebSocket connections',
-    attributes: z.object({}),
+    attributes: z.object({
+      'ws.gateway': z.string().optional(),
+    }),
   }),
 
   wsDisconnections: defineCounter({
@@ -47,6 +49,7 @@ export const TauMetrics = {
     unit: '{connection}',
     description: 'Total WebSocket disconnections by reason',
     attributes: z.object({
+      'ws.gateway': z.string().optional(),
       'ws.close.reason': z.string().optional(),
     }),
   }),
@@ -57,8 +60,19 @@ export const TauMetrics = {
     description: 'WebSocket RPC payload sizes for capacity planning',
     buckets: [64, 256, 1024, 4096, 16_384, 65_536, 262_144, 1_048_576, 4_194_304],
     attributes: z.object({
+      'ws.gateway': z.string().optional(),
       'ws.direction': z.string().optional(),
       'rpc.method': z.string().optional(),
+    }),
+  }),
+
+  wsUpgradeRejections: defineCounter({
+    name: 'ws.upgrade.rejections',
+    unit: '{connection}',
+    description: 'WebSocket upgrades refused before or at admission, by gateway and reason',
+    attributes: z.object({
+      'ws.gateway': z.string(),
+      reason: z.string(),
     }),
   }),
 

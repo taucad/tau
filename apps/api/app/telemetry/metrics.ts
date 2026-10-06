@@ -44,6 +44,11 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.wsMessageSize.buckets] },
   });
 
+  public readonly wsUpgradeRejections = this.apiMeter.createCounter(TauMetrics.wsUpgradeRejections.name, {
+    description: TauMetrics.wsUpgradeRejections.description,
+    unit: TauMetrics.wsUpgradeRejections.unit,
+  });
+
   public readonly rpcDeliveryEvents = this.apiMeter.createCounter(TauMetrics.rpcDeliveryEvents.name, {
     description: TauMetrics.rpcDeliveryEvents.description,
     unit: TauMetrics.rpcDeliveryEvents.unit,

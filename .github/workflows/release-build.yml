@@ -321,6 +321,13 @@ jobs:
           rustup toolchain install 1.88 --profile minimal
           rustup run 1.88 rustc --version
 
+      # prepare-build123d-python resolves its wheels with uv, as on the
+      # portable hosts.
+      - name: Install uv
+        run: |
+          command -v uv || pipx install uv
+          uv --version
+
       # A throwaway keychain holds the Developer ID identity and the notary
       # profile for this job only; it is deleted in the last step.
       - name: Import the Developer ID identity and notary credentials

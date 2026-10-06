@@ -6,6 +6,11 @@ description: 'Darwin ARM64, after setup-nx with Node 24.10.0: provision the pinn
 # compiling OCCT twice (native and WASM) unless the retained preparation for this exact
 # toolchain generation was restored first; only the products are then compiled.
 
+inputs:
+  rebuild:
+    description: '`true` builds the products even when Nx Cloud holds them, so the OCCT and toolchain preparation exists to be retained'
+    default: 'false'
+
 outputs:
   generation:
     description: 'The delivery generation (selected toolchains and OCCT recipe) this host resolved'
@@ -111,6 +116,9 @@ runs:
           ~/.cargo/registry/src
           ~/.cargo/git/db
 
+    # A remote cache hit restores the products without building, which leaves no preparation
+    # to retain; `rebuild` refills a preparation entry that was evicted while the products
+    # stayed in Nx Cloud.
     - name: Prepare complete current-source transport
       shell: bash
-      run: pnpm nx run-many -t prepare-geospec-ci-artifacts --parallel=1
+      run: pnpm nx run-many -t prepare-geospec-ci-artifacts --parallel=1 ${{ inputs.rebuild == 'true' && '--skip-nx-cache' || '' }}

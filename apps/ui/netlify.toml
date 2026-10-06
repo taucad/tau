@@ -38,10 +38,10 @@ publish = "build/client"
 NX_NO_CLOUD = "true"
 
 # The React Router plugin writes the SSR function to `.netlify/v1/functions`
-# under this base. `netlify deploy` from `apps/ui` (deploy-ui.yml) looks for
-# framework functions under base + workspace package, `apps/ui/apps/ui`, so it
-# would find none. Naming the directory makes Netlify bundle the function from
-# its real path, where its import of `build/server/server.js` resolves.
+# under this base. Naming that directory makes Netlify bundle the function from
+# its real path, where its import of `build/server/server.js` resolves, as a
+# user function that outranks the copy `deploy-ui.yml` exposes as a framework
+# function through its `.netlify` link (which ships without the server build).
 [functions]
 directory = ".netlify/v1/functions"
 

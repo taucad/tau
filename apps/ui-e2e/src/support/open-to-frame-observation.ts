@@ -65,7 +65,7 @@ export const observedReplicadNativeVariant = (
       : undefined;
 };
 
-/** Complete browser-network WASM response for the variant that initialized in this sample. */
+/** Completed browser request joined to pinned immutable server bytes for the initialized variant. */
 export const observedReplicadLoadedWasm = (
   responses: ReadonlyArray<Readonly<{ url: string; status: number; byteLength: number; sha256: string }>>,
   input: Readonly<{

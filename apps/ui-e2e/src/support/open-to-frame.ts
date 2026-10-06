@@ -1165,7 +1165,16 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
           if (!response) {
             throw new Error('The completed native request has no response.');
           }
-          const bytes = await response.body();
+          if (new URL(request.url()).origin !== new URL(origin).origin || !page) {
+            throw new Error('The completed native request is outside the immutable server.');
+          }
+          // Chromium does not expose Worker response bodies. Join the actual completed request
+          // to the same URL's separately fetched immutable server bytes after PNG verification.
+          const immutableResponse = await page.request.get(request.url());
+          if (!immutableResponse.ok()) {
+            throw new Error('The requested immutable native asset is unavailable.');
+          }
+          const bytes = await immutableResponse.body();
           return {
             url: request.url(),
             status: response.status(),
@@ -1328,6 +1337,8 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
             assets: referenceAssets,
             nativeVariant,
             loadedNativeWasm,
+            nativeResourceEvidence:
+              'completed browser request URL/status and initialization joined to separately fetched immutable server bytes; original Worker response body unavailable',
             browserVersion,
             process: browserExit,
             browserProfile: 'default Chromium launch with existing unsafe-WebGPU flag',

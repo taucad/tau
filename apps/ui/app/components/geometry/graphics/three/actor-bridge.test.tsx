@@ -123,6 +123,37 @@ describe('ActorBridge', () => {
     expect(mockGraphicsSend).toHaveBeenLastCalledWith({ type: 'cameraViewChanged', verticalSpan: 10 });
   });
 
+  it('should retarget viewport revisions without republishing an unchanged grid span', () => {
+    const state = { camera: mockRig.perspectiveCamera as Camera, controls: null, raycaster: { near: 0, far: 0 } };
+    const invalidate = vi.fn();
+    const retarget = vi.fn();
+    mockConsumersRef.current.add(retarget);
+    mockUseThree.mockReturnValue({
+      ...state,
+      get: () => state,
+      invalidate,
+      set: vi.fn(),
+      size: { width: 800, height: 600 },
+    });
+    render(<ActorBridge />);
+    mockGraphicsSend.mockClear();
+    retarget.mockClear();
+    const snapshot = createDriverSnapshot({ kind: 'perspective', verticalFieldOfView: 60 }, 1);
+
+    mockConnectorRef.current?.(mockRig.perspectiveCamera, {
+      ...snapshot,
+      view: { ...snapshot.view, viewport: { ...snapshot.view.viewport, width: 700 } },
+    });
+    expect(retarget).toHaveBeenCalledOnce();
+    expect(mockGraphicsSend).not.toHaveBeenCalled();
+    mockConnectorRef.current?.(mockRig.perspectiveCamera, {
+      ...snapshot,
+      revision: 2,
+      view: { ...snapshot.view, verticalSpan: 5 },
+    });
+    expect(mockGraphicsSend).toHaveBeenCalledExactlyOnceWith({ type: 'cameraViewChanged', verticalSpan: 5 });
+  });
+
   it('retargets a same-camera FOV revision before invalidating', () => {
     const calls: string[] = [];
     const state = {

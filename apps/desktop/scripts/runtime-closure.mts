@@ -12,7 +12,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { cp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { basename, dirname, parse, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -263,7 +263,7 @@ const runtimeDependencies = async (
       continue;
     }
     /* oxlint-disable no-await-in-loop -- Each optional package is resolved from its declaring package. */
-    const source = await resolveFromTree(directory, name, '/');
+    const source = await resolveFromTree(directory, name, parse(directory).root);
     if (!source) {
       continue;
     }
@@ -348,7 +348,7 @@ export const copyRuntimeClosure = async (options: {
     for (const dependency of await runtimeDependencies(from, optionalDependencies)) {
       /* oxlint-disable no-await-in-loop -- Siblings would race on the same nested
        * directories; staging one dependency at a time keeps the layout decidable. */
-      const dependencySource = await resolveFromTree(from, dependency, '/');
+      const dependencySource = await resolveFromTree(from, dependency, parse(from).root);
       if (!dependencySource) {
         throw new Error(`${packageName} depends on ${dependency}, which does not resolve from ${from}`);
       }

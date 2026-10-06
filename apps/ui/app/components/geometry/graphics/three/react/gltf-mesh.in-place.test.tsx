@@ -66,6 +66,7 @@ import {
   getGltfFatLinePositions,
   getGltfOccurrenceEdgeBatch,
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import * as gltfEdges from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import * as threeBackend from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import * as assemblyDemand from '#components/geometry/graphics/three/utils/assembly-demand-index.js';
 import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
@@ -109,6 +110,7 @@ const mocks = vi.hoisted(() => {
     observePreparation: undefined as ReturnType<typeof vi.fn<(scene: Object3D) => void>> | undefined,
     frameCallback: undefined as (() => void) | undefined,
     invalidate: vi.fn(),
+    size: { height: 768, width: 1024 },
     rootScene: { name: 'viewport-lighting-scene' },
     modelUnit: {
       focusedComponentId: undefined as string | undefined,
@@ -139,7 +141,7 @@ vi.mock('@react-three/fiber', () => ({
       gl: mocks.gl,
       invalidate: mocks.invalidate,
       scene: mocks.rootScene,
-      size: { height: 768, width: 1024 },
+      size: mocks.size,
     };
     return selector ? selector(state) : state;
   },
@@ -547,6 +549,7 @@ describe('GltfMesh in-place updates', () => {
     mocks.camera.updateMatrixWorld();
   });
   afterEach(() => {
+    mocks.size = { height: 768, width: 1024 };
     cleanup();
     vi.restoreAllMocks();
     mocks.graphicsActor.send.mockClear();
@@ -561,6 +564,29 @@ describe('GltfMesh in-place updates', () => {
     delete mocks.observePreparation;
     vi.unstubAllGlobals();
     mocks.modelUnit = { ...mocks.modelUnit, selectedComponentIds: [] };
+  });
+
+  it('should update edge resolution before the resized frame without parsing or scheduling a later frame', async () => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const updateResolution = vi.spyOn(gltfEdges, 'updateLineMaterialResolution');
+    const source = buildGlb();
+    const view = render(
+      <GltfMesh gltfFile={source} geometryHash='resize' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame');
+    updateResolution.mockClear();
+    mocks.invalidate.mockClear();
+    mocks.size = { width: 640, height: 480 };
+    view.rerender(<GltfMesh gltfFile={source} geometryHash='resize' presentationRevision={1} enableMatcap={false} />);
+    expect(updateResolution).toHaveBeenCalledOnce();
+    expect(updateResolution.mock.calls[0]?.[1].toArray()).toEqual([640, 480]);
+    expect(requestFrame).not.toHaveBeenCalled();
+    expect(parseAsync).toHaveBeenCalledOnce();
+    expect(mocks.invalidate).not.toHaveBeenCalled();
   });
 
   it('should count live assembly buffers for the mounted owner and deny retired and unmounted scenes', async () => {

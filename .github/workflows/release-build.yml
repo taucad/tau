@@ -202,9 +202,14 @@ jobs:
       - name: Check the kit against its receipt
         run: |
           set -euo pipefail
-          receipt=packages/geospec-engine-native/licenses/SOURCE-RELINK.json
+          # The build writes the receipt and notices into the package it ships, so
+          # take them from there: committed copies describe an earlier build.
+          tarballs=out/artifacts/geospec-native-engine/ci/assembly/tarballs
+          tar -xzf "$tarballs/root.tgz" -C "$RUNNER_TEMP" package/licenses
+          licenses="$RUNNER_TEMP/package/licenses"
+          receipt="$licenses/SOURCE-RELINK.json"
           name=$(jq -r .artifact.fileName "$receipt")
-          kit="out/artifacts/geospec-native-engine/ci/assembly/tarballs/$name"
+          kit="$tarballs/$name"
           expected=$(jq -r .artifact.sha256 "$receipt")
           actual=$(sha256sum "$kit" | cut -d' ' -f1)
           if [ "$actual" != "$expected" ]; then
@@ -212,7 +217,6 @@ jobs:
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/source-kit"
-          licenses=packages/geospec-engine-native/licenses
           cp "$kit" "$RUNNER_TEMP/source-kit/"
           cp "$licenses/OCCT-LGPL-2.1.txt" "$licenses/OCCT-LGPL-exception.txt" "$RUNNER_TEMP/source-kit/"
           cp "$licenses/NOTICE.txt" "$RUNNER_TEMP/source-kit/GeoSpec-NOTICE.txt"
@@ -265,7 +269,7 @@ jobs:
       - name: Setup producer Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: '3.12.14'
+          python-version: '3.13.14'
 
       - name: Setup selected CPython 3.13 tooling
         id: python313
@@ -419,6 +423,11 @@ jobs:
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}
     steps:
+      # Windows checkouts default to CRLF, which changes the GeoSpec product key
+      # main CI computed and breaks its lockfile parse; keep the committed bytes.
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+
       - name: Checkout the release
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

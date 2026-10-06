@@ -194,6 +194,27 @@ function toothProfile(teeth: number, module: number, internalSpace: boolean) {
   return drawFaceOutline(makeFace(outline));
 }
 
+// Standard 45-degree face-edge chamfer on the tooth tips: a revolved cutter at each face,
+// so every tip edge breaks by the same amount and the involute working flank is untouched
+// below the chamfer. `inward` cuts an internal gear's bore, where its teeth point inward.
+function tipChamfer(
+  tipRadius: number,
+  size: number,
+  faces: [number, number],
+  inward = false,
+) {
+  const s = inward ? -1 : 1;
+  return faces.map((z, index) => {
+    const d = index === 0 ? -1 : 1;
+    return draw([tipRadius - s * (size + 1), z + d])
+      .lineTo([tipRadius + s * 2, z - d * (size + 2)])
+      .lineTo([tipRadius + s * 2, z + d])
+      .close()
+      .sketchOnPlane('XZ')
+      .revolve([0, 0, 1]);
+  });
+}
+
 export default function main(p = defaultParams): ShapeConfig[] {
   const f = p.faceWidth;
   const a = 24 * p.module;
@@ -202,9 +223,11 @@ export default function main(p = defaultParams): ShapeConfig[] {
   const carrierAngle = p.inputAngle / 4;
   const planetAngle = 7.5 - p.inputAngle / 2;
 
+  const toothChamfer = 0.25 * p.module;
   const gearBlank = toothProfile(24, p.module, false)
     .sketchOnPlane('XY')
-    .extrude(f);
+    .extrude(f)
+    .cutAll(tipChamfer(13 * p.module, toothChamfer, [0, f]));
   const planet = gearBlank.clone().cut(makeCylinder(7.015, f + 2, [0, 0, -1]));
   const shaft = makeCylinder(8, f + 30, [0, 0, -28]).chamfer(0.5);
   const lowerHub = makeCylinder(12, 2, [0, 0, -2]).chamfer(0.25);
@@ -232,7 +255,16 @@ export default function main(p = defaultParams): ShapeConfig[] {
   }).flat();
   const ring = makeCylinder(ringRadius, f + 2, [0, 0, -1])
     .chamfer(0.6)
-    .cutAll([ringVoid, ...mountingHoles]);
+    .cutAll([
+      ringVoid,
+      ...mountingHoles,
+      ...tipChamfer(
+        ringPitchRadius - p.module,
+        toothChamfer,
+        [-1, f + 1],
+        true,
+      ),
+    ]);
 
   let spider = drawCircle(18);
   for (let index = 0; index < 3; index++) {

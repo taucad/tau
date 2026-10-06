@@ -38,6 +38,14 @@ export function createTauR3fGlProp(
         void 0;
       });
     }
+    // R3F reapplies DPR on every resize. WebGLRenderer.setPixelRatio also calls
+    // setSize, clearing/reallocating the old buffer before R3F sizes the new one.
+    const setPixelRatio = renderer.setPixelRatio.bind(renderer);
+    renderer.setPixelRatio = (value: number): void => {
+      if (renderer.getPixelRatio() !== value) {
+        setPixelRatio(value);
+      }
+    };
     const reversedDepth = 'reversedDepthBuffer' in renderer && renderer.reversedDepthBuffer;
     for (const camera of cameras) {
       // The rig survives backend remounts. Three r184 only ever enables reversed

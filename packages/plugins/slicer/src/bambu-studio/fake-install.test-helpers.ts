@@ -222,7 +222,9 @@ const record = JSON.stringify({
   stls: args.filter((arg) => arg.endsWith('.stl')).map((file) => fs.readFileSync(file).toString('base64')),
   datadir: fs.readdirSync(option('--datadir')),
 });
-fs.writeFileSync(control.record, record);
+// Write then rename: a test that waits for the record to exist can kill this process mid-write.
+fs.writeFileSync(control.record + '.tmp', record);
+fs.renameSync(control.record + '.tmp', control.record);
 fs.appendFileSync(control.runs, record + '\\n');
 const out = option('--outputdir');
 const finish = () => {

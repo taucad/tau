@@ -575,6 +575,8 @@ describe('GltfMesh in-place updates', () => {
     );
     await waitFor(() => {
       expect(committedRevisions()).toEqual([1]);
+      // The initial commit, edge tint and visual state each invalidate before a resize is isolated.
+      expect(mocks.invalidate).toHaveBeenCalledTimes(3);
     });
 
     const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame');

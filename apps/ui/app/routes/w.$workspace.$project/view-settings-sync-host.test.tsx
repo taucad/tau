@@ -18,7 +18,11 @@ import { perspectiveVerticalSpan } from '@taucad/camera';
 import { Box3, Vector3 } from 'three';
 import { readRecordIssues } from '#workbench-records/record-issues.js';
 
-vi.mock('@react-three/fiber', () => ({ useThree: () => ({ size: { width: 800, height: 600 } }) }));
+vi.mock('@react-three/fiber', () => {
+  const size = { width: 800, height: 600 };
+  const state = { size, get: () => ({ size }) };
+  return { useThree: (selector?: (input: typeof state) => unknown) => (selector ? selector(state) : state) };
+});
 
 type GraphicsRef = Actor<typeof graphicsMachine>;
 const sync = vi.hoisted(() => vi.fn());

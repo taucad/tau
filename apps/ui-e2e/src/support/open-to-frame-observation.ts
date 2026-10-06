@@ -67,7 +67,9 @@ export const observedReplicadNativeVariant = (
 
 /** Completed browser request joined to pinned immutable server bytes for the initialized variant. */
 export const observedReplicadLoadedWasm = (
-  responses: ReadonlyArray<Readonly<{ url: string; status: number; byteLength: number; sha256: string }>>,
+  responses: ReadonlyArray<
+    Readonly<{ url: string; method: string; status: number; byteLength: number; sha256: string }>
+  >,
   input: Readonly<{
     origin: string;
     variant: 'auto-single' | 'auto-multi' | 'custom-single' | undefined;
@@ -75,10 +77,28 @@ export const observedReplicadLoadedWasm = (
   }>,
 ): Readonly<{ url: string; variant: 'single' | 'multi'; byteLength: number; sha256: string }> | undefined => {
   const { origin, variant, expectedSha256 } = input;
-  if (variant === undefined || expectedSha256 === undefined || responses.length !== 1) {
+  if (
+    variant === undefined ||
+    expectedSha256 === undefined ||
+    responses.length === 0 ||
+    responses.length > 2 ||
+    !responses.some((response) => response.method === 'GET') ||
+    responses.some((response) => response.method !== 'GET' && response.method !== 'HEAD')
+  ) {
     return undefined;
   }
   const response = responses[0]!;
+  if (
+    responses.some(
+      (candidate) =>
+        candidate.url !== response.url ||
+        candidate.status !== response.status ||
+        candidate.byteLength !== response.byteLength ||
+        candidate.sha256 !== response.sha256,
+    )
+  ) {
+    return undefined;
+  }
   let url: URL;
   try {
     url = new URL(response.url);

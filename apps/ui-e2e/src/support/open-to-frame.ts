@@ -766,6 +766,26 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   const consoleErrors: string[] = [];
   const nativeLogs: string[] = [];
   const nativeRequests: Request[] = [];
+  const nativeResourceEvents = { requested: 0, responded: 0, finished: 0, failed: 0 };
+  const nativeResourceRows: Array<{
+    request: Request;
+    url: string;
+    method: string;
+    status?: number;
+    error?: string;
+  }> = [];
+  const recordNativeRequest = (request: Request): (typeof nativeResourceRows)[number] | undefined => {
+    const url = request.url();
+    if (!url.includes('replicad_') || !url.includes('.wasm')) {
+      return undefined;
+    }
+    let row = nativeResourceRows.find((entry) => entry.request === request);
+    if (!row && nativeResourceRows.length < 2) {
+      row = { request, url, method: request.method() };
+      nativeResourceRows.push(row);
+    }
+    return row;
+  };
   try {
     at('launchIntent');
     if (host === 'desktop') {
@@ -800,10 +820,38 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
         deviceScaleFactor: 1,
       });
       if (referenceFixture) {
+        context.on('request', (request) => {
+          if (request.url().includes('replicad_') && request.url().includes('.wasm')) {
+            nativeResourceEvents.requested += 1;
+            recordNativeRequest(request);
+          }
+        });
+        context.on('response', (response) => {
+          if (response.url().includes('replicad_') && response.url().includes('.wasm')) {
+            nativeResourceEvents.responded += 1;
+            const row = recordNativeRequest(response.request());
+            if (row) {
+              row.status = response.status();
+            }
+          }
+        });
         context.on('requestfinished', (request) => {
           // This browser-network event excludes the driver's later APIRequestContext availability check.
-          if (request.url().includes('replicad_') && request.url().includes('.wasm') && nativeRequests.length < 2) {
-            nativeRequests.push(request);
+          if (request.url().includes('replicad_') && request.url().includes('.wasm')) {
+            nativeResourceEvents.finished += 1;
+            recordNativeRequest(request);
+            if (nativeRequests.length < 2) {
+              nativeRequests.push(request);
+            }
+          }
+        });
+        context.on('requestfailed', (request) => {
+          if (request.url().includes('replicad_') && request.url().includes('.wasm')) {
+            nativeResourceEvents.failed += 1;
+            const row = recordNativeRequest(request);
+            if (row) {
+              row.error = request.failure()?.errorText.slice(0, 160) ?? 'request failed without browser detail';
+            }
           }
         });
       }
@@ -962,15 +1010,18 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
         const pixels = await canvas.asElement()?.screenshot({ path: screenshot, animations: 'disabled' });
         if (pixels && pixels.length > 0) {
           at('pixelCaptureUpperBound');
-          await page.evaluate(() =>
-            (
+          const hiddenFrame = await page.evaluate(() => {
+            const bridge = (
               globalThis as {
                 __TAU_SECTION_VIEW_TEST__?: {
                   setPresentation(presentation: { surfaces: boolean; lines: boolean }): void;
+                  getRendererIdentity(): { frame: number };
                 };
               }
-            ).__TAU_SECTION_VIEW_TEST__?.setPresentation({ surfaces: false, lines: false }),
-          );
+            ).__TAU_SECTION_VIEW_TEST__;
+            bridge?.setPresentation({ surfaces: false, lines: false });
+            return bridge?.getRendererIdentity().frame ?? 0;
+          });
           await page.waitForFunction(
             ({ previousFrame, componentIds }) => {
               const bridge = (
@@ -987,7 +1038,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
                 componentIds.every((id: string) => bridge.getRenderedModelComponentState(id).visibleMeshCount === 0)
               );
             },
-            { previousFrame: bridgeState.rendererFrame, componentIds: bridgeState.componentIds },
+            { previousFrame: hiddenFrame, componentIds: bridgeState.componentIds },
             { timeout: 10_000 },
           );
           const blankCanvas = await page.evaluateHandle(() =>
@@ -1158,51 +1209,67 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     : undefined;
   // Native response bytes are inspected only after the checked-PNG timing mark. The request
   // completed in this fresh browser context, alongside the consistent post-init marker.
-  const loadedNativeWasm = nativeVariant
-    ? await Promise.all(
-        nativeRequests.map(async (request) => {
-          const response = await request.response();
-          if (!response) {
-            throw new Error('The completed native request has no response.');
-          }
-          if (new URL(request.url()).origin !== new URL(origin).origin || !page) {
-            throw new Error('The completed native request is outside the immutable server.');
-          }
-          // Chromium does not expose Worker response bodies. Join the actual completed request
-          // to the same URL's separately fetched immutable server bytes after PNG verification.
-          const immutableResponse = await page.request.get(request.url());
-          if (!immutableResponse.ok()) {
-            throw new Error('The requested immutable native asset is unavailable.');
-          }
-          const bytes = await immutableResponse.body();
-          return {
-            url: request.url(),
-            status: response.status(),
-            byteLength: bytes.byteLength,
-            sha256: createHash('sha256').update(bytes).digest('hex'),
-          };
-        }),
-      )
-        .then(async (responses) =>
-          observedReplicadLoadedWasm(responses, {
-            origin: new URL(origin).origin,
-            variant: nativeVariant,
-            expectedSha256:
-              nativeVariant === 'custom-single'
-                ? referenceAssetPins.find((asset) => asset.name === 'replicad_single.wasm')?.sha256
-                : await hashFile(
-                    fileURLToPath(
-                      import.meta.resolve(
-                        nativeVariant === 'auto-multi'
-                          ? 'replicad-opencascadejs/multi/wasm'
-                          : 'replicad-opencascadejs/wasm',
+  const nativeResourceInspections = await Promise.all(
+    nativeRequests.map(async (request) => {
+      try {
+        const response = await request.response();
+        if (!response) {
+          throw new Error('The completed native request has no response.');
+        }
+        if (new URL(request.url()).origin !== new URL(origin).origin || !page) {
+          throw new Error('The completed native request is outside the immutable server.');
+        }
+        // Chromium does not expose Worker response bodies. Join the actual completed request
+        // to the same URL's separately fetched immutable server bytes after PNG verification.
+        const immutableResponse = await page.request.get(request.url());
+        if (!immutableResponse.ok()) {
+          throw new Error('The requested immutable native asset is unavailable.');
+        }
+        const bytes = await immutableResponse.body();
+        return {
+          url: request.url(),
+          method: request.method(),
+          status: response.status(),
+          byteLength: bytes.byteLength,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+        };
+      } catch (error) {
+        return { url: request.url(), method: request.method(), error: String(error).slice(0, 160) };
+      }
+    }),
+  );
+  const completeNativeResourceInspections = nativeResourceInspections.filter(
+    (row): row is { url: string; method: string; status: number; byteLength: number; sha256: string } =>
+      'sha256' in row,
+  );
+  const loadedNativeWasm =
+    nativeVariant &&
+    nativeResourceEvents.requested === nativeResourceEvents.finished &&
+    nativeResourceEvents.responded === nativeResourceEvents.finished &&
+    nativeResourceEvents.failed === 0 &&
+    nativeResourceEvents.finished === nativeResourceInspections.length &&
+    completeNativeResourceInspections.length === nativeResourceInspections.length
+      ? await Promise.resolve(completeNativeResourceInspections)
+          .then(async (responses) =>
+            observedReplicadLoadedWasm(responses, {
+              origin: new URL(origin).origin,
+              variant: nativeVariant,
+              expectedSha256:
+                nativeVariant === 'custom-single'
+                  ? referenceAssetPins.find((asset) => asset.name === 'replicad_single.wasm')?.sha256
+                  : await hashFile(
+                      fileURLToPath(
+                        import.meta.resolve(
+                          nativeVariant === 'auto-multi'
+                            ? 'replicad-opencascadejs/multi/wasm'
+                            : 'replicad-opencascadejs/wasm',
+                        ),
                       ),
                     ),
-                  ),
-          }),
-        )
-        .catch(() => undefined)
-    : undefined;
+            }),
+          )
+          .catch(() => undefined)
+      : undefined;
   const reason =
     warmup?.error ??
     (warmup !== undefined && warmup.appIsPackaged !== true
@@ -1337,6 +1404,11 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
             assets: referenceAssets,
             nativeVariant,
             loadedNativeWasm,
+            nativeResourceObservation: {
+              ...nativeResourceEvents,
+              rows: nativeResourceRows.map(({ url, method, status, error }) => ({ url, method, status, error })),
+              inspected: nativeResourceInspections,
+            },
             nativeResourceEvidence:
               'completed browser request URL/status and initialization joined to separately fetched immutable server bytes; original Worker response body unavailable',
             browserVersion,

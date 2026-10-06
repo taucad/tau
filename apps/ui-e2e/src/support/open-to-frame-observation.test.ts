@@ -62,6 +62,7 @@ it('should require the selected Replicad native build to finish initialization i
 it('joins a completed native request to the initialized variant and the immutable binary pin', () => {
   const custom = {
     url: 'http://127.0.0.1:61901/assets/engines/replicad/density-single-v1/replicad_single.wasm',
+    method: 'GET',
     status: 200,
     byteLength: 23_000_363,
     sha256: 'custom-pin',
@@ -82,7 +83,19 @@ it('joins a completed native request to the initialized variant and the immutabl
     observedReplicadLoadedWasm([auto], { ...selected, variant: 'auto-multi', expectedSha256: 'auto-pin' })?.variant,
   ).toBe('multi');
   expect(observedReplicadLoadedWasm([], selected)).toBeUndefined();
-  expect(observedReplicadLoadedWasm([custom, custom], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, { ...custom }], selected)).toEqual({
+    url: custom.url,
+    variant: 'single',
+    byteLength: custom.byteLength,
+    sha256: custom.sha256,
+  });
+  expect(observedReplicadLoadedWasm([{ ...custom, method: 'HEAD' }, custom], selected)?.sha256).toBe(custom.sha256);
+  expect(observedReplicadLoadedWasm([{ ...custom, method: 'HEAD' }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([{ ...custom, method: 'POST' }, custom], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, { ...custom, sha256: 'other' }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, { ...custom, byteLength: 1 }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, { ...custom, url: auto.url }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, custom, custom], selected)).toBeUndefined();
   expect(observedReplicadLoadedWasm([custom], { ...selected, variant: undefined })).toBeUndefined();
   expect(observedReplicadLoadedWasm([custom], { ...selected, expectedSha256: undefined })).toBeUndefined();
   expect(observedReplicadLoadedWasm([{ ...custom, status: 404 }], selected)).toBeUndefined();

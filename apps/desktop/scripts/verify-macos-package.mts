@@ -199,7 +199,7 @@ const printQuickLookDiagnostics = (): void => {
       timeout: 60_000,
     },
   );
-  if (log.error || log.status !== 0) {
+  if (log.error !== undefined || log.status !== 0) {
     console.error(
       `Could not collect the Quick Look unified log (status ${String(log.status)}): ${String(log.error ?? log.stderr)}`,
     );

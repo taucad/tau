@@ -16,7 +16,7 @@
  *   `type:tool`. The gate umbrellas (`scripts:validate`, `scripts:release-gate`)
  *   are tools, not package surface: nothing about them changes when a package
  *   is added.
- * - Deployment workflows (`deploy.yml`, `review.yml`, …) are topology, not
+ * - Deployment workflows (`deploy.yml`, `deploy-ui.yml`, …) are topology, not
  *   package surface, and are out of scope — see {@link workflowPaths}.
  *
  * Every target a workflow names must exist on at least one project, because a

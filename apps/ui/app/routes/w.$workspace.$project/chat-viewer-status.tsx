@@ -6,7 +6,14 @@ import { cn } from '@taucad/ui/utils/cn';
 import { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.js';
 import { selectCadFailureIssues, selectCadLoadingPhase } from '#machines/cad.machine.js';
 
-export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
+export function ChatViewerStatus({
+  className,
+  shouldShowLoading = true,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement> & {
+  /** False where the viewer bar shows the build status instead. */
+  readonly shouldShowLoading?: boolean;
+}): React.ReactNode {
   const { projectRef } = useProject();
   const cadRef = useCad();
   const loadingState = useCadSelector(selectCadLoadingPhase, undefined);
@@ -20,6 +27,10 @@ export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<H
   }
 
   if (loadingState) {
+    if (!shouldShowLoading) {
+      return null;
+    }
+
     return (
       <div
         {...props}

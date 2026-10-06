@@ -444,8 +444,26 @@ vi.mock('#components/files/file-selector.js', () => ({
   ),
 }));
 
+// The issues list opens for a view notice; this stand-in shows the notice as the real list does.
 vi.mock('#routes/w.$workspace.$project/chat-stack-trace.js', () => ({
-  ChatStackTrace: () => <div data-testid='chat-stack-trace' />,
+  ViewerIssues: ({
+    notice,
+    children,
+  }: {
+    readonly notice?: { message: string; actionLabel: string; onAct: () => void };
+    readonly children: (parts: { segment: React.ReactNode; list: React.ReactNode }) => React.ReactNode;
+  }): React.ReactNode =>
+    children({
+      segment: <span data-testid='chat-stack-trace' />,
+      list: notice ? (
+        <div role='alert'>
+          {notice.message}
+          <button type='button' onClick={notice.onAct}>
+            {notice.actionLabel}
+          </button>
+        </div>
+      ) : null,
+    }),
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer-status.js', () => ({
@@ -453,9 +471,22 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-status.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
-  ChatViewerControls: ({ captureRendering }: { captureRendering: () => Promise<Rendering> }) => {
+  ChatViewerControls: ({
+    captureRendering,
+    leading,
+    aboveControls,
+  }: {
+    captureRendering: () => Promise<Rendering>;
+    leading?: React.ReactNode;
+    aboveControls?: React.ReactNode;
+  }) => {
     mockCaptureRendering = captureRendering;
-    return <div role='group' aria-label='Viewer controls' />;
+    return (
+      <div role='group' aria-label='Viewer controls'>
+        {aboveControls}
+        {leading}
+      </div>
+    );
   },
 }));
 
@@ -1214,15 +1245,16 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(strip.lastElementChild).toBe(bar);
   });
 
-  it('should keep the issues card and the AR button on the line above the bar, so the bar never covers them', () => {
+  it('should keep the AR button on the line above the bar and the issues inside the bar', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    const line = screen.getByTestId('chat-stack-trace').parentElement!;
-    expect(line).toContainElement(screen.getByRole('button', { name: 'View in AR' }));
+    const line = screen.getByRole('button', { name: 'View in AR' }).parentElement!;
+    const bar = screen.getByRole('group', { name: 'Viewer controls' });
     expect(line).toHaveClass('[&>*]:pointer-events-auto');
-    expect(line.nextElementSibling).toBe(screen.getByRole('group', { name: 'Viewer controls' }));
+    expect(line.nextElementSibling).toBe(bar);
+    expect(bar).toContainElement(screen.getByTestId('chat-stack-trace'));
   });
 
   it('should make the viewer root the frame the shortcuts target and the container the bar sizes to', () => {

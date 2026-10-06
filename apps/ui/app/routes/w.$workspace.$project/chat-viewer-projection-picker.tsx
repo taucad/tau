@@ -24,7 +24,7 @@ import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 
 type ViewOffer = Extract<Evaluation, { success: true }>['views'][number];
 
-/** The bottom viewer bar's hairline (`chat-viewer-controls.tsx`). */
+/** The viewer bar's hairline (`chat-viewer-controls.tsx`). */
 const Hairline = (): React.JSX.Element => (
   <Separator orientation='vertical' className='mx-0 first:hidden data-[orientation=vertical]:h-4' />
 );
@@ -33,9 +33,9 @@ const Hairline = (): React.JSX.Element => (
 const menuTriggerClassName = 'w-auto max-w-40 min-w-0 gap-1 px-2 text-xs data-[state=open]:bg-accent';
 
 /**
- * The viewer's view bar, top left: a sibling of the bottom viewer bar holding the view menu (two or more views, or a
- * pinned view the model no longer offers) and the instance menu (when the view offers instances). With neither it
- * renders nothing. Its menus stay inside the viewer. A view's options are Kernel settings in Viewer settings.
+ * The view menus at the start of the viewer bar: the view menu (two or more views, or a pinned view the model no
+ * longer offers) and the instance menu (when the view offers instances). With neither it renders nothing. Its menus
+ * open upward and stay inside the viewer. A view's options are Kernel settings in Viewer settings.
  */
 export function ViewerProjectionPicker({
   viewId,
@@ -105,7 +105,7 @@ export function ViewerProjectionPicker({
       role='group'
       aria-label='View controls'
       data-slot='view-controls'
-      className='pointer-events-auto flex h-9 max-w-full min-w-0 items-center gap-1 rounded-lg border bg-sidebar p-1 text-muted-foreground shadow-xs [&_button]:font-normal [&_button:focus-visible]:text-foreground [&_button:hover]:text-foreground [&_button[data-state=open]]:text-foreground'
+      className='flex min-w-0 items-center gap-1'
     >
       {showSwitch ? (
         <ViewMenu views={evaluation.views} selected={selected} title={title} boundary={boundary} onChoose={choose} />
@@ -154,7 +154,8 @@ function ViewMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align='start'
-        side='bottom'
+        side='top'
+        sideOffset={10}
         className='w-56'
         collisionBoundary={boundary}
         aria-label='Pane view'
@@ -218,7 +219,8 @@ function InstanceMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align='start'
-        side='bottom'
+        side='top'
+        sideOffset={10}
         className='w-56'
         collisionBoundary={boundary}
         aria-label={`${viewTitle} instance`}

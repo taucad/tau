@@ -8,9 +8,15 @@ import type {
   ClosureCancellationAdapter,
   ClosureCancellationResult,
 } from '#api/billing/billing-account-closure.service.js';
+import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
+import type { BillingCashQualification } from '#api/billing/billing-payments.service.js';
+import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
+import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
+import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import type { DatabaseService } from '#database/database.service.js';
 import type { billingAccountClosure, billingOwnerBinding } from '#database/schema.js';
 import * as schema from '#database/schema.js';
+import { seedPaidPurchase } from '#testing/billing-payment.fixture.js';
 
 describe('account closure cancellation boundary', () => {
   it('requires recovery of the original subscription identity and exposes no create operation', async () => {
@@ -401,6 +407,62 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
       expect(await first`select id from billing.billing_account_closure where account_id=${accountId}`).toHaveLength(0);
     } finally {
       await Promise.all([first.end(), second.end()]);
+    }
+  });
+
+  it('should refuse preparation while a payment action is pending and proceed once it is canceled', async () => {
+    const client = postgres(databaseUrl!, { max: 1, prepare: false });
+    const suffix = crypto.randomUUID();
+    const userId = `pending-user-${suffix}`;
+    const accountId = `pending-account-${suffix}`;
+    const requestId = `pending-close-${suffix}`;
+    try {
+      await client`insert into public."user" (id,name,email,email_verified,allows_ai_training,created_at,updated_at)
+        values (${userId},'Pending fixture',${`${suffix}@example.invalid`},false,true,now(),now())`;
+      await client`insert into billing.credit_account (id,environment,status)
+        values (${accountId},'development','open')`;
+      await client`insert into billing.billing_owner_binding (id,account_id,environment,auth_user_id)
+        values (${`pending-binding-${suffix}`},${accountId},'development',${userId})`;
+      const database = drizzle(client, { schema });
+      const { purchaseId } = await seedPaidPurchase({
+        database,
+        accountId,
+        environment: 'development',
+        atoms: 100n,
+        prepared: true,
+      });
+      const service = new BillingAccountClosureService({ database }, { recoverAndCancel: vi.fn() }, 'development');
+
+      await expect(service.prepare({ authUserId: userId, requestId })).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'payment_action_pending' },
+      });
+      const closures = await client`select id from billing.billing_account_closure where account_id=${accountId}`;
+      expect(closures).toHaveLength(0);
+      // The refusal changed nothing, so the still-bound owner cancels the action and retries the same request.
+      const stripe = createBillingStripeClient({ secretKey: 'sk_test_closure_pending' });
+      const payments = new BillingPaymentsService(
+        { database },
+        stripe,
+        stripe,
+        {
+          environment: 'development',
+          stripeAccountId: 'acct_fixture',
+          livemode: false,
+          uiOrigin: 'https://tau.test',
+          webhookSecret: 'whsec_closure_pending_fixture',
+          collection: null,
+        },
+        mockDeep<BillingPolicyService>(),
+        mockDeep<CreditLedgerService>(),
+        mockDeep<BillingCashQualification>(),
+      );
+      await expect(payments.cancelAction(userId, purchaseId)).resolves.toMatchObject({ state: 'canceled' });
+      await expect(service.prepare({ authUserId: userId, requestId })).resolves.toMatchObject({
+        state: 'ready_for_auth_deletion',
+      });
+    } finally {
+      await client.end();
     }
   });
 });

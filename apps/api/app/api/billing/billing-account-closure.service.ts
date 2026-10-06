@@ -9,6 +9,7 @@ import {
   billingAccountClosure,
   billingOwnerBinding,
   billingProviderLeg,
+  billingPurchase,
   billingReloadConsent,
   creditAccount,
   subscription,
@@ -76,6 +77,19 @@ export class BillingAccountClosureService {
           throw new ConflictException('account_closure_request_conflict');
         return project(existing, input.authUserId);
       }
+      // Money may still move or await its grant, so closure waits for the payments service's active purchases.
+      // ponytail: a copy of findActivePurchase's states; share one constant if the purchase lifecycle grows.
+      const [pendingPurchase] = await tx
+        .select({ id: billingPurchase.id })
+        .from(billingPurchase)
+        .where(
+          and(
+            eq(billingPurchase.accountId, discovered.accountId),
+            inArray(billingPurchase.state, ['prepared', 'creating', 'pending', 'attention', 'paid_unfulfilled']),
+          ),
+        )
+        .limit(1);
+      if (pendingPurchase !== undefined) throw new ConflictException({ code: 'payment_action_pending' });
       const now = new Date();
       const closureId = randomUUID();
       await tx.update(billingOwnerBinding).set({ revokedAt: now }).where(eq(billingOwnerBinding.id, discovered.id));

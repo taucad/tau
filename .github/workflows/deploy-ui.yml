@@ -158,14 +158,24 @@ jobs:
           fi
 
       # The CLI resolves the site base (`apps/ui`) and then joins the workspace
-      # package (`apps/ui`) onto it for everything under `.netlify/`: framework
-      # functions, the functions and edge-function bundles. Its deploy step reads
-      # them from `apps/ui/.netlify/` without the doubling, so a direct build
-      # shipped no server function and no marketing edge function. Linking the
-      # doubled path back makes both sides use the same directory.
-      - name: Point the Netlify CLI's package path at apps/ui/.netlify
+      # package (`apps/ui`) onto it for everything it writes under `.netlify/`, so
+      # the function and edge-function bundles land in `apps/ui/apps/ui/.netlify/`,
+      # while its deploy step uploads them from `apps/ui/.netlify/`. Linking those
+      # two output directories back to where the build writes them makes the
+      # deploy ship what the build bundled.
+      #
+      # Only the outputs are linked. Linking the whole doubled `.netlify` made the
+      # CLI bundle the React Router server function through the link, and the
+      # function's relative import of `build/server/server.js` then resolved
+      # under `apps/ui/apps/ui/`, so the bundle shipped without the server build
+      # and every SSR page crashed with ERR_MODULE_NOT_FOUND. `apps/ui/netlify.toml`
+      # names the function's real directory instead (`[functions] directory`).
+      - name: Point the Netlify CLI's bundle output at apps/ui/.netlify
         working-directory: apps/ui
-        run: mkdir -p apps/ui && ln -sfn ../../.netlify apps/ui/.netlify
+        run: |
+          mkdir -p .netlify
+          ln -sfn ../apps/ui/.netlify/functions .netlify/functions
+          ln -sfn ../apps/ui/.netlify/edge-functions-dist .netlify/edge-functions-dist
 
       # The CLI comes from the workspace lockfile (`scripts` owns it); its build
       # runs `apps/ui/netlify.toml`'s production command with the site's variables.

@@ -109,6 +109,7 @@ const mocks = vi.hoisted(() => {
       }),
     },
     gl: Object.create(null) as { coordinateSystem?: number },
+    graphicsBackend: 'webgl' as 'webgl' | 'webgpu',
     observePreparation: undefined as ReturnType<typeof vi.fn<(scene: Object3D) => void>> | undefined,
     frameCallback: undefined as (() => void) | undefined,
     invalidate: vi.fn(),
@@ -179,7 +180,7 @@ vi.mock('#hooks/use-theme.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/three-graphics-backend-context.js', () => ({
-  useThreeGraphicsBackend: () => 'webgl',
+  useThreeGraphicsBackend: () => mocks.graphicsBackend,
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
@@ -2755,6 +2756,7 @@ describe('GltfMesh model raycast', () => {
 });
 
 const resetAssemblyFixture = (): void => {
+  mocks.graphicsBackend = 'webgl';
   mocks.camera = new OrthographicCamera(-3000, 3000, 3000, -3000, 0.1, 10_000);
   mocks.camera.position.z = 100;
   mocks.camera.updateMatrixWorld(true);
@@ -2775,132 +2777,45 @@ describe('actual candidate indexed demand', () => {
     mocks.frameCallback = undefined;
     delete mocks.observePreparation;
   });
-  it('should retain an unchanged spatial batch when camera demand changes another cell', async () => {
-    mocks.camera = new OrthographicCamera(-15, 15, 15, -15, 0.1, 100);
-    mocks.camera.position.set(10, 0, 10);
-    mocks.camera.updateMatrixWorld(true);
-    const scenes: Object3D[] = [];
-    const ordinaryRoot = mocks.rootScene;
-    const mountedRoot = new Group();
-    mocks.rootScene = mountedRoot;
-    const placeholders = new Map<
-      string,
-      { mesh: InstancedMesh; dispose: ReturnType<typeof vi.spyOn>; material?: Material }
-    >();
-    const preparedScenes = new Set<Object3D>();
-    mocks.observePreparation = vi.fn((scene: Object3D) => {
-      scenes.push(scene);
-      if (preparedScenes.size === 1 && !preparedScenes.has(scene)) {
-        scene.traverse((object) => {
-          if (object instanceof InstancedMesh) {
-            const mesh = object as InstancedMesh;
-            const id = getModelComponentInstanceSlots(mesh)?.[0]?.owner.componentId;
-            if (id) {
-              placeholders.set(id, {
-                mesh,
-                dispose: vi.spyOn(mesh, 'dispose'),
-                material: Array.isArray(mesh.material) ? undefined : mesh.material,
-              });
-            }
-          }
-        });
-      }
-      preparedScenes.add(scene);
-    });
-    mocks.mountPrimitives = true;
-    const display = await residentAssembly({ occurrenceCount: 8, spacing: 20 });
-    const materialDispose = vi.spyOn(Material.prototype, 'dispose');
-    const view = render(
-      <GltfMesh
-        assemblyDisplay={display}
-        geometryHash={display.root.digest}
-        presentationRevision={1}
-        enableMatcap={false}
-      />,
-    );
-    let retainedOwner: InstancedMesh | undefined;
-    const batches = (scene: Object3D): Map<string, InstancedMesh> => {
-      const result = new Map<string, InstancedMesh>();
-      for (const mesh of surfacesOf(scene)) {
-        if (mesh instanceof InstancedMesh) {
-          const slots = getModelComponentInstanceSlots(mesh as Object3D);
-          if (slots?.length !== 1) {
-            throw new Error('Expected one canonical slot per spatial cell');
-          }
-          result.set(slots[0]!.owner.componentId, mesh as InstancedMesh);
-        }
-      }
-      return result;
-    };
-    try {
-      await waitFor(() => {
-        expect(committedRevisions()).toEqual([1]);
-      });
-      const firstScene = scenes.at(-1)!;
-      firstScene.updateMatrixWorld(true);
-      const first = batches(firstScene);
-      const firstAttributes = new Map([...first].map(([id, mesh]) => [id, mesh.instanceMatrix]));
-      const firstMatrices = new Map([...first].map(([id, mesh]) => [id, Float32Array.from(mesh.instanceMatrix.array)]));
-      const firstWorld = new Map(
-        [...first].map(([id, mesh]) => [id, getModelComponentWorldMatrix(mesh, 0, new Matrix4())?.toArray()]),
-      );
-      const firstParents = new Map([...first].map(([id, mesh]) => [id, mesh.parent!.matrix.toArray()]));
-      const firstDisposals = new Map([...first].map(([id, mesh]) => [id, vi.spyOn(mesh, 'dispose')]));
-      const firstMaterials = new Map(
-        [...first].map(([id, mesh]) => [id, Array.isArray(mesh.material) ? undefined : mesh.material]),
-      );
-      mocks.camera.position.x = 30;
+  it.each(['webgl', 'webgpu'] as const)(
+    'retains an unchanged spatial batch across camera demand on %s',
+    async (backend) => {
+      mocks.graphicsBackend = backend;
+      mocks.camera = new OrthographicCamera(-15, 15, 15, -15, 0.1, 100);
+      mocks.camera.position.set(10, 0, 10);
       mocks.camera.updateMatrixWorld(true);
-      act(() => mocks.frameCallback?.());
-      await waitFor(() => {
-        expect(committedRevisions()).toEqual([1, 1]);
+      const scenes: Object3D[] = [];
+      const ordinaryRoot = mocks.rootScene;
+      const mountedRoot = new Group();
+      mocks.rootScene = mountedRoot;
+      const placeholders = new Map<
+        string,
+        { mesh: InstancedMesh; dispose: ReturnType<typeof vi.spyOn>; material?: Material }
+      >();
+      const preparedScenes = new Set<Object3D>();
+      mocks.observePreparation = vi.fn((scene: Object3D) => {
+        scenes.push(scene);
+        if (preparedScenes.size === 1 && !preparedScenes.has(scene)) {
+          scene.traverse((object) => {
+            if (object instanceof InstancedMesh) {
+              const mesh = object as InstancedMesh;
+              const id = getModelComponentInstanceSlots(mesh)?.[0]?.owner.componentId;
+              if (id) {
+                placeholders.set(id, {
+                  mesh,
+                  dispose: vi.spyOn(mesh, 'dispose'),
+                  material: Array.isArray(mesh.material) ? undefined : mesh.material,
+                });
+              }
+            }
+          });
+        }
+        preparedScenes.add(scene);
       });
-      const nextScene = scenes.at(-1)!;
-      nextScene.updateMatrixWorld(true);
-      const next = batches(nextScene);
-      const unchanged = [...first.keys()].filter((id) => next.has(id));
-      const retainedId = unchanged[0]!;
-      retainedOwner = first.get(retainedId)!;
-      const retainedDispose = firstDisposals.get(retainedId)!;
-      expect(unchanged.length).toBeGreaterThan(0);
-      expect([...first.keys()].some((id) => !next.has(id))).toBe(true);
-      expect([...next.keys()].some((id) => !first.has(id))).toBe(true);
-      expect(captureCommittedGltfDrawInventory(firstScene)).toBeUndefined();
-      expect(captureCommittedGltfDrawInventory(nextScene)?.isCurrent()).toBe(true);
-      for (const id of unchanged) {
-        const before = first.get(id)!;
-        const after = next.get(id)!;
-        expect(after.geometry).toBe(before.geometry);
-        expect(after.instanceMatrix.array).toEqual(firstMatrices.get(id));
-        expect(getModelComponentWorldMatrix(after, 0, new Matrix4())?.toArray()).toEqual(firstWorld.get(id));
-        expect(after.parent?.matrix.toArray()).toEqual(firstParents.get(id));
-        const beforeMaterials = Array.isArray(before.material) ? before.material : [before.material];
-        const afterMaterials = Array.isArray(after.material) ? after.material : [after.material];
-        expect(afterMaterials.map(({ type, opacity }) => ({ type, opacity }))).toEqual(
-          beforeMaterials.map(({ type, opacity }) => ({ type, opacity })),
-        );
-        expect({ object: after === before, instanceBuffer: after.instanceMatrix === firstAttributes.get(id) }).toEqual({
-          object: true,
-          instanceBuffer: true,
-        });
-        expect(getModelComponentInstanceSlots(after)?.[0]?.owner.componentId).toBe(id);
-        expect(placeholders.get(id)?.dispose).toHaveBeenCalledOnce();
-        expect(materialDispose.mock.contexts.filter((value) => value === placeholders.get(id)?.material)).toHaveLength(
-          1,
-        );
-        expect(placeholders.get(id)?.mesh.instanceMatrix).not.toBe(firstAttributes.get(id));
-        expect(materialDispose.mock.contexts).not.toContain(firstMaterials.get(id));
-      }
-      const entrant = [...next.keys()].find((id) => !first.has(id))!;
-      expect(placeholders.get(entrant)?.dispose).not.toHaveBeenCalled();
-      expect(materialDispose.mock.contexts).not.toContain(placeholders.get(entrant)?.material);
-      const currentInventory = captureLiveGltfAssemblyResourceInventory(nextScene);
-      expect(currentInventory?.retiredOwnerCount).toBe(0);
-      expect(currentInventory?.current.bufferCount).toBeGreaterThan(0);
-      expect(retainedDispose).not.toHaveBeenCalled();
-      const register = vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
-      mocks.sectionView = { isActive: true };
-      view.rerender(
+      mocks.mountPrimitives = true;
+      const display = await residentAssembly({ occurrenceCount: 8, spacing: 20 });
+      const materialDispose = vi.spyOn(Material.prototype, 'dispose');
+      const view = render(
         <GltfMesh
           assemblyDisplay={display}
           geometryHash={display.root.digest}
@@ -2908,31 +2823,127 @@ describe('actual candidate indexed demand', () => {
           enableMatcap={false}
         />,
       );
-      await waitFor(() => {
-        expect(register).toHaveBeenCalled();
-      });
-      const sectionScene = register.mock.calls.at(-1)?.[0].scene;
-      expect(sectionScene).toBe(nextScene);
-      expect(surfacesOf(sectionScene!)).toContain(retainedOwner);
-      expect(getModelComponentHitOwner({ object: retainedOwner, instanceId: 0 })?.componentId).toBe(retainedId);
-      expect(batches(nextScene).get(retainedId)).toBe(retainedOwner);
-      mocks.camera.position.x = 10;
-      mocks.camera.updateMatrixWorld(true);
-      act(() => mocks.frameCallback?.());
-      await waitFor(() => {
-        expect(committedRevisions()).toEqual([1, 1, 1]);
-      });
-      const sectionReplacement = batches(scenes.at(-1)!);
-      const sameCell = [...next.keys()].find((id) => sectionReplacement.has(id));
-      expect(sameCell).toBeDefined();
-      expect(sectionReplacement.get(sameCell!)).not.toBe(next.get(sameCell!));
-    } finally {
-      view.unmount();
-      mocks.rootScene = ordinaryRoot;
-      mocks.mountPrimitives = false;
-    }
-    expect(retainedOwner.dispose).toHaveBeenCalledOnce();
-  });
+      let retainedOwner: InstancedMesh | undefined;
+      const batches = (scene: Object3D): Map<string, InstancedMesh> => {
+        const result = new Map<string, InstancedMesh>();
+        for (const mesh of surfacesOf(scene)) {
+          if (mesh instanceof InstancedMesh) {
+            const slots = getModelComponentInstanceSlots(mesh as Object3D);
+            if (slots?.length !== 1) {
+              throw new Error('Expected one canonical slot per spatial cell');
+            }
+            result.set(slots[0]!.owner.componentId, mesh as InstancedMesh);
+          }
+        }
+        return result;
+      };
+      try {
+        await waitFor(() => {
+          expect(committedRevisions()).toEqual([1]);
+        });
+        const firstScene = scenes.at(-1)!;
+        firstScene.updateMatrixWorld(true);
+        const first = batches(firstScene);
+        const firstAttributes = new Map([...first].map(([id, mesh]) => [id, mesh.instanceMatrix]));
+        const firstMatrices = new Map(
+          [...first].map(([id, mesh]) => [id, Float32Array.from(mesh.instanceMatrix.array)]),
+        );
+        const firstWorld = new Map(
+          [...first].map(([id, mesh]) => [id, getModelComponentWorldMatrix(mesh, 0, new Matrix4())?.toArray()]),
+        );
+        const firstParents = new Map([...first].map(([id, mesh]) => [id, mesh.parent!.matrix.toArray()]));
+        const firstDisposals = new Map([...first].map(([id, mesh]) => [id, vi.spyOn(mesh, 'dispose')]));
+        const firstMaterials = new Map(
+          [...first].map(([id, mesh]) => [id, Array.isArray(mesh.material) ? undefined : mesh.material]),
+        );
+        mocks.camera.position.x = 30;
+        mocks.camera.updateMatrixWorld(true);
+        act(() => mocks.frameCallback?.());
+        await waitFor(() => {
+          expect(committedRevisions()).toEqual([1, 1]);
+        });
+        const nextScene = scenes.at(-1)!;
+        nextScene.updateMatrixWorld(true);
+        const next = batches(nextScene);
+        const unchanged = [...first.keys()].filter((id) => next.has(id));
+        const retainedId = unchanged[0]!;
+        retainedOwner = first.get(retainedId)!;
+        const retainedDispose = firstDisposals.get(retainedId)!;
+        expect(unchanged.length).toBeGreaterThan(0);
+        expect([...first.keys()].some((id) => !next.has(id))).toBe(true);
+        expect([...next.keys()].some((id) => !first.has(id))).toBe(true);
+        expect(captureCommittedGltfDrawInventory(firstScene)).toBeUndefined();
+        expect(captureCommittedGltfDrawInventory(nextScene)?.isCurrent()).toBe(true);
+        for (const id of unchanged) {
+          const before = first.get(id)!;
+          const after = next.get(id)!;
+          expect(after.geometry).toBe(before.geometry);
+          expect(after.instanceMatrix.array).toEqual(firstMatrices.get(id));
+          expect(getModelComponentWorldMatrix(after, 0, new Matrix4())?.toArray()).toEqual(firstWorld.get(id));
+          expect(after.parent?.matrix.toArray()).toEqual(firstParents.get(id));
+          const beforeMaterials = Array.isArray(before.material) ? before.material : [before.material];
+          const afterMaterials = Array.isArray(after.material) ? after.material : [after.material];
+          expect(afterMaterials.map(({ type, opacity }) => ({ type, opacity }))).toEqual(
+            beforeMaterials.map(({ type, opacity }) => ({ type, opacity })),
+          );
+          expect({
+            object: after === before,
+            instanceBuffer: after.instanceMatrix === firstAttributes.get(id),
+          }).toEqual({
+            object: true,
+            instanceBuffer: true,
+          });
+          expect(getModelComponentInstanceSlots(after)?.[0]?.owner.componentId).toBe(id);
+          expect(placeholders.get(id)?.dispose).toHaveBeenCalledOnce();
+          expect(
+            materialDispose.mock.contexts.filter((value) => value === placeholders.get(id)?.material),
+          ).toHaveLength(1);
+          expect(placeholders.get(id)?.mesh.instanceMatrix).not.toBe(firstAttributes.get(id));
+          expect(materialDispose.mock.contexts).not.toContain(firstMaterials.get(id));
+        }
+        const entrant = [...next.keys()].find((id) => !first.has(id))!;
+        expect(placeholders.get(entrant)?.dispose).not.toHaveBeenCalled();
+        expect(materialDispose.mock.contexts).not.toContain(placeholders.get(entrant)?.material);
+        const currentInventory = captureLiveGltfAssemblyResourceInventory(nextScene);
+        expect(currentInventory?.retiredOwnerCount).toBe(0);
+        expect(currentInventory?.current.bufferCount).toBeGreaterThan(0);
+        expect(retainedDispose).not.toHaveBeenCalled();
+        const register = vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
+        mocks.sectionView = { isActive: true };
+        view.rerender(
+          <GltfMesh
+            assemblyDisplay={display}
+            geometryHash={display.root.digest}
+            presentationRevision={1}
+            enableMatcap={false}
+          />,
+        );
+        await waitFor(() => {
+          expect(register).toHaveBeenCalled();
+        });
+        const sectionScene = register.mock.calls.at(-1)?.[0].scene;
+        expect(sectionScene).toBe(nextScene);
+        expect(surfacesOf(sectionScene!)).toContain(retainedOwner);
+        expect(getModelComponentHitOwner({ object: retainedOwner, instanceId: 0 })?.componentId).toBe(retainedId);
+        expect(batches(nextScene).get(retainedId)).toBe(retainedOwner);
+        mocks.camera.position.x = 10;
+        mocks.camera.updateMatrixWorld(true);
+        act(() => mocks.frameCallback?.());
+        await waitFor(() => {
+          expect(committedRevisions()).toEqual([1, 1, 1]);
+        });
+        const sectionReplacement = batches(scenes.at(-1)!);
+        const sameCell = [...next.keys()].find((id) => sectionReplacement.has(id));
+        expect(sameCell).toBeDefined();
+        expect(sectionReplacement.get(sameCell!)).not.toBe(next.get(sameCell!));
+      } finally {
+        view.unmount();
+        mocks.rootScene = ordinaryRoot;
+        mocks.mountPrimitives = false;
+      }
+      expect(retainedOwner.dispose).toHaveBeenCalledOnce();
+    },
+  );
   it('should replace an unchanged batch when its mounted render-world transform changed', async () => {
     mocks.camera = new OrthographicCamera(-15, 15, 15, -15, 0.1, 100);
     mocks.camera.position.set(10, 0, 10);

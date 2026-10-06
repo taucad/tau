@@ -133,8 +133,19 @@ vi.mock('@taucad/ui/components/collapsible', () => ({
 }));
 
 vi.mock('@taucad/ui/components/button', () => ({
-  Button: ({ children, onClick }: { readonly children: React.ReactNode; readonly onClick?: () => void }) => (
-    <button type='button' onClick={onClick} data-testid='fix-with-ai'>
+  Button: ({
+    children,
+    ref,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement> & { readonly ref?: React.Ref<HTMLButtonElement> }) => (
+    <button
+      ref={ref}
+      type='button'
+      onClick={props.onClick}
+      onKeyDown={props.onKeyDown}
+      aria-label={props['aria-label']}
+      aria-expanded={props['aria-expanded']}
+    >
       {children}
     </button>
   ),
@@ -144,7 +155,33 @@ vi.mock('#utils/filesystem.utils.js', () => ({
   decodeTextFile: (_bytes: Uint8Array<ArrayBuffer>) => 'cube(10);',
 }));
 
-const { ChatStackTrace } = await import('#routes/w.$workspace.$project/chat-stack-trace.js');
+const { ViewerIssues } = await import('#routes/w.$workspace.$project/chat-stack-trace.js');
+
+type Notice = Parameters<typeof ViewerIssues>[0]['notice'];
+
+function ViewerIssuesHost({ notice }: { readonly notice?: Notice }): React.JSX.Element {
+  return (
+    <ViewerIssues entryPath='main.scad' notice={notice}>
+      {({ segment, list }) => (
+        <>
+          {list}
+          {segment}
+        </>
+      )}
+    </ViewerIssues>
+  );
+}
+
+/** The segment toggling the list: "Issues: …", after "Build failed." when the build failed. */
+const issuesSegment = (): HTMLElement => screen.getByRole('button', { name: /Issues:/ });
+
+function renderOpen(notice?: Notice): ReturnType<typeof render> {
+  const view = render(<ViewerIssuesHost notice={notice} />);
+  if (!notice) {
+    fireEvent.click(issuesSegment());
+  }
+  return view;
+}
 
 const issue: KernelIssue = {
   message: 'Boom',
@@ -163,7 +200,7 @@ beforeEach(() => {
   mockCadTags = new Set();
 });
 
-describe('ChatStackTrace — canonical issue selection', () => {
+describe('ViewerIssues — canonical issue selection', () => {
   const compileIssue: KernelIssue = {
     message: "The name 'MissingPicoGkSymbol' does not exist in the current context",
     code: 'RUNTIME',
@@ -178,8 +215,9 @@ describe('ChatStackTrace — canonical issue selection', () => {
     mockKernelIssues = new Map([['main.scad', [compileIssue]]]);
     mockLatestGeometryOutcome = 'failure';
 
-    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+    renderOpen();
 
+    expect(issuesSegment()).toHaveAccessibleName('Build failed. Issues: 1 error');
     expect(screen.getByText(compileIssue.message)).toBeInTheDocument();
     expect(screen.getByText('ShapeFactory.cs:14:80')).toBeInTheDocument();
   });
@@ -188,18 +226,18 @@ describe('ChatStackTrace — canonical issue selection', () => {
     mockCadParentRef = {};
     mockKernelIssues = new Map([['main.scad', [compileIssue]]]);
 
-    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+    render(<ViewerIssuesHost />);
 
-    expect(screen.queryByText(compileIssue.message)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Issues:/ })).not.toBeInTheDocument();
   });
 
   it('hides previous-project issues during a project transition', () => {
     mockKernelIssues = new Map([['main.scad', [compileIssue]]]);
-    const { rerender } = render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+    const { rerender } = renderOpen();
     expect(screen.getByText(compileIssue.message)).toBeInTheDocument();
 
     mockProjectRef = {};
-    rerender(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+    rerender(<ViewerIssuesHost />);
 
     expect(screen.queryByText(compileIssue.message)).not.toBeInTheDocument();
   });
@@ -208,9 +246,9 @@ describe('ChatStackTrace — canonical issue selection', () => {
     mockHasCadActor = false;
     mockKernelIssues = new Map([['main.scad', [compileIssue]]]);
 
-    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+    render(<ViewerIssuesHost />);
 
-    expect(screen.queryByText(compileIssue.message)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Issues:/ })).not.toBeInTheDocument();
   });
 
   it('shows connection failures selected by the CAD machine', () => {
@@ -218,7 +256,7 @@ describe('ChatStackTrace — canonical issue selection', () => {
     mockKernelIssues = new Map([['__connection__', [connectionIssue]]]);
     mockCadTags = new Set(['cad-runtime-error']);
 
-    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+    renderOpen();
 
     expect(screen.getByText(connectionIssue.message)).toBeInTheDocument();
   });
@@ -228,13 +266,67 @@ describe('ChatStackTrace — canonical issue selection', () => {
     mockKernelIssues = new Map([['main.scad', [warning]]]);
     mockLatestGeometryOutcome = 'success';
 
-    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+    renderOpen();
 
+    expect(issuesSegment()).toHaveAccessibleName('Issues: 1 warning');
     expect(screen.getByText(warning.message)).toBeInTheDocument();
   });
 });
 
-describe('ChatStackTrace — new-chat (shift held) path', () => {
+describe('ViewerIssues — disclosure', () => {
+  const warning: KernelIssue = { ...issue, message: 'Parameter is unused', severity: 'warning' };
+  const note: KernelIssue = { ...issue, message: 'Wall is thin', severity: 'info' };
+
+  beforeEach(() => {
+    mockKernelIssues = new Map([['main.scad', [note, warning, issue]]]);
+  });
+
+  it('starts closed, with the counts in the segment', () => {
+    render(<ViewerIssuesHost />);
+
+    expect(issuesSegment()).toHaveAttribute('aria-expanded', 'false');
+    expect(issuesSegment()).toHaveAccessibleName('Issues: 1 error, 1 warning, 1 info');
+    expect(screen.queryByRole('region', { name: 'Issues' })).not.toBeInTheDocument();
+  });
+
+  it('lists errors first, then warnings, then notes', () => {
+    renderOpen();
+
+    const messages = screen.getAllByRole('listitem').map((item) => item.textContent);
+    expect(messages.map((text) => text.includes(issue.message))).toEqual([true, false, false]);
+    expect(messages[1]).toContain(warning.message);
+    expect(messages[2]).toContain(note.message);
+  });
+
+  it('closes on Escape and returns focus to the segment', () => {
+    renderOpen();
+
+    fireEvent.keyDown(screen.getByRole('region', { name: 'Issues' }), { key: 'Escape' });
+
+    expect(screen.queryByRole('region', { name: 'Issues' })).not.toBeInTheDocument();
+    expect(issuesSegment()).toHaveFocus();
+  });
+
+  it('opens for a view notice and acts on it', () => {
+    mockKernelIssues = new Map();
+    const onAct = vi.fn();
+    render(
+      <ViewerIssuesHost
+        notice={{ message: 'Saved view “drawing” is unavailable', actionLabel: 'Use default view', onAct }}
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Saved view “drawing” is unavailable');
+    fireEvent.click(screen.getByRole('button', { name: 'Use default view' }));
+    expect(onAct).toHaveBeenCalledOnce();
+  });
+});
+
+/** Fix with AI is named for what Shift does: a new chat while it is held. */
+let shiftHeld = true;
+const fixLabel = (): string => (shiftHeld ? 'Fix in new chat' : 'Fix with AI');
+
+describe('ViewerIssues — new-chat (shift held) path', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockReadFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
@@ -251,8 +343,8 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
   });
 
   it('seeds activeExecution and activeKernel on the new chat from the chat-client agent', async () => {
-    render(<ChatStackTrace entryPath='main.scad' side='top' />);
-    fireEvent.click(await screen.findByTestId('fix-with-ai'));
+    renderOpen();
+    fireEvent.click(await screen.findByRole('button', { name: fixLabel() }));
 
     await waitFor(() => {
       expect(mockCreateChat).toHaveBeenCalledOnce();
@@ -268,8 +360,8 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
   });
 
   it('focuses the newly created chat after seeding', async () => {
-    render(<ChatStackTrace entryPath='main.scad' side='top' />);
-    fireEvent.click(await screen.findByTestId('fix-with-ai'));
+    renderOpen();
+    fireEvent.click(await screen.findByRole('button', { name: fixLabel() }));
 
     await waitFor(() => {
       expect(mockSetFocusedChatId).toHaveBeenCalledWith('chat_new');
@@ -284,8 +376,8 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
   it('seeds the pending user message without per-field metadata stamping', async () => {
     mockAgent = { ...mockAgent, execution: { kind: 'tau', model: 'chat-local-model' }, kernel: 'manifold' };
 
-    render(<ChatStackTrace entryPath='main.scad' side='top' />);
-    fireEvent.click(await screen.findByTestId('fix-with-ai'));
+    renderOpen();
+    fireEvent.click(await screen.findByRole('button', { name: fixLabel() }));
 
     await waitFor(() => {
       expect(mockCreateChat).toHaveBeenCalledOnce();
@@ -316,7 +408,7 @@ describe('ChatStackTrace — new-chat (shift held) path', () => {
   });
 });
 
-describe('ChatStackTrace — in-place (shift not held) path', () => {
+describe('ViewerIssues — in-place (shift not held) path', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mockReadFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
@@ -334,11 +426,12 @@ describe('ChatStackTrace — in-place (shift not held) path', () => {
     // path is exercised and the in-place chat-client submit fires.
     const useModifiersMock = (await import('#hooks/use-keyboard.js')) as { useModifiers: () => { shift: boolean } };
     useModifiersMock.useModifiers = () => ({ shift: false });
+    shiftHeld = false;
   });
 
   it('routes the fix prompt through cadChat.submit (no inline metadata stamping)', async () => {
-    render(<ChatStackTrace entryPath='main.scad' side='top' />);
-    fireEvent.click(await screen.findByTestId('fix-with-ai'));
+    renderOpen();
+    fireEvent.click(await screen.findByRole('button', { name: fixLabel() }));
 
     await waitFor(() => {
       expect(mockSubmit).toHaveBeenCalledOnce();
@@ -356,8 +449,8 @@ describe('ChatStackTrace — in-place (shift not held) path', () => {
   // testingEnabled bug — all three fields previously needed to be hand-
   // stamped on the user message metadata and frequently drifted.
   it('produces a wire body satisfying chatTurnRequestSchema for the Fix-with-AI in-place path', async () => {
-    render(<ChatStackTrace entryPath='main.scad' side='top' />);
-    fireEvent.click(await screen.findByTestId('fix-with-ai'));
+    renderOpen();
+    fireEvent.click(await screen.findByRole('button', { name: fixLabel() }));
 
     await waitFor(() => {
       expect(mockSubmit).toHaveBeenCalledOnce();
@@ -386,5 +479,21 @@ describe('ChatStackTrace — in-place (shift not held) path', () => {
     expect(parsed.agent.mode).toBe('plan');
     expect(parsed.agent.toolChoice).toBe('auto');
     expect(parsed.agent.testingEnabled).toBe(false);
+  });
+
+  it('sends every issue in one prompt with Fix all', async () => {
+    const second: KernelIssue = { ...issue, message: 'Second failure', location: undefined };
+    mockKernelIssues = new Map([['main.scad', [issue, second]]]);
+    renderOpen();
+
+    fireEvent.click(screen.getByRole('button', { name: /Fix all 2 with AI/ }));
+
+    await waitFor(() => {
+      expect(mockSubmit).toHaveBeenCalledOnce();
+    });
+    const submitArgs = mockSubmit.mock.calls[0]?.[0] as { text: string };
+    expect(submitArgs.text).toContain("I'm getting 2 issues");
+    expect(submitArgs.text).toContain(issue.message);
+    expect(submitArgs.text).toContain(second.message);
   });
 });

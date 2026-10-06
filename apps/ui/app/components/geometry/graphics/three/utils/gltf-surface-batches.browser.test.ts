@@ -15,7 +15,7 @@ import {
   WebGLRenderer,
   WebGLRenderTarget,
 } from 'three';
-import { WebGPUBackend } from 'three/webgpu';
+import { Node, NodeBuilder, WebGPUBackend } from 'three/webgpu';
 import type { RendererInstance } from '#components/geometry/graphics/three/renderer.js';
 import { createRenderer } from '#components/geometry/graphics/three/renderer.js';
 import {
@@ -316,6 +316,9 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
       split.dispose();
       expect(await render()).toEqual(posed);
       if (backend === 'webgpu') {
+        if (renderer instanceof WebGLRenderer) {
+          throw new TypeError('Expected native WebGPU renderer');
+        }
         const initialOwned = instanceLifetime().allocated;
         expect(instanceLifetime().destroyed).toBe(initialOwned);
         const sharedMaterial = new MeshStandardMaterial({ color: 0xcc_cc_cc });
@@ -397,6 +400,117 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
         geometryDispose.mockRestore();
         sharedMaterial.removeEventListener('dispose', materialDispose);
         console.info('E06 surviving/large owners', JSON.stringify(instanceLifetime()));
+
+        instanceSizes.add(4 * 64);
+        const controlLifetimeStart = instanceLifetime();
+        const controlScene = new Scene();
+        controlScene.background = new Color(0);
+        controlScene.add(new AmbientLight(0xff_ff_ff, 1));
+        const controlLight = new DirectionalLight(0xff_ff_ff, 2);
+        controlLight.position.set(0, 0, 10);
+        controlScene.add(controlLight);
+        const controlRoot = new Group();
+        controlScene.add(controlRoot);
+        const controlMaterials = [0xcc_cc_cc, 0xff_33_33].map((color) => {
+          const material = new MeshStandardMaterial({ color, roughness: 0.5 });
+          qualifyGltfSurfaceMaterial(material);
+          sealGltfSurfaceMaterial(material);
+          resources.push(material);
+          return material;
+        });
+        const controlSources = Array.from({ length: 8 }, (_, index) => {
+          const source = new Mesh(geometry, controlMaterials[Math.floor(index / 4)]);
+          source.position.set((index % 4) * 2 - 7, Math.floor(index / 4) * 4 - 2, 0);
+          controlRoot.add(source);
+          return source;
+        });
+        let control = createGltfSurfaceBatches(controlRoot, controlSources);
+        resources.push(control);
+        control.sync();
+        const controlBatches = () =>
+          control.group.children.map((object) => {
+            if (!(object instanceof InstancedMesh)) {
+              throw new TypeError('Expected two native instanced surface groups');
+            }
+            const material: unknown = object.material;
+            if (!(material instanceof MeshStandardMaterial)) {
+              throw new TypeError('Expected native surface material');
+            }
+            return {
+              uuid: object.uuid,
+              material: material.uuid,
+              version: material.version,
+              slots: object.count,
+              matrices: [...object.instanceMatrix.array],
+            };
+          });
+        const controlRender = async (): Promise<Uint8Array<ArrayBuffer>> => {
+          renderer.setRenderTarget(target);
+          renderer.render(controlScene, camera);
+          renderer.setRenderTarget(null);
+          return new Uint8Array(await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size));
+        };
+        const nodeBuild = vi.spyOn(Node.prototype, 'build');
+        const builderBuild = vi.spyOn(NodeBuilder.prototype, 'build');
+        try {
+          const firstPixels = await controlRender();
+          const firstBatches = controlBatches();
+          expect(firstBatches.map(({ slots }) => slots)).toEqual([4, 4]);
+          expect(firstPixels.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
+          const stableBuilds = [nodeBuild.mock.calls.length, builderBuild.mock.calls.length];
+          const stableDraws = rawCounts.indexed;
+          control.sync();
+          expect(await controlRender()).toEqual(firstPixels);
+          expect(rawCounts.indexed - stableDraws).toBe(2);
+          expect(controlBatches()).toEqual(firstBatches);
+          const stableResult = [nodeBuild.mock.calls.length, builderBuild.mock.calls.length];
+          expect(stableResult).toEqual(stableBuilds);
+
+          control.dispose();
+          control = createGltfSurfaceBatches(controlRoot, controlSources);
+          resources.push(control);
+          control.sync();
+          const replacementBuilds = [nodeBuild.mock.calls.length, builderBuild.mock.calls.length];
+          const replacementDraws = rawCounts.indexed;
+          expect(await controlRender()).toEqual(firstPixels);
+          expect(rawCounts.indexed - replacementDraws).toBe(2);
+          const replacementBatches = controlBatches();
+          expect(replacementBatches.map(({ uuid }) => uuid)).not.toEqual(firstBatches.map(({ uuid }) => uuid));
+          expect(replacementBatches.map(({ material }) => material)).toEqual(
+            firstBatches.map(({ material }) => material),
+          );
+          expect(replacementBatches.map(({ matrices }) => matrices)).toEqual(
+            firstBatches.map(({ matrices }) => matrices),
+          );
+          expect(nodeBuild.mock.calls.length).toBeGreaterThan(replacementBuilds[0]!);
+          expect(builderBuild.mock.calls.length).toBeGreaterThan(replacementBuilds[1]!);
+
+          controlMaterials[1]!.flatShading = true;
+          controlMaterials[1]!.needsUpdate = true;
+          control.sync();
+          const changedBuilds = [nodeBuild.mock.calls.length, builderBuild.mock.calls.length];
+          const changedDraws = rawCounts.indexed;
+          const changedPixels = await controlRender();
+          expect(rawCounts.indexed - changedDraws).toBe(2);
+          expect(changedPixels.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
+          const changedBatches = controlBatches();
+          expect(changedBatches[0]).toEqual(replacementBatches[0]);
+          expect(changedBatches[1]!.uuid).not.toBe(replacementBatches[1]!.uuid);
+          expect(changedBatches[1]!.material).toBe(replacementBatches[1]!.material);
+          expect(changedBatches[1]!.version).toBeGreaterThan(replacementBatches[1]!.version);
+          expect(changedBatches[1]!.matrices).toEqual(replacementBatches[1]!.matrices);
+          expect(nodeBuild.mock.calls.length).toBeGreaterThan(changedBuilds[0]!);
+          expect(builderBuild.mock.calls.length).toBeGreaterThan(changedBuilds[1]!);
+        } finally {
+          nodeBuild.mockRestore();
+          builderBuild.mockRestore();
+          control.dispose();
+        }
+        const controlLifetimeEnd = instanceLifetime();
+        expect(controlLifetimeEnd.allocated).toBeGreaterThan(controlLifetimeStart.allocated);
+        expect(controlLifetimeEnd.destroyed - controlLifetimeStart.destroyed).toBe(
+          controlLifetimeEnd.allocated - controlLifetimeStart.allocated,
+        );
       }
       expect(validation).toEqual([]);
       console.info(

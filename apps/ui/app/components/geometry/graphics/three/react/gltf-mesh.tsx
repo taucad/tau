@@ -3,6 +3,7 @@ import {
   createGltfSurfaceBatches,
   disposeGltfSurfaceBatches,
   qualifyGltfSurfaceMaterial,
+  qualifiedGltfSurfaceMaterialKey,
   sealGltfSurfaceMaterial,
   gltfSurfacePresentationTag,
 } from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
@@ -108,6 +109,7 @@ import {
   getModelComponentId,
   getModelComponentIdInHierarchy,
   getModelComponentHitOwner,
+  getModelComponentOwner,
   getModelComponentInstanceSlots,
   getModelComponentWorldMatrix,
   getModelComponentSourceGeometry,
@@ -2591,6 +2593,9 @@ type PreparedGltfPresentation = {
   readonly metadataSerializedBytes?: number;
   assemblyResources?: GltfPresentationTelemetry['assemblyResources'];
   readonly assemblyFacade?: AdmittedAssembly;
+  readonly assemblyPoseRevision?: number;
+  readonly assemblyRenderFrameKey?: string;
+  mountedRootWorld?: Matrix4;
   readonly sourceBindings?: ReadonlyMap<Object3D, GltfSectionSourceBinding>;
   readonly ownershipSignature?: string;
   readonly getMeasurementFeatures: ReturnType<typeof prepareGltfMetadata>['getMeasurementFeatures'];
@@ -2612,6 +2617,251 @@ type PreparedGltfPresentation = {
   dispose: () => void;
   disposeResources: () => void;
 };
+
+/** Move only an exactly unchanged batch after React has detached the previous scene. */
+function transferUnchangedAssemblyBatches(
+  previous: PreparedGltfPresentation,
+  current: PreparedGltfPresentation,
+): boolean {
+  const materialUses = (bundle: PreparedGltfPresentation): Map<Material, number> => {
+    const uses = new Map<Material, number>();
+    const add = (material: Material): void => {
+      uses.set(material, (uses.get(material) ?? 0) + 1);
+    };
+    bundle.scene.traverse((object) => {
+      for (const material of getObjectMaterials(object)) {
+        add(material);
+      }
+    });
+    for (const saved of bundle.originalMaterials.values()) {
+      for (const material of getMaterials(saved)) {
+        add(material);
+      }
+    }
+    return uses;
+  };
+  const previousMaterialUses = materialUses(previous);
+  const currentMaterialUses = materialUses(current);
+  const byAttribute = new Map<InstancedBufferAttribute, InstancedMesh>();
+  const ambiguous = new Set<InstancedBufferAttribute>();
+  previous.scene.traverse((object) => {
+    if (!(object instanceof InstancedMesh) || !getModelComponentInstanceSlots(object as Object3D)) {
+      return;
+    }
+    const mesh = object as InstancedMesh;
+    if (byAttribute.has(mesh.instanceMatrix)) {
+      ambiguous.add(mesh.instanceMatrix);
+    } else {
+      byAttribute.set(mesh.instanceMatrix, mesh);
+    }
+  });
+  const candidates: InstancedMesh[] = [];
+  current.scene.traverse((object) => {
+    if (object instanceof InstancedMesh && getModelComponentInstanceSlots(object as Object3D)) {
+      candidates.push(object as InstancedMesh);
+    }
+  });
+  let transferred = false;
+  for (const candidate of candidates) {
+    const old = byAttribute.get(candidate.instanceMatrix);
+    const oldParent = old?.parent;
+    const candidateParent = candidate.parent;
+    if (
+      !old ||
+      ambiguous.has(candidate.instanceMatrix) ||
+      !oldParent ||
+      !candidateParent ||
+      oldParent.parent !== previous.scene ||
+      candidateParent.parent !== current.scene ||
+      old.geometry !== candidate.geometry ||
+      old.count !== candidate.count ||
+      old.instanceColor !== null ||
+      candidate.instanceColor !== null ||
+      old.morphTexture !== null ||
+      candidate.morphTexture !== null ||
+      !old.matrix.equals(candidate.matrix) ||
+      !oldParent.matrix.equals(candidateParent.matrix) ||
+      !previous.scene.matrix.equals(current.scene.matrix) ||
+      old.visible !== candidate.visible ||
+      oldParent.visible !== candidateParent.visible ||
+      old.layers.mask !== candidate.layers.mask ||
+      oldParent.layers.mask !== candidateParent.layers.mask ||
+      old.renderOrder !== candidate.renderOrder ||
+      old.castShadow !== candidate.castShadow ||
+      old.receiveShadow !== candidate.receiveShadow ||
+      old.frustumCulled !== candidate.frustumCulled ||
+      old.raycast !== candidate.raycast ||
+      old.onBeforeRender !== candidate.onBeforeRender ||
+      old.onAfterRender !== candidate.onAfterRender ||
+      previous.sourceBindings?.has(old) === true ||
+      current.sourceBindings?.has(candidate) === true
+    ) {
+      continue;
+    }
+    const oldParentOwner = getModelComponentOwner(oldParent);
+    const candidateParentOwner = getModelComponentOwner(candidateParent);
+    if (
+      oldParentOwner?.unitId !== candidateParentOwner?.unitId ||
+      oldParentOwner?.componentId !== candidateParentOwner?.componentId
+    ) {
+      continue;
+    }
+    const oldSlots = getModelComponentInstanceSlots(old);
+    const candidateSlots = getModelComponentInstanceSlots(candidate);
+    if (
+      !oldSlots ||
+      !candidateSlots ||
+      oldSlots.length !== candidateSlots.length ||
+      oldSlots.some((slot, index) => {
+        const next = candidateSlots[index];
+        const oldFeature = slot.measurementFeatures as GltfMeasurementFeatures | undefined;
+        const nextFeature = next?.measurementFeatures as GltfMeasurementFeatures | undefined;
+        return (
+          !next ||
+          slot.owner.unitId !== next.owner.unitId ||
+          slot.owner.componentId !== next.owner.componentId ||
+          slot.sourceObject !== next.sourceObject ||
+          Boolean(oldFeature) !== Boolean(nextFeature) ||
+          (oldFeature !== undefined &&
+            (oldFeature.componentId !== nextFeature?.componentId ||
+              oldFeature.occurrenceId !== nextFeature.occurrenceId ||
+              oldFeature.kind !== nextFeature.kind ||
+              oldFeature.primitive !== nextFeature.primitive ||
+              oldFeature.faces !== nextFeature.faces ||
+              oldFeature.edges !== nextFeature.edges)) ||
+          slot.sourceBinding?.parser !== next.sourceBinding?.parser ||
+          slot.sourceBinding?.occurrenceId !== next.sourceBinding?.occurrenceId
+        );
+      })
+    ) {
+      continue;
+    }
+    const oldDataKeys = Object.keys(old.userData);
+    if (
+      oldDataKeys.length !== Object.keys(candidate.userData).length ||
+      oldDataKeys.some((key) => !Object.is(old.userData[key], candidate.userData[key]))
+    ) {
+      continue;
+    }
+    if (Array.isArray(old.material) || Array.isArray(candidate.material)) {
+      continue;
+    }
+    const oldOriginal = previous.originalMaterials.get(old.id);
+    const candidateOriginal = current.originalMaterials.get(candidate.id);
+    if (
+      !oldOriginal ||
+      !candidateOriginal ||
+      Array.isArray(oldOriginal) ||
+      Array.isArray(candidateOriginal) ||
+      old.material === candidate.material ||
+      old.material === oldOriginal ||
+      old.material === candidateOriginal ||
+      oldOriginal === candidate.material ||
+      oldOriginal === candidateOriginal ||
+      candidate.material === candidateOriginal ||
+      previousMaterialUses.get(old.material) !== 1 ||
+      previousMaterialUses.get(oldOriginal) !== 1 ||
+      currentMaterialUses.get(candidate.material) !== 1 ||
+      currentMaterialUses.get(candidateOriginal) !== 1
+    ) {
+      continue;
+    }
+    const oldKey = qualifiedGltfSurfaceMaterialKey(old.material);
+    const candidateKey = qualifiedGltfSurfaceMaterialKey(candidate.material);
+    qualifyGltfSurfaceMaterial(oldOriginal);
+    qualifyGltfSurfaceMaterial(candidateOriginal);
+    const oldOriginalKey = qualifiedGltfSurfaceMaterialKey(oldOriginal);
+    const candidateOriginalKey = qualifiedGltfSurfaceMaterialKey(candidateOriginal);
+    if (
+      oldKey === undefined ||
+      candidateKey === undefined ||
+      oldOriginalKey === undefined ||
+      candidateOriginalKey === undefined ||
+      oldKey !== candidateKey ||
+      oldOriginalKey !== candidateOriginalKey
+    ) {
+      continue;
+    }
+    // One scene parent at a time. The previous scene is detached before this layout effect.
+    candidateParent.remove(candidate);
+    oldParent.remove(old);
+    candidateParent.add(old);
+    previous.originalMaterials.delete(old.id);
+    current.originalMaterials.delete(candidate.id);
+    current.originalMaterials.set(old.id, oldOriginal);
+    for (const material of [old.material, oldOriginal]) {
+      previous.resources.owned.delete(material);
+      previous.resources.released.add(material);
+      current.resources.owned.add(material);
+    }
+    for (const material of new Set([candidate.material, candidateOriginal])) {
+      current.resources.owned.delete(material);
+      material.dispose();
+    }
+    // Both candidate and predecessor point at the borrowed attribute. Dispose only
+    // the candidate object's empty replacement binding, never the live GPU buffer.
+    const retainedAttribute = candidate.instanceMatrix;
+    candidate.instanceMatrix = new InstancedBufferAttribute(new Float32Array(0), 16);
+    candidate.dispose();
+    byAttribute.delete(retainedAttribute);
+    transferred = true;
+  }
+  return transferred;
+}
+
+/** Rebind the post-commit owner after its captured placeholder sources were replaced. */
+function rebindCommittedAssemblySurfaceBatches(
+  bundle: PreparedGltfPresentation,
+  {
+    backend,
+    resolution,
+    sectionClip,
+  }: Readonly<{
+    backend: ReturnType<typeof useThreeGraphicsBackend>;
+    resolution: Vector2;
+    sectionClip: Parameters<typeof installSectionClip>[1];
+  }>,
+): void {
+  bundle.surfaceBatches.dispose();
+  const inventory = getComponentInventory(bundle.scene);
+  bundle.surfaceBatches = createGltfSurfaceBatches(
+    bundle.scene,
+    inventory.filter((object) => isSurfaceObject(object)),
+    {
+      sources: inventory.filter((object): object is Mesh => isFatLineSegmentsMesh(object)),
+      backend,
+      resolution,
+      prepareMaterial: (material) => {
+        installSectionClip(material, sectionClip);
+      },
+    },
+  );
+  if (bundle.assemblyResources) {
+    const previous = bundle.assemblyResources;
+    const measured = countAssemblyResources(bundle, undefined, { queuedPreparationCount: 0 });
+    bundle.assemblyResources = {
+      ...measured,
+      preparedSourceBufferCount: previous.preparedSourceBufferCount,
+      preparedSourcePayloadBytes: previous.preparedSourcePayloadBytes,
+      currentAndCandidateExactBufferCpuBytes: Math.max(
+        measured.currentAndCandidateExactBufferCpuBytes,
+        previous.currentAndCandidateExactBufferCpuBytes,
+      ),
+      currentAndCandidateExactBufferCount: Math.max(
+        measured.currentAndCandidateExactBufferCount,
+        previous.currentAndCandidateExactBufferCount,
+      ),
+      currentAndCandidateExactPayloadCpuBytes: Math.max(
+        measured.currentAndCandidateExactPayloadCpuBytes,
+        previous.currentAndCandidateExactPayloadCpuBytes,
+      ),
+      currentAndCandidateBytesEstimate: Math.max(
+        measured.currentAndCandidateBytesEstimate,
+        previous.currentAndCandidateBytesEstimate,
+      ),
+    };
+  }
+}
 
 /** Count actual unique resources without treating occurrence clones as additional immutable allocations. */
 function countAssemblyResources(
@@ -3971,6 +4221,13 @@ export function GltfMesh({
   const kinematicsRef = useKinematicsRef();
   const renderFrame = useRenderFrame();
   const assemblyRenderFrame = assemblyDisplay ? renderFrame : undefined;
+  const assemblyRenderFrameKey = assemblyRenderFrame
+    ? JSON.stringify([
+        assemblyRenderFrame.anchorFrameId,
+        assemblyRenderFrame.originMeters,
+        assemblyRenderFrame.metersPerRenderUnit,
+      ])
+    : undefined;
   const assetMatrix = useMemo(() => createCanonicalGltfToTauMatrix(), []);
   const [presentation, setPresentation] = useState<PreparedGltfPresentation | undefined>();
   const [assemblyDemandRevision, setAssemblyDemandRevision] = useState(0);
@@ -4885,6 +5142,8 @@ export function GltfMesh({
           validatedSourceBytes,
           metadataSerializedBytes,
           assemblyFacade: assemblyDisplay?.admitted,
+          assemblyPoseRevision: assemblyDisplay ? kinematicsRef.getSnapshot().context.revision : undefined,
+          assemblyRenderFrameKey,
           originalMaterials,
           resources,
           inPlace,
@@ -5443,6 +5702,88 @@ export function GltfMesh({
     applyGltfEdgeThemeColor(scene, activeEdgeColor);
     invalidate();
   }, [scene, activeEdgeColor, invalidate]);
+
+  useLayoutEffect(() => {
+    const previous = retiredPresentationsRef.current.at(-1);
+    const materialSignature = `${enableMatcap}:${matcapTint}:${graphicsBackendThree}`;
+    let attachedToViewport = false;
+    for (let parent = presentation?.scene.parent; parent; parent = parent.parent) {
+      if (parent === rootScene) {
+        attachedToViewport = true;
+        break;
+      }
+    }
+    if (presentation && attachedToViewport) {
+      presentation.scene.updateWorldMatrix(true, false);
+    }
+    if (
+      !presentation ||
+      !previous ||
+      !attachedToViewport ||
+      !previous.mountedRootWorld ||
+      !previous.mountedRootWorld.equals(presentation.scene.matrixWorld) ||
+      previous.assemblyRenderFrameKey !== presentation.assemblyRenderFrameKey ||
+      presentation.assemblyRenderFrameKey !== assemblyRenderFrameKey ||
+      !assemblyDisplay ||
+      assemblyDisplay.admitted !== presentation.assemblyFacade ||
+      previous.assemblyFacade !== presentation.assemblyFacade ||
+      previous.key !== presentation.key ||
+      previous.unitId !== presentation.unitId ||
+      previous.assemblyPoseRevision === undefined ||
+      previous.assemblyPoseRevision !== presentation.assemblyPoseRevision ||
+      presentation.assemblyPoseRevision !== kinematicsRef.getSnapshot().context.revision ||
+      previous.manifest.mechanism !== undefined ||
+      presentation.manifest.mechanism !== undefined ||
+      previous.disposed ||
+      presentation.disposed ||
+      committedPresentationRef.current !== presentation ||
+      previous.scene.parent !== null ||
+      presentation.firstFrameAt !== undefined ||
+      sectionView.isActive ||
+      previous.barrier !== 'display-ready' ||
+      presentation.barrier !== 'display-ready' ||
+      previous.sectionStatus !== 'pending' ||
+      presentation.sectionStatus !== 'pending' ||
+      previous.analysisPromise !== undefined ||
+      presentation.analysisPromise !== undefined ||
+      enableMatcap ||
+      materialSignaturesRef.current.get(previous) !== materialSignature ||
+      materialSignaturesRef.current.get(presentation) !== materialSignature
+    ) {
+      if (presentation && attachedToViewport) {
+        (presentation.mountedRootWorld ??= new Matrix4()).copy(presentation.scene.matrixWorld);
+      }
+      return;
+    }
+    if (!transferUnchangedAssemblyBatches(previous, presentation)) {
+      (presentation.mountedRootWorld ??= new Matrix4()).copy(presentation.scene.matrixWorld);
+      return;
+    }
+    // Both owners captured their source objects. Retire the detached owner's
+    // callbacks before the moved objects enter the current visual effect.
+    previous.surfaceBatches.dispose();
+    componentInventories.delete(previous.scene);
+    componentInventories.delete(presentation.scene);
+    modelPickableMeshesSceneRef.current = undefined;
+    modelPickableMeshesRef.current = [];
+    rebindCommittedAssemblySurfaceBatches(presentation, {
+      backend: graphicsBackendThree,
+      resolution: resolutionRef.current,
+      sectionClip,
+    });
+    (presentation.mountedRootWorld ??= new Matrix4()).copy(presentation.scene.matrixWorld);
+  }, [
+    assemblyDisplay,
+    assemblyRenderFrameKey,
+    enableMatcap,
+    graphicsBackendThree,
+    kinematicsRef,
+    matcapTint,
+    presentation,
+    rootScene,
+    sectionClip,
+    sectionView.isActive,
+  ]);
 
   useLayoutEffect(() => {
     if (!presentation) {

@@ -149,7 +149,8 @@ function renderValue(value: unknown, visiting = new Set<WeakKey>()): unknown {
   return { identity: identity(value) };
 }
 
-function materialKey(material: Material, owningCohort = false): string | undefined {
+/** Exact private render-state key; unqualified or unknown materials refuse reuse. */
+export function qualifiedGltfSurfaceMaterialKey(material: Material, owningCohort = false): string | undefined {
   const known = qualifiedMaterials.get(material);
   if (
     !known ||
@@ -312,7 +313,7 @@ export function createGltfSurfaceBatches(
     const keyFor = (material: Material, owningCohort: boolean): string | undefined => {
       const keys = owningCohort ? owningKeys : liveKeys;
       if (!keys.has(material)) {
-        keys.set(material, materialKey(material, owningCohort));
+        keys.set(material, qualifiedGltfSurfaceMaterialKey(material, owningCohort));
       }
       return keys.get(material);
     };

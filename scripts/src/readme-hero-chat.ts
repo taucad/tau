@@ -8,7 +8,7 @@
  *
  * Usage (from the workspace root, Node 24):
  *   node --import @oxc-node/core/register scripts/src/readme-hero-chat.ts \
- *     --project <directory holding the example's tau.json> \
+ *     --project <the project directory whose tau.json the chat belongs to> \
  *     [--chat-id chat_readme_hero] [--revision <revisionId>] [--checkout <checkoutId>] [--at <ISO time>]
  */
 
@@ -67,7 +67,7 @@ const { values } = parseArgs({
 });
 
 if (values.project === undefined) {
-  throw new Error('Pass --project <directory holding the example tau.json>.');
+  throw new Error('Pass --project <the project directory whose tau.json the chat belongs to>.');
 }
 
 const projectDir = resolve(values.project);
@@ -82,7 +82,7 @@ const modelId = 'anthropic-claude-fable-5.1';
 const mainTs = await readFile(join(exampleDir, 'main.ts'), 'utf8');
 const geospecTs = await readFile(join(exampleDir, 'main.geospec.ts'), 'utf8');
 const designMd = await readFile(join(exampleDir, 'DESIGN.md'), 'utf8');
-const manifest = JSON.parse(await readFile(join(exampleDir, 'tau.json'), 'utf8')) as { id: string; name: string };
+const manifest = JSON.parse(await readFile(join(projectDir, 'tau.json'), 'utf8')) as { id: string; name: string };
 const thumbnail = await readFile(join(exampleDir, 'thumbnail.webp'));
 const skillMd = await readFile(join(skillDir, 'SKILL.md'), 'utf8');
 const skillFiles = (await readdir(skillDir)).filter((name) => name !== 'SKILL.md').sort();

@@ -1003,6 +1003,80 @@ describe('committed assembly bridge registration lifetime', () => {
           files: [{ name: 'assembly', mimeType: 'application/step', bytes: stepBytes }],
         };
         try {
+          const drawnGeometry = new THREE.BoxGeometry();
+          const drawnMaterial = new THREE.MeshBasicMaterial();
+          const drawnMesh = new THREE.Mesh(drawnGeometry, drawnMaterial);
+          candidate.add(drawnMesh);
+          const priorSurfaces = capture.surfaces;
+          const priorEdges = capture.edges;
+          const priorCurrent = capture.isCurrent;
+          const priorBackend = 'backend' in renderer ? renderer.backend : undefined;
+          const gpuBuffer = { size: 64, usage: 1 };
+          vi.stubGlobal('GPUBuffer', { [Symbol.hasInstance]: (value: unknown) => value === gpuBuffer });
+          Object.assign(renderer, {
+            backend: {
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Three's native backend flag has this exact spelling.
+              isWebGPUBackend: true,
+              data: new WeakMap([[drawnGeometry.getAttribute('position'), { buffer: gpuBuffer }]]),
+            },
+          });
+          Object.assign(capture, { surfaces: [{ objectId: drawnMesh.id }], edges: [], isCurrent: () => true });
+          try {
+            captureSpy.mockClear();
+            const observed = bridge.observeBackendBindings();
+            for (let index = 0; index < 3; index++) {
+              drawnMesh.onAfterRender(
+                renderer,
+                viewport.scene,
+                viewport.camera,
+                drawnGeometry,
+                drawnMaterial,
+                candidate,
+              );
+            }
+            Reflect.apply(viewport.scene.onAfterRender, viewport.scene, [renderer, viewport.scene, viewport.camera]);
+            const observedBindings = await observed;
+            expect(observedBindings.samples).toHaveLength(3);
+            expect(captureSpy).toHaveBeenCalledOnce();
+
+            const detached = bridge.observeBackendBindings();
+            drawnMesh.onAfterRender(renderer, viewport.scene, viewport.camera, drawnGeometry, drawnMaterial, candidate);
+            candidate.removeFromParent();
+            Reflect.apply(viewport.scene.onAfterRender, viewport.scene, [renderer, viewport.scene, viewport.camera]);
+            await expect(detached).rejects.toThrow('subject changed');
+            viewport.scene.add(candidate);
+
+            const poseChanged = bridge.observeBackendBindings();
+            drawnMesh.onAfterRender(renderer, viewport.scene, viewport.camera, drawnGeometry, drawnMaterial, candidate);
+            Object.assign(capture, { isCurrent: () => false });
+            Reflect.apply(viewport.scene.onAfterRender, viewport.scene, [renderer, viewport.scene, viewport.camera]);
+            await expect(poseChanged).rejects.toThrow('subject changed');
+            Object.assign(capture, { isCurrent: () => true });
+
+            const sourceChanged = bridge.observeBackendBindings();
+            drawnMesh.onAfterRender(renderer, viewport.scene, viewport.camera, drawnGeometry, drawnMaterial, candidate);
+            setGltfAssemblyBounds(candidate, {
+              bounds: posedInput.source.metadata.bounds,
+              components: [],
+              unitId,
+              source: { display: poseDisplay, metadata: mock<typeof posedInput.source.metadata>() },
+            });
+            Reflect.apply(viewport.scene.onAfterRender, viewport.scene, [renderer, viewport.scene, viewport.camera]);
+            await expect(sourceChanged).rejects.toThrow('subject changed');
+            setGltfAssemblyBounds(candidate, {
+              bounds: posedInput.source.metadata.bounds,
+              components: [],
+              unitId,
+              source: { display: poseDisplay, metadata: posedInput.source.metadata },
+            });
+          } finally {
+            Object.assign(capture, { surfaces: priorSurfaces, edges: priorEdges, isCurrent: priorCurrent });
+            Object.assign(renderer, { backend: priorBackend });
+            vi.unstubAllGlobals();
+            candidate.remove(drawnMesh);
+            drawnGeometry.dispose();
+            drawnMaterial.dispose();
+          }
           expect(bridge.armCadTelemetryIngress()).toBe(true);
           const emit = telemetryClient.on.mock.calls[0]?.[1] as (batch: {
             entries: Array<{

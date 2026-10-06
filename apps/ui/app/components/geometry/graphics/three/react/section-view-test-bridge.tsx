@@ -2041,16 +2041,18 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         const backend = bridge.getGraphicsBackend();
         const isCurrent = (): boolean => {
           const viewport = get();
-          const fresh = captureCommittedGltfDrawInventory(scene);
+          let attached: THREE.Object3D | undefined = root;
+          while (attached && attached !== scene) {
+            attached = attached.parent ?? undefined;
+          }
+          const source = getGltfAssemblySource(root);
           return (
             live &&
             subject.isCurrent() &&
             capture.isCurrent() &&
-            fresh?.candidateSceneId === capture.candidateSceneId &&
-            fresh.display === capture.display &&
-            fresh.presentationRevision === capture.presentationRevision &&
-            fresh.poseRevision === capture.poseRevision &&
-            fresh.unitId === capture.unitId &&
+            attached === scene &&
+            source?.display === capture.display &&
+            source.metadata === capture.metadata &&
             viewport.gl === gl &&
             viewport.camera === camera &&
             viewport.size.width === width &&

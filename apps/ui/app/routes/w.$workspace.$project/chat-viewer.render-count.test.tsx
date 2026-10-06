@@ -191,7 +191,13 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
     return null;
   },
 }));
-vi.mock('#routes/w.$workspace.$project/chat-stack-trace.js', () => ({ ChatStackTrace: () => null }));
+vi.mock('#routes/w.$workspace.$project/chat-stack-trace.js', () => ({
+  ViewerIssues: ({
+    children,
+  }: {
+    readonly children: (parts: { segment: React.ReactNode; list: React.ReactNode }) => React.ReactNode;
+  }): React.ReactNode => children({ segment: null, list: null }),
+}));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-status.js', () => ({ ChatViewerStatus: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-interface-graphics.js', () => ({ ChatInterfaceGraphics: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-interface-status.js', () => ({ ChatInterfaceStatus: () => null }));

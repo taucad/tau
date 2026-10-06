@@ -19,6 +19,7 @@ import {
   uiCloseTarget,
   uiCpuProfile,
   uiCaptureTargetDiagnostics,
+  uiEvaluateTarget,
   uiScalePresentationProbe,
 } from './browser-command.ts';
 /* oxlint-enable no-restricted-imports */
@@ -102,6 +103,68 @@ describe('warehouse failure CPU observation through actual Chromium', () => {
       await rm(artifactDirectory(), { recursive: true, force: true });
       vi.restoreAllMocks();
     }
+  });
+
+  it('should persist a recovery evaluation larger than the Vitest WebSocket limit without returning its body', async () => {
+    const page = owned.pages().at(0);
+    if (!page) {
+      throw new Error('Actual preparation page is unavailable.');
+    }
+    const evidence = {
+      identity: {
+        root: 'checked-root',
+        candidateSceneId: 'candidate-1',
+        presentationRevision: 1,
+        unitId: 'unit-1',
+        poseRevision: 2,
+        viewportActorSessionId: 'viewport-1',
+        backend: 'webgl',
+      },
+      inventory: 'x'.repeat(100 * 1024 * 1024),
+    };
+    const receipt = await uiEvaluateTarget(
+      context,
+      `() => ({ identity: ${JSON.stringify(evidence.identity)}, inventory: 'x'.repeat(100 * 1024 * 1024) })`,
+      undefined,
+      undefined,
+      's15-webgl-warehouse-recovery-before.json',
+    );
+    expect(receipt).toMatchObject({ identity: evidence.identity });
+    if (typeof receipt !== 'object' || receipt === null || !('path' in receipt) || typeof receipt.path !== 'string') {
+      throw new TypeError('Recovery artifact receipt has no path.');
+    }
+    const stored = await readFile(receipt.path);
+    const original = Buffer.from(JSON.stringify(evidence, undefined, 2));
+    expect(stored.byteLength).toBeGreaterThan(100 * 1024 * 1024);
+    expect(stored.equals(original)).toBe(true);
+    expect(receipt).toMatchObject({
+      byteLength: stored.byteLength,
+      sha256: createHash('sha256').update(stored).digest('hex'),
+    });
+    expect(Buffer.byteLength(JSON.stringify(receipt))).toBeLessThan(1024);
+    const reconstructed = JSON.parse(stored.toString('utf8')) as typeof evidence;
+    expect(reconstructed.identity).toEqual(evidence.identity);
+    expect(reconstructed.inventory).toHaveLength(evidence.inventory.length);
+  }, 30_000);
+
+  it('should preserve evaluation rejection and refuse an invalid recovery artifact name', async () => {
+    const page = owned.pages().at(0);
+    if (!page) {
+      throw new Error('Actual preparation page is unavailable.');
+    }
+    const error = new Error('Current recovery subject retired.');
+    vi.spyOn(page, 'evaluate').mockRejectedValueOnce(error);
+    await expect(
+      uiEvaluateTarget(context, '() => evidence', undefined, undefined, 's15-webgl-warehouse-recovery-before.json'),
+    ).rejects.toBe(error);
+    await expect(
+      readFile(resolve(artifactDirectory(), 's15-webgl-warehouse-recovery-before.json')),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(uiEvaluateTarget(context, '() => evidence', undefined, undefined, '../escape.json')).rejects.toThrow(
+      'Invalid warehouse recovery artifact name.',
+    );
   });
 
   type PreparationWorkerKind = 'current' | 'multiple' | 'foreign-name' | 'foreign-script';

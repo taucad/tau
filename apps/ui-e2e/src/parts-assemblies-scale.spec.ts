@@ -22,130 +22,147 @@ import { assertOrdinaryParityDiagnostics } from '#support/parts-assemblies-parit
 import type { AssemblyTestBridgeApi, AssemblyTestCamera } from '#support/parts-assemblies-motion.js';
 
 // Forward the existing bridge inventory as opaque data; its rows are defined only by the producer owner.
+const captureScaleViewportEvidenceInPage = (includeRenderDevice: boolean) => {
+  const bridge = (
+    globalThis as typeof globalThis & {
+      __TAU_SECTION_VIEW_TEST__?: {
+        getCommittedAssembly(): { assemblyDisplay: { root: { digest: string } } | undefined; isCurrent(): boolean };
+        getCommittedDrawInventory(): unknown;
+        getAssemblyResourceTelemetry(): readonly TelemetrySpanRecord[];
+        getCadActivity(): unknown;
+        getCamera(): unknown;
+        getViewportCanvas(): HTMLCanvasElement;
+        getRendererIdentity(
+          options?: Readonly<{ includeRenderDevice?: boolean }>,
+        ): ReturnType<AssemblyTestBridgeApi['getRendererIdentity']>;
+      };
+    }
+  ).__TAU_SECTION_VIEW_TEST__;
+  const subject = bridge?.getCommittedAssembly();
+  if (!bridge || !subject?.assemblyDisplay || !subject.isCurrent()) {
+    throw new Error('A coherent scale viewport is unavailable.');
+  }
+  const inventory = bridge.getCommittedDrawInventory();
+  if (
+    typeof inventory !== 'object' ||
+    inventory === null ||
+    !('key' in inventory) ||
+    inventory.key !== subject.assemblyDisplay.root.digest ||
+    !('candidateSceneId' in inventory) ||
+    typeof inventory.candidateSceneId !== 'string' ||
+    inventory.candidateSceneId.length === 0 ||
+    !('presentationRevision' in inventory) ||
+    typeof inventory.presentationRevision !== 'number' ||
+    !('unitId' in inventory) ||
+    typeof inventory.unitId !== 'string' ||
+    !('poseRevision' in inventory) ||
+    typeof inventory.poseRevision !== 'number'
+  ) {
+    throw new Error('The mounted producer has no current scale inventory.');
+  }
+  if (
+    !('frustumSurfaceTriangleUpperBound' in inventory) ||
+    typeof inventory.frustumSurfaceTriangleUpperBound !== 'number' ||
+    !Number.isFinite(inventory.frustumSurfaceTriangleUpperBound) ||
+    inventory.frustumSurfaceTriangleUpperBound < 0 ||
+    !('residentMandatoryEdgeTriangles' in inventory) ||
+    typeof inventory.residentMandatoryEdgeTriangles !== 'number' ||
+    !Number.isFinite(inventory.residentMandatoryEdgeTriangles) ||
+    inventory.residentMandatoryEdgeTriangles < 0
+  ) {
+    throw new Error('The mounted scale triangle inventory is unavailable.');
+  }
+  const resources = bridge.getAssemblyResourceTelemetry();
+  const viewportIds = new Set(
+    resources.flatMap(({ detail }) => {
+      const id = detail?.['viewportActorSessionId'];
+      return typeof id === 'string' && id.length > 0 ? [id] : [];
+    }),
+  );
+  const [viewportActorSessionId] = viewportIds;
+  if (viewportIds.size !== 1 || viewportActorSessionId === undefined) {
+    throw new Error('The actual scale viewport actor authority is unavailable.');
+  }
+  const canvas = includeRenderDevice ? bridge.getViewportCanvas() : undefined;
+  if (canvas && !canvas.isConnected) {
+    throw new Error('Native scale identity requires the actual mounted canvas.');
+  }
+  const nativeIdentityStartedAt = includeRenderDevice ? performance.now() : undefined;
+  const renderer = bridge.getRendererIdentity(includeRenderDevice ? { includeRenderDevice: true } : undefined);
+  const nativeIdentityFinishedAt = includeRenderDevice ? performance.now() : undefined;
+  if (includeRenderDevice && !renderer.renderDevice) {
+    throw new Error('The opt-in scale native identity response is unavailable.');
+  }
+  const result = {
+    identity: {
+      root: subject.assemblyDisplay.root.digest,
+      candidateSceneId: inventory.candidateSceneId,
+      presentationRevision: inventory.presentationRevision,
+      unitId: inventory.unitId,
+      poseRevision: inventory.poseRevision,
+      viewportActorSessionId,
+      backend: renderer.api,
+    },
+    inventory,
+    triangleUpperBound: inventory.frustumSurfaceTriangleUpperBound + inventory.residentMandatoryEdgeTriangles,
+    camera: bridge.getCamera(),
+    renderer,
+    nativeIdentityWindow: includeRenderDevice
+      ? {
+          timeOrigin: performance.timeOrigin,
+          startedAt: nativeIdentityStartedAt,
+          finishedAt: nativeIdentityFinishedAt,
+          semantics: 'Untimed native identity read; excluded from trusted-input and presented-frame timing.',
+        }
+      : undefined,
+    resources,
+    activity: bridge.getCadActivity(),
+  };
+  if (!subject.isCurrent()) {
+    throw new Error('Scale presentation changed during evidence collection.');
+  }
+  if (includeRenderDevice) {
+    const current = bridge.getCommittedDrawInventory();
+    if (
+      typeof current !== 'object' ||
+      current === null ||
+      !('key' in current) ||
+      current.key !== inventory.key ||
+      !('candidateSceneId' in current) ||
+      current.candidateSceneId !== inventory.candidateSceneId ||
+      !('presentationRevision' in current) ||
+      current.presentationRevision !== inventory.presentationRevision ||
+      !('unitId' in current) ||
+      current.unitId !== inventory.unitId ||
+      !('poseRevision' in current) ||
+      current.poseRevision !== inventory.poseRevision ||
+      !canvas?.isConnected ||
+      bridge.getViewportCanvas() !== canvas ||
+      (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: unknown }).__TAU_SECTION_VIEW_TEST__ !== bridge
+    ) {
+      throw new Error('Scale candidate or native canvas changed during the untimed identity read.');
+    }
+  }
+  return result;
+};
 const captureScaleViewportEvidence = async (includeRenderDevice = false) =>
-  target.evaluate((includeRenderDevice) => {
-    const bridge = (
-      globalThis as typeof globalThis & {
-        __TAU_SECTION_VIEW_TEST__?: {
-          getCommittedAssembly(): { assemblyDisplay: { root: { digest: string } } | undefined; isCurrent(): boolean };
-          getCommittedDrawInventory(): unknown;
-          getAssemblyResourceTelemetry(): readonly TelemetrySpanRecord[];
-          getCadActivity(): unknown;
-          getCamera(): unknown;
-          getViewportCanvas(): HTMLCanvasElement;
-          getRendererIdentity(
-            options?: Readonly<{ includeRenderDevice?: boolean }>,
-          ): ReturnType<AssemblyTestBridgeApi['getRendererIdentity']>;
-        };
-      }
-    ).__TAU_SECTION_VIEW_TEST__;
-    const subject = bridge?.getCommittedAssembly();
-    if (!bridge || !subject?.assemblyDisplay || !subject.isCurrent()) {
-      throw new Error('A coherent scale viewport is unavailable.');
-    }
-    const inventory = bridge.getCommittedDrawInventory();
-    if (
-      typeof inventory !== 'object' ||
-      inventory === null ||
-      !('key' in inventory) ||
-      inventory.key !== subject.assemblyDisplay.root.digest ||
-      !('candidateSceneId' in inventory) ||
-      typeof inventory.candidateSceneId !== 'string' ||
-      inventory.candidateSceneId.length === 0 ||
-      !('presentationRevision' in inventory) ||
-      typeof inventory.presentationRevision !== 'number' ||
-      !('unitId' in inventory) ||
-      typeof inventory.unitId !== 'string' ||
-      !('poseRevision' in inventory) ||
-      typeof inventory.poseRevision !== 'number'
-    ) {
-      throw new Error('The mounted producer has no current scale inventory.');
-    }
-    if (
-      !('frustumSurfaceTriangleUpperBound' in inventory) ||
-      typeof inventory.frustumSurfaceTriangleUpperBound !== 'number' ||
-      !Number.isFinite(inventory.frustumSurfaceTriangleUpperBound) ||
-      inventory.frustumSurfaceTriangleUpperBound < 0 ||
-      !('residentMandatoryEdgeTriangles' in inventory) ||
-      typeof inventory.residentMandatoryEdgeTriangles !== 'number' ||
-      !Number.isFinite(inventory.residentMandatoryEdgeTriangles) ||
-      inventory.residentMandatoryEdgeTriangles < 0
-    ) {
-      throw new Error('The mounted scale triangle inventory is unavailable.');
-    }
-    const resources = bridge.getAssemblyResourceTelemetry();
-    const viewportIds = new Set(
-      resources.flatMap(({ detail }) => {
-        const id = detail?.['viewportActorSessionId'];
-        return typeof id === 'string' && id.length > 0 ? [id] : [];
-      }),
-    );
-    const [viewportActorSessionId] = viewportIds;
-    if (viewportIds.size !== 1 || viewportActorSessionId === undefined) {
-      throw new Error('The actual scale viewport actor authority is unavailable.');
-    }
-    const canvas = includeRenderDevice ? bridge.getViewportCanvas() : undefined;
-    if (canvas && !canvas.isConnected) {
-      throw new Error('Native scale identity requires the actual mounted canvas.');
-    }
-    const nativeIdentityStartedAt = includeRenderDevice ? performance.now() : undefined;
-    const renderer = bridge.getRendererIdentity(includeRenderDevice ? { includeRenderDevice: true } : undefined);
-    const nativeIdentityFinishedAt = includeRenderDevice ? performance.now() : undefined;
-    if (includeRenderDevice && !renderer.renderDevice) {
-      throw new Error('The opt-in scale native identity response is unavailable.');
-    }
-    const result = {
-      identity: {
-        root: subject.assemblyDisplay.root.digest,
-        candidateSceneId: inventory.candidateSceneId,
-        presentationRevision: inventory.presentationRevision,
-        unitId: inventory.unitId,
-        poseRevision: inventory.poseRevision,
-        viewportActorSessionId,
-        backend: renderer.api,
-      },
-      inventory,
-      triangleUpperBound: inventory.frustumSurfaceTriangleUpperBound + inventory.residentMandatoryEdgeTriangles,
-      camera: bridge.getCamera(),
-      renderer,
-      nativeIdentityWindow: includeRenderDevice
-        ? {
-            timeOrigin: performance.timeOrigin,
-            startedAt: nativeIdentityStartedAt,
-            finishedAt: nativeIdentityFinishedAt,
-            semantics: 'Untimed native identity read; excluded from trusted-input and presented-frame timing.',
-          }
-        : undefined,
-      resources,
-      activity: bridge.getCadActivity(),
-    };
-    if (!subject.isCurrent()) {
-      throw new Error('Scale presentation changed during evidence collection.');
-    }
-    if (includeRenderDevice) {
-      const current = bridge.getCommittedDrawInventory();
-      if (
-        typeof current !== 'object' ||
-        current === null ||
-        !('key' in current) ||
-        current.key !== inventory.key ||
-        !('candidateSceneId' in current) ||
-        current.candidateSceneId !== inventory.candidateSceneId ||
-        !('presentationRevision' in current) ||
-        current.presentationRevision !== inventory.presentationRevision ||
-        !('unitId' in current) ||
-        current.unitId !== inventory.unitId ||
-        !('poseRevision' in current) ||
-        current.poseRevision !== inventory.poseRevision ||
-        !canvas?.isConnected ||
-        bridge.getViewportCanvas() !== canvas ||
-        (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: unknown }).__TAU_SECTION_VIEW_TEST__ !== bridge
-      ) {
-        throw new Error('Scale candidate or native canvas changed during the untimed identity read.');
-      }
-    }
-    return result;
-  }, includeRenderDevice);
+  target.evaluate(captureScaleViewportEvidenceInPage, includeRenderDevice);
+
+const writeWarehouseEvidencePart = async (name: string, value: unknown) => {
+  const content = JSON.stringify(value, undefined, 2);
+  const bytes = new TextEncoder().encode(content);
+  // Include JSON escaping and leave room for Vitest's command envelope below ws's 100 MiB limit.
+  if (new TextEncoder().encode(JSON.stringify([name, content])).byteLength > 100 * 1024 * 1024 - 64 * 1024) {
+    throw new RangeError('Warehouse evidence part exceeds its WebSocket artifact bound.');
+  }
+  await target.writeArtifact(name, content);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return {
+    path: name,
+    byteLength: bytes.byteLength,
+    sha256: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(''),
+  };
+};
 
 const readScaleCommittedPin = async (
   externalFiles: ReadonlyArray<{ path: string; digest: string; byteLength: number; bytes: readonly number[] }> = [],
@@ -2144,8 +2161,8 @@ for (const backend of ['webgl', 'webgpu'] as const) {
     await target.stopCpuProfile(`s15-${backend}-warehouse-startup.cpuprofile`);
     // Freeze the existing Model pane before image baselines so selection does not change the canvas dimensions.
     await openS15ModelPane();
-    const initial = await readS15State();
     const pin = await readScaleCommittedPin();
+    const initial = await readS15State();
     expect(pin.root).toEqual(completedCorpusRoot);
     expect(pin.root.digest).toBe(initial.root.digest);
     expect(pin.definitions).toBe(1000);
@@ -2279,45 +2296,62 @@ for (const backend of ['webgl', 'webgpu'] as const) {
         s15Number(phase, 'exactResidentBufferCpuBytes'),
       );
     }
-    const recoveryProbeBefore = await captureScaleViewportEvidence();
+    const recoveryProbeBefore = await target.evaluateWarehouseRecoveryArtifact(
+      captureScaleViewportEvidenceInPage,
+      false,
+      `s15-${backend}-warehouse-recovery-before.json`,
+    );
     expect(recoveryProbeBefore.identity.root).toBe(pin.root.digest);
     const rawHeapAndPresentation = await target.scalePresentationProbe(`s15-${backend}-warehouse-recovery-raw`);
-    const recoveryProbeAfter = await captureScaleViewportEvidence();
+    const recoveryProbeAfter = await target.evaluateWarehouseRecoveryArtifact(
+      captureScaleViewportEvidenceInPage,
+      false,
+      `s15-${backend}-warehouse-recovery-after.json`,
+    );
     const { candidateSceneId: recoveryBeforeCandidate, ...recoveryHeldBefore } = recoveryProbeBefore.identity;
     const { candidateSceneId: recoveryAfterCandidate, ...recoveryHeldAfter } = recoveryProbeAfter.identity;
     expect(recoveryHeldAfter).toEqual(recoveryHeldBefore);
     expect(rawHeapAndPresentation.dataLossOccurred).toBe(false);
     expect(rawHeapAndPresentation.traceBytes).toBeGreaterThan(0);
     expect(rawHeapAndPresentation.presentationQualification).toBe('raw-probe-only');
-    await target.writeArtifact(
-      `s15-${backend}-warehouse-calibration-recovery.json`,
-      JSON.stringify(
-        {
-          status: 'ACTUAL_PRODUCT_CONTROLS_WITH_PARTIAL_ACCOUNTING_NOT_FULL_S15_S16_ACCEPTANCE',
-          reviewed: approved,
-          publicationDenominator: { definitions: 1000, occurrences: 100_000 },
-          completeCheckedPin: pin,
-          footprint: s15Footprint(calibrated),
-          phases,
-          visibleTriangles,
-          pixels: { warehousePixels, selectedPixels, recoveredPixels },
-          knownExactBufferPeak,
-          rawHeapAndPresentation,
-          recoveryProbe: {
-            before: recoveryProbeBefore,
-            after: recoveryProbeAfter,
-            candidateBoundary: { before: recoveryBeforeCandidate, after: recoveryAfterCandidate },
-          },
-          budgets: { approvedCpuBytes: null, approvedGpuBytes: null, knownExactBufferPeak },
-          memoryQualification:
-            'CDP report contains target-isolate heapBefore/heapAfter and memory dumps. Those raw samples are not all-worker/WASM/GPU bytes and are not numeric recovery acceptance. Current/candidate unique-buffer telemetry is separate and its unmeasuredInventoryJson must remain explicit.',
-          nextGate:
-            'Review useful named warehouse imagery, full-denominator emitted triangles/mandatory edges, actual pixel quality, backend upload/disposal, reader/source/meta/WASM inventory, and measured budgets. Cuboid identity under this policy is not independent LOD calibration.',
-        },
-        undefined,
-        2,
-      ),
+    const pinArtifact = await writeWarehouseEvidencePart(`s15-${backend}-warehouse-checked-pin.json`, pin);
+    const footprintArtifact = await writeWarehouseEvidencePart(
+      `s15-${backend}-warehouse-footprint.json`,
+      s15Footprint(calibrated),
     );
+    const phaseNames = ['initial', 'calibrated', 'selected', 'evicted', 'recovered'] as const;
+    const phaseArtifacts: Array<Awaited<ReturnType<typeof writeWarehouseEvidencePart>>> = [];
+    for (const [index, phase] of phases.entries()) {
+      const phaseName = phaseNames[index];
+      if (phaseName === undefined) {
+        throw new RangeError('Warehouse evidence has an unexpected phase.');
+      }
+      // Keep the five large RPC writes serial so one field cannot combine with another in flight.
+      // oxlint-disable-next-line no-await-in-loop -- Each artifact must finish before the next bounded Vitest RPC.
+      phaseArtifacts.push(await writeWarehouseEvidencePart(`s15-${backend}-warehouse-${phaseName}-phase.json`, phase));
+    }
+    await writeWarehouseEvidencePart(`s15-${backend}-warehouse-calibration-recovery.json`, {
+      status: 'ACTUAL_PRODUCT_CONTROLS_WITH_PARTIAL_ACCOUNTING_NOT_FULL_S15_S16_ACCEPTANCE',
+      reviewed: approved,
+      publicationDenominator: { definitions: 1000, occurrences: 100_000 },
+      completeCheckedPin: pinArtifact,
+      footprint: footprintArtifact,
+      phases: phaseArtifacts,
+      visibleTriangles,
+      pixels: { warehousePixels, selectedPixels, recoveredPixels },
+      knownExactBufferPeak,
+      rawHeapAndPresentation,
+      recoveryProbe: {
+        before: recoveryProbeBefore,
+        after: recoveryProbeAfter,
+        candidateBoundary: { before: recoveryBeforeCandidate, after: recoveryAfterCandidate },
+      },
+      budgets: { approvedCpuBytes: null, approvedGpuBytes: null, knownExactBufferPeak },
+      memoryQualification:
+        'CDP report contains target-isolate heapBefore/heapAfter and memory dumps. Those raw samples are not all-worker/WASM/GPU bytes and are not numeric recovery acceptance. Current/candidate unique-buffer telemetry is separate and its unmeasuredInventoryJson must remain explicit.',
+      nextGate:
+        'Review useful named warehouse imagery, full-denominator emitted triangles/mandatory edges, actual pixel quality, backend upload/disposal, reader/source/meta/WASM inventory, and measured budgets. Cuboid identity under this policy is not independent LOD calibration.',
+    });
   });
 }
 

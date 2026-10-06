@@ -252,7 +252,12 @@ export type UiBrowserCommands = {
   uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
   uiEmulateReducedMotion(reducedMotion: 'no-preference' | 'reduce', surface?: TargetSurface): Promise<void>;
-  uiEvaluateTarget(source: string, argument?: unknown, surface?: TargetSurface): Promise<unknown>;
+  uiEvaluateTarget(
+    source: string,
+    argument?: unknown,
+    surface?: TargetSurface,
+    artifactName?: string,
+  ): Promise<unknown>;
   uiEvaluateTargetLocator(
     selector: string,
     source: string,
@@ -402,6 +407,17 @@ export const evaluate = async <Result, Argument = undefined>(
     argument ?? (surface ? null : undefined),
     surface,
   ) as Promise<Result>;
+export const evaluateWarehouseRecoveryArtifact = async <
+  Result extends Readonly<{ identity: unknown }>,
+  Argument = undefined,
+>(
+  callback: (argument: Argument) => Result | Promise<Result>,
+  argument: Argument,
+  artifactName: string,
+): Promise<Readonly<{ identity: Result['identity']; path: string; sha256: string; byteLength: number }>> =>
+  server.commands.uiEvaluateTarget(callback.toString(), argument ?? null, 'primary', artifactName) as Promise<
+    Readonly<{ identity: Result['identity']; path: string; sha256: string; byteLength: number }>
+  >;
 export const evaluateLocator = async <Result, Argument = undefined>(
   selector: TargetSelector,
   callback: (element: Element, argument: Argument) => Result | Promise<Result>,

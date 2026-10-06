@@ -2069,14 +2069,48 @@ export const uiReadTarget: BrowserCommand<
 };
 
 export const uiEvaluateTarget: BrowserCommand<
-  [source: string, argument?: unknown, surface?: TargetSurface],
+  [source: string, argument?: unknown, surface?: TargetSurface, artifactName?: string],
   unknown
-> = async (commandContext, source, argument, surface) =>
-  pageFor(sessionFor(commandContext), surface).evaluate(
+> = async (commandContext, source, argument, surface, artifactName) => {
+  if (
+    artifactName !== undefined &&
+    !/^s15-(?:webgl|webgpu)-warehouse-recovery-(?:before|after)\.json$/u.test(artifactName)
+  ) {
+    throw new TypeError('Invalid warehouse recovery artifact name.');
+  }
+  const result: unknown = await pageFor(sessionFor(commandContext), surface).evaluate(
     ({ argument: value, source: functionSource }) =>
       (globalThis.eval(`(${functionSource})`) as (input: unknown) => unknown)(value),
     { argument, source },
   );
+  if (artifactName === undefined) {
+    return result;
+  }
+  if (!/^[A-Za-z0-9-]{1,80}$/u.test(commandContext.sessionId)) {
+    throw new TypeError('Invalid warehouse recovery session ID.');
+  }
+  if (typeof result !== 'object' || result === null || !('identity' in result)) {
+    throw new TypeError('Warehouse recovery evidence has no current identity.');
+  }
+  const identity: unknown = result.identity;
+  if (typeof identity !== 'object' || identity === null) {
+    throw new TypeError('Warehouse recovery evidence has an invalid current identity.');
+  }
+  if (Buffer.byteLength(JSON.stringify(identity)) > 4096) {
+    throw new RangeError('Warehouse recovery identity exceeds its receipt bound.');
+  }
+  const content = JSON.stringify(result, undefined, 2);
+  const bytes = Buffer.from(content);
+  const path = resolve(outputRoot, commandContext.sessionId, artifactName);
+  await mkdir(resolve(outputRoot, commandContext.sessionId), { recursive: true });
+  await writeFile(path, bytes);
+  return {
+    identity,
+    path,
+    byteLength: bytes.byteLength,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+  };
+};
 
 export const uiEvaluateTargetLocator: BrowserCommand<
   [selector: string, source: string, argument?: unknown, surface?: TargetSurface],

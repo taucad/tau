@@ -180,6 +180,7 @@ describe('standard physical materials through Replicad and the runtime', () => {
     const deserialize = definition.deserializeHandle!;
     const context = mock<Parameters<typeof deserialize>[2]>();
     context.replicadLibrary = library;
+    context.openCascade = library.getOC();
     const image = Uint8Array.from(
       Buffer.from(
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1EAAAAASUVORK5CYII=',

@@ -21,6 +21,7 @@ import { offersFor, replicadKernel } from '#replicad.kernel.js';
 import { exportSTEP } from '#export/interface-export.js';
 import type * as ReplicadModule from 'replicad';
 import { normalizeRenderShapes, render } from '#utils/render-output.js';
+import { measureReplicadPhysical } from '#utils/physical-evidence.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
 import {
   placePublishedEntry,
@@ -2317,6 +2318,46 @@ export default function main() {
 
       const exportResult = await exportLastRender(client, 'stl', { binary: true });
       assertExportSuccess(exportResult);
+    });
+
+    it('should export each client’s STL with its own native instance after another client initializes', async () => {
+      const first = createClient({
+        'first.ts': `import { makeBox } from 'replicad';
+          export default () => makeBox([0, 0, 0], [11, 8, 6]);`,
+      });
+      const second = createClient({
+        'second.ts': `import { makeBox } from 'replicad';
+          export default () => makeBox([0, 0, 0], [2, 3, 4]);`,
+      });
+      assertRenderingSuccess(await renderGeometry(first, { file: createGeometryFile('first.ts'), parameters: {} }));
+      assertRenderingSuccess(await renderGeometry(second, { file: createGeometryFile('second.ts'), parameters: {} }));
+
+      const firstExport = await exportLastRender(first, 'stl', { binary: true });
+      assertExportSuccess(firstExport);
+      const firstVertices = readBinaryStlEvidence(firstExport.files[0].bytes).vertices;
+      expect(firstVertices.length).toBeGreaterThan(0);
+      expect([0, 1, 2].map((axis) => Math.max(...firstVertices.map((vertex) => vertex[axis]!)))).toEqual([11, 8, 6]);
+
+      const secondExport = await exportLastRender(second, 'stl', { binary: true });
+      assertExportSuccess(secondExport);
+      const secondVertices = readBinaryStlEvidence(secondExport.files[0].bytes).vertices;
+      expect(secondVertices.length).toBeGreaterThan(0);
+      expect([0, 1, 2].map((axis) => Math.max(...secondVertices.map((vertex) => vertex[axis]!)))).toEqual([2, 3, 4]);
+
+      const firstPhysicalRender = await renderGeometry(first, {
+        file: createGeometryFile('first.ts'),
+        parameters: {},
+        content: { includePhysical: true },
+      });
+      assertRenderingSuccess(firstPhysicalRender);
+      const firstGlb = extractGltfFromResult(firstPhysicalRender);
+      if (!firstGlb) {
+        throw new Error('First client’s GLB is missing after the second client exported.');
+      }
+      const firstSizeMetres = await readGltfSize(firstGlb);
+      expect(firstSizeMetres[0]).toBeCloseTo(0.011, 6);
+      expect(firstSizeMetres[1]).toBeCloseTo(0.006, 6);
+      expect(firstSizeMetres[2]).toBeCloseTo(0.008, 6);
     });
 
     it('should rotate asymmetric binary STL vertices and normals to y-up exactly once', async () => {
@@ -4622,9 +4663,13 @@ describe('mechanism export', () => {
 type ReplicadKernelContext = Parameters<NonNullable<typeof replicadDefinition.serializeHandle>>[2];
 type ReplicadLibrary = typeof ReplicadModule;
 let snapshotLibrary: ReplicadLibrary;
-const contextWithLibrary = (library: ReplicadLibrary): ReplicadKernelContext => {
+const contextWithLibrary = (
+  library: ReplicadLibrary,
+  openCascade: ReplicadKernelContext['openCascade'] = library.getOC(),
+): ReplicadKernelContext => {
   const context = mock<ReplicadKernelContext>();
   context.replicadLibrary = library;
+  context.openCascade = openCascade;
   return context;
 };
 
@@ -4666,6 +4711,68 @@ describe('serializeHandle', () => {
       }),
     );
   }, 60_000);
+
+  it('should serialize, restore, and place a native handle with its owning instance after another client initializes', async () => {
+    const first = createClient({
+      'first.ts': `import { makeBox } from 'replicad'; export default () => makeBox([0, 0, 0], [3, 4, 5]);`,
+    });
+    assertRenderingSuccess(await renderGeometry(first, { file: createGeometryFile('first.ts'), parameters: {} }));
+    const firstOc = snapshotLibrary.getOC();
+    const shape = snapshotLibrary.makeBox([0, 0, 0], [17, 9, 5]);
+    const firstContext = contextWithLibrary(snapshotLibrary, firstOc);
+    const second = createClient({
+      'second.ts': `import { makeBox } from 'replicad'; export default () => makeBox([0, 0, 0], [2, 3, 4]);`,
+    });
+    assertRenderingSuccess(await renderGeometry(second, { file: createGeometryFile('second.ts'), parameters: {} }));
+    const secondOc = snapshotLibrary.getOC();
+    expect(secondOc).not.toBe(firstOc);
+
+    try {
+      const serialized = replicadDefinition.serializeHandle!(
+        { handle: { shapes: [{ shape, name: 'body' }] } },
+        createMockKernelRuntime(),
+        firstContext,
+      );
+      if (!serialized) {
+        throw new Error('The first native instance did not serialize its solid.');
+      }
+      assertExportSuccess(await exportLastRender(second, 'stl', { binary: true }));
+      expect(snapshotLibrary.getOC()).toBe(secondOc);
+      const restored = await replicadDefinition.deserializeHandle!(
+        { serialized },
+        createMockKernelRuntime(),
+        firstContext,
+      );
+      try {
+        assertExportSuccess(await exportLastRender(second, 'stl', { binary: true }));
+        expect(snapshotLibrary.getOC()).toBe(secondOc);
+        const placed = await replicadDefinition.composeHandles!(
+          {
+            occurrences: [
+              {
+                handle: restored,
+                occurrencePath: ['placed'],
+                worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+              },
+            ],
+          },
+          createMockKernelRuntime(),
+          firstContext,
+        );
+        try {
+          const physical = await measureReplicadPhysical({ shape: placed.shapes[0]!.shape }, firstOc);
+          expect(physical.volume).toMatchObject({ state: 'measured', valueMm3: 765 });
+          expect(placed.shapes[0]!.shape.boundingBox.bounds).toEqual(shape.boundingBox.bounds);
+        } finally {
+          placed.shapes[0]?.shape.delete();
+        }
+      } finally {
+        restored.shapes[0]?.shape.delete();
+      }
+    } finally {
+      shape.delete();
+    }
+  });
 
   it('should serialize nativeHandle to BRep strings with metadata', async () => {
     const { drawRoundedRectangle } = await import('replicad');

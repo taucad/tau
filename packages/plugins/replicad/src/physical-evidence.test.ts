@@ -62,6 +62,8 @@ describe('requested Replicad physical evidence', () => {
     expect(second.volume).toEqual(first.volume);
     expect(second.density?.valueGPerCm3).toBe(7.85);
     expect(volumeWork).toHaveBeenCalledTimes(1);
+    // This shape belongs to the first native instance; capture its STL before the next client binds a different one.
+    const freshStl = fresh.blobSTL({ binary: true });
     const meshClient = clientFor(`import { importSTLAsMesh, makeBox } from 'replicad';
       export default async () => ({
         shape: await importSTLAsMesh(makeBox([0,0,0], [1,1,1]).blobSTL({ binary: true })),
@@ -83,7 +85,7 @@ describe('requested Replicad physical evidence', () => {
       volume: { state: 'unavailable', reason: 'not-solid' },
       density: { valueGPerCm3: 1.55, provenance: 'authored-shape-config' },
     });
-    const importedMesh = await replicad.importSTLAsMesh(fresh.blobSTL({ binary: true }));
+    const importedMesh = await replicad.importSTLAsMesh(freshStl);
     const meshPhysical = await measureReplicadPhysical({ shape: importedMesh, density: 1.55 }, getOC(), volumeWork);
     expect(meshPhysical).toEqual({
       volume: { state: 'unavailable', reason: 'not-solid' },

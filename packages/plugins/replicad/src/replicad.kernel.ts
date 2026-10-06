@@ -979,6 +979,7 @@ export const replicadKernel = defineKernel({
   },
 
   async render(input, runtime, context) {
+    context.replicadLibrary.setOC(context.openCascade);
     const { handle } = input;
     if (input.view === 'drawing') {
       const drawings = handle.shapes.filter(({ shape }) => isDrawingShape(shape));
@@ -1018,6 +1019,8 @@ export const replicadKernel = defineKernel({
           ...(includePhysical ? { physical: await measureReplicadPhysical(entry, context.openCascade) } : {}),
         })),
       );
+
+      context.replicadLibrary.setOC(context.openCascade);
 
       let renderMode: 'flat' | 'tessellation-instanced' | 'mixed' = 'flat';
       const renderedShapes = await tracedPhase(tracer, 'mesh.renderDisplayTessellation', () => {
@@ -1093,6 +1096,8 @@ export const replicadKernel = defineKernel({
   },
 
   async export(input, runtime, context) {
+    // Replicad resolves native calls through a module-global OC binding. Another in-process client may have initialized since this handle was built.
+    context.replicadLibrary.setOC(context.openCascade);
     return context.libraryTrace.runInScope({
       scope: 'export',
       operation: async () => {
@@ -1147,6 +1152,7 @@ export const replicadKernel = defineKernel({
                   : {}),
               })),
             );
+            context.replicadLibrary.setOC(context.openCascade);
             const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
               render(namedShapes, {
                 tessellation: { linearTolerance, angularTolerance },
@@ -1283,6 +1289,7 @@ export const replicadKernel = defineKernel({
   },
 
   serializeHandle({ handle }, runtime, context) {
+    context.replicadLibrary.setOC(context.openCascade);
     return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () =>
       handle.shapes.every(
         ({ shape }) => shape instanceof context.replicadLibrary.Shape || isMeshShape(shape, context.replicadLibrary),
@@ -1299,6 +1306,7 @@ export const replicadKernel = defineKernel({
     if (serialized.shapes.some((entry) => entry.kind === 'mesh')) {
       await ensureManifold(context.replicadLibrary);
     }
+    context.replicadLibrary.setOC(context.openCascade);
     const shapes: NativeHandleEntry[] = [];
     try {
       for (const entry of serialized.shapes) {
@@ -1318,6 +1326,7 @@ export const replicadKernel = defineKernel({
   },
 
   async composeHandles({ occurrences }, _runtime, context): Promise<NativeHandle> {
+    context.replicadLibrary.setOC(context.openCascade);
     const shapes: NativeHandleEntry[] = [];
     try {
       // Preflight every identity join before native cloning; legacy ordinary composition keeps its prior route.

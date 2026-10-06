@@ -3,7 +3,7 @@ type ReportOptions = {
   name: string;
   /** Milliseconds. */
   duration: number;
-  detail: Record<string, string>;
+  detail: Readonly<Record<string, unknown>>;
 };
 
 /**

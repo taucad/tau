@@ -16,7 +16,14 @@ export {
   GenAiContextCompactionFailureDisposition,
   RpcStatus,
 } from '#attributes.js';
-export { IngestEntryName, clientMetricEntrySchema, ingestPayloadSchema } from '#ingest.js';
+export {
+  IngestEntryName,
+  clientMetricEntrySchema,
+  ingestPayloadSchema,
+  agentIdSchema,
+  agentPlacements,
+  agentToolKinds,
+} from '#ingest.js';
 export type { ClientMetricEntry, IngestPayload } from '#ingest.js';
 export { toPrometheusName, PrometheusNames, prometheusNameOf } from '#prometheus.js';
 export type { TelemetryBackend } from '#reporter.js';

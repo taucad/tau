@@ -12,6 +12,8 @@ export const IngestEntryName = {
   EDITOR_LOAD: 'observability.editorLoad',
   WASM_MODULE_LOAD: 'observability.wasmModuleLoad',
   INDEXEDDB_OPERATION: 'observability.indexeddbOperation',
+  AGENT_SESSION: 'agent.session',
+  AGENT_TURN: 'agent.turn',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end OTEL constants block */
 
@@ -83,6 +85,78 @@ const indexeddbOperationEntrySchema = z.object({
     .optional(),
 });
 
+/* Agent usage (W36-C). Every string is a bounded label: ids and codes are shape-checked, the rest are enums. */
+
+/** A descriptor's agent id: `tau`, `claude`, `codex`, … @public */
+export const agentIdSchema = z.string().regex(/^[a-z][\d_a-z-]{0,31}$/);
+
+/** Where an agent turn ran. @public */
+export const agentPlacements = ['browser', 'desktop', 'daemon', 'cloud'] as const;
+
+/** ACP's `ToolKind` taxonomy; Tau's own tools are mapped onto it (`tauToolKinds`). @public */
+export const agentToolKinds = [
+  'read',
+  'edit',
+  'delete',
+  'move',
+  'search',
+  'execute',
+  'think',
+  'fetch',
+  'switch_mode',
+  'other',
+] as const;
+
+/** A refusal or failure code, e.g. `CLI_NOT_FOUND`, `MODEL_STREAM_STALLED`. */
+const agentErrorCodeSchema = z.string().regex(/^[A-Z][\dA-Z_]{0,63}$/);
+
+/** Token counts are per turn; one turn never legitimately reports more than this. */
+const tokenCountSchema = z.number().int().nonnegative().max(100_000_000);
+
+const agentSessionEntrySchema = z.object({
+  name: z.literal(IngestEntryName.AGENT_SESSION),
+  duration: z.number().nonnegative().max(86_400_000),
+  detail: z.object({
+    agentId: agentIdSchema,
+    placement: z.enum(agentPlacements),
+    /** The refusal's code rides the refused turn entry, so `tau.agent.errors` counts it once. */
+    outcome: z.enum(['started', 'ended', 'refused']),
+  }),
+});
+
+/** One settled turn: `duration` is admission to terminal, in milliseconds. */
+const agentTurnEntrySchema = z.object({
+  name: z.literal(IngestEntryName.AGENT_TURN),
+  duration: z.number().nonnegative().max(86_400_000),
+  detail: z.object({
+    agentId: agentIdSchema,
+    placement: z.enum(agentPlacements),
+    outcome: z.enum(['completed', 'cancelled', 'error', 'refused']),
+    errorCode: agentErrorCodeSchema.optional(),
+    /** Admission to the first content update, in milliseconds. */
+    timeToFirstUpdate: z.number().nonnegative().max(86_400_000).optional(),
+    toolCalls: z
+      .array(
+        z.object({
+          kind: z.enum(agentToolKinds),
+          status: z.enum(['completed', 'failed']),
+          count: z.number().int().positive().max(10_000),
+        }),
+      )
+      .max(agentToolKinds.length * 2)
+      .optional(),
+    /** Present only when the agent reported usage; never estimated. */
+    tokens: z
+      .object({
+        input: tokenCountSchema,
+        output: tokenCountSchema,
+        cacheRead: tokenCountSchema,
+        cacheWrite: tokenCountSchema,
+      })
+      .optional(),
+  }),
+});
+
 /**
  * Discriminated union of all client metric entry shapes.
  * Used for validating individual entries in the ingest payload.
@@ -95,6 +169,8 @@ export const clientMetricEntrySchema = z.discriminatedUnion('name', [
   editorLoadEntrySchema,
   wasmModuleLoadEntrySchema,
   indexeddbOperationEntrySchema,
+  agentSessionEntrySchema,
+  agentTurnEntrySchema,
 ]);
 
 /**

@@ -49,6 +49,14 @@ export class TelemetryController {
         this.recordIndexedDbOperation(entry, durationSeconds);
         return;
       }
+      case IngestEntryName.AGENT_SESSION: {
+        this.recordAgentSession(entry);
+        return;
+      }
+      case IngestEntryName.AGENT_TURN: {
+        this.recordAgentTurn(entry, durationSeconds);
+        return;
+      }
       default: {
         const exhaustive: never = entry;
         throw new Error(`Unhandled ingest entry: ${(exhaustive as { name: string }).name}`);
@@ -113,4 +121,44 @@ export class TelemetryController {
       [AttributeKey.INDEXEDDB_STORE]: entry.detail?.store ?? 'unknown',
     });
   }
+
+  /* eslint-disable @typescript-eslint/naming-convention -- keys are the `tau_agent_*` Prometheus label contract */
+  private recordAgentSession(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_SESSION }>): void {
+    const { agentId, placement, outcome } = entry.detail;
+    this.metrics.agentSessions.add(1, { agent_id: agentId, agent_placement: placement, outcome });
+  }
+
+  private recordAgentTurn(
+    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_TURN }>,
+    durationSeconds: number,
+  ): void {
+    const { agentId, placement, outcome, errorCode, timeToFirstUpdate, toolCalls, tokens } = entry.detail;
+    const turn = { agent_id: agentId, agent_placement: placement, outcome };
+    this.metrics.agentTurns.add(1, turn);
+    this.metrics.agentTurnDuration.record(durationSeconds, turn);
+    if (timeToFirstUpdate !== undefined) {
+      this.metrics.agentTimeToFirstUpdate.record(timeToFirstUpdate / 1000, {
+        agent_id: agentId,
+        agent_placement: placement,
+      });
+    }
+    for (const call of toolCalls ?? []) {
+      this.metrics.agentToolCalls.add(call.count, { agent_id: agentId, tool_kind: call.kind, status: call.status });
+    }
+    if (tokens !== undefined) {
+      const byType = [
+        ['input', tokens.input],
+        ['output', tokens.output],
+        ['cache_read', tokens.cacheRead],
+        ['cache_write', tokens.cacheWrite],
+      ] as const;
+      for (const [tokenType, count] of byType) {
+        this.metrics.agentTokens.add(count, { agent_id: agentId, token_type: tokenType });
+      }
+    }
+    if (errorCode !== undefined && (outcome === 'error' || outcome === 'refused')) {
+      this.metrics.agentErrors.add(1, { agent_id: agentId, error_code: errorCode });
+    }
+  }
+  /* eslint-enable @typescript-eslint/naming-convention -- end label contract */
 }

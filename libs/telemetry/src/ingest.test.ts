@@ -85,3 +85,35 @@ describe('ingestPayloadSchema', () => {
     ).toThrow();
   });
 });
+
+describe('agent usage entries', () => {
+  it('should accept a Codex turn with tools and tokens', () => {
+    const entry = {
+      name: IngestEntryName.AGENT_TURN,
+      duration: 4000,
+      detail: {
+        agentId: 'codex',
+        placement: 'daemon',
+        outcome: 'completed',
+        timeToFirstUpdate: 800,
+        toolCalls: [{ kind: 'read', status: 'completed', count: 1 }],
+        tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 0 },
+      },
+    };
+    expect(clientMetricEntrySchema.parse(entry)).toEqual(entry);
+  });
+
+  it('should reject a tool kind outside ACP ToolKind and a turn longer than a day', () => {
+    const detail = { agentId: 'tau', placement: 'browser', outcome: 'completed' };
+    expect(() =>
+      clientMetricEntrySchema.parse({
+        name: IngestEntryName.AGENT_TURN,
+        duration: 1,
+        detail: { ...detail, toolCalls: [{ kind: 'shell', status: 'completed', count: 1 }] },
+      }),
+    ).toThrow();
+    expect(() =>
+      clientMetricEntrySchema.parse({ name: IngestEntryName.AGENT_TURN, duration: 90_000_000, detail }),
+    ).toThrow();
+  });
+});

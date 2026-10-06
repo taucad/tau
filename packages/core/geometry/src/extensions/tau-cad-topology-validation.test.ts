@@ -31,6 +31,24 @@ const payload: TauCadTopologyPayload = {
 };
 
 describe('validateTauCadTopology', () => {
+  it('checks forward and backward hierarchy references with bounded component ID reads', () => {
+    const count = 128;
+    let idReads = 0;
+    const components: TauCadTopologyPayload['components'] = Array.from({ length: count }, (_, index) => ({
+      get id() {
+        idReads += 1;
+        return `component:chain-${index}`;
+      },
+      name: `Chain ${index}`,
+      kind: 'body',
+      selector: `chain/${index}`,
+      ...(index > 0 ? { parentId: `component:chain-${index - 1}` } : {}),
+      ...(index + 1 < count ? { childIds: [`component:chain-${index + 1}`] } : {}),
+    }));
+    expect(validateTauCadTopology({ schemaVersion: 1, components }, { nodes: [], meshes: [] })).toEqual([]);
+    expect(idReads).toBeLessThan(count * 10);
+  });
+
   it('accepts requested solid evidence and rejects fabricated or invalid physical facts', () => {
     const bounds = { nodes: [], meshes: [] };
     const component = { ...payload.components[1]!, parentId: undefined };

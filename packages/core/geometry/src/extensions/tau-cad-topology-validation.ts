@@ -128,6 +128,7 @@ export const validateTauCadTopology = (
   bounds: TauCadTopologyDocumentBounds,
 ): readonly string[] => {
   const issues: string[] = [];
+  const componentIds = new Set(payload.components.map(({ id }) => id));
   const identifiers = new Set<string>();
   for (const component of payload.components) {
     if (identifiers.has(component.id)) {
@@ -142,11 +143,11 @@ export const validateTauCadTopology = (
         issues.push(`${component.id} ${issue}`);
       }
     }
-    if (component.parentId && !payload.components.some(({ id }) => id === component.parentId)) {
+    if (component.parentId && !componentIds.has(component.parentId)) {
       issues.push(`${component.id} references missing parent ${component.parentId}`);
     }
     for (const childId of component.childIds ?? []) {
-      if (!payload.components.some(({ id }) => id === childId)) {
+      if (!componentIds.has(childId)) {
         issues.push(`${component.id} references missing child ${childId}`);
       }
     }

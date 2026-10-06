@@ -380,7 +380,7 @@ export function ConfigurationFields({
       schema: {
         ...compiled.schema,
         properties: offered,
-        required: required.filter((key) => !omit.includes(key)),
+        required: required.filter((key: string) => !omit.includes(key)),
       },
     };
   }, [compiled, omit, titles]);

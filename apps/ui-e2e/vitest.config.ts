@@ -9,9 +9,13 @@ import { uiBrowserCommands } from './src/support/browser-command.ts';
 import { resolveRequiredWebGpuProfile, webGpuLaunchArguments } from './src/support/webgpu-profile.ts';
 
 const isCi = Boolean(process.env['CI']);
+const browserChannel = process.env['TAU_E2E_BROWSER_CHANNEL'] ?? 'chromium';
+if (browserChannel !== 'chromium' && browserChannel !== 'chrome') {
+  throw new Error(`TAU_E2E_BROWSER_CHANNEL must be 'chromium' or 'chrome'; received '${browserChannel}'.`);
+}
 const requiredWebGpuProfile = resolveRequiredWebGpuProfile(process.env['TAU_E2E_WEBGPU_PROFILE']);
-const chromiumArguments = webGpuLaunchArguments(requiredWebGpuProfile);
-const chromiumDisabledArguments = webGpuLaunchArguments('disabled');
+const chromiumArguments = ['--enable-automation', ...webGpuLaunchArguments(requiredWebGpuProfile)];
+const chromiumDisabledArguments = ['--enable-automation', ...webGpuLaunchArguments('disabled')];
 /** The opt-in specs that spend real provider credit; excluded from every default run. */
 const liveProviderSpecs = ['src/gemini-browser-agent-host.live.spec.ts', 'src/provider-switch.live.spec.ts'];
 const liveProvidersEnabled = process.env['TAU_E2E_LIVE_GEMINI'] === 'true';
@@ -71,7 +75,11 @@ export default defineConfig({
     hookTimeout: 300_000,
     retry: isCi ? 2 : 0,
     fileParallelism: false,
-    provide: { crossOriginIsolation: !disableCoi, picovoxelExactPins },
+    provide: {
+      crossOriginIsolation: !disableCoi,
+      picovoxelExactPins,
+      scaleCpuDiagnostic: process.env['TAU_E2E_SCALE_CPU_DIAGNOSTIC'] === '1',
+    },
     browser: {
       enabled: true,
       headless: true,
@@ -97,7 +105,7 @@ export default defineConfig({
             actionTimeout: 10_000,
             launchOptions: {
               args: [...chromiumArguments],
-              channel: 'chromium',
+              channel: browserChannel,
             },
           }),
           provide: {
@@ -113,7 +121,7 @@ export default defineConfig({
             actionTimeout: 10_000,
             launchOptions: {
               args: [...chromiumDisabledArguments],
-              channel: 'chromium',
+              channel: browserChannel,
             },
           }),
           provide: { webGpuProfile: 'disabled' },
@@ -127,7 +135,7 @@ export default defineConfig({
             contextOptions: { hasTouch: true, isMobile: true },
             launchOptions: {
               args: [...chromiumArguments],
-              channel: 'chromium',
+              channel: browserChannel,
             },
           }),
           provide: { webGpuProfile: requiredWebGpuProfile },

@@ -23,6 +23,7 @@ import type { EvaluateResult, KernelOffers, RenderResult } from '#types/runtime-
 import type { ExportOffer, ViewOffer } from '#client/runtime-document.types.js';
 import type { KernelMiddlewareV2, MiddlewareContent, RenderRequest } from '#types/runtime-middleware-v2.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
+import type { AssemblyDisplayProjector } from '#types/runtime-assembly.types.js';
 import type { RuntimeContentKey } from '#types/runtime-content.types.js';
 import type {
   CreateGeometryResult,
@@ -72,12 +73,14 @@ export const initializeWorkerForTesting = async <T extends KernelWorker>(
     readonly onTelemetry?: Parameters<T['setTelemetrySend']>[0];
     /** Serve the store without its watch channel, for the kernel's watcherless freshness path. */
     readonly watchable?: boolean;
+    /** Override the in-memory provider for tests of authority-backed publication. */
+    readonly fileSystem?: RuntimeFileSystemBase;
   },
 ): Promise<T> => {
   if (options?.onTelemetry) {
     worker.setTelemetrySend(options.onTelemetry);
   }
-  const base = getTestFileSystem();
+  const base = options?.fileSystem ?? getTestFileSystem();
   const { port } = createFileSystemBridgePort(options?.watchable === false ? { ...base, watch: undefined } : base);
   await worker.initialize({
     callbacks: { onLog: options?.onLog ?? (() => undefined) },
@@ -217,6 +220,7 @@ export type MockKernelWorkerOptions = {
   readonly middlewareEnabled?: boolean[];
   readonly evaluationResult?: EvaluateResult;
   readonly evaluationSnapshot?: unknown;
+  readonly evaluationViewContent?: Uint8Array<ArrayBuffer>;
   readonly exportResult?: ExportGeometryResult;
   readonly onLog?: OnWorkerLog;
   readonly filesystem?: KernelFileSystem;
@@ -224,6 +228,7 @@ export type MockKernelWorkerOptions = {
   readonly renderZodSchema?: z.ZodType;
   readonly nativeHandle?: unknown;
   readonly transcoders?: readonly TranscoderPlugin[];
+  readonly admitAssemblyDisplay?: AssemblyDisplayProjector;
 };
 
 const normalizeTestMiddleware = (
@@ -280,13 +285,14 @@ export class MockKernelWorker extends KernelWorker {
   private readonly testResolvedMiddleware: ResolvedMiddleware[];
   private readonly mockEvaluationResult: EvaluateResult | undefined;
   private readonly evaluationSnapshot: unknown;
+  private readonly evaluationViewContent: Uint8Array<ArrayBuffer>;
   private readonly mockExportResult: ExportGeometryResult;
   private readonly handleToCapture: unknown;
   private readonly geometryByHandle = new Map<unknown, GeometryResponse>();
   private readonly offeredExportIds: string[];
 
   public constructor(options: MockKernelWorkerOptions) {
-    super({ transcoders: options.transcoders ?? [] });
+    super({ transcoders: options.transcoders ?? [], admitAssemblyDisplay: options.admitAssemblyDisplay });
     this.testResolvedMiddleware = options.middleware.map((entry, index) => {
       const middleware = normalizeTestMiddleware(entry);
       return {
@@ -298,6 +304,7 @@ export class MockKernelWorker extends KernelWorker {
     });
     this.mockEvaluationResult = options.evaluationResult;
     this.evaluationSnapshot = options.evaluationSnapshot;
+    this.evaluationViewContent = options.evaluationViewContent ?? new Uint8Array([1, 2, 3]);
     this.mockExportResult = options.exportResult ?? {
       success: true,
       data: [{ bytes: new Uint8Array(), name: 'export.gltf', mimeType: 'model/gltf+json' }],
@@ -357,7 +364,7 @@ export class MockKernelWorker extends KernelWorker {
       return result;
     }
     return {
-      ...this.completeFixtureEvaluation(new Uint8Array([1, 2, 3]), {
+      ...this.completeFixtureEvaluation(this.evaluationViewContent, {
         issues: result.issues,
         handle: this.handleToCapture,
       }),

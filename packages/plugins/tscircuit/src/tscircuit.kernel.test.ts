@@ -360,7 +360,7 @@ describe('TscircuitKernel', () => {
       ]);
       expect(duplicates.instances?.schematic?.[2]?.id).toBe('sheet:Sheet%203');
       expect(repeated.instances?.schematic?.[0]?.id).not.toBe(duplicates.instances?.schematic?.[0]?.id);
-      const restored = definition.deserializeHandle!(
+      const restored = await definition.deserializeHandle!(
         { serialized: definition.serializeHandle!({ handle: duplicates.handle }, runtime, context) },
         runtime,
         context,
@@ -709,7 +709,7 @@ describe('TscircuitKernel', () => {
       };
       const runtime = createMockKernelRuntime();
       const context = await definition.initialize({}, runtime);
-      const fresh = definition.deserializeHandle!(
+      const fresh = await definition.deserializeHandle!(
         { serialized: definition.serializeHandle!({ handle }, runtime, context) },
         runtime,
         context,
@@ -951,13 +951,13 @@ describe('TscircuitKernel', () => {
       const runtime = createMockKernelRuntime();
       const context = await definition.initialize({}, runtime);
 
-      expect(() =>
+      await expect(async () =>
         definition.deserializeHandle!(
           { serialized: new TextEncoder().encode('{"type":"pcb_board"}') },
           runtime,
           context,
         ),
-      ).toThrow(TypeError);
+      ).rejects.toThrow(TypeError);
     });
   });
 });

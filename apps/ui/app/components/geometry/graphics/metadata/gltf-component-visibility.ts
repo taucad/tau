@@ -20,14 +20,18 @@ export const hasComponentOrAncestor = (
   componentId: string,
   componentIds: ReadonlySet<string>,
 ): boolean =>
-  componentIds.has(componentId) ||
-  getComponentAncestorIds(manifest, componentId).some((ancestorId) => componentIds.has(ancestorId));
+  componentIds.size > 0 &&
+  (componentIds.has(componentId) ||
+    getComponentAncestorIds(manifest, componentId).some((ancestorId) => componentIds.has(ancestorId)));
 
 export const hasComponentOrDescendant = (
   manifest: GeometryComponentManifest,
   componentId: string,
   componentIds: ReadonlySet<string>,
 ): boolean => {
+  if (componentIds.size === 0) {
+    return false;
+  }
   if (componentIds.has(componentId)) {
     return true;
   }

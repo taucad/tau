@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import type { CanvasProps } from '@react-three/fiber';
+import type { CadAssemblyDisplay } from '#machines/cad.machine.js';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Artifact } from '@taucad/runtime';
 import { GltfMesh } from '#components/geometry/graphics/three/react/gltf-mesh.js';
@@ -19,6 +20,7 @@ type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> &
   CadViewerCanvasEventProperties & {
     readonly artifact?: Artifact;
     readonly artifactHash?: string;
+    readonly assemblyDisplay?: CadAssemblyDisplay;
     readonly sourceFile?: string;
     readonly enableSurfaces?: boolean;
     readonly enableLines?: boolean;
@@ -32,6 +34,7 @@ export const CadViewer = memo(
   ({
     artifact,
     artifactHash,
+    assemblyDisplay,
     sourceFile,
     enableSurfaces = true,
     enableLines = true,
@@ -51,12 +54,13 @@ export const CadViewer = memo(
     }
 
     let scene: React.ReactNode;
-    if (known?.mimeType === 'model/gltf-binary') {
+    if (assemblyDisplay !== undefined || known?.mimeType === 'model/gltf-binary') {
       scene = (
         <GltfMesh
-          gltfFile={known.content}
+          gltfFile={known?.mimeType === 'model/gltf-binary' ? known.content : undefined}
+          assemblyDisplay={assemblyDisplay}
           sourceFile={sourceFile}
-          geometryHash={artifactHash}
+          geometryHash={assemblyDisplay?.root.digest ?? artifactHash}
           presentationRevision={requestedGltfRevision}
           enableMatcap={enableMatcap}
           enableSurfaces={enableSurfaces}

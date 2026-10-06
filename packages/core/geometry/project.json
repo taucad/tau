@@ -6,7 +6,8 @@
   "tags": ["scope:shared", "type:package"],
   "targets": {
     "build": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "outputs": ["{projectRoot}/dist", "{projectRoot}/schema/tau-cad-topology.schema.d.cts"]
     },
     "performance-gate": {
       "command": "vitest run src/utils/glb-writer.bench.test.ts",

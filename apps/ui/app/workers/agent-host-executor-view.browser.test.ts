@@ -1,5 +1,10 @@
 import { expect, it, vi } from 'vitest';
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
+import type { CreateRuntimeAgentClientsInput } from '@taucad/agent-tools/runtime';
+import type * as AgentRuntimeModule from '@taucad/agent-tools/runtime';
+import type { RuntimeClient } from '@taucad/runtime/client';
+import type * as RuntimeClientModule from '@taucad/runtime/client';
+import { digestContent } from '@taucad/cache-core';
 import type { FsLike } from '@taucad/runtime/filesystem';
 import type * as RuntimeFileSystemModule from '@taucad/runtime/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
@@ -22,9 +27,34 @@ import type * as GeoSpecClientModule from '#workers/geospec-runner.client.js';
  * changing it: the kernel runtime's `FsLike` and the GeoSpec runner's bridge
  * thunk. Both must be the agent's view, not the working copy. */
 const executorSeams = vi.hoisted(() => ({
+  clients: [] as RuntimeClient[],
+  agentInputs: [] as CreateRuntimeAgentClientsInput[],
   kernelFileSystems: [] as FsLike[],
   geoSpecBridges: [] as Array<() => FileSystemBridgeConnection>,
 }));
+
+vi.mock('@taucad/runtime/client', async (importOriginal) => {
+  const original = await importOriginal<typeof RuntimeClientModule>();
+  return {
+    ...original,
+    createRuntimeClient: (...args: Parameters<typeof original.createRuntimeClient>) => {
+      const client = original.createRuntimeClient(...args);
+      executorSeams.clients.push(client);
+      return client;
+    },
+  };
+});
+
+vi.mock('@taucad/agent-tools/runtime', async (importOriginal) => {
+  const original = await importOriginal<typeof AgentRuntimeModule>();
+  return {
+    ...original,
+    createRuntimeAgentClients: (input: CreateRuntimeAgentClientsInput) => {
+      executorSeams.agentInputs.push(input);
+      return original.createRuntimeAgentClients(input);
+    },
+  };
+});
 
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
   const original = await importOriginal<typeof RuntimeFileSystemModule>();
@@ -62,6 +92,8 @@ it('should hand both executors of project code the agent view of the workspace',
   const { createFileSystemBridgePort, createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
   const projectId = `agent-host-executor-${crypto.randomUUID()}`;
   let host: BrowserProjectHost | undefined;
+  executorSeams.clients.length = 0;
+  executorSeams.agentInputs.length = 0;
   executorSeams.kernelFileSystems.length = 0;
   executorSeams.geoSpecBridges.length = 0;
   await workspace.writeFile('.git/HEAD', 'ref: refs/heads/main\n');
@@ -115,6 +147,61 @@ it('should hand both executors of project code the agent view of the workspace',
       await expect(geoSpec.readFile('main.ts', 'utf8')).resolves.toBe('export const main = 1;\n');
     } finally {
       geoSpec.dispose();
+    }
+
+    // Observe the real client's admission request, rejecting before its lazy worker boots.
+    // Actual admitted projection is covered by the runtime/host integration controls.
+    const client = executorSeams.clients.at(-1);
+    const resolvePublished = executorSeams.agentInputs.at(-1)?.openPublishedAssembly;
+    if (!client || !resolvePublished) {
+      throw new TypeError('Expected request-scoped agent runtime wiring.');
+    }
+    const admissionError = new Error('Admission rejected by the runtime control.');
+    const open = vi.spyOn(client, 'openAssembly').mockRejectedValue(admissionError);
+    const exported = vi.spyOn(client, 'exportPublished');
+    const ordinaryOpen = vi.spyOn(client, 'open');
+    try {
+      const scene = (generation: number) =>
+        new TextEncoder().encode(JSON.stringify({ schemaVersion: 1, generation, parts: {}, occurrences: [] }));
+      const bytes = scene(1);
+      await workspace.writeFile('scene.json', bytes);
+      await expect(resolvePublished({ targetFile: 'scene.json' })).rejects.toBe(admissionError);
+      expect(open).toHaveBeenLastCalledWith({
+        root: { path: 'scene.json', digest: await digestContent({ bytes }), byteLength: bytes.byteLength },
+        signal: undefined,
+      });
+      const nextBytes = scene(2);
+      await workspace.writeFile('scene.json', nextBytes);
+      await expect(resolvePublished({ targetFile: 'scene.json' })).rejects.toBe(admissionError);
+      expect(open).toHaveBeenLastCalledWith({
+        root: {
+          path: 'scene.json',
+          digest: await digestContent({ bytes: nextBytes }),
+          byteLength: nextBytes.byteLength,
+        },
+        signal: undefined,
+      });
+      expect(exported).not.toHaveBeenCalled();
+      expect(ordinaryOpen).not.toHaveBeenCalled();
+      await workspace.writeFile('authored.json', JSON.stringify({ schemaVersion: 1, parts: {}, occurrences: [] }));
+      await expect(resolvePublished({ targetFile: 'authored.json' })).rejects.toThrow('committed pinned scene');
+      await workspace.writeFile('ordinary.json', '{}');
+      await expect(resolvePublished({ targetFile: 'ordinary.json' })).resolves.toBeUndefined();
+      await workspace.writeFile('invalid.json', '{');
+      await expect(resolvePublished({ targetFile: 'invalid.json' })).resolves.toBeUndefined();
+      await expect(resolvePublished({ targetFile: '../scene.json' })).rejects.toThrow();
+      const controller = new AbortController();
+      controller.abort();
+      await expect(resolvePublished({ targetFile: 'scene.json', signal: controller.signal })).rejects.toThrow();
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(exported).not.toHaveBeenCalled();
+      expect(ordinaryOpen).not.toHaveBeenCalled();
+      await expect(resolvePublished({ targetFile: 'main.ts' })).resolves.toBeUndefined();
+      expect(ordinaryOpen).not.toHaveBeenCalled();
+    } finally {
+      open.mockRestore();
+      exported.mockRestore();
+      ordinaryOpen.mockRestore();
     }
   } finally {
     await host?.close();

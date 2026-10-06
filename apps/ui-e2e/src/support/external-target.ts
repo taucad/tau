@@ -3,8 +3,60 @@ import { expect, inject } from 'vitest';
 import type { Locator } from 'vitest/browser';
 import { locators, server as vitestServer } from 'vitest/browser';
 import type { GatewayScriptTurn, GatewayTurnCount } from '#support/agent-host-gateway-script.js';
+import type {
+  AssemblyTestBridgeApi,
+  MotionNativeOracleInput,
+  MotionNativeOracleResult,
+} from '#support/parts-assemblies-motion.js';
 
 export type TargetSurface = 'primary' | 'secondary';
+
+/** Private recovery request bound to the actual committed viewport. */
+export type TargetViewportLossBinding = Readonly<{
+  root: string;
+  rootPath: string;
+  candidate: string;
+  unit: string;
+  pose: number;
+}>;
+/** Actual native GPUDevice loss and retired capture; CDP acknowledgement alone does not qualify recovery. */
+export type TargetWebGpuViewportLoss = Readonly<{
+  browser: Readonly<{
+    protocolVersion: string;
+    product: string;
+    revision: string;
+    userAgent: string;
+    jsVersion: string;
+  }>;
+  browserCommandLine: Readonly<{ arguments: readonly string[] }>;
+  testPath: string | undefined;
+  sessionId: string;
+  url: string;
+  renderDevice: NonNullable<ReturnType<AssemblyTestBridgeApi['getRendererIdentity']>['renderDevice']>;
+  nativeDeviceLoss: Readonly<{ reason: string; message: string }>;
+  retiredCanvasDisconnected: boolean;
+  retiredSubjectCurrent: boolean;
+  retiredDrawUnavailable: boolean;
+  retiredTaggedResourcesUnavailable: boolean;
+  retiredReaderDenied: boolean;
+  newCanvas: boolean;
+}>;
+
+/** Opt-in trace transport and mouse-dispatch lineage for isolated diagnostic captures. */
+export type TargetScaleProbeOptions = Readonly<{
+  traceFormat?: 'json' | 'proto';
+  inputLineage?: boolean;
+}>;
+
+/** Raw browser-owned probe output; successful capture does not qualify compositor joins or memory budgets. */
+export type TargetScalePresentationProbe = Readonly<{
+  tracePath: string;
+  reportPath: string;
+  traceBytes: number;
+  dataLossOccurred: boolean;
+  presentationQualification: 'raw-probe-only';
+}>;
+
 export type TargetSelector = Locator | string;
 export type TargetViewport = {
   readonly height: number;
@@ -45,8 +97,13 @@ export type TargetGatewayState = {
   readonly turns: readonly GatewayTurnCount[];
 };
 
-export type TargetReadOptions = { readonly attributes?: readonly string[] };
+export type TargetReadOptions = {
+  readonly attributes?: readonly string[];
+  /** Request the actual Playwright accessibility snapshot for the scoped element. */
+  readonly accessibility?: boolean;
+};
 export type TargetState = {
+  readonly accessibilitySnapshot?: string;
   readonly attributes: Readonly<Record<string, string | null>>;
   readonly boundingBox?: {
     readonly height: number;
@@ -164,6 +221,7 @@ declare module 'vitest/browser' {
 }
 
 export type UiBrowserCommands = {
+  uiMotionNativeOracle(input: MotionNativeOracleInput): Promise<MotionNativeOracleResult>;
   uiAuthenticateTauTestUser(account: TargetTauTestAccount): Promise<void>;
   uiAddCookies(cookies: readonly TargetCookie[]): Promise<void>;
   uiAddContextInitScript(source: string, argument?: unknown): Promise<void>;
@@ -181,14 +239,25 @@ export type UiBrowserCommands = {
   uiCloseSecondaryTarget(): Promise<void>;
   uiCloseTarget(): Promise<void>;
   uiCookies(): Promise<TargetCookie[]>;
+  uiCrashGpuProcess(expected: TargetViewportLossBinding): Promise<TargetWebGpuViewportLoss>;
   uiCpuProfile(action: 'start' | 'stop', artifactName?: string, surface?: TargetSurface): Promise<string | undefined>;
+  uiScalePresentationProbe(
+    artifactName: string,
+    surface?: TargetSurface,
+    options?: TargetScaleProbeOptions,
+  ): Promise<TargetScalePresentationProbe>;
   uiDragTarget(source: string, target: string, surface?: TargetSurface): Promise<void>;
   uiDownloadTarget(triggerSelector: string): Promise<TargetDownload>;
   uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
   uiEmulateReducedMotion(reducedMotion: 'no-preference' | 'reduce', surface?: TargetSurface): Promise<void>;
-  uiEvaluateTarget(source: string, argument?: unknown, surface?: TargetSurface): Promise<unknown>;
+  uiEvaluateTarget(
+    source: string,
+    argument?: unknown,
+    surface?: TargetSurface,
+    artifactName?: string,
+  ): Promise<unknown>;
   uiEvaluateTargetLocator(
     selector: string,
     source: string,
@@ -338,6 +407,17 @@ export const evaluate = async <Result, Argument = undefined>(
     argument ?? (surface ? null : undefined),
     surface,
   ) as Promise<Result>;
+export const evaluateWarehouseRecoveryArtifact = async <
+  Result extends Readonly<{ identity: unknown }>,
+  Argument = undefined,
+>(
+  callback: (argument: Argument) => Result | Promise<Result>,
+  argument: Argument,
+  artifactName: string,
+): Promise<Readonly<{ identity: Result['identity']; path: string; sha256: string; byteLength: number }>> =>
+  server.commands.uiEvaluateTarget(callback.toString(), argument ?? null, 'primary', artifactName) as Promise<
+    Readonly<{ identity: Result['identity']; path: string; sha256: string; byteLength: number }>
+  >;
 export const evaluateLocator = async <Result, Argument = undefined>(
   selector: TargetSelector,
   callback: (element: Element, argument: Argument) => Result | Promise<Result>,
@@ -685,3 +765,18 @@ export const expectUrl = async (expected: string | RegExp, timeout = 10_000): Pr
     await assertion.toMatch(expected);
   }
 };
+
+/** One bounded trusted viewport trajectory, raw compositor trace and isolate heap samples. */
+export const scalePresentationProbe = (
+  artifactName: string,
+  surface?: TargetSurface,
+  options?: TargetScaleProbeOptions,
+): Promise<TargetScalePresentationProbe> => server.commands.uiScalePresentationProbe(artifactName, surface, options);
+
+/** Acquire the independent Node oracle through the existing server-owned command boundary. */
+export const motionNativeOracle = (input: MotionNativeOracleInput): Promise<MotionNativeOracleResult> =>
+  server.commands.uiMotionNativeOracle(input);
+
+/** One native GPU-process loss in the owned version-bound Chromium page, followed by actual viewport retirement and Retry. */
+export const crashGpuProcess = (expected: TargetViewportLossBinding): Promise<TargetWebGpuViewportLoss> =>
+  server.commands.uiCrashGpuProcess(expected);

@@ -1,18 +1,23 @@
+import type { PublishedAssembly } from '@taucad/runtime/types';
 import { z } from 'zod';
 import { fileExtensions } from '@taucad/types/constants';
 import { runtimeContentSchema } from '@taucad/runtime';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
 import { XIcon, Download, Info, Check, ChevronDown, ChevronRight } from 'lucide-react';
-import { useCallback, memo, useState, useMemo, useEffect, useRef } from 'react';
+import { useCallback, memo, useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react';
 import type { ReactElement } from 'react';
 import { useSelector } from '@xstate/react';
-import type { RuntimeContentInput } from '@taucad/runtime';
+import type { KernelIssue, RuntimeContentInput } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { getActiveGroupValues } from '@taucad/types';
 import type { ExportFile, FileExtension } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
-import { compileParameterManifest, projectJsonSchemaToParameterDeclaration } from '@taucad/parameters';
+import {
+  ParameterAdmissionError,
+  compileParameterManifest,
+  projectJsonSchemaToParameterDeclaration,
+} from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
 import Form from '@rjsf/core';
 import type { IChangeEvent } from '@rjsf/core';
@@ -42,7 +47,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@tauca
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
-import { selectCadFailureIssues } from '#machines/cad.machine.js';
+import { selectCadDisplay, selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { FormatEntry } from '#utils/export-formats.utils.js';
 import {
   bestRouteForActiveKernel,
@@ -277,14 +282,14 @@ export function resolveActiveSchema(
 function resolveFormatSettings(
   format: FileExtension,
   client: AppRuntimeClient | undefined,
-  activeKernelId: string | undefined,
+  activeKernelId: string | PublishedAssembly | undefined,
 ): ResolvedFormatSettings | undefined {
   if (!client || !activeKernelId) {
     return undefined;
   }
 
   const route = bestRouteForActiveKernel(client, format, activeKernelId);
-  if (!route || route.kernelId !== activeKernelId) {
+  if (!route || (typeof activeKernelId === 'string' && route.kernelId !== activeKernelId)) {
     return undefined;
   }
 
@@ -345,6 +350,7 @@ function runtimeContentFromRecord(input: Record<string, unknown>): RuntimeConten
   return {
     ...(typeof input['includeEdges'] === 'boolean' ? { includeEdges: input['includeEdges'] } : {}),
     ...(typeof input['includeTopology'] === 'boolean' ? { includeTopology: input['includeTopology'] } : {}),
+    ...(typeof input['includePhysical'] === 'boolean' ? { includePhysical: input['includePhysical'] } : {}),
   };
 }
 
@@ -908,7 +914,7 @@ function ExportSettings({
 }: {
   readonly selectedFormats: FileExtension[];
   readonly client: AppRuntimeClient | undefined;
-  readonly activeKernelId: string | undefined;
+  readonly activeKernelId: string | PublishedAssembly | undefined;
   readonly formatContent: Partial<Record<FileExtension, RuntimeContentInput>>;
   readonly formatOptions: Partial<Record<FileExtension, Record<string, unknown>>>;
   readonly onContentChange: (format: FileExtension, content: RuntimeContentInput) => void;
@@ -1164,7 +1170,12 @@ export const ConverterPanelBody = function ({
   }, [isShown, projectRef, selectedEntryPath, selectedOperationTimeout]);
 
   const selectedActor = geometryUnits.get(selectedEntryPath);
+  const currentSelectionRef = useRef({ selectedEntryPath, selectedActor });
+  useLayoutEffect(() => {
+    currentSelectionRef.current = { selectedEntryPath, selectedActor };
+  }, [selectedEntryPath, selectedActor]);
 
+  const display = useSelector(selectedActor, (state) => (state ? selectCadDisplay(state) : undefined));
   const rendering = useSelector(selectedActor, (state) => state?.context.rendering);
   const evaluation = useSelector(selectedActor, (state) => state?.context.evaluation);
   const latestRenderingOutcome = useSelector(selectedActor, (state) => state?.context.latestRenderingOutcome);
@@ -1172,7 +1183,12 @@ export const ConverterPanelBody = function ({
     rendering?.success === true ||
     (latestRenderingOutcome === 'success' && evaluation?.success === true && evaluation.views.length === 0);
   const capabilities = useSelector(selectedActor, (state) => state?.context.capabilities);
-  const activeKernelId = useSelector(selectedActor, (state) => state?.context.activeKernelId);
+  const activeKernelId = useSelector(selectedActor, (state) => {
+    const currentDisplay = state ? selectCadDisplay(state) : undefined;
+    return currentDisplay && 'admitted' in currentDisplay
+      ? currentDisplay.admitted.publication
+      : state?.context.activeKernelId;
+  });
   const kernelClient = useSelector(selectedActor, (state) => state?.context.kernelClient);
 
   const availableFormats = useMemo(
@@ -1237,7 +1253,7 @@ export const ConverterPanelBody = function ({
 
     for (const [format, options] of Object.entries(formatOptions)) {
       const route = bestRouteForActiveKernel(kernelClient, format as FileExtension, activeKernelId);
-      if (!route || route.kernelId !== activeKernelId) {
+      if (!route || (typeof activeKernelId === 'string' && route.kernelId !== activeKernelId)) {
         Reflect.deleteProperty(nextOptions, format);
         changed = true;
         continue;
@@ -1251,7 +1267,7 @@ export const ConverterPanelBody = function ({
 
     for (const [format, content] of Object.entries(formatContent)) {
       const route = bestRouteForActiveKernel(kernelClient, format as FileExtension, activeKernelId);
-      if (!route?.content || route.kernelId !== activeKernelId) {
+      if (!route?.content || (typeof activeKernelId === 'string' && route.kernelId !== activeKernelId)) {
         Reflect.deleteProperty(nextContent, format);
         changed = true;
         continue;
@@ -1316,17 +1332,48 @@ export const ConverterPanelBody = function ({
       if (settled.context.latestRenderingOutcome !== 'success') {
         throw new Error(`No current successful geometry is available for ${selectedEntryPath}`);
       }
+      const freshDisplay = selectCadDisplay(settled);
+      if (!freshDisplay && !(settled.context.evaluation?.success && settled.context.evaluation.views.length === 0)) {
+        throw new Error(`No current successful geometry is available for ${selectedEntryPath}`);
+      }
       const freshKernelClient = settled.context.kernelClient;
+      const assemblyDisplay = freshDisplay && 'admitted' in freshDisplay ? freshDisplay : undefined;
       const freshDocument = settled.context.document;
-      const freshKernelId = settled.context.activeKernelId;
-      if (!freshKernelClient || !freshDocument) {
+      const freshKernelId = assemblyDisplay?.admitted.publication ?? settled.context.activeKernelId;
+      if (!freshKernelClient || (!freshDocument && !assemblyDisplay)) {
         throw new Error('The selected CAD runtime is unavailable');
       }
+      const assertCurrentDisplay = (): void => {
+        const currentSelection = currentSelectionRef.current;
+        const current = selectedActor.getSnapshot();
+        if (
+          currentSelection.selectedEntryPath !== selectedEntryPath ||
+          currentSelection.selectedActor !== selectedActor ||
+          projectRef.getSnapshot().context.geometryUnits.get(selectedEntryPath) !== selectedActor ||
+          current.context.latestRenderingOutcome !== 'success' ||
+          current.context.entryPath !== selectedEntryPath ||
+          current.context.kernelClient !== freshKernelClient ||
+          selectCadDisplay(current) !== freshDisplay ||
+          current.context.document !== freshDocument ||
+          current.context.rendering !== settled.context.rendering ||
+          current.context.evaluation !== settled.context.evaluation
+        ) {
+          throw new Error('The selected CAD display changed during export');
+        }
+      };
       /* oxlint-disable no-await-in-loop -- Sequential: each export depends on shared kernel state */
       for (const format of selectedFormats) {
+        let stage = 'route';
+        let route: ReturnType<typeof bestRouteForActiveKernel> = undefined;
+        let reachedWrite = false;
+        let completedWrite = false;
+        let failureReason: 'no-route' | 'runtime-result' | 'exception' | undefined;
+        let failureIssues: readonly KernelIssue[] | undefined;
+        let failureError: unknown;
         try {
-          const route = bestRouteForActiveKernel(freshKernelClient, format, freshKernelId);
-          if (!route || route.kernelId !== freshKernelId) {
+          route = bestRouteForActiveKernel(freshKernelClient, format, freshKernelId);
+          if (!route || (typeof freshKernelId === 'string' && route.kernelId !== freshKernelId)) {
+            failureReason = 'no-route';
             failed.push(format);
             continue;
           }
@@ -1335,6 +1382,7 @@ export const ConverterPanelBody = function ({
             route.transcoderId === undefined
               ? String(route.kernelId)
               : `${String(route.kernelId)}+${String(route.transcoderId)}`;
+          stage = 'options';
           const optionsResolved =
             Object.keys(route.exportOptions.schema).length === 0
               ? undefined
@@ -1348,6 +1396,7 @@ export const ConverterPanelBody = function ({
                   },
                   legacyValues: sanitizeFormDelta(route.exportOptions.schema, formatOptions[format] ?? {}),
                 });
+          stage = 'content';
           const contentResolved = route.content
             ? await resolveExportConfigurationValues({
                 parameterService,
@@ -1360,6 +1409,7 @@ export const ConverterPanelBody = function ({
                 legacyValues: sanitizeFormDelta(route.content.schema, { ...formatContent[format] }),
               })
             : undefined;
+          stage = 'input';
           const options = sanitizeFormDelta(
             route.exportOptions.schema,
             optionsResolved?.values ?? formatOptions[format] ?? {},
@@ -1367,36 +1417,99 @@ export const ConverterPanelBody = function ({
           const content = contentResolved
             ? runtimeContentFromRecord(sanitizeFormDelta(route.content!.schema, contentResolved.values))
             : undefined;
-          const result = await exportDocumentWithValidatedInput(freshDocument, route, {
-            ...(content && Object.keys(content).length > 0 ? { content } : {}),
-            options,
-          });
+          stage = 'current-display-before-export';
+          assertCurrentDisplay();
+          stage = 'runtime-export';
+          const result = assemblyDisplay
+            ? await assemblyDisplay.document.exportPublished({
+                publishedAssembly: { root: assemblyDisplay.root },
+                format,
+                exportOptions: options,
+                ...(content && Object.keys(content).length > 0 ? { content } : {}),
+              })
+            : freshDocument
+              ? await exportDocumentWithValidatedInput(freshDocument, route, {
+                  ...(content && Object.keys(content).length > 0 ? { content } : {}),
+                  options,
+                })
+              : undefined;
+          if (!result) {
+            throw new Error('The selected CAD document is unavailable');
+          }
+          stage = 'current-display-after-export';
+          assertCurrentDisplay();
 
+          stage = 'runtime-result';
           if (!result.success) {
+            failureReason = 'runtime-result';
+            failureIssues = result.issues;
             failed.push(format);
             continue;
           }
 
           const files = [...result.files];
 
+          stage = 'download-queue';
           if (shouldDownload) {
             downloadQueue.push({ format, files });
           }
 
           if (shouldSaveToProject) {
             const prefix = selectedFormats.length === 1 ? 'exports' : `exports/${format}`;
+            stage = 'project-write';
+            reachedWrite = true;
             await fileManager.writeFiles(
               Object.fromEntries(files.map((file) => [`${prefix}/${file.name}`, { content: file.bytes }])),
             );
+            completedWrite = true;
           }
 
           succeeded.push(format);
-        } catch {
+        } catch (error) {
+          failureReason = 'exception';
+          failureError = error;
           failed.push(format);
+        } finally {
+          if (failureReason !== undefined) {
+            try {
+              selectedActor.send({
+                type: 'kernelLog',
+                level: 'error',
+                message: 'CAD export failed',
+                origin: { component: 'export', file: selectedEntryPath },
+                data: {
+                  entryPath: selectedEntryPath,
+                  activeKernelId: typeof freshKernelId === 'string' ? freshKernelId : undefined,
+                  requestedRenderId: settled.context.lastRequestedRenderId,
+                  settledRenderId: settled.context.lastSettledRenderId,
+                  format,
+                  stage,
+                  kernelId: route?.kernelId,
+                  transcoderId: route?.transcoderId,
+                  reachedWrite,
+                  completedWrite,
+                  reason: failureReason,
+                  issues: failureIssues,
+                  ...(failureReason === 'exception'
+                    ? {
+                        errorType: typeof failureError,
+                        errorName: failureError instanceof Error ? failureError.name : undefined,
+                        errorMessage: failureError instanceof Error ? failureError.message : undefined,
+                        diagnostics:
+                          failureError instanceof ParameterAdmissionError ? failureError.diagnostics : undefined,
+                      }
+                    : {}),
+                },
+              });
+            } catch {
+              // Diagnostic delivery must preserve the export outcome and release its claim.
+            }
+          }
         }
       }
       /* oxlint-enable no-await-in-loop */
 
+      assertCurrentDisplay();
       if (shouldDownload) {
         await downloadExports(downloadQueue, { zipMultiple, projectName });
       }
@@ -1453,7 +1566,7 @@ export const ConverterPanelBody = function ({
             </div>
           </section>
 
-          {hasExportableDocument ? (
+          {(display ?? hasExportableDocument) ? (
             availableFormats.length > 0 ? (
               <>
                 <section aria-label='Formats' className='overflow-hidden rounded-xl border border-border bg-card'>
@@ -1542,11 +1655,19 @@ export const ConverterPanelBody = function ({
             ) : (
               <PanelEmptyState
                 icon={Info}
-                title='Export formats are still loading'
-                description={<>Formats for {selectedEntryPath || 'this file'} will appear when its kernel is ready.</>}
+                title={capabilities === undefined ? 'Export formats are still loading' : 'No supported export formats'}
+                description={
+                  capabilities === undefined ? (
+                    <>Formats for {selectedEntryPath || 'this file'} will appear when its kernel is ready.</>
+                  ) : (
+                    <>The available exporters do not support {selectedEntryPath || 'this file'}.</>
+                  )
+                }
                 role='status'
-                aria-label='Export formats are still loading'
-                aria-busy='true'
+                aria-label={
+                  capabilities === undefined ? 'Export formats are still loading' : 'No supported export formats'
+                }
+                aria-busy={capabilities === undefined}
                 className='m-0 h-auto min-h-40 flex-1 rounded-xl border bg-card'
               />
             )

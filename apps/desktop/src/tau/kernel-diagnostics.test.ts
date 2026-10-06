@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { join } from 'node:path';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
@@ -9,7 +9,7 @@ import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 
 import { kernelEngineEvent, kernelEngineRecord } from '#tau/kernel-diagnostics.js';
 
-// The prepared Python and .NET payloads are build outputs; middleware composition does not read them.
+// These recipe/diagnostic controls never select Python or .NET; their prepared loaders have separate owner tests.
 vi.mock('#tau/build123d-resources.js', () => ({ build123dKernelOptions: () => ({}) }));
 vi.mock('#tau/picogk-resources.js', () => ({ picogkKernelOptions: () => ({}) }));
 
@@ -65,16 +65,31 @@ describe('kernelEngineRecord', () => {
 
 describe('the identity the record reports', () => {
   it('enables one unit-inference middleware after the parameter file resolver', async () => {
-    const resolved = await resolveRuntimeDefinition(createDesktopRuntime(), {
-      tauApiUrl: 'http://localhost:4000',
-      tauWebSocketUrl: 'ws://localhost:4001',
-    });
-    expect(resolved.middleware.map(({ id }) => id)).toEqual([
-      'parameterFileResolver',
-      'parameterUnits',
-      'geometryCache',
-      'gltfEdgeDetection',
-    ]);
+    const resourceRoot = mkdtempSync(join(tmpdir(), 'tau-kernel-replicad-recipe-'));
+    const previous = process.env['TAU_REPLICAD_RESOURCE_ROOT'];
+    // This test resolves the recipe only; it never initializes the placeholder engine pair.
+    writeFileSync(join(resourceRoot, 'replicad_single.wasm'), 'recipe-only-wasm');
+    writeFileSync(join(resourceRoot, 'replicad_single.mjs'), 'recipe-only-glue');
+    process.env['TAU_REPLICAD_RESOURCE_ROOT'] = resourceRoot;
+    try {
+      const resolved = await resolveRuntimeDefinition(createDesktopRuntime(), {
+        tauApiUrl: 'http://localhost:4000',
+        tauWebSocketUrl: 'ws://localhost:4001',
+      });
+      expect(resolved.middleware.map(({ id }) => id)).toEqual([
+        'parameterFileResolver',
+        'parameterUnits',
+        'geometryCache',
+        'gltfEdgeDetection',
+      ]);
+    } finally {
+      if (previous === undefined) {
+        delete process.env['TAU_REPLICAD_RESOURCE_ROOT'];
+      } else {
+        process.env['TAU_REPLICAD_RESOURCE_ROOT'] = previous;
+      }
+      rmSync(resourceRoot, { recursive: true, force: true });
+    }
   });
 
   it('comes from the kernel the desktop recipe actually serves and the engine it loaded', async () => {

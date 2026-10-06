@@ -6,11 +6,13 @@ import { captureCadImages } from '#services/headless-capture.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 
 const mocks = vi.hoisted(() => {
-  const cadRef = { getSnapshot: () => ({ context: { geometry: { format: 'gltf' } } }) };
+  const cadContext: Record<string, unknown> = { geometry: { format: 'gltf' } };
+  const cadRef = { getSnapshot: () => ({ context: cadContext }) };
   const secondaryCadRef = { getSnapshot: () => ({ context: { geometry: { format: 'gltf' } } }) };
   const viewSettings: Record<string, { entryPath: string }> = { view: { entryPath: 'main.ts' } };
   return {
     cadRef,
+    cadContext,
     secondaryCadRef,
     geometryUnits: new Map([['main.ts', cadRef]]),
     viewSettings,
@@ -125,10 +127,34 @@ const captureCurrentView = async (omittedSectionCutIds: readonly string[]): Prom
 describe('ChatTextarea screenshots', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    for (const key of Object.keys(mocks.cadContext)) {
+      Reflect.deleteProperty(mocks.cadContext, key);
+    }
+    mocks.cadContext['geometry'] = { format: 'gltf' };
     mocks.geometryUnits.delete('other.ts');
     delete mocks.viewSettings['parked'];
     mocks.viewRecords.delete('parked');
     mocks.viewEntryPaths.set('view', 'main.ts');
+  });
+
+  it('offers orthographic capture for a qualified assembly without flattened geometry', () => {
+    const root = { digest: 'sha256:assembly' };
+    const publication = { root };
+    const admitted = { publication };
+    Object.assign(mocks.cadContext, {
+      geometry: undefined,
+      committedAssemblyDisplay: { root, admitted },
+      publishedAssemblyRoot: root,
+      publishedAssembly: publication,
+      admittedAssembly: admitted,
+      publishedAssemblyEntryPath: 'main.ts',
+      entryPath: 'main.ts',
+    });
+    const view = render(<ChatTextarea onSubmit={vi.fn()} />);
+    expect(mocks.actionItems.some((item) => item.id === 'screenshot-orthographic')).toBe(true);
+    mocks.cadContext['entryPath'] = 'other.ts';
+    view.rerender(<ChatTextarea onSubmit={vi.fn()} />);
+    expect(mocks.actionItems.some((item) => item.id === 'screenshot-orthographic')).toBe(false);
   });
 
   it('should say when a screenshot it adds leaves a section cut out', async () => {

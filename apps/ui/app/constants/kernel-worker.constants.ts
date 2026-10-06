@@ -42,11 +42,17 @@ const createDebugRuntimeWorker = (): Worker =>
  * is constructed with everything it needs up-front, preserving the
  * runtime invariant that `client.connect()` takes no arguments.
  */
-export const createDefaultKernelOptions: KernelOptionsFactory = ({ fileSystem, runtimeConfig, compute }) => ({
+export const createDefaultKernelOptions: KernelOptionsFactory = ({
+  fileSystem,
+  publicationFileSystem,
+  runtimeConfig,
+  compute,
+}) => ({
   config: runtimeConfig,
   transport: webWorkerTransport({
     createWorker: createDefaultRuntimeWorker,
     fileSystem,
+    publicationFileSystem,
     compute,
   }),
 });
@@ -66,6 +72,7 @@ export const createDebugKernelOptions: KernelOptionsFactory = (deps) => ({
     createWorker: createDebugRuntimeWorker,
     devtoolsTelemetry: true,
     fileSystem: deps.fileSystem,
+    publicationFileSystem: deps.publicationFileSystem,
     compute: deps.compute,
   }),
 });

@@ -149,7 +149,8 @@ function renderValue(value: unknown, visiting = new Set<WeakKey>()): unknown {
   return { identity: identity(value) };
 }
 
-function materialKey(material: Material, owningCohort = false): string | undefined {
+/** Exact private render-state key; unqualified or unknown materials refuse reuse. */
+export function qualifiedGltfSurfaceMaterialKey(material: Material, owningCohort = false): string | undefined {
   const known = qualifiedMaterials.get(material);
   if (
     !known ||
@@ -307,20 +308,31 @@ export function createGltfSurfaceBatches(
     const memberships = new Map<string, Mesh[]>();
     const retainedKeys = new Set<string>();
     const compatibleCounts = new Map<string, number>();
+    const owningKeys = new Map<Material, string | undefined>();
+    const liveKeys = new Map<Material, string | undefined>();
+    const keyFor = (material: Material, owningCohort: boolean): string | undefined => {
+      const keys = owningCohort ? owningKeys : liveKeys;
+      if (!keys.has(material)) {
+        keys.set(material, qualifiedGltfSurfaceMaterialKey(material, owningCohort));
+      }
+      return keys.get(material);
+    };
     for (const source of sources) {
       restore(source);
-      const material = Array.isArray(source.material) ? undefined : source.material;
-      const shading = material ? materialKey(material, true) : undefined;
       if (
-        !shading ||
         source.type !== 'Mesh' ||
+        source instanceof InstancedMesh ||
         Boolean(source.morphTargetInfluences) ||
         Boolean(source.customDepthMaterial) ||
         Boolean(source.customDistanceMaterial) ||
         source.onBeforeRender !== Object3D.prototype.onBeforeRender ||
-        source.onAfterRender !== Object3D.prototype.onAfterRender ||
-        !supportedMatrix(placement(source))
+        source.onAfterRender !== Object3D.prototype.onAfterRender
       ) {
+        continue;
+      }
+      const material = Array.isArray(source.material) ? undefined : source.material;
+      const shading = material ? keyFor(material, true) : undefined;
+      if (!shading || !supportedMatrix(placement(source))) {
         continue;
       }
       const key = JSON.stringify([
@@ -334,7 +346,7 @@ export function createGltfSurfaceBatches(
       ]);
       retainedKeys.add(key);
       compatibleCounts.set(key, (compatibleCounts.get(key) ?? 0) + 1);
-      if (!worldVisible(source) || !material || !materialKey(material)) {
+      if (!worldVisible(source) || !material || !keyFor(material, false)) {
         continue;
       }
       const members = memberships.get(key) ?? [];

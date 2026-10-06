@@ -48,6 +48,7 @@ import { toast } from 'sonner';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
+import type { DockviewProjectionOptions } from '#workbench-records/converters.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 import {
   languageFromExtension,
@@ -1653,6 +1654,57 @@ export function WorkbenchRightHeaderActions(properties: IDockviewHeaderActionsPr
   );
 }
 
+/** Apply a portable lane without replacing temporary tabs when its current projection already agrees. */
+export function applyWorkbenchRecordNode({
+  api,
+  node,
+  files,
+  openFile,
+  applied,
+}: {
+  readonly api: DockviewApi;
+  readonly node: WorkbenchLaneNode;
+  readonly files: NonNullable<DockviewProjectionOptions['files']>;
+  readonly openFile: (path: string) => void;
+  readonly applied: (projection: string) => void;
+}): void {
+  const tabs = (current: WorkbenchLaneNode): string[] =>
+    current.kind === 'group'
+      ? current.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
+      : current.children.flatMap(tabs);
+  const missing = tabs(node).filter((path) => files[path] === undefined);
+  if (missing.length > 0) {
+    for (const path of missing) {
+      openFile(path);
+    }
+    return;
+  }
+
+  const projection = toDockview('workbench', node, {
+    dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) },
+    files,
+  });
+  const desiredProjection = JSON.stringify(fromDockview('workbench', projection));
+  let currentProjection: string | undefined;
+  try {
+    currentProjection = JSON.stringify(fromDockview('workbench', api.toJSON()));
+  } catch {
+    // An unsupported live arrangement still needs the authoritative record restore.
+  }
+  if (currentProjection === desiredProjection) {
+    applied(currentProjection);
+    return;
+  }
+
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+  try {
+    api.fromJSON(projection, { reuseExistingPanels: true });
+    applied(JSON.stringify(fromDockview('workbench', api.toJSON())));
+  } finally {
+    active?.focus({ preventScroll: true });
+  }
+}
+
 /**
  * WorkbenchDockview
  *
@@ -1742,34 +1794,25 @@ export const WorkbenchDockview = memo(function ({
           },
         ]),
       );
-      const tabs = (current: WorkbenchLaneNode): string[] =>
-        current.kind === 'group'
-          ? current.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.path)
-          : current.children.flatMap(tabs);
-      const missing = tabs(node).filter((path) => files[path] === undefined);
-      if (missing.length > 0) {
-        for (const path of missing) {
-          editorRef.send({ type: 'openFile', path, source: 'record' });
-        }
-        return;
-      }
-      const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
       isRestoringLayout.current = true;
       try {
-        api.fromJSON(
-          toDockview('workbench', node, {
-            dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) },
-            files,
-          }),
-          { reuseExistingPanels: true },
-        );
-        adoptedProjectionRef.current = JSON.stringify(fromDockview('workbench', api.toJSON()));
-        pendingRecordNodeRef.current = undefined;
-        pendingRecordAppliedRef.current?.();
-        pendingRecordAppliedRef.current = undefined;
+        applyWorkbenchRecordNode({
+          api,
+          node,
+          files,
+          openFile: (path) => {
+            editorRef.send({ type: 'openFile', path, source: 'record' });
+          },
+          applied: (projection) => {
+            adoptedProjectionRef.current = projection;
+            pendingRecordNodeRef.current = undefined;
+            const pendingApplied = pendingRecordAppliedRef.current;
+            pendingRecordAppliedRef.current = undefined;
+            pendingApplied?.();
+          },
+        });
       } finally {
         isRestoringLayout.current = false;
-        active?.focus({ preventScroll: true });
       }
     },
     [api, editorRef, profile],

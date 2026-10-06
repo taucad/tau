@@ -42,3 +42,8 @@ export {
   OperationTimeoutError,
   isOperationTimeoutError,
 } from '#framework/runtime-operation-errors.js';
+
+export type { PublishedAssemblyDocument } from '#client/runtime-document.types.js';
+
+export { selectPublishedExportRoute } from '#client/published-export-routes.js';
+export type { PublishedExportRoute } from '#client/published-export-routes.js';

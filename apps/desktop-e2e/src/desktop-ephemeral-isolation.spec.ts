@@ -4,7 +4,14 @@ import { dirname, join, resolve } from 'node:path';
 import type { Page } from 'playwright';
 import { afterEach, expect, test } from 'vitest';
 
-import { captureNextDesktopDownload, launchDesktopApp } from '#support/desktop-app.js';
+import {
+  captureNextDesktopDownload,
+  desktopRuntimeLeases,
+  expectDesktopRuntimeLeaseExit,
+  launchDesktopApp,
+  observeDesktopRuntimeLeases,
+  waitForDesktopRuntimeLease,
+} from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
@@ -14,7 +21,7 @@ let session: DesktopSession | undefined;
 
 afterEach(async (context) => {
   if (context.task.result?.state === 'fail') {
-    await session?.capture('ephemeral-isolation-failure');
+    await session?.capture(`ephemeral-isolation-failure-${context.task.id}`);
   }
   await session?.close();
   session = undefined;
@@ -27,11 +34,13 @@ const directorySnapshot = async (root: string): Promise<readonly string[]> => {
 
 const openConverter = async (page: Page): Promise<void> => {
   await page.goto('app://tau/convert', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('heading', { name: '3D Model Converter' }).waitFor({ state: 'visible' });
-  await page
-    .getByText(/^[1-9]\d* formats supported$/u)
-    .filter({ visible: true })
-    .waitFor({ state: 'visible', timeout: 120_000 });
+  await page.getByRole('heading', { name: 'Convert', exact: true }).waitFor({ state: 'visible' });
+  const inputFormats = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Input formats', exact: true }),
+  });
+  await expect
+    .poll(async () => inputFormats.getByRole('listitem').filter({ visible: true }).count(), { timeout: 120_000 })
+    .toBeGreaterThan(0);
 };
 
 const uploadNamedCube = async (page: Page, bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
@@ -101,7 +110,7 @@ const downloadGlb = async (
   await secondaryFormat.click();
   const path = join(dirname(desktopSession.homeRoot), `.e2e-${name}.glb`);
   const download = await captureNextDesktopDownload(desktopSession, path, async () =>
-    page.getByRole('button', { name: 'Download', exact: true }).click(),
+    page.getByRole('button', { name: 'Download GLB', exact: true }).click(),
   );
   expect(download.filename).toMatch(/\.glb$/u);
   return Uint8Array.from(await readFile(path));
@@ -135,30 +144,13 @@ const utilityProcesses = async (desktopSession: DesktopSession): Promise<Readonl
     ),
   );
 
-const waitForNewUtility = async (desktopSession: DesktopSession, before: ReadonlySet<number>): Promise<number> => {
-  let added: number | undefined;
-  await expect
-    .poll(
-      async () => {
-        added = [...(await utilityProcesses(desktopSession))].find((pid) => !before.has(pid));
-        return added;
-      },
-      { timeout: 60_000 },
-    )
-    .toBeDefined();
-  if (added === undefined) {
-    throw new Error('Packaged Electron application did not launch an owned runtime utility process');
-  }
-  return added;
-};
-
 test('[completed-artifact] isolates simultaneous converter clients with identical entry names', async () => {
   session = await launchDesktopApp({ packaged: true, token: 'simultaneous-ephemeral-probe' });
   const homeBefore = await directorySnapshot(session.homeRoot);
   const pickedBefore = await directorySnapshot(session.pickedDirectory);
-  const utilitiesBeforeFirst = await utilityProcesses(session);
+  await observeDesktopRuntimeLeases(session);
   await openConverter(session.page);
-  const firstRuntimePid = await waitForNewUtility(session, utilitiesBeforeFirst);
+  const firstLease = await waitForDesktopRuntimeLease(session, session.page, { leaseTimeout: 60_000 });
 
   const bootstrap = await session.page.evaluate(() => {
     const shell = globalThis.window as unknown as {
@@ -170,7 +162,8 @@ test('[completed-artifact] isolates simultaneous converter clients with identica
   const mainWindowBounds = await session.application.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()[0]!.getBounds(),
   );
-  const utilitiesBeforeSecond = await utilityProcesses(session);
+  const priorLeases = await desktopRuntimeLeases(session);
+  const previousRequestIds = priorLeases.map(({ requestId }) => requestId);
   const nextWindow = session.application.waitForEvent('window');
   await session.application.evaluate(
     async ({ app, BrowserWindow }, options) => {
@@ -192,12 +185,19 @@ test('[completed-artifact] isolates simultaneous converter clients with identica
   );
   const secondPage = await nextWindow;
   secondPage.setDefaultTimeout(60_000);
-  await secondPage.getByRole('heading', { name: '3D Model Converter' }).waitFor({ state: 'visible' });
-  await secondPage
-    .getByText(/^[1-9]\d* formats supported$/u)
-    .filter({ visible: true })
-    .waitFor({ state: 'visible', timeout: 120_000 });
-  const secondRuntimePid = await waitForNewUtility(session, utilitiesBeforeSecond);
+  await secondPage.getByRole('heading', { name: 'Convert', exact: true }).waitFor({ state: 'visible' });
+  const secondInputFormats = secondPage.locator('section').filter({
+    has: secondPage.getByRole('heading', { name: 'Input formats', exact: true }),
+  });
+  await expect
+    .poll(async () => secondInputFormats.getByRole('listitem').filter({ visible: true }).count(), { timeout: 120_000 })
+    .toBeGreaterThan(0);
+  const secondLease = await waitForDesktopRuntimeLease(session, secondPage, {
+    previousRequestIds,
+    leaseTimeout: 60_000,
+  });
+  expect(secondLease.hostId).not.toBe(firstLease.hostId);
+  expect(secondLease.pid).not.toBe(firstLease.pid);
 
   await Promise.all([uploadObject(session.page, cubeObject(1)), uploadObject(secondPage, cubeObject(3))]);
   const smallGlb = await downloadGlb(session, session.page, 'small');
@@ -207,65 +207,40 @@ test('[completed-artifact] isolates simultaneous converter clients with identica
   expect(await directorySnapshot(session.homeRoot)).toEqual(homeBefore);
   expect(await directorySnapshot(session.pickedDirectory)).toEqual(pickedBefore);
   await secondPage.close();
-  await expect
-    .poll(
-      async () => {
-        const utilities = await utilityProcesses(session!);
-        return !utilities.has(secondRuntimePid);
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(true);
+  await expectDesktopRuntimeLeaseExit(session, secondLease, { released: true });
+  const survivingUtilities = await utilityProcesses(session);
+  expect(survivingUtilities.has(firstLease.pid)).toBe(true);
+  const survivingGlb = await downloadGlb(session, session.page, 'surviving');
+  expect(glbPositionExtent(survivingGlb)).toEqual([2, 2, 2]);
   await session.page.goto('app://tau/');
-  await expect
-    .poll(
-      async () => {
-        const utilities = await utilityProcesses(session!);
-        return !utilities.has(firstRuntimePid);
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(true);
+  await expectDesktopRuntimeLeaseExit(session, firstLease, { released: true });
 });
 
 test('[completed-artifact] recovers a converter session after its utility process crashes', async () => {
   session = await launchDesktopApp({ packaged: true, token: 'ephemeral-crash-probe' });
-  const utilitiesBefore = await utilityProcesses(session);
+  await observeDesktopRuntimeLeases(session);
   await openConverter(session.page);
   await uploadNamedCube(session.page, await readFixture(cubePath));
 
-  let runtimePid: number | undefined;
-  await expect
-    .poll(
-      async () => {
-        runtimePid = [...(await utilityProcesses(session!))].find((pid) => !utilitiesBefore.has(pid));
-        return runtimePid;
-      },
-      { timeout: 60_000 },
-    )
-    .toBeDefined();
-  if (runtimePid === undefined) {
-    throw new Error('Packaged Electron application did not launch a runtime utility process');
-  }
-  const killedPid = runtimePid;
-  process.kill(killedPid, 'SIGKILL');
-  await expect
-    .poll(
-      async () => {
-        const utilities = await utilityProcesses(session!);
-        return utilities.has(killedPid);
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(false);
+  const crashedLease = await waitForDesktopRuntimeLease(session, session.page, { leaseTimeout: 60_000 });
+  process.kill(crashedLease.pid, 'SIGKILL');
+  await expectDesktopRuntimeLeaseExit(session, crashedLease, { released: false });
   const utilitiesAfterCrash = await utilityProcesses(session);
   await new Promise<void>((resolve) => {
     setTimeout(resolve, 2e3);
   });
   expect(await utilityProcesses(session)).toEqual(utilitiesAfterCrash);
 
+  const recoveryPriorLeases = await desktopRuntimeLeases(session);
+  const priorRequestIds = recoveryPriorLeases.map(({ requestId }) => requestId);
   await session.page.goto('app://tau/');
   await openConverter(session.page);
+  const recoveredLease = await waitForDesktopRuntimeLease(session, session.page, {
+    previousRequestIds: priorRequestIds,
+    leaseTimeout: 60_000,
+  });
+  expect(recoveredLease.hostId).not.toBe(crashedLease.hostId);
+  expect(recoveredLease.pid).not.toBe(crashedLease.pid);
   await uploadNamedCube(session.page, await readFixture(dracoCubePath));
   const recoveredGlb = await downloadGlb(session, session.page, 'recovered');
   expect(recoveredGlb.byteLength).toBeGreaterThan(500);

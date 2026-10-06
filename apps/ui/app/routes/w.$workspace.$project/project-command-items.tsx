@@ -41,6 +41,7 @@ import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
+import { selectCadDisplay } from '#machines/cad.machine.js';
 
 export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): React.JSX.Element | undefined {
   const project = useProject({ enableNoContext: true });
@@ -60,13 +61,21 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
   const projectName = useSelector(projectRef, (state) => state.context.project?.name) ?? 'file';
 
   const mainCadRef = geometryUnits.get(mainEntryPath);
-  const artifactMimeType = useSelector(mainCadRef, (state) =>
-    state?.context.rendering?.success ? state.context.rendering.artifact.mimeType : undefined,
-  );
+  const display = useSelector(mainCadRef, (state) => (state ? selectCadDisplay(state) : undefined));
+  const rendering = useSelector(mainCadRef, (state) => state?.context.rendering);
+  const assemblyDisplay = display && 'admitted' in display ? display : undefined;
+  const artifactMimeType = assemblyDisplay
+    ? 'model/gltf-binary'
+    : rendering?.success
+      ? rendering.artifact.mimeType
+      : undefined;
+  const presentedKey = useSelector(mainGraphicsRef, (state) => state?.context.gltfPresentation?.presentedKey);
+  const displayKey = assemblyDisplay?.root.digest ?? (rendering?.success ? rendering.hash : undefined);
   const hasCameraRig = useGraphicsCameraRigQuery();
   const cameraReady = hasCameraRig(mainGraphicsRef);
   const canCapturePng = Boolean(
-    artifactMimeType === 'image/svg+xml' || (artifactMimeType === 'model/gltf-binary' && cameraReady),
+    artifactMimeType === 'image/svg+xml' ||
+    (artifactMimeType === 'model/gltf-binary' && cameraReady && presentedKey === displayKey),
   );
   const fileCount = fileTree.size;
 

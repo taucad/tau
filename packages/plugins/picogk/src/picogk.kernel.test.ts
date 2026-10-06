@@ -339,7 +339,7 @@ describe('PicoGK kernel', () => {
     const artifact = await definition.render!({ view: 'model', handle, options: {} }, runtime, value);
     expect(handle.glb).toEqual(artifact.content);
     const serialized = definition.serializeHandle!({ handle }, runtime, value);
-    const restored = definition.deserializeHandle!({ serialized }, runtime, value);
+    const restored = await definition.deserializeHandle!({ serialized }, runtime, value);
     expect(restored.glb).toEqual(handle.glb);
     expect(restored.glb).not.toBe(handle.glb);
 

@@ -10,11 +10,11 @@ import {
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 
 describe('document protocol schema coverage (C15)', () => {
-  it('binds the v4 hello and exact six-call, twenty-notify inventory', () => {
+  it('binds the v4 hello and exact fourteen-call, twenty-notify inventory', () => {
     expect(runtimeDocumentProtocolSchemas.hello).toBeDefined();
     expect(Object.keys(runtimeDocumentProtocolSchemas.calls)).toEqual([...documentProtocolCallNames]);
     expect(Object.keys(runtimeDocumentProtocolSchemas.notifies)).toEqual([...documentProtocolNotifyNames]);
-    expect(documentProtocolCallNames).toHaveLength(6);
+    expect(documentProtocolCallNames).toHaveLength(14);
     expect(documentProtocolClientNotifyNames).toHaveLength(8);
     expect(documentProtocolWorkerNotifyNames).toHaveLength(12);
     expect(documentProtocolNotifyNames).toHaveLength(20);

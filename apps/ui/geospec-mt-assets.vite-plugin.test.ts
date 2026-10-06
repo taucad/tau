@@ -1,6 +1,9 @@
+// @vitest-environment node
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import type { InlineConfig } from 'vite';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -121,6 +124,291 @@ describe('GeoSpec qualified MT client assets', () => {
       expect(() => createGeoSpecMtAssets(stage)).toThrow('staged wasm is invalid');
     } finally {
       rmSync(stage, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Desktop client and host static delivery', () => {
+  // Keep config acquisition and the native build in the same plain Node process.
+  // The actual async plugin remains unchanged; no completion sleep or manual hook call is used.
+  const staticAssetsBuildSource = `
+    import { build, loadConfigFromFile } from 'vite';
+    import { existsSync, readFileSync } from 'node:fs';
+    import path from 'node:path';
+    import { deepStrictEqual } from 'node:assert';
+    const configPath = JSON.parse(process.argv[1]);
+    const builds = JSON.parse(process.argv[2]);
+    const configured = await loadConfigFromFile({ command: 'build', mode: 'production' }, configPath);
+    if (!configured || configured.config.build?.copyPublicDir !== false) {
+      throw new Error('Actual desktop config did not disable its automatic public copy.');
+    }
+    const plugin = configured.config.plugins?.find((entry) =>
+      entry !== null && typeof entry === 'object' && !Array.isArray(entry) &&
+      entry.name === 'vite:desktop-static-assets');
+    if (!plugin) {
+      throw new Error('Actual desktop config omitted its static delivery owner.');
+    }
+    for (const options of builds) {
+      const writesClient = !options.build.ssr && options.build.write !== false;
+      const nativeInput = path.join(options.publicDir, 'assets/engines/replicad/density-single-v1');
+      const missingNotice = writesClient && !existsSync(path.join(nativeInput, 'NOTICE'));
+      await build({ ...options, configFile: false, plugins: [plugin] });
+      if (missingNotice) {
+        process.stdout.write('DESKTOP_STATIC_BUILD_RESOLVED_INVALID_INPUT');
+        throw new Error('Actual Vite build resolved for incomplete native input.');
+      }
+      if (writesClient) {
+        const host = path.join(path.dirname(options.build.outDir), 'host-assets/engines/replicad/density-single-v1');
+        // Assert at build fulfillment, not just after the child event loop has drained.
+        for (const name of ['replicad_single.wasm', 'replicad_single.mjs', 'provenance.json',
+          'LICENSE', 'LICENSE.OCCT-Exception', 'LICENSE.Replicad', 'NOTICE']) {
+          deepStrictEqual(readFileSync(path.join(host, name)), readFileSync(path.join(nativeInput, name)));
+        }
+      }
+    }
+  `;
+
+  const buildDesktopStaticAssets = async (
+    builds: ReadonlyArray<Pick<InlineConfig, 'root' | 'publicDir' | 'build'>>,
+  ): Promise<void> => {
+    try {
+      execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '--eval',
+          staticAssetsBuildSource,
+          JSON.stringify(path.join(import.meta.dirname, 'desktop/vite.config.ts')),
+          JSON.stringify(builds),
+        ],
+        { cwd: import.meta.dirname, encoding: 'utf8' },
+      );
+    } catch (error) {
+      // The command itself contains NOTICE. A late unhandled child rejection must not
+      // accidentally satisfy the existing expected build-rejection assertion.
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'stdout' in error &&
+        typeof error.stdout === 'string' &&
+        error.stdout.includes('DESKTOP_STATIC_BUILD_RESOLVED_INVALID_INPUT')
+      ) {
+        throw new Error('Actual build accepted incomplete input before its child exited.', { cause: error });
+      }
+      // ExecFileSync's generic message embeds the --eval source. Expose only
+      // actual child diagnostics, so an unrelated loader failure cannot match NOTICE.
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'stderr' in error &&
+        typeof error.stderr === 'string' &&
+        error.stderr.trim().length > 0
+      ) {
+        throw new Error(error.stderr, { cause: error });
+      }
+      throw new Error('Static asset build child failed without error output.', { cause: error });
+    }
+  };
+
+  const fixture = async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'tau-desktop-static-'));
+    const publicRoot = path.join(root, 'public');
+    const nativeInput = path.join(publicRoot, 'assets/engines/replicad/density-single-v1');
+    const nativeSource = path.join(import.meta.dirname, 'public/assets/engines/replicad/density-single-v1');
+    const clientOutDirectory = path.join(root, 'nonstandard/output/client-variant');
+    const nativeHostOutput = path.join(
+      path.dirname(clientOutDirectory),
+      'host-assets/engines/replicad/density-single-v1',
+    );
+    const nativeClientOutput = path.join(clientOutDirectory, 'assets/engines/replicad/density-single-v1');
+    await mkdir(path.dirname(nativeInput), { recursive: true });
+    await cp(nativeSource, nativeInput, { recursive: true });
+    await writeFile(path.join(publicRoot, 'ordinary-display.txt'), 'ordinary public bytes');
+    await writeFile(path.join(root, 'entry.mjs'), 'export const ordinary = 1;');
+    return { root, publicRoot, nativeInput, nativeSource, clientOutDirectory, nativeHostOutput, nativeClientOutput };
+  };
+
+  it('should copy actual native closure outside the actual client outDir and remove only stale owned native output', async () => {
+    const paths = await fixture();
+    try {
+      await mkdir(paths.nativeClientOutput, { recursive: true });
+      await writeFile(path.join(paths.nativeClientOutput, 'stale.wasm'), 'retired build bytes');
+      await mkdir(paths.nativeHostOutput, { recursive: true });
+      await writeFile(path.join(paths.nativeHostOutput, 'stale.mjs'), 'retired host bytes');
+      await writeFile(path.join(paths.clientOutDirectory, 'unrelated-existing.txt'), 'keep this output');
+      await buildDesktopStaticAssets([
+        {
+          root: paths.root,
+          publicDir: paths.publicRoot,
+          build: {
+            copyPublicDir: false,
+            outDir: paths.clientOutDirectory,
+            emptyOutDir: false,
+            minify: false,
+            lib: { entry: path.join(paths.root, 'entry.mjs'), formats: ['es'], fileName: 'entry' },
+          },
+        },
+      ]);
+      await expect(readFile(path.join(paths.clientOutDirectory, 'ordinary-display.txt'), 'utf8')).resolves.toBe(
+        'ordinary public bytes',
+      );
+      await expect(readFile(path.join(paths.clientOutDirectory, 'unrelated-existing.txt'), 'utf8')).resolves.toBe(
+        'keep this output',
+      );
+      await expect(readdir(paths.nativeClientOutput)).rejects.toMatchObject({ code: 'ENOENT' });
+      const names = await readdir(paths.nativeSource);
+      names.sort();
+      const hostNames = await readdir(paths.nativeHostOutput);
+      expect(hostNames.sort()).toEqual(names);
+      expect(names).toEqual([
+        'LICENSE',
+        'LICENSE.OCCT-Exception',
+        'LICENSE.Replicad',
+        'NOTICE',
+        'provenance.json',
+        'replicad_single.mjs',
+        'replicad_single.wasm',
+      ]);
+      await Promise.all(
+        names.map(async (name) => {
+          const [source, host] = await Promise.all([
+            readFile(path.join(paths.nativeSource, name)),
+            readFile(path.join(paths.nativeHostOutput, name)),
+          ]);
+          expect(host.byteLength).toBe(source.byteLength);
+          expect(host.equals(source)).toBe(true);
+        }),
+      );
+    } finally {
+      await rm(paths.root, { recursive: true, force: true });
+    }
+  });
+
+  it('should leave SSR output and existing client resources untouched even when the native input is absent', async () => {
+    const paths = await fixture();
+    try {
+      await rm(paths.nativeInput, { recursive: true });
+      await mkdir(paths.nativeClientOutput, { recursive: true });
+      await writeFile(path.join(paths.nativeClientOutput, 'existing.mjs'), 'keep separate client build');
+      const serverOutDirectory = path.join(paths.root, 'nonstandard/server-only');
+      await buildDesktopStaticAssets([
+        {
+          root: paths.root,
+          publicDir: paths.publicRoot,
+          build: {
+            copyPublicDir: false,
+            outDir: serverOutDirectory,
+            ssr: path.join(paths.root, 'entry.mjs'),
+            minify: false,
+          },
+        },
+      ]);
+      await expect(readFile(path.join(paths.nativeClientOutput, 'existing.mjs'), 'utf8')).resolves.toBe(
+        'keep separate client build',
+      );
+      await expect(readFile(path.join(serverOutDirectory, 'ordinary-display.txt'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+      await expect(readdir(paths.nativeHostOutput)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(readdir(path.join(path.dirname(serverOutDirectory), 'host-assets'))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      await rm(paths.root, { recursive: true, force: true });
+    }
+  });
+
+  it('should use each actual client environment outDir on repeated builds', async () => {
+    const paths = await fixture();
+    try {
+      const clientOutDirectories = [paths.clientOutDirectory, path.join(paths.root, 'different/copy/client')];
+      // One acquired actual plugin is reused inside the same child for both actual environments.
+      await buildDesktopStaticAssets(
+        clientOutDirectories.map((clientOutDirectory) => ({
+          root: paths.root,
+          publicDir: paths.publicRoot,
+          build: {
+            copyPublicDir: false,
+            outDir: clientOutDirectory,
+            minify: false,
+            lib: { entry: path.join(paths.root, 'entry.mjs'), formats: ['es'], fileName: 'entry' },
+          },
+        })),
+      );
+      await Promise.all(
+        clientOutDirectories.map(async (clientOutDirectory) => {
+          await expect(readFile(path.join(clientOutDirectory, 'ordinary-display.txt'), 'utf8')).resolves.toBe(
+            'ordinary public bytes',
+          );
+          await expect(
+            readFile(path.join(clientOutDirectory, 'assets/engines/replicad/density-single-v1/replicad_single.wasm')),
+          ).rejects.toMatchObject({ code: 'ENOENT' });
+          expect(
+            await readFile(
+              path.join(
+                path.dirname(clientOutDirectory),
+                'host-assets/engines/replicad/density-single-v1/provenance.json',
+              ),
+            ),
+          ).toEqual(await readFile(path.join(paths.nativeSource, 'provenance.json')));
+        }),
+      );
+    } finally {
+      await rm(paths.root, { recursive: true, force: true });
+    }
+  });
+
+  it('should produce no static filesystem output for a client generate-only build', async () => {
+    const paths = await fixture();
+    try {
+      await rm(paths.nativeInput, { recursive: true });
+      await buildDesktopStaticAssets([
+        {
+          root: paths.root,
+          publicDir: paths.publicRoot,
+          build: {
+            write: false,
+            copyPublicDir: false,
+            outDir: paths.clientOutDirectory,
+            minify: false,
+            lib: { entry: path.join(paths.root, 'entry.mjs'), formats: ['es'], fileName: 'entry' },
+          },
+        },
+      ]);
+      await expect(readdir(paths.clientOutDirectory)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(readdir(paths.nativeHostOutput)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(paths.root, { recursive: true, force: true });
+    }
+  });
+
+  it('should reject a missing native closure member before mutating prior client or host output', async () => {
+    const paths = await fixture();
+    try {
+      await rm(path.join(paths.nativeInput, 'NOTICE'));
+      await mkdir(paths.nativeClientOutput, { recursive: true });
+      await writeFile(path.join(paths.nativeClientOutput, 'prior.mjs'), 'prior client');
+      await mkdir(paths.nativeHostOutput, { recursive: true });
+      await writeFile(path.join(paths.nativeHostOutput, 'prior.mjs'), 'prior host');
+      await expect(
+        buildDesktopStaticAssets([
+          {
+            root: paths.root,
+            publicDir: paths.publicRoot,
+            build: {
+              copyPublicDir: false,
+              outDir: paths.clientOutDirectory,
+              emptyOutDir: false,
+              minify: false,
+              lib: { entry: path.join(paths.root, 'entry.mjs'), formats: ['es'], fileName: 'entry' },
+            },
+          },
+        ]),
+      ).rejects.toThrow('NOTICE');
+      await expect(readFile(path.join(paths.nativeClientOutput, 'prior.mjs'), 'utf8')).resolves.toBe('prior client');
+      await expect(readFile(path.join(paths.nativeHostOutput, 'prior.mjs'), 'utf8')).resolves.toBe('prior host');
+    } finally {
+      await rm(paths.root, { recursive: true, force: true });
     }
   });
 });

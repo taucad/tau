@@ -10,6 +10,7 @@
 
 import { realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { safeDispose } from '@taucad/utils/dispose';
 
 import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electron';
 import type { MachineBindingOutcome } from '@taucad/runtime/machine';
@@ -535,8 +536,12 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           [channel.port2],
         );
       } catch (error) {
-        channel.port1.close();
-        channel.port2.close();
+        safeDispose(() => {
+          channel.port1.close();
+        });
+        safeDispose(() => {
+          channel.port2.close();
+        });
         throw error;
       }
       if (projectContext) {

@@ -9,7 +9,9 @@ import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryCo
 import {
   buildModelComponentGeometryReference,
   ModelComponentActionDropdown,
+  ModelComponentMaterialSummary,
 } from '#components/geometry/cad/model-component-action-menu.js';
+import { projectPartInspection } from '#components/geometry/cad/part-quantities.js';
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 
@@ -71,6 +73,38 @@ function createNode(): GeometryComponentNode {
     capabilities,
   };
 }
+
+it('shows retained physical facts in the menu without treating surface appearance as density', () => {
+  const node = createNode();
+  const committedNode: GeometryComponentNode = {
+    ...node,
+    physical: {
+      volume: {
+        state: 'measured',
+        valueMm3: 12_480,
+        geometryDigest: `sha256:${'a'.repeat(64)}`,
+        method: 'occt-solid-volume',
+        validity: 'closed-solid',
+      },
+      density: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Unit-bearing physical field uses cm³ notation.
+        valueGPerCm3: 1.55,
+        provenance: 'authored-shape-config',
+      },
+    },
+  };
+  render(
+    <ModelComponentMaterialSummary
+      node={node}
+      inspection={projectPartInspection({ node, committedNode, transientPreview: true })}
+    />,
+  );
+  expect(screen.getByText('1.55 g/cm³')).toBeVisible();
+  expect(screen.getByText('12.48 cm³')).toBeVisible();
+  expect(screen.getByText('19.34 g')).toBeVisible();
+  expect(screen.getByText('Last committed physical facts; preview geometry is transient.')).toBeVisible();
+  expect(screen.getByText('Not specified')).toBeVisible();
+});
 
 function createManifest(node = createNode(), sourceFile?: string): GeometryComponentManifest {
   return {
@@ -290,6 +324,7 @@ describe('model component action menu', () => {
       // The menu opens on its part: a collapsed row with the name and a swatch; the factors wait inside.
       const partRow = screen.getByRole('menuitem', { name: /Planetary housing/ });
       expect(screen.getByRole('menu')).toHaveTextContent(/^Planetary housing/);
+      expect(within(partRow).getByText('Unnamed material')).toBeVisible();
       expect(partRow).toHaveAttribute('aria-expanded', 'false');
       expect(partRow.querySelector('[data-slot="material-swatch"]')).toBeInTheDocument();
       expect(screen.queryByRole('group', { name: 'Inspection for Planetary housing' })).not.toBeInTheDocument();

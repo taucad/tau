@@ -1,3 +1,6 @@
+import { statSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
@@ -34,6 +37,26 @@ export type DesktopRuntimeOptions = {
 };
 
 let engineIdentityRecorded = false;
+
+/** Resolve the immutable app-selected engine pair supplied by trusted main composition. */
+const desktopReplicadWasm = (): { wasmUrl: string; wasmBindingsUrl: string } => {
+  const resourceRoot = process.env['TAU_REPLICAD_RESOURCE_ROOT'];
+  if (!resourceRoot || !isAbsolute(resourceRoot)) {
+    throw new Error('The desktop shell did not supply an absolute Replicad resource root.');
+  }
+  const wasm = join(resourceRoot, 'replicad_single.wasm');
+  const bindings = join(resourceRoot, 'replicad_single.mjs');
+  for (const path of [wasm, bindings]) {
+    try {
+      if (!statSync(path).isFile()) {
+        throw new Error('Resource is not a file.');
+      }
+    } catch (error) {
+      throw new Error('The desktop Replicad engine pair is missing from the built UI payload.', { cause: error });
+    }
+  }
+  return { wasmUrl: pathToFileURL(wasm).href, wasmBindingsUrl: pathToFileURL(bindings).href };
+};
 
 /** Load the engine only when OpenRSCAD is selected, and record the bound payload once per utility. */
 export const desktopOpenrscadKernel = createOpenrscadKernel({
@@ -93,7 +116,7 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
         replicad({
           kernels: {
             default: {
-              wasm: 'auto',
+              wasm: desktopReplicadWasm(),
               withSourceMapping: options.withSourceMapping === true,
             },
           },

@@ -26,6 +26,8 @@ import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Remote } from 'comlink';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
+import type { ProjectCreationObservation, ProjectCreationPhase } from '#hooks/project-manager.machine.js';
+import { ENV } from '#environment.config.js';
 import type { ObjectStoreWorker, InitialEditorState } from '#hooks/object-store.worker.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import {
@@ -621,6 +623,8 @@ function createMetadataReadOwner(source: ReturnType<typeof createChatFileStore>)
 
 export function ProjectManagerProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const actorRef = useActorRef(projectManagerMachine);
+  // Cardinality of live debug scopes only; overlap denies the single slot until every scope drains.
+  const creationDepth = useRef(0);
   const fileManager = useFileManager();
   const queryClient = useQueryClient();
   /**
@@ -1000,7 +1004,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   );
 
   const resumePendingProjectOperation = useCallback(
-    async (operation: PendingProjectOperation, suppliedWorker?: Remote<ObjectStoreWorker>): Promise<void> => {
+    async (
+      operation: PendingProjectOperation,
+      suppliedWorker?: Remote<ObjectStoreWorker>,
+      observe?: (phase: ProjectCreationPhase) => void,
+    ): Promise<void> => {
       const worker = suppliedWorker ?? (await getReadiedWorker());
 
       if (operation.kind === 'permanent-delete') {
@@ -1042,8 +1050,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       let result;
       try {
         if (operation.backend === 'indexeddb' || operation.backend === 'opfs') {
+          observe?.('pin-backend');
           await pinHomeStorageBackend(operation.backend);
         }
+        observe?.('resolve-storage-scope');
         const scope = await pendingStorageToScope(operation);
         /* The bytes are handed over: this attempt owns them, and a retry reads
          * the durable pending operation again (`getPendingProjectOperations`),
@@ -1054,6 +1064,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           files: Object.fromEntries(Object.entries(operation.files).filter(([path]) => path !== 'tau.json')),
           manifest: serializeProjectManifest(operation.manifest),
         };
+        observe?.('commit-directory');
         result = await fileManager.client.commitPendingProjectDirectory(
           Object.assign(input, { [consumableBytes]: true }),
         );
@@ -1068,14 +1079,20 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       }
 
       try {
+        observe?.('persist-route');
         await setProjectFileSystemConfig(pendingStorageToConfig(operation.manifest.id, operation));
+        observe?.('sync-roots');
         await fileManager.workspace.syncProjectRoots();
         /* The project's root is mounted by the line above, so the chats this
          * operation carries can be written where they live: files inside it. */
+        observe?.('resume-resources');
         const chats = await worker.resumePendingProjectOperationResources(operation.operationId);
         // The bytes land before the record that makes the startup request runnable.
+        observe?.('promote-attachments');
         await promoteDraftAttachments(operation, chats);
+        observe?.('persist-chats');
         await Promise.all(chats.map(async (chat) => chatStore.putChatRecord(chat)));
+        observe?.('complete-journal');
         await worker.completePendingProjectOperation(operation.operationId);
       } catch (error) {
         throw new PendingProjectRecoveryError('local-state-error', { cause: error });
@@ -1094,176 +1111,230 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const createProjectOnce = useCallback(
     async (options: CreateProjectOptions): Promise<CreatedProject> => {
-      /* The id is a directory here and a repository name on the Tau Hosted
-         Remote, so a supplied one is checked against the same rule a minted one
-         satisfies — before anything is readied, allocated or written (W18 DEF-2). */
-      if (options.id !== undefined && !projectIdSchema.safeParse(options.id).success) {
-        throw new Error(`Not a project id: ${options.id}`);
-      }
-      /* One id is one local project (review R4). The *From Tau Cloud* row is
-         offered from a cached listing against an asynchronous discovery pass, so
-         the same row can be clicked twice — and two directories under one id is
-         a `duplicate-id` conflict neither of them recovers from. The route
-         config is the durable record of what this device holds. */
-      if (options.id !== undefined && (await getProjectFileSystemConfig(options.id)) !== undefined) {
-        throw new Error(`That project is already on this device: ${options.id}`);
-      }
-      const worker = await getReadiedWorker();
-
-      const { location: explicitLocation } = options;
-      let location = explicitLocation;
-      if (!location) {
-        const { location: preferredLocation } = await getProjectCreationLocation({
-          webAccessSupported: directoryPicker().available,
-        });
-        location = preferredLocation;
-      }
-      let storageRoot: PersistentStorageRoot;
-      // The workspace is resolved here, so the result can carry the canonical
-      // URL its caller navigates to instead of riding an id-addressed redirect.
-      let workspaceSlug: string;
-      if (location.kind === 'workspace') {
-        const picked = await getWorkspaceMetadata(location.workspaceId);
-        if (picked && isNodeWorkspace(picked)) {
-          // A node workspace is a directory on disk: nothing to grant, nothing
-          // to reconnect. Its row existing is the whole admission check.
-          storageRoot = { backend: 'node', path: picked.path };
-          workspaceSlug = picked.slug;
-        } else {
-          const entry = await resolveWorkspaceForWrite(location.workspaceId);
-          storageRoot = {
-            backend: 'webaccess',
-            workspaceId: entry.workspace.workspaceId,
-          };
-          workspaceSlug = entry.workspace.slug;
-        }
-      } else {
-        storageRoot = { backend: await getHomeStorageBackend() };
-        workspaceSlug = homeWorkspaceSlug;
-      }
-
-      const projectId = options.id ?? generatePrefixedId(idPrefix.project);
-
-      // Determine project data and files based on pattern
-      let projectData: Omit<ProjectManifest, '$schema' | 'id'>;
-      let files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
-      let kernel: KernelProvider | undefined;
-
-      if ('kernel' in options) {
-        // CreateProjectFromKernel: Generate from kernel template
-        kernel = options.kernel;
-        const { projectName: requestedProjectName } = options;
-        let projectName = requestedProjectName;
-        if (!projectName && options.initialMessage) {
-          const generated = await projectNameClient
-            .generate({
-              projectId,
-              text: options.initialMessage.content,
-              imageUrls: await namingImageUrls(options.initialMessage),
-            })
-            /* Naming is a courtesy from the API, not a prerequisite: with the
-             * API unreachable (a daemon-served page, desktop offline) the
-             * project is still created, under the same default an empty
-             * suggestion gets. */
-            .catch((): string => '');
-          projectName = generated.trim() || defaultProjectName;
-        }
-        const mainFileName = getMainFile(options.kernel);
-        const emptyCode = getEmptyCode(options.kernel);
-        const result = createInitialProject({
-          projectName: projectName ?? defaultProjectName,
-          mainFileName,
-          emptyCodeContent: encodeTextFile(emptyCode),
-        });
-        projectData = result.projectData;
-        files = result.files;
-      } else {
-        // CreateProjectFromData: Use provided project data and files
-        projectData = options.project;
-        files = options.files;
-      }
-
-      const manifest = projectToManifest({ ...projectData, id: projectId });
-      const providerBasePath = await allocateProjectBasePath(fileManager.client, storageRoot, manifest.name);
-      const pendingStorage: PendingProjectStorage = { ...storageRoot, providerBasePath };
-
-      // The initial homepage prompt remains a normal pending user message
-      // for display purposes. The permission to run it automatically after
-      // route hydration is separate one-shot command state on the chat row.
-      const initialUserMessage = options.initialMessage
-        ? buildUserMessage({
-            text: options.initialMessage.content,
-            attachments: options.initialMessage.attachments,
-          })
-        : undefined;
-      const chatMessages = initialUserMessage ? [initialUserMessage] : [];
-      const startupRequest: Chat['startupRequest'] | undefined = initialUserMessage
-        ? {
-            id: generatePrefixedId(idPrefix.request),
-            kind: 'regenerate-tail',
-            messageId: initialUserMessage.id,
-            message: initialUserMessage,
-            source: 'homepage-initial-message',
-            createdAt: Date.now(),
-          }
-        : undefined;
-
-      const chatName = options.chatName ?? (options.initialMessage ? 'Initial design' : 'Initial chat');
-
-      // Seed the chat row with chat-scoped active model + kernel so a
-      // cookie change in another tab does not mutate the active selection
-      // for this freshly-created chat. Defaults to the kernel chosen by
-      // the creation flow when not explicitly supplied.
-      const seededActiveExecution = options.activeExecution;
-      const seededActiveKernel = options.activeKernel ?? kernel;
-
-      // Single atomic call to create project + chat + Editor state
-      const operation = await worker.prepareProjectCreation({
-        manifest,
-        ...(options.chat === false
-          ? {}
-          : {
-              chat: {
-                name: chatName,
-                messages: chatMessages,
-                activeExecution: seededActiveExecution,
-                activeKernel: seededActiveKernel,
-                ...(startupRequest ? { startupRequest } : {}),
-              },
-              ...attachmentSourceOf(options),
-            }),
-        editorState: options.editorState,
-        files,
-        storage: pendingStorage,
-      });
-      await resumePendingProjectOperation(operation, worker);
-      /* D19: a project born with no remote backs up to Tau Cloud from its first
-         revision — a template, a fork, a file or zip import. A caller that
-         supplies the id is adopting an identity that has a remote of its own (a
-         Tau Cloud open, a materialized project, a linked GitHub import), so it
-         is left alone. The session decides once it knows the account (W11). */
-      if (options.id === undefined) {
-        tauCloudIntent.set(projectId, 'default');
-      }
-      /* Route callers navigate with the returned slugs immediately. Publish
-       * the completed filesystem commit to every active project-list query
-       * before that navigation can ask the sole slug resolver for its id. */
-      const previous = discoveryPassRef.current;
-      if (previous) {
-        await previous.catch(() => undefined);
-      }
-      discoveryEpochRef.current++;
-      discoverySnapshotRef.current = undefined;
-      await queryClient.invalidateQueries({ queryKey: ['projects'] });
+      let observation: ProjectCreationObservation | undefined;
+      let observe:
+        | ((phase: ProjectCreationPhase, fields?: Omit<ProjectCreationObservation, 'owner' | 'phase'>) => void)
+        | undefined;
+      let observing = false;
       try {
-        await setProjectCreationLocation(location);
-      } catch (error) {
-        console.warn('[ProjectManager] failed to persist project creation location', error);
+        if (ENV.TAU_DEBUG) {
+          observing = true;
+          creationDepth.current += 1;
+          observation = { owner: options, phase: 'worker-ready' };
+          observe = (phase, fields): void => {
+            if (!observation || actorRef.getSnapshot().status !== 'active') {
+              return;
+            }
+            observation = { ...observation, ...fields, phase };
+            try {
+              actorRef.send({ type: 'creationObserved', observation });
+            } catch {
+              // Observation cannot change creation/receipt/cleanup outcomes.
+            }
+          };
+          actorRef.send({ type: 'creationStarted', owner: options });
+        }
+      } catch {
+        // A debug environment or observer failure must not reject project creation.
       }
+      try {
+        /* The id is a directory here and a repository name on the Tau Hosted
+           Remote, so a supplied one is checked against the same rule a minted one
+           satisfies — before anything is readied, allocated or written (W18 DEF-2). */
+        if (options.id !== undefined && !projectIdSchema.safeParse(options.id).success) {
+          throw new Error(`Not a project id: ${options.id}`);
+        }
+        /* One id is one local project (review R4). The *From Tau Cloud* row is
+           offered from a cached listing against an asynchronous discovery pass, so
+           the same row can be clicked twice — and two directories under one id is
+           a `duplicate-id` conflict neither of them recovers from. The route
+           config is the durable record of what this device holds. */
+        if (options.id !== undefined && (await getProjectFileSystemConfig(options.id)) !== undefined) {
+          throw new Error(`That project is already on this device: ${options.id}`);
+        }
+        observe?.('worker-ready');
+        const worker = await getReadiedWorker();
+        observe?.('storage-root');
 
-      return { ...operation.manifest, slugs: { workspaceSlug, projectSlug: directorySlug(providerBasePath) } };
+        const { location: explicitLocation } = options;
+        let location = explicitLocation;
+        if (!location) {
+          const { location: preferredLocation } = await getProjectCreationLocation({
+            webAccessSupported: directoryPicker().available,
+          });
+          location = preferredLocation;
+        }
+        observe?.('storage-root');
+        let storageRoot: PersistentStorageRoot;
+        // The workspace is resolved here, so the result can carry the canonical
+        // URL its caller navigates to instead of riding an id-addressed redirect.
+        let workspaceSlug: string;
+        if (location.kind === 'workspace') {
+          const picked = await getWorkspaceMetadata(location.workspaceId);
+          if (picked && isNodeWorkspace(picked)) {
+            // A node workspace is a directory on disk: nothing to grant, nothing
+            // to reconnect. Its row existing is the whole admission check.
+            storageRoot = { backend: 'node', path: picked.path };
+            workspaceSlug = picked.slug;
+          } else {
+            const entry = await resolveWorkspaceForWrite(location.workspaceId);
+            storageRoot = {
+              backend: 'webaccess',
+              workspaceId: entry.workspace.workspaceId,
+            };
+            workspaceSlug = entry.workspace.slug;
+          }
+        } else {
+          storageRoot = { backend: await getHomeStorageBackend() };
+          workspaceSlug = homeWorkspaceSlug;
+        }
+
+        const projectId = options.id ?? generatePrefixedId(idPrefix.project);
+        observe?.('storage-root', { projectId, backend: storageRoot.backend });
+
+        // Determine project data and files based on pattern
+        let projectData: Omit<ProjectManifest, '$schema' | 'id'>;
+        let files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
+        let kernel: KernelProvider | undefined;
+
+        if ('kernel' in options) {
+          // CreateProjectFromKernel: Generate from kernel template
+          kernel = options.kernel;
+          const { projectName: requestedProjectName } = options;
+          let projectName = requestedProjectName;
+          if (!projectName && options.initialMessage) {
+            const generated = await projectNameClient
+              .generate({
+                projectId,
+                text: options.initialMessage.content,
+                imageUrls: await namingImageUrls(options.initialMessage),
+              })
+              /* Naming is a courtesy from the API, not a prerequisite: with the
+               * API unreachable (a daemon-served page, desktop offline) the
+               * project is still created, under the same default an empty
+               * suggestion gets. */
+              .catch((): string => '');
+            projectName = generated.trim() || defaultProjectName;
+          }
+          const mainFileName = getMainFile(options.kernel);
+          const emptyCode = getEmptyCode(options.kernel);
+          const result = createInitialProject({
+            projectName: projectName ?? defaultProjectName,
+            mainFileName,
+            emptyCodeContent: encodeTextFile(emptyCode),
+          });
+          projectData = result.projectData;
+          files = result.files;
+        } else {
+          // CreateProjectFromData: Use provided project data and files
+          projectData = options.project;
+          files = options.files;
+        }
+
+        const manifest = projectToManifest({ ...projectData, id: projectId });
+        observe?.('allocate-directory');
+        const providerBasePath = await allocateProjectBasePath(fileManager.client, storageRoot, manifest.name);
+        const pendingStorage: PendingProjectStorage = { ...storageRoot, providerBasePath };
+
+        // The initial homepage prompt remains a normal pending user message
+        // for display purposes. The permission to run it automatically after
+        // route hydration is separate one-shot command state on the chat row.
+        const initialUserMessage = options.initialMessage
+          ? buildUserMessage({
+              text: options.initialMessage.content,
+              attachments: options.initialMessage.attachments,
+            })
+          : undefined;
+        const chatMessages = initialUserMessage ? [initialUserMessage] : [];
+        const startupRequest: Chat['startupRequest'] | undefined = initialUserMessage
+          ? {
+              id: generatePrefixedId(idPrefix.request),
+              kind: 'regenerate-tail',
+              messageId: initialUserMessage.id,
+              message: initialUserMessage,
+              source: 'homepage-initial-message',
+              createdAt: Date.now(),
+            }
+          : undefined;
+
+        const chatName = options.chatName ?? (options.initialMessage ? 'Initial design' : 'Initial chat');
+
+        // Seed the chat row with chat-scoped active model + kernel so a
+        // cookie change in another tab does not mutate the active selection
+        // for this freshly-created chat. Defaults to the kernel chosen by
+        // the creation flow when not explicitly supplied.
+        const seededActiveExecution = options.activeExecution;
+        const seededActiveKernel = options.activeKernel ?? kernel;
+
+        // Single atomic call to create project + chat + Editor state
+        observe?.('prepare-journal');
+        const operation = await worker.prepareProjectCreation({
+          manifest,
+          ...(options.chat === false
+            ? {}
+            : {
+                chat: {
+                  name: chatName,
+                  messages: chatMessages,
+                  activeExecution: seededActiveExecution,
+                  activeKernel: seededActiveKernel,
+                  ...(startupRequest ? { startupRequest } : {}),
+                },
+                ...attachmentSourceOf(options),
+              }),
+          editorState: options.editorState,
+          files,
+          storage: pendingStorage,
+        });
+        observe?.(
+          operation.backend === 'opfs' || operation.backend === 'indexeddb' ? 'pin-backend' : 'resolve-storage-scope',
+          { operationId: operation.operationId },
+        );
+        await resumePendingProjectOperation(operation, worker, observing ? observe : undefined);
+        /* D19: a project born with no remote backs up to Tau Cloud from its first
+           revision — a template, a fork, a file or zip import. A caller that
+           supplies the id is adopting an identity that has a remote of its own (a
+           Tau Cloud open, a materialized project, a linked GitHub import), so it
+           is left alone. The session decides once it knows the account (W11). */
+        if (options.id === undefined) {
+          tauCloudIntent.set(projectId, 'default');
+        }
+        /* Route callers navigate with the returned slugs immediately. Publish
+         * the completed filesystem commit to every active project-list query
+         * before that navigation can ask the sole slug resolver for its id. */
+        const previous = discoveryPassRef.current;
+        if (previous) {
+          observe?.('prior-discovery');
+          await previous.catch(() => undefined);
+        }
+        discoveryEpochRef.current++;
+        discoverySnapshotRef.current = undefined;
+        observe?.('invalidate-projects');
+        await queryClient.invalidateQueries({ queryKey: ['projects'] });
+        try {
+          observe?.('persist-location');
+          await setProjectCreationLocation(location);
+        } catch (error) {
+          console.warn('[ProjectManager] failed to persist project creation location', error);
+        }
+
+        return { ...operation.manifest, slugs: { workspaceSlug, projectSlug: directorySlug(providerBasePath) } };
+      } finally {
+        if (observing) {
+          observation = undefined;
+          creationDepth.current -= 1;
+          if (creationDepth.current === 0) {
+            try {
+              actorRef.send({ type: 'creationsDrained' });
+            } catch {
+              // Drain observation is independent of the original completion/error.
+            }
+          }
+        }
+      }
     },
     [
+      actorRef,
       fileManager.client,
       getReadiedWorker,
       namingImageUrls,

@@ -10,6 +10,8 @@ import process from 'node:process';
 import {
   desktopE2EApiUrl,
   desktopE2ECompletedArtifact,
+  desktopE2EIsolatedApiDirectory,
+  desktopE2EIsolatedServices,
   desktopE2EFreeTierSyncEnabled,
   desktopE2EFrontendUrl,
   desktopE2EPackagedExecutable,
@@ -91,18 +93,9 @@ const closeLog = async (apiLog: ReturnType<typeof createWriteStream>): Promise<v
   });
 
 export const setup = async (): Promise<() => void> => {
+  const isolatedApiCwd = desktopE2EIsolatedApiDirectory();
   if (desktopE2ECompletedArtifact) {
     desktopE2EPackagedExecutable();
-    const apiUrl = new URL(desktopE2EApiUrl);
-    if (
-      !['127.0.0.1', '[::1]', 'localhost'].includes(apiUrl.hostname) ||
-      desktopE2EApiUrl === 'http://localhost:4014' ||
-      process.env['TAU_E2E_EXTERNAL_SERVICES'] !== 'true'
-    ) {
-      throw new Error(
-        'Completed-artifact E2E requires TAU_E2E_EXTERNAL_SERVICES=true and a non-default loopback-only TAU_E2E_API_URL.',
-      );
-    }
   }
 
   if (await isApiReady()) {
@@ -147,7 +140,7 @@ export const setup = async (): Promise<() => void> => {
    * model would be stubbed and is not a supported live selection. The default
    * completed-artifact tier remains self-host; an explicit isolated-cloud
    * gateway run uses its verified disposable development billing database. */
-  if (!desktopE2ECompletedArtifact || process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] === 'true') {
+  if (!desktopE2EIsolatedServices || process.env['TAU_E2E_COMPLETED_CLOUD_GATEWAY'] === 'true') {
     environment['TAU_CLOUD_ENABLED'] = 'true';
     environment['BILLING_ENVIRONMENT'] = 'development';
     environment['BILLING_USAGE_CURSOR_SECRET'] = 'desktop-e2e-usage-cursor-secret-min-32-chars';
@@ -177,16 +170,13 @@ export const setup = async (): Promise<() => void> => {
    * keeps the first pass's evidence. */
   const apiLogName = desktopE2EFreeTierSyncEnabled ? 'api-free-tier-sync.log' : 'api.log';
   const apiLog = createWriteStream(resolve(logDirectory, apiLogName), { flags: 'w' });
-  // Nest also loads .env from cwd. Completed-package tests use the fixture's
+  // Nest also loads .env from cwd. Isolated desktop tests use the fixture's
   // private directory so neither Node nor Nest can read real API credentials.
-  const apiCwd = desktopE2ECompletedArtifact ? process.env['TAU_E2E_API_CWD'] : apiRoot;
-  if (!apiCwd) {
-    throw new Error('Completed-artifact E2E requires the isolated launcher API directory.');
-  }
+  const apiCwd = isolatedApiCwd ?? apiRoot;
   const api = spawn(
     process.execPath,
     [
-      ...(desktopE2ECompletedArtifact ? [] : ['--env-file-if-exists=.env']),
+      ...(desktopE2EIsolatedServices ? [] : ['--env-file-if-exists=.env']),
       '--import',
       new URL('register.mjs', pathToFileURL(createRequire(import.meta.url).resolve('@oxc-node/core/package.json')))
         .href,

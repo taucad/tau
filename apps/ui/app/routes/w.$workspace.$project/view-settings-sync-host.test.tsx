@@ -8,7 +8,21 @@ import type { Actor } from 'xstate';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
 import { workbenchRecords } from '@taucad/workbench';
+import type { WorkbenchView } from '@taucad/workbench';
+import type * as ViewSettingsSyncModule from '#hooks/use-view-settings-sync.js';
+import { GraphicsProvider } from '#hooks/use-graphics.js';
+import { getViewCameraSession } from '#services/graphics-camera-registry.js';
+import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
+import { resolveCameraUp } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
+import { perspectiveVerticalSpan } from '@taucad/camera';
+import { Box3, Vector3 } from 'three';
 import { readRecordIssues } from '#workbench-records/record-issues.js';
+
+vi.mock('@react-three/fiber', () => {
+  const size = { width: 800, height: 600 };
+  const state = { size, get: () => ({ size }) };
+  return { useThree: (selector?: (input: typeof state) => unknown) => (selector ? selector(state) : state) };
+});
 
 type GraphicsRef = Actor<typeof graphicsMachine>;
 const sync = vi.hoisted(() => vi.fn());
@@ -159,6 +173,177 @@ function realViewFiles(branchScenario = false) {
 }
 
 describe('ViewSettingsSyncHost', () => {
+  it.each(['settled own write', 'deferred incoming preset'] as const)(
+    'distinguishes the explicit framed pose and FOV30 from a %s through the real host',
+    async (arrival) => {
+      const actualSync = await vi.importActual<typeof ViewSettingsSyncModule>('#hooks/use-view-settings-sync.js');
+      const memory = realViewFiles();
+      const actor = graphics();
+      setViews({ 'v-abcd1234': actor });
+      const setAppliedWorkbenchRevision = vi.fn();
+      const setViewRecord = vi.fn((viewId: string, record: WorkbenchView) => {
+        projectStore.set({
+          ...(projectStore.getSnapshot() as Record<string, unknown>),
+          viewRecords: new Map([[viewId, record]]),
+        });
+      });
+      projectStore.set({
+        ...(projectStore.getSnapshot() as Record<string, unknown>),
+        editorRef: {
+          getSnapshot: () => ({ context: { graphicsBackendPreferences: {} } }),
+          send: vi.fn(),
+        },
+        setViewRecord,
+        setAppliedWorkbenchRevision,
+      });
+      sync.mockImplementation(actualSync.useViewSettingsSync);
+      const bounds = new Box3(new Vector3(-0.1, -0.1, -0.1), new Vector3(0.4, 0.1, 0.1));
+      function Frame(): React.JSX.Element {
+        useCameraFraming({ geometryRadius: bounds.getSize(new Vector3()).length() / 2, geometryBounds: bounds });
+        return <div />;
+      }
+      let view: ReturnType<typeof render> | undefined;
+      try {
+        const [body] = await Promise.allSettled([
+          (async () => {
+            view = render(
+              <GraphicsProvider graphicsRef={actor} seed={{ identity: 'a.ts', camera: { cameraFovAngle: 60 } }}>
+                <ViewSettingsSyncHost />
+                <Frame />
+              </GraphicsProvider>,
+            );
+            await waitFor(() => {
+              expect(getViewCameraSession(actor)?.framing.initialized).toBe(true);
+              expect(setAppliedWorkbenchRevision).toHaveBeenCalledWith(
+                '.tau/workbench/views/v-abcd1234.json',
+                expect.stringMatching(/^sha256:/u),
+              );
+            });
+            const session = getViewCameraSession(actor)!;
+            const rig = session.rig.actorRef;
+            const initialDirection = rig.getSnapshot().context.view.direction;
+            const target: [number, number, number] = [0.15, 0, 0];
+            const offset = new Vector3(0.15, -0.65, 0.45).sub(new Vector3(...target));
+            const distance = offset.length();
+            const direction = offset.normalize();
+            const up = resolveCameraUp({ direction, preferredUp: new Vector3(...rig.getSnapshot().context.view.up) });
+            const requestedView = {
+              target,
+              direction: [direction.x, direction.y, direction.z] as [number, number, number],
+              up: [up.x, up.y, up.z] as [number, number, number],
+              verticalSpan: perspectiveVerticalSpan({ distance, verticalFieldOfView: 30, zoom: 1 }),
+              perspectiveZoom: 1,
+            };
+            memory.files.writeFileChecked.mockClear();
+            setAppliedWorkbenchRevision.mockClear();
+            setViewRecord.mockClear();
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+            act(() => {
+              rig.send({ type: 'setView', ...requestedView });
+              rig.send({ type: 'setVerticalFieldOfView', verticalFieldOfView: 30 });
+            });
+            expect(rig.getSnapshot().context.view).toMatchObject({
+              ...requestedView,
+              requestedVerticalFieldOfView: 30,
+            });
+            if (arrival === 'deferred incoming preset') {
+              await act(async () => {
+                memory.writeLive(
+                  new TextEncoder().encode(
+                    workbenchRecords.view.serialize(
+                      workbenchRecords.view.schema.parse({ version: 1, entryPath: 'a.ts', fieldOfView: 30 }),
+                    ),
+                  ),
+                );
+              });
+            }
+            await act(async () => {
+              await vi.advanceTimersByTimeAsync(249);
+            });
+            expect(memory.files.writeFileChecked).not.toHaveBeenCalled();
+            expect(rig.getSnapshot().context.view).toMatchObject({
+              ...requestedView,
+              requestedVerticalFieldOfView: 30,
+            });
+            expect(setAppliedWorkbenchRevision.mock.calls.some(([, digest]) => digest !== undefined)).toBe(false);
+            await act(async () => {
+              await vi.advanceTimersByTimeAsync(1);
+            });
+            expect(memory.files.writeFileChecked).not.toHaveBeenCalled();
+            if (arrival === 'deferred incoming preset') {
+              expect(rig.getSnapshot().context.view).toMatchObject({
+                requestedVerticalFieldOfView: 30,
+                direction: initialDirection,
+              });
+              expect(setViewRecord).toHaveBeenCalledWith(
+                'v-abcd1234',
+                expect.objectContaining({ fieldOfView: 30, camera: { kind: 'preset', preset: 'isometric' } }),
+              );
+              vi.useRealTimers();
+              await waitFor(() => {
+                expect(setAppliedWorkbenchRevision).toHaveBeenCalledWith(
+                  '.tau/workbench/views/v-abcd1234.json',
+                  expect.stringMatching(/^sha256:/u),
+                );
+              });
+              return;
+            }
+            expect(setAppliedWorkbenchRevision.mock.calls.some(([, digest]) => digest !== undefined)).toBe(false);
+            // The settled pose replaces the queued FOV-only edit and restarts the host's actual 500 ms debounce.
+            await act(async () => {
+              await vi.advanceTimersByTimeAsync(499);
+            });
+            expect(memory.files.writeFileChecked).not.toHaveBeenCalled();
+            expect(setAppliedWorkbenchRevision.mock.calls.some(([, digest]) => digest !== undefined)).toBe(false);
+            await act(async () => {
+              await vi.advanceTimersByTimeAsync(1);
+            });
+            expect(memory.files.writeFileChecked).toHaveBeenCalledTimes(1);
+            expect(memory.files.writeFileChecked).toHaveBeenCalledWith(
+              expect.objectContaining({ path: '/projects/p/.tau/workbench/views/v-abcd1234.json' }),
+            );
+            expect(workbenchRecords.view.read(memory.get())).toMatchObject({
+              status: 'current',
+              record: { fieldOfView: 30, camera: { kind: 'pose', ...requestedView } },
+            });
+            const expectedCamera: unknown = expect.objectContaining({ kind: 'pose', ...requestedView });
+            expect(setViewRecord).toHaveBeenCalledWith(
+              'v-abcd1234',
+              expect.objectContaining({ fieldOfView: 30, camera: expectedCamera }),
+            );
+            vi.useRealTimers();
+            await waitFor(() => {
+              expect(setAppliedWorkbenchRevision).toHaveBeenCalledWith(
+                '.tau/workbench/views/v-abcd1234.json',
+                expect.stringMatching(/^sha256:/u),
+              );
+            });
+            expect(rig.getSnapshot().context.view).toMatchObject({
+              ...requestedView,
+              requestedVerticalFieldOfView: 30,
+            });
+          })(),
+        ]);
+        const [unmount] = await Promise.allSettled([Promise.resolve().then(() => view?.unmount())]);
+        const [stop] = await Promise.allSettled([Promise.resolve().then(() => actor.stop())]);
+        if (body.status === 'rejected') {
+          const error: unknown = body.reason;
+          throw error;
+        }
+        if (unmount.status === 'rejected') {
+          const error: unknown = unmount.reason;
+          throw error;
+        }
+        if (stop.status === 'rejected') {
+          const error: unknown = stop.reason;
+          throw error;
+        }
+      } finally {
+        sync.mockReset();
+        vi.useRealTimers();
+      }
+    },
+  );
   it('re-registers a closed view watch on retry and applies later external edits', async () => {
     const memory = realViewFiles();
     const actor = graphics();

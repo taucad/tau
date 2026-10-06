@@ -3,6 +3,48 @@ import { defineKernel } from '#plugins/kernel-plugin-entry.js';
 import { runtimePluginDefinitionSymbol } from '#plugins/plugin-runtime-definition.js';
 
 describe('v2 kernel registration metadata', () => {
+  it('rejects orphan exact snapshot descriptors at the runtime registration boundary', () => {
+    const definition = {
+      id: 'orphan-descriptor',
+      name: 'Orphan descriptor',
+      version: '1',
+      extensions: ['src'],
+      views: {},
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve() {
+        return { resolved: [], unresolved: [] };
+      },
+      async describe() {
+        return { success: false, issues: [] };
+      },
+      async evaluate() {
+        return { handle: {} };
+      },
+      describeHandleSnapshot() {
+        return undefined;
+      },
+    };
+    // Reflection exercises the JavaScript registration boundary without weakening its TypeScript contract.
+    expect((): void => {
+      Reflect.apply(defineKernel, undefined, [definition]);
+    }).toThrow('exact snapshot descriptors require paired snapshot hooks');
+    expect((): void => {
+      Reflect.apply(defineKernel, undefined, [
+        {
+          ...definition,
+          serializeHandle() {
+            return new Uint8Array();
+          },
+          deserializeHandle() {
+            return {};
+          },
+        },
+      ]);
+    }).not.toThrow();
+  });
   it('serializes import detection and declarations without executable state', () => {
     const kernel = defineKernel({
       id: 'serializable',

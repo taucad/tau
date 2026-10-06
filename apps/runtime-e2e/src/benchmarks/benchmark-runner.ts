@@ -48,6 +48,27 @@ type BenchmarkTessellation = {
   angularTolerance: number;
 };
 
+/** Diagnostic-only host boundaries on the same operation as worker telemetry. */
+export type HostRenderBoundary = {
+  caseName: string;
+  iteration: number;
+  phase:
+    | 'profile-started'
+    | 'profile-stopped'
+    | 'before-open'
+    | 'after-open'
+    | 'after-view'
+    | 'request-issued'
+    | 'await-settled'
+    | 'document-closed';
+  /** Milliseconds, the host realm's `performance.timeOrigin`. */
+  timeOrigin: number;
+  /** Milliseconds, the host realm's `performance.now()`. */
+  monotonic: number;
+  processCpu: NodeJS.CpuUsage;
+  threadCpu?: NodeJS.CpuUsage;
+};
+
 /** Stable JSON keys retained for benchmark artifact compatibility. @public */
 export const benchmarkFirstCallFields = {
   timeToFirstRender: 'timeToFirstRenderMs',
@@ -128,6 +149,8 @@ export type BenchmarkRunResult = {
 /** Options for configuring a benchmark run. */
 export type BenchmarkRunnerOptions = {
   iterations: number;
+  /** Run-local steady-state conditioning count; the default remains eight. */
+  warmupRuns?: number;
   ocTracing?: 'off' | 'summary' | 'per-call';
   libraryTracing?: 'off' | 'summary' | 'per-call';
   /** Operation to time. Defaults to `'export'` for historical benchmark compatibility. */
@@ -141,6 +164,7 @@ export type BenchmarkRunnerOptions = {
   /** WASM variant or custom config. Defaults to `'auto'` (multi when supported, else single). */
   wasm?: 'auto' | 'single' | 'multi' | { wasmUrl: string; wasmBindingsUrl: string };
   onProgress?: (completed: number, total: number, caseName: string) => void;
+  onIterationStart?: (progress: { caseName: string; iteration: number; totalRuns: number; warmupRuns: number }) => void;
   onIterationProgress?: (progress: {
     caseName: string;
     iteration: number;
@@ -148,6 +172,16 @@ export type BenchmarkRunnerOptions = {
     warmupRuns: number;
     elapsed: number;
   }) => void;
+  /** Retain a successful operation's GLB digest outside its timed wall interval. */
+  onIterationOutput?: (output: {
+    iteration: number;
+    totalRuns: number;
+    warmupRuns: number;
+    sha256: string;
+    bytes: number;
+  }) => void;
+  /** Explicit diagnostic callback; absent from ordinary benchmark runs. */
+  onHostRenderBoundary?: (boundary: HostRenderBoundary) => void;
   /** Enable V8 CPU profiling for per-function timing breakdown. */
   cpuProfile?: boolean;
   /** CPU profiler sampling interval in microseconds (default: 100). */
@@ -169,7 +203,7 @@ function computePercentile(sorted: number[], percentile: number): number {
   return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (index - lower);
 }
 
-function computeStats(timings: number[]): {
+export function computeStats(timings: number[]): {
   mean: number;
   median: number;
   p95: number;
@@ -316,6 +350,7 @@ export async function runBenchmarks(
 ): Promise<BenchmarkRunResult> {
   const {
     iterations,
+    warmupRuns: warmupRunsOverride,
     ocTracing = 'off',
     libraryTracing = 'off',
     operation = 'export',
@@ -324,10 +359,16 @@ export async function runBenchmarks(
     includeEdges = false,
     wasm = 'auto',
     onProgress,
+    onIterationStart,
     onIterationProgress,
+    onIterationOutput,
+    onHostRenderBoundary,
     cpuProfile: enableCpuProfile = false,
     cpuProfileInterval = 100,
   } = options;
+  if (warmupRunsOverride !== undefined && (!Number.isSafeInteger(warmupRunsOverride) || warmupRunsOverride < 0)) {
+    throw new RangeError('warmupRuns must be a nonnegative safe integer');
+  }
   const totalWork = cases.length;
   const results: BenchmarkResult[] = [];
   /* Read before the first case so the load average describes the run, not its own heat. */
@@ -374,139 +415,203 @@ export async function runBenchmarks(
       transport,
     });
 
-    client.on('telemetry', (batch) => {
-      telemetryBatches.push([...batch.entries]);
-    });
-    client.on('log', (entry) => {
-      // Surface kernel-side info/warn lines (e.g. WASM auto-selection log,
-      // OCCT parallel activation summary) to the benchmark CLI. Skip debug/trace
-      // (very chatty under per-call OC tracing) and the `info` rubber-band.
-      if (entry.level === 'info' || entry.level === 'warn' || entry.level === 'error') {
-        const stream = entry.level === 'error' ? console.error : console.log;
-        stream(`  [${entry.level.padEnd(5)}] ${entry.message}`);
-      }
-    });
-
     const mode = benchCase.mode ?? 'steady-state';
-    const warmupRuns = mode === 'first-call' ? 0 : steadyStateWarmups;
+    const warmupRuns = mode === 'first-call' ? 0 : (warmupRunsOverride ?? steadyStateWarmups);
     const sampleIterations = mode === 'first-call' ? 1 : iterations;
     const totalRuns = sampleIterations + warmupRuns;
-
-    let profiler: CpuProfiler | undefined;
-    if (enableCpuProfile) {
-      const cpuProfilerModule = await import('#benchmarks/cpu-profiler.js');
-      profiler = new cpuProfilerModule.CpuProfiler();
-    }
-
-    for (let iter = 0; iter < totalRuns; iter++) {
-      performance.clearMeasures();
-      performance.clearMarks();
-      telemetryBatches.length = 0;
-
-      if (iter > 0) {
-        /* Re-issue the inline source files via the transport's
-         * stage-and-render envelope on the next export call below;
-         * benchmarks no longer reach into the FS handle directly. */
-      }
-
-      if (profiler && iter === warmupRuns) {
-        globalThis.gc?.();
-        await profiler.start(cpuProfileInterval);
-      }
-
-      const start = performance.now();
-      const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
-      const committed = benchCase.stageSequence?.[iter % benchCase.stageSequence.length];
-      let failureMessage: string | undefined;
-      const document = client.open({
-        source: { path: benchCase.mainFile },
-        parameters,
-        ...(caseOperation !== 'render' || committed === undefined
-          ? {}
-          : {
-              stage: {
-                [sidecarPath]: serializeParameterRecord(
-                  fileParameterEntrySchema.parse({
-                    activeGroup: 'default',
-                    groups: { default: { values: committed } },
-                  }),
-                ),
-              },
-            }),
-      });
-      try {
-        if (caseOperation === 'render') {
-          const view = document.view('model', {
-            content: { includeEdges },
-            ...(renderOptions === undefined ? {} : { options: renderOptions }),
-          });
-          const outcome = await view.rendering().finally(() => {
-            view.close();
-          });
-          if (outcome.superseded) {
-            failureMessage = 'render was unexpectedly superseded';
-          } else if (outcome.rendering.success) {
-            geometryHash = outcome.rendering.hash;
-            const artifact = asKnownArtifact(outcome.rendering.artifact);
-            if (artifact?.mimeType === 'model/gltf-binary') {
-              outputBytes = artifact.content;
-            }
-          } else {
-            failureMessage = outcome.rendering.issues.map((issue) => issue.message).join('; ');
-          }
-        } else {
-          const exportResult = await document.export('glb', {
-            content: { includeEdges },
-            ...(renderOptions === undefined ? {} : { options: renderOptions }),
-          });
-          if (exportResult.success) {
-            outputBytes =
-              exportResult.files.find(({ name }) => name.endsWith('.glb'))?.bytes ?? exportResult.files[0].bytes;
-          } else {
-            failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');
-          }
-        }
-      } finally {
-        document.close();
-      }
-      const elapsed = performance.now() - start;
-      onIterationProgress?.({
-        caseName: benchCase.name,
-        iteration: iter + 1,
-        totalRuns,
-        warmupRuns,
-        elapsed,
-      });
-
-      if (failureMessage) {
-        throw new Error(`Benchmark "${benchCase.name}" ${caseOperation} failed (iteration ${iter}): ${failureMessage}`);
-      }
-
-      if (iter === 0) {
-        const firstEntries = telemetryBatches.flat();
-        timeToFirstRender = elapsed;
-        hostCompile = durationOf(firstEntries, ['wasm.compile']);
-        emscriptenInit = durationOf(firstEntries, ['wasm.emscripten-init']);
-        firstRender = durationOf(firstEntries, ['kernel.render', 'kernel.export', 'kernel.export-model']);
-      }
-
-      if (iter < warmupRuns) {
-        continue;
-      }
-
-      timings.push(elapsed);
-      allTelemetry.push(telemetryBatches.flat());
-    }
-
     let cpuProfileResult: CpuProfile | undefined;
     let profileAnalysis: ProfileAnalysis | undefined;
-    if (profiler) {
-      cpuProfileResult = await profiler.stop();
+    let profiler: CpuProfiler | undefined;
+    const profilerState = { started: false };
+    const recordHostBoundary = (phase: HostRenderBoundary['phase'], iteration: number): void => {
+      onHostRenderBoundary?.({
+        caseName: benchCase.name,
+        iteration,
+        phase,
+        timeOrigin: performance.timeOrigin,
+        monotonic: performance.now(),
+        processCpu: process.cpuUsage(),
+        ...(typeof process.threadCpuUsage === 'function' ? { threadCpu: process.threadCpuUsage() } : {}),
+      });
+    };
+    // Observe the operation immediately, then settle the owned client independently on every exit.
+    const [operationResult] = await Promise.allSettled([
+      (async (): Promise<void> => {
+        client.on('telemetry', (batch) => {
+          telemetryBatches.push([...batch.entries]);
+        });
+        client.on('log', (entry) => {
+          // Surface kernel-side info/warn lines (e.g. WASM auto-selection log,
+          // OCCT parallel activation summary) to the benchmark CLI. Skip debug/trace
+          // (very chatty under per-call OC tracing) and the `info` rubber-band.
+          if (entry.level === 'info' || entry.level === 'warn' || entry.level === 'error') {
+            const stream = entry.level === 'error' ? console.error : console.log;
+            stream(`  [${entry.level.padEnd(5)}] ${entry.message}`);
+          }
+        });
+
+        if (enableCpuProfile) {
+          const cpuProfilerModule = await import('#benchmarks/cpu-profiler.js');
+          profiler = new cpuProfilerModule.CpuProfiler();
+        }
+        for (let iter = 0; iter < totalRuns; iter++) {
+          performance.clearMeasures();
+          performance.clearMarks();
+          telemetryBatches.length = 0;
+
+          if (iter > 0) {
+            /* Re-issue the inline source files via the transport's
+             * stage-and-render envelope on the next export call below;
+             * benchmarks no longer reach into the FS handle directly. */
+          }
+
+          if (profiler && iter === warmupRuns) {
+            globalThis.gc?.();
+            await profiler.start(cpuProfileInterval);
+            profilerState.started = true;
+            recordHostBoundary('profile-started', iter + 1);
+          }
+
+          const start = performance.now();
+          onIterationStart?.({ caseName: benchCase.name, iteration: iter + 1, totalRuns, warmupRuns });
+          const hostBoundary = (phase: HostRenderBoundary['phase']): void => {
+            recordHostBoundary(phase, iter + 1);
+          };
+          const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
+          const committed = benchCase.stageSequence?.[iter % benchCase.stageSequence.length];
+          let failureMessage: string | undefined;
+          let iterationOutputBytes: Uint8Array<ArrayBuffer> | undefined;
+          hostBoundary('before-open');
+          const document = client.open({
+            source: { path: benchCase.mainFile },
+            parameters,
+            ...(caseOperation !== 'render' || committed === undefined
+              ? {}
+              : {
+                  stage: {
+                    [sidecarPath]: serializeParameterRecord(
+                      fileParameterEntrySchema.parse({
+                        activeGroup: 'default',
+                        groups: { default: { values: committed } },
+                      }),
+                    ),
+                  },
+                }),
+          });
+          try {
+            hostBoundary('after-open');
+            if (caseOperation === 'render') {
+              const view = document.view('model', {
+                content: { includeEdges },
+                ...(renderOptions === undefined ? {} : { options: renderOptions }),
+              });
+              hostBoundary('after-view');
+              const rendering = view.rendering();
+              hostBoundary('request-issued');
+              let outcome: Awaited<typeof rendering>;
+              try {
+                outcome = await rendering;
+              } finally {
+                try {
+                  hostBoundary('await-settled');
+                } finally {
+                  view.close();
+                }
+              }
+              if (outcome.superseded) {
+                failureMessage = 'render was unexpectedly superseded';
+              } else if (outcome.rendering.success) {
+                geometryHash = outcome.rendering.hash;
+                const artifact = asKnownArtifact(outcome.rendering.artifact);
+                if (artifact?.mimeType === 'model/gltf-binary') {
+                  outputBytes = artifact.content;
+                  iterationOutputBytes = artifact.content;
+                }
+              } else {
+                failureMessage = outcome.rendering.issues.map((issue) => issue.message).join('; ');
+              }
+            } else {
+              const exportResult = await document.export('glb', {
+                content: { includeEdges },
+                ...(renderOptions === undefined ? {} : { options: renderOptions }),
+              });
+              if (exportResult.success) {
+                outputBytes =
+                  exportResult.files.find(({ name }) => name.endsWith('.glb'))?.bytes ?? exportResult.files[0].bytes;
+                iterationOutputBytes = outputBytes;
+              } else {
+                failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');
+              }
+            }
+          } finally {
+            document.close();
+            hostBoundary('document-closed');
+          }
+          const elapsed = performance.now() - start;
+          if (iterationOutputBytes) {
+            onIterationOutput?.({
+              iteration: iter + 1,
+              totalRuns,
+              warmupRuns,
+              sha256: sha256(iterationOutputBytes),
+              bytes: iterationOutputBytes.byteLength,
+            });
+          }
+          onIterationProgress?.({
+            caseName: benchCase.name,
+            iteration: iter + 1,
+            totalRuns,
+            warmupRuns,
+            elapsed,
+          });
+
+          if (failureMessage) {
+            throw new Error(
+              `Benchmark "${benchCase.name}" ${caseOperation} failed (iteration ${iter}): ${failureMessage}`,
+            );
+          }
+
+          if (iter === 0) {
+            const firstEntries = telemetryBatches.flat();
+            timeToFirstRender = elapsed;
+            hostCompile = durationOf(firstEntries, ['wasm.compile']);
+            emscriptenInit = durationOf(firstEntries, ['wasm.emscripten-init']);
+            firstRender = durationOf(firstEntries, ['kernel.render', 'kernel.export', 'kernel.export-model']);
+          }
+
+          if (iter < warmupRuns) {
+            continue;
+          }
+
+          timings.push(elapsed);
+          allTelemetry.push(telemetryBatches.flat());
+        }
+      })(),
+    ]);
+    const [profileStop] = profiler && profilerState.started ? await Promise.allSettled([profiler.stop()]) : [];
+    const [cleanup] = await Promise.allSettled([
+      Promise.resolve().then(() => {
+        client.terminate();
+      }),
+    ]);
+    if (operationResult.status === 'rejected') {
+      const error: unknown = operationResult.reason;
+      throw error;
+    }
+    if (profileStop?.status === 'rejected') {
+      const error: unknown = profileStop.reason;
+      throw error;
+    }
+    if (cleanup.status === 'rejected') {
+      const error: unknown = cleanup.reason;
+      throw error;
+    }
+    if (profileStop?.status === 'fulfilled') {
+      cpuProfileResult = profileStop.value;
+      recordHostBoundary('profile-stopped', totalRuns);
       const { analyzeProfile } = await import('#benchmarks/profile-analyzer.js');
       profileAnalysis = analyzeProfile(cpuProfileResult, allTelemetry);
     }
-
-    await client.shutdown();
     globalThis.gc?.();
 
     const stats = computeStats(timings);

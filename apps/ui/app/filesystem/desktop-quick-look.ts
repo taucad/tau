@@ -1,4 +1,6 @@
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { digestContent } from '@taucad/cache-core';
+import type { PublishedPartAsset } from '@taucad/runtime/types';
 import { assertRootedPath } from '@taucad/utils/path';
 import { mimeTypes } from '@taucad/types/constants';
 import { desktopKernelOptions } from '#constants/desktop-kernel-options.js';
@@ -10,6 +12,9 @@ type PreviewProjectFileOptions = {
   readonly path: string;
   readonly projectId: string;
   readonly runtimeFileSystem: RuntimeFileSystem;
+  readonly readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
+  readonly publishedAssemblyRoot?: PublishedPartAsset;
+  readonly assertCurrentSubject?: () => void;
 };
 
 /** Convert one disk-backed project file when needed and open native macOS Quick Look. */
@@ -39,14 +44,53 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
     return;
   }
 
+  options.assertCurrentSubject?.();
+  let assemblyRoot = options.publishedAssemblyRoot;
+  if (path.endsWith('.json')) {
+    const bytes = await options.readFile(path);
+    let candidate: unknown;
+    try {
+      candidate = JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      candidate = undefined;
+    }
+    if (
+      candidate !== null &&
+      typeof candidate === 'object' &&
+      Object.hasOwn(candidate, 'schemaVersion') &&
+      Object.hasOwn(candidate, 'parts') &&
+      Object.hasOwn(candidate, 'occurrences')
+    ) {
+      if (Object.hasOwn(candidate, 'generation')) {
+        assemblyRoot = { path, digest: await digestContent({ bytes }), byteLength: bytes.byteLength };
+      } else if (!assemblyRoot) {
+        throw new Error(
+          'Open this authored assembly in the viewer before Quick Look so a current admitted pin is available.',
+        );
+      }
+    }
+  }
   const [{ createRuntimeClient }, resolveOptions] = await Promise.all([
     import('@taucad/runtime/client'),
     desktopKernelOptions(options.projectId, undefined, getComputeReuseMode())(),
   ]);
   const client = createRuntimeClient(resolveOptions({ fileSystem: options.runtimeFileSystem }));
-  const document = client.open({ source: { path }, watch: false });
+  const document = assemblyRoot ? undefined : client.open({ source: { path }, watch: false });
+  let publishedDocument: Awaited<ReturnType<typeof client.openAssembly>> | undefined;
   try {
-    const exported = await document.export('usdz');
+    options.assertCurrentSubject?.();
+    if (assemblyRoot) {
+      publishedDocument = await client.openAssembly({ root: assemblyRoot });
+    }
+    options.assertCurrentSubject?.();
+    const exported = publishedDocument
+      ? await publishedDocument.exportPublished({ format: 'usdz', publishedAssembly: { root: publishedDocument.root } })
+      : document
+        ? await document.export('usdz')
+        : undefined;
+    if (!exported) {
+      throw new Error('The selected CAD document is unavailable');
+    }
     if (!exported.success) {
       throw new Error(exported.issues[0]?.message ?? 'USDZ export failed');
     }
@@ -54,12 +98,14 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
     if (exported.files.length !== 1 || !file.name.endsWith('.usdz') || file.mimeType !== mimeTypes.usdz) {
       throw new Error('Quick Look conversion did not return one USDZ file.');
     }
+    options.assertCurrentSubject?.();
     const result = await bridge.quickLook.previewUsdz({ bytes: file.bytes, displayName: file.name });
     if (!result.success) {
       throw new Error(result.error);
     }
   } finally {
-    document.close();
+    publishedDocument?.close();
+    document?.close();
     await client.shutdown();
   }
 };

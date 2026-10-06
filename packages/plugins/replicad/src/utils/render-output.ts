@@ -1,4 +1,4 @@
-import type { AnyShape, Drawing } from 'replicad';
+import type { AnyShape, Drawing, MeshShape } from 'replicad';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { SetRequired } from 'type-fest';
 import type { GeometrySvg, RuntimeSpanTracer } from '@taucad/runtime/types';
@@ -6,6 +6,7 @@ import type { ShapeConfig } from '#model.js';
 import { addSurfaceCoordinates } from '#utils/surface-coordinates.js';
 import { normalizeColor } from '#utils/normalize-color.js';
 import type { GeometryReplicad } from '#replicad.types.js';
+import type { TauCadPhysical } from '@taucad/geometry-core';
 import { resolveShapeName, uniqueShapeName } from '@taucad/geometry-core';
 
 import {
@@ -63,7 +64,10 @@ type SpanOperation<T> = {
 };
 
 /** Replicad authoring config used by the meshing adapter. */
-export type InputShape = { [Key in keyof ShapeConfig]: ShapeConfig[Key] };
+export type InputShape = { [Key in keyof ShapeConfig]: ShapeConfig[Key] } & {
+  physical?: TauCadPhysical;
+  sourceComponentId?: string;
+};
 
 /** An input shape whose display name has been resolved and de-duplicated. @public */
 export type NamedInputShape = InputShape & { name: string };
@@ -71,6 +75,7 @@ export type NamedInputShape = InputShape & { name: string };
 type SvgShapeConfiguration = NamedInputShape & { shape: Svgable };
 
 type MeshableConfiguration = NamedInputShape & { shape: Meshable };
+type MeshShapeConfiguration = NamedInputShape & { shape: MeshShape };
 type MeshableInstance = {
   config: MeshableConfiguration;
   info: ReplicadShapeIdentityInfo;
@@ -106,10 +111,17 @@ const isMeshable = (shape: unknown): shape is Meshable => {
     Boolean((shape as Meshable).mesh && (shape as Meshable).meshEdges)
   );
 };
+const isMeshShape = (shape: unknown): shape is MeshShape =>
+  typeof shape === 'object' &&
+  shape !== null &&
+  typeof (shape as MeshShape).mesh === 'function' &&
+  typeof (shape as MeshShape).numTri === 'function' &&
+  typeof (shape as Partial<Meshable>).meshEdges !== 'function';
 
 const hasSvgableShape = (config: InputShape): config is SvgShapeConfiguration => isSvgable(config.shape);
 
 const hasMeshableShape = (config: InputShape): config is MeshableConfiguration => isMeshable(config.shape);
+const hasMeshShape = (config: InputShape): config is MeshShapeConfiguration => isMeshShape(config.shape);
 
 function partitionRenderConfigs(configs: NamedInputShape[]): {
   svgConfigs: SvgShapeConfiguration[];
@@ -126,6 +138,10 @@ function partitionRenderConfigs(configs: NamedInputShape[]): {
 
     if (hasMeshableShape(config)) {
       meshConfigs.push(config);
+      continue;
+    }
+
+    if (hasMeshShape(config)) {
       continue;
     }
 
@@ -318,16 +334,18 @@ function withSpan<T>({ tracer, name, attributes, operation }: SpanOperation<T>):
 }
 
 function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptions) {
-  const { name, shape, color, opacity, metalness, roughness, material } = shapeConfig;
+  const { name, shape, color, opacity, metalness, roughness, material, physical, sourceComponentId } = shapeConfig;
   const { tessellation, collectBrepEdges, tracer } = options;
   const geometry: GeometryReplicad = {
     format: 'replicad',
+    sourceComponentId,
     name,
     color,
     opacity,
     metalness,
     roughness,
     material,
+    physical,
     faces: {
       triangles: [],
       vertices: [],
@@ -383,16 +401,47 @@ function renderMesh(shapeConfig: MeshableConfiguration, options: RenderMeshOptio
   return geometry;
 }
 
-function createEmptyReplicadGeometry(shapeConfig: MeshableConfiguration): GeometryReplicad {
-  const { name, color, opacity, metalness, roughness, material } = shapeConfig;
+function renderMeshShape({
+  name,
+  shape,
+  color,
+  opacity,
+  metalness,
+  roughness,
+  material,
+  physical,
+  sourceComponentId,
+}: MeshShapeConfiguration): GeometryReplicad {
+  const { triangles, vertices, normals } = shape.mesh();
   return {
     format: 'replicad',
+    sourceComponentId,
+    meshOnly: true,
     name,
     color,
     opacity,
     metalness,
     roughness,
     material,
+    physical,
+    faces: { triangles, vertices, normals, faceGroups: [] },
+    // An imported STL has triangles, not OCCT BRep edge or face identities.
+    edges: { lines: [], edgeGroups: [] },
+  };
+}
+
+function createEmptyReplicadGeometry(shapeConfig: MeshableConfiguration): GeometryReplicad {
+  const { name, color, opacity, metalness, roughness, material, physical, sourceComponentId } = shapeConfig;
+  return {
+    format: 'replicad',
+    sourceComponentId,
+    name,
+    color,
+    opacity,
+    metalness,
+    roughness,
+    material,
+    physical,
     faces: {
       triangles: [],
       vertices: [],
@@ -543,6 +592,7 @@ function instanceFromConfig({
     metalness: config.metalness,
     roughness: config.roughness,
     material: config.material,
+    physical: config.physical,
     locationMatrix: info.locationMatrix,
     determinant: info.determinant,
     faceIds,
@@ -624,10 +674,13 @@ function renderPrototypeGroup({
           : [];
         return [
           instance.config,
-          transformReplicadGeometryInstance({
-            prototype: prototypeGeometry,
-            instance: instanceFromConfig({ config: instance.config, info: instance.info, faceIds, edgeIds }),
-          }),
+          {
+            ...transformReplicadGeometryInstance({
+              prototype: prototypeGeometry,
+              instance: instanceFromConfig({ config: instance.config, info: instance.info, faceIds, edgeIds }),
+            }),
+            sourceComponentId: instance.config.sourceComponentId,
+          },
         ];
       }),
   });
@@ -678,15 +731,22 @@ function renderWithTessellationInstancing(
 
   let legacyMeshCount = 0;
   const geometries: Array<GeometrySvg | GeometryReplicad> = [];
-  for (const shapeConfig of meshConfigs) {
-    const grouped = groupedGeometries.get(shapeConfig);
-    if (grouped) {
-      geometries.push(grouped);
+  for (const shapeConfig of configs) {
+    if (hasMeshableShape(shapeConfig)) {
+      const grouped = groupedGeometries.get(shapeConfig);
+      if (grouped) {
+        geometries.push(grouped);
+        continue;
+      }
+      legacyMeshCount++;
+      geometries.push(renderMesh(shapeConfig, { tessellation, collectBrepEdges, tracer }));
       continue;
     }
-
+    if (!hasMeshShape(shapeConfig)) {
+      continue;
+    }
     legacyMeshCount++;
-    geometries.push(renderMesh(shapeConfig, { tessellation, collectBrepEdges, tracer }));
+    geometries.push(renderMeshShape(shapeConfig));
   }
   geometries.push(...renderSvgArtifacts(svgConfigs));
 
@@ -731,9 +791,15 @@ export function render(
   }
 
   onRenderMode?.('flat');
-  const { svgConfigs, meshConfigs } = partitionRenderConfigs(shapes);
+  const { svgConfigs } = partitionRenderConfigs(shapes);
   return [
-    ...meshConfigs.map((shapeConfig) => renderMesh(shapeConfig, { tessellation, collectBrepEdges, tracer })),
+    ...shapes.flatMap((shapeConfig) =>
+      hasMeshableShape(shapeConfig)
+        ? [renderMesh(shapeConfig, { tessellation, collectBrepEdges, tracer })]
+        : hasMeshShape(shapeConfig)
+          ? [renderMeshShape(shapeConfig)]
+          : [],
+    ),
     ...renderSvgArtifacts(svgConfigs),
   ];
 }

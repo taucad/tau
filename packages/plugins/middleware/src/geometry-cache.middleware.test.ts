@@ -341,6 +341,8 @@ describe('geometryCache', () => {
 
   it('reuses an exact display mesh with byte ownership', async () => {
     const runtime = createMockRuntime();
+    const end = vi.fn<(attributes?: Record<string, string | number | boolean>) => void>();
+    runtime.tracer.startSpan.mockReturnValue({ end });
     const handler = vi.fn(async () =>
       successfulRender({ mimeType: 'model/gltf-binary', content: new Uint8Array([7, 8, 9]) }),
     );
@@ -357,6 +359,44 @@ describe('geometryCache', () => {
       expect([...second.data.content]).toEqual([7, 8, 9]);
     }
     expect(runtime.tracer.startSpan).toHaveBeenCalledWith('cache.geometry.mesh.evaluate');
+    const computed = end.mock.calls[0]?.[0];
+    if (!computed) {
+      throw new Error('Computed mesh span did not record its outcome');
+    }
+    expect(computed).toEqual({
+      source: 'computed',
+      publicationStatus: 'stored',
+      actionDigest: computed['actionDigest'],
+      contentDigest: computed['contentDigest'],
+    });
+    expect(computed['actionDigest']).toMatch(/^sha256:[\da-f]{64}$/);
+    expect(computed['contentDigest']).toMatch(/^sha256:[\da-f]{64}$/);
+    expect(end.mock.calls[1]?.[0]).toEqual({
+      source: 'cache',
+      actionDigest: computed['actionDigest'],
+      contentDigest: computed['contentDigest'],
+    });
+    const changedRuntime = { ...runtime, dependencyHash: 'b'.repeat(64) };
+    const changedHandler = vi.fn(async () =>
+      successfulRender({ mimeType: 'model/gltf-binary', content: new Uint8Array([10]) }),
+    );
+    await middleware.wrapRender!(input, changedHandler, changedRuntime);
+    expect(changedHandler).toHaveBeenCalledOnce();
+    const changed = end.mock.calls[2]?.[0];
+    if (!changed) {
+      throw new Error('Changed mesh span did not record its outcome');
+    }
+    expect(changed).toEqual({
+      source: 'computed',
+      publicationStatus: 'stored',
+      actionDigest: changed['actionDigest'],
+      contentDigest: changed['contentDigest'],
+    });
+    expect(changed['actionDigest']).toMatch(/^sha256:[\da-f]{64}$/);
+    expect(changed['contentDigest']).toMatch(/^sha256:[\da-f]{64}$/);
+    expect(changed['actionDigest']).not.toBe(computed['actionDigest']);
+    expect(changed['contentDigest']).not.toBe(computed['contentDigest']);
+    expect(end).toHaveBeenCalledTimes(3);
   });
 
   it('keeps nonbinary string display content inline and exactly reusable', async () => {
@@ -375,12 +415,24 @@ describe('geometryCache', () => {
 
   it.each([['failed', createErrorResult()]])('does not publish a %s mesh result', async (_name, result) => {
     const runtime = createMockRuntime();
+    const end = vi.fn<(attributes?: Record<string, string | number | boolean>) => void>();
+    runtime.tracer.startSpan.mockReturnValue({ end });
     const handler = vi.fn(async () => result);
 
     await middleware.wrapRender!({ view: 'model', mimeType: 'model/gltf-binary', options: {} }, handler, runtime);
     await middleware.wrapRender!({ view: 'model', mimeType: 'model/gltf-binary', options: {} }, handler, runtime);
 
     expect(handler).toHaveBeenCalledTimes(2);
+    expect(end).toHaveBeenCalledTimes(2);
+    for (const [attributes] of end.mock.calls) {
+      expect(attributes?.['actionDigest']).toMatch(/^sha256:[\da-f]{64}$/);
+      expect(attributes).toEqual({
+        source: 'computed',
+        actionDigest: attributes?.['actionDigest'],
+        publicationStatus: 'skipped',
+        publicationReason: 'encode-failed',
+      });
+    }
   });
 
   it('reuses exact export files with byte ownership', async () => {
@@ -448,11 +500,14 @@ describe('geometryCache', () => {
 
   it('rejects a malformed dependency identity before invoking the kernel', async () => {
     const runtime = createMockRuntime({ dependencyHash: 'not-a-digest' });
+    const end = vi.fn<(attributes?: Record<string, string | number | boolean>) => void>();
+    runtime.tracer.startSpan.mockReturnValue({ end });
     const handler = vi.fn(async () => reusableBuild());
 
     await expect(middleware.wrapEvaluate!(createMockInput(), handler, runtime)).rejects.toThrow(
       'middleware dependency hash',
     );
     expect(handler).not.toHaveBeenCalled();
+    expect(end).toHaveBeenCalledExactlyOnceWith(undefined);
   });
 });

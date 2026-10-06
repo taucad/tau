@@ -19,6 +19,8 @@ export type ModelInteractionUnitState = {
   readonly manifest?: GeometryComponentManifest;
   readonly hoveredComponentId?: string;
   readonly selectedComponentIds: readonly string[];
+  /** Actual selected manifest hash within this source unit; retained only as intent after revocation. */
+  readonly selectionPin?: string;
   readonly focusedComponentId?: string;
   readonly hiddenComponentIds: readonly string[];
   readonly isolatedComponentIds: readonly string[];
@@ -39,7 +41,13 @@ export type ModelInteractionInput = {
 
 export type ModelInteractionEvent =
   | { type: 'loadManifest'; unitId: string; manifest: GeometryComponentManifest; source?: ModelInteractionSource }
-  | { type: 'clearManifest'; unitId: string; source?: ModelInteractionSource }
+  | {
+      type: 'clearManifest';
+      unitId: string;
+      /** Actual pending pins for this source unit; absent when only revoking manifest authority. */
+      requestedPins?: readonly string[];
+      source?: ModelInteractionSource;
+    }
   | { type: 'restoreComponentDisplay'; componentDisplay?: PersistedModelComponentDisplayState }
   | { type: 'rekeySourceUnits'; oldPath: string; newPath: string }
   | { type: 'pruneSourceUnits'; path: string }
@@ -188,16 +196,24 @@ const pruneOpacityForManifest = (
 const reconcileUnitForManifest = (
   unit: ModelInteractionUnitState,
   manifest: GeometryComponentManifest,
-): ModelInteractionUnitState => ({
-  manifest,
-  hoveredComponentId: undefined,
-  selectedComponentIds: pruneIdsForManifest(manifest, unit.selectedComponentIds),
-  focusedComponentId:
-    unit.focusedComponentId && manifest.nodesById[unit.focusedComponentId] ? unit.focusedComponentId : undefined,
-  hiddenComponentIds: pruneIdsForManifest(manifest, unit.hiddenComponentIds),
-  isolatedComponentIds: pruneIdsForManifest(manifest, unit.isolatedComponentIds),
-  opacityByComponentId: pruneOpacityForManifest(manifest, unit.opacityByComponentId),
-});
+): ModelInteractionUnitState => {
+  // Live replacement preserves ordinary compatible selection. A revoked owner must prove its pin again.
+  const selectedComponentIds =
+    unit.manifest !== undefined || (unit.selectionPin !== undefined && unit.selectionPin === manifest.geometryHash)
+      ? pruneIdsForManifest(manifest, unit.selectedComponentIds)
+      : [];
+  return {
+    manifest,
+    hoveredComponentId: undefined,
+    selectedComponentIds,
+    selectionPin: selectedComponentIds.length > 0 ? manifest.geometryHash : undefined,
+    focusedComponentId:
+      unit.focusedComponentId && manifest.nodesById[unit.focusedComponentId] ? unit.focusedComponentId : undefined,
+    hiddenComponentIds: pruneIdsForManifest(manifest, unit.hiddenComponentIds),
+    isolatedComponentIds: pruneIdsForManifest(manifest, unit.isolatedComponentIds),
+    opacityByComponentId: pruneOpacityForManifest(manifest, unit.opacityByComponentId),
+  };
+};
 
 function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
@@ -291,8 +307,16 @@ function mergeUnitStates(
   if (!existing) {
     return moved;
   }
+  const manifest = moved.manifest ?? existing.manifest;
+  let selectedPin: string | undefined;
+  if (existing.selectedComponentIds.length === 0) {
+    selectedPin = moved.selectionPin;
+  } else if (moved.selectedComponentIds.length === 0 || existing.selectionPin === moved.selectionPin) {
+    selectedPin = existing.selectionPin;
+  }
   return {
-    manifest: moved.manifest ?? existing.manifest,
+    manifest,
+    selectionPin: manifest && manifest.geometryHash !== selectedPin ? undefined : selectedPin,
     hoveredComponentId: moved.hoveredComponentId ?? existing.hoveredComponentId,
     selectedComponentIds: [...new Set([...existing.selectedComponentIds, ...moved.selectedComponentIds])],
     focusedComponentId: moved.focusedComponentId ?? existing.focusedComponentId,
@@ -388,7 +412,15 @@ export const modelInteractionMachine = setup({
     },
     clearManifest: ({ context, event }) => {
       const unit = getModelInteractionUnitState(context, event.unitId);
-      if (unit.manifest === undefined && unit.hoveredComponentId === undefined) {
+      const retainSelection =
+        event.requestedPins === undefined ||
+        (unit.selectionPin !== undefined && event.requestedPins.includes(unit.selectionPin));
+      if (
+        unit.manifest === undefined &&
+        unit.hoveredComponentId === undefined &&
+        unit.focusedComponentId === undefined &&
+        (retainSelection || unit.selectedComponentIds.length === 0)
+      ) {
         return {};
       }
       return {
@@ -399,6 +431,9 @@ export const modelInteractionMachine = setup({
             ...unit,
             manifest: undefined,
             hoveredComponentId: undefined,
+            focusedComponentId: undefined,
+            selectedComponentIds: retainSelection ? unit.selectedComponentIds : [],
+            selectionPin: retainSelection ? unit.selectionPin : undefined,
           },
           source: event.source,
           displayChanged: false,
@@ -447,7 +482,9 @@ export const modelInteractionMachine = setup({
         if (!unit) {
           continue;
         }
-        unitsById[nextUnitId] = mergeUnitStates(unitsById[nextUnitId], unit);
+        // A source namespace move cannot restamp the old source's selection pin.
+        const moved = nextUnitId === unitId ? unit : { ...unit, selectionPin: undefined };
+        unitsById[nextUnitId] = mergeUnitStates(unitsById[nextUnitId], moved);
         if (!unitOrder.includes(nextUnitId)) {
           unitOrder.push(nextUnitId);
         }
@@ -513,6 +550,7 @@ export const modelInteractionMachine = setup({
           unit: {
             ...unit,
             selectedComponentIds,
+            selectionPin: selectedComponentIds.length > 0 ? unit.manifest?.geometryHash : undefined,
           },
           source: event.source,
           displayChanged: false,
@@ -531,6 +569,7 @@ export const modelInteractionMachine = setup({
           unit: {
             ...unit,
             selectedComponentIds: [event.componentId],
+            selectionPin: unit.manifest?.geometryHash,
           },
           source: event.source,
           displayChanged: false,
@@ -549,6 +588,7 @@ export const modelInteractionMachine = setup({
           unit: {
             ...unit,
             selectedComponentIds: [],
+            selectionPin: undefined,
           },
           source: event.source,
           displayChanged: false,
@@ -692,6 +732,7 @@ export const modelInteractionMachine = setup({
             ...unit,
             focusedComponentId: event.componentId,
             selectedComponentIds: [event.componentId],
+            selectionPin: unit.manifest?.geometryHash,
           },
           source: event.source,
           displayChanged: false,

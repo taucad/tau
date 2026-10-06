@@ -2,10 +2,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Compose keys, credential fixtures, and environment variables retain external wire names. */
 
 /**
- * Purpose: Run packaged desktop smoke tests against disposable Postgres, Redis, and MinIO services.
+ * Purpose: Run packaged desktop smoke tests or the selected unpackaged writer control against disposable Postgres, Redis, and MinIO services.
  * Why: Completed-package proof must not use the shared development database or storage stack.
- * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE (absolute packaged Tau executable path).
- * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only).
+ * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE for packaged mode; absolute TAU_E2E_BROWSER_PHYSICAL_CLOSURE for --unpackaged-writer-control.
+ * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only);
+ * TAU_E2E_BROWSER_PHYSICAL_CLOSURE forwards the absolute physical pin artifact path; --test-name-pattern selects tests.
+ * TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC=1 explicitly enables the installed startup-only diagnostic.
  * Usage: pnpm nx run desktop-e2e:test:e2e:desktop:completed-artifact [--args='--test-name-pattern="pattern" [--isolated-cloud-gateway]']
  * Exit codes: 0 when package tests pass; non-zero on preflight, infrastructure, migration, or test failure.
  */
@@ -13,28 +15,178 @@
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
+import { StringDecoder } from 'node:string_decoder';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const desktopE2ERoot = resolve(import.meta.dirname, '..');
 
+type ProtocolCommand = {
+  id: number;
+  kind: 'Page.addScriptToEvaluateOnNewDocument' | 'Runtime.evaluate' | 'Runtime.callFunctionOn';
+  sessionHash: string;
+  enteredAt: number;
+  settledAt?: number;
+  outcome?: 'ok' | 'error';
+};
+type ProtocolCounts = {
+  lines: number;
+  refused: number;
+  dropped: number;
+  unmatched: number;
+  unqualified: number;
+  overflow: boolean;
+};
+type ProtocolMetadataCollector = {
+  consume: (line: string) => boolean;
+  snapshot: () => { counts: ProtocolCounts; commands: ProtocolCommand[] };
+  refuse: () => void;
+};
+
+/** Retain only qualified CDP command timing; never persist a protocol body. */
+export const createProtocolMetadataCollector = (): ProtocolMetadataCollector => {
+  const commands: ProtocolCommand[] = [];
+  const counts = { lines: 0, refused: 0, dropped: 0, unmatched: 0, unqualified: 0, overflow: false };
+  const increment = (key: 'lines' | 'refused' | 'dropped' | 'unmatched' | 'unqualified'): void => {
+    if (counts[key] < 1_000_000) {
+      counts[key]++;
+    } else {
+      counts.overflow = true;
+    }
+  };
+  const consume = (line: string): boolean => {
+    if (!line.includes('pw:protocol')) {
+      return false;
+    }
+    increment('lines');
+    // A line longer than the parser budget or clipped by Playwright cannot
+    // establish a trustworthy session and must never reach ordinary stderr.
+    if (Buffer.byteLength(line, 'utf8') > 131_072 || line.includes('LOG TRUNCATED') || counts.overflow) {
+      increment('refused');
+      return true;
+    }
+    const direction = /\bpw:protocol\b.*?\b(SEND|RECV)\b/u.exec(line)?.[1];
+    const start = line.indexOf('{');
+    const end = line.lastIndexOf('}');
+    if (!direction || start === -1 || end <= start) {
+      increment('refused');
+      return true;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line.slice(start, end + 1));
+    } catch {
+      increment('refused');
+      return true;
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      increment('refused');
+      return true;
+    }
+    const message = parsed as { id?: unknown; method?: unknown; sessionId?: unknown; error?: unknown };
+    if (!Number.isSafeInteger(message.id) || typeof message.id !== 'number') {
+      return true; // Protocol event, not a command response.
+    }
+    if (typeof message.sessionId !== 'string' || message.sessionId.length === 0) {
+      increment('unqualified');
+      return true; // Root commands can reuse IDs across Electron's connections.
+    }
+    const sessionHash = createHash('sha256').update(message.sessionId).digest('hex');
+    if (direction === 'SEND') {
+      if (
+        message.method !== 'Page.addScriptToEvaluateOnNewDocument' &&
+        message.method !== 'Runtime.evaluate' &&
+        message.method !== 'Runtime.callFunctionOn'
+      ) {
+        return true;
+      }
+      if (commands.length === 256) {
+        commands.shift();
+        increment('dropped');
+      }
+      commands.push({ id: message.id, kind: message.method, sessionHash, enteredAt: Date.now() });
+      return true;
+    }
+    const matches = commands.filter(
+      (row) => row.id === message.id && row.sessionHash === sessionHash && row.settledAt === undefined,
+    );
+    if (matches.length === 1) {
+      matches[0]!.settledAt = Date.now();
+      matches[0]!.outcome = message.error === undefined ? 'ok' : 'error';
+    } else if (matches.length > 1) {
+      increment('refused');
+    } else {
+      increment('unmatched');
+    }
+    return true;
+  };
+  return {
+    consume,
+    snapshot: (): { counts: ProtocolCounts; commands: ProtocolCommand[] } => ({
+      counts: { ...counts },
+      commands: [...commands],
+    }),
+    refuse: (): void => {
+      increment('refused');
+    },
+  };
+};
+
 const main = async (): Promise<void> => {
   const { values } = parseArgs({
     options: {
-      'test-name-pattern': { type: 'string', default: String.raw`^\[completed-artifact\]` },
+      'test-name-pattern': { type: 'string' },
+      'unpackaged-writer-control': { type: 'boolean', default: false },
       'isolated-cloud-gateway': { type: 'boolean', default: false },
     },
   });
-  const isolatedCloudGateway = values['isolated-cloud-gateway'];
+  const unpackagedWriterControl = values['unpackaged-writer-control'];
+  const unpackagedPattern = String.raw`^\[unpackaged-utility-control\] should reopen the exact browser pin without a publication writer and deny authored publication$`;
+  const testNamePattern =
+    values['test-name-pattern'] ?? (unpackagedWriterControl ? unpackagedPattern : String.raw`^\[completed-artifact\]`);
+  if (unpackagedWriterControl && testNamePattern !== unpackagedPattern) {
+    throw new Error('Unpackaged isolated mode selects only the actual missing-writer utility control.');
+  }
+  const isolatedCloudGateway = values['isolated-cloud-gateway'] || unpackagedWriterControl;
+  const startupDiagnostic = process.env['TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC'];
+  if (startupDiagnostic !== undefined && !['0', '1', 'false'].includes(startupDiagnostic)) {
+    throw new Error('TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC accepts only 1, 0, or false.');
+  }
+  const startupControl = process.env['TAU_E2E_DESKTOP_STARTUP_CONTROL'];
+  if (startupControl !== undefined && !['0', '1', 'false'].includes(startupControl)) {
+    throw new Error('TAU_E2E_DESKTOP_STARTUP_CONTROL accepts only 1, 0, or false.');
+  }
+  if (startupControl === '1' && startupDiagnostic !== '1') {
+    throw new Error('Startup control requires the explicit startup diagnostic.');
+  }
   const executable = process.env['TAU_E2E_DESKTOP_EXECUTABLE'];
-  if (!executable || !isAbsolute(executable) || !existsSync(executable)) {
+  if (!unpackagedWriterControl && (!executable || !isAbsolute(executable) || !existsSync(executable))) {
     throw new Error('TAU_E2E_DESKTOP_EXECUTABLE must name an existing absolute packaged executable.');
+  }
+
+  const browserClosure = process.env['TAU_E2E_BROWSER_PHYSICAL_CLOSURE'];
+  if (
+    (unpackagedWriterControl && browserClosure === undefined) ||
+    (browserClosure !== undefined &&
+      (!isAbsolute(browserClosure) || !existsSync(browserClosure) || !statSync(browserClosure).isFile()))
+  ) {
+    throw new Error('TAU_E2E_BROWSER_PHYSICAL_CLOSURE must name an existing absolute artifact file.');
   }
 
   const toolEnvironment = Object.fromEntries(
@@ -181,11 +333,17 @@ const main = async (): Promise<void> => {
     }
     cleaned = true;
     await stopActiveChild();
-    spawnSync(composeCommand, [...composeArguments, 'down', '--volumes', '--remove-orphans'], {
+    const result = spawnSync(composeCommand, [...composeArguments, 'down', '--volumes', '--remove-orphans'], {
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Cleanup receives only tool discovery variables.
       env: toolEnvironment as NodeJS.ProcessEnv,
       stdio: 'ignore',
       timeout: 40_000,
+    });
+    console.info('[completed-artifact] service cleanup', {
+      project,
+      status: result.status,
+      signal: result.signal,
+      error: result.error?.message,
     });
     rmSync(directory, { force: true, recursive: true });
   };
@@ -244,6 +402,15 @@ const main = async (): Promise<void> => {
       throw new Error('Disposable Postgres container identity was not resolved.');
     }
 
+    console.info('[completed-artifact] verified container services', {
+      project,
+      postgresContainer,
+      databaseAddress,
+      redisAddress,
+      storageAddress,
+      databaseIdentity,
+    });
+
     const apiPort = await freePort();
     const apiUrl = `http://127.0.0.1:${String(apiPort)}`;
     const providerPort = isolatedCloudGateway ? await freePort() : undefined;
@@ -281,8 +448,9 @@ const main = async (): Promise<void> => {
       OTEL_METRICS_PORT: String(await freePort()),
       TAU_E2E_API_URL: apiUrl,
       TAU_E2E_API_CWD: directory,
-      TAU_E2E_COMPLETED_ARTIFACT: 'true',
-      TAU_E2E_ACP_PACKAGED: 'true',
+      TAU_E2E_COMPLETED_ARTIFACT: unpackagedWriterControl ? 'false' : 'true',
+      TAU_E2E_ACP_PACKAGED: unpackagedWriterControl ? 'false' : 'true',
+      ...(unpackagedWriterControl ? { TAU_E2E_UNPACKAGED_WRITER_CONTROL: 'true' } : {}),
       TAU_E2E_COMPOSE_PROJECT: project,
       ...(isolatedCloudGateway
         ? {
@@ -298,7 +466,10 @@ const main = async (): Promise<void> => {
             }),
           }
         : {}),
-      TAU_E2E_DESKTOP_EXECUTABLE: executable,
+      ...(executable === undefined ? {} : { TAU_E2E_DESKTOP_EXECUTABLE: executable }),
+      ...(startupDiagnostic === '1' ? { TAU_E2E_DESKTOP_STARTUP_DIAGNOSTIC: '1' } : {}),
+      ...(startupControl === '1' ? { TAU_E2E_DESKTOP_STARTUP_CONTROL: '1' } : {}),
+      ...(browserClosure === undefined ? {} : { TAU_E2E_BROWSER_PHYSICAL_CLOSURE: browserClosure }),
       TAU_E2E_EXTERNAL_SERVICES: 'true',
       TAU_E2E_POSTGRES_CONTAINER: postgresContainer,
       TAU_E2E_POSTGRES_DATABASE: 'desktop_e2e',
@@ -376,44 +547,114 @@ const main = async (): Promise<void> => {
     if (applied !== expected) {
       throw new Error('Disposable database migration checkpoint does not match the consumed journal.');
     }
+    // Playwright's supported pw:protocol logger is opt-in. Drain its stderr in
+    // this owned runner and retain only command metadata, never protocol bodies.
+    const protocol = createProtocolMetadataCollector();
+    const consumeProtocolLine = (line: string): void => {
+      if (!protocol.consume(line)) {
+        process.stderr.write(`${line}\n`);
+      }
+    };
+    const vitestEnvironment: NodeJS.ProcessEnv = {
+      ...environment,
+      ...(startupDiagnostic === '1' ? { DEBUG: 'pw:protocol', DEBUG_COLORS: '0', MAX_LOG_LENGTH: '65536' } : {}),
+    };
     const vitest = spawn(
       resolve(workspaceRoot, 'node_modules/.bin/vitest'),
       [
         'run',
         '--config',
         'vitest.config.ts',
-        'src/desktop-build123d.spec.ts',
-        'src/desktop-assimp.spec.ts',
-        'src/desktop-main-editor-kernels.spec.ts',
-        'src/desktop-converter.spec.ts',
-        'src/desktop-ephemeral-isolation.spec.ts',
-        'src/desktop-image-geospec.spec.ts',
-        'src/desktop-geometry-host.spec.ts',
-        'src/desktop-chat-replay.spec.ts',
-        'src/desktop-chat-in-project.spec.ts',
-        'src/desktop-chat-acp.spec.ts',
-        'src/desktop-measurement-exact.spec.ts',
-        'src/desktop-thumbnail-lifecycle.spec.ts',
-        'src/desktop-native-payload.spec.ts',
-        'src/desktop-community-preview.spec.ts',
+        ...(unpackagedWriterControl
+          ? []
+          : [
+              'src/desktop-build123d.spec.ts',
+              'src/desktop-assimp.spec.ts',
+              'src/desktop-main-editor-kernels.spec.ts',
+              'src/desktop-converter.spec.ts',
+              'src/desktop-ephemeral-isolation.spec.ts',
+              'src/desktop-image-geospec.spec.ts',
+              'src/desktop-geometry-host.spec.ts',
+              'src/desktop-chat-replay.spec.ts',
+              'src/desktop-chat-in-project.spec.ts',
+              'src/desktop-chat-acp.spec.ts',
+              'src/desktop-measurement-exact.spec.ts',
+              'src/desktop-thumbnail-lifecycle.spec.ts',
+              'src/desktop-native-payload.spec.ts',
+              'src/desktop-community-preview.spec.ts',
+            ]),
+        'src/desktop-published-part.spec.ts',
         '-t',
-        values['test-name-pattern'],
+        testNamePattern,
       ],
       {
         cwd: desktopE2ERoot,
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Test environment contains only run-owned service credentials.
-        env: environment as NodeJS.ProcessEnv,
-        stdio: 'inherit',
+        env: vitestEnvironment,
+        stdio: startupDiagnostic === '1' ? ['inherit', 'inherit', 'pipe'] : 'inherit',
       },
     );
     activeChild = vitest;
+    if (startupDiagnostic === '1') {
+      const decoder = new StringDecoder('utf8');
+      let carry = '';
+      let carryBytes = 0;
+      let dropping = false;
+      const append = (text: string): void => {
+        let offset = 0;
+        while (offset < text.length) {
+          const end = text.indexOf('\n', offset);
+          const final = end === -1 ? text.length : end;
+          const segment = text.slice(offset, final);
+          if (!dropping) {
+            const segmentBytes = Buffer.byteLength(segment, 'utf8');
+            if (carryBytes + segmentBytes > 131_072) {
+              carry = '';
+              carryBytes = 0;
+              dropping = true;
+              protocol.refuse();
+            } else {
+              carry += segment;
+              carryBytes += segmentBytes;
+            }
+          }
+          if (end === -1) {
+            break;
+          }
+          if (!dropping) {
+            consumeProtocolLine(carry);
+          }
+          carry = '';
+          carryBytes = 0;
+          dropping = false;
+          offset = end + 1;
+        }
+      };
+      vitest.stderr?.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+        for (let offset = 0; offset < chunk.byteLength; offset += 16_384) {
+          append(decoder.write(Buffer.from(chunk.subarray(offset, offset + 16_384))));
+        }
+      });
+      vitest.stderr?.once('end', () => {
+        append(decoder.end());
+        if (carry && !dropping) {
+          consumeProtocolLine(carry);
+        }
+      });
+    }
     const status = await new Promise<number>((resolve, reject) => {
       vitest.once('error', reject);
-      vitest.once('exit', (code, signal) => {
+      vitest.once('close', (code, signal) => {
         resolve(code ?? (signal ? 1 : 0));
       });
     });
     activeChild = undefined;
+    if (startupDiagnostic === '1') {
+      const path = resolve(workspaceRoot, 'out/test-results/desktop-e2e', `protocol-${project}.json`);
+      mkdirSync(resolve(workspaceRoot, 'out/test-results/desktop-e2e'), { recursive: true });
+      const metadata = protocol.snapshot();
+      writeFileSync(path, JSON.stringify(metadata), { mode: 0o600 });
+      console.info('[completed-artifact] private protocol metadata', { path, ...metadata.counts });
+    }
     if (status !== 0) {
       throw new Error(`Completed-artifact Vitest failed with status ${String(status)}.`);
     }
@@ -422,9 +663,11 @@ const main = async (): Promise<void> => {
   }
 };
 
-try {
-  await main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  }
 }

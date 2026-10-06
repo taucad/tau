@@ -963,90 +963,216 @@ describe('projectMachine', () => {
   // State: ready – view graphics
   // =========================================================================
   describe('ready – view graphics', () => {
-    it('keeps a shared manifest while a sibling GLB pane is live and clears it after the last pane switches or closes', async () => {
-      const actor = await startAndLoad();
-      actor.send({ type: 'createViewGraphics', viewId: 'glb' });
-      actor.send({ type: 'createViewGraphics', viewId: 'sibling' });
-      const { viewGraphics, modelInteractionRef } = actor.getSnapshot().context;
-      const first = viewGraphics.get('glb')!;
-      const sibling = viewGraphics.get('sibling')!;
-      const unitId = deriveModelInteractionUnitId({ sourceFile: 'main.ts' });
-      const manifest: GeometryComponentManifest = {
-        schemaVersion: 1,
-        sourceFile: 'main.ts',
-        rootId: 'root',
-        nodeOrder: ['root'],
-        nodesById: {
-          root: {
-            id: 'root',
-            name: 'Model',
-            kind: 'model',
-            selector: 'root',
-            childIds: [],
-            depth: 0,
-            path: ['Model'],
-            meshNodeIndices: [],
-            primitiveIndices: [],
-            materialIndices: [],
-            capabilities: {
-              canHide: true,
-              canIsolate: true,
-              canFocus: true,
-              canAdjustOpacity: true,
-              hasDrawings: false,
-              hasPreciseTopology: false,
-              exports: [],
+    it.each(['GLB', 'assembly'])(
+      'should retain a shared %s manifest until its last presented pane switches or closes',
+      async (kind) => {
+        const actor = await startAndLoad();
+        actor.send({ type: 'createViewGraphics', viewId: 'glb' });
+        actor.send({ type: 'createViewGraphics', viewId: 'sibling' });
+        const { viewGraphics, modelInteractionRef } = actor.getSnapshot().context;
+        const first = viewGraphics.get('glb')!;
+        const sibling = viewGraphics.get('sibling')!;
+        const unitId = deriveModelInteractionUnitId({ sourceFile: 'main.ts' });
+        const manifest: GeometryComponentManifest = {
+          schemaVersion: 1,
+          sourceFile: 'main.ts',
+          rootId: 'root',
+          nodeOrder: ['root'],
+          nodesById: {
+            root: {
+              id: 'root',
+              name: 'Model',
+              kind: 'model',
+              selector: 'root',
+              childIds: [],
+              depth: 0,
+              path: ['Model'],
+              meshNodeIndices: [],
+              primitiveIndices: [],
+              materialIndices: [],
+              capabilities: {
+                canHide: true,
+                canIsolate: true,
+                canFocus: true,
+                canAdjustOpacity: true,
+                hasDrawings: false,
+                hasPreciseTopology: false,
+                exports: [],
+              },
             },
           },
-        },
-        capabilities: {
-          canHide: true,
-          canIsolate: true,
-          canFocus: true,
-          canAdjustOpacity: true,
-          hasDrawings: false,
-          hasPreciseTopology: false,
-          exports: [],
-        },
-      };
-      const showGlb = (graphics: typeof first, hash: string): void => {
-        graphics.send({
-          type: 'updateArtifact',
-          artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
-          hash,
-          sourceFile: 'main.ts',
-        });
-        graphics.send({
-          type: 'gltfPresentationCommitted',
-          revision: graphics.getSnapshot().context.gltfPresentation.requestedRevision,
-          key: hash,
-          unitId,
-          manifest,
-        });
-      };
-      const showSvg = (graphics: typeof first): void => {
-        graphics.send({
-          type: 'updateArtifact',
-          artifact: { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg" />' },
-          hash: 'drawing',
-          sourceFile: 'main.ts',
-        });
+          capabilities: {
+            canHide: true,
+            canIsolate: true,
+            canFocus: true,
+            canAdjustOpacity: true,
+            hasDrawings: false,
+            hasPreciseTopology: false,
+            exports: [],
+          },
+        };
+        const showModel = (graphics: typeof first, hash: string, offeredManifest = manifest): void => {
+          if (kind === 'assembly') {
+            graphics.send({ type: 'updateAssembly', key: hash, units: { length: 'mm' }, sourceFile: 'main.ts' });
+          } else {
+            graphics.send({
+              type: 'updateArtifact',
+              artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
+              hash,
+              sourceFile: 'main.ts',
+            });
+          }
+          graphics.send({
+            type: 'gltfPresentationCommitted',
+            revision: graphics.getSnapshot().context.gltfPresentation.requestedRevision,
+            key: hash,
+            unitId,
+            manifest: offeredManifest,
+          });
+        };
+        const showSvg = (graphics: typeof first): void => {
+          graphics.send({
+            type: 'updateArtifact',
+            artifact: { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg" />' },
+            hash: 'drawing',
+            sourceFile: 'main.ts',
+          });
+          actor.send({ type: 'reconcileViewManifest', unitId });
+        };
+
+        showModel(first, 'first');
+        showModel(sibling, 'second');
+        showSvg(first);
+        expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBe(manifest);
+        showSvg(sibling);
+        expect(
+          getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest,
+        ).toBeUndefined();
+
+        showModel(first, 'third');
+        showModel(sibling, 'fourth');
+        actor.send({ type: 'destroyViewGraphics', viewId: 'glb' });
+        expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBe(manifest);
+        showSvg(sibling);
+        expect(
+          getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest,
+        ).toBeUndefined();
+
+        if (kind === 'assembly') {
+          sibling.send({ type: 'clearArtifact' });
+          sibling.send({ type: 'loadModelComponentManifest', unitId, manifest, source: 'viewer' });
+          actor.send({ type: 'reconcileViewManifest', unitId });
+          expect(
+            getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest,
+          ).toBeUndefined();
+          sibling.send({ type: 'loadModelComponentManifest', unitId, manifest, source: 'viewer' });
+          sibling.send({ type: 'updateAssembly', key: 'pending', units: { length: 'mm' }, sourceFile: 'main.ts' });
+          expect(sibling.getSnapshot().context.modelInteractionUnitId).toBe(unitId);
+          expect(sibling.getSnapshot().context.gltfPresentation.presentedKey).toBeUndefined();
+          actor.send({ type: 'reconcileViewManifest', unitId });
+          expect(
+            getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest,
+          ).toBeUndefined();
+        }
+
+        showModel(sibling, 'fifth');
+        expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBe(manifest);
+        const presentation = sibling.getSnapshot().context.gltfPresentation;
+        sibling.send({ type: 'gltfPresentationReleased', revision: presentation.presentedRevision, key: 'fifth' });
         actor.send({ type: 'reconcileViewManifest', unitId });
-      };
+        expect(
+          getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest,
+        ).toBeUndefined();
 
-      showGlb(first, 'first');
-      showGlb(sibling, 'second');
-      showSvg(first);
-      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBe(manifest);
-      showSvg(sibling);
-      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBeUndefined();
+        const pinned = { ...manifest, geometryHash: 'same-pin' };
+        const unit = () => getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId);
+        const release = (): void => {
+          const held = sibling.getSnapshot().context.gltfPresentation;
+          if (held.presentedKey === undefined) {
+            throw new Error('Expected an actual presented fixture before release.');
+          }
+          sibling.send({ type: 'gltfPresentationReleased', revision: held.presentedRevision, key: held.presentedKey });
+          actor.send({ type: 'reconcileViewManifest', unitId });
+        };
+        const select = (): void => {
+          modelInteractionRef.send({ type: 'selectComponent', unitId, componentId: 'root', source: 'viewer' });
+          modelInteractionRef.send({ type: 'setHoveredComponent', unitId, componentId: 'root', source: 'viewer' });
+          modelInteractionRef.send({ type: 'focusComponent', unitId, componentId: 'root', source: 'viewer' });
+        };
+        showModel(sibling, 'same-pin', pinned);
+        select();
+        expect(unit().selectionPin).toBe('same-pin');
+        release();
+        expect(unit().manifest).toBeUndefined();
+        expect(unit().hoveredComponentId).toBeUndefined();
+        expect(unit().focusedComponentId).toBeUndefined();
+        expect(unit().selectedComponentIds).toEqual(['root']);
+        expect(sibling.getSnapshot().context.gltfPresentation.presentedKey).toBeUndefined();
+        expect(sibling.getSnapshot().context.modelInteractionUnitId).toBeUndefined();
+        const revoked = unit();
+        modelInteractionRef.send({ type: 'toggleComponentSelection', unitId, componentId: 'root', source: 'viewer' });
+        expect(unit()).toBe(revoked);
+        showModel(sibling, 'same-pin', pinned);
+        expect(unit().manifest).toBe(pinned);
+        expect(unit().selectedComponentIds).toEqual(['root']);
 
-      showGlb(sibling, 'third');
-      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBe(manifest);
-      actor.send({ type: 'destroyViewGraphics', viewId: 'sibling' });
-      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBeUndefined();
-      actor.stop();
-    });
+        release();
+        if (kind === 'assembly') {
+          sibling.send({
+            type: 'updateAssembly',
+            key: 'different-pin',
+            units: { length: 'mm' },
+            sourceFile: 'main.ts',
+          });
+        } else {
+          sibling.send({
+            type: 'updateArtifact',
+            artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
+            hash: 'different-pin',
+            sourceFile: 'main.ts',
+          });
+        }
+        actor.send({ type: 'reconcileViewManifest', unitId });
+        expect(unit().manifest).toBeUndefined();
+        expect(unit().selectedComponentIds).toEqual([]);
+        expect(unit().selectionPin).toBeUndefined();
+        showModel(sibling, 'different-pin', { ...manifest, geometryHash: 'different-pin' });
+        expect(unit().selectedComponentIds).toEqual([]);
+        expect(unit().selectionPin).toBeUndefined();
+
+        showModel(sibling, 'same-pin', pinned);
+        select();
+        release();
+        if (kind === 'assembly') {
+          sibling.send({
+            type: 'updateAssembly',
+            key: 'same-pin',
+            units: { length: 'mm' },
+            sourceFile: 'alternate.ts',
+          });
+        } else {
+          sibling.send({
+            type: 'updateArtifact',
+            artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
+            hash: 'same-pin',
+            sourceFile: 'alternate.ts',
+          });
+        }
+        actor.send({ type: 'reconcileViewManifest', unitId });
+        expect(unit().manifest).toBeUndefined();
+        expect(unit().selectedComponentIds).toEqual([]);
+        expect(unit().selectionPin).toBeUndefined();
+
+        showModel(sibling, 'same-pin', pinned);
+        select();
+        release();
+        actor.send({ type: 'destroyViewGraphics', viewId: 'sibling' });
+        expect(unit().manifest).toBeUndefined();
+        expect(unit().selectedComponentIds).toEqual([]);
+        expect(unit().selectionPin).toBeUndefined();
+        actor.stop();
+      },
+    );
 
     it('should create a graphics actor for a view', async () => {
       const actor = await startAndLoad();

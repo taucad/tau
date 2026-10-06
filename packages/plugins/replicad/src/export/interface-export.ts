@@ -36,7 +36,11 @@ type EntryDatumPlacements = {
   datums: Array<Extract<ResolvedReplicadInterface, { kind: 'datum' }>>;
 };
 /** A native-handle entry: authored appearance fields as written, plus interfaces resolved on the live shape. */
-type StepShapeEntry = InputShape & { resolvedInterfaces?: ResolvedReplicadInterface[] };
+type StepShapeEntry = Omit<InputShape, 'shape'> & {
+  shape: AnyShape;
+  resolvedInterfaces?: ResolvedReplicadInterface[];
+  publishedOccurrencePath?: readonly string[];
+};
 /** Linear RGBA base colour and metallic-roughness factors. */
 type StepAppearance = { baseColor: [number, number, number, number]; metalness: number; roughness: number };
 type PreparedStepOccurrence = StepShapeEntry & {
@@ -413,6 +417,29 @@ const buildDocument = (
   const rootLabel = shapeTool.NewShape();
   const entryDatums: EntryDatumPlacements[] = [];
   oc.TDataStd_Name.Set(rootLabel, wrapString(oc, 'assembly'));
+  const assemblyLabels = new Map<string, TDF_Label>();
+  const occurrenceParent = (path: readonly string[] | undefined): TDF_Label => {
+    let parent = rootLabel;
+    if (!path) {
+      return parent;
+    }
+    for (let index = 0; index < path.length - 1; index++) {
+      const prefix = path.slice(0, index + 1);
+      const key = JSON.stringify(prefix);
+      let label = assemblyLabels.get(key);
+      if (!label) {
+        label = shapeTool.NewShape();
+        oc.TDataStd_Name.Set(label, wrapString(oc, prefix.map((id) => encodeURIComponent(id)).join('/')));
+        const identity = new oc.TopLoc_Location();
+        const instance = shapeTool.AddComponent(parent, label, identity);
+        identity.delete();
+        oc.TDataStd_Name.Set(instance, wrapString(oc, prefix.map((id) => encodeURIComponent(id)).join('/')));
+        assemblyLabels.set(key, label);
+      }
+      parent = label;
+    }
+    return parent;
+  };
 
   for (const { productName, prototypeShape, firstOccurrence, interfaces, occurrences } of products) {
     entryDatums.push({
@@ -454,7 +481,11 @@ const buildDocument = (
 
     for (const [index, occurrence] of occurrences.entries()) {
       const location = occurrence.shape.wrapped.Location();
-      const instanceLabel = shapeTool.AddComponent(rootLabel, productLabel, location);
+      const instanceLabel = shapeTool.AddComponent(
+        occurrenceParent(occurrence.publishedOccurrencePath),
+        productLabel,
+        location,
+      );
       location.delete();
       oc.TDataStd_Name.Set(instanceLabel, wrapString(oc, occurrence.occurrenceName));
       attachVisualMaterial({

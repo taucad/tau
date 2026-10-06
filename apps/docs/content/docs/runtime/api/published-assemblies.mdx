@@ -1,0 +1,70 @@
+---
+title: Published Parts and Assemblies
+description: Pinned part records, published assembly roots, admitted readers, and source-free exports.
+docType: reference
+icon: lucide:boxes
+---
+
+# Published Parts and Assemblies
+
+An authored assembly lists recipes and occurrences in a rooted project filesystem. `AuthoredAssemblySource` chooses a project path or in-memory files; `AuthoredPartRecipe` chooses source or an issued part reference. `AuthoredPartOccurrence` describes groups and leaves. Publication resolves leaves to `PublishedPartOccurrence` variants.
+
+<auto-type-table path='./props/types.ts' name='AuthoredAssembly' />
+
+<auto-type-table path='./props/types.ts' name='AuthoredAssemblySource' />
+
+<auto-type-table path='./props/types.ts' name='AuthoredPartRecipe' />
+
+<auto-type-table path='./props/types.ts' name='AuthoredPartOccurrence' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartOccurrence' />
+
+`PublishedPartRecord` stores versioned effective recipes. Variants pin display GLBs through `PublishedPartAsset`; optional `PublishedPartExact` identifies native evidence and its producer-qualified codec. The host issues a digest-pinned `PublishedPartReference`. `publishedPartRecordSchema` validates records, assets, and exact metadata at wire and durable boundaries.
+
+<auto-type-table path='./props/types.ts' name='PublishedPartRecord' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartVariant' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartAsset' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartExact' />
+
+<auto-type-table path='./props/types.ts' name='PublishedPartReference' />
+
+`PublishedAssembly` carries checked records and occurrences. The host-local `AssemblyDisplayProjector` validates the immutable closure during admission and returns flattened bytes during projection. `AdmittedAssembly` adds a client-local asset reader; callers cannot construct its token. `PublishedAssemblyRootSnapshot` observes the shared root and generation but cannot recover a lost receipt. `PublishAssemblyOutcome` distinguishes published, superseded, cancelled, invalid, and commit-unknown outcomes. After commit-unknown, use `readCurrent` before acting.
+
+The shared root file is a generation pointer pinning an immutable manifest and ordered chunks of the logical root. Publication verifies chunks and manifest before a checked pointer write. Source-free readers verify the pointer, manifest, chunks, part records, and display assets; missing or mismatched bytes invalidate admission. `readCurrent` reports the verified generation after an uncertain commit without attributing its writer.
+
+<auto-type-table path='./props/types.ts' name='PublishedAssembly' />
+
+<auto-type-table path='./props/types.ts' name='AssemblyDisplayProjector' />
+
+<auto-type-table path='./props/types.ts' name='AdmittedAssembly' />
+
+<auto-type-table path='./props/types.ts' name='PublishedAssemblyRootSnapshot' />
+
+<auto-type-table path='./props/types.ts' name='PublishAssemblyOutcome' />
+
+`PublishedAssemblyDocument` is an admitted source-free session; close it independently of an authored document. `PublishedExportInput` selects a part and variant or an assembly root with optional `PublishedAssemblyComponentPlacement` values. Placements move restored native geometry for admitted components without changing the root. `ExportOutcome` carries files or issues. `selectPublishedExportRoute` uses admitted metadata and capabilities; execution still validates immutable assets and the exact codec.
+
+<auto-type-table path='./props/types.ts' name='PublishedAssemblyDocument' />
+
+<auto-type-table path='./props/types.ts' name='PublishedExportInput' />
+
+<auto-type-table path='./props/types.ts' name='PublishedAssemblyComponentPlacement' />
+
+<auto-type-table path='./props/types.ts' name='ExportOutcome' />
+
+<auto-type-table path='./props/types.ts' name='PublishedExportRoute' />
+
+For kernel snapshot hooks, `HandleSnapshotExactDescriptor` reports portable producer/codec metadata without an asset address; the runtime attaches the immutable asset after serialization. `ComposeHandlesInput` gives a kernel the restored handles and placement for admitted occurrences, including any component-level mappings needed for exact assembly export.
+
+<auto-type-table path='./props/types.ts' name='HandleSnapshotExactDescriptor' />
+
+<auto-type-table path='./props/types.ts' name='ComposeHandlesInput' />
+
+## Related
+
+- [Core Types](./types)
+- [Client API](./client)
+- [Handle Errors](../guides/error-handling)

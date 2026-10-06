@@ -1,0 +1,11 @@
+This app engine contains compiled Open CASCADE Technology software.
+Open CASCADE Technology is copyright OPEN CASCADE SAS and is distributed
+under LGPL-2.1 with Open CASCADE Exception 1.0. See LICENSE and
+LICENSE.OCCT-Exception for the original license and exception text.
+
+The Replicad wrapper sources are distributed under the MIT license.
+See LICENSE.Replicad for their original copyright and license text.
+
+Sources and the immutable build inputs are recorded in provenance.json.
+The generated module bytes are preserved exactly; this application selects
+that module and its matching WASM through the existing custom override.

@@ -6,9 +6,12 @@ import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults } from '@taucad/run
 import type { KernelIssue } from '@taucad/runtime/types';
 import {
   detectEdges,
+  formatComponentId,
+  formatNamedComponentId,
   transformNormalArray,
   transformVertexArray,
   srgbTupleToLinear,
+  uniqueComponentId,
   writeGlb,
 } from '@taucad/geometry-core';
 import type { GeometryOutputTransformOptions, GlbInput, GlbNode, GlbPrimitive } from '@taucad/geometry-core';
@@ -414,9 +417,18 @@ export function jscadToGltf(
 
   const nodes: GlbNode[] = [];
   const issues: KernelIssue[] = [];
+  const usedIds = new Map<string, number>();
   for (const part of parts) {
     const { node, issue } = buildNodeFromJscadPart(part, transformOptions, modeling);
     if (node) {
+      const index = nodes.length;
+      node.extras = {
+        ...node.extras,
+        tauComponentId: uniqueComponentId(
+          formatNamedComponentId(node.name ?? '', index) ?? formatComponentId(index),
+          usedIds,
+        ),
+      };
       nodes.push(node);
     }
     if (issue) {

@@ -143,6 +143,7 @@ exports[`edge occurrence semantics > should retain the stripped occurrence endpo
     }
   ],
   "scale": 1,
+  "side": 2,
   "type": "Line2NodeMaterial"
 }
 "

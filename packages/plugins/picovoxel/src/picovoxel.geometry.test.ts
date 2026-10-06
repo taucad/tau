@@ -308,12 +308,12 @@ it('should bind reordered outputs by authored names while retaining unrelated ge
   const payload = document.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')!.getPayload();
   expect(payload['components']).toHaveLength(3);
   expect(payload['mechanism']).toMatchObject({
-    links: { base: { components: ['component:node-2'] }, lid: { components: ['component:node-0'] } },
+    links: { base: { components: ['component:base'] }, lid: { components: ['component:lid'] } },
   });
   expect(
     document
       .getRoot()
       .listNodes()
       .map((node) => node.getExtras()['tauComponentId']),
-  ).toEqual(['component:node-0', 'component:node-1', 'component:node-2']);
+  ).toEqual(['component:lid', 'component:unrelated', 'component:base']);
 });

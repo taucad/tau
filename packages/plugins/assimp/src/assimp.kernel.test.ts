@@ -126,7 +126,7 @@ describe('assimpKernel', () => {
       renderB: async () => exportModel(result.handle, 'y-up', 'meter'),
       export: async () => exportModel(result.handle, 'z-up', 'millimeter'),
       freshB: async () => {
-        const fresh = definition.deserializeHandle!({ serialized: freshSnapshot }, localRuntime, localContext);
+        const fresh = await definition.deserializeHandle!({ serialized: freshSnapshot }, localRuntime, localContext);
         return exportModel(fresh, 'y-up', 'meter');
       },
     });

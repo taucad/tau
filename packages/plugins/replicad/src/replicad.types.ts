@@ -1,10 +1,14 @@
-import type { GlbMaterial } from '@taucad/geometry-core';
+import type { GlbMaterial, TauCadPhysical } from '@taucad/geometry-core';
 
 /**
  * Tessellated 3D geometry produced by the Replicad kernel, containing indexed triangle meshes and optional BRep edge lines.
  */
 export type GeometryReplicad = {
   format: 'replicad';
+  /** Identity minted with the native entry and forwarded to display; absent on legacy snapshots. */
+  sourceComponentId?: string;
+  /** Imported triangle geometry has no native BRep topology or exact export capability. */
+  meshOnly?: true;
   faces: {
     triangles: number[];
     vertices: number[];
@@ -30,5 +34,6 @@ export type GeometryReplicad = {
   metalness?: number;
   roughness?: number;
   material?: GlbMaterial;
+  physical?: TauCadPhysical;
   name: string;
 };

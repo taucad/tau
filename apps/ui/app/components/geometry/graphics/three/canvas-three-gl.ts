@@ -25,37 +25,48 @@ export function createTauR3fGlProp(
   cameras: readonly ThreeCamera[] = [],
   onCreateError?: (error: Error) => void,
 ): CanvasProps['gl'] {
+  // R3F may configure again on resize before its first async renderer has settled.
+  const byCanvas = new WeakMap<HTMLCanvasElement, Promise<FiberCompatibleGl>>();
   return async (defaults) => {
-    let renderer: RendererInstance;
-    try {
-      renderer = await createRenderer('viewport', graphicsBackend, defaults.canvas as HTMLCanvasElement);
-    } catch (error) {
-      const failure = error instanceof Error ? error : new Error(String(error));
-      console.warn('[createTauR3fGlProp] Renderer creation failed:', failure);
-      onCreateError?.(failure);
-      return new Promise<never>(() => {
-        // Never settles: R3F keeps waiting while the owner unmounts this canvas.
-        void 0;
-      });
+    const canvas = defaults.canvas as HTMLCanvasElement;
+    const existing = byCanvas.get(canvas);
+    if (existing) {
+      return existing;
     }
-    // R3F reapplies DPR on every resize. WebGLRenderer.setPixelRatio also calls
-    // setSize, clearing/reallocating the old buffer before R3F sizes the new one.
-    const setPixelRatio = renderer.setPixelRatio.bind(renderer);
-    renderer.setPixelRatio = (value: number): void => {
-      if (renderer.getPixelRatio() !== value) {
-        setPixelRatio(value);
+    const creation = (async (): Promise<FiberCompatibleGl> => {
+      let renderer: RendererInstance;
+      try {
+        renderer = await createRenderer('viewport', graphicsBackend, canvas);
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        console.warn('[createTauR3fGlProp] Renderer creation failed:', failure);
+        onCreateError?.(failure);
+        return new Promise<never>(() => {
+          // Never settles: R3F keeps waiting while the owner unmounts this canvas.
+          void 0;
+        });
       }
-    };
-    const reversedDepth = 'reversedDepthBuffer' in renderer && renderer.reversedDepthBuffer;
-    for (const camera of cameras) {
-      // The rig survives backend remounts. Three r184 only ever enables reversed
-      // depth, so restore both conventions before scene warmup or direct rendering.
-      camera.coordinateSystem = renderer.coordinateSystem;
-      // Three exposes reversedDepth as a getter without a setter.
-      Object.assign(camera, { _reversedDepth: reversedDepth });
-      camera.updateProjectionMatrix();
-    }
-    return renderer as FiberCompatibleGl;
+      // R3F reapplies DPR on every resize. WebGLRenderer.setPixelRatio also calls
+      // setSize, clearing/reallocating the old buffer before R3F sizes the new one.
+      const setPixelRatio = renderer.setPixelRatio.bind(renderer);
+      renderer.setPixelRatio = (value: number): void => {
+        if (renderer.getPixelRatio() !== value) {
+          setPixelRatio(value);
+        }
+      };
+      const reversedDepth = 'reversedDepthBuffer' in renderer && renderer.reversedDepthBuffer;
+      for (const camera of cameras) {
+        // The rig survives backend remounts. Three r184 only ever enables reversed
+        // depth, so restore both conventions before scene warmup or direct rendering.
+        camera.coordinateSystem = renderer.coordinateSystem;
+        // Three exposes reversedDepth as a getter without a setter.
+        Object.assign(camera, { _reversedDepth: reversedDepth });
+        camera.updateProjectionMatrix();
+      }
+      return renderer as FiberCompatibleGl;
+    })();
+    byCanvas.set(canvas, creation);
+    return creation;
   };
 }
 /* oxlint-enable unicorn-js/prevent-abbreviations */

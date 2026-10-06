@@ -44,6 +44,7 @@ const state = vi.hoisted(() => ({
   /* What main asked to start; the built files themselves exist only under `dist/main`. */
   workerEntries: [] as string[],
   kernelUtilityEntry: undefined as string | undefined,
+  kernelForkEnvAllowlist: [] as string[],
   servicesUtilityEntry: undefined as string | undefined,
   userData: '',
   servicesDispose: vi.fn(async () => undefined),
@@ -201,10 +202,16 @@ vi.mock('electron', () => ({
 vi.mock('@taucad/runtime/electron/main', () => ({
   installElectronRuntimeHeaders: vi.fn(),
   registerElectronRuntimeMain: vi.fn(
-    (options: { maxUtilities?: number; resolveFork?: typeof state.resolveFork; utilityEntry: string }) => {
+    (options: {
+      maxUtilities?: number;
+      resolveFork?: typeof state.resolveFork;
+      utilityEntry: string;
+      forkEnvAllowlist?: readonly string[];
+    }) => {
       state.resolveFork = options.resolveFork;
       state.runtimeMaxUtilities = options.maxUtilities;
       state.kernelUtilityEntry = options.utilityEntry;
+      state.kernelForkEnvAllowlist = [...(options.forkEnvAllowlist ?? [])];
       return { connect: vi.fn(), dispose: vi.fn(), prewarm: state.runtimePrewarm };
     },
   ),
@@ -333,6 +340,7 @@ afterEach(async () => {
   await Promise.all(state.workers.splice(0).map(async (worker) => worker.terminate()));
   state.workerEntries.length = 0;
   state.kernelUtilityEntry = undefined;
+  state.kernelForkEnvAllowlist.length = 0;
   state.servicesUtilityEntry = undefined;
   if (state.userData) {
     await rm(state.userData, { recursive: true, force: true });
@@ -363,6 +371,7 @@ afterEach(async () => {
   // Each case bootstraps main afresh; the cached module would otherwise register nothing.
   vi.resetModules();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   for (const listener of process.listeners('uncaughtException')) {
     if (!originalUncaught.has(listener)) {
       process.removeListener('uncaughtException', listener);
@@ -397,6 +406,45 @@ describe('desktop main compute owner', () => {
     });
     return resolve(join(state.userData, 'home', 'project'));
   };
+
+  it(
+    'mints the Replicad pair root from host assets and keeps it outside renderer fork authority',
+    async () => {
+      vi.stubEnv('TAU_DESKTOP_CLIENT_ROOT', '/trusted/built/client');
+      vi.stubEnv('TAU_REPLICAD_RESOURCE_ROOT', '/untrusted/shell/engine');
+      await bootstrap();
+      const kernelEnvironment = state.utilityEnvironmentAdditions.find(
+        (additions) => 'TAU_REPLICAD_RESOURCE_ROOT' in additions,
+      );
+      expect(kernelEnvironment?.['TAU_REPLICAD_RESOURCE_ROOT']).toBe(
+        join(import.meta.dirname, '../../../ui/desktop/build/host-assets/engines/replicad/density-single-v1'),
+      );
+      expect(state.kernelForkEnvAllowlist).not.toContain('TAU_REPLICAD_RESOURCE_ROOT');
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'mints the packaged Replicad pair root from resources independently of the SPA and shell overrides',
+    async () => {
+      app.isPackaged = true;
+      Object.defineProperty(process, 'resourcesPath', {
+        configurable: true,
+        value: '/trusted/Tau.app/Contents/Resources',
+      });
+      vi.stubEnv('TAU_DESKTOP_CLIENT_ROOT', '/separate/spa/client');
+      vi.stubEnv('TAU_REPLICAD_RESOURCE_ROOT', '/untrusted/shell/engine');
+      await bootstrap();
+      const kernelEnvironment = state.utilityEnvironmentAdditions.find(
+        (additions) => 'TAU_REPLICAD_RESOURCE_ROOT' in additions,
+      );
+      expect(kernelEnvironment?.['TAU_REPLICAD_RESOURCE_ROOT']).toBe(
+        '/trusted/Tau.app/Contents/Resources/engines/replicad/density-single-v1',
+      );
+      expect(state.kernelForkEnvAllowlist).not.toContain('TAU_REPLICAD_RESOURCE_ROOT');
+    },
+    bootMilliseconds,
+  );
 
   /* AF-L03-1: the descriptors used to be frozen into the window's
    * `additionalArguments`, so a vendor model probe on a 5 s clock was a
@@ -454,6 +502,52 @@ describe('desktop main compute owner', () => {
       expect(home.env).toEqual(checkout.env);
       expect(state.servicesConnect).toHaveBeenLastCalledWith('runtimeFileSystem', {
         workspaceRoot: join(projectRoot, '.tau/checkouts/run'),
+        runtimeRole: 'publication',
+      });
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'closes the evaluator binding when publication acquisition fails and refuses renderer publication roles',
+    async () => {
+      const projectRoot = await bootstrap();
+      const evaluator = {
+        id: 'evaluator-port',
+        close: vi.fn(() => {
+          throw new Error('close failed');
+        }),
+      };
+      const failure = new Error('publication acquisition failed');
+      state.servicesConnect
+        .mockImplementationOnce(() => evaluator)
+        .mockImplementationOnce(() => {
+          throw failure;
+        });
+      expect(() => state.resolveFork!({ projectRoot, computeMode: 'memory' })).toThrow(failure);
+      expect(evaluator.close).toHaveBeenCalledOnce();
+      state.servicesConnect.mockClear();
+      const postMessage = vi.fn();
+      for (const concern of ['runtimeFileSystem', 'agentHost', 'machines']) {
+        for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+          listener(
+            { senderFrame: { url: 'app://tau/index.html', postMessage } },
+            { requestId: concern, concern, context: { workspaceRoot: projectRoot, runtimeRole: 'publication' } },
+          );
+        }
+      }
+      expect(state.servicesConnect).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+        requestId: 'runtimeFileSystem',
+        error: 'services.unknown-concern',
+      });
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+        requestId: 'machines',
+        error: 'services.host-only-runtime-role',
+      });
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+        requestId: 'agentHost',
+        error: 'services.host-only-runtime-role',
       });
     },
     bootMilliseconds,

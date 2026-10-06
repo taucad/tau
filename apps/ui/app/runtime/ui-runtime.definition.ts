@@ -24,6 +24,17 @@ type UiRuntimeOptions = {
   readonly withSourceMapping?: boolean;
 };
 
+const isNodeRuntime =
+  typeof process !== 'undefined' && typeof process.versions === 'object' && typeof process.versions.node === 'string';
+
+const deliveredReplicadAssetUrl = (name: 'replicad_single.wasm' | 'replicad_single.mjs'): string =>
+  new URL(
+    isNodeRuntime
+      ? `../../public/assets/engines/replicad/density-single-v1/${name}`
+      : `/assets/engines/replicad/density-single-v1/${name}`,
+    isNodeRuntime ? import.meta.url : globalThis.location.href,
+  ).href;
+
 const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptions = {}) => ({
   plugins: [
     esbuild(),
@@ -43,10 +54,12 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     replicad({
       kernels: {
         default: {
-          // 'auto' picks the pthread build only when the host is cross-origin
-          // isolated; a pinned 'multi' fails kernel binding on plain-http LAN
-          // origins where SharedArrayBuffer is unavailable.
-          wasm: 'auto',
+          // This app selects the maintained density-capable single build. The existing
+          // custom override hashes the delivered WASM and glue bytes, independent of URL.
+          wasm: {
+            wasmUrl: deliveredReplicadAssetUrl('replicad_single.wasm'),
+            wasmBindingsUrl: deliveredReplicadAssetUrl('replicad_single.mjs'),
+          },
           withSourceMapping: options.withSourceMapping === true,
         },
       },

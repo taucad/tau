@@ -318,8 +318,10 @@ catalog:
   '@streamdown/cjk': ^1.0.3
   '@streamdown/mermaid': ^1.0.2
   '@napi-rs/cli': 3.8.6
+  react-virtuoso: ^4.18.7
   '@parcel/watcher': ^2.6.0
   cheerio: 1.2.0
+  meshoptimizer: 1.1.1
   sharp: 0.34.5
 catalogs:
   electron-vite7:
@@ -402,6 +404,11 @@ minimumReleaseAgeExclude:
   - '@agentclientprotocol/sdk@1.4.0'
   - '@agentclientprotocol/claude-agent-acp@0.70.0'
   - '@agentclientprotocol/codex-acp@1.7.0'
+packageExtensions:
+  # 0.0.35 imports nanoid without declaring it; the tscircuit toolkit vendors this engine graph.
+  '@tscircuit/infgrid-ijump-astar@0.0.35':
+    dependencies:
+      nanoid: 5.1.14
 peerDependencyRules:
   allowedVersions:
     fumadocs-mdx>vite: ^8.0.0

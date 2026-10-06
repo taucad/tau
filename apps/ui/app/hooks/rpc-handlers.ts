@@ -19,6 +19,7 @@ import type {
   CaptureImagesRpcInput,
   RunGeoSpecTestsRpcResult,
 } from '@taucad/chat';
+import { fileExtensions } from '@taucad/types/constants';
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
 import { mutatingRpcNames } from '@taucad/chat/constants';
 import { applyClientTextMutation, createExactReplacementPlan, createRpcDispatcher } from '@taucad/chat/rpc';
@@ -44,7 +45,7 @@ import { getErrno } from '@taucad/utils/error';
 import { randomUuid } from '@taucad/utils/id';
 import { recordRpcOutcome } from '#services/rpc-ledger.js';
 import type { projectMachine } from '#machines/project.machine.js';
-import { selectCadFailureIssues } from '#machines/cad.machine.js';
+import { selectCadDisplay, selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { createSourceModelInteractionUnitId } from '#machines/model-interaction.machine.js';
@@ -558,7 +559,9 @@ function createBrowserGraphicsClient(
       try {
         const { cadSnapshot } = resolved;
         const { document, evaluation } = cadSnapshot.context;
-        if (!document) {
+        const display = selectCadDisplay(cadSnapshot);
+        const assemblyDisplay = display && 'admitted' in display ? display : undefined;
+        if (!document && !assemblyDisplay) {
           return {
             success: false,
             errorCode: rpcClientErrorCode.unknown,
@@ -566,7 +569,7 @@ function createBrowserGraphicsClient(
           };
         }
 
-        if (!evaluation?.success) {
+        if (!assemblyDisplay && !evaluation?.success) {
           const failedIssues = evaluation?.issues ?? selectCadFailureIssues(cadSnapshot) ?? [];
           return {
             success: false,
@@ -576,7 +579,24 @@ function createBrowserGraphicsClient(
         }
         try {
           context?.signal?.throwIfAborted();
-          const exportResult = await document.export(to, { options, signal: context?.signal });
+          const pinnedFormat = fileExtensions.find((format) => format === to);
+          if (assemblyDisplay && !pinnedFormat) {
+            throw new Error(`Unsupported pinned export format: ${to}`);
+          }
+          const exportResult =
+            assemblyDisplay && pinnedFormat
+              ? await assemblyDisplay.document.exportPublished({
+                  format: pinnedFormat,
+                  publishedAssembly: { root: assemblyDisplay.root },
+                  exportOptions: options,
+                  signal: context?.signal,
+                })
+              : document
+                ? await document.export(to, { options, signal: context?.signal })
+                : undefined;
+          if (!exportResult) {
+            throw new Error('The selected CAD document is unavailable');
+          }
           if (!exportResult.success) {
             const message = exportResult.issues.map((issue) => issue.message).join('; ') || 'Geometry export failed';
             return { success: false, errorCode: rpcClientErrorCode.unknown, message };

@@ -547,7 +547,7 @@ export default function main() {
           expect.any(Object),
         );
 
-        const restored = definition.deserializeHandle!(
+        const restored = await definition.deserializeHandle!(
           { serialized: structuredClone(snapshot) },
           kernelRuntime,
           context,
@@ -579,7 +579,7 @@ export default function main() {
             const curvedSnapshot = expectOpenCascadeSnapshot(
               definition.serializeHandle!({ handle: curvedHandle }, kernelRuntime, context),
             );
-            const curvedRestored = definition.deserializeHandle!(
+            const curvedRestored = await definition.deserializeHandle!(
               { serialized: structuredClone(curvedSnapshot) },
               kernelRuntime,
               context,

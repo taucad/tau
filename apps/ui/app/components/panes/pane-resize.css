@@ -15,6 +15,12 @@
   transition: none !important;
 }
 
+/* Native resize targets stay below shared portaled menus. */
+.pane-resize .dv-split-view-container .dv-sash-container .dv-sash,
+.section-resize .dv-split-view-container .dv-sash-container .dv-sash {
+  z-index: 10;
+}
+
 /* Clipped collapsed bodies must also leave the accessibility/focus tree. */
 .section-resize .dv-pane:has([data-slot='paneview-header'][data-state='closed']) > .dv-pane-body {
   visibility: hidden;

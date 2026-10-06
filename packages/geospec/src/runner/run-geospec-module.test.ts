@@ -141,6 +141,69 @@ describe('runGeoSpecModule', () => {
       await nativeModelLoader.releaseAll();
     }
   });
+  it('should release a failed case before the next case admits within the same byte limit', async () => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    const releaseSubject = vi.fn(() => encode({ result: {} }));
+    const ingestSubject = vi.fn((_request: Uint8Array<ArrayBuffer>, primary: Uint8Array<ArrayBuffer>) =>
+      encode({ result: { subject: { subjectHash: String(primary[0]).repeat(64) } } }),
+    );
+    const engine: GeoSpecNativeModelEngine = {
+      ...nativeAssertions.engine,
+      processRequest: () =>
+        encode({
+          requestId: 'configuration',
+          result: {
+            canonicalProfile: 'geospec-jcs-v1',
+            protocolVersion: 3,
+            registryVersion: 5,
+            configuration: { binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 } },
+          },
+        }),
+      ingestSubject,
+      subjectHandle: () => encode({ result: { subjectHandle: 'owned' } }),
+      releaseSubject,
+    };
+    const nativeModelLoader = createGeoSpecNativeModelLoader({ engine });
+    try {
+      const result = await runModule(
+        [
+          [
+            'spec.geospec.ts',
+            `
+        import { it } from 'geospec';
+        import { createModelLoader } from 'geospec/model';
+        it('failed case', async () => {
+          const load = createModelLoader({ format: 'step' });
+          try {
+            const bytes = new Uint8Array(800); bytes[0] = 1;
+            await load({ source: bytes });
+            throw new Error('case failed after admission');
+          } finally {
+            await load.dispose();
+          }
+        });
+        it('following case', async () => {
+          const load = createModelLoader({ format: 'step' });
+          try {
+            const bytes = new Uint8Array(800); bytes[0] = 2;
+            await load({ source: bytes });
+          } finally {
+            await load.dispose();
+          }
+        });
+      `,
+          ],
+        ],
+        { nativeAssertions: { engine }, nativeModelLoader },
+      );
+      expect(result.success && result.tests.map(({ status }) => status)).toEqual(['failed', 'passed']);
+      expect(result.lineage?.loads.map(({ status }) => status)).toEqual(['complete', 'complete']);
+      expect(ingestSubject).toHaveBeenCalledTimes(2);
+      expect(releaseSubject).toHaveBeenCalledTimes(2);
+    } finally {
+      await nativeModelLoader.releaseAll();
+    }
+  });
   it('should invalidate a child even when its genuine lease release fails and retain cleanup for retry', async () => {
     const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
     const evaluateClaim = vi.fn(nativeAssertions.engine.evaluateClaim);

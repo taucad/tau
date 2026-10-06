@@ -2,6 +2,8 @@ import type { MockInstance } from 'vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   Group,
+  InstancedMesh,
+  Matrix4,
   Mesh,
   BufferGeometry,
   BufferAttribute,
@@ -36,6 +38,7 @@ import { sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.j
 import { resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
 import {
   getModelComponentOwner,
+  setModelComponentInstanceSlots,
   setModelComponentOwner,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import { applyFatLineSegments } from '#components/geometry/graphics/three/materials/gltf-edges.js';
@@ -592,6 +595,32 @@ describe('model component BVH picking', () => {
     expect(collectModelPickableSurfaceMeshes(scene)).toEqual([ownedMesh]);
   });
 
+  it('should collect genuine placed instance slots without inherited IDs and deny unbound batches', () => {
+    const scene = new Group();
+    const source = buildRaycastMesh({ z: -2, componentId: firstComponentId });
+    const batch = new InstancedMesh(source.geometry, source.material, 1);
+    batch.setMatrixAt(0, new Matrix4().makeTranslation(2, 0, 0));
+    setModelComponentInstanceSlots(batch, [{ owner: { unitId, componentId: firstComponentId }, sourceObject: source }]);
+    scene.add(batch);
+    scene.updateMatrixWorld(true);
+    expect(collectModelPickableSurfaceMeshes(scene)).toEqual([batch]);
+    const raycaster = buildForwardRaycaster();
+    raycaster.ray.origin.x = 2;
+    const stockHits = raycaster.intersectObjects(collectModelPickableSurfaceMeshes(scene), false);
+    expect(stockHits[0]?.instanceId).toBe(0);
+    expect(resolveModelComponentHitFromRay({ raycaster, meshes: collectModelPickableSurfaceMeshes(scene) })).toBe(
+      firstComponentId,
+    );
+    const unbound = new InstancedMesh(source.geometry, source.material, 1);
+    const ownedParent = new Group();
+    assignComponentOwner(ownedParent, secondComponentId);
+    ownedParent.add(unbound);
+    scene.add(ownedParent);
+    expect(collectModelPickableSurfaceMeshes(scene)).toEqual([batch]);
+    scene.userData[sceneTag.sectionViewHelper] = true;
+    expect(collectModelPickableSurfaceMeshes(scene)).toEqual([]);
+  });
+
   it('should skip clipped front model hits and resolve the nearest remaining visible component', () => {
     const frontMesh = buildRaycastMesh({ z: -1, componentId: secondComponentId });
     const rearMesh = buildRaycastMesh({ z: -2, componentId: firstComponentId });
@@ -853,7 +882,7 @@ describe('applyModelComponentVisualStateToScene', () => {
       enableLines: true,
     });
 
-    expect(emphasis).toEqual({ hover: [], selected: [] });
+    expect(emphasis).toEqual({ hover: [], selected: [], hoverInstances: [], selectedInstances: [] });
     expect(mesh.visible).toBe(true);
     expect(getMeshBasicMaterial(mesh).opacity).toBe(1);
     expect(ancestorQuery).not.toHaveBeenCalled();
@@ -885,7 +914,7 @@ describe('applyModelComponentVisualStateToScene', () => {
     expect(first.visible).toBe(false);
     expect(second.visible).toBe(true);
     expect(getMeshBasicMaterial(second).opacity).toBe(0.25);
-    expect(emphasis).toEqual({ hover: [], selected: [second] });
+    expect(emphasis).toEqual({ hover: [], selected: [second], hoverInstances: [], selectedInstances: [] });
   });
 
   it('should dim non-focused component materials without writing depth', () => {

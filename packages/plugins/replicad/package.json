@@ -84,6 +84,7 @@
     "@taucad/occt-core": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "culori": "catalog:",
+    "manifold-3d": "catalog:",
     "replicad": "catalog:",
     "replicad-opencascadejs": "catalog:",
     "source-map-js": "catalog:"
@@ -94,7 +95,10 @@
   },
   "devDependencies": {
     "@msgpack/msgpack": "catalog:",
+    "@taucad/assimp": "workspace:*",
     "@taucad/esbuild": "workspace:*",
+    "@taucad/jscad": "workspace:*",
+    "@taucad/middleware": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/utils": "workspace:*",

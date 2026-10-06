@@ -440,7 +440,11 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
       expect(handle.images?.[0]?.data.byteLength).toBe(png.byteLength);
       expect(handle.textures).toEqual(textures);
       expect(handle.samplers).toEqual(samplers);
-      const restored = definition.deserializeHandle!({ serialized: structuredClone(serialized) }, runtimeMock, context);
+      const restored = await definition.deserializeHandle!(
+        { serialized: structuredClone(serialized) },
+        runtimeMock,
+        context,
+      );
       expect(restored.shapes[0]!.material).toEqual(material);
       expect(restored.images?.[0]?.data).toEqual(png);
       const unalignedBytes = (bytes: Uint8Array<ArrayBuffer>) => {
@@ -456,7 +460,7 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
           triangles: unalignedBytes(shape.triangles),
         })),
       };
-      const copied = definition.deserializeHandle!({ serialized: unaligned }, runtimeMock, context);
+      const copied = await definition.deserializeHandle!({ serialized: unaligned }, runtimeMock, context);
       expect(copied.shapes[0]!.vertices).toEqual(handle.shapes[0]!.vertices);
       expect(copied.shapes[0]!.triangles).toEqual(handle.shapes[0]!.triangles);
       unaligned.shapes[0]!.vertices.fill(0);
@@ -465,8 +469,12 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
         ...serialized,
         shapes: serialized.shapes.map((shape) => ({ ...shape, vertices: shape.vertices.subarray(1) })),
       };
-      expect(() => definition.deserializeHandle!({ serialized: malformed }, runtimeMock, context)).toThrow(TypeError);
-      expect(() => definition.deserializeHandle!({ serialized: malformed }, runtimeMock, context)).toThrow('byte');
+      await expect(async () =>
+        definition.deserializeHandle!({ serialized: malformed }, runtimeMock, context),
+      ).rejects.toThrow(TypeError);
+      await expect(async () =>
+        definition.deserializeHandle!({ serialized: malformed }, runtimeMock, context),
+      ).rejects.toThrow('byte');
       const meshed = await definition.render!(
         { handle: restored, view: 'model', options: {}, content: {} },
         runtimeMock,

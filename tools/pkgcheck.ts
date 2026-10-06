@@ -967,9 +967,15 @@ void [
  */
 function consumerProbeSource(specifiers: readonly string[]): string {
   const { exports } = applyPublishConfig(packageJson);
+  const runtimeTarget = (target: unknown): unknown => {
+    if (isRecord(target)) {
+      return runtimeTarget(target['import'] ?? target['default']);
+    }
+    return target;
+  };
   const imports = specifiers.map((specifier, index) => {
     const subpath = `.${specifier.slice(packageName.length)}`;
-    const target = isRecord(exports) ? exports[subpath] : undefined;
+    const target = runtimeTarget(isRecord(exports) ? exports[subpath] : undefined);
     const attribute = typeof target === 'string' && target.endsWith('.json') ? ' with { type: "json" }' : '';
     return `import * as probe${String(index)} from '${specifier}'${attribute};`;
   });

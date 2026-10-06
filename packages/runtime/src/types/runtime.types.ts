@@ -387,6 +387,8 @@ export type ExportRoute<
   Format extends KnownTargetFormats<Kernels, Transcoders> = KnownTargetFormats<Kernels, Transcoders>,
   Kernel extends CollectKernelIds<Kernels> = CollectKernelIds<Kernels>,
 > = {
+  /** Actual selected kernel declaration ID for this source route; absent when no unique declaration is discoverable. */
+  exportId?: string;
   targetFormat: Format;
   kernelId: Kernel;
   sourceFormat: KnownSourceFormats<Kernels>;

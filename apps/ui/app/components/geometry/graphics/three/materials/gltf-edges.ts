@@ -1,5 +1,5 @@
-import type { Group, LineSegments, Object3D, Vector2 } from 'three';
-import { InterleavedBufferAttribute } from 'three';
+import type { Group, LineSegments, Matrix4, Object3D, Vector2 } from 'three';
+import { InterleavedBufferAttribute, Color, DoubleSide, Vector3 } from 'three';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -191,6 +191,7 @@ export function createWebGlGltfFatLineMaterial(
     color: edgeColor,
     linewidth: gltfEdgeLineWidth,
     worldUnits: false,
+    side: DoubleSide,
     resolution: resolution.clone(),
   });
 }
@@ -219,6 +220,8 @@ export function createWebGpuGltfFatLineMaterial(edgeColor: number = gltfEdgeColo
   });
 
   material.alphaToCoverage = false;
+  // Screen-space quads keep their winding under mirrored occurrences while Three flips the mesh front face.
+  material.side = DoubleSide;
   material.depthWrite = false;
   material.transparent = false;
   material.edgePresentationCoverage = true;
@@ -355,6 +358,33 @@ export function getFatLineSourceIndices(object: Object3D): Uint32Array | Uint16A
 /** The shared theme-coloured material each fat line wears when its component is not emphasised. */
 const fatLineBaseMaterials = new WeakMap<Object3D, GltfFatLineMaterial>();
 const fatLinePrototypeSources = new WeakMap<Object3D, LineSegments['geometry']>();
+
+/** Give an occurrence clone its own mutable edge material while retaining immutable source indices. */
+export function cloneGltfFatLineOwnership(source: Object3D, target: Object3D): void {
+  const base = fatLineBaseMaterials.get(source);
+  if (!base) {
+    return;
+  }
+  let clone: GltfFatLineMaterial;
+  if (target instanceof WebGpuFatLineSegments2 && base instanceof Line2NodeMaterial) {
+    clone = base.clone();
+    target.material = clone;
+  } else if (target instanceof LineSegments2 && base instanceof LineMaterial) {
+    clone = base.clone();
+    target.material = clone;
+  } else {
+    throw new TypeError('Fat line occurrence clone has an incompatible material backend');
+  }
+  fatLineBaseMaterials.set(target, clone);
+  const prototype = fatLinePrototypeSources.get(source);
+  if (prototype) {
+    fatLinePrototypeSources.set(target, prototype);
+  }
+  const indices = fatLineSourceIndices.get(source);
+  if (indices) {
+    fatLineSourceIndices.set(target, indices);
+  }
+}
 
 /** Canonical loader prototype identity retained without hashing or flattening occurrences. */
 export function getFatLinePrototypeSource(object: Object3D): LineSegments['geometry'] | undefined {
@@ -571,6 +601,11 @@ export function updateGltfEdgeColor(scene: Group, edgeColor: number): Set<GltfFa
       return;
     }
 
+    const batch = getGltfOccurrenceEdgeBatch(object);
+    if (batch) {
+      batch.setThemeColor(edgeColor);
+      return;
+    }
     const edgeMaterial =
       fatLineBaseMaterials.get(object) ?? ((object as LineSegments2).material as GltfFatLineMaterial);
     if (!updatedMaterials.has(edgeMaterial) && edgeMaterial.color.getHex() !== edgeColor) {
@@ -580,4 +615,163 @@ export function updateGltfEdgeColor(scene: Group, edgeColor: number): Set<GltfFa
   });
 
   return updatedMaterials;
+}
+
+/** One candidate-owned cell/link group; all members receive the same rigid pose matrix. */
+export type GltfOccurrenceEdgeBatch = Readonly<{
+  object: LineSegments2 | WebGpuFatLineSegments2;
+  segments: ReadonlyArray<Readonly<{ componentId: string; first: number; count: number }>>;
+  positionBytes: number;
+  colorBytes: number;
+  setColors: (colors: ReadonlyMap<string, number>, baseColor?: number) => boolean;
+  dispose: () => void;
+  setThemeColor: (baseColor: number) => boolean;
+}>;
+
+/** Bake static occurrence placement once; motion updates the group's ordinary matrix, never these endpoints. */
+export function createGltfOccurrenceEdgeBatch({
+  backend,
+  material,
+  occurrences,
+}: {
+  backend: ResolvedGraphicsBackend;
+  material: GltfFatLineMaterial;
+  occurrences: ReadonlyArray<Readonly<{ componentId: string; positions: Float32Array; localToBatch: Matrix4 }>>;
+}): GltfOccurrenceEdgeBatch | undefined {
+  let length = 0;
+  for (const occurrence of occurrences) {
+    if (occurrence.positions.length % 6 !== 0) {
+      throw new RangeError('Occurrence edges require complete endpoint pairs');
+    }
+    length += occurrence.positions.length;
+  }
+  if (length === 0) {
+    return undefined;
+  }
+  const positions = new Float32Array(length);
+  const colors = new Float32Array(length);
+  const point = new Vector3();
+  const spans: Array<Readonly<{ componentId: string; first: number; count: number }>> = [];
+  let offset = 0;
+  for (const occurrence of occurrences) {
+    spans.push(
+      Object.freeze({ componentId: occurrence.componentId, first: offset / 6, count: occurrence.positions.length / 6 }),
+    );
+    for (let coordinate = 0; coordinate < occurrence.positions.length; coordinate += 3) {
+      point.fromArray(occurrence.positions, coordinate).applyMatrix4(occurrence.localToBatch);
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
+        throw new RangeError('Occurrence edge placement is non-finite');
+      }
+      positions[offset + coordinate] = point.x;
+      positions[offset + coordinate + 1] = point.y;
+      positions[offset + coordinate + 2] = point.z;
+      if (
+        !Number.isFinite(positions[offset + coordinate]) ||
+        !Number.isFinite(positions[offset + coordinate + 1]) ||
+        !Number.isFinite(positions[offset + coordinate + 2])
+      ) {
+        throw new RangeError('Occurrence edges exceed Float32 local storage');
+      }
+    }
+    offset += occurrence.positions.length;
+  }
+  const ownedMaterial = material.clone();
+  ownedMaterial.vertexColors = true;
+  ownedMaterial.color.setHex(0xff_ff_ff);
+  const object = createGltfFatLineSegmentsFromPositions({ backend, positions, material: ownedMaterial });
+  if (!object) {
+    ownedMaterial.dispose();
+    return undefined;
+  }
+  object.geometry.setColors(colors);
+  const colorAttribute = object.geometry.getAttribute('instanceColorStart');
+  if (!(colorAttribute instanceof InterleavedBufferAttribute)) {
+    object.geometry.dispose();
+    ownedMaterial.dispose();
+    throw new TypeError('Expected actual segment-instanced colors');
+  }
+  const sampled = new Color();
+  let disposed = false;
+  let lastColors: ReadonlyMap<string, number> = new Map();
+  let lastBaseColor = material.color.getHex();
+  const setColors = (byComponent: ReadonlyMap<string, number>, baseColor = lastBaseColor): boolean => {
+    lastColors = new Map(byComponent);
+    lastBaseColor = baseColor;
+    if (disposed) {
+      return false;
+    }
+    let changed = false;
+    for (const span of spans) {
+      sampled.setHex(byComponent.get(span.componentId) ?? baseColor);
+      for (let coordinate = span.first * 6; coordinate < (span.first + span.count) * 6; coordinate += 3) {
+        if (
+          colors[coordinate] !== Math.fround(sampled.r) ||
+          colors[coordinate + 1] !== Math.fround(sampled.g) ||
+          colors[coordinate + 2] !== Math.fround(sampled.b)
+        ) {
+          sampled.toArray(colors, coordinate);
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      colorAttribute.data.needsUpdate = true;
+    }
+    return changed;
+  };
+  setColors(new Map(), material.color.getHex());
+  const batch: GltfOccurrenceEdgeBatch = {
+    object,
+    segments: Object.freeze(spans),
+    positionBytes: positions.byteLength,
+    colorBytes: colors.byteLength,
+    setColors,
+    dispose: () => {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      object.geometry.dispose();
+      ownedMaterial.dispose();
+      Reflect.deleteProperty(object, occurrenceEdgeBatch);
+    },
+    setThemeColor: (baseColor) => setColors(lastColors, baseColor),
+  };
+  (object as OccurrenceEdgeObject)[occurrenceEdgeBatch] = batch;
+  const retire = (): void => {
+    disposed = true;
+    Reflect.deleteProperty(object, occurrenceEdgeBatch);
+    object.geometry.removeEventListener('dispose', retire);
+  };
+  object.geometry.addEventListener('dispose', retire);
+  return batch;
+}
+
+const occurrenceEdgeBatch = Symbol('occurrenceEdgeBatch');
+type OccurrenceEdgeObject = Object3D & { [occurrenceEdgeBatch]?: GltfOccurrenceEdgeBatch };
+
+/** Existing edge ownership carried by its actual candidate object, without an external registry. */
+export function getGltfOccurrenceEdgeBatch(object: Object3D): GltfOccurrenceEdgeBatch | undefined {
+  return (object as OccurrenceEdgeObject)[occurrenceEdgeBatch];
+}
+
+/** Immutable actual segment endpoints from the definition owner; this call does not allocate. */
+export function getGltfFatLinePositions(object: Object3D): Float32Array | undefined {
+  if (!(object instanceof LineSegments2) && !(object instanceof WebGpuFatLineSegments2)) {
+    return undefined;
+  }
+  const start = object.geometry.getAttribute('instanceStart');
+  const end = object.geometry.getAttribute('instanceEnd');
+  if (
+    !(start instanceof InterleavedBufferAttribute) ||
+    !(end instanceof InterleavedBufferAttribute) ||
+    start.data !== end.data ||
+    start.data.stride !== 6 ||
+    start.offset !== 0 ||
+    end.offset !== 3 ||
+    !(start.data.array instanceof Float32Array)
+  ) {
+    return undefined;
+  }
+  return start.data.array;
 }

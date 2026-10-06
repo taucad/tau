@@ -25,6 +25,7 @@ import type { RecordIssue } from '#workbench-records/record-issues.js';
 import { digestBytes } from '#utils/crypto.utils.js';
 
 type Entry = WorkbenchEntries['entries'][string];
+type Components = NonNullable<Entry['components']>;
 const storeMounts = new WeakMap<ReturnType<typeof createWorkbenchEntriesStore>, number>();
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 const emptyEntries = (): WorkbenchEntries => workbenchRecords.entries.schema.parse({ version: 1, entries: {} });
@@ -273,6 +274,18 @@ export function EntryOwner({
   );
   const [observed, setObserved] = useState<{ operationTimeout: number; components: Entry['components'] }>();
   const appliedEntryRef = useRef<{ entry: Entry | undefined } | undefined>(undefined);
+  const pendingComponentsRef = useRef<
+    Partial<
+      Record<
+        keyof Components,
+        {
+          value: Components[keyof Components];
+          echoes: Array<Components[keyof Components]>;
+          saved: boolean;
+        }
+      >
+    >
+  >({});
   useEffect(() => {
     if (!recordPresent) {
       return;
@@ -291,6 +304,12 @@ export function EntryOwner({
     const defaults = { hidden: [], isolated: [], opacity: [] };
     const target = entry?.components ?? defaults;
     const before = previous?.components ?? defaults;
+    for (const field of ['hidden', 'isolated', 'opacity'] as const) {
+      const pending = pendingComponentsRef.current[field];
+      if (pending?.saved && same(pending.value, target[field])) {
+        Reflect.deleteProperty(pendingComponentsRef.current, field);
+      }
+    }
     if (!first && same(before, target)) {
       return;
     }
@@ -304,18 +323,38 @@ export function EntryOwner({
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([id, opacity]) => ({ id, opacity })),
     };
+    const keepLocal = (field: keyof Components): boolean => {
+      const pending = pendingComponentsRef.current[field];
+      if (!pending) {
+        return false;
+      }
+      if (same(before[field], target[field])) {
+        return true;
+      }
+      if (!same(pending.value, target[field]) && !pending.echoes.some((value) => same(value, target[field]))) {
+        Reflect.deleteProperty(pendingComponentsRef.current, field);
+        return false;
+      }
+      return true;
+    };
     const merged = {
       ...current,
       hidden:
-        first || (!Object.hasOwn(localPatch?.components ?? {}, 'hidden') && !same(before.hidden, target.hidden))
+        !Object.hasOwn(localPatch?.components ?? {}, 'hidden') &&
+        !keepLocal('hidden') &&
+        (first || !same(before.hidden, target.hidden))
           ? target.hidden
           : current.hidden,
       isolated:
-        first || (!Object.hasOwn(localPatch?.components ?? {}, 'isolated') && !same(before.isolated, target.isolated))
+        !Object.hasOwn(localPatch?.components ?? {}, 'isolated') &&
+        !keepLocal('isolated') &&
+        (first || !same(before.isolated, target.isolated))
           ? target.isolated
           : current.isolated,
       opacity:
-        first || (!Object.hasOwn(localPatch?.components ?? {}, 'opacity') && !same(before.opacity, target.opacity))
+        !Object.hasOwn(localPatch?.components ?? {}, 'opacity') &&
+        !keepLocal('opacity') &&
+        (first || !same(before.opacity, target.opacity))
           ? target.opacity
           : current.opacity,
     };
@@ -354,11 +393,41 @@ export function EntryOwner({
       operationTimeout !== (entry?.renderTimeout ?? defaultOperationTimeout);
     const changedComponents =
       !same(previous.components, components) &&
-      !same(components, entry?.components ?? { hidden: [], isolated: [], opacity: [] });
+      (!same(components, entry?.components ?? { hidden: [], isolated: [], opacity: [] }) ||
+        Object.keys(pendingComponentsRef.current).length > 0);
     if (!changedTimeout && !changedComponents) {
       return;
     }
-    void write(path, { ...entry, renderTimeout: operationTimeout, components });
+    const pendingWrites: Partial<typeof pendingComponentsRef.current> = {};
+    if (changedComponents) {
+      for (const field of ['hidden', 'isolated', 'opacity'] as const) {
+        if (!same(previous.components?.[field], components[field])) {
+          const prior = pendingComponentsRef.current[field];
+          const pending = {
+            saved: false,
+            value: components[field],
+            echoes: [...(prior?.echoes ?? []), ...(prior ? [prior.value] : [])],
+          };
+          pendingComponentsRef.current[field] = pending;
+          pendingWrites[field] = pending;
+        }
+      }
+    }
+    const save = async (): Promise<void> => {
+      const saved = await write(path, { ...entry, renderTimeout: operationTimeout, components });
+      for (const field of ['hidden', 'isolated', 'opacity'] as const) {
+        const pending = pendingWrites[field];
+        if (pending && pendingComponentsRef.current[field] === pending) {
+          pending.saved = saved;
+          const acknowledged = appliedEntryRef.current?.entry?.components?.[field] ?? [];
+          if (!saved || same(pending.value, acknowledged)) {
+            Reflect.deleteProperty(pendingComponentsRef.current, field);
+          }
+        }
+      }
+    };
+    // async-iife: bootstrap -- This React effect owns the write and its field acknowledgement.
+    void save();
   }, [components, entry, observed, path, ready, operationTimeout, write]);
   return null;
 }

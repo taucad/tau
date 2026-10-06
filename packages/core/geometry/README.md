@@ -25,8 +25,7 @@ Shared geometry import, export, and inventory helpers
 npm i @taucad/geometry-core @taucad/runtime
 ```
 
-`@taucad/runtime` is a required peer — one install must hold one runtime. `vitest` is an optional
-peer, wanted only by `./testing`.
+`@taucad/runtime` is a required peer — one install must hold one runtime.
 
 ## Quick start
 
@@ -48,17 +47,18 @@ const exported = await transformGltfExportBytes(named, {
 
 ## API
 
-| Area                            | Exports                                                                                                                                                                        |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| glTF extension contract         | `allExtensions`, `registerTauGltfExtensions`, `TauCadTopology`, `TauCadTopologyRoot`, `KittyCadBoundaryRepresentation`, `KittyCadBrepNode`, `KittyCadBrepRoot`                 |
-| glTF IO and document transforms | `createNodeIo`, `createCoordinateTransform`, `createScalingTransform`, `createReverseCoordinateTransform`                                                                      |
-| Serialized-bytes pipeline       | `normalizeGltfGeometryNames`, `transformGltfExportBytes`                                                                                                                       |
-| GLB writing                     | `writeGlb`, `writeGltfJson`, `createEmptyGlb`, `createEmptyGltf`, `createEmptyGltfGeometry`, types `GlbInput`, `GlbNode`, `GlbPrimitive`, `GlbMaterial`, `GlbManifoldTopology` |
-| Import staging                  | `createImportFileInventory`, `ImportLoader`, types `ImportFile`, `ImportFileInventory`, `FileResolver`                                                                         |
-| Names and color                 | `resolveShapeName`, `uniqueShapeName`, `formatShapeName`, `isLegacyGeneratedShapeName`, `srgbToLinear`, `srgbTupleToLinear`, `srgbHexToLinearTuple`                            |
-| Coordinate and unit transforms  | `transformVertexArray`, `transformNormalArray`, types `GeometryOutputTransformOptions`, `OutputCoordinateSystem`, `OutputLengthUnit`                                           |
+| Area                            | Exports                                                                                                                                                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| glTF extension contract         | `allExtensions`, `registerTauGltfExtensions`, `TauCadTopology`, `TauCadTopologyRoot`, `KittyCadBoundaryRepresentation`, `KittyCadBrepNode`, `KittyCadBrepRoot`                                                                    |
+| glTF IO and document transforms | `createNodeIo`, `createCoordinateTransform`, `createScalingTransform`, `createReverseCoordinateTransform`                                                                                                                         |
+| Serialized-bytes pipeline       | `normalizeGltfGeometryNames`, `transformGltfExportBytes`                                                                                                                                                                          |
+| GLB writing                     | `writeGlb`, `writeGltfJson`, `createEmptyGlb`, `createEmptyGltf`, `createEmptyGltfGeometry`, types `GlbInput`, `GlbNode`, `GlbPrimitive`, `GlbMaterial`, `GlbManifoldTopology`                                                    |
+| Admitted assemblies             | `validateAdmittedAssemblyGlb` returns canonical topology, source-local references, placed occurrence bounds and properly placed mechanisms without flattened output; `flattenAdmittedAssemblyGlb` projects admitted display bytes |
+| Import staging                  | `createImportFileInventory`, `ImportLoader`, types `ImportFile`, `ImportFileInventory`, `FileResolver`                                                                                                                            |
+| Names and color                 | `resolveShapeName`, `uniqueShapeName`, `formatShapeName`, `isLegacyGeneratedShapeName`, `srgbToLinear`, `srgbTupleToLinear`, `srgbHexToLinearTuple`                                                                               |
+| Coordinate and unit transforms  | `transformVertexArray`, `transformNormalArray`, types `GeometryOutputTransformOptions`, `OutputCoordinateSystem`, `OutputLengthUnit`                                                                                              |
 
-The shared glTF-Transform registry preserves `EXT_mesh_manifold`.
+The shared glTF-Transform registry preserves `EXT_mesh_manifold`. Admission parses each used source GLB and traverses occurrence metadata; it does not create a target Document, output occurrence nodes, or serialized GLB. This removes output allocation but does not establish retained resource or large-scene performance.
 
 | Entry                   | Purpose                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------- |

@@ -115,6 +115,7 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',
       'apps/desktop-e2e/src/desktop-print-dry-run.spec.ts',
       'apps/desktop-e2e/src/desktop-voice.spec.ts',
+      'apps/desktop-e2e/src/support/desktop-app.test.ts',
       'apps/desktop-e2e/src/support/desktop-app.ts',
       'apps/desktop-e2e/src/support/gateway-fixture.ts',
       'apps/desktop-e2e/src/support/revisions-pane.ts',
@@ -126,7 +127,9 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/docs/scripts/verify-browser.mts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
+      'apps/ui-e2e/src/support/browser-trace-stream.test.ts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
+      'apps/ui-e2e/src/support/parts-assemblies-motion.test.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
       'packages/geospec-engine-native/bindings/browser-conformance/qualify-mt-product.mjs',
       'packages/geospec-engine-native/bindings/browser-conformance/run-browser-conformance.ts',
@@ -228,9 +231,19 @@ describe('Vitest Browser test-runner ownership', () => {
       const chromiumInstances = source.match(/browser:\s*['"]chromium['"]/gu)?.length ?? 0;
       const managedChannels = source.match(/channel:\s*['"]chromium['"]/gu)?.length ?? 0;
       expect(chromiumInstances, `${path} must declare at least one Chromium instance`).toBeGreaterThan(0);
-      expect(managedChannels, `${path} must select managed full Chromium for every Chromium instance`).toBe(
-        chromiumInstances,
-      );
+      if (path === 'apps/ui-e2e/vitest.config.ts') {
+        expect(source, `${path} must default the explicit reference selection to managed Chromium`).toMatch(
+          /const browserChannel = process\.env\['TAU_E2E_BROWSER_CHANNEL'\] \?\? 'chromium';/u,
+        );
+        expect(source, `${path} must reject every channel except managed Chromium or explicit Chrome`).toMatch(
+          /if \(browserChannel !== 'chromium' && browserChannel !== 'chrome'\) \{\s*throw new Error\(/u,
+        );
+        expect(source.match(/channel:\s*browserChannel\b/gu)?.length ?? 0).toBe(chromiumInstances);
+      } else {
+        expect(managedChannels, `${path} must select managed full Chromium for every Chromium instance`).toBe(
+          chromiumInstances,
+        );
+      }
       expect(source, `${path} must keep headless ownership at the Vitest Browser level`).toMatch(
         /browser:\s*\{[\s\S]*?headless:\s*true/u,
       );

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 /**
  * One rooted connection is the file manager's change transport (charter D12, W12b).
  *
@@ -41,6 +43,8 @@ import type { FileSystemBridgeProxy, RootedBridgeConsumer } from '@taucad/fs-bri
 import { createComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { ComposedViewClient, ComposedViewProxy } from '@taucad/fs-client/composed-view-client';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import { FileContentService } from '@taucad/fs-client/file-content-service';
+import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
 import type { WorkspaceAuthorityClient } from '@taucad/fs-client/file-system-client';
 import { joinPath } from '@taucad/utils/path';
@@ -60,6 +64,7 @@ type Harness = {
   readonly client: ComposedViewClient;
   /** Every `fileWritten` the file manager was told about, in its own namespace. */
   readonly announced: string[];
+  readonly channel: WorkerChangeChannel;
   /** A second rooted connection, standing in for another tab's or the agent's writes. */
   readonly peer: FileSystemBridgeProxy;
   /** One more connection on the same authority, for the surface a consumer names. */
@@ -72,10 +77,15 @@ type Harness = {
  * @param root - The root the file manager is mounted at; `'/'` is the Home file
  * manager `root-layout.tsx` always mounts, which is where the resolver used to
  * route nothing to the view and hear its own writes back (gate G-D, H1).
+ * @param seed - Optional immutable root bytes seeded before change authority registration.
  */
-const createHarness = async (root: string = projectRoot): Promise<Harness> => {
+const createHarness = async (
+  root: string = projectRoot,
+  seed?: { path: string; content: Uint8Array<ArrayBuffer> },
+): Promise<Harness> => {
   const mountTable = new MountTable();
-  mountTable.mount('/', new MemoryProvider(), {
+  const homeProvider = new MemoryProvider();
+  mountTable.mount('/', homeProvider, {
     class: 'authored',
     backend: 'memory',
     storageRootKey: 'memory:w12b-home',
@@ -84,6 +94,10 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
   /* Seeded before the authority exists, so no seed event can still be sitting in
    * the coalescer when the connections below register. */
   await provider.writeFile('main.scad', 'cube(1);');
+  if (seed) {
+    await provider.mkdir(seed.path.slice(0, seed.path.lastIndexOf('/')), { recursive: true });
+    await (root === '/' ? homeProvider : provider).writeFile(seed.path, seed.content);
+  }
   mountTable.mount(projectRoot, provider, {
     class: 'authored',
     backend: 'memory',
@@ -159,10 +173,65 @@ const createHarness = async (root: string = projectRoot): Promise<Harness> => {
     eventBus.dispose();
   });
 
-  return { client, announced, peer: await openRooted(), openRooted };
+  return { client, announced, channel, peer: await openRooted(), openRooted };
 };
 
 describe('the file manager change transport (charter D12, W12b)', () => {
+  it.each([
+    { root: projectRoot, prefix: '' },
+    { root: '/', prefix: '' },
+  ])(
+    'should read the new checked root before its foreign change event is delivered at $root',
+    async ({ root, prefix }) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const seedPath = `.tau/artifacts/reusable-parts/${'a'.repeat(64)}/scene.json`;
+        const path = `${prefix}${seedPath}`;
+        const previous = new TextEncoder().encode('{"generation":1}');
+        const current = new TextEncoder().encode('{"generation":2}');
+        const { client, announced, channel, peer } = await createHarness(root, { path: seedPath, content: previous });
+        const service = new FileContentService({
+          proxy: client,
+          paths: new WorkspacePathResolver(root),
+          channel,
+          refreshGuard: new RefreshGenerationGuard(),
+          openSizeBytes: 50 * 1024 * 1024,
+        });
+        disposers.push(() => {
+          service.dispose();
+        });
+        await expect(client.readFile(joinPath(root, path))).resolves.toEqual(previous);
+        const ready = await service.resolve(path);
+        expect(ready).toMatchObject({ kind: 'text', content: previous });
+        expect(service.peek(path)).toEqual(previous);
+        expect(current.byteLength).toBe(previous.byteLength);
+
+        await expect(
+          peer.writeFileChecked({
+            path,
+            data: current,
+            preconditions: [{ path, expected: previous }],
+          }),
+        ).resolves.toMatchObject({ status: 'applied' });
+        await expect(peer.readFile(path)).resolves.toEqual(current);
+        expect(announced).toEqual([]);
+        expect(service.peekOutcome(path)).toBe(ready);
+        const raw = await service.readRawBytes(path);
+        expect(announced).toEqual([]);
+        expect(service.peekOutcome(path)).toBe(ready);
+
+        await vi.advanceTimersByTimeAsync(500);
+        await vi.waitFor(() => {
+          expect(announced).toContain(path);
+          expect(service.peek(path)).toEqual(current);
+        });
+        expect(raw).toEqual(current);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('should not announce the file manager its own write as an external change', async () => {
     const { client, announced, peer } = await createHarness();
 

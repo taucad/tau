@@ -1,6 +1,8 @@
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import { markGeometryReceipt } from '#lib/renderer-telemetry.js';
 import { createAsyncLogic, setup, types, waitFor } from 'xstate';
+import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
+import { digestContent } from '@taucad/cache-core';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import type { CodeIssue, LogLevel, LogOrigin } from '@taucad/types';
 import type {
@@ -15,6 +17,9 @@ import type {
 } from '@taucad/runtime';
 import type { ParameterManifest } from '@taucad/parameters';
 import { asKnownArtifact, isKernelIssueCode } from '@taucad/runtime/types';
+import { assertRootedPath, normalizePath } from '@taucad/utils/path';
+import type { PublishedPartAsset, PublishedAssembly, AdmittedAssembly } from '@taucad/runtime/types';
+import type { PublishedAssemblyDocument } from '@taucad/runtime/client';
 import { safeDispose } from '@taucad/utils/dispose';
 import type { LengthSymbol } from '#constants/length-units.js';
 import { defaultOperationTimeout } from '#constants/editor.constants.js';
@@ -29,6 +34,13 @@ import type {
   LazyKernelOptionsFactory,
 } from '#types/runtime-client.alias.js';
 export type LatestRenderingOutcome = 'success' | 'failure' | undefined;
+export type CadAssemblyDisplay = Readonly<{
+  root: PublishedPartAsset;
+  admitted: AdmittedAssembly;
+  document: PublishedAssemblyDocument;
+  /** Actual selected entry bytes read for this admission; a root refresh retains that baseline. */
+  entryRead?: PublishedPartAsset;
+}>;
 
 type CadTag = 'cad-loading' | 'cad-runtime-error';
 
@@ -38,14 +50,33 @@ export type CadContext = {
   /** What the next render carries beyond the entry, cleared by any other render trigger. */
   parameterRender: ParameterRender | undefined;
   units: { length: LengthSymbol };
+  lastRequestedRenderId: number;
+  lastSettledRenderId: number;
   /** Outcome of the latest default-view projection. */
   latestRenderingOutcome: LatestRenderingOutcome;
   /** Last successful default projection retained across later failures. */
   rendering: Rendering | undefined;
+  /** Last non-transient successful view retains physical inspection facts during a scrub. */
+  committedRendering: Rendering | undefined;
   /** Latest projection verdict, including failures, for operation correlation. */
   lastProjection: Rendering | undefined;
   /** Latest document evaluation, including offered views and exports. */
   evaluation: Evaluation | undefined;
+  /** Actual admitted scene retained without allocating a flattened display GLB. */
+  committedAssemblyDisplay?: CadAssemblyDisplay;
+  /** Immutable subject matching the last committed pinned scene. */
+  publishedAssemblyRoot?: PublishedPartAsset;
+  /** Admitted records and placement that qualify consumers of the committed root. */
+  publishedAssembly?: PublishedAssembly;
+  /** Actual host-admitted reader matching the committed publication and display. */
+  admittedAssembly?: AdmittedAssembly;
+  /** Selected entry associated with the committed immutable root (authored or pinned). */
+  publishedAssemblyEntryPath?: string;
+  /** Entry whose JSON classification or immutable admission is still pending. */
+  pendingAssemblyEntryPath?: string;
+  /** Managed root observation used by a root watch refresh, without rerunning its author. */
+  assemblyRootReadPath?: string;
+  assemblyPublicationWritable?: boolean;
   kernelIssues: Map<string, KernelIssue[]>;
   codeIssues: CodeIssue[];
   shouldInitializeKernelOnStart: boolean;
@@ -76,6 +107,7 @@ export type CadContext = {
 
 type KernelConnectedEvent = {
   type: 'kernelConnected';
+  assemblyPublicationWritable?: boolean;
   client: AppRuntimeClient;
   cleanups: Array<() => void>;
 };
@@ -97,6 +129,7 @@ type CadEvent =
   | { type: 'setPreviewParameters'; parameters: Record<string, unknown> }
   | { type: 'scrubParameters'; parameters: Record<string, unknown> }
   | { type: 'restoreParameters' }
+  | { type: 'refreshPublishedAssembly' }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'defaultRendered'; rendering: Rendering }
   | { type: 'documentEvaluated'; evaluation: Evaluation }
@@ -121,6 +154,12 @@ type CadEvent =
       type: 'defaultViewStatusChanged';
       status: 'rendering' | 'ready' | 'error' | 'closed';
     }
+  | {
+      type: 'assemblyComputed';
+      assemblyDisplay: CadAssemblyDisplay;
+      entryPath: string;
+      issues: KernelIssue[];
+    }
   | { type: 'parametersParsed'; manifest: ParameterManifest }
   | { type: 'kernelIssue'; errors: KernelIssue[] }
   | { type: 'kernelProgress'; phase: string }
@@ -138,13 +177,15 @@ type CadEvent =
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
   | { type: 'parkRuntime' }
   | { type: 'resumeRuntime' }
+  | { type: 'sourceRenderingSelected'; entryPath: string; requestId: number }
   | { type: 'closeRuntime' }
   | { type: 'kernelAllocated'; client: AppRuntimeClient; cleanups: Array<() => void> }
   | KernelConnectedEvent
   | FileSystemBindingChangedEvent;
 
-type CadEmitted = { type: 'defaultRendered'; rendering: Rendering };
-
+type CadEmitted =
+  | { type: 'defaultRendered'; rendering: Rendering }
+  | { type: 'assemblyEvaluated'; assemblyDisplay: CadAssemblyDisplay };
 const consoleLogData = (data: unknown): string => {
   if (data === undefined) {
     return '';
@@ -213,12 +254,22 @@ type ConnectKernelInput = {
 };
 
 type RenderModelInput = {
+  publishedAssemblyRoot?: PublishedPartAsset;
+  assemblyEntryRead?: PublishedPartAsset;
+  assemblyRootReadPath?: string;
+  assemblyPublicationWritable?: boolean;
+  knownAssemblyRoute?: 'authored' | 'published';
   client: AppRuntimeClient | undefined;
   document: RuntimeDocument | undefined;
   machineRef: AnyActorRef;
   requestId: number;
   entryPath: string | undefined;
   parameterRender: ParameterRender | undefined;
+  fileManagerRef: CadContext['fileManagerRef'];
+  fileSystemRoot: string;
+  /** Whether no newer UI render was requested since this one. */
+  isLatestRequest: () => boolean;
+  selectSourceRendering: () => void;
 };
 
 /**
@@ -272,6 +323,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     import('@taucad/runtime/client'),
     import('@taucad/runtime/filesystem'),
     lazyKernelOptionsFactory(),
+    import('#runtime/assembly-display-admission.js'),
   ]);
   // oxlint-disable-next-line promise/prefer-await-to-then -- an abort can skip the await below, and an unhandled rejection would take the page with it
   modules.catch(() => undefined);
@@ -324,7 +376,12 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   signal.throwIfAborted();
 
-  const [{ createRuntimeClient }, { fromFileSystemBridge }, resolveKernelOptions] = await modules;
+  const [
+    { createRuntimeClient },
+    { fromFileSystemBridge },
+    resolveKernelOptions,
+    { createAssemblyPublicationAuthority },
+  ] = await modules;
   signal.throwIfAborted();
 
   const computeConnection =
@@ -334,14 +391,223 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   if (computeConnection) {
     cleanups.push(computeConnection.dispose);
   }
+  const publicationAuthority = await createAssemblyPublicationAuthority(
+    () => snapshot.context.openFileSystemBridge!(fileSystemRoot, 'user'),
+    signal,
+  );
+  cleanups.push(publicationAuthority.dispose);
   const kernelOptions = resolveKernelOptions({
     /* The kernel executes project code the agent wrote, so it reads the agent's
      * own view and never the working copy: the control plane is absent from it and
      * the records Tau keeps are read-only (invariant CI1, W14). */
     fileSystem: fromFileSystemBridge(() => snapshot.context.openFileSystemBridge!(fileSystemRoot, 'agent')),
+    publicationFileSystem: publicationAuthority.fileSystem,
     compute: computeConnection?.compute,
   });
   client = createRuntimeClient(kernelOptions);
+
+  let watchedEntry: string | undefined;
+  let watchedRoot: string | undefined;
+  let assemblyContext: CadContext | undefined;
+  let stopWatchingEntry: (() => void) | undefined;
+  let stopWatchingRoot: (() => void) | undefined;
+  const subscribePath = (
+    path: string,
+    readBaseline: () => PublishedPartAsset | undefined,
+    listener: () => void,
+  ): (() => void) => {
+    const projectRelativePath = assertRootedPath(path);
+    const selectedPath = normalizePath(`${fileSystemRoot}/${projectRelativePath}`);
+    const rootDirectory: unknown = snapshot.context.rootDirectory;
+    if (typeof rootDirectory !== 'string') {
+      throw new TypeError('Assembly watch has no captured workspace root.');
+    }
+    const scope = normalizePath(rootDirectory);
+    const prefix = scope === '/' ? '/' : `${scope}/`;
+    if (!selectedPath.startsWith(prefix)) {
+      throw new Error('Assembly watch escapes captured content authority.');
+    }
+    const relativePath = assertRootedPath(selectedPath.slice(prefix.length));
+    let closed = false;
+    let pending: { baseline: PublishedPartAsset | undefined } | undefined;
+    let externalMutationPending = false;
+    const ownsWatch = (): boolean => {
+      const files = fileManagerRef.getSnapshot();
+      return (
+        !closed &&
+        !replacementState.notified &&
+        machineRef.getSnapshot().status === 'active' &&
+        files.status === 'active' &&
+        files.matches('ready') &&
+        assemblyContext?.fileManagerRef === fileManagerRef &&
+        assemblyContext.fileSystemRoot === fileSystemRoot &&
+        (assemblyContext.entryPath === projectRelativePath ||
+          assemblyContext.publishedAssemblyRoot?.path === projectRelativePath) &&
+        files.context.contentService === capturedContentService &&
+        files.context.rootDirectory === rootDirectory
+      );
+    };
+    const observe = async (durableMutation = false): Promise<void> => {
+      const baseline = readBaseline();
+      // A subscription's first content read is not a new edit. A durable write or deletion
+      // during admission is new intent even before the first committed entryRead exists.
+      if (!baseline && !durableMutation && assemblyContext?.pendingAssemblyEntryPath === projectRelativePath) {
+        return;
+      }
+      const observation = { baseline };
+      pending = observation;
+      const isCurrent = (): boolean => ownsWatch() && pending === observation && readBaseline() === baseline;
+      if (!isCurrent()) {
+        return;
+      }
+      if (baseline) {
+        try {
+          const bytes = await capturedContentService.readRawBytes(relativePath);
+          if (!isCurrent()) {
+            return;
+          }
+          const digest = await digestContent({ bytes });
+          if (!isCurrent()) {
+            return;
+          }
+          if (
+            digest === baseline.digest &&
+            bytes.byteLength === baseline.byteLength &&
+            assemblyContext?.latestRenderingOutcome !== 'failure'
+          ) {
+            return;
+          }
+        } catch {
+          // A deletion or refused read must still reach the existing admission error path.
+          if (!isCurrent()) {
+            return;
+          }
+        }
+      }
+      listener();
+    };
+    const externalWatch = capturedContentService.watchReady({ paths: [relativePath] }, (event) => {
+      if (!ownsWatch()) {
+        return;
+      }
+      if (event.type === 'change') {
+        externalMutationPending = true;
+      } else {
+        externalMutationPending = false;
+        // Delete, rename and reset may have no ready outcome to notify. Re-read the captured
+        // authority before admitting the invalidation, including ancestor changes.
+        const refresh = async (): Promise<void> => {
+          try {
+            await capturedContentService.resolve(relativePath, { forceText: true });
+          } catch {
+            // The existing admission path reports a refused or missing selected entry.
+          }
+          await observe(true);
+        };
+        // async-iife: authority invalidation -- the owner fence is checked again by observe.
+        void refresh();
+      }
+    });
+    const refuseWatch = (error: unknown): void => {
+      if (ownsWatch()) {
+        stop();
+        machineRef.send({ type: 'stateChanged', state: 'error', detail: `Assembly watch closed: ${String(error)}` });
+      }
+    };
+    const register = async (): Promise<void> => {
+      try {
+        await externalWatch.ready;
+      } catch (error) {
+        refuseWatch(error);
+      }
+    };
+    const awaitClose = async (): Promise<void> => {
+      try {
+        await externalWatch.closed;
+        refuseWatch('authority closed');
+      } catch (error) {
+        refuseWatch(error);
+      }
+    };
+    const unsubscribe = capturedContentService.subscribe(relativePath, () => {
+      const durableMutation = externalMutationPending;
+      externalMutationPending = false;
+      // async-iife: event handler -- A content outcome may be the first read of already admitted bytes.
+      void observe(durableMutation);
+    });
+    const unsubscribeMutation = capturedContentService.onDidContentChange((event) => {
+      const changed =
+        event.type === 'written' || event.type === 'deleted'
+          ? event.path === relativePath
+          : event.type === 'batchWritten' && event.paths.includes(relativePath);
+      if (changed && !readBaseline() && assemblyContext?.pendingAssemblyEntryPath === projectRelativePath) {
+        externalMutationPending = false;
+        // async-iife: durable mutation -- replay the latest admitted entry, not the initial observer read.
+        void observe(true);
+      }
+    });
+    const stop = (): void => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      pending = undefined;
+      unsubscribe();
+      unsubscribeMutation();
+      externalWatch.dispose();
+    };
+    // async-iife: captured watch lifetime -- either failed registration or closure refuses admission.
+    void register();
+    void awaitClose();
+    return stop;
+  };
+  const entrySubscription = machineRef.subscribe((state: { context: CadContext }) => {
+    const { context } = state;
+    assemblyContext = context;
+    const entry = context.entryPath?.endsWith('.json') ? context.entryPath : undefined;
+    const publishedRoot = context.publishedAssemblyEntryPath === entry ? context.publishedAssemblyRoot : undefined;
+    const root = publishedRoot?.path;
+    if (entry !== watchedEntry) {
+      stopWatchingEntry?.();
+      watchedEntry = entry;
+      stopWatchingEntry = entry
+        ? subscribePath(
+            entry,
+            () =>
+              assemblyContext?.publishedAssemblyEntryPath === entry
+                ? assemblyContext.committedAssemblyDisplay?.entryRead
+                : undefined,
+            () => {
+              machineRef.send({ type: 'setEntryPath', entryPath: entry });
+            },
+          )
+        : undefined;
+    }
+    const observedRoot = root === entry ? undefined : root;
+    if (observedRoot !== watchedRoot) {
+      stopWatchingRoot?.();
+      watchedRoot = observedRoot;
+      stopWatchingRoot = observedRoot
+        ? subscribePath(
+            observedRoot,
+            () =>
+              assemblyContext?.publishedAssemblyRoot?.path === observedRoot
+                ? assemblyContext.publishedAssemblyRoot
+                : undefined,
+            () => {
+              machineRef.send({ type: 'refreshPublishedAssembly' });
+            },
+          )
+        : undefined;
+    }
+  });
+  cleanups.push(
+    () => {
+      entrySubscription.unsubscribe();
+    },
+    () => stopWatchingEntry?.(),
+    () => stopWatchingRoot?.(),
+  );
 
   cleanups.push(
     client.on('state', (state) => {
@@ -397,10 +663,15 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   signal.removeEventListener('abort', teardown);
 
-  return { type: 'kernelConnected', client, cleanups };
+  return {
+    type: 'kernelConnected',
+    client,
+    cleanups,
+    assemblyPublicationWritable: publicationAuthority.fileSystem !== undefined,
+  };
 });
 
-const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, signal }) => {
+const renderModelActor = fromSafeAsync<CadEvent | void, RenderModelInput>(async ({ input, signal }) => {
   if (!input.client) {
     throw new Error('Kernel client is not connected');
   }
@@ -408,6 +679,138 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
     throw new Error('No model file is selected');
   }
 
+  const readEntryPath =
+    input.assemblyRootReadPath ??
+    (input.assemblyPublicationWritable === false && input.knownAssemblyRoute === 'authored'
+      ? (input.publishedAssemblyRoot?.path ?? input.entryPath)
+      : input.entryPath);
+  const knownRoute = readEntryPath === input.entryPath ? input.knownAssemblyRoute : 'published';
+  if (readEntryPath.endsWith('.json')) {
+    assertRootedPath(readEntryPath);
+    const snapshot = input.fileManagerRef?.getSnapshot();
+    const contentService = snapshot?.context.contentService;
+    if (!snapshot?.matches('ready') || !contentService) {
+      throw new Error('File content authority is not ready for assembly admission.');
+    }
+    const entryPath = assertRootedPath(readEntryPath);
+    const selectedPath = normalizePath(`${input.fileSystemRoot}/${entryPath}`);
+    const rootDirectory: unknown = snapshot.context.rootDirectory;
+    if (typeof rootDirectory !== 'string') {
+      throw new TypeError('File content authority has no captured workspace root.');
+    }
+    const scope = normalizePath(rootDirectory);
+    const prefix = scope === '/' ? '/' : `${scope}/`;
+    if (!selectedPath.startsWith(prefix)) {
+      throw new Error('Assembly entry escapes its captured file content authority.');
+    }
+    let bytes: Uint8Array<ArrayBuffer>;
+    try {
+      bytes = await contentService.readRawBytes(assertRootedPath(selectedPath.slice(prefix.length)));
+    } catch (error) {
+      if (
+        !(error instanceof FileNotFoundError) ||
+        input.knownAssemblyRoute !== 'authored' ||
+        readEntryPath !== input.entryPath ||
+        !input.publishedAssemblyRoot
+      ) {
+        throw error;
+      }
+      signal.throwIfAborted();
+      const { publishedAssemblyRoot } = input;
+      const document = await input.client.openAssembly({ root: publishedAssemblyRoot, signal });
+      const { admitted } = document;
+      if (signal.aborted || !input.isLatestRequest()) {
+        document.close();
+        signal.throwIfAborted();
+        return undefined;
+      }
+      return {
+        type: 'assemblyComputed',
+        assemblyDisplay: { root: publishedAssemblyRoot, admitted, document, entryRead: input.assemblyEntryRead },
+        entryPath: input.entryPath,
+        issues: [],
+      };
+    }
+    signal.throwIfAborted();
+    let candidate: unknown;
+    try {
+      candidate = JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      // Ordinary malformed JSON still belongs to the selected source render route.
+      candidate = undefined;
+    }
+    const assemblyShape =
+      candidate !== null &&
+      typeof candidate === 'object' &&
+      Object.hasOwn(candidate, 'schemaVersion') &&
+      Object.hasOwn(candidate, 'parts') &&
+      Object.hasOwn(candidate, 'occurrences');
+    const publishedPointerShape =
+      candidate !== null &&
+      typeof candidate === 'object' &&
+      'schemaVersion' in candidate &&
+      candidate.schemaVersion === 2 &&
+      'generation' in candidate &&
+      typeof candidate.generation === 'number' &&
+      Number.isSafeInteger(candidate.generation) &&
+      'manifest' in candidate &&
+      candidate.manifest !== null &&
+      typeof candidate.manifest === 'object';
+    if (knownRoute !== undefined || assemblyShape || publishedPointerShape) {
+      const { sha256String } = await import('@taucad/utils/hash');
+      signal.throwIfAborted();
+      const digest = await digestContent({ bytes });
+      signal.throwIfAborted();
+      const entryRead =
+        readEntryPath === input.entryPath
+          ? { path: readEntryPath, digest, byteLength: bytes.byteLength }
+          : input.assemblyEntryRead;
+      let root = { path: entryPath, digest, byteLength: bytes.byteLength };
+      let admitted;
+      let publishedDocument: PublishedAssemblyDocument;
+      const publishedRoot = knownRoute
+        ? knownRoute === 'published'
+        : candidate && typeof candidate === 'object' && Object.hasOwn(candidate, 'generation');
+      if (publishedRoot) {
+        publishedDocument = await input.client.openAssembly({ root, signal });
+        admitted = publishedDocument.admitted;
+      } else {
+        if (input.assemblyPublicationWritable === false) {
+          throw new Error('Authored assembly publication is unavailable for a read-only rooted authority.');
+        }
+        const parent = `.tau/artifacts/reusable-parts/${await sha256String(entryPath)}`;
+        signal.throwIfAborted();
+        const outcome = await input.client.publishAssembly({
+          authoredPath: entryPath,
+          publicationPath: `${parent}/scene.json`,
+          signal,
+        });
+        if (outcome.status !== 'published') {
+          throw new Error(`Assembly publication did not commit: ${outcome.status}`);
+        }
+        root = outcome.root;
+        admitted = outcome.admitted;
+        publishedDocument = outcome.document;
+      }
+      if (signal.aborted || !input.isLatestRequest()) {
+        publishedDocument.close();
+        signal.throwIfAborted();
+        return undefined;
+      }
+      return {
+        type: 'assemblyComputed',
+        assemblyDisplay: { root, admitted, document: publishedDocument, entryRead },
+        entryPath: input.entryPath,
+        issues: [],
+      };
+    }
+  }
+
+  signal.throwIfAborted();
+  if (!input.isLatestRequest()) {
+    return undefined;
+  }
+  input.selectSourceRendering();
   if (!input.document) {
     const initial = input.parameterRender?.kind === 'initial' ? input.parameterRender : undefined;
     const document = input.client.open({
@@ -436,13 +839,13 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
     };
     const followDefaultOffer = (evaluation: Evaluation): void => {
       if (!evaluation.success) {
-        return;
+        return undefined;
       }
       const offer = evaluation.views[0];
       const content = interactiveViewContent(offer?.mimeType, kernelId, input.client?.capabilities);
       const key = `${offer?.id ?? ''}:${Boolean(content)}`;
       if (key === selectedViewKey) {
-        return;
+        return undefined;
       }
       selectedViewKey = key;
       for (const cleanup of viewCleanups) {
@@ -506,7 +909,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
     if (!outcome.superseded) {
       followDefaultOffer(outcome.evaluation);
     }
-    return;
+    return undefined;
   }
 
   /* Committed sidecar bytes reach the watched document once; transient drag parameters never
@@ -526,6 +929,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
               }
             : {};
   await input.document.update(update);
+  return undefined;
 });
 
 /** Traces retained for the telemetry pane. A root span closes its trace, so the cut is trace-aligned. */
@@ -716,12 +1120,28 @@ const destroyDocument = (context: CadContext, enq: CadEnqueue): CadPatch => {
 
 /** Record new actor intent so a superseded asynchronous document open can be closed. */
 const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch => {
-  const bumped = { openAttempt: context.openAttempt + 1 };
+  const entryPath = 'entryPath' in event ? event.entryPath : context.entryPath;
+  const bumped = {
+    openAttempt: context.openAttempt + 1,
+    lastRequestedRenderId: context.lastRequestedRenderId + 1,
+    pendingAssemblyEntryPath: entryPath?.endsWith('.json') ? entryPath : undefined,
+    assemblyRootReadPath: undefined,
+  };
   switch (event.type) {
     case 'initializeModel': {
       return {
         ...bumped,
         entryPath: event.entryPath,
+        ...(event.entryPath === context.entryPath
+          ? {}
+          : {
+              committedRendering: undefined,
+              publishedAssemblyRoot: undefined,
+              publishedAssembly: undefined,
+              admittedAssembly: undefined,
+              committedAssemblyDisplay: undefined,
+              publishedAssemblyEntryPath: undefined,
+            }),
         codeIssues: [],
         latestRenderingOutcome: undefined,
         parameterManifest: undefined,
@@ -742,6 +1162,16 @@ const renderRequestPatch = (context: CadContext, event: RenderTrigger): CadPatch
       return {
         ...bumped,
         entryPath: event.entryPath,
+        ...(event.entryPath === context.entryPath
+          ? {}
+          : {
+              committedRendering: undefined,
+              publishedAssemblyRoot: undefined,
+              publishedAssembly: undefined,
+              admittedAssembly: undefined,
+              committedAssemblyDisplay: undefined,
+              publishedAssemblyEntryPath: undefined,
+            }),
         // The staged bytes belong to the entry that was open; the new entry re-supplies its own.
         parameterRender: undefined,
         latestRenderingOutcome: undefined,
@@ -829,6 +1259,11 @@ const kernelTelemetry = ({ context, event }: CadArgs<'kernelTelemetry'>) => {
   return { context: { telemetryEntries: boundTelemetryEntries([...context.telemetryEntries, ...arrived]) } };
 };
 
+const hasSelectedAssemblyRoute = (context: CadContext): boolean =>
+  context.pendingAssemblyEntryPath !== undefined ||
+  (context.publishedAssemblyRoot !== undefined &&
+    (context.publishedAssemblyEntryPath ?? context.publishedAssemblyRoot.path) === context.entryPath);
+
 /** Signals every connected unit takes, whatever its render state. */
 const runtimeSignals = {
   kernelLog,
@@ -837,7 +1272,8 @@ const runtimeSignals = {
   capabilitiesUpdated: ({ event }: CadArgs<'capabilitiesUpdated'>) => ({
     context: { capabilities: event.capabilities },
   }),
-  activeKernelChanged: ({ event }: CadArgs<'activeKernelChanged'>) => ({ context: { activeKernelId: event.kernelId } }),
+  activeKernelChanged: ({ context, event }: CadArgs<'activeKernelChanged'>) =>
+    hasSelectedAssemblyRoute(context) ? undefined : { context: { activeKernelId: event.kernelId } },
 };
 
 /** Results and issues a unit with a kernel records in every state after connecting. */
@@ -845,6 +1281,9 @@ const resultSignals = {
   ...runtimeSignals,
   setCodeIssues: ({ event }: CadArgs<'setCodeIssues'>) => ({ context: { codeIssues: event.errors } }),
   defaultRendered: ({ context, event }: CadArgs<'defaultRendered'>, enq: CadEnqueue) => {
+    if (hasSelectedAssemblyRoute(context)) {
+      return {};
+    }
     // A successful export-only build offers no default projection. Its automatic
     // VIEW_UNAVAILABLE reply must not turn the document's success into failure.
     if (context.evaluation?.success && context.evaluation.views.length === 0) {
@@ -881,8 +1320,10 @@ const resultSignals = {
     }
     const patch: CadPatch = {
       rendering: event.rendering,
+      ...(event.rendering.transient ? {} : { committedRendering: event.rendering }),
       lastProjection: event.rendering,
       latestRenderingOutcome: 'success',
+      lastSettledRenderId: context.lastRequestedRenderId,
       kernelIssues: withEntryIssues(context, (issues, entryPath) => {
         if (combinedIssues.length > 0) {
           issues.set(entryPath, combinedIssues);
@@ -893,11 +1334,62 @@ const resultSignals = {
     };
     return { context: patch };
   },
+  assemblyComputed: ({ context, event }: CadArgs<'assemblyComputed'>, enq: CadEnqueue) => {
+    if (event.entryPath !== context.entryPath) {
+      enq(() => {
+        event.assemblyDisplay.document.close();
+      });
+      return undefined;
+    }
+    const { root, admitted } = event.assemblyDisplay;
+    enq(() => {
+      for (const cleanup of context.documentCleanups) {
+        safeDispose(cleanup);
+      }
+      safeDispose(() => context.defaultView?.close());
+      safeDispose(() => context.document?.close());
+    });
+    enq.emit({ type: 'assemblyEvaluated', assemblyDisplay: event.assemblyDisplay });
+    const patch: CadPatch = {
+      rendering: undefined,
+      committedRendering: undefined,
+      committedAssemblyDisplay: event.assemblyDisplay,
+      document: undefined,
+      defaultView: undefined,
+      documentCleanups: [
+        () => {
+          event.assemblyDisplay.document.close();
+        },
+      ],
+      evaluation: undefined,
+      lastProjection: undefined,
+      publishedAssemblyRoot: root,
+      publishedAssembly: admitted.publication,
+      admittedAssembly: admitted,
+      publishedAssemblyEntryPath: context.entryPath,
+      pendingAssemblyEntryPath: undefined,
+      parameterManifest: undefined,
+      activeKernelId: undefined,
+      latestRenderingOutcome: 'success',
+      kernelIssues: withEntryIssues(context, (issues, entryPath) => {
+        if (event.issues.length > 0) {
+          issues.set(entryPath, event.issues);
+        } else {
+          issues.delete(entryPath);
+        }
+      }),
+      lastSettledRenderId: context.lastRequestedRenderId,
+    };
+    return { context: patch };
+  },
   documentEvaluated: ({ context, event }: CadArgs<'documentEvaluated'>) => {
+    if (hasSelectedAssemblyRoute(context)) {
+      return {};
+    }
     const patch: CadPatch = {
       evaluation: event.evaluation,
       ...(event.evaluation.success && event.evaluation.views.length === 0
-        ? { rendering: undefined, latestRenderingOutcome: 'success' }
+        ? { rendering: undefined, committedRendering: undefined, latestRenderingOutcome: 'success' }
         : {}),
       ...(event.evaluation.success ? {} : { latestRenderingOutcome: 'failure' }),
       kernelIssues: withEntryIssues(context, (issues, entryPath) => {
@@ -910,20 +1402,27 @@ const resultSignals = {
     };
     return { context: patch };
   },
-  documentDescribed: ({ event }: CadArgs<'documentDescribed'>) => ({
-    context: {
-      activeKernelId: event.description.kernelId,
-      ...(event.description.success ? { parameterManifest: event.description.parameters } : {}),
-    },
-  }),
-  parametersParsed: ({ event }: CadArgs<'parametersParsed'>) => ({ context: { parameterManifest: event.manifest } }),
-  kernelIssue: ({ context, event }: CadArgs<'kernelIssue'>) => ({
-    context: {
-      kernelIssues: withEntryIssues(context, (issues, entryPath) => {
-        issues.set(entryPath, event.errors);
-      }),
-    },
-  }),
+  documentDescribed: ({ context, event }: CadArgs<'documentDescribed'>) =>
+    hasSelectedAssemblyRoute(context)
+      ? {}
+      : {
+          context: {
+            activeKernelId: event.description.kernelId,
+            ...(event.description.success ? { parameterManifest: event.description.parameters } : {}),
+          },
+        },
+  parametersParsed: ({ context, event }: CadArgs<'parametersParsed'>) =>
+    hasSelectedAssemblyRoute(context) ? {} : { context: { parameterManifest: event.manifest } },
+  kernelIssue: ({ context, event }: CadArgs<'kernelIssue'>) =>
+    hasSelectedAssemblyRoute(context)
+      ? {}
+      : {
+          context: {
+            kernelIssues: withEntryIssues(context, (issues, entryPath) => {
+              issues.set(entryPath, event.errors);
+            }),
+          },
+        },
 };
 
 /** Follow the runtime's own state report, from wherever it is not already. */
@@ -956,10 +1455,20 @@ export const cadMachine = setup({
     screenshot: undefined,
     units: { length: 'mm' },
     parameterRender: undefined,
+    lastRequestedRenderId: 0,
+    lastSettledRenderId: 0,
     latestRenderingOutcome: undefined,
     rendering: undefined,
+    committedRendering: undefined,
     lastProjection: undefined,
     evaluation: undefined,
+    publishedAssemblyRoot: undefined,
+    publishedAssembly: undefined,
+    admittedAssembly: undefined,
+    committedAssemblyDisplay: undefined,
+    publishedAssemblyEntryPath: undefined,
+    pendingAssemblyEntryPath: undefined,
+    assemblyRootReadPath: undefined,
     kernelIssues: new Map(),
     codeIssues: [],
     shouldInitializeKernelOnStart: input.shouldInitializeKernelOnStart,
@@ -1010,7 +1519,10 @@ export const cadMachine = setup({
     },
     defaultViewChanged: ({ context, event }) =>
       context.document === event.document ? { context: { defaultView: event.view } } : {},
-    documentStatusChanged: ({ event }) => {
+    documentStatusChanged: ({ context, event }) => {
+      if (hasSelectedAssemblyRoute(context)) {
+        return {};
+      }
       if (event.status === 'evaluating') {
         return { target: '.rendering.active' };
       }
@@ -1023,6 +1535,9 @@ export const cadMachine = setup({
       return {};
     },
     defaultViewStatusChanged: ({ context, event }) => {
+      if (hasSelectedAssemblyRoute(context)) {
+        return {};
+      }
       if (context.evaluation?.success && context.evaluation.views.length === 0) {
         return {};
       }
@@ -1037,6 +1552,33 @@ export const cadMachine = setup({
       }
       return {};
     },
+    refreshPublishedAssembly: ({ context }) =>
+      context.publishedAssemblyRoot && context.entryPath
+        ? {
+            target: '.rendering.submitting',
+            context: {
+              lastRequestedRenderId: context.lastRequestedRenderId + 1,
+              pendingAssemblyEntryPath: context.entryPath,
+              assemblyRootReadPath: context.publishedAssemblyRoot.path,
+              latestRenderingOutcome: undefined,
+              parameterRender: undefined,
+            },
+          }
+        : undefined,
+    sourceRenderingSelected: ({ context, event }, enq) =>
+      event.entryPath === context.entryPath && event.requestId === context.lastRequestedRenderId
+        ? {
+            context: {
+              ...(context.committedAssemblyDisplay ? destroyDocument(context, enq) : {}),
+              pendingAssemblyEntryPath: undefined,
+              publishedAssemblyRoot: undefined,
+              publishedAssembly: undefined,
+              admittedAssembly: undefined,
+              committedAssemblyDisplay: undefined,
+              publishedAssemblyEntryPath: undefined,
+            },
+          }
+        : undefined,
     parkRuntime: { context: { parkWhenIdle: true } },
     resumeRuntime: { context: { parkWhenIdle: false } },
     restoreParameters: ({ context }) => ({
@@ -1187,7 +1729,12 @@ export const cadMachine = setup({
           }
           return {
             target: context.entryPath ? '#cad.rendering.submitting' : 'idle',
-            context: { kernelClient: event.client, connectingClient: undefined, eventCleanups: event.cleanups },
+            context: {
+              kernelClient: event.client,
+              connectingClient: undefined,
+              eventCleanups: event.cleanups,
+              assemblyPublicationWritable: event.assemblyPublicationWritable,
+            },
           };
         },
         initializeModel: renderRequest(),
@@ -1238,14 +1785,36 @@ export const cadMachine = setup({
           invoke: {
             src: 'renderModelActor',
             input: ({ context, self }) => ({
+              assemblyRootReadPath: context.assemblyRootReadPath,
+              assemblyEntryRead: context.committedAssemblyDisplay?.entryRead,
+              publishedAssemblyRoot: context.publishedAssemblyRoot,
+              assemblyPublicationWritable: context.assemblyPublicationWritable,
+              knownAssemblyRoute:
+                context.publishedAssemblyRoot && context.publishedAssemblyEntryPath === context.entryPath
+                  ? context.publishedAssemblyRoot.path === context.entryPath
+                    ? 'published'
+                    : 'authored'
+                  : undefined,
               client: context.kernelClient,
               entryPath: context.entryPath,
               parameterRender: context.parameterRender,
               document: context.document,
               machineRef: self,
               requestId: context.openAttempt,
+              fileManagerRef: context.fileManagerRef,
+              fileSystemRoot: context.fileSystemRoot,
+              isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
+              selectSourceRendering: () => {
+                if (context.entryPath) {
+                  self.send({
+                    type: 'sourceRenderingSelected',
+                    entryPath: context.entryPath,
+                    requestId: context.lastRequestedRenderId,
+                  });
+                }
+              },
             }),
-            onDone: { target: '#cad.idle' },
+            onDone: { target: '#cad.idle', context: { pendingAssemblyEntryPath: undefined } },
             onError: ({ context, event }) => {
               const entryPath = context.entryPath ?? '__render__';
               const errorCode =
@@ -1264,7 +1833,15 @@ export const cadMachine = setup({
                   severity: 'error',
                 },
               ]);
-              return { target: '#cad.error', context: { kernelIssues } };
+              return {
+                target: '#cad.error',
+                context: {
+                  kernelIssues,
+                  pendingAssemblyEntryPath: undefined,
+                  latestRenderingOutcome: 'failure',
+                  lastSettledRenderId: context.lastRequestedRenderId,
+                },
+              };
             },
           },
           on: {},
@@ -1291,7 +1868,7 @@ export const cadMachine = setup({
      */
     parked: {
       on: {
-        resumeRuntime: { target: 'connecting', context: { parkWhenIdle: false } },
+        resumeRuntime: { target: 'connecting', context: { parkWhenIdle: false, assemblyRootReadPath: undefined } },
         /* Changes while parked retarget the unit; rendering happens on resume. */
         setEntryPath: renderRequest(),
         commitParameters: renderRequest(),
@@ -1378,6 +1955,40 @@ export const selectCadEntryIssues =
 export const selectCadOperationTimeout = (snapshot: CadSnapshot): number => snapshot.context.operationTimeout;
 
 export const selectCadRendering = (snapshot: CadSnapshot): Rendering | undefined => snapshot.context.rendering;
+export const selectCadCommittedRendering = (snapshot: CadSnapshot): Rendering | undefined =>
+  snapshot.context.committedRendering;
+/** Select the committed display arm without materializing assembly projection bytes. */
+export const selectCadDisplay = (snapshot: CadSnapshot): Rendering | CadAssemblyDisplay | undefined => {
+  const {
+    committedAssemblyDisplay,
+    publishedAssemblyRoot,
+    publishedAssembly,
+    admittedAssembly,
+    publishedAssemblyEntryPath,
+    entryPath,
+  } = snapshot.context;
+  if (committedAssemblyDisplay) {
+    return snapshot.context.rendering === undefined &&
+      snapshot.context.committedRendering === undefined &&
+      committedAssemblyDisplay.root === publishedAssemblyRoot &&
+      committedAssemblyDisplay.admitted === admittedAssembly &&
+      admittedAssembly.publication === publishedAssembly &&
+      publishedAssemblyEntryPath === entryPath
+      ? committedAssemblyDisplay
+      : undefined;
+  }
+  return snapshot.context.rendering;
+};
+/** Select the actual admitted reader only while its coherent committed display is selected. */
+export const selectCadAdmittedAssembly = (snapshot: CadSnapshot): AdmittedAssembly | undefined => {
+  const display = selectCadDisplay(snapshot);
+  return display && 'admitted' in display ? display.admitted : undefined;
+};
+/** True only while a transient successful rendering overlays committed inspection facts. */
+export const selectCadHasTransientPreview = (snapshot: CadSnapshot): boolean =>
+  snapshot.context.committedRendering !== undefined &&
+  snapshot.context.rendering?.success === true &&
+  snapshot.context.rendering.transient;
 export const selectCadEvaluation = (snapshot: CadSnapshot): Evaluation | undefined => snapshot.context.evaluation;
 export const selectCadDocument = (snapshot: CadSnapshot): RuntimeDocument | undefined => snapshot.context.document;
 export const selectCadUnits = (snapshot: CadSnapshot): CadContext['units'] => snapshot.context.units;

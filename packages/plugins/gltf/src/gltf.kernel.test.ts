@@ -66,7 +66,7 @@ describe('gltfKernel', () => {
       renderB: async () => exportModel(result.handle, 'y-up', 'meter'),
       export: async () => exportModel(result.handle, 'z-up', 'millimeter'),
       freshB: async () => {
-        const fresh = definition.deserializeHandle!({ serialized: freshSnapshot }, runtime, context);
+        const fresh = await definition.deserializeHandle!({ serialized: freshSnapshot }, runtime, context);
         return exportModel(fresh, 'y-up', 'meter');
       },
     });

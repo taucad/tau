@@ -1,4 +1,12 @@
 import * as THREE from 'three';
+import {
+  getModelComponentWorldMatrix,
+  getModelComponentSourceGeometry,
+  getModelComponentInstanceSlot,
+  getModelComponentHitOwner,
+} from '#components/geometry/graphics/three/utils/model-component-owner.js';
+
+import type { ModelComponentInstanceSlot } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 
 export type MeasurementEvidence = 'mesh' | 'fitted';
 export type MeasurementFeatureKind = 'edge' | 'circle' | 'face' | 'body';
@@ -55,9 +63,26 @@ export type MeasurementTarget = {
   label: string;
   feature: MeshFeature;
   sourceMesh: THREE.Object3D;
+  instanceId?: number;
+  instanceSlot?: ModelComponentInstanceSlot;
   revision: string;
   occurrenceId?: string;
 };
+/** A target keeps the exact canonical slot it sampled; an index never silently retargets it. */
+export function getMeasurementTargetWorldMatrix(
+  target: MeasurementTarget,
+  matrix: THREE.Matrix4,
+): THREE.Matrix4 | undefined {
+  if (
+    target.sourceMesh instanceof THREE.InstancedMesh &&
+    (!target.instanceSlot ||
+      getModelComponentInstanceSlot(target.sourceMesh, target.instanceId) !== target.instanceSlot)
+  ) {
+    return undefined;
+  }
+  return getModelComponentWorldMatrix(target.sourceMesh, target.instanceId, matrix);
+}
+
 export type FeatureMeasurement = {
   operation:
     | 'length'
@@ -1085,6 +1110,7 @@ export function findMeasurementTargets(
   graph: MeshFeatureGraph,
   options: {
     mesh: THREE.Object3D;
+    instanceId?: number;
     camera: THREE.Camera;
     canvas: HTMLCanvasElement;
     mousePos: THREE.Vector2;
@@ -1116,8 +1142,12 @@ export function findMeasurementTargets(
     return [];
   }
   mesh.updateWorldMatrix(true, false);
+  const worldMatrix = getModelComponentWorldMatrix(mesh, options.instanceId, new THREE.Matrix4());
+  if (!worldMatrix) {
+    return [];
+  }
   camera.updateWorldMatrix(true, false);
-  const matrix = camera.projectionMatrix.clone().multiply(camera.matrixWorldInverse).multiply(mesh.matrixWorld);
+  const matrix = camera.projectionMatrix.clone().multiply(camera.matrixWorldInverse).multiply(worldMatrix);
   const width = canvas.clientWidth || canvas.width;
   const height = canvas.clientHeight || canvas.height;
   const candidates: MeasurementTarget[] = [];
@@ -1132,11 +1162,12 @@ export function findMeasurementTargets(
     label: string,
     suffix = '',
   ): void => {
-    const id = `${mesh.uuid}:${graph.revision}:${feature.id}:${kind}${suffix}`;
+    const occurrenceKey = options.instanceId === undefined ? mesh.uuid : `${mesh.uuid}@instance:${options.instanceId}`;
+    const id = `${occurrenceKey}:${graph.revision}:${feature.id}:${kind}${suffix}`;
     if (distance > snapDistancePx * (id === activeId ? 1.5 : 1)) {
       return;
     }
-    const position = local.clone().applyMatrix4(mesh.matrixWorld);
+    const position = local.clone().applyMatrix4(worldMatrix);
     candidates.push({
       id,
       featureId: feature.id,
@@ -1148,8 +1179,13 @@ export function findMeasurementTargets(
       label,
       feature,
       sourceMesh: mesh,
+      instanceId: options.instanceId,
+      instanceSlot: getModelComponentInstanceSlot(mesh, options.instanceId),
       revision: graph.revision,
-      occurrenceId: (mesh.userData['measurementFeatures'] as { occurrenceId?: string } | undefined)?.occurrenceId,
+      occurrenceId:
+        options.instanceId === undefined
+          ? (mesh.userData['measurementFeatures'] as { occurrenceId?: string } | undefined)?.occurrenceId
+          : getModelComponentHitOwner({ object: mesh, instanceId: options.instanceId })?.componentId,
     });
   };
   // oxlint-disable-next-line max-params -- A semantic point carries its feature, kind, position and label.
@@ -1174,7 +1210,7 @@ export function findMeasurementTargets(
     );
   };
   if (surfaceHit && finite(surfaceHit)) {
-    const localHit = mesh.worldToLocal(surfaceHit.clone());
+    const localHit = surfaceHit.clone().applyMatrix4(worldMatrix.clone().invert());
     const featureId = faceIndex === undefined ? '' : (graph.triangleFeatureId[faceIndex] ?? '');
     const body = faceIndex === undefined ? -1 : (graph.triangleBody[faceIndex] ?? -1);
     for (const feature of graph.features) {
@@ -1295,8 +1331,8 @@ export function findMeasurementTargets(
     const kept =
       isKept === undefined ||
       (virtual
-        ? virtualSupportSome(candidate.feature, graph, (point) => isKept(point.clone().applyMatrix4(mesh.matrixWorld)))
-        : isKept(candidate.localPosition.clone().applyMatrix4(mesh.matrixWorld)));
+        ? virtualSupportSome(candidate.feature, graph, (point) => isKept(point.clone().applyMatrix4(worldMatrix)))
+        : isKept(candidate.localPosition.clone().applyMatrix4(worldMatrix)));
     return kept && isVisible?.(candidate.position, candidate.feature, candidate.kind) !== false;
   };
   // A hover needs only a few visible results. Keep raycast-heavy occlusion off the full candidate cloud.
@@ -1334,6 +1370,7 @@ export function listMeasurementTargets(
   graph: MeshFeatureGraph,
   options: {
     mesh: THREE.Object3D;
+    instanceId?: number;
     camera: THREE.Camera;
     canvas: HTMLCanvasElement;
     filter?: 'auto' | 'point' | 'edge' | 'face' | 'circle' | 'body';
@@ -1356,7 +1393,14 @@ export function measureFeature(
 ): FeatureMeasurement[] {
   const { feature } = target;
   mesh.updateWorldMatrix(true, false);
-  const world = (point: THREE.Vector3): THREE.Vector3 => point.clone().applyMatrix4(mesh.matrixWorld);
+  const worldMatrix =
+    target.sourceMesh instanceof THREE.InstancedMesh
+      ? getMeasurementTargetWorldMatrix(target, new THREE.Matrix4())
+      : new THREE.Matrix4().copy(mesh.matrixWorld);
+  if (!worldMatrix) {
+    return [];
+  }
+  const world = (point: THREE.Vector3): THREE.Vector3 => point.clone().applyMatrix4(worldMatrix);
   if (feature.kind === 'edge' && target.kind === 'edge') {
     const points = feature.points.map(world);
     return [
@@ -1370,9 +1414,9 @@ export function measureFeature(
     ];
   }
   if (feature.kind === 'circle') {
-    const sx = new THREE.Vector3().setFromMatrixColumn(mesh.matrixWorld, 0).length();
-    const sy = new THREE.Vector3().setFromMatrixColumn(mesh.matrixWorld, 1).length();
-    const sz = new THREE.Vector3().setFromMatrixColumn(mesh.matrixWorld, 2).length();
+    const sx = new THREE.Vector3().setFromMatrixColumn(worldMatrix, 0).length();
+    const sy = new THREE.Vector3().setFromMatrixColumn(worldMatrix, 1).length();
+    const sz = new THREE.Vector3().setFromMatrixColumn(worldMatrix, 2).length();
     if (Math.max(sx, sy, sz) - Math.min(sx, sy, sz) > Math.max(sx, sy, sz) * 1e-8) {
       return [];
     }
@@ -1503,26 +1547,37 @@ function closestPolylinePair(
 
 function worldPoints(target: MeasurementTarget): THREE.Vector3[] {
   target.sourceMesh.updateWorldMatrix(true, false);
+  const worldMatrix = getMeasurementTargetWorldMatrix(target, new THREE.Matrix4());
+  if (!worldMatrix) {
+    return [];
+  }
   if (target.kind !== 'edge' || target.feature.kind !== 'edge') {
     return [];
   }
-  return target.feature.points.map((point) => point.clone().applyMatrix4(target.sourceMesh.matrixWorld));
+  return target.feature.points.map((point) => point.clone().applyMatrix4(worldMatrix));
 }
 
 function worldTriangles(target: MeasurementTarget): THREE.Triangle[] {
   if (target.feature.kind !== 'face' || !('geometry' in target.sourceMesh)) {
     return [];
   }
-  const geometry = target.sourceMesh.geometry as THREE.BufferGeometry;
+  const geometry = getModelComponentSourceGeometry(target.sourceMesh, target.instanceId);
+  if (!geometry) {
+    return [];
+  }
   const attribute = geometry.getAttribute('position');
   const index = geometry.getIndex();
   target.sourceMesh.updateWorldMatrix(true, false);
+  const worldMatrix = getMeasurementTargetWorldMatrix(target, new THREE.Matrix4());
+  if (!worldMatrix) {
+    return [];
+  }
   const triangles: THREE.Triangle[] = [];
   for (const triangle of target.feature.triangleIndices) {
     const read = (corner: number): THREE.Vector3 =>
       new THREE.Vector3()
         .fromBufferAttribute(attribute, index?.getX(triangle * 3 + corner) ?? triangle * 3 + corner)
-        .applyMatrix4(target.sourceMesh.matrixWorld);
+        .applyMatrix4(worldMatrix);
     triangles.push(new THREE.Triangle(read(0), read(1), read(2)));
   }
   return triangles;
@@ -1658,6 +1713,12 @@ function finiteFeatureDistance(a: MeasurementTarget, b: MeasurementTarget): Feat
 
 /** Results are bounded to the selected support; unsupported feature pairs return only the explicit point distance. */
 export function measureTargetPair(a: MeasurementTarget, b: MeasurementTarget): FeatureMeasurement[] {
+  if (
+    (a.sourceMesh instanceof THREE.InstancedMesh && !getMeasurementTargetWorldMatrix(a, new THREE.Matrix4())) ||
+    (b.sourceMesh instanceof THREE.InstancedMesh && !getMeasurementTargetWorldMatrix(b, new THREE.Matrix4()))
+  ) {
+    return [];
+  }
   const evidence = a.evidence === 'fitted' || b.evidence === 'fitted' ? 'fitted' : 'mesh';
   const results: FeatureMeasurement[] = [
     {
@@ -1738,17 +1799,16 @@ export function measureTargetPair(a: MeasurementTarget, b: MeasurementTarget): F
   ) {
     a.sourceMesh.updateWorldMatrix(true, false);
     b.sourceMesh.updateWorldMatrix(true, false);
-    const normalA = a.feature.normal
-      .clone()
-      .applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(a.sourceMesh.matrixWorld))
-      .normalize();
-    const normalB = b.feature.normal
-      .clone()
-      .applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(b.sourceMesh.matrixWorld))
-      .normalize();
+    const worldA = getMeasurementTargetWorldMatrix(a, new THREE.Matrix4());
+    const worldB = getMeasurementTargetWorldMatrix(b, new THREE.Matrix4());
+    if (!worldA || !worldB) {
+      return results;
+    }
+    const normalA = a.feature.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(worldA)).normalize();
+    const normalB = b.feature.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(worldB)).normalize();
     if (Math.abs(normalA.dot(normalB)) > normalAgreement) {
-      const first = a.feature.centroid.clone().applyMatrix4(a.sourceMesh.matrixWorld);
-      const second = b.feature.centroid.clone().applyMatrix4(b.sourceMesh.matrixWorld);
+      const first = a.feature.centroid.clone().applyMatrix4(worldA);
+      const second = b.feature.centroid.clone().applyMatrix4(worldB);
       const offset = second.clone().sub(first).dot(normalA);
       results.push({
         operation: 'plane-spacing',

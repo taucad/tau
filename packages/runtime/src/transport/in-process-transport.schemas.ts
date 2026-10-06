@@ -20,6 +20,7 @@ import { isRuntimeDefinition } from '#worker/runtime-definition.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import { compiledWasmModuleSchema } from '#transport/_internal/compiled-wasm-module.schema.js';
 import type { ComputeBinding } from '#types/runtime-compute.types.js';
+import type { AssemblyDisplayProjector } from '#types/runtime-assembly.types.js';
 
 const runtimeFileSystemSchema = z.custom<RuntimeFileSystem>(
   (value) => value === undefined || isRuntimeFileSystem(value),
@@ -35,12 +36,16 @@ export const inProcessClientOptionsSchema = z
      * handle into the worker's in-isolate filesystem.
      */
     fileSystem: runtimeFileSystemSchema.optional(),
+    /** Host-only checked publication authority, never the evaluator filesystem. */
+    publicationFileSystem: runtimeFileSystemSchema.optional(),
     compute: z.custom<ComputeBinding>().optional(),
     /**
      * Worker-owned runtime definition. Required when the in-process transport
      * is used directly because this topology creates the host worker itself.
      */
     runtime: runtimeDefinitionSchema.optional(),
+    /** Host-local projector; never sent through the MessageChannel protocol. */
+    admitAssemblyDisplay: z.custom<AssemblyDisplayProjector>().optional(),
     /**
      * Geometry shared-pool sizing. Always allocated for in-process —
      * SAB is unconditionally available in the same isolate.

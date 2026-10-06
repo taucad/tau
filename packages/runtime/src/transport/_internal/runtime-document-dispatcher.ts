@@ -162,6 +162,7 @@ export function createDocumentWorkerDispatcher(
           callbacks: { onLog },
           transferables: {
             fileSystemPort: memoryHandle?.fileSystemPort,
+            publicationFileSystemPort: options?.publicationFileSystem?.port ?? memoryHandle?.publicationFileSystemPort,
             inlineFileSystem: options?.inlineFileSystem,
           },
           config: args.config,
@@ -232,6 +233,68 @@ export function createDocumentWorkerDispatcher(
             transferables,
           };
           return response;
+        }
+        case 'exportPublished': {
+          let result: Awaited<ReturnType<typeof worker.exportPublished>>;
+          try {
+            result = await worker.exportPublished(
+              args as RuntimeDocumentProtocol['calls']['exportPublished']['args'],
+              signal,
+            );
+          } finally {
+            flushLogs();
+            worker.flushTelemetry();
+          }
+          if (!result.success) {
+            return result as CallResult;
+          }
+          const { files, transferables } = encodeExport(result.files);
+          const response: WithTransferables<RuntimeDocumentProtocol['calls']['exportPublished']['result']> = {
+            value: { ...result, files },
+            transferables,
+          };
+          return response;
+        }
+        case 'preparePublishedPart': {
+          return (await worker.preparePublishedPart(
+            args as RuntimeDocumentProtocol['calls']['preparePublishedPart']['args'],
+            signal,
+          )) as CallResult;
+        }
+        case 'admitPublishedPart': {
+          return (await worker.admitPublishedPart(
+            args as RuntimeDocumentProtocol['calls']['admitPublishedPart']['args'],
+            signal,
+          )) as CallResult;
+        }
+        case 'readPublishedPartAsset': {
+          const input = args as RuntimeDocumentProtocol['calls']['readPublishedPartAsset']['args'];
+          const bytes = await worker.readPublishedPartAsset(input.reference, input.digest, signal);
+          const response: WithTransferables<RuntimeDocumentProtocol['calls']['readPublishedPartAsset']['result']> = {
+            value: bytes,
+            transferables: [bytes.buffer],
+          };
+          return response;
+        }
+        case 'publishPartsRoot': {
+          return (await worker.publishPartsRoot(
+            args as RuntimeDocumentProtocol['calls']['publishPartsRoot']['args'],
+            signal,
+          )) as CallResult;
+        }
+        case 'publishAuthoredAssemblyRoot': {
+          return (await worker.publishAuthoredAssemblyRoot(
+            args as RuntimeDocumentProtocol['calls']['publishAuthoredAssemblyRoot']['args'],
+            signal,
+          )) as CallResult;
+        }
+        case 'readPublishedAssemblyRoot': {
+          const input = args as RuntimeDocumentProtocol['calls']['readPublishedAssemblyRoot']['args'];
+          return (await worker.readPublishedAssemblyRoot(input.publicationPath, signal)) as CallResult;
+        }
+        case 'openPublishedAssembly': {
+          const input = args as RuntimeDocumentProtocol['calls']['openPublishedAssembly']['args'];
+          return (await worker.openPublishedAssembly(input.root, signal)) as CallResult;
         }
         case 'snapshotSource': {
           const result = await worker.snapshotSource(

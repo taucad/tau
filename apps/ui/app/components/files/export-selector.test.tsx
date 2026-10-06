@@ -83,6 +83,7 @@ const mockCadRef = {
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
       document: mockDocument,
+      latestRenderingOutcome: 'success',
     },
   })),
 } as unknown as ActorRefFrom<typeof cadMachine>;
@@ -94,6 +95,7 @@ const mockCadRef2 = {
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
       document: mockDocument,
+      latestRenderingOutcome: 'success',
     },
   })),
 } as unknown as ActorRefFrom<typeof cadMachine>;

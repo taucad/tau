@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 
 import { toPiToolContent } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
@@ -28,6 +29,8 @@ import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { MachineClient, MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
 import type {
   RuntimeDocument,
+  RuntimeClient,
+  PublishedAssemblyDocument,
   ViewSubscription,
   WideViewRequest,
   Evaluation,
@@ -461,6 +464,114 @@ describe('createHostToolRegistry', () => {
     await vi.waitFor(() => {
       expect(close).toHaveBeenCalled();
     });
+  });
+
+  it('routes agent export and capture through the exact selected assembly pin without source evaluation', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 2,
+        generation: 1,
+        manifest: { path: 'manifest.json', digest: `sha256:${'0'.repeat(64)}`, byteLength: 1 },
+      }),
+    );
+    await writeFile(join(workspaceRoot, 'scene.json'), bytes);
+    const root = { path: 'scene.json', digest: `sha256:${await sha256Bytes(bytes)}`, byteLength: bytes.byteLength };
+    const display = glb();
+    const exportPublished = vi.fn<PublishedAssemblyDocument['exportPublished']>(async () => ({
+      success: true,
+      exportId: 'glb',
+      issues: [],
+      files: [{ name: 'scene.glb', mimeType: 'model/gltf-binary', bytes: display }],
+    }));
+    const close = vi.fn();
+    const runtime = {
+      ...fakeRuntime(),
+      openAssembly: vi.fn<RuntimeClient['openAssembly']>(async ({ root }) =>
+        mock<PublishedAssemblyDocument>({
+          root,
+          projection: 'assembly',
+          admitted: mock<PublishedAssemblyDocument['admitted']>({
+            publication: { schemaVersion: 1, parts: {}, occurrences: [] },
+          }),
+          exportPublished,
+          close,
+        }),
+      ),
+    };
+    const registry = createHostToolRegistry({ workspaceRoot, runtimeClient: async () => runtime });
+    const exported = await invoke(registry, 'export_model', { targetFile: 'scene.json', to: 'glb' });
+    expect(exported.isError).toBe(false);
+    expect(runtime.openAssembly.mock.calls[0]?.[0]).toMatchObject({ root });
+    expect(runtime.openAssembly.mock.calls[0]?.[0].signal).toBeInstanceOf(AbortSignal);
+    expect(exportPublished.mock.calls[0]?.[0]).toMatchObject({
+      format: 'glb',
+      publishedAssembly: { root },
+    });
+    expect(exportPublished.mock.calls[0]?.[0].signal).toBeInstanceOf(AbortSignal);
+    const captured = await invoke(registry, 'screenshot', { targetFile: 'scene.json', mode: 'single' });
+    expect(captured.isError).toBe(false);
+    expect(runtime.open).not.toHaveBeenCalled();
+    expect(exportPublished.mock.calls[1]?.[0]).toMatchObject({
+      format: 'glb',
+      publishedAssembly: { root },
+    });
+    expect(exportPublished.mock.calls[1]?.[0].signal).toBeInstanceOf(AbortSignal);
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(runtime.transcode).toHaveBeenCalledWith(
+      expect.objectContaining({ from: 'glb', files: [expect.objectContaining({ bytes: display })] }),
+    );
+    const next = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: 2,
+        generation: 2,
+        manifest: { path: 'manifest.json', digest: `sha256:${'0'.repeat(64)}`, byteLength: 1 },
+      }),
+    );
+    await writeFile(join(workspaceRoot, 'scene.json'), next);
+    await invoke(registry, 'export_model', { targetFile: 'scene.json', to: 'glb' });
+    expect(runtime.openAssembly.mock.calls.at(-1)?.[0]).toMatchObject({
+      root: { path: 'scene.json', digest: `sha256:${await sha256Bytes(next)}`, byteLength: next.byteLength },
+    });
+    expect(runtime.openAssembly.mock.calls.at(-1)?.[0].signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('denies unpinned authored and invalid JSON and failed admission without source fallback', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const runtime = {
+      ...fakeRuntime(),
+      openAssembly: vi.fn(async () => {
+        throw new Error('Pinned admission failed');
+      }),
+    };
+    const registry = createHostToolRegistry({ workspaceRoot, runtimeClient: async () => runtime });
+    const authored = JSON.stringify({ schemaVersion: 1, parts: {}, occurrences: [] });
+    for (const content of [
+      '{',
+      '{"ordinary":true}',
+      authored,
+      JSON.stringify({ schemaVersion: 1, generation: 1, parts: {}, occurrences: [] }),
+      JSON.stringify({ schemaVersion: 2, generation: 1 }),
+      JSON.stringify({ schemaVersion: 2, generation: 1, manifest: {} }),
+    ]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each selected JSON replacement precedes its request.
+      await writeFile(join(workspaceRoot, 'scene.json'), content);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- The request must settle before the next selected replacement.
+      const result = await invoke(registry, 'export_model', { targetFile: 'scene.json', to: 'glb' });
+      expect(result.isError).toBe(true);
+      if (content === authored) {
+        expect(JSON.stringify(result.content)).toContain('committed pinned scene');
+      }
+    }
+    expect(runtime.openAssembly).toHaveBeenCalledOnce();
+    expect(runtime.open).not.toHaveBeenCalled();
+    expect(runtime.open).not.toHaveBeenCalled();
+    const missing = fakeRuntime();
+    const unsupported = createHostToolRegistry({ workspaceRoot, runtimeClient: async () => missing });
+    const unavailable = await invoke(unsupported, 'export_model', { targetFile: 'scene.json', to: 'glb' });
+    expect(unavailable.isError).toBe(true);
+    expect(JSON.stringify(unavailable.content)).toContain('no assembly admission operation');
+    expect(missing.open).not.toHaveBeenCalled();
   });
 
   it('names the source revision of every model test_model loaded (R4)', async () => {

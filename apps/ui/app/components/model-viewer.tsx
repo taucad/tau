@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo } from 'react';
 import { useActorRef } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import { AlertTriangle } from 'lucide-react';
+import type { CadAssemblyDisplay } from '#machines/cad.machine.js';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Artifact, DocumentStatus } from '@taucad/runtime';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
@@ -69,6 +70,7 @@ export type ModelViewerProps = {
   readonly artifact: Artifact | undefined;
   /** Identity of the successful rendering that produced `artifact`. */
   readonly artifactHash: string | undefined;
+  readonly assemblyDisplay?: CadAssemblyDisplay;
   /**
    * Lifecycle hint from the surrounding pipeline. Defaults to `'loading'` when
    * artifact is absent and `'ready'` otherwise — preserves behaviour for
@@ -102,6 +104,7 @@ type ModelViewerCoreProps = Omit<ModelViewerProps, 'graphicsRef'> & {
 const ModelViewerCore = memo(function ModelViewerCore({
   artifact,
   artifactHash,
+  assemblyDisplay,
   viewerState,
   graphicsRef,
   className,
@@ -112,21 +115,23 @@ const ModelViewerCore = memo(function ModelViewerCore({
   graphicsOptions,
   error,
 }: ModelViewerCoreProps): React.JSX.Element {
-  const effectiveState: ModelViewerState = viewerState ?? (artifact ? 'ready' : 'loading');
+  const effectiveState: ModelViewerState = viewerState ?? ((artifact ?? assemblyDisplay) ? 'ready' : 'loading');
   const knownArtifact = useMemo(() => (artifact ? asKnownArtifact(artifact) : undefined), [artifact]);
   const emptyModel = useMemo(
     () => knownArtifact?.mimeType === 'model/gltf-binary' && isEmptyGlb(knownArtifact.content),
     [knownArtifact],
   );
   useEffect(() => {
-    if (emptyModel || (effectiveState === 'ready' && !error && !knownArtifact)) {
+    if (assemblyDisplay) {
+      graphicsRef.send({ type: 'updateAssembly', key: assemblyDisplay.root.digest, units: { length: 'mm' } });
+    } else if (emptyModel || (effectiveState === 'ready' && !error && !knownArtifact)) {
       graphicsRef.send({ type: 'clearArtifact' });
     } else if (knownArtifact && artifactHash !== undefined) {
       graphicsRef.send({ type: 'updateArtifact', artifact: knownArtifact, hash: artifactHash });
     }
-  }, [knownArtifact, artifactHash, graphicsRef, effectiveState, emptyModel, error]);
+  }, [knownArtifact, artifactHash, graphicsRef, effectiveState, emptyModel, error, assemblyDisplay]);
 
-  if (error && !artifact) {
+  if (error && !artifact && !assemblyDisplay) {
     return (
       <RuntimeErrorOverlay
         message={error.message}
@@ -180,6 +185,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
           <CadViewer
             artifact={artifact}
             artifactHash={artifactHash}
+            assemblyDisplay={assemblyDisplay}
             enablePan={enablePan}
             enableZoom={enableZoom}
             enableGrid={graphicsOptions?.enableGrid}

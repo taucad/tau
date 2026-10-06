@@ -133,6 +133,21 @@ describe('convertReplicadGeometriesToGltf', () => {
     expect(component.edgeGroups?.map(({ edgeId }) => edgeId)).toEqual([0, 1]);
   });
 
+  it('should preserve stored producer IDs when display order and authored names change', () => {
+    const geometries = [
+      createSimpleGeometry({ name: 'Renamed B', sourceComponentId: 'component:b' }),
+      createSimpleGeometry({ name: 'Renamed A', sourceComponentId: 'component:a' }),
+    ];
+    const { json, payload } = readTopologyPayload(convertReplicadGeometriesToGltf({ geometries }));
+    expect(payload.components.map(({ id }) => id)).toEqual(['component:b', 'component:a']);
+    expect(json.nodes.map(({ extras }) => extras?.['tauComponentId'])).toEqual(['component:b', 'component:a']);
+    const duplicate = [geometries[0]!, { ...geometries[1]!, sourceComponentId: 'component:b' }];
+    expect(() => convertReplicadGeometriesToGltf({ geometries: duplicate })).toThrow(/component IDs.*unique/iu);
+    expect(() =>
+      convertReplicadGeometriesToGltf({ geometries: [{ ...geometries[0]!, sourceComponentId: '' }] }),
+    ).toThrow(/component IDs.*nonempty/iu);
+  });
+
   it('should convert empty geometries array to valid GLB', async () => {
     const result = convertReplicadGeometriesToGltf({ geometries: [], format: 'glb' });
 
@@ -276,6 +291,50 @@ describe('convertReplicadGeometriesToGltf', () => {
     expect(document.getRoot().listMaterials()).toHaveLength(2);
     expect(document.getRoot().listNodes()[0]!.getName()).toBe('Red');
     expect(document.getRoot().listNodes()[1]!.getName()).toBe('Blue');
+  });
+
+  it('should keep MeshShape capabilities mesh-only while preserving BRep capabilities', () => {
+    const { payload } = readTopologyPayload(
+      convertReplicadGeometriesToGltf({
+        geometries: [
+          createSimpleGeometry({ name: 'Imported mesh', meshOnly: true }),
+          createSimpleGeometry({ name: 'Native mount' }),
+        ],
+        format: 'glb',
+      }),
+    );
+    expect(payload.components[0]).toMatchObject({
+      capabilities: {
+        hasPreciseTopology: false,
+        exports: [
+          { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },
+          { fidelity: 'brep', formats: ['step', 'stp', 'brep', 'dxf'], available: false },
+        ],
+      },
+    });
+    expect(payload.components[1]).toMatchObject({
+      capabilities: {
+        hasPreciseTopology: true,
+        exports: [
+          { fidelity: 'mesh', formats: ['glb', 'stl'], available: true },
+          { fidelity: 'brep', formats: ['step', 'stp', 'brep', 'dxf'], available: true },
+        ],
+      },
+    });
+  });
+
+  it('should omit topology edge groups when their overlay primitive is omitted', () => {
+    const geometry = createSimpleGeometry({
+      edges: { lines: [], edgeGroups: [{ start: 0, count: 6, edgeId: 0 }] },
+    });
+    const glb = convertReplicadGeometriesToGltf({
+      geometries: [geometry],
+      format: 'glb',
+    });
+    const { json, payload } = readTopologyPayload(glb);
+    expect(json.meshes[0]!.primitives).toHaveLength(1);
+    expect(payload.components[0]!.edgeGroups).toEqual([]);
+    expect(geometry.edges.edgeGroups).toEqual([{ start: 0, count: 6, edgeId: 0 }]);
   });
 
   it('should emit semantic Tau component ids for named geometries', () => {

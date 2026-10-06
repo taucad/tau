@@ -212,6 +212,78 @@
         "reason": { "type": "string" }
       }
     },
+    "physicalVolume": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "valueMm3", "geometryDigest", "method", "validity"],
+          "properties": {
+            "state": { "const": "measured" },
+            "valueMm3": { "type": "number", "exclusiveMinimum": 0 },
+            "geometryDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "method": { "const": "occt-solid-volume" },
+            "validity": { "const": "closed-solid" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "sourceValueMm3",
+            "addedAbsDeterminant",
+            "valueMm3",
+            "geometryDigest",
+            "method",
+            "validity"
+          ],
+          "properties": {
+            "state": { "const": "derived" },
+            "sourceValueMm3": { "type": "number", "exclusiveMinimum": 0 },
+            "addedAbsDeterminant": { "type": "number", "exclusiveMinimum": 0 },
+            "valueMm3": { "type": "number", "exclusiveMinimum": 0 },
+            "geometryDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "method": { "const": "occurrence-determinant-v1" },
+            "validity": { "const": "placed-solid" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "reason"],
+          "properties": {
+            "state": { "const": "unavailable" },
+            "reason": {
+              "enum": [
+                "not-solid",
+                "invalid-solid",
+                "native-unavailable",
+                "degenerate-placement",
+                "nonfinite-placement"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "physical": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["volume"],
+      "properties": {
+        "volume": { "$ref": "#/$defs/physicalVolume" },
+        "density": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["valueGPerCm3", "provenance"],
+          "properties": {
+            "valueGPerCm3": { "type": "number", "exclusiveMinimum": 0 },
+            "provenance": { "const": "authored-shape-config" }
+          }
+        }
+      }
+    },
     "component": {
       "type": "object",
       "additionalProperties": true,
@@ -236,6 +308,7 @@
         "faceGroups": { "type": "array", "items": { "$ref": "#/$defs/faceGroup" } },
         "edgeGroups": { "type": "array", "items": { "$ref": "#/$defs/edgeGroup" } },
         "sourceRefs": { "type": "object" },
+        "physical": { "$ref": "#/$defs/physical" },
         "capabilities": {
           "type": "object",
           "additionalProperties": true,

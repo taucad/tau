@@ -206,10 +206,11 @@ function ExportSelectorBody({
   const capabilities = useSelector(selectedActor, (state) => state?.context.capabilities);
   const activeKernelId = useSelector(selectedActor, (state) => state?.context.activeKernelId);
   const kernelClient = useSelector(selectedActor, (state) => state?.context.kernelClient);
+  const publishedAssembly = useSelector(selectedActor, (state) => state?.context.publishedAssembly);
 
   const availableFormats = useMemo(
-    () => (capabilities === undefined ? [] : deriveAvailableFormats(kernelClient, activeKernelId)),
-    [kernelClient, activeKernelId, capabilities],
+    () => (capabilities === undefined ? [] : deriveAvailableFormats(kernelClient, publishedAssembly ?? activeKernelId)),
+    [kernelClient, activeKernelId, capabilities, publishedAssembly],
   );
 
   const { exportToDisk, isExporting } = useExportToDisk(filenameBase);

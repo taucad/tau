@@ -200,8 +200,15 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
       });
       const glb = await document.export('glb');
       assertSuccess(glb);
+      const parsed = await parse(glb.files[0].bytes);
+      const root = parsed.document.getRoot();
+      expect(root.listNodes()).toHaveLength(1);
+      expect(root.listNodes()[0]!.getExtras()['tauComponentId']).toBe('component:base');
+      expect(root.listMeshes()).toHaveLength(1);
+      expect(root.listMeshes()[0]!.listPrimitives()[0]!.getAttribute('POSITION')?.getCount()).toBe(3);
+      expect(root.listMeshes()[0]!.listPrimitives()[0]!.getIndices()?.getCount()).toBe(3);
       expect(createHash('sha256').update(glb.files[0].bytes).digest('hex')).toBe(
-        '853d1eecb0d48f0cad26b6decff90df1e43de67d45475939e8cc109cee6807b8',
+        '97deda1097312e1017c51570f0253ea263a890fde42afbfd9e730923503ff8c1',
       );
       const stl = await document.export('stl');
       assertSuccess(stl);
@@ -226,17 +233,16 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
         assertSuccess(result.rendering);
         const { document: sceneDocument, topology } = await parse(extractGltfFromResult(result.rendering)!);
         const delivered = admitted(topology?.['mechanism']);
+        const componentIds = Object.keys(mechanism.links).map((name) => `component:${name}`);
         expect(result.rendering.issues).toEqual([]);
         expect(delivered.units).toEqual({ length: 'm', angle: 'deg' });
-        expect(Object.values(delivered.links).flatMap(({ components }) => components)).toEqual(
-          Array.from({ length: 8 }, (_, index) => `component:node-${index}`),
-        );
+        expect(Object.values(delivered.links).flatMap(({ components }) => components)).toEqual(componentIds);
         expect(
           sceneDocument
             .getRoot()
             .listNodes()
             .map((node) => node.getExtras()['tauComponentId']),
-        ).toEqual(Array.from({ length: 8 }, (_, index) => `component:node-${index}`));
+        ).toEqual(componentIds);
         expect(sceneDocument.getRoot().listMaterials()[0]!.getMetallicFactor()).toBe(0.7);
         const pose = poseAt(delivered, 1);
         expect(pose.coordinates['screw']).toBe(-10);
@@ -246,9 +252,7 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
         expect(pose.coordinates['spherical/z']).toBe(-12.5);
         const original = resolveMechanismComponents({
           source: mechanism,
-          componentIds: Object.fromEntries(
-            Object.keys(mechanism.links).map((name, index) => [name, `component:node-${index}`]),
-          ),
+          componentIds: Object.fromEntries(Object.keys(mechanism.links).map((name) => [name, `component:${name}`])),
         });
         if (original.status !== 'resolved') {
           throw new Error(JSON.stringify(original.issues));

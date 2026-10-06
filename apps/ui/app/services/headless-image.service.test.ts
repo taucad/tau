@@ -3,7 +3,10 @@ import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ExportFile } from '@taucad/types';
 import type { imageRuntime } from '#runtime/image-runtime.definition.js';
 import { HeadlessImageError, HeadlessImageService } from '#services/headless-image.service.js';
+import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import type { HeadlessImageJob, HeadlessImageServiceDependencies } from '#services/headless-image.service.js';
+
+vi.mock('#services/headless-image-debug.js', () => ({ recordHeadlessImageTiming: vi.fn() }));
 
 const activeServices = new Set<HeadlessImageService>();
 const glb = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
@@ -55,6 +58,105 @@ describe('HeadlessImageService', () => {
     activeServices.clear();
     vi.restoreAllMocks();
   });
+
+  it('records held canceled and superseded queue admissions before any queued execution', async () => {
+    vi.mocked(recordHeadlessImageTiming).mockClear();
+    const { imageClient, service } = createFixture();
+    const gate = Promise.withResolvers<void>();
+    vi.mocked(imageClient.transcode).mockImplementationOnce(async () => {
+      await gate.promise;
+      return { success: true, data: files(), issues: [] };
+    });
+    const cancellation = new AbortController();
+    const active = service.export(captureJob('active'));
+    const jobs: Array<Promise<unknown>> = [active];
+    const settledJobs = Promise.allSettled(jobs);
+    try {
+      await vi.waitFor(() => {
+        expect(imageClient.transcode).toHaveBeenCalledOnce();
+      });
+      const canceled = Promise.allSettled([service.export(captureJob('canceled', { signal: cancellation.signal }))]);
+      jobs.push(canceled);
+      const first = service.export(thumbnailJob('superseded'));
+      jobs.push(first);
+      const settledFirst = Promise.allSettled([first]);
+      await vi.waitFor(() => {
+        expect(vi.mocked(recordHeadlessImageTiming).mock.calls.filter(([name]) => name === 'queue.admit')).toHaveLength(
+          3,
+        );
+      });
+      const replacement = service.export(thumbnailJob('replacement'));
+      jobs.push(replacement);
+      await expect(first).resolves.toBeUndefined();
+      cancellation.abort();
+      await expect(canceled).resolves.toMatchObject([{ status: 'rejected', reason: { name: 'AbortError' } }]);
+      const admissions = vi
+        .mocked(recordHeadlessImageTiming)
+        .mock.calls.filter(([name]) => name === 'queue.admit')
+        .map((call) => call[2]);
+      expect(admissions).toEqual([
+        { kind: 'capture', identity: 'active', queueDepth: 1 },
+        { kind: 'capture', identity: 'canceled', queueDepth: 2 },
+        { kind: 'automatic-thumbnail', identity: 'superseded', queueDepth: 3 },
+        { kind: 'automatic-thumbnail', identity: 'replacement', queueDepth: 3 },
+      ]);
+      expect(vi.mocked(recordHeadlessImageTiming).mock.calls.filter(([name]) => name === 'queue.wait')).toHaveLength(1);
+      gate.resolve();
+      await expect(Promise.all([active, replacement])).resolves.toHaveLength(2);
+      expect(imageClient.transcode).toHaveBeenCalledTimes(2);
+      await settledFirst;
+    } finally {
+      cancellation.abort();
+      gate.resolve();
+      await settledJobs;
+      await Promise.allSettled(jobs);
+    }
+  });
+
+  it('does not record admissions for cold or driver refused automatic work', async () => {
+    vi.mocked(recordHeadlessImageTiming).mockClear();
+    const cold = createFixture();
+    const driver = createFixture({ isAutomaticGpuAvailable: () => false });
+    await expect(
+      cold.service.export({ ...thumbnailJob('cold'), exportOptions: { mode: 'batch' } }),
+    ).rejects.toMatchObject({ code: 'cold-start-deferred' });
+    await expect(driver.service.export(thumbnailJob('driver'))).rejects.toMatchObject({ code: 'driver-unsupported' });
+    expect(vi.mocked(recordHeadlessImageTiming).mock.calls.filter(([name]) => name === 'queue.admit')).toHaveLength(0);
+    expect(cold.imageClient.transcode).not.toHaveBeenCalled();
+    expect(driver.imageClient.transcode).not.toHaveBeenCalled();
+  });
+
+  it.each(['adapter-unavailable', 'device-lost', 'gpu', 'parse', 'encode', 'unknown'] as const)(
+    'preserves queued manual failure class %s without successful completion',
+    async (code) => {
+      vi.mocked(recordHeadlessImageTiming).mockClear();
+      const { imageClient, service } = createFixture();
+      vi.mocked(imageClient.transcode).mockResolvedValueOnce({
+        success: false,
+        issues: [
+          {
+            code: 'RUNTIME',
+            type: 'runtime',
+            severity: 'error',
+            message: 'preview failed',
+            details: { type: 'render', code },
+          },
+        ],
+      });
+      await expect(
+        service.export({ ...captureJob(`failure:${code}`), kind: 'manual-thumbnail' }),
+      ).rejects.toMatchObject({ code });
+      expect(vi.mocked(recordHeadlessImageTiming).mock.calls.filter(([name]) => name === 'queue.admit')).toHaveLength(
+        1,
+      );
+      expect(
+        vi
+          .mocked(recordHeadlessImageTiming)
+          .mock.calls.filter(([name]) => name === 'job.complete')
+          .map((call) => call[2]),
+      ).toEqual([{ kind: 'manual-thumbnail', identity: `failure:${code}`, success: false, errorCode: code }]);
+    },
+  );
 
   it('transcodes the settled thumbnail GLB without a kernel render or filesystem', async () => {
     const { imageClient, service } = createFixture();
@@ -164,6 +266,7 @@ describe('HeadlessImageService', () => {
   });
 
   it('should bound the number of queued explicit exports even when they share one payload', async () => {
+    vi.mocked(recordHeadlessImageTiming).mockClear();
     const { imageClient, service } = createFixture();
     const gate = Promise.withResolvers<void>();
     vi.mocked(imageClient.transcode).mockImplementationOnce(async () => {
@@ -181,6 +284,12 @@ describe('HeadlessImageService', () => {
     const overflow = service.export(captureJob('seventeenth'));
     await expect(overflow).rejects.toBeInstanceOf(RangeError);
     await expect(overflow).rejects.toThrow('Headless image queue is full');
+    expect(vi.mocked(recordHeadlessImageTiming).mock.calls.filter(([name]) => name === 'queue.admit')).toHaveLength(17);
+    expect(
+      vi
+        .mocked(recordHeadlessImageTiming)
+        .mock.calls.some(([name, , detail]) => name === 'queue.admit' && detail?.['identity'] === 'seventeenth'),
+    ).toBe(false);
     gate.resolve();
     await expect(Promise.all([active, ...accepted])).resolves.toHaveLength(17);
     expect(imageClient.transcode).toHaveBeenCalledTimes(17);
@@ -268,6 +377,59 @@ describe('HeadlessImageService', () => {
     gate.resolve();
     await expect(sibling).resolves.toEqual(files());
     expect(imageClient.transcode).toHaveBeenCalledTimes(2);
+  });
+
+  it('disposes one active non-cooperative transcode and two queued owners without late sibling dispatch', async () => {
+    const { imageClient, service } = createFixture();
+    const gate = Promise.withResolvers<void>();
+    const completion = (async (): Promise<Awaited<ReturnType<typeof imageClient.transcode>>> => {
+      await gate.promise;
+      return { success: true, data: files(), issues: [] };
+    })();
+    vi.mocked(imageClient.transcode).mockReturnValueOnce(completion);
+    const controllers = [new AbortController(), new AbortController(), new AbortController()];
+    const removeListeners = controllers.map(({ signal }) => vi.spyOn(signal, 'removeEventListener'));
+    const active = service.export(captureJob('dispose-active', { signal: controllers[0]!.signal }));
+    await vi.waitFor(() => {
+      expect(imageClient.transcode).toHaveBeenCalledOnce();
+    });
+    const queued = controllers.slice(1).map(async ({ signal }, index) =>
+      service.export(
+        captureJob(`dispose-queued-${index}`, {
+          geometryHash: `dispose-queued-${index}`,
+          signal,
+        }),
+      ),
+    );
+    const settled = Promise.allSettled([active, ...queued]);
+    try {
+      expect(imageClient.terminate).not.toHaveBeenCalled();
+      service.dispose();
+      const outcomes = await settled;
+      expect(outcomes).toHaveLength(3);
+      for (const outcome of outcomes) {
+        expect(outcome.status).toBe('rejected');
+        if (outcome.status !== 'rejected') {
+          throw new Error('Disposed job unexpectedly completed.');
+        }
+        expect(outcome.reason).toBeInstanceOf(Error);
+        expect(outcome.reason).toHaveProperty('message', 'HeadlessImageService was disposed');
+      }
+      expect(imageClient.terminate).toHaveBeenCalledOnce();
+      for (const listener of removeListeners) {
+        expect(listener).toHaveBeenCalledWith('abort', expect.any(Function));
+      }
+      expect(imageClient.transcode).toHaveBeenCalledOnce();
+      gate.resolve();
+      await completion;
+      await expect(service.export(captureJob('after-dispose'))).rejects.toThrow('HeadlessImageService is disposed');
+      expect(imageClient.transcode).toHaveBeenCalledOnce();
+      expect(imageClient.terminate).toHaveBeenCalledOnce();
+    } finally {
+      gate.resolve();
+      await completion;
+      service.dispose();
+    }
   });
 
   it('does not start an aborted operation after shared client initialization and detaches its listener', async () => {

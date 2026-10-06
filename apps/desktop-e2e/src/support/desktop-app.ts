@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { setTimeout as wait } from 'node:timers/promises';
-import type { DownloadItem, Event } from 'electron';
+import type * as Electron from 'electron';
+import type { BrowserWindow, DownloadItem, Event, IpcMainEvent, UtilityProcess } from 'electron';
 import { _electron as electron } from 'playwright';
-import type { ElectronApplication, Page } from 'playwright';
-import { expect } from 'vitest';
+import type { BrowserContext, ElectronApplication, Frame, Page } from 'playwright';
+import { expect, onTestFinished } from 'vitest';
 import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 import {
   desktopE2EApiUrl,
@@ -37,6 +38,315 @@ const clientRoot = process.env['TAU_DESKTOP_CLIENT_ROOT'] ?? join(workspaceRoot,
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
 const defaultPackagedExecutable = join(desktopRoot, 'package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau');
 const diagnosticsRoot = join(workspaceRoot, 'out/test-results/desktop-e2e');
+/** Milliseconds. The opt-in startup probe begins only if tracing remains pending. */
+const traceProbeDelay = 2000;
+/** Milliseconds. A main-process observation cannot extend a failed startup indefinitely. */
+const traceProbeMainLimit = 5000;
+/** Milliseconds between the two renderer CPU samples. */
+const traceProbeCpuInterval = 1000;
+
+/** Cached Playwright state only: observing this must not request renderer execution. */
+const observeTraceContext = (context: BrowserContext, startedAt: number) => {
+  const pageIds = new WeakMap<Page, number>();
+  const frameIds = new WeakMap<Frame, number>();
+  const listeners = new Map<Page, Array<() => void>>();
+  const events: Array<{ kind: string; page: number; frame?: number; elapsed: number }> = [];
+  let nextPageId = 0;
+  let nextFrameId = 0;
+  let droppedEvents = 0;
+  let everPageOverflow = false;
+  let everFrameOverflow = false;
+  const pageId = (page: Page): number => {
+    let id = pageIds.get(page);
+    if (id === undefined) {
+      id = ++nextPageId;
+      pageIds.set(page, id);
+    }
+    return id;
+  };
+  const frameId = (frame: Frame): number => {
+    let id = frameIds.get(frame);
+    if (id === undefined) {
+      id = ++nextFrameId;
+      frameIds.set(frame, id);
+    }
+    return id;
+  };
+  const record = (kind: string, page: Page, frame?: Frame): void => {
+    if (frame && page.frames().length > 16) {
+      everFrameOverflow = true;
+    }
+    if (events.length === 64) {
+      events.shift();
+      droppedEvents++;
+    }
+    events.push({
+      kind,
+      page: pageId(page),
+      ...(frame ? { frame: frameId(frame) } : {}),
+      elapsed: performance.now() - startedAt,
+    });
+  };
+  const attach = (page: Page): void => {
+    if (listeners.has(page)) {
+      return;
+    }
+    if (listeners.size === 8) {
+      everPageOverflow = true;
+      return;
+    }
+    const attached = (frame: Frame): void => {
+      record('frame-attached', page, frame);
+    };
+    const detached = (frame: Frame): void => {
+      record('frame-detached', page, frame);
+    };
+    const navigated = (frame: Frame): void => {
+      record('frame-navigated', page, frame);
+    };
+    const closed = (): void => {
+      record('page-closed', page);
+    };
+    page.on('frameattached', attached);
+    page.on('framedetached', detached);
+    page.on('framenavigated', navigated);
+    page.on('close', closed);
+    listeners.set(page, [
+      () => page.off('frameattached', attached),
+      () => page.off('framedetached', detached),
+      () => page.off('framenavigated', navigated),
+      () => page.off('close', closed),
+    ]);
+  };
+  const onPage = (page: Page): void => {
+    record('page-opened', page);
+    attach(page);
+  };
+  for (const page of context.pages()) {
+    attach(page);
+  }
+  context.on('page', onPage);
+  const snapshot = () => {
+    const pages = context.pages();
+    const selectedPages = pages.slice(0, 8);
+    const selectedFrames = selectedPages.map((page) => page.frames());
+    everPageOverflow ||= pages.length > 8;
+    everFrameOverflow ||= selectedFrames.some((frames) => frames.length > 16);
+    return {
+      pageCount: pages.length,
+      truncatedPages: Math.max(0, pages.length - 8),
+      everPageOverflow,
+      everFrameOverflow,
+      droppedEvents,
+      events: [...events],
+      pages: selectedPages.map((page, index) => {
+        const frames = selectedFrames[index]!;
+        return {
+          id: pageId(page),
+          closed: page.isClosed(),
+          frameCount: frames.length,
+          truncatedFrames: Math.max(0, frames.length - 16),
+          frames: frames.slice(0, 16).map((frame) => ({
+            id: frameId(frame),
+            parent: frame.parentFrame() ? frameId(frame.parentFrame()!) : null,
+            detached: frame.isDetached(),
+            location: frame.url().startsWith('app://tau/') ? 'app' : frame.url() === 'about:blank' ? 'blank' : 'other',
+          })),
+        };
+      }),
+    };
+  };
+  const initial = snapshot();
+  return {
+    snapshot: () => ({ initial, current: snapshot() }),
+    dispose: () => {
+      context.off('page', onPage);
+      for (const registrations of listeners.values()) {
+        for (const remove of registrations) {
+          remove();
+        }
+      }
+      listeners.clear();
+    },
+  };
+};
+
+const observePendingTrace = async ({
+  application,
+  directory,
+  signal,
+  startupStartedAt,
+  traceEnter,
+  controlNoMainIpc,
+  contextObservation,
+}: Readonly<{
+  application: ElectronApplication;
+  directory: string;
+  signal: AbortSignal;
+  startupStartedAt: number;
+  /** Milliseconds since startup began. */
+  traceEnter: number;
+  controlNoMainIpc: boolean;
+  contextObservation: ReturnType<typeof observeTraceContext>;
+}>): Promise<void> => {
+  const observation: {
+    status: string;
+    samples: unknown[];
+    /** Milliseconds since startup began. */
+    traceEnter: number;
+    mainIpc: Array<{
+      /** Milliseconds since startup began. */ enter: number;
+      /** Milliseconds since startup began. */ exit?: number;
+      /** Milliseconds since startup began; may precede actual IPC settlement on deadline. */
+      raceSettled?: number;
+    }>;
+    errorName?: string;
+    context?: ReturnType<ReturnType<typeof observeTraceContext>['snapshot']>;
+  } = { status: 'waiting', samples: [], traceEnter, mainIpc: [] };
+  const path = join(directory, 'trace-pending.json');
+  let pendingWrite: Promise<void> = Promise.resolve();
+  const persist = async (): Promise<void> => {
+    observation.context = contextObservation.snapshot();
+    const snapshot = JSON.stringify(observation);
+    const previousWrite = pendingWrite;
+    pendingWrite = (async (): Promise<void> => {
+      try {
+        await previousWrite;
+      } catch {
+        // A later observation still gets its own attempt if an earlier write failed.
+      }
+      await writeFile(path, snapshot);
+    })();
+    await pendingWrite;
+  };
+  const read = async () => {
+    const timing: { enter: number; exit?: number; raceSettled?: number } = {
+      enter: performance.now() - startupStartedAt,
+    };
+    observation.mainIpc.push(timing);
+    const mainDeadlineController = new AbortController();
+    let readRaceSettled = false;
+    try {
+      const mainDeadline = async (): Promise<never> => {
+        await wait(traceProbeMainLimit, undefined, {
+          signal: AbortSignal.any([signal, mainDeadlineController.signal]),
+        });
+        throw new Error('main-evaluate-timeout');
+      };
+      const evaluate = async () => {
+        try {
+          return await application.evaluate(({ app, BrowserWindow }) => {
+            const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+            if (windows.length !== 1) {
+              return {
+                status: windows.length === 0 ? 'missing-window' : 'ambiguous-window',
+                windowCount: windows.length,
+              } as const;
+            }
+            const contents = windows[0]!.webContents;
+            const rendererPid = contents.getOSProcessId();
+            const frames = contents.mainFrame.framesInSubtree;
+            const selected = {
+              windowCount: 1,
+              webContentsId: contents.id,
+              rendererPid,
+              loading: contents.isLoading(),
+              loadingMainFrame: contents.isLoadingMainFrame(),
+              waitingForResponse: contents.isWaitingForResponse(),
+              crashed: contents.isCrashed(),
+              appDocument: contents.getURL().startsWith('app://tau/'),
+              frameCount: frames.length,
+              frames: frames.slice(0, 16).map((frame) => ({
+                processId: frame.processId,
+                routingId: frame.routingId,
+                detached: frame.detached,
+              })),
+            };
+            if (rendererPid <= 0) {
+              return { status: 'missing-renderer', ...selected } as const;
+            }
+            const metrics = app.getAppMetrics().filter((metric) => metric.pid === rendererPid);
+            if (metrics.length !== 1) {
+              return {
+                status: metrics.length === 0 ? 'missing-metric' : 'ambiguous-metric',
+                ...selected,
+              } as const;
+            }
+            const metric = metrics[0]!;
+            return {
+              status: 'selected',
+              ...selected,
+              creationTime: metric.creationTime,
+              cpu: {
+                percentCPUUsage: metric.cpu.percentCPUUsage,
+                cumulativeCPUUsage: metric.cpu.cumulativeCPUUsage,
+              },
+            } as const;
+          });
+        } finally {
+          timing.exit = performance.now() - startupStartedAt;
+          if (readRaceSettled) {
+            // The observation race already ended; retain the later real IPC result time.
+            try {
+              await persist();
+            } catch {
+              // Private diagnostics never replace the original IPC result or error.
+            }
+          }
+        }
+      };
+      return await Promise.race([evaluate(), mainDeadline()]);
+    } finally {
+      readRaceSettled = true;
+      timing.raceSettled = performance.now() - startupStartedAt;
+      mainDeadlineController.abort();
+    }
+  };
+  try {
+    await persist();
+    await wait(traceProbeDelay, undefined, { signal });
+    if (controlNoMainIpc) {
+      await persist();
+      await wait(traceProbeCpuInterval, undefined, { signal });
+      observation.status = 'control-no-main-ipc';
+      return;
+    }
+    const first = await read();
+    signal.throwIfAborted();
+    observation.samples.push(first);
+    await persist();
+    if (first.status !== 'selected') {
+      observation.status = first.status;
+      return;
+    }
+    await wait(traceProbeCpuInterval, undefined, { signal });
+    const second = await read();
+    signal.throwIfAborted();
+    observation.samples.push(second);
+    observation.status =
+      second.status === 'selected' &&
+      second.rendererPid === first.rendererPid &&
+      second.creationTime === first.creationTime &&
+      second.webContentsId === first.webContentsId
+        ? 'selected'
+        : second.status === 'selected'
+          ? 'renderer-changed'
+          : second.status;
+  } catch (error) {
+    observation.status = signal.aborted
+      ? signal.reason === 'test-finished'
+        ? 'test-finished'
+        : 'trace-settled'
+      : error instanceof Error && error.message === 'main-evaluate-timeout'
+        ? 'main-evaluate-timeout'
+        : 'main-evaluate-refused';
+    if (!signal.aborted) {
+      observation.errorName = error instanceof Error ? error.name : typeof error;
+    }
+  } finally {
+    await persist();
+  }
+};
 
 /** Select the complete descendant command records from one successful ps snapshot. */
 export const desktopDescendants = (
@@ -125,6 +435,310 @@ export type DesktopSession = {
   readonly close: () => Promise<void>;
 };
 
+/** One served renderer request, correlated to the child receiving its runtime port. */
+export type DesktopRuntimeLease = {
+  readonly requestId: string;
+  readonly webContentsId: number;
+  readonly frameProcessId: number;
+  readonly frameRoutingId: number;
+  readonly context: Readonly<Record<string, string>>;
+  hostId?: string;
+  pid?: number;
+  exitCode?: number;
+  gap?: string;
+};
+
+type DesktopRuntimeLeaseState = typeof globalThis & {
+  tauE2eRuntimeLeases?: DesktopRuntimeLease[];
+  tauE2eRestoreRuntimeLeases?: () => void;
+};
+
+/** Serializable test installer: observe real handoffs inside the synchronous broker dispatch. */
+export const installDesktopRuntimeLeaseObservation = ({
+  ipcMain,
+  utilityProcess,
+}: Pick<typeof Electron, 'ipcMain' | 'utilityProcess'>): void => {
+  const state = globalThis as DesktopRuntimeLeaseState;
+  if (state.tauE2eRestoreRuntimeLeases) {
+    throw new Error('Runtime lease observation is already installed.');
+  }
+  const leases: DesktopRuntimeLease[] = [];
+  state.tauE2eRuntimeLeases = leases;
+  const originalFork = utilityProcess.fork;
+  const originalEmit = ipcMain.emit;
+  const children: Array<() => void> = [];
+  let active: { lease: DesktopRuntimeLease; child?: UtilityProcess; handoffs: number } | undefined;
+  const fork = ((...args: Parameters<typeof originalFork>) => {
+    const child = originalFork(...args);
+    if (args[2]?.serviceName !== 'tau-kernel-host') {
+      return child;
+    }
+    const originalPost = child.postMessage;
+    let lease: DesktopRuntimeLease | undefined;
+    let { pid } = child;
+    const spawned = (): void => {
+      pid = child.pid;
+      if (lease) {
+        lease.pid = pid;
+      }
+    };
+    const exited = (code: number): void => {
+      if (lease) {
+        lease.pid = pid;
+        lease.exitCode = code;
+      }
+    };
+    const post = ((message: unknown, transfer?: Parameters<typeof originalPost>[1]) => {
+      originalPost.call(child, message, transfer);
+      const frame = message as { taucadRuntime?: unknown; runtimePortIndex?: unknown } | undefined;
+      if (
+        active &&
+        frame?.taucadRuntime === true &&
+        typeof frame.runtimePortIndex === 'number' &&
+        Number.isSafeInteger(frame.runtimePortIndex) &&
+        frame.runtimePortIndex >= 0 &&
+        transfer?.[frame.runtimePortIndex]
+      ) {
+        active.handoffs += 1;
+        active.child = child;
+        lease = active.lease;
+        lease.pid = pid;
+      }
+    }) as typeof child.postMessage;
+    const restore = (): void => {
+      child.postMessage = originalPost;
+      child.off('spawn', spawned);
+      child.off('exit', exited);
+    };
+    try {
+      child.postMessage = post;
+      child.once('spawn', spawned);
+      child.once('exit', exited);
+    } catch {
+      // An unavailable observation seam must not change the real broker's admission.
+      try {
+        restore();
+      } catch {
+        /* The test will reject the missing handoff. */
+      }
+    }
+    children.push(restore);
+    return child;
+  }) as typeof utilityProcess.fork;
+  const emit = ((...args: Parameters<typeof originalEmit>) => {
+    const channel: unknown = args[0];
+    const event: unknown = args[1];
+    const payload: unknown = args[2];
+    const request = payload as { requestId?: unknown; context?: Record<string, string> } | undefined;
+    const incoming = event as IpcMainEvent | undefined;
+    const target = incoming?.senderFrame;
+    if (channel !== 'taucad:connect-runtime' || typeof request?.requestId !== 'string' || !incoming || !target) {
+      return originalEmit.apply(ipcMain, args);
+    }
+    const lease: DesktopRuntimeLease = {
+      requestId: request.requestId,
+      webContentsId: incoming.sender.id,
+      frameProcessId: target.processId,
+      frameRoutingId: target.routingId,
+      context: { ...request.context },
+      gap: 'no-synchronous-served-handoff',
+    };
+    leases.push(lease);
+    const prior = active;
+    const scope: NonNullable<typeof active> = { lease, handoffs: 0 };
+    const originalRelay = target.postMessage;
+    const relay = ((relayChannel: string, message: unknown, transfer?: Parameters<typeof originalRelay>[2]) => {
+      originalRelay.call(target, relayChannel, message, transfer);
+      const frame = message as { requestId?: unknown; hostId?: unknown } | undefined;
+      if (
+        active === scope &&
+        relayChannel === 'taucad:connect-runtime:port' &&
+        frame?.requestId === lease.requestId &&
+        typeof frame.hostId === 'string' &&
+        frame.hostId.length > 0 &&
+        transfer?.length === 1
+      ) {
+        if (lease.hostId !== undefined) {
+          lease.gap = 'ambiguous-frame-relay';
+        } else if (scope.handoffs === 1 && scope.child) {
+          lease.hostId = frame.hostId;
+          delete lease.gap;
+        } else {
+          lease.hostId = frame.hostId;
+          lease.gap = scope.handoffs === 0 ? 'unobserved-child' : 'ambiguous-child-handoff';
+          delete lease.pid;
+        }
+      }
+    }) as typeof target.postMessage;
+    active = scope;
+    try {
+      target.postMessage = relay;
+    } catch {
+      lease.gap = 'unavailable-frame-observation';
+    }
+    try {
+      return originalEmit.apply(ipcMain, args);
+    } finally {
+      if (lease.gap === undefined && scope.handoffs !== 1) {
+        lease.gap = 'ambiguous-child-handoff';
+        delete lease.pid;
+      }
+      active = prior;
+      try {
+        target.postMessage = originalRelay;
+      } catch {
+        lease.gap = 'frame-restoration-failed';
+      }
+    }
+  }) as typeof ipcMain.emit;
+  let forkInstalled = false;
+  try {
+    utilityProcess.fork = fork;
+    forkInstalled = true;
+    ipcMain.emit = emit;
+  } catch (error) {
+    if (forkInstalled) {
+      utilityProcess.fork = originalFork;
+    }
+    delete state.tauE2eRuntimeLeases;
+    throw error;
+  }
+  state.tauE2eRestoreRuntimeLeases = () => {
+    utilityProcess.fork = originalFork;
+    ipcMain.emit = originalEmit;
+    const errors: unknown[] = [];
+    for (const restore of children) {
+      try {
+        restore();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    delete state.tauE2eRestoreRuntimeLeases;
+    if (errors.length > 0) {
+      throw new AggregateError(errors, 'Runtime lease observation cleanup failed.');
+    }
+  };
+};
+
+/** Install before scaffold or converter acquisition; pre-existing children are never inferred. */
+export const observeDesktopRuntimeLeases = async (session: DesktopSession): Promise<void> => {
+  await session.application.evaluate(installDesktopRuntimeLeaseObservation);
+};
+
+/** Snapshot exact request/host/child identity, including explicit observation gaps. */
+export const desktopRuntimeLeases = async (session: DesktopSession): Promise<readonly DesktopRuntimeLease[]> =>
+  session.application.evaluate(() => {
+    const state = globalThis as DesktopRuntimeLeaseState;
+    if (!state.tauE2eRuntimeLeases) {
+      throw new Error('Runtime lease observation was not installed.');
+    }
+    return state.tauE2eRuntimeLeases.map((lease) => ({ ...lease }));
+  });
+
+/** Resolve one page-owned served lease, never a new or most recently spawned PID. */
+export const waitForDesktopRuntimeLease = async (
+  session: DesktopSession,
+  page: Page,
+  options: {
+    readonly requestId?: string;
+    readonly previousRequestIds?: readonly string[];
+    readonly leaseTimeout?: number;
+  } = {},
+): Promise<DesktopRuntimeLease & { readonly hostId: string; readonly pid: number }> => {
+  const window = await session.application.browserWindow(page);
+  const identity = await window.evaluate(({ webContents }: BrowserWindow) => ({
+    webContentsId: webContents.id,
+    frameProcessId: webContents.mainFrame.processId,
+    frameRoutingId: webContents.mainFrame.routingId,
+  }));
+  let matches: readonly DesktopRuntimeLease[] = [];
+  await expect
+    .poll(
+      async () => {
+        const leases = await desktopRuntimeLeases(session);
+        matches = leases.filter(
+          (lease) =>
+            lease.webContentsId === identity.webContentsId &&
+            lease.frameProcessId === identity.frameProcessId &&
+            lease.frameRoutingId === identity.frameRoutingId &&
+            (options.requestId === undefined
+              ? lease.context['purpose'] === 'ephemeral' &&
+                lease.context['definition'] === 'default' &&
+                !options.previousRequestIds?.includes(lease.requestId)
+              : lease.requestId === options.requestId),
+        );
+        return (
+          matches.length === 1 &&
+          matches[0]?.gap === undefined &&
+          Number.isSafeInteger(matches[0]?.pid) &&
+          (matches[0]?.pid ?? 0) > 0
+        );
+      },
+      options.leaseTimeout === undefined ? {} : { timeout: options.leaseTimeout },
+    )
+    .toBe(true);
+  const lease = matches[0];
+  if (!lease?.hostId || lease.pid === undefined || (lease.gap ?? '') !== '' || matches.length !== 1) {
+    throw new Error(`No unique actual runtime lease: ${JSON.stringify(matches)}`);
+  }
+  return { ...lease, hostId: lease.hostId, pid: lease.pid };
+};
+
+/** Require this actual child exit, OS retirement and matching supervised host diagnostics. */
+export const expectDesktopRuntimeLeaseExit = async (
+  session: DesktopSession,
+  lease: DesktopRuntimeLease & { readonly hostId: string; readonly pid: number },
+  options: { readonly released: boolean; readonly exitTimeout?: number },
+): Promise<void> => {
+  await expect
+    .poll(
+      async () => {
+        const leases = await desktopRuntimeLeases(session);
+        const observed = leases.find((entry) => entry.requestId === lease.requestId);
+        const present = await session.application.evaluate(
+          ({ app }, pid) => app.getAppMetrics().some((metric) => metric.pid === pid),
+          lease.pid,
+        );
+        let retired = false;
+        try {
+          process.kill(lease.pid, 0);
+        } catch (error) {
+          if (!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH') {
+            throw error;
+          }
+          retired = true;
+        }
+        const log = await readFile(session.logPath, 'utf8');
+        const lines = log.split('\n');
+        const supervised = lines.some((line) => {
+          const separator = ' kernel.exit ';
+          const index = line.indexOf(separator);
+          if (index === -1) {
+            return false;
+          }
+          const exit = JSON.parse(line.slice(index + separator.length)) as {
+            hostId?: string;
+            code?: number;
+            released?: boolean;
+          };
+          return exit.hostId === lease.hostId && exit.code === observed?.exitCode && exit.released === options.released;
+        });
+        return (
+          observed?.gap === undefined &&
+          observed?.hostId === lease.hostId &&
+          observed.pid === lease.pid &&
+          observed.exitCode !== undefined &&
+          !present &&
+          retired &&
+          supervised
+        );
+      },
+      { timeout: options.exitTimeout ?? 60_000 },
+    )
+    .toBe(true);
+};
+
 /** Save and await the next download emitted by the packaged Electron session. */
 export const captureNextDesktopDownload = async (
   desktopSession: DesktopSession,
@@ -203,6 +817,12 @@ export const launchDesktopApp = async (options: {
   readonly preserveProfile?: boolean | undefined;
   /** Capture startup traffic before Playwright can attach its request listener. */
   readonly captureStartupNetwork?: boolean | undefined;
+  /** Collect private renderer state only while the original tracing call is pending. */
+  readonly startupDiagnostic?: boolean | undefined;
+  /** Private finite control: retain observation timing without sending main-process IPC. */
+  readonly startupDiagnosticNoMainIpc?: boolean | undefined;
+  /** Unit tests supply an owned launcher without starting a native process. */
+  readonly launchElectron?: typeof electron.launch | undefined;
   /** WAV input for Chromium's fake capture driver; leaves the OS microphone unchanged. */
   readonly fakeMicrophonePath?: string | undefined;
 }): Promise<DesktopSession> => {
@@ -241,7 +861,27 @@ export const launchDesktopApp = async (options: {
     delete inheritedEnvironment['TAU_FRONTEND_URL'];
   }
 
-  const application = await electron.launch({
+  await mkdir(diagnosticsRoot, { recursive: true });
+  const startupDirectory = await mkdtemp(join(diagnosticsRoot, 'startup-'));
+  const startupStartedAt = performance.now();
+  let startupStage = 'electron.launch';
+  const owner: { child?: ReturnType<ElectronApplication['process']> } = {};
+  const recordStartup = async (stage: string, status: 'pending' | 'failed' | 'returned' = 'pending'): Promise<void> => {
+    startupStage = stage;
+    await writeFile(
+      join(startupDirectory, 'stage.json'),
+      JSON.stringify({
+        stage,
+        status,
+        /** Milliseconds since the first startup mark. */
+        elapsed: performance.now() - startupStartedAt,
+        pid: owner.child?.pid,
+      }),
+    );
+  };
+  await recordStartup(startupStage);
+
+  const launchOptions = {
     ...(packaged ? { executablePath: packagedExecutable } : {}),
     args: [
       ...(packaged ? [] : [desktopRoot]),
@@ -288,8 +928,36 @@ export const launchDesktopApp = async (options: {
       TAU_E2E_HIDE_WINDOW: '1',
       ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
     },
-  });
+  };
+  const launch = options.launchElectron ? options.launchElectron(launchOptions) : electron.launch(launchOptions);
+  let application: ElectronApplication;
+  try {
+    application = await launch;
+  } catch (error) {
+    await recordStartup(startupStage, 'failed').catch(() => undefined);
+    throw error;
+  }
   const child = application.process();
+  owner.child = child;
+  let sessionReturned = false;
+  let startupFinished = false;
+  let traceProbeAbort: AbortController | undefined;
+  let traceProbe: Promise<void> | undefined;
+  let contextObservation: ReturnType<typeof observeTraceContext> | undefined;
+  const assertStartupActive = (): void => {
+    if (startupFinished) {
+      throw new Error('Desktop startup finished before a session was returned.');
+    }
+  };
+  onTestFinished(async () => {
+    startupFinished = true;
+    traceProbeAbort?.abort('test-finished');
+    if (!sessionReturned && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+    }
+    await traceProbe?.catch(() => undefined);
+    contextObservation?.dispose();
+  });
   /* Installed before the first window loads, and kept for the whole session, so
    * startup and late traffic are both observed. */
   const analyticsRequests: string[] = [];
@@ -312,11 +980,19 @@ export const launchDesktopApp = async (options: {
   try {
     /* A packaged launch releases main bootstrap before its first window exists.
      * Configure the main-process test overrides only after that startup boundary. */
+    await recordStartup('first-window');
+    assertStartupActive();
     page = await application.firstWindow();
+    assertStartupActive();
+    await recordStartup('dom-content-loaded');
+    assertStartupActive();
     await page.waitForLoadState('domcontentloaded');
+    assertStartupActive();
     if (options.fakeMicrophonePath) {
       // Chromium recommends disabling DSP for calibrated file microphone input.
       // Keep the real capture driver; change only its audio-processing constraints.
+      await recordStartup('audio-init-script');
+      assertStartupActive();
       await page.addInitScript(() => {
         const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         navigator.mediaDevices.getUserMedia = async (constraints) => {
@@ -334,7 +1010,10 @@ export const launchDesktopApp = async (options: {
           });
         };
       });
+      assertStartupActive();
     }
+    await recordStartup('main-overrides');
+    assertStartupActive();
     await application.evaluate(({ dialog, shell }, selectedDirectory) => {
       const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
       shell.openExternal = async (url): Promise<void> => {
@@ -343,6 +1022,7 @@ export const launchDesktopApp = async (options: {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
       dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
     }, pickedDirectory);
+    assertStartupActive();
     page.setDefaultTimeout(60_000);
     page.on('console', (message) => {
       if (message.type() === 'error') {
@@ -350,9 +1030,46 @@ export const launchDesktopApp = async (options: {
       }
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
-    await page.context().tracing.start({ screenshots: true, snapshots: true });
+    await recordStartup('trace-start');
+    assertStartupActive();
+    if (options.startupDiagnostic) {
+      contextObservation = observeTraceContext(page.context(), startupStartedAt);
+    }
+    const traceEnter = performance.now() - startupStartedAt;
+    const tracingStart = page.context().tracing.start({ screenshots: true, snapshots: true });
+    if (options.startupDiagnostic) {
+      traceProbeAbort = new AbortController();
+      traceProbe = observePendingTrace({
+        application,
+        directory: startupDirectory,
+        signal: traceProbeAbort.signal,
+        startupStartedAt,
+        traceEnter,
+        controlNoMainIpc: options.startupDiagnosticNoMainIpc === true,
+        contextObservation: contextObservation!,
+      });
+      // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- Attach before the original tracing promise settles.
+      void traceProbe.catch(() => undefined);
+    }
+    let traceOutcome: 'fulfilled' | 'rejected' = 'rejected';
+    try {
+      await tracingStart;
+      traceOutcome = 'fulfilled';
+    } finally {
+      if (options.startupDiagnostic) {
+        await writeFile(
+          join(startupDirectory, 'trace-settled.json'),
+          JSON.stringify({ status: traceOutcome, elapsed: performance.now() - startupStartedAt }),
+        ).catch(() => undefined);
+      }
+      traceProbeAbort?.abort('trace-settled');
+      await traceProbe?.catch(() => undefined);
+      contextObservation?.dispose();
+    }
+    assertStartupActive();
   } catch (error) {
     child.kill('SIGKILL');
+    await recordStartup(startupStage, 'failed').catch(() => undefined);
     /* The shell's own output is the only account of why it went away, and the
      * caller has no session to read it from. */
     throw new Error(`The desktop shell did not survive launch.\n${output.join('')}`, { cause: error });
@@ -392,8 +1109,10 @@ export const launchDesktopApp = async (options: {
       .catch(() => undefined);
     const desktopLog = await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '(no desktop.log)');
     const bodyText = await page
-      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- `innerText` keeps the rendered line breaks that make this readable.
-      .evaluate(() => document.body.innerText.slice(0, 2000))
+      .locator('body')
+      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Rendered line breaks are required in the failure report.
+      .innerText({ timeout: 10_000 })
+      .then((text) => text.slice(0, 2000))
       .catch(() => '(unavailable)');
     const pickedTree = await tree(pickedDirectory);
     const homeTree = await tree(join(userData, 'home'));
@@ -415,6 +1134,12 @@ export const launchDesktopApp = async (options: {
         homeTree.join('\n'),
         '--- granted roots ---',
         grants,
+        '--- runtime leases ---',
+        JSON.stringify(
+          await application
+            .evaluate(() => (globalThis as DesktopRuntimeLeaseState).tauE2eRuntimeLeases ?? [])
+            .catch(() => '(unavailable)'),
+        ),
         '--- desktop.log ---',
         desktopLog,
       ].join('\n'),
@@ -424,6 +1149,12 @@ export const launchDesktopApp = async (options: {
   };
 
   const close = async (): Promise<void> => {
+    const wasRunning = child.exitCode === null && child.signalCode === null;
+    const [observationCleanup] = await Promise.allSettled([
+      application.evaluate(() => {
+        (globalThis as DesktopRuntimeLeaseState).tauE2eRestoreRuntimeLeases?.();
+      }),
+    ]);
     if (tracing) {
       tracing = false;
       await page
@@ -457,16 +1188,29 @@ export const launchDesktopApp = async (options: {
     const chatLogs = chatLogDestination('desktop-e2e', expect.getState().testPath);
     await captureChatLogs(userData, chatLogs);
     await captureChatLogs(pickedParent, chatLogs);
-    if (captured) {
-      /* Keep the evidence a failing run just produced. */
-      return;
+    /* Keep the evidence a failing run just produced. */
+    if (!captured) {
+      if (!options.preserveProfile) {
+        await rm(userData, { force: true, recursive: true });
+      }
+      await rm(pickedParent, { force: true, recursive: true });
     }
-    if (!options.preserveProfile) {
-      await rm(userData, { force: true, recursive: true });
+    if (wasRunning && observationCleanup.status === 'rejected') {
+      const error: unknown = observationCleanup.reason;
+      throw error;
     }
-    await rm(pickedParent, { force: true, recursive: true });
   };
 
+  try {
+    assertStartupActive();
+    await recordStartup('session-returned', 'returned');
+    assertStartupActive();
+  } catch (error) {
+    child.kill('SIGKILL');
+    await recordStartup(startupStage, 'failed').catch(() => undefined);
+    throw new Error(`The desktop shell did not survive launch.\n${output.join('')}`, { cause: error });
+  }
+  sessionReturned = true;
   return {
     analyticsRequests,
     startupNetworkLogPath,

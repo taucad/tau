@@ -31,6 +31,7 @@
  *   TAU_DESKTOP_CLIENT_ROOT=<private copy of apps/ui/desktop/build/client> \
  *   node apps/ui-e2e/src/support/open-to-frame.ts desktop jscad 3 [base-url] [cold|home|restart-warm|link-intent]
  *   node apps/ui-e2e/src/support/open-to-frame.ts browser jscad 3 http://127.0.0.1:3110 [cold|home]
+ *   node apps/ui-e2e/src/support/open-to-frame.ts browser replicad 5 http://127.0.0.1:61901 reference-cold [tray|birdhouse|honeycomb] [webgl|webgpu]
  *
  * Environment:
  *   TAU_DESKTOP_CLIENT_ROOT      Required for unpackaged desktop runs; packaged runs hash their bundled client.
@@ -50,8 +51,9 @@ import { cpus, loadavg, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { setTimeout as wait } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { _electron as electron, chromium } from 'playwright';
-import type { Page } from 'playwright';
+import type { Page, Request } from 'playwright';
 // oxlint-disable-next-line no-restricted-imports -- one owner for the measurement contract both harnesses answer to.
 import { budgetVerdict, readContention, rendererAngle } from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
 // oxlint-disable-next-line no-restricted-imports -- same owner, type only.
@@ -62,11 +64,20 @@ import { mergeRuntimeTrace } from '../../../runtime-e2e/src/benchmarks/runtime-t
 import type { RuntimeTraceSummary } from '../../../runtime-e2e/src/benchmarks/runtime-trace.ts';
 // oxlint-disable-next-line no-restricted-imports -- executable driver: no package alias before install.
 import { classifyWebGpuAdapter } from './webgpu-profile.ts';
-// oxlint-disable-next-line no-restricted-imports -- executable driver runs directly in Node without the test aliases.
-import { epochForRelativeMarks, observedKernelSelection, observedRuntimeWindow } from './open-to-frame-observation.ts';
+// oxlint-disable no-restricted-imports -- executable driver runs directly in Node without the test aliases.
+import {
+  epochForRelativeMarks,
+  observedKernelSelection,
+  observedReplicadLoadedWasm,
+  observedReplicadNativeVariant,
+  observedRuntimeWindow,
+} from './open-to-frame-observation.ts';
+// oxlint-enable no-restricted-imports
 
 type Host = 'browser' | 'desktop';
-type Scenario = 'cold' | 'home' | 'restart-warm' | 'link-intent';
+type Scenario = 'cold' | 'home' | 'restart-warm' | 'link-intent' | 'reference-cold';
+type ReferenceName = 'tray' | 'birdhouse' | 'honeycomb';
+type ReferenceBackend = 'webgl' | 'webgpu';
 
 /** Steps of one open-to-frame sample, in the order they are stamped. */
 type Timeline = Readonly<Record<string, number>>;
@@ -84,13 +95,18 @@ type PageTimeline = Readonly<{
 }>;
 
 type FrameWitness = Readonly<{
-  /** Screenshot is a compositor pixel readback after the model's viewport renderer advanced. */
+  /** PNG readback follows an active viewport frame; compositor presentation is unmeasured. */
   screenshot: string;
   sha256: string;
   componentIds: readonly string[];
   visibleMeshes: number;
   rendererFrame: number;
   modelPixelDifference: number;
+  backend: 'webgl' | 'webgpu' | undefined;
+  framed: boolean;
+  viewport: readonly number[];
+  dpr: number;
+  canvas: readonly number[];
 }>;
 
 const repoRoot = resolve(import.meta.dirname, '../../../..');
@@ -98,7 +114,8 @@ const hostArgument = process.argv[2] ?? 'desktop';
 const host: Host = hostArgument === 'browser' ? 'browser' : 'desktop';
 const kernelId = process.argv[3] ?? 'jscad';
 const repeats = Number(process.argv[4] ?? 3);
-if (!Number.isSafeInteger(repeats) || repeats < 2) {
+const referenceStructuralProbe = process.env['TAU_OPEN_TO_FRAME_NATIVE_STRUCTURAL_PROBE'] === '1';
+if (!Number.isSafeInteger(repeats) || repeats < (referenceStructuralProbe ? 1 : 2)) {
   throw new Error('Repeat count must be an integer of at least two for a variation verdict.');
 }
 const baseUrl = process.argv[5] ?? 'http://127.0.0.1:3110';
@@ -107,18 +124,43 @@ if (
   scenarioArgument !== 'cold' &&
   scenarioArgument !== 'home' &&
   scenarioArgument !== 'restart-warm' &&
-  scenarioArgument !== 'link-intent'
+  scenarioArgument !== 'link-intent' &&
+  scenarioArgument !== 'reference-cold'
 ) {
-  throw new Error(`Scenario must be cold, home, restart-warm or link-intent; received '${scenarioArgument}'.`);
+  throw new Error(
+    `Scenario must be cold, home, restart-warm, link-intent or reference-cold; received '${scenarioArgument}'.`,
+  );
 }
 const scenario: Scenario = scenarioArgument;
+if (referenceStructuralProbe && scenario !== 'reference-cold') {
+  throw new Error('The native structural probe is only available for reference-cold.');
+}
+const referenceName = process.argv[7];
+const referenceBackend = process.argv[8] as ReferenceBackend | undefined;
+if (
+  scenario === 'reference-cold' &&
+  (host !== 'browser' ||
+    kernelId !== 'replicad' ||
+    repeats !== (referenceStructuralProbe ? 1 : 5) ||
+    (referenceName !== 'tray' && referenceName !== 'birdhouse' && referenceName !== 'honeycomb') ||
+    (referenceBackend !== 'webgl' && referenceBackend !== 'webgpu'))
+) {
+  throw new Error(
+    `reference-cold requires browser replicad ${referenceStructuralProbe ? '1 structural probe' : '5'} [base-url] reference-cold [tray|birdhouse|honeycomb] [webgl|webgpu].`,
+  );
+}
 if (scenario === 'restart-warm' && host !== 'desktop') {
   throw new Error('restart-warm requires the desktop host with a persistent user-data profile.');
 }
 if (scenario === 'link-intent' && host !== 'desktop') {
   throw new Error('link-intent requires the desktop host: only it seeds a project visible from Home.');
 }
-const scenarioSuffix = scenario === 'cold' ? '' : `-${scenario}`;
+const scenarioSuffix =
+  scenario === 'cold'
+    ? ''
+    : scenario === 'reference-cold'
+      ? `-${scenario}-${referenceName}-${referenceBackend}${referenceStructuralProbe ? '-structural-probe' : ''}`
+      : `-${scenario}`;
 const origin = host === 'desktop' ? 'app://tau' : baseUrl;
 const outputDirectory = process.env['TAU_OPEN_TO_FRAME_OUT'] ?? join(repoRoot, 'out/test-results/open-to-frame');
 const clientRoot = process.env['TAU_DESKTOP_CLIENT_ROOT'];
@@ -137,6 +179,58 @@ const examples: Readonly<Record<string, readonly [string, string]>> = {
   picogk: ['picogk/parameterized-sphere', 'main.cs'],
   build123d: ['build123d/v8-engine-brep', 'main.py'],
 };
+
+const referenceFixtures: Readonly<
+  Record<ReferenceName, Readonly<{ route: string; source: string; bytes: number; sha256: string }>>
+> = {
+  tray: {
+    route: '/__e2e/example-fixture?locator=replicad.tray',
+    source: 'libs/tau-examples/src/kernels/replicad/tray/main.ts',
+    bytes: 1732,
+    sha256: '01219b9077985715827d327bdc9821ad5a534cb755237527ff4ca5980b0f20c6',
+  },
+  birdhouse: {
+    route: '/__e2e/example-fixture?locator=replicad.birdhouse',
+    source: 'libs/tau-examples/src/kernels/replicad/birdhouse/main.ts',
+    bytes: 2121,
+    sha256: '8a421459a81972d10b391445ad0dc2d1879c8f2a3bea014d819e78343381238e',
+  },
+  honeycomb: {
+    route: '/__e2e/project-file-tree?main=honeycomb',
+    source: 'apps/ui/app/routes/[__e2e].project-file-tree/route.tsx#honeycombModel',
+    bytes: 347,
+    sha256: '9433c7f5d9d2f2bc521efddeb71e25488ee906e4f888c39b82aa7677abb2806b',
+  },
+};
+const referenceFixture = scenario === 'reference-cold' ? referenceFixtures[referenceName as ReferenceName] : undefined;
+const referenceNativeTreatment = 'custom';
+const referenceAssetPins = [
+  {
+    name: 'replicad_single.wasm',
+    sha256: '9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9',
+    bytes: 23_000_363,
+  },
+  {
+    name: 'replicad_single.mjs',
+    sha256: 'cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27',
+    bytes: 60_437,
+  },
+] as const;
+if (referenceFixture) {
+  const sourceFile = referenceFixture.source.split('#')[0]!;
+  const source = await readFile(join(repoRoot, sourceFile), 'utf8');
+  const logicalSource =
+    referenceName === 'honeycomb'
+      ? /const honeycombModel = `(?<body>[\s\S]*?)`;/u.exec(source)?.groups?.['body']
+      : source;
+  if (
+    logicalSource === undefined ||
+    Buffer.byteLength(logicalSource) !== referenceFixture.bytes ||
+    createHash('sha256').update(logicalSource).digest('hex') !== referenceFixture.sha256
+  ) {
+    throw new Error('The selected reference source no longer matches its canonical byte pin.');
+  }
+}
 
 const launchArguments = [
   '--enable-unsafe-webgpu',
@@ -498,7 +592,7 @@ const tagsFor = (
  * produced zero valid rows, and the three causes were indistinguishable from
  * "slow machine" without this.
  */
-// eslint-disable-next-line complexity -- Every independent sample failure must keep its specific refusal.
+// oxlint-disable-next-line complexity -- Each independent sample refusal retains its own cause.
 const sampleVerdict = (input: {
   readonly marks: Record<string, number>;
   readonly projectUrl: string | undefined;
@@ -530,7 +624,7 @@ const sampleVerdict = (input: {
   if (host === 'desktop' && appIsPackaged !== true) {
     return 'desktop sample did not run a packaged Electron app';
   }
-  if (scenario !== 'home' && projectUrl !== undefined && !projectUrl.includes(slug)) {
+  if (scenario !== 'home' && projectUrl !== undefined && !projectUrl.includes(referenceFixture?.route ?? slug)) {
     /* L10 timed one sample that had silently opened a different project. */
     return `opened ${projectUrl} instead of the seeded project ${slug}`;
   }
@@ -561,6 +655,12 @@ const sampleVerdict = (input: {
   }
   if (frameWitness === undefined) {
     return 'current-model viewport pixels were not captured after an active renderer frame';
+  }
+  if (referenceFixture && sampleError !== undefined) {
+    return sampleError;
+  }
+  if (referenceFixture && (timeline?.renderer?.api !== referenceBackend || timeline?.backend !== referenceBackend)) {
+    return 'the selected reference backend was not the active renderer';
   }
   if (engine !== undefined && !engine.startsWith(`${kernelId}:`)) {
     return `the host ran ${engine}, not the requested ${kernelId} — the kernel preference did not take`;
@@ -654,13 +754,38 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   let application: Awaited<ReturnType<typeof electron.launch>> | undefined;
   let appIsPackaged: boolean | undefined;
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let browserServer: Awaited<ReturnType<typeof chromium.launchServer>> | undefined;
+  let browserPid: number | undefined;
   let page: Page | undefined;
   let sampleError: string | undefined;
   let timeline: PageTimeline | undefined;
   let frameWitness: FrameWitness | undefined;
   let homeWitness: Readonly<{ screenshot: string; sha256: string }> | undefined;
   let projectUrl: string | undefined;
+  let referenceAssets: ReadonlyArray<Readonly<{ name: string; sha256: string; bytes: number }>> | undefined;
   const consoleErrors: string[] = [];
+  const nativeLogs: string[] = [];
+  const nativeRequests: Request[] = [];
+  const nativeResourceEvents = { requested: 0, responded: 0, finished: 0, failed: 0 };
+  const nativeResourceRows: Array<{
+    request: Request;
+    url: string;
+    method: string;
+    status?: number;
+    error?: string;
+  }> = [];
+  const recordNativeRequest = (request: Request): (typeof nativeResourceRows)[number] | undefined => {
+    const url = request.url();
+    if (!url.includes('replicad_') || !url.includes('.wasm')) {
+      return undefined;
+    }
+    let row = nativeResourceRows.find((entry) => entry.request === request);
+    if (!row && nativeResourceRows.length < 2) {
+      row = { request, url, method: request.method() };
+      nativeResourceRows.push(row);
+    }
+    return row;
+  };
   try {
     at('launchIntent');
     if (host === 'desktop') {
@@ -679,20 +804,100 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
       await page.waitForLoadState('domcontentloaded').catch(() => undefined);
       await page.locator('a[href="/projects"]').first().waitFor({ state: 'visible', timeout: 240_000 });
     } else {
-      browser = await chromium.launch({ headless: true, channel: 'chromium', args: launchArguments });
-      const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      if (referenceFixture) {
+        browserServer = await chromium.launchServer({ headless: true, channel: 'chromium', args: launchArguments });
+        browserPid = browserServer.process().pid;
+        if (browserPid === undefined || !Number.isSafeInteger(browserPid) || browserPid <= 0) {
+          throw new Error('The fresh reference Chromium process has no valid OS PID.');
+        }
+        at('hostStart');
+        browser = await chromium.connect(browserServer.wsEndpoint());
+      } else {
+        browser = await chromium.launch({ headless: true, channel: 'chromium', args: launchArguments });
+      }
+      const context = await browser.newContext({
+        viewport: scenario === 'reference-cold' ? { width: 1920, height: 1080 } : { width: 1440, height: 900 },
+        deviceScaleFactor: 1,
+      });
+      if (referenceFixture) {
+        context.on('request', (request) => {
+          if (request.url().includes('replicad_') && request.url().includes('.wasm')) {
+            nativeResourceEvents.requested += 1;
+            recordNativeRequest(request);
+          }
+        });
+        context.on('response', (response) => {
+          if (response.url().includes('replicad_') && response.url().includes('.wasm')) {
+            nativeResourceEvents.responded += 1;
+            const row = recordNativeRequest(response.request());
+            if (row) {
+              row.status = response.status();
+            }
+          }
+        });
+        context.on('requestfinished', (request) => {
+          // This browser-network event excludes the driver's later APIRequestContext availability check.
+          if (request.url().includes('replicad_') && request.url().includes('.wasm')) {
+            nativeResourceEvents.finished += 1;
+            recordNativeRequest(request);
+            if (nativeRequests.length < 2) {
+              nativeRequests.push(request);
+            }
+          }
+        });
+        context.on('requestfailed', (request) => {
+          if (request.url().includes('replicad_') && request.url().includes('.wasm')) {
+            nativeResourceEvents.failed += 1;
+            const row = recordNativeRequest(request);
+            if (row) {
+              row.error = request.failure()?.errorText.slice(0, 160) ?? 'request failed without browser detail';
+            }
+          }
+        });
+      }
       await context.addInitScript(instrument, kernelId);
       page = await context.newPage();
       page.on('console', (message) => {
         if (message.type() === 'error') {
           consoleErrors.push(message.text().slice(0, 300));
         }
+        if (referenceFixture && (message.type() === 'debug' || message.type() === 'warning')) {
+          const line = message.text();
+          if (
+            line.startsWith('[Kernel:') &&
+            (line.includes('Replicad WASM variant auto-selected:') ||
+              line.includes('Replicad OCCT initialised: variant=') ||
+              line.includes('OCCT parallel defaults activated:') ||
+              line.includes('OCCT parallel defaults partially activated:'))
+          ) {
+            if (nativeLogs.length < 16 && line.length <= 300) {
+              nativeLogs.push(line);
+            } else if (nativeLogs.length <= 16) {
+              nativeLogs.push('');
+            }
+          }
+        }
       });
-      at('hostStart');
-      await page.goto(`${origin}/projects`, { waitUntil: 'domcontentloaded' });
+      if (referenceFixture) {
+        at('browserReady');
+      } else {
+        at('hostStart');
+      }
+      if (referenceFixture) {
+        at('openIntent');
+        await page.goto(`${origin}${referenceFixture.route}&graphicsBackend=${referenceBackend}`, {
+          waitUntil: 'commit',
+        });
+        at('projectRouteEntered');
+        projectUrl = page.url();
+      } else {
+        await page.goto(`${origin}/projects`, { waitUntil: 'domcontentloaded' });
+      }
     }
     page.setDefaultTimeout(240_000);
-    at('projectsInteractive');
+    if (!referenceFixture) {
+      at('projectsInteractive');
+    }
     if (scenario === 'home') {
       const screenshot = join(outputDirectory, `open-to-frame-${host}-${kernelId}${scenarioSuffix}-${iteration}.png`);
       const pixels = await page.screenshot({ path: screenshot, animations: 'disabled' });
@@ -700,37 +905,39 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
       homeWitness = { screenshot, sha256: createHash('sha256').update(pixels).digest('hex') };
       timeline = await readPageTimeline(page);
     } else {
-      await page.evaluate(instrument, kernelId).catch(() => undefined);
-      await page
-        .getByRole('button', { name: /^decline$/iu })
-        .first()
-        .click({ timeout: 5000 })
-        .catch(() => undefined);
+      if (!referenceFixture) {
+        await page.evaluate(instrument, kernelId).catch(() => undefined);
+        await page
+          .getByRole('button', { name: /^decline$/iu })
+          .first()
+          .click({ timeout: 5000 })
+          .catch(() => undefined);
 
-      /* A link-intent sample needs a real Home link before its measured clock starts. */
-      const link = scenario === 'link-intent' ? page.locator(`a[href="/w/home/${slug}"]`).first() : undefined;
-      if (link) {
-        await link.waitFor({ state: 'visible' });
-        at('homeLinkReady');
+        /* A link-intent sample needs a real Home link before its measured clock starts. */
+        const link = scenario === 'link-intent' ? page.locator(`a[href="/w/home/${slug}"]`).first() : undefined;
+        if (link) {
+          await link.waitFor({ state: 'visible' });
+          at('homeLinkReady');
+        }
+        /* The user-perceived clock starts here; Home's own viewer is discarded with it. */
+        await page
+          .evaluate(() => (globalThis as { __TAU_OPEN_TO_FRAME__?: { reset(): void } }).__TAU_OPEN_TO_FRAME__?.reset())
+          .catch(() => undefined);
+        at('openIntent');
+        if (link) {
+          await link.hover();
+          at('intentHover');
+          await link.focus();
+          at('intentFocus');
+          at('navigationClick');
+          await link.click();
+          await page.waitForURL(`${origin}/w/home/${slug}`);
+        } else {
+          await page.goto(`${origin}/w/home/${slug}`, { waitUntil: 'commit' });
+        }
+        at('projectRouteEntered');
+        projectUrl = page.url();
       }
-      /* The user-perceived clock starts here; Home's own viewer is discarded with it. */
-      await page
-        .evaluate(() => (globalThis as { __TAU_OPEN_TO_FRAME__?: { reset(): void } }).__TAU_OPEN_TO_FRAME__?.reset())
-        .catch(() => undefined);
-      at('openIntent');
-      if (link) {
-        await link.hover();
-        at('intentHover');
-        await link.focus();
-        at('intentFocus');
-        at('navigationClick');
-        await link.click();
-        await page.waitForURL(`${origin}/w/home/${slug}`);
-      } else {
-        await page.goto(`${origin}/w/home/${slug}`, { waitUntil: 'commit' });
-      }
-      at('projectRouteEntered');
-      projectUrl = page.url();
       await page.evaluate(instrument, kernelId).catch(() => undefined);
       await page.waitForFunction(
         () =>
@@ -750,13 +957,18 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
         { timeout: 180_000 },
       );
       at('geometryFramed');
+      if (referenceFixture) {
+        await wait(750);
+      }
       const bridgeState = await page.evaluate(() => {
         const bridge = (
           globalThis as {
             __TAU_SECTION_VIEW_TEST__?: {
               getModelComponents(): ReadonlyArray<{ id: string }>;
               getRenderedModelComponentState(id: string): { visibleMeshCount: number };
-              getRendererIdentity(): { frame: number };
+              getRendererIdentity(): { api: 'webgl' | 'webgpu'; frame: number };
+              isGeometryFramed(): boolean;
+              getViewportCanvas(): HTMLCanvasElement;
             };
           }
         ).__TAU_SECTION_VIEW_TEST__;
@@ -768,28 +980,48 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
             0,
           ),
           rendererFrame: bridge?.getRendererIdentity().frame ?? 0,
+          backend: bridge?.getRendererIdentity().api,
+          framed: bridge?.isGeometryFramed() ?? false,
+          viewport: [innerWidth, innerHeight],
+          dpr: devicePixelRatio,
+          canvas: [bridge?.getViewportCanvas().width ?? 0, bridge?.getViewportCanvas().height ?? 0],
         };
       });
+      if (
+        referenceFixture &&
+        (bridgeState.backend !== referenceBackend ||
+          !bridgeState.framed ||
+          bridgeState.viewport[0] !== 1920 ||
+          bridgeState.viewport[1] !== 1080 ||
+          bridgeState.dpr !== 1)
+      ) {
+        throw new Error('The selected reference backend, framed geometry, viewport or DPR changed.');
+      }
       if (bridgeState.componentIds.length > 0 && bridgeState.visibleMeshes > 0 && bridgeState.rendererFrame > 0) {
         const canvas = await page.evaluateHandle(() =>
           (
             globalThis as { __TAU_SECTION_VIEW_TEST__?: { getViewportCanvas(): HTMLCanvasElement } }
           ).__TAU_SECTION_VIEW_TEST__?.getViewportCanvas(),
         );
-        const screenshot = join(outputDirectory, `open-to-frame-${host}-${kernelId}-${iteration}-pixel.png`);
+        const screenshot = join(
+          outputDirectory,
+          `open-to-frame-${host}-${kernelId}${scenarioSuffix}-${iteration}-pixel.png`,
+        );
         const pixels = await canvas.asElement()?.screenshot({ path: screenshot, animations: 'disabled' });
-        await canvas.dispose();
         if (pixels && pixels.length > 0) {
           at('pixelCaptureUpperBound');
-          await page.evaluate(() =>
-            (
+          const hiddenFrame = await page.evaluate(() => {
+            const bridge = (
               globalThis as {
                 __TAU_SECTION_VIEW_TEST__?: {
                   setPresentation(presentation: { surfaces: boolean; lines: boolean }): void;
+                  getRendererIdentity(): { frame: number };
                 };
               }
-            ).__TAU_SECTION_VIEW_TEST__?.setPresentation({ surfaces: false, lines: false }),
-          );
+            ).__TAU_SECTION_VIEW_TEST__;
+            bridge?.setPresentation({ surfaces: false, lines: false });
+            return bridge?.getRendererIdentity().frame ?? 0;
+          });
           await page.waitForFunction(
             ({ previousFrame, componentIds }) => {
               const bridge = (
@@ -806,7 +1038,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
                 componentIds.every((id: string) => bridge.getRenderedModelComponentState(id).visibleMeshCount === 0)
               );
             },
-            { previousFrame: bridgeState.rendererFrame, componentIds: bridgeState.componentIds },
+            { previousFrame: hiddenFrame, componentIds: bridgeState.componentIds },
             { timeout: 10_000 },
           );
           const blankCanvas = await page.evaluateHandle(() =>
@@ -864,6 +1096,56 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
                   modelPixelDifference,
                 }
               : undefined;
+          // oxlint-disable-next-line max-depth -- The cold witness must stay within this sample's positive PNG branch.
+          if (referenceFixture && frameWitness) {
+            const current = await page.evaluate((expectedCanvas) => {
+              const bridge = (
+                globalThis as {
+                  __TAU_SECTION_VIEW_TEST__?: {
+                    getModelComponents(): ReadonlyArray<{ id: string }>;
+                    getRendererIdentity(): { api: 'webgl' | 'webgpu'; frame: number };
+                    getViewportCanvas(): HTMLCanvasElement;
+                  };
+                }
+              ).__TAU_SECTION_VIEW_TEST__;
+              return bridge === undefined
+                ? undefined
+                : {
+                    ids: bridge.getModelComponents().map(({ id }) => id),
+                    api: bridge.getRendererIdentity().api,
+                    canvasConnected: bridge.getViewportCanvas() === expectedCanvas && expectedCanvas.isConnected,
+                  };
+            }, canvas);
+            // oxlint-disable-next-line max-depth -- Refuse the exact captured canvas, backend or component identity changing.
+            if (
+              !current?.canvasConnected ||
+              current.api !== referenceBackend ||
+              current.ids.join('\0') !== bridgeState.componentIds.join('\0')
+            ) {
+              throw new Error('The selected reference geometry or canvas retired during PNG verification.');
+            }
+            at('checkedUsefulPngUpperBound');
+            const referencePage = page;
+            referenceAssets = await Promise.all(
+              referenceAssetPins.map(async (asset) => {
+                const response = await referencePage.request.get(
+                  `${origin}/assets/engines/replicad/density-single-v1/${asset.name}`,
+                );
+                if (!response.ok()) {
+                  throw new Error(`The delivered reference asset is unavailable: ${asset.name}`);
+                }
+                const bytes = await response.body();
+                if (bytes.length !== asset.bytes || createHash('sha256').update(bytes).digest('hex') !== asset.sha256) {
+                  throw new Error(`The delivered reference asset changed: ${asset.name}`);
+                }
+                return { ...asset };
+              }),
+            );
+          }
+          await canvas.dispose();
+        }
+        if (!pixels) {
+          await canvas.dispose();
         }
       }
       timeline = await readPageTimeline(page);
@@ -922,13 +1204,84 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     appIsPackaged,
     sampleError,
   });
+  const nativeVariant = referenceFixture
+    ? observedReplicadNativeVariant(nativeLogs, referenceNativeTreatment)
+    : undefined;
+  // Native response bytes are inspected only after the checked-PNG timing mark. The request
+  // completed in this fresh browser context, alongside the consistent post-init marker.
+  const nativeResourceInspections = await Promise.all(
+    nativeRequests.map(async (request) => {
+      try {
+        const response = await request.response();
+        if (!response) {
+          throw new Error('The completed native request has no response.');
+        }
+        if (new URL(request.url()).origin !== new URL(origin).origin || !page) {
+          throw new Error('The completed native request is outside the immutable server.');
+        }
+        // Chromium does not expose Worker response bodies. Join the actual completed request
+        // to the same URL's separately fetched immutable server bytes after PNG verification.
+        const immutableResponse = await page.request.get(request.url());
+        if (!immutableResponse.ok()) {
+          throw new Error('The requested immutable native asset is unavailable.');
+        }
+        const bytes = await immutableResponse.body();
+        return {
+          url: request.url(),
+          method: request.method(),
+          status: response.status(),
+          byteLength: bytes.byteLength,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+        };
+      } catch (error) {
+        return { url: request.url(), method: request.method(), error: String(error).slice(0, 160) };
+      }
+    }),
+  );
+  const completeNativeResourceInspections = nativeResourceInspections.filter(
+    (row): row is { url: string; method: string; status: number; byteLength: number; sha256: string } =>
+      'sha256' in row,
+  );
+  const loadedNativeWasm =
+    nativeVariant &&
+    nativeResourceEvents.requested === nativeResourceEvents.finished &&
+    nativeResourceEvents.responded === nativeResourceEvents.finished &&
+    nativeResourceEvents.failed === 0 &&
+    nativeResourceEvents.finished === nativeResourceInspections.length &&
+    completeNativeResourceInspections.length === nativeResourceInspections.length
+      ? await Promise.resolve(completeNativeResourceInspections)
+          .then(async (responses) =>
+            observedReplicadLoadedWasm(responses, {
+              origin: new URL(origin).origin,
+              variant: nativeVariant,
+              expectedSha256:
+                nativeVariant === 'custom-single'
+                  ? referenceAssetPins.find((asset) => asset.name === 'replicad_single.wasm')?.sha256
+                  : await hashFile(
+                      fileURLToPath(
+                        import.meta.resolve(
+                          nativeVariant === 'auto-multi'
+                            ? 'replicad-opencascadejs/multi/wasm'
+                            : 'replicad-opencascadejs/wasm',
+                        ),
+                      ),
+                    ),
+            }),
+          )
+          .catch(() => undefined)
+      : undefined;
   const reason =
     warmup?.error ??
     (warmup !== undefined && warmup.appIsPackaged !== true
       ? 'warmup did not run a packaged Electron app'
       : warmup !== undefined && warmupSelection !== kernelId
         ? 'warmup selected kernel was not observed for the seeded project'
-        : invalidReason);
+        : (invalidReason ??
+          (referenceFixture && nativeVariant === undefined
+            ? 'the selected Replicad native build did not complete a consistent initialization'
+            : referenceFixture && loadedNativeWasm === undefined
+              ? 'the initialized Replicad variant has no matching completed browser-network WASM response'
+              : undefined)));
   if (reason !== undefined) {
     await page
       ?.screenshot({
@@ -941,26 +1294,62 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   const binaryDigestAfter =
     desktopExecutable === undefined ? undefined : await hashFile(desktopExecutable).catch(() => 'unreadable');
   const hostPid = application?.process().pid;
+  const browserVersion = browser?.version();
   await closeDesktop(application);
-  await browser?.close().catch(() => undefined);
+  if (!browserServer) {
+    await browser?.close().catch(() => undefined);
+  }
+  let browserCloseError: string | undefined;
+  if (browserServer) {
+    try {
+      await browserServer.close();
+    } catch (error) {
+      browserCloseError = String(error).slice(0, 200);
+    }
+  }
+  const browserExit =
+    browserServer === undefined
+      ? undefined
+      : {
+          pid: browserPid,
+          exitCode: browserServer.process().exitCode,
+          signalCode: browserServer.process().signalCode,
+        };
+  const finalReason =
+    reason ??
+    (referenceFixture &&
+    (browserCloseError !== undefined ||
+      browserExit?.pid === undefined ||
+      (browserExit.exitCode === null && browserExit.signalCode === null))
+      ? 'the fresh reference Chromium process did not report a completed exit'
+      : undefined);
   /* Each cold sample fills an OPFS `/node_modules` under its own user-data dir. */
   await rm(userData, { recursive: true, force: true }).catch(() => undefined);
   await rm(picked, { recursive: true, force: true }).catch(() => undefined);
   const unknownBoundaries: ReadonlyArray<readonly [string, string, string]> =
     scenario === 'home'
       ? [['launchIntent', 'homePixelCaptureUpperBound', 'desktop/browser launch and Home presentation']]
-      : [
-          ...(scenario === 'link-intent'
-            ? ([
-                ['openIntent', 'intentHover', 'pointer intent and warmup dispatch'],
-                ['intentHover', 'intentFocus', 'focus dispatch'],
-                ['intentFocus', 'navigationClick', 'automation handoff'],
-                ['navigationClick', 'projectRouteEntered', 'click and route admission'],
-              ] as const)
-            : ([['openIntent', 'projectRouteEntered', 'route admission']] as const)),
-          ['projectRouteEntered', 'geometryInScene', 'filesystem/runtime/geometry and scene admission'],
-          ['geometryInScene', 'pixelCaptureUpperBound', 'renderer/GPU presentation and screenshot latency'],
-        ];
+      : scenario === 'reference-cold'
+        ? [
+            ['launchIntent', 'hostStart', 'fresh Chromium process launch'],
+            ['hostStart', 'browserReady', 'browser context/page creation'],
+            ['browserReady', 'projectRouteEntered', 'fixture navigation and route admission'],
+            ['projectRouteEntered', 'geometryInScene', 'runtime and geometry admission'],
+            ['geometryInScene', 'geometryFramed', 'viewer framing'],
+            ['geometryFramed', 'checkedUsefulPngUpperBound', 'settlement, renderer, screenshot and PNG verification'],
+          ]
+        : [
+            ...(scenario === 'link-intent'
+              ? ([
+                  ['openIntent', 'intentHover', 'pointer intent and warmup dispatch'],
+                  ['intentHover', 'intentFocus', 'focus dispatch'],
+                  ['intentFocus', 'navigationClick', 'automation handoff'],
+                  ['navigationClick', 'projectRouteEntered', 'click and route admission'],
+                ] as const)
+              : ([['openIntent', 'projectRouteEntered', 'route admission']] as const)),
+            ['projectRouteEntered', 'geometryInScene', 'filesystem/runtime/geometry and scene admission'],
+            ['geometryInScene', 'pixelCaptureUpperBound', 'renderer/GPU presentation and screenshot latency'],
+          ];
   const unknownIntervals = unknownBoundaries.flatMap(([from, to, owner]) => {
     const start = marks[from];
     const end = marks[to];
@@ -1001,10 +1390,36 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     projectUrl,
     consoleErrors,
     /* No geometry is never a number: the sample is invalid and says why. */
-    valid: reason === undefined,
-    invalidReason: reason,
+    valid: finalReason === undefined,
+    invalidReason: finalReason,
     engine,
     frameWitness,
+    reference:
+      referenceFixture === undefined
+        ? undefined
+        : {
+            name: referenceName,
+            backend: referenceBackend,
+            source: referenceFixture,
+            assets: referenceAssets,
+            nativeVariant,
+            loadedNativeWasm,
+            nativeResourceObservation: {
+              ...nativeResourceEvents,
+              rows: nativeResourceRows.map(({ url, method, status, error }) => ({ url, method, status, error })),
+              inspected: nativeResourceInspections,
+            },
+            nativeResourceEvidence:
+              'completed browser request URL/status and initialization joined to separately fetched immutable server bytes; original Worker response body unavailable',
+            browserVersion,
+            process: browserExit,
+            browserProfile: 'default Chromium launch with existing unsafe-WebGPU flag',
+            viewport: frameWitness?.viewport,
+            dpr: frameWitness?.dpr,
+            canvas: frameWitness?.canvas,
+            measurementScope:
+              'fresh browser process launch to checked useful PNG upper bound; server stays warm; no first-paint or native-presentation claim',
+          },
     homeWitness,
     /** Total milliseconds per span name for this sample's ten heaviest spans. */
     runtimeSpans: trace?.totals,
@@ -1041,6 +1456,7 @@ const samples: Array<{
   readonly valid: boolean;
   readonly clientRootStable: boolean;
   readonly binaryStable: boolean;
+  readonly browserPid?: number;
   readonly measurement?: MeasurementTags;
 }> = [];
 for (let iteration = 0; iteration < repeats; iteration += 1) {
@@ -1050,6 +1466,7 @@ for (let iteration = 0; iteration < repeats; iteration += 1) {
     valid: sample['valid'] === true,
     clientRootStable: sample['clientRootStable'] === true,
     binaryStable: (sample['artifact'] as { binaryStable: boolean }).binaryStable,
+    browserPid: (sample['reference'] as { process?: { pid?: number } } | undefined)?.process?.pid,
     measurement: sample['measurement'] as MeasurementTags | undefined,
   });
   lines.push(JSON.stringify(sample));
@@ -1057,7 +1474,9 @@ for (let iteration = 0; iteration < repeats; iteration += 1) {
   const duration =
     scenario === 'home'
       ? marks['homePixelCaptureUpperBound']! - marks['launchIntent']!
-      : marks['pixelCaptureUpperBound']! - marks['openIntent']!;
+      : scenario === 'reference-cold'
+        ? marks['checkedUsefulPngUpperBound']! - marks['launchIntent']!
+        : marks['pixelCaptureUpperBound']! - marks['openIntent']!;
   if (
     sample['valid'] === true &&
     sample['clientRootStable'] === true &&
@@ -1080,16 +1499,27 @@ for (let iteration = 0; iteration < repeats; iteration += 1) {
 }
 
 const spread = coefficientOfVariation(durations);
-const sampleVerdicts = samples.map((sample) =>
-  budgetVerdict({ tags: sample.measurement, coefficientOfVariation: spread }),
-);
-const refusals = [
-  ...(durations.length === repeats
-    ? []
-    : [`${String(repeats - durations.length)} sample(s) had invalid timing or changed client/binary assets`]),
-  'launch-to-pixel wall attribution below 95%: host launch, route admission, renderer/GPU and screenshot latency remain unjoined',
-  ...sampleVerdicts.flatMap((sample, index) => sample.refusals.map((reason) => `sample ${String(index)}: ${reason}`)),
-];
+const distinctBrowserPids = new Set(samples.map((sample) => sample.browserPid).filter((pid) => pid !== undefined)).size;
+const sampleVerdicts = referenceStructuralProbe
+  ? []
+  : samples.map((sample) => budgetVerdict({ tags: sample.measurement, coefficientOfVariation: spread }));
+const refusals = referenceStructuralProbe
+  ? ['non-measured native structural probe; no CV or population qualification']
+  : [
+      ...(durations.length === repeats
+        ? []
+        : [`${String(repeats - durations.length)} sample(s) had invalid timing or changed client/binary assets`]),
+      ...(referenceFixture && distinctBrowserPids !== repeats
+        ? ['the reference population did not use five distinct fresh Chromium OS processes']
+        : []),
+      ...(referenceFixture && durations.length === repeats && (spread === undefined || spread > 0.1)
+        ? ['fresh-browser launch-to-checked-PNG CV exceeds 0.1']
+        : []),
+      'launch-to-pixel wall attribution below 95%: host launch, route admission, renderer/GPU and screenshot latency remain unjoined',
+      ...sampleVerdicts.flatMap((sample, index) =>
+        sample.refusals.map((reason) => `sample ${String(index)}: ${reason}`),
+      ),
+    ];
 const verdict = { eligible: refusals.length === 0, refusals };
 lines.push(
   JSON.stringify({
@@ -1097,12 +1527,36 @@ lines.push(
     host,
     kernelId,
     scenario,
+    referenceStructuralProbe,
+    ...(referenceFixture === undefined
+      ? {}
+      : {
+          referencePopulation: {
+            source: referenceName,
+            backend: referenceBackend,
+            requestedFreshProcesses: repeats,
+            distinctBrowserPids,
+          },
+          ...(referenceStructuralProbe
+            ? {}
+            : {
+                referenceCvGate: {
+                  bound: 0.1,
+                  measured: durations.length === repeats ? spread : undefined,
+                  passed:
+                    durations.length === repeats &&
+                    distinctBrowserPids === repeats &&
+                    spread !== undefined &&
+                    spread <= 0.1,
+                },
+              }),
+        }),
     valid: durations.length,
     requested: repeats,
     invalidReasons: lines
       .map((line) => (JSON.parse(line) as { invalidReason?: string }).invalidReason)
       .filter((reason) => reason !== undefined),
-    /** Milliseconds, open intent to the current-model compositor screenshot; an upper bound on first pixels. */
+    /** Milliseconds, launch intent for reference-cold (otherwise open intent) to checked PNG; never first paint. */
     pixelCaptureUpperBound: durations,
     wallAttribution: {
       fraction: 0,

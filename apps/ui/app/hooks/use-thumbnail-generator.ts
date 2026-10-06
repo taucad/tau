@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { awaitGeometryPresentation } from '#components/geometry/graphics/three/utils/geometry-presentation-admission.js';
 import { useActorRef } from '@xstate/react';
+import { selectCadDisplay } from '#machines/cad.machine.js';
+import { resolveSettledCadGeometry } from '#services/headless-capture.js';
 import { asKnownArtifact } from '@taucad/runtime';
 import { useProject } from '#hooks/use-project.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -90,21 +92,45 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
     input: {
       render: async (request) => {
         const snapshot = cadActorRef.current?.getSnapshot();
+        const display = snapshot && selectCadDisplay(snapshot);
+        const assemblyDisplay = display && 'admitted' in display ? display : undefined;
         const rendering = snapshot?.context.rendering;
-        const artifact = rendering?.success ? asKnownArtifact(rendering.artifact) : undefined;
+        const generation = generationRef.current;
+        if (request.kind === 'automatic-thumbnail' && assemblyDisplay) {
+          await awaitGeometryPresentation(assemblyDisplay.admitted, request.signal);
+          if (
+            generation !== generationRef.current ||
+            selectCadDisplay(cadActorRef.current!.getSnapshot()) !== assemblyDisplay
+          ) {
+            throw new DOMException('Thumbnail display was superseded.', 'AbortError');
+          }
+        }
+        const projection = assemblyDisplay && snapshot ? await resolveSettledCadGeometry(snapshot) : undefined;
+        const artifact =
+          projection?.geometry.format === 'gltf'
+            ? ({ mimeType: 'model/gltf-binary', content: projection.geometry.content } as const)
+            : rendering?.success && !rendering.transient
+              ? asKnownArtifact(rendering.artifact)
+              : undefined;
         const identity = request.identity ?? identityRef.current;
         if (
           !snapshot?.context.entryPath ||
-          !rendering?.success ||
-          rendering.transient ||
           !artifact ||
-          (snapshot.context.evaluation?.success === true && snapshot.context.evaluation.views.length === 0) ||
+          (!assemblyDisplay &&
+            snapshot.context.evaluation?.success === true &&
+            snapshot.context.evaluation.views.length === 0) ||
           (artifact.mimeType === 'model/gltf-binary' && isEmptyGlb(artifact.content))
         ) {
           throw new Error('source-unavailable: committed rendering not ready');
         }
-        const generation = generationRef.current;
-        if (request.kind === 'automatic-thumbnail' && artifact.mimeType === 'model/gltf-binary') {
+        if (assemblyDisplay && selectCadDisplay(cadActorRef.current!.getSnapshot()) !== assemblyDisplay) {
+          throw new DOMException('Thumbnail display was superseded.', 'AbortError');
+        }
+        const sourceHash = assemblyDisplay?.root.digest ?? (rendering?.success ? rendering.hash : undefined);
+        if (sourceHash === undefined) {
+          throw new Error('source-unavailable: committed rendering identity not ready');
+        }
+        if (request.kind === 'automatic-thumbnail' && !assemblyDisplay && artifact.mimeType === 'model/gltf-binary') {
           await awaitGeometryPresentation(artifact.content, request.signal);
           if (generation !== generationRef.current) {
             throw new DOMException('Thumbnail source was superseded.', 'AbortError');
@@ -131,7 +157,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
                 signal: request.signal,
                 sourceFormat: 'glb',
                 sourcePath: snapshot.context.entryPath,
-                geometryHash: rendering.hash,
+                geometryHash: sourceHash,
                 content: artifact.content,
                 format: 'webp',
                 exportOptions: {
@@ -244,6 +270,11 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
 
       thumbnailActor.send({ type: 'settled', hash: identityRef.current });
     });
+    const assemblySubscription = mainCadActor.on('assemblyEvaluated', (event) => {
+      generationRef.current += 1;
+      identityRef.current = `${projectId}:${mainEntryPath}:${event.assemblyDisplay.root.digest}:webp:q0.9:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
+      thumbnailActor.send({ type: 'settled', hash: identityRef.current });
+    });
     const initialSnapshot = mainCadActor.getSnapshot();
     let requestId = initialSnapshot.context.openAttempt;
     let rendering = initialSnapshot.matches('rendering');
@@ -262,6 +293,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
     });
     return () => {
       subscription.unsubscribe();
+      assemblySubscription.unsubscribe();
       requests.unsubscribe();
     };
   }, [mainCadActor, mainEntryPath, projectId, thumbnailActor]);

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
+import { writeGlb } from '@taucad/geometry-core';
+import type { TauCadPhysical } from '@taucad/geometry-core';
+import { quantityFromPhysical } from '#components/geometry/cad/part-quantities.js';
 import {
   buildGltfComponentManifest,
   buildGltfMeasurementFeatures,
@@ -17,6 +20,84 @@ function encodeJson(value: unknown): Uint8Array<ArrayBuffer> {
 }
 
 describe('buildGltfComponentManifest', () => {
+  it('carries authored physical evidence from real GLB bytes into the quantity projection', () => {
+    const physical = {
+      volume: {
+        state: 'measured',
+        valueMm3: 12_480,
+        geometryDigest: `sha256:${'a'.repeat(64)}`,
+        method: 'occt-solid-volume',
+        validity: 'closed-solid',
+      },
+      density: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Unit-bearing physical field uses cm³ notation.
+        valueGPerCm3: 1.55,
+        provenance: 'authored-shape-config',
+      },
+    } satisfies TauCadPhysical;
+    const bytes = writeGlb({
+      nodes: [
+        {
+          name: 'physical-part',
+          primitives: [
+            {
+              mode: 4,
+              positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+              indices: new Uint32Array([0, 1, 2]),
+              material: { pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1] } },
+            },
+          ],
+        },
+      ],
+      extensions: {
+        [tauCadTopologyExtension]: {
+          schemaVersion: 1,
+          components: [
+            { id: 'physical-part', name: 'physical-part', kind: 'part', selector: 'node/0', nodeIndex: 0, physical },
+          ],
+        },
+      },
+    });
+    const component = buildGltfComponentManifest(bytes).nodesById['physical-part']!;
+    expect(component.physical).toEqual(physical);
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Unit-bearing projected field uses cm³ notation.
+    expect(quantityFromPhysical(component.physical)).toEqual({ volumeCm3: 12.48, densityGPerCm3: 1.55 });
+  });
+
+  it('does not turn an unlabelled density in imported topology into mass', () => {
+    const bytes = encodeJson({
+      nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ mode: 4 }] }],
+      extensions: {
+        [tauCadTopologyExtension]: {
+          schemaVersion: 1,
+          components: [
+            {
+              id: 'part',
+              name: 'part',
+              kind: 'part',
+              selector: 'node/0',
+              nodeIndex: 0,
+              physical: {
+                volume: {
+                  state: 'measured',
+                  valueMm3: 12_480,
+                  geometryDigest: `sha256:${'a'.repeat(64)}`,
+                  method: 'occt-solid-volume',
+                  validity: 'closed-solid',
+                },
+                density: { value: 1.55, provenance: 'authored-shape-config' },
+              },
+            },
+          ],
+        },
+      },
+    });
+    expect(quantityFromPhysical(buildGltfComponentManifest(bytes).nodesById['part']?.physical)).toEqual({
+      measurement: 'failed',
+    });
+  });
+
   it('keeps instance-specific face groups and normalizes Replicad non-indexed line scalar spans', () => {
     const bytes = encodeJson({
       nodes: [{ mesh: 0 }, { mesh: 0 }],
@@ -362,6 +443,40 @@ describe('buildGltfComponentManifest', () => {
     });
   });
 
+  it('places topology primitive references by their node instance, including a mirrored sibling', () => {
+    const bytes = encodeJson({
+      scene: 0,
+      scenes: [{ nodes: [0] }],
+      nodes: [
+        { translation: [5, 0, 0], children: [1, 2] },
+        { mesh: 0, translation: [2, 0, 0] },
+        { mesh: 0, matrix: [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 20, 0, 0, 1] },
+      ],
+      meshes: [{ primitives: [{ attributes: { [positionAttribute]: 0 } }] }],
+      accessors: [{ componentType: 5126, count: 3, type: 'VEC3', min: [1, 2, 3], max: [4, 5, 6] }],
+      extensions: {
+        [tauCadTopologyExtension]: {
+          components: [
+            { id: 'first', kind: 'part', primitiveRefs: [{ nodeIndex: 1, meshIndex: 0, primitiveIndex: 0 }] },
+            { id: 'mirrored', kind: 'part', primitiveRefs: [{ nodeIndex: 2, meshIndex: 0, primitiveIndex: 0 }] },
+          ],
+        },
+      },
+    });
+
+    const manifest = buildGltfComponentManifest(bytes);
+    expect(manifest.nodesById['first']?.bounds).toMatchObject({
+      min: [8, 2, 3],
+      max: [11, 5, 6],
+      center: [9.5, 3.5, 4.5],
+    });
+    expect(manifest.nodesById['mirrored']?.bounds).toMatchObject({
+      min: [21, 2, 3],
+      max: [24, 5, 6],
+      center: [22.5, 3.5, 4.5],
+    });
+  });
+
   it('should create mesh-only fallback components for unannotated glTF nodes', () => {
     const bytes = encodeJson({
       nodes: [{ name: 'planet_gear', mesh: 0 }],
@@ -496,6 +611,24 @@ describe('buildGltfComponentManifest', () => {
       path: ['Model', 'Assembly', 'Roof Frame'],
       primitiveRefs: [{ nodeIndex: 1, meshIndex: 0, primitiveIndex: 0 }],
     });
+  });
+
+  it('places fallback mesh bounds through nested translation and negative nonuniform scale', () => {
+    const bytes = encodeJson({
+      scene: 0,
+      scenes: [{ nodes: [0] }],
+      nodes: [
+        { name: 'Assembly', translation: [10, 20, 30], children: [1] },
+        { name: 'Part', mesh: 0, translation: [2, 3, 4], scale: [-1, 2, 1] },
+      ],
+      meshes: [{ primitives: [{ attributes: { [positionAttribute]: 0 } }] }],
+      accessors: [{ componentType: 5126, count: 3, type: 'VEC3', min: [1, 2, 3], max: [4, 5, 6] }],
+    });
+
+    const manifest = buildGltfComponentManifest(bytes);
+    const bounds = { min: [8, 27, 37], max: [11, 33, 40], center: [9.5, 30, 38.5] };
+    expect(manifest.nodesById['component:node-1']?.bounds).toMatchObject(bounds);
+    expect(manifest.nodesById['component:node-0']?.bounds).toMatchObject(bounds);
   });
 
   it('should keep parent direct primitives distinct while aggregating descendant bounds and appearance', () => {

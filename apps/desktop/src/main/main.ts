@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
+import { safeDispose } from '@taucad/utils/dispose';
 
 import {
   app,
@@ -29,6 +30,7 @@ import {
 } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
+import type { ElectronRuntimeForkResolver } from '@taucad/runtime/electron/main';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
@@ -360,6 +362,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const build123dResourceRoot = app.isPackaged
     ? join(process.resourcesPath, 'python')
     : join(import.meta.dirname, '../../resources/python');
+  const replicadResourceRoot = app.isPackaged
+    ? join(process.resourcesPath, 'engines/replicad/density-single-v1')
+    : join(import.meta.dirname, '../../../ui/desktop/build/host-assets/engines/replicad/density-single-v1');
   const picogkResourceRoot = app.isPackaged
     ? join(process.resourcesPath, 'picogk')
     : join(import.meta.dirname, '../../resources/picogk');
@@ -577,6 +582,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_BUILD123D_RESOURCE_ROOT: build123dResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_PICOGK_RESOURCE_ROOT: picogkResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      // This trusted app payload root is not a renderer-selectable fork option.
+      TAU_REPLICAD_RESOURCE_ROOT: replicadResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     forkEnvAllowlist: [...kernelForkEnvAllowlist],
     /* A fork-loop guard, not a concurrency policy: a live project costs one to
@@ -613,15 +620,30 @@ const bootstrapElectronApp = async (): Promise<void> => {
        * ever be adopted (W-L03-4). */
       const forkEnvironment = { ...resolved.env };
       delete forkEnvironment['TAU_PROJECT_ROOT'];
+      let filesystemBindings: Pick<
+        ReturnType<ElectronRuntimeForkResolver>,
+        'fileSystemPort' | 'publicationFileSystemPort'
+      > = {};
+      if (context['purpose'] !== 'ephemeral') {
+        const fileSystemPort = services.connect('runtimeFileSystem', { workspaceRoot: executionRoot });
+        try {
+          const publicationFileSystemPort = services.connect('runtimeFileSystem', {
+            workspaceRoot: executionRoot,
+            runtimeRole: 'publication',
+          });
+          filesystemBindings = { fileSystemPort, publicationFileSystemPort };
+        } catch (error) {
+          safeDispose(() => {
+            fileSystemPort.close();
+          });
+          throw error;
+        }
+      }
       return {
         ...resolved,
         env: forkEnvironment,
         compute,
-        ...(context['purpose'] === 'ephemeral'
-          ? {}
-          : {
-              fileSystemPort: services.connect('runtimeFileSystem', { workspaceRoot: executionRoot }),
-            }),
+        ...filesystemBindings,
       };
     },
     serviceName: 'tau-kernel-host',
@@ -1060,6 +1082,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     try {
       const resolved = sanitizeServicesContext(context);
+      if (resolved['runtimeRole'] !== undefined) {
+        refuse('services.host-only-runtime-role');
+        return;
+      }
       /* Launcher 2 is scoped to one workspace root, and the renderer names it —
        * so it passes the same registry the kernel fork resolver uses. Refusing
        * outright rather than substituting Home: an agent host working over the

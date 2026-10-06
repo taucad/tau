@@ -1,3 +1,4 @@
+import { selectCadDisplay } from '#machines/cad.machine.js';
 // oxlint-disable max-lines -- TODO: refactor this component to be more manageable
 import { useCallback, useId, useState, useRef, useMemo, useEffect, memo } from 'react';
 import { createPortal, flushSync } from 'react-dom';
@@ -1407,13 +1408,46 @@ export const ChatEditorFileTree = memo(function ({
         return;
       }
       const name = path.split('/').pop() ?? path;
-      toast.promise(previewProjectFileInQuickLook({ path, projectId, runtimeFileSystem }), {
-        loading: `Preparing ${name} for Quick Look…`,
-        success: `Opened ${name} in Quick Look`,
-        error: (error: unknown) => (error instanceof Error ? error.message : 'Quick Look failed'),
-      });
+      const cadActor = projectRef.getSnapshot().context.geometryUnits.get(path);
+      const cadSnapshot = cadActor?.getSnapshot();
+      const cad = cadSnapshot?.context;
+      const display = cadSnapshot ? selectCadDisplay(cadSnapshot) : undefined;
+      const publishedAssemblyRoot =
+        cad?.latestRenderingOutcome === 'success' &&
+        cad.publishedAssemblyEntryPath === path &&
+        display !== undefined &&
+        'admitted' in display &&
+        display.root === cad.publishedAssemblyRoot
+          ? cad.publishedAssemblyRoot
+          : undefined;
+      toast.promise(
+        previewProjectFileInQuickLook({
+          path,
+          projectId,
+          runtimeFileSystem,
+          publishedAssemblyRoot,
+          assertCurrentSubject:
+            publishedAssemblyRoot && cadActor
+              ? () => {
+                  const current = cadActor.getSnapshot();
+                  if (current.context.latestRenderingOutcome !== 'success' || selectCadDisplay(current) !== display) {
+                    throw new Error('The selected assembly changed during Quick Look export.');
+                  }
+                }
+              : undefined,
+          readFile: async (selectedPath) => {
+            const { contentService: capturedContentService } = await whenServicesReady();
+            return capturedContentService.readRawBytes(selectedPath);
+          },
+        }),
+        {
+          loading: `Preparing ${name} for Quick Look…`,
+          success: `Opened ${name} in Quick Look`,
+          error: (error: unknown) => (error instanceof Error ? error.message : 'Quick Look failed'),
+        },
+      );
     },
-    [projectId, runtimeFileSystem],
+    [projectId, projectRef, runtimeFileSystem, whenServicesReady],
   );
 
   const handleDownload = useCallback(
@@ -2634,6 +2668,7 @@ function PendingFolderInput({
     </div>
   );
 }
+// eslint-enable max-lines
 
 type PendingFileInputProps = {
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object

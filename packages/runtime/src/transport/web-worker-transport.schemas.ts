@@ -62,6 +62,7 @@ export const webWorkerClientOptionsSchema = z
      * Optional filesystem handle produced by a `fromX` factory.
      */
     fileSystem: runtimeFileSystemSchema.optional(),
+    publicationFileSystem: runtimeFileSystemSchema.optional(),
     compute: z.custom<ComputeBinding>().optional(),
     /** Explicit Chrome DevTools Performance Timeline mirroring. */
     devtoolsTelemetry: z.boolean().optional(),

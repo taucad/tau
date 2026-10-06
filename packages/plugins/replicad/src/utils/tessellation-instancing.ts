@@ -54,6 +54,7 @@ export type ReplicadTessellationInstance = {
   metalness?: number;
   roughness?: number;
   material?: GlbMaterial;
+  physical?: GeometryReplicad['physical'];
   locationMatrix: ReplicadShapeIdentityInfo['locationMatrix'];
   determinant: number;
   faceIds?: number[];
@@ -523,6 +524,7 @@ export function transformReplicadGeometryInstance({
     metalness: instance.metalness,
     roughness: instance.roughness,
     material: instance.material,
+    physical: instance.physical,
     faces: {
       texCoords: prototype.faces.texCoords,
       tangents: transformTangents(prototype.faces.tangents, instance),

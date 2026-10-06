@@ -30,6 +30,8 @@ import type {
 } from '#types/runtime-kernel.types.js';
 import type {
   Artifact,
+  HandleSnapshotExactDescriptor,
+  ComposeHandlesInput,
   EvaluateResult,
   KernelOffers,
   RenderResult,
@@ -40,6 +42,7 @@ import type {
   KernelViewDeclarations,
   ViewInstance,
 } from '#types/runtime-kernel-v2.types.js';
+import type { AssemblyDisplayProjector } from '#types/runtime-assembly.types.js';
 import type { ExportOffer, ViewOffer } from '#client/runtime-document.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
@@ -93,6 +96,7 @@ type RuntimeWorkerOptions = Record<string, never>;
 
 type KernelRuntimeWorkerOptions = {
   readonly runtime: AnyRuntimeDefinition;
+  readonly admitAssemblyDisplay?: AssemblyDisplayProjector;
 };
 
 /**
@@ -109,6 +113,19 @@ type KernelSelection = {
 
 /** Maximum registered extensions named in an unhandled-extension diagnostic before eliding. */
 const listedExtensionLimit = 12;
+
+/** Select the same declared ID for planner and capability metadata; ambiguous extensions have no implicit ID. */
+const selectDeclaredExportId = (
+  declarations: Readonly<Record<string, { readonly extension: string }>>,
+  available: readonly string[],
+  target: string,
+): string | undefined => {
+  if (Object.hasOwn(declarations, target) && available.includes(target)) {
+    return target;
+  }
+  const candidates = available.filter((id) => declarations[id]?.extension === target);
+  return candidates.length === 1 ? candidates[0] : undefined;
+};
 
 const isViewInstance = (value: unknown): value is ViewInstance =>
   typeof value === 'object' &&
@@ -153,7 +170,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   private initialized = false;
 
   public constructor(options: KernelRuntimeWorkerOptions) {
-    super();
+    super({ admitAssemblyDisplay: options.admitAssemblyDisplay });
     this.runtime = options.runtime;
   }
 
@@ -206,6 +223,43 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     _runtime: KernelRuntime,
   ): Promise<void> {
     await Promise.resolve();
+  }
+
+  protected override async discoverPublishedCapabilities(
+    kernelIds: ReadonlySet<string>,
+    assertCurrent: () => void,
+    tracer: KernelRuntime['tracer'],
+  ): Promise<void> {
+    const configuredIds = new Set(this.kernelPlugins.map((entry) => entry.id));
+    for (const kernelId of kernelIds) {
+      if (!configuredIds.has(kernelId)) {
+        this.logger.warn('Published exact export metadata is unavailable: kernel is not configured', {
+          data: { kernelId },
+        });
+      }
+    }
+    for (const entry of this.kernelPlugins) {
+      // The admitted representation is GLB; use its configured codec declaration,
+      // never the erased source extension or an active/stale producer selection.
+      if (!entry.extensions.includes('glb') && !kernelIds.has(entry.id)) {
+        continue;
+      }
+      assertCurrent();
+      try {
+        // Metadata becomes available before initialize; native restore stays export-scoped.
+        // eslint-disable-next-line no-await-in-loop -- Discover each configured module once in registration order.
+        await this.loadKernelModule(entry, tracer, true);
+      } catch (error) {
+        assertCurrent();
+        if (isRenderAbortedError(error) || (error instanceof DOMException && error.name === 'AbortError')) {
+          throw error;
+        }
+        this.logger.warn('Published export metadata is unavailable: configured module failed to load', {
+          data: { kernelId: entry.id, error: error instanceof Error ? error.message : String(error) },
+        });
+      }
+      assertCurrent();
+    }
   }
 
   protected override async onCleanup(): Promise<void> {
@@ -555,6 +609,31 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     });
   }
 
+  protected override getCapabilityExportId(
+    kernelId: string,
+    sourceFormat: string,
+    targetFormat: string,
+  ): string | undefined {
+    const declarations = this.loadedKernels.get(kernelId)?.definition.exports;
+    if (!declarations) {
+      return undefined;
+    }
+    const available = Object.keys(declarations);
+    if (
+      sourceFormat !== targetFormat &&
+      (Object.hasOwn(declarations, targetFormat) ||
+        available.some((id) => declarations[id]?.extension === targetFormat))
+    ) {
+      return undefined;
+    }
+    const sources =
+      sourceFormat === targetFormat
+        ? available
+        : available.filter((id) => declarations[id]?.extension === sourceFormat);
+    const id = selectDeclaredExportId(declarations, sources, sourceFormat);
+    return id && declarations[id]?.extension === sourceFormat ? id : undefined;
+  }
+
   protected override resolveDocumentExportTarget(
     owner: OperationOwner,
     offers: KernelOffers | undefined,
@@ -573,12 +652,29 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           },
         ]);
       }
-      return { success: true, format: kernel.definition.exports[target]!.extension, exportId: target };
+      const exportId = selectDeclaredExportId(kernel.definition.exports, offered, target);
+      if (!exportId) {
+        return createKernelError([
+          { code: 'EXPORT_UNKNOWN', message: `Export ${target} is unavailable.`, type: 'kernel', severity: 'error' },
+        ]);
+      }
+      return { success: true, format: kernel.definition.exports[exportId]!.extension, exportId };
     }
     const exports = this.getDocumentExportOffers(owner, offers);
     const direct = exports.filter((item) => item.extension === target);
     if (direct.length === 1) {
-      return { success: true, format: target, exportId: direct[0]!.id };
+      const exportId =
+        kernel &&
+        selectDeclaredExportId(
+          kernel.definition.exports,
+          exports.map((item) => item.id),
+          target,
+        );
+      return exportId
+        ? { success: true, format: target, exportId }
+        : createKernelError([
+            { code: 'EXPORT_UNKNOWN', message: `Export ${target} is unavailable.`, type: 'kernel', severity: 'error' },
+          ]);
     }
     if (direct.length > 1) {
       return createKernelError([
@@ -596,7 +692,23 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     if (route) {
       const source = exports.filter((item) => item.extension === route.sourceFormat);
       if (source.length === 1) {
-        return { success: true, format: target, exportId: source[0]!.id };
+        const exportId =
+          kernel &&
+          selectDeclaredExportId(
+            kernel.definition.exports,
+            source.map((item) => item.id),
+            route.sourceFormat,
+          );
+        return exportId
+          ? { success: true, format: target, exportId }
+          : createKernelError([
+              {
+                code: 'EXPORT_UNKNOWN',
+                message: `Source export ${route.sourceFormat} is unavailable.`,
+                type: 'kernel',
+                severity: 'error',
+              },
+            ]);
       }
       if (source.length > 1) {
         return createKernelError([
@@ -878,11 +990,69 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
+  protected override describeNativeSnapshotForOwner(
+    owner: OperationOwner,
+    serializedNativeHandle: unknown,
+    runtime: KernelRuntime,
+  ): HandleSnapshotExactDescriptor | undefined {
+    const kernel = this.getKernelForOwner(owner);
+    return kernel?.definition.describeHandleSnapshot?.({ serialized: serializedNativeHandle }, runtime, kernel.ctx);
+  }
+
+  protected override hasNativeSnapshotDescriptorForOwner(owner: OperationOwner): boolean {
+    return this.getKernelForOwner(owner)?.definition.describeHandleSnapshot !== undefined;
+  }
+
+  protected override getPublishedExportMetadataOwner(kernelId: string, entryPath: string): OperationOwner | undefined {
+    const kernel = this.loadedKernels.get(kernelId);
+    if (!kernel) {
+      return undefined;
+    }
+    const slash = entryPath.lastIndexOf('/');
+    return {
+      kind: 'request',
+      file: { path: slash === -1 ? '' : entryPath.slice(0, slash), filename: entryPath.slice(slash + 1) },
+      binding: { kernelId, kernelVersion: kernel.definition.version, entryPath, kernel },
+    };
+  }
+
+  protected override async bindPublishedExactOwner(
+    kernelId: string,
+    entryPath: string,
+    runtime: KernelRuntime,
+  ): Promise<OperationOwner | undefined> {
+    const entry = this.kernelPlugins.find((candidate) => candidate.id === kernelId);
+    if (!entry) {
+      return undefined;
+    }
+    const kernel = await this.loadKernelModule(entry, runtime.tracer);
+    await this.ensureKernelInitialized(kernel, runtime);
+    const slash = entryPath.lastIndexOf('/');
+    return {
+      kind: 'request',
+      file: { path: slash === -1 ? '' : entryPath.slice(0, slash), filename: entryPath.slice(slash + 1) },
+      binding: {
+        kernelId: entry.id,
+        kernelVersion: kernel.definition.version,
+        entryPath,
+        kernel,
+      },
+    };
+  }
+
+  protected override async composePublishedAssemblyForOwner(
+    owner: OperationOwner,
+    occurrences: ComposeHandlesInput<unknown>['occurrences'],
+    runtime: KernelRuntime,
+  ): Promise<unknown | undefined> {
+    const kernel = this.getKernelForOwner(owner);
+    return kernel?.definition.composeHandles?.({ occurrences }, runtime, kernel.ctx);
+  }
+
   protected override disposeNativeHandleForOwner(
     owner: OperationOwner,
     nativeHandle: unknown,
     runtime: KernelRuntime,
-    _slot: EvaluationSlot,
   ): void {
     const kernel = this.getKernelForOwner(owner);
     if (kernel) {
@@ -894,6 +1064,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     input: { entryPath: string },
     runtime: KernelRuntime,
   ): Promise<RuntimeKernelBinding | undefined> {
+    this.selectionErrors.delete(input.entryPath);
     const span = runtime.tracer.startSpan('kernel.select', { file: input.entryPath });
     let selected: { kernelId: string; method: SelectionMethod } | undefined;
     try {
@@ -1082,7 +1253,11 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return kernel?.definition.version === binding.kernelVersion ? kernel : undefined;
   }
 
-  private async loadKernelModule(config: KernelPluginEntry, tracer: RuntimeSpanTracer): Promise<LoadedKernel> {
+  private async loadKernelModule(
+    config: KernelPluginEntry,
+    tracer: RuntimeSpanTracer,
+    metadataOnly = false,
+  ): Promise<LoadedKernel> {
     const existing = this.loadedKernels.get(config.id);
     if (existing) {
       return existing;
@@ -1107,7 +1282,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
     const validatedOptions: Record<string, unknown> = { ...parsedOptions };
     const implementationAssets = definition.implementationAssets ?? [];
-    await this.verifyImplementationAssets(config.id, implementationAssets);
+    if (!metadataOnly) {
+      await this.verifyImplementationAssets(config.id, implementationAssets);
+    }
 
     const loaded: LoadedKernel = {
       entry: config,
@@ -1181,6 +1358,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     if (kernel.initialized) {
       return;
     }
+
+    // A metadata-only admitted pin never proves these optional native assets usable.
+    await this.verifyImplementationAssets(kernel.entry.id, kernel.definition.implementationAssets ?? []);
 
     this.logger.trace(`Initializing kernel: ${kernel.entry.id}`);
 

@@ -19,6 +19,45 @@ export type GeometryComponentKind =
   | 'material'
   | 'unknown';
 
+/** Requested native solid volume, or an explicit reason it could not be measured. @public */
+export type TauCadPhysicalVolume =
+  | Readonly<{
+      state: 'measured';
+      valueMm3: number;
+      /** SHA-256 over provider/codec/unit and exact native shape bytes, never display GLB bytes. */
+      geometryDigest: string;
+      method: 'occt-solid-volume';
+      validity: 'closed-solid';
+    }>
+  | Readonly<{
+      state: 'derived';
+      /** Source-native measurement, already including native shape transforms. */
+      sourceValueMm3: number;
+      /** Absolute determinant of added assembly occurrence and ancestor transforms only. */
+      addedAbsDeterminant: number;
+      valueMm3: number;
+      /** Identity of the measured source-native geometry, not an assembly mesh digest. */
+      geometryDigest: string;
+      method: 'occurrence-determinant-v1';
+      validity: 'placed-solid';
+    }>
+  | Readonly<{
+      state: 'unavailable';
+      reason: 'not-solid' | 'invalid-solid' | 'native-unavailable' | 'degenerate-placement' | 'nonfinite-placement';
+    }>;
+
+/** Authored material assignment. Density is never inferred from a display material name. @public */
+export type TauCadPhysicalDensity = Readonly<{
+  valueGPerCm3: number;
+  provenance: 'authored-shape-config';
+}>;
+
+/** Optional physical evidence on the canonical component identity. @public */
+export type TauCadPhysical = Readonly<{
+  volume: TauCadPhysicalVolume;
+  density?: TauCadPhysicalDensity;
+}>;
+
 /**
  * Axis-aligned bounds for a geometry component.
  * @public
@@ -159,6 +198,8 @@ export type GeometryComponentNode = {
   primitiveRefs?: GeometryComponentPrimitiveRef[];
   materialIndices: number[];
   appearance?: GeometryComponentAppearance;
+  /** Native physical record from the admitted source GLB. */
+  physical?: TauCadPhysical;
   bounds?: GeometryComponentBounds;
   capabilities: GeometryComponentCapabilities;
   reference?: GeometryComponentReference;

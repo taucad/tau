@@ -38,6 +38,99 @@ const componentHitCandidates: ReadonlyArray<readonly [number, number, number]> =
   [0, 5, 0],
 ];
 
+test('shows producer physical facts, honest coverage, and committed facts during a parameter scrub', async () => {
+  await target.setViewport({ width: 1440, height: 900 });
+  await target.navigate('/__e2e/project-file-tree?main=physical-inspection');
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
+  await dismissCookieBanner();
+  await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
+  const commandSearch = selectors.getByPlaceholder('Search projects, chats, and actions…');
+  await target.fill(commandSearch, 'Open model structure');
+  await target.click(selectors.getByText('Open model structure', { exact: true }));
+
+  const parts = selectors.getByRole('list', { name: 'Model components for public/models/physical-inspection.js' });
+  await target.expectVisible(parts, 60_000);
+  await target.expectVisible(selectors.getByText('Weight · 1 of 3 parts known', { exact: true }), 60_000);
+  await target.click(parts.getByRole('button', { name: 'Known housing', exact: true }));
+  const physical = selectors.getByRole('region', { name: 'Physical facts', exact: true });
+  await target.expectVisible(physical.getByText('12.48 cm³', { exact: true }));
+  await target.expectVisible(physical.getByText('1.55 g/cm³', { exact: true }));
+  await target.expectVisible(physical.getByText('19.34 g', { exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Details', exact: true }));
+  await target.expectVisible(selectors.getByText('Native solid volume (OCCT)', { exact: true }));
+  await target.expectVisible(selectors.getByText('Authored shape configuration', { exact: true }));
+
+  await target.click(parts.getByRole('button', { name: 'Actions for Known housing', exact: true }));
+  const menu = selectors.getByRole('menu');
+  await target.click(menu.getByRole('menuitem', { name: /^Known housing/u }));
+  await target.expectVisible(menu.getByText('1.55 g/cm³', { exact: true }));
+  await target.expectVisible(menu.getByText('12.48 cm³', { exact: true }));
+  await target.expectVisible(menu.getByText('19.34 g', { exact: true }));
+  await target.keyboardPress('Escape');
+
+  await target.click(selectors.getByRole('button', { name: 'Missing', exact: true }));
+  await target.expectCount(selectors.getByRole('button', { name: 'Unknown density', exact: true }), 2);
+  await target.expectCount(selectors.getByRole('button', { name: 'Open face', exact: true }), 2);
+  await target.click(parts.getByRole('button', { name: 'Unknown density', exact: true }));
+  await target.expectVisible(physical.getByText('0.48 cm³', { exact: true }));
+  await target.expectCount(physical.getByText('Unknown', { exact: true }), 2);
+  await target.click(parts.getByRole('button', { name: 'Open face', exact: true }));
+  await target.expectCount(physical.getByText('Unavailable', { exact: true }), 2);
+  await target.expectVisible(
+    selectors.getByRole('status', { name: 'Measurement status' }).getByText('Open mesh: no enclosed volume.'),
+  );
+  await target.click(parts.getByRole('button', { name: 'Known housing', exact: true }));
+
+  // Keep the inspected facts and the parameter field in separate visible workbench groups.
+  await target.click(
+    selectors.getByCss('.dv-groupview:has(.dv-tab[aria-label="Model"]) button[aria-label="Split right"]'),
+    { button: 'right' },
+  );
+  await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
+  await target.fill(commandSearch, 'Open parameters');
+  await target.click(selectors.getByText('Open parameters', { exact: true }));
+  await target.expectCount(selectors.getByCss('[data-slot="dialog-overlay"]'), 0);
+  await target.expectVisible(physical.getByText('19.34 g', { exact: true }));
+  const width = selectors.getByLabelText('Input for Width').first();
+  await target.expectVisible(width, 60_000);
+  const bounds = await target.evaluateLocator(width, (element) => {
+    const slider = element.closest('[data-slot="slider-input"]');
+    if (!slider) {
+      throw new Error('Width scrub field is missing.');
+    }
+    const rect = slider.getBoundingClientRect();
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  });
+  const scrubX = bounds.x + bounds.width / 2;
+  const scrubY = bounds.y + bounds.height / 2;
+  await target.mouseMove(scrubX, scrubY);
+  await target.mouseDown();
+  try {
+    await target.mouseMove(scrubX + bounds.width / 4, scrubY, { steps: 4 });
+    await target.expectVisible(
+      physical.getByText('Last committed physical facts; preview geometry is transient.'),
+      60_000,
+    );
+    await target.expectVisible(physical.getByText('12.48 cm³', { exact: true }));
+    await target.expectVisible(physical.getByText('19.34 g', { exact: true }));
+  } finally {
+    await target.mouseUp();
+  }
+  await target.expectCount(
+    physical.getByText('Last committed physical facts; preview geometry is transient.'),
+    0,
+    60_000,
+  );
+  const changedWidth = await target.evaluateLocator(width, (element) => Number((element as HTMLInputElement).value));
+  expect(changedWidth).not.toBe(26);
+  const changedMass = new Intl.NumberFormat('en', { maximumFractionDigits: 2 }).format(
+    (changedWidth * 20 * 24 * 1.55) / 1000,
+  );
+  await target.expectVisible(physical.getByText(`${changedMass} g`, { exact: true }), 60_000);
+  await target.expectVisible(selectors.getByText('Weight · 1 of 3 parts known', { exact: true }));
+  await target.screenshot(selectors.getByRole('main'), 'physical-inspection.png');
+});
+
 type MenuItemVisualState = {
   readonly backgroundColor: string;
   readonly color: string;

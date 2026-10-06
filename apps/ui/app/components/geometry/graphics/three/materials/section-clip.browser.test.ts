@@ -451,3 +451,76 @@ const compare = ({
   }
   return counts;
 };
+
+it.each(['webgl', 'webgpu'] as const)(
+  'should rasterize screen-space edges with either world determinant on %s',
+  async (backend) => {
+    const disposables: Array<{ dispose: () => void }> = [];
+    const errors: unknown[][] = [];
+    vi.spyOn(console, 'error').mockImplementation((...data: unknown[]) => {
+      errors.push(data);
+    });
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const renderer = await createRenderer('viewport', backend, canvas);
+      disposables.push(renderer);
+      const { renderToPixels } = createFrameReader(renderer, disposables);
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+      camera.position.set(0, 0, 5);
+      camera.updateMatrixWorld();
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x00_00_00);
+      const material = createGltfFatLineMaterial({
+        backend,
+        resolution: new THREE.Vector2(size, size),
+        edgeColor: 0xff_ff_ff,
+      });
+      disposables.push(material);
+      const background = await renderToPixels(scene, camera);
+      for (const scaleX of [1, -1]) {
+        const positions = new Float32Array([-0.5 * scaleX, 0, 0, 0.5 * scaleX, 0, 0]);
+        const lines = createGltfFatLineSegmentsFromPositions({ backend, positions, material });
+        if (!lines) {
+          throw new Error('The reflected edge control has no segment.');
+        }
+        disposables.push(lines.geometry);
+        lines.scale.set(scaleX, 1, 1);
+        scene.add(lines);
+        lines.updateMatrixWorld(true);
+        try {
+          expect(lines.isMesh).toBe(true);
+          expect(lines.matrixWorld.determinant()).toBe(scaleX);
+          for (const [attribute, expected] of [
+            ['instanceStart', [-0.5, 0, 0]],
+            ['instanceEnd', [0.5, 0, 0]],
+          ] as const) {
+            const endpoint = new THREE.Vector3().fromBufferAttribute(lines.geometry.getAttribute(attribute), 0);
+            expect(endpoint.applyMatrix4(lines.matrixWorld).toArray()).toEqual(expected);
+          }
+          // oxlint-disable-next-line no-await-in-loop -- the same owned renderer reads each determinant control in turn.
+          const frame = await renderToPixels(scene, camera);
+          let changedPixels = 0;
+          for (let row = 0; row < size; row++) {
+            for (let column = 0; column < size; column++) {
+              if (frame.red(row, column) > background.red(row, column) + 24) {
+                changedPixels++;
+              }
+            }
+          }
+          expect(changedPixels, `${backend} determinant ${scaleX}`).toBeGreaterThan(0);
+        } finally {
+          scene.remove(lines);
+        }
+      }
+      expect(errors).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+      for (const resource of disposables.reverse()) {
+        resource.dispose();
+      }
+    }
+  },
+  setupTimeout,
+);

@@ -2,6 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import type { ThumbnailEvent, ThumbnailInput } from '#machines/thumbnail.machine.js';
 import type { HeadlessImageJob } from '#services/headless-image.service.js';
+import type { AdmittedAssembly } from '@taucad/runtime/types';
+import { mock } from 'vitest-mock-extended';
+import { holdGeometryPresentation } from '#components/geometry/graphics/three/utils/geometry-presentation-admission.js';
+
+let assemblyDisplay: { root: { digest: string }; admitted: AdmittedAssembly } | undefined;
+const resolveSettledCadGeometry = vi.fn(async () => ({
+  geometry: { format: 'gltf', content: new Uint8Array([0x67, 0x6c, 0x54, 0x46]) },
+  entryPath: 'src/main.ts',
+}));
+vi.mock('#machines/cad.machine.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  selectCadDisplay: () => assemblyDisplay,
+}));
+vi.mock('#services/headless-capture.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  resolveSettledCadGeometry,
+}));
 
 let thumbnailInput: ThumbnailInput | undefined;
 const send = vi.fn<(event: ThumbnailEvent) => void>();
@@ -48,12 +65,19 @@ type RenderEvent = {
   };
 };
 let renderingListener: ((event: RenderEvent) => void) | undefined;
-const unsubscribe = vi.fn();
+const unsubscribeRendering = vi.fn();
+const unsubscribeAssembly = vi.fn();
 const unsubscribeSnapshots = vi.fn();
 const subscribe = vi.fn(() => ({ unsubscribe: unsubscribeSnapshots }));
-const on = vi.fn((_event: string, listener: (event: RenderEvent) => void) => {
-  renderingListener = listener;
-  return { unsubscribe };
+const on = vi.fn((event: string, listener: (event: RenderEvent) => void) => {
+  if (event === 'defaultRendered') {
+    renderingListener = listener;
+    return { unsubscribe: unsubscribeRendering };
+  }
+  if (event !== 'assemblyEvaluated') {
+    throw new Error(`Unexpected CAD event ${event}`);
+  }
+  return { unsubscribe: unsubscribeAssembly };
 });
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -120,6 +144,7 @@ describe('useThumbnailGenerator', () => {
     renderingListener = undefined;
     snapshotEntryPath = sourceEntryPath;
     geometryFormat = 'gltf';
+    assemblyDisplay = undefined;
     getProjectFileSystemConfig.mockResolvedValue(locator('/projects/one'));
     vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 1536, height: 1152, close: vi.fn() }));
   });
@@ -168,6 +193,76 @@ describe('useThumbnailGenerator', () => {
     }
     expect(job.sourcePath).toBe(sourceEntryPath);
     expect(job.content).toBe(geometryContent);
+  });
+
+  it('waits for the admitted assembly presentation before automatic projection but keeps manual projection immediate', async () => {
+    const admitted = mock<AdmittedAssembly>();
+    assemblyDisplay = { root: { digest: 'assembly-root' }, admitted };
+    const held = holdGeometryPresentation(admitted);
+    renderHook(() => useThumbnailGenerator());
+    const automatic = thumbnailInput!.render({
+      kind: 'automatic-thumbnail',
+      identity: 'assembly-identity',
+      signal: new AbortController().signal,
+    });
+    await Promise.resolve();
+    expect(resolveSettledCadGeometry).not.toHaveBeenCalled();
+    await thumbnailInput!.render({ kind: 'manual-thumbnail', signal: new AbortController().signal });
+    expect(resolveSettledCadGeometry).toHaveBeenCalledOnce();
+    held.presented();
+    await automatic;
+    expect(resolveSettledCadGeometry).toHaveBeenCalledTimes(2);
+    held.release();
+  });
+
+  it('allows automatic assembly projection without a mounted presentation owner', async () => {
+    assemblyDisplay = { root: { digest: 'assembly-root' }, admitted: mock<AdmittedAssembly>() };
+    renderHook(() => useThumbnailGenerator());
+    await thumbnailInput!.render({
+      kind: 'automatic-thumbnail',
+      identity: 'assembly-identity',
+      signal: new AbortController().signal,
+    });
+    expect(resolveSettledCadGeometry).toHaveBeenCalledOnce();
+  });
+
+  it('refuses an aborted or superseded automatic assembly wait before projection', async () => {
+    const admitted = mock<AdmittedAssembly>();
+    assemblyDisplay = { root: { digest: 'assembly-root' }, admitted };
+    const held = holdGeometryPresentation(admitted);
+    const hook = renderHook(() => useThumbnailGenerator());
+    const controller = new AbortController();
+    const aborted = thumbnailInput!.render({
+      kind: 'automatic-thumbnail',
+      identity: 'assembly-identity',
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(aborted).rejects.toMatchObject({ name: 'AbortError' });
+    expect(resolveSettledCadGeometry).not.toHaveBeenCalled();
+
+    const changed = thumbnailInput!.render({
+      kind: 'automatic-thumbnail',
+      identity: 'assembly-identity',
+      signal: new AbortController().signal,
+    });
+    assemblyDisplay = { root: { digest: 'replacement-root' }, admitted: mock<AdmittedAssembly>() };
+    held.presented();
+    await expect(changed).rejects.toMatchObject({ name: 'AbortError' });
+    expect(resolveSettledCadGeometry).not.toHaveBeenCalled();
+    held.release();
+
+    const replacementHold = holdGeometryPresentation(assemblyDisplay.admitted);
+    const superseded = thumbnailInput!.render({
+      kind: 'automatic-thumbnail',
+      identity: 'assembly-identity',
+      signal: new AbortController().signal,
+    });
+    hook.unmount();
+    replacementHold.presented();
+    await expect(superseded).rejects.toMatchObject({ name: 'AbortError' });
+    expect(resolveSettledCadGeometry).not.toHaveBeenCalled();
+    replacementHold.release();
   });
 
   it('should reject a missing settled source without enqueueing an image export', async () => {
@@ -307,7 +402,8 @@ describe('useThumbnailGenerator', () => {
 
     unmount();
 
-    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(unsubscribeRendering).toHaveBeenCalledOnce();
+    expect(unsubscribeAssembly).toHaveBeenCalledOnce();
     expect(unsubscribeSnapshots).toHaveBeenCalledOnce();
   });
 

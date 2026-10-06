@@ -7,7 +7,8 @@ import type { Actor } from 'xstate';
 import type { Mechanism } from '@taucad/kinematics';
 import { fromThreeRenderBounds } from '@taucad/three/spatial';
 import type { RenderFrame } from '@taucad/spatial';
-import { useGeometryBounds } from '#components/geometry/graphics/three/use-geometry-bounds.js';
+import { useGeometryBounds, setGltfAssemblyBounds } from '#components/geometry/graphics/three/use-geometry-bounds.js';
+import { createCanonicalGltfToTauMatrix } from '#components/geometry/graphics/three/gltf-world.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
 import { createEdgePrototypeGeometry } from '#components/geometry/graphics/three/utils/gltf-edge-batches.js';
 import { sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
@@ -196,6 +197,63 @@ describe('useGeometryBounds', () => {
     expect(result.current.geometryBounds.min.toArray()).toEqual([9, -2, -3]);
     expect(result.current.geometryBounds.max.toArray()).toEqual([11, 2, 3]);
     expect(result.current.geometryRadius).toBeCloseTo(Math.sqrt(14), 10);
+  });
+
+  it('keeps admitted unresident bounds through the existing glTF adapter and render-frame inversion', () => {
+    const { innerRef, outerRef } = createSceneReferences(10);
+    const inner = innerRef.current!;
+    inner.matrixAutoUpdate = false;
+    inner.matrix.copy(createCanonicalGltfToTauMatrix());
+    mocks.renderFrame = { anchorFrameId: 'tau:root', originMeters: [10, 0, 0], metersPerRenderUnit: 2 };
+    outerRef.current!.matrixAutoUpdate = false;
+    outerRef.current!.matrix.makeScale(0.5, 0.5, 0.5).setPosition(-5, 0, 0);
+    setGltfAssemblyBounds(inner, {
+      unitId: 'file:assembly.json',
+      bounds: { min: [9, -2, -3], max: [22, 8, 10] },
+      components: [
+        { memberIds: ['resident'], bounds: { min: [9, -2, -3], max: [11, 2, 3] } },
+        { memberIds: ['unresident'], bounds: { min: [20, 4, 6], max: [22, 8, 10] } },
+      ],
+    });
+    const { result } = renderHook(() => useGeometryBounds(innerRef, outerRef));
+    act(() => mocks.frame?.());
+    expect(result.current.geometryBounds.min.toArray()).toEqual([9, -10, -2]);
+    expect(result.current.geometryBounds.max.toArray()).toEqual([22, 3, 8]);
+    expect(inner.children).toHaveLength(1);
+    expect(result.current.geometryCenter.toArray()).toEqual([15.5, -3.5, 3]);
+  });
+
+  it('includes a settled kinematic displacement of an unresident component without reconstructing geometry', () => {
+    const unitId = 'file:assembly.json';
+    const kinematics = mocks.kinematics!;
+    const mechanism: Mechanism = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'rad' },
+      root: 'base',
+      links: { base: { components: ['resident'] }, moving: { components: ['unresident'] } },
+      joints: { slide: { type: 'prismatic', parent: 'base', child: 'moving', origin: [0, 0, 0], axis: [1, 0, 0] } },
+    };
+    kinematics.send({ type: 'loadMechanism', unitId, mechanism });
+    const { innerRef, outerRef } = createSceneReferences(10);
+    setGltfAssemblyBounds(innerRef.current!, {
+      unitId,
+      bounds: { min: [9, -2, -3], max: [22, 8, 10] },
+      components: [
+        { memberIds: ['resident'], bounds: { min: [9, -2, -3], max: [11, 2, 3] } },
+        { memberIds: ['unresident'], bounds: { min: [20, 4, 6], max: [22, 8, 10] } },
+      ],
+    });
+    const { result } = renderHook(() => useGeometryBounds(innerRef, outerRef));
+    act(() => mocks.frame?.());
+    act(() => mocks.frame?.());
+    expect(result.current.geometryBounds.max.x).toBe(22);
+    act(() => {
+      kinematics.send({ type: 'setCoordinate', unitId, id: 'slide', value: 20 });
+    });
+    act(() => mocks.frame?.());
+    expect(result.current.geometryBounds.min.x).toBe(9);
+    expect(result.current.geometryBounds.max.x).toBe(42);
+    expect(innerRef.current!.children).toHaveLength(1);
   });
 
   it('measures again once a kinematic pose settles, but not while a clip still moves it', () => {

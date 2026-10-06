@@ -917,8 +917,20 @@ describe('Electron main runtime helpers', () => {
       start: vi.fn(),
       close: vi.fn(),
     };
+    const publicationFileSystemPort = {
+      ...fileSystemPort,
+      close: vi.fn(() => {
+        throw new Error('publication close failed');
+      }),
+    };
+    fileSystemPort.close.mockImplementation(() => {
+      throw new Error('evaluator close failed');
+    });
     const handle = registerElectronRuntimeMain({
-      resolveFork: () => ({ fileSystemPort: fileSystemPort as unknown as MessagePortMain }),
+      resolveFork: () => ({
+        fileSystemPort: fileSystemPort as unknown as MessagePortMain,
+        publicationFileSystemPort: publicationFileSystemPort as unknown as MessagePortMain,
+      }),
       utilityEntry: '/dist/main/kernel-host.js',
     });
     const nextUtilityIndex = liveUtilities.length;
@@ -938,6 +950,7 @@ describe('Electron main runtime helpers', () => {
     expect(() => handle.connect({ purpose: 'main-process-client' })).toThrow(/port transfer failed/u);
     expect(liveUtilities[nextUtilityIndex]?.kill).toHaveBeenCalledOnce();
     expect(fileSystemPort.close).toHaveBeenCalledOnce();
+    expect(publicationFileSystemPort.close).toHaveBeenCalledOnce();
     handle.dispose();
   });
 
@@ -950,16 +963,20 @@ describe('Electron main runtime helpers', () => {
       start: vi.fn(),
       close: vi.fn(),
     };
+    const publicationFileSystemPort = { ...fileSystemPort, close: vi.fn() };
     const handle = registerElectronRuntimeMain({
-      resolveFork: () => ({ fileSystemPort: fileSystemPort as unknown as MessagePortMain }),
+      resolveFork: () => ({
+        fileSystemPort: fileSystemPort as unknown as MessagePortMain,
+        publicationFileSystemPort: publicationFileSystemPort as unknown as MessagePortMain,
+      }),
       utilityEntry: '/dist/main/kernel-host.js',
     });
 
     handle.connect({ purpose: 'main-process-client' });
 
     expect(liveUtilities.at(-1)?.postMessage).toHaveBeenLastCalledWith(
-      { taucadRuntime: true, runtimePortIndex: 0, fileSystemPortIndex: 1 },
-      [expect.objectContaining({ id: 'utility-port' }), fileSystemPort],
+      { taucadRuntime: true, runtimePortIndex: 0, fileSystemPortIndex: 1, publicationFileSystemPortIndex: 2 },
+      [expect.objectContaining({ id: 'utility-port' }), fileSystemPort, publicationFileSystemPort],
     );
     handle.dispose();
   });

@@ -160,6 +160,40 @@ describe('bundledGitEnvironment', () => {
   });
 });
 
+describe('bundledGitEnvironment', () => {
+  const roots: string[] = [];
+  afterAll(async () => {
+    await Promise.all(roots.map(async (root) => rm(root, { recursive: true, force: true })));
+  });
+  /** A packaged app's `Contents/Resources`, carrying the payload `package-macos.mts` copies in. */
+  const resourcesWithGit = async (target: string, name: string): Promise<string> => {
+    const resources = await mkdtemp(join(tmpdir(), 'tau-resources-'));
+    roots.push(resources);
+    await mkdir(join(resources, 'git', target, 'bin'), { recursive: true });
+    await writeFile(join(resources, 'git', target, 'bin', name), '#!/bin/sh\n');
+    return resources;
+  };
+
+  it('should point the services utility at the git a packaged app carries under its resources', async () => {
+    const resources = await resourcesWithGit('darwin-arm64', 'git');
+    expect(bundledGitEnvironment(resources, { architecture: 'arm64', platform: 'darwin' })).toEqual({
+      TAU_GIT_EXECUTABLE: join(resources, 'git/darwin-arm64/bin/git'),
+    });
+  });
+
+  it('should name the Windows executable on Windows', async () => {
+    const resources = await resourcesWithGit('win32-x64', 'git.exe');
+    expect(bundledGitEnvironment(resources, { architecture: 'x64', platform: 'win32' })).toEqual({
+      TAU_GIT_EXECUTABLE: join(resources, 'git/win32-x64/bin/git.exe'),
+    });
+  });
+
+  it('should leave git to PATH when the build carries no payload for this target', async () => {
+    const resources = await resourcesWithGit('darwin-arm64', 'git');
+    expect(bundledGitEnvironment(resources, { architecture: 'x64', platform: 'linux' })).toEqual({});
+  });
+});
+
 describe('loginShellEnvironment', () => {
   const roots: string[] = [];
   afterAll(async () => {

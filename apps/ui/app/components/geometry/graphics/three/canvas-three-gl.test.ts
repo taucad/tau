@@ -41,6 +41,32 @@ describe('createTauR3fGlProp', () => {
     expect(hoisted.createRenderer).toHaveBeenCalledWith('viewport', 'webgpu', canvas);
   });
 
+  it('shares one pending WebGPU renderer for concurrent configuration of the same canvas', async () => {
+    const { createTauR3fGlProp } = await import('#components/geometry/graphics/three/canvas-three-gl.js');
+    const first = document.createElement('canvas');
+    const second = document.createElement('canvas');
+    let releaseFirst: ((renderer: unknown) => void) | undefined;
+    hoisted.createRenderer.mockImplementation(async (_useCase, _backend, canvas) => {
+      if (canvas === first) {
+        return new Promise((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return { setPixelRatio: vi.fn(), getPixelRatio: () => 1 };
+    });
+    const factory = createTauR3fGlProp('webgpu');
+    if (typeof factory !== 'function') {
+      throw new TypeError('Expected renderer factory');
+    }
+    const firstRequest = factory({ canvas: first });
+    const repeatRequest = factory({ canvas: first });
+    const otherRequest = factory({ canvas: second });
+    expect(hoisted.createRenderer).toHaveBeenCalledTimes(2);
+    releaseFirst?.({ setPixelRatio: vi.fn(), getPixelRatio: () => 1 });
+    expect(await firstRequest).toBe(await repeatRequest);
+    expect(await otherRequest).not.toBe(await firstRequest);
+  });
+
   it('delegates WebGL canvases to createRenderer viewport presets', async () => {
     const { createTauR3fGlProp } = await import('#components/geometry/graphics/three/canvas-three-gl.js');
     const glFactory = createTauR3fGlProp('webgl');
@@ -87,9 +113,12 @@ describe('createTauR3fGlProp', () => {
     if (typeof glFactory !== 'function') {
       throw new TypeError('Expected the R3F renderer factory.');
     }
+    const canvas = document.createElement('canvas');
+    const first = glFactory({ canvas });
+    const repeated = glFactory({ canvas });
     const settlement = async (): Promise<'settled'> => {
       try {
-        await glFactory({ canvas: document.createElement('canvas') });
+        await first;
       } catch {
         return 'settled';
       }
@@ -103,7 +132,17 @@ describe('createTauR3fGlProp', () => {
     };
 
     expect(await Promise.race([settlement(), stillPending()])).toBe('pending');
+    expect(repeated).toBeInstanceOf(Promise);
     expect(onCreateError).toHaveBeenCalledWith(failure);
+    expect(onCreateError).toHaveBeenCalledTimes(1);
+    expect(hoisted.createRenderer).toHaveBeenCalledTimes(1);
+    hoisted.createRenderer.mockResolvedValue({ setPixelRatio: vi.fn(), getPixelRatio: () => 1 });
+    const retryFactory = createTauR3fGlProp('webgl', [], onCreateError);
+    if (typeof retryFactory !== 'function') {
+      throw new TypeError('Expected fresh renderer factory');
+    }
+    await retryFactory({ canvas: document.createElement('canvas') });
+    expect(hoisted.createRenderer).toHaveBeenCalledTimes(2);
   });
 
   it('should restore both retained cameras to forward depth before a WebGL canvas starts', async () => {

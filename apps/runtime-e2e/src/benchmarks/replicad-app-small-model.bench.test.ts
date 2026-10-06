@@ -1,0 +1,1068 @@
+// @vitest-environment node
+import { spawn, execFileSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { writeSync } from 'node:fs';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { PerformanceObserver } from 'node:perf_hooks';
+import { pathToFileURL } from 'node:url';
+import { expect, it, onTestFinished } from 'vitest';
+import { loadFixture } from '@taucad/tau-examples/fixtures';
+import { computeStats, runBenchmarks } from '#benchmarks/benchmark-runner.js';
+import type { BenchmarkRunResult, HostRenderBoundary } from '#benchmarks/benchmark-runner.js';
+import type { BenchmarkCase } from '#benchmarks/benchmark-suite.js';
+
+const honeycombSource = `import { makeBaseBox } from 'replicad';
+
+export const defaultParams = {
+  dimensions: { width: 20, height: 14, depth: 4, rotationAngle: 45 },
+  pattern: { cellSize: 3, wallThickness: 1 },
+};
+
+export default function main(params = defaultParams) {
+  const { width, height, depth } = params.dimensions;
+  return makeBaseBox(width, height, depth);
+}
+`;
+const honeycombSourceDigest = '9433c7f5d9d2f2bc521efddeb71e25488ee906e4f888c39b82aa7677abb2806b';
+
+const processWindow = (startedAt: number, cpuAtStart: ReturnType<typeof process.cpuUsage>) => {
+  const cpu = process.cpuUsage(cpuAtStart);
+  return { runCallWall: performance.now() - startedAt, processUserMicros: cpu.user, processSystemMicros: cpu.system };
+};
+
+type IterationProcessWindow = {
+  iteration: number;
+  warmup: boolean;
+  /** Milliseconds. */
+  renderWall: number;
+  processUserMicros: number;
+  processSystemMicros: number;
+};
+
+const honeycombCohortMode = (cpuDiagnostic: boolean) => ({
+  directoryName: cpuDiagnostic ? 'cohort-cpu-diagnostic-v1' : 'cohort-v2',
+  finalStatus: cpuDiagnostic ? 'diagnostic-only' : 'qualified',
+  cpuDiagnostic,
+});
+
+const readHoneycombSource = async (): Promise<string> => {
+  const route = await readFile(
+    resolve(import.meta.dirname, '../../../ui/app/routes/[__e2e].project-file-tree/route.tsx'),
+    'utf8',
+  );
+  const declaration = 'const honeycombModel = `';
+  const start = route.indexOf(declaration);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const end = route.indexOf('`;', start + declaration.length);
+  expect(end).toBeGreaterThan(start);
+  const source = route.slice(start + declaration.length, end);
+  expect(source).toBe(honeycombSource);
+  expect(Buffer.byteLength(source)).toBe(347);
+  expect(createHash('sha256').update(source).digest('hex')).toBe(honeycombSourceDigest);
+  expect(route).toContain("['public/models/honeycomb.js', { content: encode(honeycombModel) }]");
+  return source;
+};
+
+it('should bind the Honeycomb benchmark to the exact existing route seed without native acquisition', async () => {
+  if (process.env['TAU_E2E_HONEYCOMB_WARM_TIER_TRACE'] === 'true') {
+    expect(process.execArgv).toEqual(
+      expect.arrayContaining(['--trace-opt', '--trace-deopt', '--trace-wasm-compilation-times']),
+    );
+  }
+  expect(await readHoneycombSource()).toBe(honeycombSource);
+});
+
+it.skipIf(process.env['TAU_E2E_HONEYCOMB_HOST_AWAIT'] !== 'true')(
+  'should record one exact Honeycomb host await diagnostic without changing the cohort',
+  async () => {
+    const workspace = resolve(import.meta.dirname, '../../../..');
+    const resourceRoot = resolve(workspace, 'apps/ui/public/assets/engines/replicad/density-single-v1');
+    const assets = await Promise.all(
+      [
+        { name: 'replicad_single.wasm', digest: '9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9' },
+        { name: 'replicad_single.mjs', digest: 'cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27' },
+      ].map(async ({ name, digest }) => {
+        const bytes = await readFile(resolve(resourceRoot, name));
+        expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
+        return { name, digest, bytes: bytes.byteLength };
+      }),
+    );
+    const source = await readHoneycombSource();
+    const boundaries: HostRenderBoundary[] = [];
+    const wasm = {
+      wasmUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.wasm')).href,
+      wasmBindingsUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.mjs')).href,
+    };
+    const run = await runBenchmarks(
+      [
+        {
+          name: 'app-custom-honeycomb-host-await-v1',
+          category: 'app-small-model',
+          files: { 'public/models/honeycomb.js': source },
+          mainFile: 'public/models/honeycomb.js',
+          mode: 'steady-state',
+          operation: 'render',
+        },
+      ],
+      {
+        iterations: 1,
+        operation: 'render',
+        includeEdges: true,
+        wasm,
+        onHostRenderBoundary: (boundary) => {
+          boundaries.push(boundary);
+        },
+      },
+    );
+    const result = run.results[0];
+    expect(result?.timings).toHaveLength(1);
+    expect(result?.warmupRuns).toBe(8);
+    expect(result?.outputHash).toBe('a961c7eaea123c509dd35092c606c8ff7d6a1b3be71e7506b3fc482a725cb408');
+    expect(result?.outputSizeBytes).toBe(4800);
+    expect(result?.triangleCount).toBe(16);
+    const phases = ['before-open', 'after-open', 'after-view', 'request-issued', 'await-settled', 'document-closed'];
+    expect(boundaries).toHaveLength(9 * phases.length);
+    for (let iteration = 1; iteration <= 9; iteration++) {
+      expect(boundaries.filter((boundary) => boundary.iteration === iteration).map(({ phase }) => phase)).toEqual(
+        phases,
+      );
+    }
+    const telemetry = result!.telemetry[0]!;
+    const operationIds = new Set(
+      telemetry.filter(({ name }) => name === 'kernel.mesh').map(({ detail }) => detail?.['operationId']),
+    );
+    expect(operationIds.size).toBe(1);
+    const operationId = [...operationIds][0];
+    expect(typeof operationId).toBe('string');
+    const stages = telemetry.map(({ name, startTime, duration, workerTimeOrigin, detail }) => ({
+      name,
+      startTime,
+      duration,
+      workerTimeOrigin,
+      ...(typeof detail?.['operationId'] === 'string'
+        ? { operationHash: createHash('sha256').update(detail['operationId']).digest('hex') }
+        : {}),
+    }));
+    const directory = resolve(
+      workspace,
+      'out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb/host-await-v1',
+    );
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      resolve(directory, 'diagnostic.json'),
+      JSON.stringify({
+        status: 'diagnostic-only',
+        predeclared: { renderOperations: 9, warmupRuns: 8, measuredRuns: 1, cohortComparisons: 0 },
+        source: { sha256: honeycombSourceDigest, bytes: Buffer.byteLength(source) },
+        assets,
+        options: { operation: 'render', includeEdges: true, mode: 'steady-state', iterations: 1, wasm },
+        output: { hash: result!.outputHash, bytes: result!.outputSizeBytes, triangles: result!.triangleCount },
+        renderWall: result!.timings[0],
+        hostOperations: Array.from({ length: 9 }, (_, index) => ({
+          iteration: index + 1,
+          warmup: index < 8,
+          boundaries: boundaries.filter((boundary) => boundary.iteration === index + 1),
+        })),
+        workerSpans: stages,
+        clockRule: 'Only subtract host/worker timestamps after checking matching time origins and one operation.',
+        implementationSources: await Promise.all(
+          [
+            'apps/runtime-e2e/src/benchmarks/benchmark-runner.ts',
+            'apps/runtime-e2e/src/benchmarks/replicad-app-small-model.bench.test.ts',
+          ].map(async (path) => ({
+            path,
+            sha256: createHash('sha256')
+              .update(await readFile(resolve(workspace, path)))
+              .digest('hex'),
+          })),
+        ),
+      }),
+    );
+  },
+);
+
+type HoneycombWarmDiagnosticMode = 'profile' | 'gc-host' | 'tier-trace' | 'tier-calibration';
+
+const runHoneycombWarmDiagnostic = async (mode: HoneycombWarmDiagnosticMode): Promise<void> => {
+  const profile = mode === 'profile';
+  const calibration = mode === 'tier-calibration';
+  const tierTrace = mode === 'tier-trace' || calibration;
+  const warmupRuns = calibration ? 400 : 8;
+  const measuredRuns = calibration ? 15 : 8;
+  const totalRuns = warmupRuns + measuredRuns;
+  if (tierTrace) {
+    expect(process.execArgv).toEqual(
+      expect.arrayContaining(['--trace-opt', '--trace-deopt', '--trace-wasm-compilation-times']),
+    );
+  }
+  if (!profile) {
+    expect(typeof process.threadCpuUsage).toBe('function');
+  }
+  const workspace = resolve(import.meta.dirname, '../../../..');
+  const gitHead = calibration
+    ? execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim()
+    : undefined;
+  const resourceRoot = resolve(workspace, 'apps/ui/public/assets/engines/replicad/density-single-v1');
+  const assets = await Promise.all(
+    [
+      { name: 'replicad_single.wasm', digest: '9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9' },
+      { name: 'replicad_single.mjs', digest: 'cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27' },
+    ].map(async ({ name, digest }) => {
+      const bytes = await readFile(resolve(resourceRoot, name));
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
+      return { name, digest, bytes: bytes.byteLength };
+    }),
+  );
+  const source = await readHoneycombSource();
+  const boundaries: HostRenderBoundary[] = [];
+  const iterationWalls: Array<{ iteration: number; totalRuns: number; warmupRuns: number; elapsed: number }> = [];
+  const iterationOutputs: Array<{
+    iteration: number;
+    totalRuns: number;
+    warmupRuns: number;
+    sha256: string;
+    bytes: number;
+  }> = [];
+  let tierMarkerCount = 0;
+  let tierMarkerFailed = false;
+  const gcEntries: Array<{ name: string; startTime: number; duration: number; timeOrigin: number; detail: unknown }> =
+    [];
+  const observer = new PerformanceObserver((entries) => {
+    for (const entry of entries.getEntries()) {
+      if (entry.entryType === 'gc') {
+        gcEntries.push({
+          name: entry.name,
+          startTime: entry.startTime,
+          duration: entry.duration,
+          timeOrigin: performance.timeOrigin,
+          detail: Reflect.get(entry, 'detail'),
+        });
+      }
+    }
+  });
+  const wasm = {
+    wasmUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.wasm')).href,
+    wasmBindingsUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.mjs')).href,
+  };
+  const caseName = `app-custom-honeycomb-warm-${mode}-v1`;
+  let run: Awaited<ReturnType<typeof runBenchmarks>>;
+  observer.observe({ entryTypes: ['gc'] });
+  try {
+    run = await runBenchmarks(
+      [
+        {
+          name: caseName,
+          category: 'app-small-model',
+          files: { 'public/models/honeycomb.js': source },
+          mainFile: 'public/models/honeycomb.js',
+          mode: 'steady-state',
+          operation: 'render',
+        },
+      ],
+      {
+        iterations: measuredRuns,
+        ...(calibration ? { warmupRuns } : {}),
+        operation: 'render',
+        includeEdges: true,
+        wasm,
+        ...(profile ? { cpuProfile: true, cpuProfileInterval: 100 } : {}),
+        ...(calibration
+          ? {
+              onIterationProgress: (progress: (typeof iterationWalls)[number]) => iterationWalls.push(progress),
+              onIterationOutput: (output: (typeof iterationOutputs)[number]) => iterationOutputs.push(output),
+            }
+          : {}),
+        onHostRenderBoundary: (boundary) => {
+          boundaries.push(boundary);
+          if (
+            tierTrace &&
+            (!calibration ||
+              (boundary.iteration === 1 && boundary.phase === 'before-open') ||
+              (boundary.iteration === warmupRuns && boundary.phase === 'document-closed') ||
+              boundary.iteration > warmupRuns) &&
+            (boundary.phase === 'before-open' || boundary.phase === 'document-closed')
+          ) {
+            if (tierMarkerCount >= 32) {
+              tierMarkerFailed = true;
+              return;
+            }
+            try {
+              const marker = `TAU_WARM_TIER_EMIT_V1 ${process.pid} ${boundary.iteration} ${boundary.phase === 'before-open' ? 1 : 2} ${boundary.monotonic}\n`;
+              if (marker.length > 128 || writeSync(1, marker) !== marker.length) {
+                tierMarkerFailed = true;
+                return;
+              }
+              tierMarkerCount++;
+            } catch {
+              // Preserve the benchmark error and observer cleanup; reject incomplete marker evidence after the run.
+              tierMarkerFailed = true;
+            }
+          }
+        },
+      },
+    );
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  } finally {
+    observer.disconnect();
+  }
+  const result = run.results[0];
+  expect(result?.timings).toHaveLength(measuredRuns);
+  expect(result?.warmupRuns).toBe(warmupRuns);
+  expect(result?.outputHash).toBe('a961c7eaea123c509dd35092c606c8ff7d6a1b3be71e7506b3fc482a725cb408');
+  expect(result?.outputSizeBytes).toBe(4800);
+  expect(result?.triangleCount).toBe(16);
+  if (profile) {
+    expect(result?.cpuProfile?.samples.length).toBeGreaterThan(0);
+    expect(result?.cpuProfile?.samples.length).toBe(result?.cpuProfile?.timeDeltas.length);
+  } else {
+    expect(result?.cpuProfile).toBeUndefined();
+    expect(result?.profileAnalysis).toBeUndefined();
+  }
+  const phases = ['before-open', 'after-open', 'after-view', 'request-issued', 'await-settled', 'document-closed'];
+  for (let iteration = 1; iteration <= totalRuns; iteration++) {
+    const operation = boundaries.filter((boundary) => boundary.iteration === iteration);
+    expect(operation.filter(({ phase }) => !phase.startsWith('profile-')).map(({ phase }) => phase)).toEqual(phases);
+    if (!profile) {
+      expect(operation.every(({ threadCpu }) => threadCpu !== undefined)).toBe(true);
+      expect(operation.map(({ monotonic }) => monotonic)).toEqual(
+        operation.map(({ monotonic }) => monotonic).toSorted((a, b) => a - b),
+      );
+    }
+  }
+  expect(
+    boundaries
+      .filter(({ phase }) => phase.startsWith('profile-'))
+      .map(({ phase, iteration }) => ({ phase, iteration })),
+  ).toEqual(
+    profile
+      ? [
+          { phase: 'profile-started', iteration: warmupRuns + 1 },
+          { phase: 'profile-stopped', iteration: totalRuns },
+        ]
+      : [],
+  );
+  if (!profile) {
+    expect(boundaries).toHaveLength(totalRuns * phases.length);
+  }
+  if (calibration) {
+    expect(iterationWalls).toHaveLength(totalRuns);
+    expect(iterationOutputs).toHaveLength(totalRuns);
+    for (let index = 0; index < totalRuns; index++) {
+      expect(iterationWalls[index]).toMatchObject({
+        iteration: index + 1,
+        totalRuns,
+        warmupRuns,
+      });
+      expect(Number.isFinite(iterationWalls[index]?.elapsed)).toBe(true);
+      expect(iterationOutputs[index]).toEqual({
+        iteration: index + 1,
+        totalRuns,
+        warmupRuns,
+        sha256: 'a961c7eaea123c509dd35092c606c8ff7d6a1b3be71e7506b3fc482a725cb408',
+        bytes: 4800,
+      });
+    }
+    expect(iterationWalls.slice(warmupRuns).map(({ elapsed }) => elapsed)).toEqual(result!.timings);
+  }
+  if (tierTrace) {
+    expect(tierMarkerFailed).toBe(false);
+    expect(tierMarkerCount).toBe(32);
+  }
+  if (calibration) {
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim()).toBe(gitHead);
+    expect(await readHoneycombSource()).toBe(source);
+    await Promise.all(
+      assets.map(async ({ name, digest }) => {
+        expect(
+          createHash('sha256')
+            .update(await readFile(resolve(resourceRoot, name)))
+            .digest('hex'),
+        ).toBe(digest);
+      }),
+    );
+  }
+  const directory = resolve(
+    workspace,
+    `out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb/warm-${mode}-v1`,
+  );
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    resolve(directory, 'diagnostic.json'),
+    JSON.stringify({
+      status: 'diagnostic-only',
+      predeclared: { clients: 1, renderOperations: totalRuns, warmupRuns, measuredRuns, cohortComparisons: 0 },
+      ...(calibration ? { gitHead } : {}),
+      source: { sha256: honeycombSourceDigest, bytes: Buffer.byteLength(source) },
+      assets,
+      options: profile
+        ? {
+            operation: 'render',
+            includeEdges: true,
+            mode: 'steady-state',
+            iterations: measuredRuns,
+            cpuProfileIntervalUs: 100,
+            wasm,
+          }
+        : {
+            operation: 'render',
+            includeEdges: true,
+            mode: 'steady-state',
+            iterations: measuredRuns,
+            ...(calibration ? { warmupRuns } : {}),
+            cpuProfile: false,
+            explicitPremeasurementGc: false,
+            wasm,
+          },
+      output: { hash: result!.outputHash, bytes: result!.outputSizeBytes, triangles: result!.triangleCount },
+      measuredRenderWall: result!.timings,
+      ...(calibration ? { conditioningWall: iterationWalls.slice(0, warmupRuns), iterationOutputs } : {}),
+      hostOperations: Array.from({ length: totalRuns }, (_, index) => ({
+        iteration: index + 1,
+        warmup: index < warmupRuns,
+        boundaries: boundaries.filter((boundary) => boundary.iteration === index + 1),
+      })),
+      gcEntries,
+      ...(tierTrace
+        ? {
+            tierTraceMarkers: {
+              prefix: 'TAU_WARM_TIER_EMIT_V1',
+              count: tierMarkerCount,
+              maximum: 32,
+              phases: { 1: 'before-open', 2: 'document-closed' },
+              ...(calibration ? { conditioningStartIteration: 1, conditioningEndIteration: warmupRuns } : {}),
+              interpretation:
+                'Synchronous stdout emission order only; V8 compiler events may be emitted asynchronously.',
+            },
+          }
+        : {}),
+      ...(profile ? { cpuProfile: result!.cpuProfile, profileAnalysis: result!.profileAnalysis } : {}),
+      workerSpans: result!.telemetry.flatMap((entries, index) =>
+        entries.map(({ name, startTime, duration, workerTimeOrigin, detail }) => ({
+          iteration: index + warmupRuns + 1,
+          name,
+          startTime,
+          duration,
+          workerTimeOrigin,
+          ...(typeof detail?.['operationId'] === 'string'
+            ? { operationHash: createHash('sha256').update(detail['operationId']).digest('hex') }
+            : {}),
+        })),
+      ),
+      limits: calibration
+        ? [
+            'The fixed 400 conditioning renders probe Node 26 Maglev invocation behavior; render count does not prove persistent function identity or bound WASM dynamic tiering.',
+            'Two numeric markers bracket the full conditioning interval, and 30 bracket the 15 observed renders; they establish stdout emission order, not V8 compiler event time.',
+            'Tracing and GC observation perturb timings. This one diagnostic cannot replace the original five/five/fifteen CV cohort or explain its historical failure.',
+          ]
+        : tierTrace
+          ? [
+              'Marker lines bracket synchronous emission in this Node worker, not the time of V8 optimization or compilation events; background work and buffering may reorder trace output.',
+              'V8 tracing and the GC observer can perturb timings. This single 8+8 window cannot replace the original CV cohort or prove its historical outlier cause.',
+            ]
+          : profile
+            ? [
+                'V8 samples cover the complete eight-operation measured window; they are not assigned to individual operations without verified clock alignment.',
+                'Profiler sampling, the explicit pre-measurement GC, and the GC observer can perturb timings. This run is diagnostic and cannot establish the original CV or its cause.',
+                'If this finite window has no slow operation, no slow-path attribution is possible.',
+              ]
+            : [
+                'GC observations and host boundaries share this Node realm; worker telemetry clocks require their own verified origin before subtraction.',
+                'The observer can perturb timings. This finite diagnostic is not a replacement for the original CV cohort or proof of its historical outlier cause.',
+                'A window with no slow operation cannot attribute a slow path.',
+              ],
+      implementationSources: await Promise.all(
+        [
+          'apps/runtime-e2e/src/benchmarks/benchmark-runner.ts',
+          'apps/runtime-e2e/src/benchmarks/replicad-app-small-model.bench.test.ts',
+          ...(calibration ? ['apps/runtime-e2e/vitest.config.ts'] : []),
+        ].map(async (path) => ({
+          path,
+          sha256: createHash('sha256')
+            .update(await readFile(resolve(workspace, path)))
+            .digest('hex'),
+        })),
+      ),
+    }),
+  );
+};
+
+it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_PROFILE'] !== 'true')(
+  'should retain the exact Honeycomb warm-window V8 samples and GC observations',
+  async () => runHoneycombWarmDiagnostic('profile'),
+);
+
+it.skipIf(process.env['TAU_E2E_HONEYCOMB_WARM_GC_HOST'] !== 'true')(
+  'should retain the exact Honeycomb warm-window GC and caller-thread boundaries without a V8 sampler',
+  async () => runHoneycombWarmDiagnostic('gc-host'),
+);
+
+it.skipIf(
+  process.env['TAU_E2E_HONEYCOMB_WARM_TIER_TRACE'] !== 'true' ||
+    process.env['TAU_E2E_HONEYCOMB_WARM_TIER_CALIBRATION'] === 'true',
+)('should retain bounded Honeycomb warm-window tier-trace emission brackets without a V8 sampler', async () =>
+  runHoneycombWarmDiagnostic('tier-trace'),
+);
+
+it.skipIf(
+  process.env['TAU_E2E_HONEYCOMB_WARM_TIER_TRACE'] !== 'true' ||
+    process.env['TAU_E2E_HONEYCOMB_WARM_TIER_CALIBRATION'] !== 'true',
+)('should retain one fixed 400-render Honeycomb tier calibration and 15 observed renders', async () =>
+  runHoneycombWarmDiagnostic('tier-calibration'),
+);
+
+// Existing runtime-e2e owner proposal; no default suite silently executes the opt-in native acquisition.
+it.skipIf(process.env['TAU_E2E_CUSTOM_SMALL_MODEL_BASELINE'] !== 'true').each([
+  {
+    title:
+      'should acquire the delivered custom pair small-CAD cold-client and warm baseline without inheriting default goldens',
+    honeycomb: false,
+  },
+  {
+    title:
+      'should acquire the exact Honeycomb delivered custom pair cold-client and warm baseline with bounded variation',
+    honeycomb: true,
+  },
+])('$title', async ({ honeycomb }) => {
+  const workspace = resolve(import.meta.dirname, '../../../..');
+  const resourceRoot = resolve(workspace, 'apps/ui/public/assets/engines/replicad/density-single-v1');
+  const delivered = [
+    { name: 'replicad_single.wasm', digest: '9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9' },
+    { name: 'replicad_single.mjs', digest: 'cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27' },
+  ];
+  const assets = await Promise.all(
+    delivered.map(async (asset) => {
+      const bytes = await readFile(resolve(resourceRoot, asset.name));
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      expect(digest).toBe(asset.digest);
+      return { ...asset, byteLength: bytes.byteLength, digest };
+    }),
+  );
+  const wasm = {
+    wasmUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.wasm')).href,
+    wasmBindingsUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.mjs')).href,
+  };
+  const fixtures: Array<Pick<BenchmarkCase, 'name' | 'files' | 'mainFile'>> = honeycomb
+    ? [
+        {
+          name: 'honeycomb',
+          mainFile: 'public/models/honeycomb.js',
+          files: { 'public/models/honeycomb.js': await readHoneycombSource() },
+        },
+      ]
+    : (['tray', 'birdhouse'] as const).map((name) => ({ name, ...loadFixture('replicad', name) }));
+  const coldClientRuns: BenchmarkRunResult[] = [];
+  // Each existing runner invocation creates and terminates its own clients. Node module cache remains warm.
+  // This loop is sequential so native work cannot contend with another sample.
+  for (let sample = 0; sample < 5; sample += 1) {
+    coldClientRuns.push(
+      // oxlint-disable-next-line no-await-in-loop -- Five fresh-client samples are a single serialized acquisition cohort.
+      await runBenchmarks(
+        fixtures.map<BenchmarkCase>((fixture) => ({
+          ...fixture,
+          name: `app-custom-${fixture.name}-fresh-client-v1`,
+          category: 'app-small-model',
+          mode: 'first-call',
+          operation: 'render',
+        })),
+        { iterations: 1, operation: 'render', includeEdges: true, wasm },
+      ),
+    );
+  }
+  const warmRun = await runBenchmarks(
+    fixtures.map<BenchmarkCase>((fixture) => ({
+      ...fixture,
+      name: `app-custom-${fixture.name}-unchanged-warm-v1`,
+      category: 'app-small-model',
+      mode: 'steady-state',
+      operation: 'render',
+    })),
+    { iterations: 15, operation: 'render', includeEdges: true, wasm },
+  );
+  for (const run of [...coldClientRuns, warmRun]) {
+    expect(run.measurement.wasmVariant).toBe(wasm.wasmUrl);
+    for (const result of run.results) {
+      expect(result.outputSizeBytes).toBeGreaterThan(0);
+      expect(result.triangleCount).toBeGreaterThan(0);
+      expect(result.timings.every((duration) => Number.isFinite(duration) && duration >= 0)).toBe(true);
+    }
+  }
+  // Cold and warm timing arms must describe the same actual rendered output for each selected canonical source.
+  for (const fixture of fixtures) {
+    const warm = warmRun.results.find(({ name }) => name === `app-custom-${fixture.name}-unchanged-warm-v1`);
+    if (!warm) {
+      throw new Error(`Warm result is absent for ${fixture.name}.`);
+    }
+    for (const run of coldClientRuns) {
+      const cold = run.results.find(({ name }) => name === `app-custom-${fixture.name}-fresh-client-v1`);
+      if (!cold) {
+        throw new Error(`Fresh-client result is absent for ${fixture.name}.`);
+      }
+      expect(cold.outputHash).toBe(warm.outputHash);
+      expect(cold.outputSizeBytes).toBe(warm.outputSizeBytes);
+      expect(cold.triangleCount).toBe(warm.triangleCount);
+    }
+  }
+  const coldFirst = coldClientRuns[0];
+  if (!coldFirst) {
+    throw new Error('Fresh-client acquisition produced no result.');
+  }
+  const coldAggregate = {
+    ...coldFirst,
+    results: coldFirst.results.map((first) => {
+      const timings = coldClientRuns.map((run) => {
+        const row = run.results.find(({ name }) => name === first.name);
+        if (
+          row?.timings.length !== 1 ||
+          row.outputHash !== first.outputHash ||
+          row.outputSizeBytes !== first.outputSizeBytes ||
+          row.triangleCount !== first.triangleCount ||
+          row.workloadFingerprint !== first.workloadFingerprint
+        ) {
+          throw new Error('Cold-client series changed output/workload identity; cannot freeze this baseline.');
+        }
+        const value = row.timings[0];
+        if (value === undefined) {
+          throw new Error('Fresh-client timing sample is absent.');
+        }
+        return value;
+      });
+      return {
+        ...first,
+        iterations: timings.length,
+        timings,
+        ...computeStats(timings),
+      };
+    }),
+  };
+  const directory = resolve(
+    workspace,
+    'out/reports/benchmarks/runtime-e2e/app-custom-small-model',
+    ...(honeycomb ? ['honeycomb'] : []),
+  );
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    resolve(directory, 'acquisition.json'),
+    JSON.stringify(
+      {
+        status: 'new custom-pair baseline acquisition; independent review/freeze required before regression comparison',
+        assets,
+        wasm,
+        ...(honeycomb
+          ? { sourceDigest: honeycombSourceDigest, sourceByteLength: 347, requiredCoefficientOfVariation: 0.1 }
+          : {}),
+        coldClientRuns,
+        coldAggregate,
+        warmRun,
+        selectedConfiguration: { variant: 'custom', implementationAssets: assets },
+        coldKind: 'fresh runtime clients in one Node process; not cold-process/browser time-to-paint',
+        pixelBaseline: 'separate actual ordinary-source browser captures on both backends',
+        installedPackageWasmSizes:
+          'runner wasmSizes are installed package reference sizes; assets above are the actual selected pair',
+        defaultBaseline:
+          'noncomparable; do not rewrite variant, outputHash, workloadFingerprint or comparator tolerances',
+      },
+      undefined,
+      2,
+    ),
+  );
+  const after = await Promise.all(
+    delivered.map(async ({ name }) =>
+      createHash('sha256')
+        .update(await readFile(resolve(resourceRoot, name)))
+        .digest('hex'),
+    ),
+  );
+  expect(after).toEqual(assets.map(({ digest }) => digest));
+  if (honeycomb) {
+    expect(await readHoneycombSource()).toBe(honeycombSource);
+    for (const result of coldAggregate.results) {
+      expect(result.iterations).toBe(5);
+      expect(result.coefficientOfVariation).toBeLessThanOrEqual(0.1);
+    }
+    for (const result of warmRun.results) {
+      expect(result.warmupRuns).toBe(8);
+      expect(result.iterations).toBe(15);
+      expect(result.coefficientOfVariation).toBeLessThanOrEqual(0.1);
+    }
+  }
+});
+
+// Explicit cohort acquisition only; the earlier five failed fresh-client samples remain immutable.
+it.skipIf(process.env['TAU_E2E_HONEYCOMB_COHORT'] !== 'true')(
+  'should compare exact Honeycomb cold processes, warmed-module fresh clients and warm cache without dropping samples',
+  async () => {
+    const cohortMode = honeycombCohortMode(process.env['TAU_E2E_HONEYCOMB_CPU_DIAGNOSTIC'] === 'true');
+    const lifecycle = new AbortController();
+    const activeChildren = new Set<ChildProcess>();
+    const assertActive = (): void => {
+      lifecycle.signal.throwIfAborted();
+    };
+    const observeProcessIterations = () => {
+      const windows: IterationProcessWindow[] = [];
+      let cpuAtStart: ReturnType<typeof process.cpuUsage> | undefined;
+      return {
+        windows,
+        onIterationStart: () => {
+          assertActive();
+          cpuAtStart = process.cpuUsage();
+        },
+        onIterationProgress: ({
+          iteration,
+          warmupRuns,
+          elapsed,
+        }: {
+          iteration: number;
+          warmupRuns: number;
+          elapsed: number;
+        }) => {
+          if (!cpuAtStart) {
+            throw new Error('Honeycomb CPU start boundary is absent.');
+          }
+          const cpu = process.cpuUsage(cpuAtStart);
+          windows.push({
+            iteration,
+            warmup: iteration <= warmupRuns,
+            renderWall: elapsed,
+            processUserMicros: cpu.user,
+            processSystemMicros: cpu.system,
+          });
+          cpuAtStart = undefined;
+          assertActive();
+        },
+      };
+    };
+    onTestFinished(() => {
+      lifecycle.abort(new Error('Honeycomb cohort test finished.'));
+      for (const child of activeChildren) {
+        child.kill('SIGKILL');
+      }
+    });
+    const workspace = resolve(import.meta.dirname, '../../../..');
+    const resourceRoot = resolve(workspace, 'apps/ui/public/assets/engines/replicad/density-single-v1');
+    const expectedAssets = [
+      { name: 'replicad_single.wasm', digest: '9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9' },
+      { name: 'replicad_single.mjs', digest: 'cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27' },
+    ];
+    const assets = await Promise.all(
+      expectedAssets.map(async ({ name, digest }) => {
+        const bytes = await readFile(resolve(resourceRoot, name));
+        expect(createHash('sha256').update(bytes).digest('hex')).toBe(digest);
+        return { name, digest, byteLength: bytes.byteLength };
+      }),
+    );
+    const source = await readHoneycombSource();
+    const gitHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim();
+    const implementationSources = await Promise.all(
+      [
+        'packages/plugins/replicad/src/replicad.kernel.ts',
+        'packages/plugins/replicad/src/utils/replicad-to-gltf.ts',
+        'packages/runtime/src/framework/kernel-runtime-worker.ts',
+        'apps/runtime-e2e/src/benchmarks/benchmark-runner.ts',
+      ].map(async (path) => ({
+        path,
+        digest: createHash('sha256')
+          .update(await readFile(resolve(workspace, path)))
+          .digest('hex'),
+      })),
+    );
+    const wasm = {
+      wasmUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.wasm')).href,
+      wasmBindingsUrl: pathToFileURL(resolve(resourceRoot, 'replicad_single.mjs')).href,
+    };
+    const benchCase: BenchmarkCase = {
+      name: 'app-custom-honeycomb-cohort-v1',
+      category: 'app-small-model',
+      files: { 'public/models/honeycomb.js': source },
+      mainFile: 'public/models/honeycomb.js',
+      mode: 'first-call',
+      operation: 'render',
+    };
+    const directory = resolve(
+      workspace,
+      'out/reports/benchmarks/runtime-e2e/app-custom-small-model/honeycomb',
+      cohortMode.directoryName,
+    );
+    await mkdir(directory, { recursive: true });
+    const inputPath = resolve(directory, 'cold-process-input.json');
+    const reportPath = resolve(directory, 'acquisition.json');
+    await writeFile(
+      inputPath,
+      JSON.stringify({
+        source,
+        sourceDigest: honeycombSourceDigest,
+        wasmUrl: wasm.wasmUrl,
+        wasmBindingsUrl: wasm.wasmBindingsUrl,
+        wasmDigest: assets[0]!.digest,
+        bindingsDigest: assets[1]!.digest,
+        gitHead,
+        implementationSources,
+        cpuDiagnostic: cohortMode.cpuDiagnostic,
+      }),
+    );
+    type ColdProcessResult = {
+      processId: number;
+      bootToken: string;
+      startupToEntry: number;
+      setupBeforeCad: number;
+      moduleResolutionPathHash: string;
+      gitHead: string;
+      implementationSources: typeof implementationSources;
+      sourceDigest: string;
+      assetDigests: [string, string];
+      run: BenchmarkRunResult;
+      runProcessWindow?: ReturnType<typeof processWindow>;
+      iterationProcessWindows?: IterationProcessWindow[];
+      launchToExit: number;
+    };
+    const coldProcessRuns: ColdProcessResult[] = [];
+    const freshClientRuns: BenchmarkRunResult[] = [];
+    const freshClientProcessWindows: Array<ReturnType<typeof processWindow>> = [];
+    const freshClientIterationProcessWindows: IterationProcessWindow[][] = [];
+    const cohortState: {
+      warmModulePrep?: BenchmarkRunResult;
+      warmModulePrepProcessWindow?: ReturnType<typeof processWindow>;
+      warmModulePrepIterationProcessWindows?: IterationProcessWindow[];
+      warmRun?: BenchmarkRunResult;
+      warmRunProcessWindow?: ReturnType<typeof processWindow>;
+      warmRunIterationProcessWindows?: IterationProcessWindow[];
+      coldProcessStats?: ReturnType<typeof computeStats>;
+      freshClientStats?: ReturnType<typeof computeStats>;
+    } = {};
+    const persist = async (status: string): Promise<void> => {
+      assertActive();
+      await writeFile(
+        reportPath,
+        JSON.stringify(
+          {
+            status,
+            ...(cohortMode.cpuDiagnostic ? { diagnosticOnly: true } : {}),
+            sourceDigest: honeycombSourceDigest,
+            sourceByteLength: 347,
+            gitHead,
+            implementationSources,
+            assets,
+            measuredWindow: 'runBenchmarks first-call render only; OS startup and module setup separate',
+            ...(cohortMode.cpuDiagnostic
+              ? {
+                  processCpuScope:
+                    'process.cpuUsage user/system microseconds for the whole Node process, including worker threads; runCallWall is milliseconds across each full runBenchmarks call, while renderWall is milliseconds for each timed render; CPU/wall may exceed one and does not isolate GC or scheduling',
+                }
+              : {}),
+            warmModuleProtocol:
+              'one recorded prep, then five measured fresh clients, then one client with eight warmups and 15 measurements',
+            coldProcessRuns,
+            coldProcessStats: cohortState.coldProcessStats,
+            warmedModuleProcess: {
+              processId: process.pid,
+              moduleResolutionPathHash: createHash('sha256')
+                .update(import.meta.resolve('@taucad/replicad'))
+                .digest('hex'),
+            },
+            warmModulePrep: cohortState.warmModulePrep,
+            ...(cohortMode.cpuDiagnostic
+              ? {
+                  warmModulePrepProcessWindow: cohortState.warmModulePrepProcessWindow,
+                  warmModulePrepIterationProcessWindows: cohortState.warmModulePrepIterationProcessWindows,
+                }
+              : {}),
+            freshClientRuns,
+            ...(cohortMode.cpuDiagnostic ? { freshClientProcessWindows, freshClientIterationProcessWindows } : {}),
+            freshClientStats: cohortState.freshClientStats,
+            warmRun: cohortState.warmRun,
+            ...(cohortMode.cpuDiagnostic
+              ? {
+                  warmRunProcessWindow: cohortState.warmRunProcessWindow,
+                  warmRunIterationProcessWindows: cohortState.warmRunIterationProcessWindows,
+                }
+              : {}),
+            cvCeiling: 0.1,
+          },
+          undefined,
+          2,
+        ),
+      );
+      assertActive();
+    };
+    assertActive();
+    await persist('prepared');
+    /* oxlint-disable no-await-in-loop -- Each fresh OS process must finish and persist before the next starts. */
+    for (let sample = 0; sample < 5; sample += 1) {
+      assertActive();
+      const resultPath = resolve(directory, `cold-process-${sample}.json`);
+      const log = await open(resolve(directory, `cold-process-${sample}.log`), 'w');
+      let launchToExit = 0;
+      const launchedAt = performance.now();
+      try {
+        assertActive();
+        const child = spawn(
+          process.execPath,
+          [
+            '--import=tsx',
+            resolve(import.meta.dirname, 'replicad-honeycomb-cold-process.fixture.ts'),
+            inputPath,
+            resultPath,
+          ],
+          { cwd: workspace, stdio: ['ignore', log.fd, log.fd] },
+        );
+        activeChildren.add(child);
+        const exit = await new Promise<number | undefined>((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', (code) => {
+            activeChildren.delete(child);
+            launchToExit = performance.now() - launchedAt;
+            resolve(code ?? undefined);
+          });
+        });
+        assertActive();
+        expect(exit).toBe(0);
+      } finally {
+        for (const child of activeChildren) {
+          child.kill('SIGKILL');
+        }
+        await log.close();
+      }
+      assertActive();
+      const childResult = JSON.parse(
+        await readFile(resultPath, { encoding: 'utf8', signal: lifecycle.signal }),
+      ) as Omit<ColdProcessResult, 'launchToExit'>;
+      assertActive();
+      expect(childResult.sourceDigest).toBe(honeycombSourceDigest);
+      expect(childResult.gitHead).toBe(gitHead);
+      expect(childResult.implementationSources).toEqual(implementationSources);
+      expect(childResult.assetDigests).toEqual(assets.map(({ digest }) => digest));
+      expect(childResult.run.results[0]?.timings).toHaveLength(1);
+      if (cohortMode.cpuDiagnostic) {
+        expect(childResult.iterationProcessWindows).toHaveLength(1);
+        expect(childResult.iterationProcessWindows?.[0]?.renderWall).toBe(childResult.run.results[0]?.timings[0]);
+      }
+      coldProcessRuns.push({ ...childResult, launchToExit });
+      await persist('cold-process-in-progress');
+    }
+    /* oxlint-enable no-await-in-loop */
+    expect(new Set(coldProcessRuns.map(({ bootToken }) => bootToken)).size).toBe(5);
+    expect(new Set(coldProcessRuns.map(({ processId }) => processId)).size).toBe(5);
+    expect(new Set(coldProcessRuns.map(({ moduleResolutionPathHash }) => moduleResolutionPathHash)).size).toBe(1);
+
+    // Predeclared module/WASM warmup is evidence, never a discarded member of the five-client distribution.
+    assertActive();
+    const prepIterations = cohortMode.cpuDiagnostic ? observeProcessIterations() : undefined;
+    const prepStartedAt = cohortMode.cpuDiagnostic ? performance.now() : undefined;
+    const prepCpuAtStart = cohortMode.cpuDiagnostic ? process.cpuUsage() : undefined;
+    const warmModulePrep = await runBenchmarks([benchCase], {
+      iterations: 1,
+      operation: 'render',
+      includeEdges: true,
+      wasm,
+      onIterationStart: prepIterations?.onIterationStart,
+      onIterationProgress: prepIterations?.onIterationProgress ?? assertActive,
+    });
+    cohortState.warmModulePrep = warmModulePrep;
+    if (prepStartedAt !== undefined && prepCpuAtStart && prepIterations) {
+      cohortState.warmModulePrepProcessWindow = processWindow(prepStartedAt, prepCpuAtStart);
+      cohortState.warmModulePrepIterationProcessWindows = prepIterations.windows;
+    }
+    await persist('warm-module-prepared');
+    for (let sample = 0; sample < 5; sample += 1) {
+      assertActive();
+      const iterations = cohortMode.cpuDiagnostic ? observeProcessIterations() : undefined;
+      const startedAt = cohortMode.cpuDiagnostic ? performance.now() : undefined;
+      const cpuAtStart = cohortMode.cpuDiagnostic ? process.cpuUsage() : undefined;
+      // oxlint-disable-next-line no-await-in-loop -- Five fresh clients are one serial warmed-module cohort.
+      const run = await runBenchmarks([benchCase], {
+        iterations: 1,
+        operation: 'render',
+        includeEdges: true,
+        wasm,
+        onIterationStart: iterations?.onIterationStart,
+        onIterationProgress: iterations?.onIterationProgress ?? assertActive,
+      });
+      if (startedAt !== undefined && cpuAtStart && iterations) {
+        freshClientProcessWindows.push(processWindow(startedAt, cpuAtStart));
+        freshClientIterationProcessWindows.push(iterations.windows);
+      }
+      freshClientRuns.push(run);
+      // oxlint-disable-next-line no-await-in-loop -- Persist each genuine measurement before the next client.
+      await persist('fresh-client-in-progress');
+    }
+    assertActive();
+    const warmIterations = cohortMode.cpuDiagnostic ? observeProcessIterations() : undefined;
+    const warmStartedAt = cohortMode.cpuDiagnostic ? performance.now() : undefined;
+    const warmCpuAtStart = cohortMode.cpuDiagnostic ? process.cpuUsage() : undefined;
+    const warmRun = await runBenchmarks([{ ...benchCase, mode: 'steady-state' }], {
+      iterations: 15,
+      operation: 'render',
+      includeEdges: true,
+      wasm,
+      onIterationStart: warmIterations?.onIterationStart,
+      onIterationProgress: warmIterations?.onIterationProgress ?? assertActive,
+    });
+    if (warmStartedAt !== undefined && warmCpuAtStart && warmIterations) {
+      cohortState.warmRunProcessWindow = processWindow(warmStartedAt, warmCpuAtStart);
+      cohortState.warmRunIterationProcessWindows = warmIterations.windows;
+    }
+    const processDurations = coldProcessRuns.map(({ run }) => run.results[0]!.timings[0]!);
+    const clientDurations = freshClientRuns.map(({ results }) => results[0]!.timings[0]!);
+    const coldProcessStats = computeStats(processDurations);
+    const freshClientStats = computeStats(clientDurations);
+    cohortState.warmRun = warmRun;
+    cohortState.coldProcessStats = coldProcessStats;
+    cohortState.freshClientStats = freshClientStats;
+    await persist('complete-before-cv');
+
+    const allRuns = [...coldProcessRuns.map(({ run }) => run), warmModulePrep, ...freshClientRuns, warmRun];
+    const first = allRuns[0]!.results[0]!;
+    for (const run of allRuns) {
+      expect(run.measurement.wasmVariant).toBe(wasm.wasmUrl);
+      expect(run.results).toHaveLength(1);
+      const result = run.results[0]!;
+      expect(result.outputHash).toBe(first.outputHash);
+      expect(result.outputSizeBytes).toBe(first.outputSizeBytes);
+      expect(result.triangleCount).toBe(first.triangleCount);
+    }
+    expect(warmModulePrep.results[0]?.timings).toHaveLength(1);
+    if (cohortMode.cpuDiagnostic) {
+      expect(prepIterations?.windows.map(({ renderWall }) => renderWall)).toEqual(warmModulePrep.results[0]?.timings);
+      expect(freshClientIterationProcessWindows).toHaveLength(5);
+      for (const [index, windows] of freshClientIterationProcessWindows.entries()) {
+        expect(windows.map(({ renderWall }) => renderWall)).toEqual(freshClientRuns[index]?.results[0]?.timings);
+      }
+    }
+    expect(warmRun.results[0]?.warmupRuns).toBe(8);
+    expect(warmRun.results[0]?.timings).toHaveLength(15);
+    if (cohortMode.cpuDiagnostic) {
+      expect(warmIterations?.windows).toHaveLength(23);
+      expect(warmIterations?.windows.slice(0, 8).every(({ warmup }) => warmup)).toBe(true);
+      expect(warmIterations?.windows.slice(8).map(({ renderWall }) => renderWall)).toEqual(warmRun.results[0]?.timings);
+    }
+    expect(await readHoneycombSource()).toBe(source);
+    expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workspace, encoding: 'utf8' }).trim()).toBe(gitHead);
+    await Promise.all(
+      implementationSources.map(async ({ path, digest }) => {
+        expect(
+          createHash('sha256')
+            .update(await readFile(resolve(workspace, path)))
+            .digest('hex'),
+        ).toBe(digest);
+      }),
+    );
+    /* oxlint-disable no-await-in-loop -- Recheck each selected implementation asset after the complete serial cohort. */
+    for (const { name, digest } of assets) {
+      expect(
+        createHash('sha256')
+          .update(await readFile(resolve(resourceRoot, name)))
+          .digest('hex'),
+      ).toBe(digest);
+    }
+    /* oxlint-enable no-await-in-loop */
+    expect(processDurations).toHaveLength(5);
+    expect(clientDurations).toHaveLength(5);
+    expect(coldProcessStats.coefficientOfVariation).toBeLessThanOrEqual(0.1);
+    expect(freshClientStats.coefficientOfVariation).toBeLessThanOrEqual(0.1);
+    expect(warmRun.results[0]!.coefficientOfVariation).toBeLessThanOrEqual(0.1);
+    await persist(cohortMode.finalStatus);
+  },
+);

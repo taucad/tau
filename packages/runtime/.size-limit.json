@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS)",
+    "name": "total (ESM JS) with pure pinned asset reads — measured 207622 bytes on 2026-10-06; 128 bytes headroom",
     "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
-    "limit": "205 kB"
+    "limit": "207.75 kB"
   },
   {
     "name": "@taucad/runtime",

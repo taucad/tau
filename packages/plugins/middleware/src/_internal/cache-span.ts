@@ -1,3 +1,4 @@
+import type { ComputeEvaluationResult } from '@taucad/cache-core';
 import type { RuntimeSpanTracer } from '@taucad/runtime/types';
 
 /**
@@ -11,12 +12,26 @@ import type { RuntimeSpanTracer } from '@taucad/runtime/types';
 export const traceCacheOperation = async <T>(
   tracer: RuntimeSpanTracer,
   name: string,
-  operation: () => T | Promise<T>,
-): Promise<T> => {
+  operation: () => ComputeEvaluationResult<T> | Promise<ComputeEvaluationResult<T>>,
+): Promise<ComputeEvaluationResult<T>> => {
   const span = tracer.startSpan(name);
+  let attributes: Record<string, string | number | boolean> | undefined;
   try {
-    return await operation();
+    const result = await operation();
+    attributes = {
+      source: result.source,
+      actionDigest: result.actionDigest,
+      ...(result.source === 'cache'
+        ? { contentDigest: result.contentDigest }
+        : {
+            publicationStatus: result.publication.status,
+            ...(result.publication.status === 'stored'
+              ? { contentDigest: result.publication.contentDigest }
+              : { publicationReason: result.publication.reason }),
+          }),
+    };
+    return result;
   } finally {
-    span.end();
+    span.end(attributes);
   }
 };

@@ -32,6 +32,7 @@ function getGeometryCache(geometry: THREE.BufferGeometry): CachedGeometry {
   const indexAttribute = geometry.index ?? undefined;
   const indexVersion = indexAttribute?.version ?? 0;
   let cached = geometryWeakCache.get(geometry);
+  const isNewGeometry = cached === undefined;
 
   if (!cached || cached.positionAttribute !== positionAttribute || cached.positionVersion !== positionVersion) {
     // A supplied box may predate the current vertices. Refresh once per attribute revision,
@@ -46,6 +47,13 @@ function getGeometryCache(geometry: THREE.BufferGeometry): CachedGeometry {
       bvh: undefined,
     };
     geometryWeakCache.set(geometry, cached);
+    if (isNewGeometry) {
+      const clearGeometryCache = (): void => {
+        geometryWeakCache.delete(geometry);
+        geometry.removeEventListener('dispose', clearGeometryCache);
+      };
+      geometry.addEventListener('dispose', clearGeometryCache);
+    }
   } else if (cached.indexAttribute !== indexAttribute || cached.indexVersion !== indexVersion) {
     cached.indexAttribute = indexAttribute;
     cached.indexVersion = indexVersion;
@@ -71,6 +79,11 @@ export function getOrBuildBvh(geometry: THREE.BufferGeometry): MeshBVH {
   const cached = getGeometryCache(geometry);
   cached.bvh ??= new MeshBVH(geometry, { indirect: true });
   return cached.bvh;
+}
+
+/** Read an already-retained tree without constructing bounds, allocating a tree or changing its revision. */
+export function getCachedBvh(geometry: THREE.BufferGeometry): MeshBVH | undefined {
+  return geometryWeakCache.get(geometry)?.bvh;
 }
 
 /** No-op: `WeakMap` cache cannot be cleared. See {@link getOrBuildBvh}. */

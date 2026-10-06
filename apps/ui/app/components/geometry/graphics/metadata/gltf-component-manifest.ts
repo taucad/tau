@@ -1,4 +1,5 @@
 import type { GLTF } from '@gltf-transform/core';
+import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
 import { tauCadTopologyExtension } from '@taucad/types/constants';
 import type {
   GeometryComponentAppearance,
@@ -10,13 +11,13 @@ import type {
   GeometryComponentPrimitiveRef,
   JSONObject,
 } from '@taucad/types';
+import type { validateAdmittedAssemblyGlb, TauCadTopologyComponent } from '@taucad/geometry-core';
+import type { AdmittedAssembly } from '@taucad/runtime/types';
 import { admitMechanism } from '@taucad/kinematics';
-import type { TauCadTopologyComponent } from '@taucad/geometry-core';
-import { Box3, Matrix4, Quaternion, Vector3 } from 'three';
 
 type JsonObject = JSONObject;
 
-type GltfAccessor = {
+type GltfAccessor = Pick<GLTF.IAccessor, 'normalized' | 'sparse'> & {
   bufferView?: number;
   byteOffset?: number;
   componentType: number;
@@ -354,7 +355,8 @@ function buildMeasurementFeatures(
   return result;
 }
 
-function readTopologyPayload(json: GltfJson, bin: Uint8Array<ArrayBuffer>): TopologyPayload {
+/** Read inline or embedded topology through the manifest's shared payload owner. */
+export function readTopologyPayload(json: GltfJson, bin: Uint8Array<ArrayBuffer>): TopologyPayload {
   const extension = json.extensions?.[tauCadTopologyExtension];
   if (!extension) {
     return {};
@@ -429,6 +431,12 @@ function combineBounds(bounds: GeometryComponentBounds[]): GeometryComponentBoun
   return { min, max, center, radius };
 }
 
+function boundsFromMinMax(min: [number, number, number], max: [number, number, number]): GeometryComponentBounds {
+  const center: [number, number, number] = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+  const radius = Math.hypot(max[0] - center[0], max[1] - center[1], max[2] - center[2]);
+  return { min, max, center, radius };
+}
+
 function getAccessorBounds(json: GltfJson, accessorIndex: number | undefined): GeometryComponentBounds | undefined {
   if (accessorIndex === undefined) {
     return undefined;
@@ -441,9 +449,7 @@ function getAccessorBounds(json: GltfJson, accessorIndex: number | undefined): G
 
   const min: [number, number, number] = [accessor.min[0]!, accessor.min[1]!, accessor.min[2]!];
   const max: [number, number, number] = [accessor.max[0]!, accessor.max[1]!, accessor.max[2]!];
-  const center: [number, number, number] = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
-  const radius = Math.hypot(max[0] - center[0], max[1] - center[1], max[2] - center[2]);
-  return { min, max, center, radius };
+  return boundsFromMinMax(min, max);
 }
 
 type GltfBoundsContext = {
@@ -451,79 +457,86 @@ type GltfBoundsContext = {
   worldMatrices: ReadonlyMap<number, Matrix4>;
 };
 
-function createNodeWorldMatrices(json: GltfJson): ReadonlyMap<number, Matrix4> {
-  const parents = new Map<number, number>();
-  for (const [nodeIndex, node] of (json.nodes ?? []).entries()) {
+function getNodeWorldMatrices(json: GltfJson): ReadonlyMap<number, Matrix4> {
+  const nodes = json.nodes ?? [];
+  const parentByNode = new Map<number, number>();
+  for (const [parentIndex, node] of nodes.entries()) {
     for (const childIndex of node.children ?? []) {
-      if (!parents.has(childIndex)) {
-        parents.set(childIndex, nodeIndex);
+      if (!parentByNode.has(childIndex)) {
+        parentByNode.set(childIndex, parentIndex);
       }
     }
   }
-
-  const matrices = new Map<number, Matrix4>();
+  const worldByNode = new Map<number, Matrix4>();
   const visiting = new Set<number>();
-  const worldMatrix = (nodeIndex: number): Matrix4 => {
-    const cached = matrices.get(nodeIndex);
+  const resolve = (index: number): Matrix4 | undefined => {
+    const cached = worldByNode.get(index);
     if (cached) {
       return cached;
     }
-    const node = json.nodes?.[nodeIndex];
-    if (!node || visiting.has(nodeIndex)) {
-      return new Matrix4();
+    const node = nodes[index];
+    if (!node || visiting.has(index)) {
+      return undefined;
     }
-
-    visiting.add(nodeIndex);
-    const matrix = node.matrix
+    visiting.add(index);
+    const invalid = (values: readonly number[] | undefined, length: number): boolean =>
+      values !== undefined && (values.length !== length || values.some((value) => !Number.isFinite(value)));
+    if (
+      invalid(node.matrix, 16) ||
+      invalid(node.translation, 3) ||
+      invalid(node.rotation, 4) ||
+      invalid(node.scale, 3)
+    ) {
+      visiting.delete(index);
+      return undefined;
+    }
+    const local = node.matrix
       ? new Matrix4().fromArray(node.matrix)
       : new Matrix4().compose(
           new Vector3().fromArray(node.translation ?? [0, 0, 0]),
           new Quaternion().fromArray(node.rotation ?? [0, 0, 0, 1]),
           new Vector3().fromArray(node.scale ?? [1, 1, 1]),
         );
-    const parentIndex = parents.get(nodeIndex);
-    if (parentIndex !== undefined) {
-      matrix.premultiply(worldMatrix(parentIndex));
+    const parentIndex = parentByNode.get(index);
+    const parent = parentIndex === undefined ? undefined : resolve(parentIndex);
+    visiting.delete(index);
+    if (parentIndex !== undefined && !parent) {
+      return undefined;
     }
-    visiting.delete(nodeIndex);
-    matrices.set(nodeIndex, matrix);
-    return matrix;
+    const world = parent ? parent.clone().multiply(local) : local;
+    worldByNode.set(index, world);
+    return world;
   };
-  for (const nodeIndex of (json.nodes ?? []).keys()) {
-    worldMatrix(nodeIndex);
+  for (const index of nodes.keys()) {
+    resolve(index);
   }
-  return matrices;
+  return worldByNode;
 }
 
-function transformBounds(
-  bounds: GeometryComponentBounds | undefined,
-  matrix: Matrix4 | undefined,
+function getPlacedAccessorBounds(
+  json: GltfJson,
+  reference: { accessorIndex: number | undefined; nodeIndex: number },
+  worldByNode: ReadonlyMap<number, Matrix4>,
 ): GeometryComponentBounds | undefined {
-  if (!bounds || !matrix) {
-    return bounds;
-  }
-  // Box3 transforms all eight corners, including rotated, scaled and sheared AABBs.
-  const box = new Box3(new Vector3(...bounds.min), new Vector3(...bounds.max)).applyMatrix4(matrix);
-  const center = box.getCenter(new Vector3());
-  return {
-    min: [box.min.x, box.min.y, box.min.z],
-    max: [box.max.x, box.max.y, box.max.z],
-    center: [center.x, center.y, center.z],
-    radius: box.getSize(new Vector3()).length() / 2,
-  };
-}
-
-function getNodeBounds(context: GltfBoundsContext, nodeIndex: number): GeometryComponentBounds | undefined {
-  const { json, worldMatrices } = context;
-  const node = json.nodes?.[nodeIndex];
-  if (!node) {
+  const bounds = getAccessorBounds(json, reference.accessorIndex);
+  const world = worldByNode.get(reference.nodeIndex);
+  if (!bounds || !world) {
     return undefined;
   }
-  const mesh = node.mesh === undefined ? undefined : json.meshes?.[node.mesh];
+  const placed = new Box3(new Vector3(...bounds.min), new Vector3(...bounds.max)).applyMatrix4(world);
+  return boundsFromMinMax([placed.min.x, placed.min.y, placed.min.z], [placed.max.x, placed.max.y, placed.max.z]);
+}
+
+function getNodeBounds(
+  { json, worldMatrices: worldByNode }: GltfBoundsContext,
+  nodeIndex: number,
+): GeometryComponentBounds | undefined {
+  const node = json.nodes?.[nodeIndex];
+  const mesh = node?.mesh === undefined ? undefined : json.meshes?.[node.mesh];
   const primitiveBounds =
     mesh?.primitives
       ?.map((primitive) =>
-        transformBounds(getAccessorBounds(json, primitive.attributes?.['POSITION']), worldMatrices.get(nodeIndex)),
+        getPlacedAccessorBounds(json, { accessorIndex: primitive.attributes?.['POSITION'], nodeIndex }, worldByNode),
       )
       .filter((bound): bound is GeometryComponentBounds => bound !== undefined) ?? [];
   return combineBounds(primitiveBounds);
@@ -531,15 +544,15 @@ function getNodeBounds(context: GltfBoundsContext, nodeIndex: number): GeometryC
 
 function getPrimitiveBounds(
   json: GltfJson,
-  meshIndex: number | undefined,
-  primitiveIndex: number | undefined,
+  reference: GeometryComponentPrimitiveRef,
+  worldByNode: ReadonlyMap<number, Matrix4>,
 ): GeometryComponentBounds | undefined {
-  if (meshIndex === undefined || primitiveIndex === undefined) {
-    return undefined;
-  }
-
-  const primitive = json.meshes?.[meshIndex]?.primitives?.[primitiveIndex];
-  return getAccessorBounds(json, primitive?.attributes?.['POSITION']);
+  const primitive = json.meshes?.[reference.meshIndex]?.primitives?.[reference.primitiveIndex];
+  return getPlacedAccessorBounds(
+    json,
+    { accessorIndex: primitive?.attributes?.['POSITION'], nodeIndex: reference.nodeIndex },
+    worldByNode,
+  );
 }
 
 function clampUnit(value: number): number {
@@ -800,12 +813,7 @@ function getPrimitiveReferencesBounds(
 ): GeometryComponentBounds | undefined {
   return combineBounds(
     primitiveReferences
-      .map((reference) =>
-        transformBounds(
-          getPrimitiveBounds(context.json, reference.meshIndex, reference.primitiveIndex),
-          context.worldMatrices.get(reference.nodeIndex),
-        ),
-      )
+      .map((reference) => getPrimitiveBounds(context.json, reference, context.worldMatrices))
       .filter((bound): bound is GeometryComponentBounds => bound !== undefined),
   );
 }
@@ -878,6 +886,7 @@ function createTopologyComponentManifest(
       primitiveRefs: primitiveReferences,
       materialIndices,
       appearance: getComponentAppearance(json, materialIndices),
+      ...(component.physical === undefined ? {} : { physical: component.physical }),
       bounds: getPrimitiveReferencesBounds(context, primitiveReferences),
       capabilities,
       reference:
@@ -987,7 +996,7 @@ function buildComponentManifest(
   topologyComponents: readonly TopologyComponent[],
   options: { sourceFile?: string; geometryHash?: string },
 ): GeometryComponentManifest {
-  const boundsContext = { json, worldMatrices: createNodeWorldMatrices(json) };
+  const boundsContext = { json, worldMatrices: getNodeWorldMatrices(json) };
   const topologyManifest = createTopologyComponentManifest(boundsContext, topologyComponents, options);
   if (topologyManifest) {
     return attachComponentSurfaceMaterials(json, topologyManifest);
@@ -1071,6 +1080,7 @@ function buildComponentManifest(
       primitiveRefs: primitiveReferences,
       materialIndices: ownMaterialIndices,
       appearance: getComponentAppearance(json, ownMaterialIndices),
+      ...(topology?.physical === undefined ? {} : { physical: topology.physical }),
       bounds: ownBounds,
       capabilities,
       reference:
@@ -1144,4 +1154,184 @@ function buildComponentManifest(
     capabilities: rootCapabilities,
     extensionUsed: json.extensions?.[tauCadTopologyExtension] ? tauCadTopologyExtension : undefined,
   });
+}
+
+/** Compose shared canonical admission metadata with actual definition-local manifests. */
+export function buildResidentAssemblyComponentManifest({
+  metadata,
+  publication,
+  definitions,
+  sourceFile,
+  geometryHash,
+}: {
+  readonly metadata: Awaited<ReturnType<typeof validateAdmittedAssemblyGlb>>;
+  readonly publication: AdmittedAssembly['publication'];
+  readonly definitions: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+  readonly sourceFile?: string;
+  readonly geometryHash: string;
+}): {
+  manifest: GeometryComponentManifest;
+  occurrenceManifests: ReadonlyMap<string, GeometryComponentManifest>;
+  sourceComponentIdsByAncestry: ReadonlyMap<string, ReadonlyMap<string, string>>;
+} {
+  const occurrenceByPath = new Map(
+    metadata.occurrences.map((occurrence) => [JSON.stringify(occurrence.ancestry), occurrence]),
+  );
+  const grouped = new Map<string, Array<(typeof metadata.components)[number]>>();
+  for (const entry of metadata.components) {
+    const key = JSON.stringify(entry.ancestry);
+    const group = grouped.get(key) ?? [];
+    group.push(entry);
+    grouped.set(key, group);
+  }
+  const nodesById: Record<string, GeometryComponentNode> = {};
+  const occurrenceManifests = new Map<string, GeometryComponentManifest>();
+  const sourceComponentIdsByAncestry = new Map<string, ReadonlyMap<string, string>>();
+  const sourceManifests = new Map<string, GeometryComponentManifest>();
+  for (const [pathKey, entries] of grouped) {
+    const occurrence = occurrenceByPath.get(pathKey);
+    if (!occurrence) {
+      throw new Error('Canonical assembly metadata has no occurrence for its component');
+    }
+    const variant =
+      occurrence.definition && publication.parts[occurrence.definition.part]?.variants[occurrence.definition.variant];
+    let sourceManifest = variant && sourceManifests.get(variant.glb.digest);
+    if (variant && !sourceManifest) {
+      const bytes = definitions.get(variant.glb.digest);
+      if (!bytes) {
+        throw new Error('Canonical assembly metadata has no retained definition bytes');
+      }
+      sourceManifest = buildGltfComponentManifest(bytes);
+      sourceManifests.set(variant.glb.digest, sourceManifest);
+    }
+    const placement = new Matrix4().fromArray(occurrence.worldTransform);
+    const localNodesById: Record<string, GeometryComponentNode> = {};
+    const localOrder: string[] = [rootId];
+    const localIds = new Set(entries.map((entry) => entry.component.id));
+    for (const entry of entries) {
+      const sourceNode =
+        entry.sourceComponentId === undefined ? undefined : sourceManifest?.nodesById[entry.sourceComponentId];
+      if (entry.sourceComponentId !== undefined && !sourceNode) {
+        throw new Error('Canonical assembly component is missing from its definition-local manifest');
+      }
+      const source = sourceNode ?? createRootNode([], createCapabilities(false));
+      const placed = sourceNode?.bounds
+        ? new Box3(new Vector3(...sourceNode.bounds.min), new Vector3(...sourceNode.bounds.max)).applyMatrix4(placement)
+        : undefined;
+      const { id, name, selector } = entry.component;
+      const kind = toGeometryKind(entry.component.kind);
+      const references = entry.component.primitiveRefs ?? source.primitiveRefs ?? [];
+      const node: GeometryComponentNode = {
+        ...source,
+        id,
+        name,
+        kind,
+        selector,
+        parentId: entry.component.parentId ?? rootId,
+        childIds: entry.component.childIds ? [...entry.component.childIds] : [],
+        primitiveRefs: [...references],
+        meshNodeIndices: [...new Set(references.map((ref) => ref.nodeIndex))],
+        primitiveIndices: references.map((ref) => ref.primitiveIndex),
+        capabilities: { ...source.capabilities, ...entry.component.capabilities },
+        physical: entry.component.physical,
+        bounds: placed ? boundsFromMinMax(placed.min.toArray(), placed.max.toArray()) : undefined,
+        materialIndices: [...source.materialIndices],
+        appearance: source.appearance
+          ? {
+              ...source.appearance,
+              materials: source.appearance.materials?.map((material) => ({
+                ...material,
+                materialIndex: material.materialIndex,
+              })),
+            }
+          : undefined,
+        reference:
+          sourceFile === undefined
+            ? undefined
+            : {
+                scheme: 'tau-cad',
+                filePath: sourceFile,
+                componentId: id,
+                selector,
+                geometryHash,
+                label: name,
+                kind,
+              },
+      };
+      nodesById[id] = node;
+      localNodesById[id] = node;
+      localOrder.push(id);
+    }
+    const localCapabilities = createCapabilities(
+      entries.some((entry) => localNodesById[entry.component.id]?.capabilities.hasPreciseTopology),
+    );
+    localNodesById[rootId] = createRootNode(
+      entries
+        .filter((entry) => !entry.component.parentId || !localIds.has(entry.component.parentId))
+        .map((entry) => entry.component.id),
+      localCapabilities,
+    );
+    occurrenceManifests.set(pathKey, {
+      schemaVersion: 1,
+      sourceFile,
+      geometryHash,
+      rootId,
+      nodeOrder: localOrder,
+      nodesById: localNodesById,
+      capabilities: localCapabilities,
+    });
+    sourceComponentIdsByAncestry.set(
+      pathKey,
+      new Map(
+        entries.flatMap((entry) =>
+          entry.sourceComponentId === undefined ? [] : [[entry.sourceComponentId, entry.component.id]],
+        ),
+      ),
+    );
+  }
+  const children = new Map<string, string[]>();
+  for (const entry of metadata.components) {
+    const parent = entry.component.parentId ?? rootId;
+    const ids = children.get(parent) ?? [];
+    ids.push(entry.component.id);
+    children.set(parent, ids);
+  }
+  const capabilities = createCapabilities(
+    Object.values(nodesById).some((node) => node.capabilities.hasPreciseTopology),
+  );
+  nodesById[rootId] = createRootNode(children.get(rootId) ?? [], capabilities);
+  const nodeOrder: string[] = [];
+  const visit = (id: string, depth: number, path: string[]): void => {
+    const node = nodesById[id];
+    if (!node) {
+      throw new Error('Canonical assembly component hierarchy has an unknown child');
+    }
+    node.childIds = children.get(id) ?? [];
+    node.depth = depth;
+    node.path = [...path, node.name];
+    nodeOrder.push(id);
+    for (const child of node.childIds) {
+      visit(child, depth + 1, node.path);
+    }
+    node.bounds = combineBounds(
+      [node.bounds, ...node.childIds.map((child) => nodesById[child]?.bounds)].filter(
+        (bound): bound is GeometryComponentBounds => bound !== undefined,
+      ),
+    );
+  };
+  visit(rootId, 0, []);
+  return {
+    manifest: {
+      schemaVersion: 1,
+      sourceFile,
+      geometryHash,
+      rootId,
+      nodeOrder,
+      nodesById,
+      capabilities,
+      ...(metadata.mechanism ? { mechanism: metadata.mechanism } : {}),
+    },
+    occurrenceManifests,
+    sourceComponentIdsByAncestry,
+  };
 }

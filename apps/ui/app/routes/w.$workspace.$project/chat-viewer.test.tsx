@@ -17,6 +17,9 @@ import { createEmptyGlb } from '@taucad/geometry-core';
 import { defaultGraphicsSettings, defaultOperationTimeout } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings, PinnedMeasurement } from '#constants/editor.constants.js';
 import type { cadMachine } from '#machines/cad.machine.js';
+import type { GraphicsEvent, PaneRenderingProvenance } from '#machines/graphics.machine.js';
+import { contentDigest } from '@taucad/cache-core';
+import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
 import type { PartThumbnailService, PartThumbnailState } from '#services/part-thumbnail.service.js';
@@ -210,6 +213,8 @@ type MockCadActorOptions = {
   readonly fileManagerReady?: boolean;
   readonly runtime?: MockRuntimeDocumentFixture;
   readonly evaluation?: Evaluation;
+  readonly activeKernelId?: string;
+  readonly capabilities?: AppCapabilitiesManifest;
 };
 
 function createMockCadActor(options: MockCadActorOptions = {}): ActorRefFrom<typeof cadMachine> {
@@ -233,8 +238,8 @@ function createMockCadActor(options: MockCadActorOptions = {}): ActorRefFrom<typ
         kernelClient: undefined,
         fileManagerRef: options.fileManagerReady ? {} : undefined,
         operationTimeout: defaultOperationTimeout,
-        activeKernelId: undefined,
-        capabilities: undefined,
+        activeKernelId: options.activeKernelId,
+        capabilities: options.capabilities,
       },
       hasTag: (tag: string) => tags.has(tag as 'cad-loading' | 'cad-runtime-error'),
     })),
@@ -577,6 +582,241 @@ describe('ChatViewer reopen-renderer overlay', () => {
     vi.unstubAllGlobals();
     getBoundingClientRectSpy?.mockRestore();
     getBoundingClientRectSpy = undefined;
+  });
+
+  it.each([
+    { label: 'physical only', includeEdges: false, includePhysical: true, mimeType: 'model/gltf-binary' },
+    { label: 'edges and physical', includeEdges: true, includePhysical: true, mimeType: 'model/gltf-binary' },
+    { label: 'unsupported GLB content', includeEdges: false, includePhysical: false, mimeType: 'model/gltf-binary' },
+    { label: 'SVG without GLB flags', includeEdges: true, includePhysical: true, mimeType: 'image/svg+xml' },
+  ])('should preserve $label in a stable pane request', ({ includeEdges, includePhysical, mimeType }) => {
+    const runtime = createMockRuntimeDocument();
+    const capabilities: AppCapabilitiesManifest = {
+      registrations: [],
+      routes: [],
+      renderCapabilities: {
+        native: {
+          renderOptions: { schema: {}, defaults: {} },
+          content: {
+            schema: {
+              properties: {
+                ...(includeEdges ? { includeEdges: { type: 'boolean' } } : {}),
+                ...(includePhysical ? { includePhysical: { type: 'boolean' } } : {}),
+              },
+            },
+            defaults: {},
+          },
+        },
+      },
+      transport: {
+        descriptor: {
+          id: 'in-process',
+          wire: 'in-process',
+          memory: { geometryDelivery: 'copy', abortSignal: 'wire-notify' },
+          fileSystem: 'inline',
+        },
+      },
+    };
+    const evaluation: Evaluation = {
+      ...successfulEvaluation(runtime.evaluation),
+      views: [{ id: 'model', title: 'Model', mimeType }],
+    };
+    mockGeometryUnits.set(
+      helperEntryPath,
+      createMockCadActor({
+        runtime,
+        evaluation,
+        activeKernelId: 'native',
+        capabilities,
+      }),
+    );
+    const viewer = render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    const content =
+      mimeType === 'model/gltf-binary' && (includeEdges || includePhysical)
+        ? { ...(includeEdges ? { includeEdges: true } : {}), ...(includePhysical ? { includePhysical: true } : {}) }
+        : undefined;
+    expect(runtime.viewSpy).toHaveBeenCalledExactlyOnceWith('model', {
+      options: {},
+      ...(content ? { content } : {}),
+    });
+    mockGeometryUnits.set(
+      helperEntryPath,
+      createMockCadActor({
+        runtime,
+        evaluation,
+        activeKernelId: 'native',
+        capabilities: { ...capabilities },
+      }),
+    );
+    viewer.rerender(
+      <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile='shared' />,
+    );
+    expect(runtime.viewSpy).toHaveBeenCalledTimes(1);
+    expect(runtime.view.close).not.toHaveBeenCalled();
+    viewer.unmount();
+    expect(runtime.view.close).toHaveBeenCalledTimes(1);
+    expect(runtime.document.close).not.toHaveBeenCalled();
+  });
+
+  it('should replace a same-view subscription when physical content changes and refuse its pending capture', async () => {
+    const runtime = createMockRuntimeDocument();
+    vi.mocked(runtime.view.rendering).mockResolvedValue({ superseded: false, rendering: mockRendering });
+    const capabilities: AppCapabilitiesManifest = {
+      registrations: [],
+      routes: [],
+      renderCapabilities: {
+        native: {
+          renderOptions: { schema: {}, defaults: {} },
+          content: { schema: { properties: { includeEdges: { type: 'boolean' } } }, defaults: {} },
+        },
+      },
+      transport: {
+        descriptor: {
+          id: 'in-process',
+          wire: 'in-process',
+          memory: { geometryDelivery: 'copy', abortSignal: 'wire-notify' },
+          fileSystem: 'inline',
+        },
+      },
+    };
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime, activeKernelId: 'native', capabilities }));
+    const viewer = render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    expect(runtime.viewSpy).toHaveBeenCalledExactlyOnceWith('model', { options: {}, content: { includeEdges: true } });
+    const pending = Promise.withResolvers<ViewUpdateOutcome>();
+    vi.mocked(runtime.view.rendering).mockReturnValueOnce(pending.promise);
+    const capture = mockCaptureRendering?.();
+    const withPhysical: AppCapabilitiesManifest = {
+      ...capabilities,
+      renderCapabilities: {
+        native: {
+          renderOptions: { schema: {}, defaults: {} },
+          content: {
+            schema: {
+              properties: {
+                includeEdges: { type: 'boolean' },
+                includePhysical: { type: 'boolean' },
+              },
+            },
+            defaults: {},
+          },
+        },
+      },
+    };
+    mockGeometryUnits.set(
+      helperEntryPath,
+      createMockCadActor({
+        runtime,
+        activeKernelId: 'native',
+        capabilities: withPhysical,
+      }),
+    );
+    viewer.rerender(
+      <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile='shared' />,
+    );
+    expect(runtime.viewSpy).toHaveBeenLastCalledWith('model', {
+      options: {},
+      content: { includeEdges: true, includePhysical: true },
+    });
+    expect(runtime.viewSpy).toHaveBeenCalledTimes(2);
+    expect(runtime.view.close).toHaveBeenCalledTimes(1);
+    pending.resolve({ superseded: false, rendering: mockRendering });
+    await expect(capture).rejects.toThrow('The selected view changed during capture.');
+    viewer.unmount();
+    expect(runtime.view.close).toHaveBeenCalledTimes(2);
+    expect(runtime.document.update).not.toHaveBeenCalled();
+    expect(runtime.document.close).not.toHaveBeenCalled();
+  });
+
+  it('should retain only actual pane identities and revoke an old picture on re-rendering, failure and release', async () => {
+    const runtime = createMockRuntimeDocument();
+    const sourceRevision = {
+      entry: helperEntryPath,
+      files: {
+        [helperEntryPath]: contentDigest({ value: `sha256:${'a'.repeat(64)}`, name: 'pane source' }),
+      },
+    };
+    const first: Rendering = {
+      ...mockRendering,
+      success: true,
+      evaluationId: runtime.evaluation.id,
+      requestId: 'pane-first',
+      sourceRevision,
+    };
+    vi.mocked(runtime.view.rendering).mockResolvedValue({ superseded: false, rendering: first });
+    const latest: { value?: PaneRenderingProvenance } = {};
+    const originalSend = mockGraphicsSend.getMockImplementation();
+    mockGraphicsSend.mockImplementation((event: GraphicsEvent) => {
+      originalSend?.(event);
+      if (event.type === 'updateArtifact') {
+        latest.value = event.paneRendering;
+      }
+    });
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime }));
+    const viewer = render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    await waitFor(() => {
+      expect(latest.value?.requestId).toBe('pane-first');
+    });
+    if (!latest.value) {
+      throw new Error('Expected actual pane record');
+    }
+    const held = latest.value;
+    expect(held).toMatchObject({
+      documentId: runtime.document.id,
+      evaluationId: runtime.evaluation.id,
+      requestId: first.requestId,
+      hash: mockRendering.hash,
+      sourceRevision,
+    });
+    expect(held).not.toHaveProperty('document');
+    expect(held).not.toHaveProperty('artifact');
+    expect(held.isCurrent()).toBe(true);
+    act(() => {
+      runtime.emitViewStatus('rendering');
+    });
+    expect(held.isCurrent()).toBe(false);
+    const second: Rendering = { ...first, success: true, requestId: 'pane-second' };
+    act(() => {
+      runtime.emitRendered(second);
+    });
+    await waitFor(() => {
+      expect(latest.value?.requestId).toBe('pane-second');
+    });
+    const replacement = latest.value;
+    expect(replacement.hash).toBe(held.hash);
+    expect(replacement.isCurrent()).toBe(true);
+    expect(held.isCurrent()).toBe(false);
+    act(() => {
+      runtime.emitRendered({
+        success: false,
+        transient: false,
+        evaluationId: runtime.evaluation.id,
+        requestId: 'pane-failed',
+        issues: [{ message: 'Pane failed', severity: 'error', type: 'runtime', code: 'RUNTIME' }],
+      });
+    });
+    expect(replacement.isCurrent()).toBe(false);
+    expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
+    act(() => {
+      runtime.emitRendered({ ...first, success: true, requestId: 'pane-third' });
+    });
+    await waitFor(() => {
+      expect(latest.value?.requestId).toBe('pane-third');
+    });
+    const released = latest.value;
+    expect(released.isCurrent()).toBe(true);
+    act(() => {
+      runtime.emitViewStatus('closed');
+    });
+    expect(released.isCurrent()).toBe(false);
+    act(() => {
+      runtime.emitRendered({ ...first, success: true, requestId: 'late-after-close' });
+    });
+    expect(latest.value.requestId).toBe('pane-third');
+    expect(released.isCurrent()).toBe(false);
+    viewer.unmount();
+    expect(replacement.isCurrent()).toBe(false);
+    expect(runtime.view.close).toHaveBeenCalledOnce();
+    expect(runtime.document.close).not.toHaveBeenCalled();
   });
 
   it('opens, captures and closes the saved named projection without changing the CAD document', async () => {
@@ -1426,7 +1666,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('submits one manual preview request for each completed retry in the viewer menu', async () => {
     mockPreviewEnabled = true;
     presentPreviewSource(mockRendering.artifact, mockRendering.hash);
-    const requestForOwner = vi.fn();
+    const requestForOwner = vi.fn<PartThumbnailService['requestForOwner']>();
     const failedSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map([
       [rightRimComponentId, { status: 'failed' }],
     ]);
@@ -1455,9 +1695,9 @@ describe('ChatViewer reopen-renderer overlay', () => {
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry preview' }));
       // oxlint-disable-next-line no-await-in-loop -- Count completed manual admissions in order.
       await waitFor(() => {
-        expect(requestForOwner.mock.calls.filter((call) => call[3]?.manualPartId === rightRimComponentId)).toHaveLength(
-          count,
-        );
+        expect(
+          requestForOwner.mock.calls.filter((call) => call[1].options?.manualPartId === rightRimComponentId),
+        ).toHaveLength(count);
       });
       if (count === 1) {
         openMenu();
@@ -1468,7 +1708,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('resumes an unsubmitted retry for the same source and drops it after a source change', async () => {
     mockPreviewEnabled = true;
     presentPreviewSource(mockRendering.artifact, mockRendering.hash);
-    const requestForOwner = vi.fn();
+    const requestForOwner = vi.fn<PartThumbnailService['requestForOwner']>();
     const announcePresentedSource = vi.fn();
     const failedSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map([
       [rightRimComponentId, { status: 'failed' }],
@@ -1492,7 +1732,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
       fireCanvasPointerEvent(canvas, 'pointerup', { button: 2, pointerId: 32, clientX: 151, clientY: 181 });
     };
     const manualCalls = () =>
-      requestForOwner.mock.calls.filter((call) => call[3]?.manualPartId === rightRimComponentId);
+      requestForOwner.mock.calls.filter((call) => call[1].options?.manualPartId === rightRimComponentId);
     openMenu();
     await waitFor(() => {
       expect(requestForOwner).toHaveBeenCalled();

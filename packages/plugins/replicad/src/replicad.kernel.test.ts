@@ -18,8 +18,16 @@ import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import { decode as msgpackDecode, encode as msgpackEncode } from '@msgpack/msgpack';
 import { evaluatePose, resolveMechanismComponents, sampleAnimation } from '@taucad/kinematics';
 import { offersFor, replicadKernel } from '#replicad.kernel.js';
-import { normalizeRenderShapes } from '#utils/render-output.js';
+import { exportSTEP } from '#export/interface-export.js';
+import type * as ReplicadModule from 'replicad';
+import { normalizeRenderShapes, render } from '#utils/render-output.js';
+import { measureReplicadPhysical } from '#utils/physical-evidence.js';
 import type { NativeHandleEntry } from '#interface-resolution.js';
+import {
+  placePublishedEntry,
+  bindSourceComponentIds,
+  resolvePublishedComponentBindings,
+} from '#interface-resolution.js';
 import {
   assertRenderingSuccess,
   createMockKernelRuntime,
@@ -2310,6 +2318,46 @@ export default function main() {
 
       const exportResult = await exportLastRender(client, 'stl', { binary: true });
       assertExportSuccess(exportResult);
+    });
+
+    it('should export each client’s STL with its own native instance after another client initializes', async () => {
+      const first = createClient({
+        'first.ts': `import { makeBox } from 'replicad';
+          export default () => makeBox([0, 0, 0], [11, 8, 6]);`,
+      });
+      const second = createClient({
+        'second.ts': `import { makeBox } from 'replicad';
+          export default () => makeBox([0, 0, 0], [2, 3, 4]);`,
+      });
+      assertRenderingSuccess(await renderGeometry(first, { file: createGeometryFile('first.ts'), parameters: {} }));
+      assertRenderingSuccess(await renderGeometry(second, { file: createGeometryFile('second.ts'), parameters: {} }));
+
+      const firstExport = await exportLastRender(first, 'stl', { binary: true });
+      assertExportSuccess(firstExport);
+      const firstVertices = readBinaryStlEvidence(firstExport.files[0].bytes).vertices;
+      expect(firstVertices.length).toBeGreaterThan(0);
+      expect([0, 1, 2].map((axis) => Math.max(...firstVertices.map((vertex) => vertex[axis]!)))).toEqual([11, 8, 6]);
+
+      const secondExport = await exportLastRender(second, 'stl', { binary: true });
+      assertExportSuccess(secondExport);
+      const secondVertices = readBinaryStlEvidence(secondExport.files[0].bytes).vertices;
+      expect(secondVertices.length).toBeGreaterThan(0);
+      expect([0, 1, 2].map((axis) => Math.max(...secondVertices.map((vertex) => vertex[axis]!)))).toEqual([2, 3, 4]);
+
+      const firstPhysicalRender = await renderGeometry(first, {
+        file: createGeometryFile('first.ts'),
+        parameters: {},
+        content: { includePhysical: true },
+      });
+      assertRenderingSuccess(firstPhysicalRender);
+      const firstGlb = extractGltfFromResult(firstPhysicalRender);
+      if (!firstGlb) {
+        throw new Error('First client’s GLB is missing after the second client exported.');
+      }
+      const firstSizeMetres = await readGltfSize(firstGlb);
+      expect(firstSizeMetres[0]).toBeCloseTo(0.011, 6);
+      expect(firstSizeMetres[1]).toBeCloseTo(0.006, 6);
+      expect(firstSizeMetres[2]).toBeCloseTo(0.008, 6);
     });
 
     it('should rotate asymmetric binary STL vertices and normals to y-up exactly once', async () => {
@@ -4607,29 +4655,48 @@ describe('mechanism export', () => {
 // apps/runtime-e2e/src/replicad-fixtures.test.ts (project-cycle break).
 
 // =============================================================================
-// serializeNativeHandle / deserializeNativeHandle
+// serializeHandle / deserializeHandle
 // =============================================================================
 
 // A display render no longer carries the durable snapshot (charter D12/W6b), so these tests call the
 // kernel's serializer the way the framework does: on the native handle `createGeometry` produces.
 type ReplicadKernelContext = Parameters<NonNullable<typeof replicadDefinition.serializeHandle>>[2];
+type ReplicadLibrary = typeof ReplicadModule;
+let snapshotLibrary: ReplicadLibrary;
+const contextWithLibrary = (
+  library: ReplicadLibrary,
+  openCascade: ReplicadKernelContext['openCascade'] = library.getOC(),
+): ReplicadKernelContext => {
+  const context = mock<ReplicadKernelContext>();
+  context.replicadLibrary = library;
+  context.openCascade = openCascade;
+  return context;
+};
 
-const serializeHandle = (entries: NativeHandleEntry[], mechanism?: unknown) => {
+const serializeHandleMaybe = (entries: NativeHandleEntry[], mechanism?: unknown) => {
   if (!replicadDefinition.serializeHandle) {
     throw new Error('The replicad kernel declares serializeHandle.');
   }
   return replicadDefinition.serializeHandle(
     { handle: { shapes: entries, mechanism } },
     createMockKernelRuntime(),
-    mock<ReplicadKernelContext>(),
+    contextWithLibrary(snapshotLibrary),
   );
 };
+const serializeHandle = (entries: NativeHandleEntry[], mechanism?: unknown) => {
+  const snapshot = serializeHandleMaybe(entries, mechanism);
+  if (!snapshot) {
+    throw new Error('Expected a serializable Replicad BRep handle.');
+  }
+  return snapshot;
+};
 
-describe('serializeNativeHandle', () => {
+describe('serializeHandle', () => {
   // The `replicad` library binds its OpenCASCADE instance process-globally through `setOC`, so one render
   // installs the kernel's instance and the handles below are built with the very library the kernel used.
   beforeAll(async () => {
     replicadDefinition = await resolveReplicadDefinition();
+    snapshotLibrary = await import('replicad');
     assertRenderingSuccess(
       await createGeometry({
         files: {
@@ -4645,6 +4712,68 @@ describe('serializeNativeHandle', () => {
     );
   }, 60_000);
 
+  it('should serialize, restore, and place a native handle with its owning instance after another client initializes', async () => {
+    const first = createClient({
+      'first.ts': `import { makeBox } from 'replicad'; export default () => makeBox([0, 0, 0], [3, 4, 5]);`,
+    });
+    assertRenderingSuccess(await renderGeometry(first, { file: createGeometryFile('first.ts'), parameters: {} }));
+    const firstOc = snapshotLibrary.getOC();
+    const shape = snapshotLibrary.makeBox([0, 0, 0], [17, 9, 5]);
+    const firstContext = contextWithLibrary(snapshotLibrary, firstOc);
+    const second = createClient({
+      'second.ts': `import { makeBox } from 'replicad'; export default () => makeBox([0, 0, 0], [2, 3, 4]);`,
+    });
+    assertRenderingSuccess(await renderGeometry(second, { file: createGeometryFile('second.ts'), parameters: {} }));
+    const secondOc = snapshotLibrary.getOC();
+    expect(secondOc).not.toBe(firstOc);
+
+    try {
+      const serialized = replicadDefinition.serializeHandle!(
+        { handle: { shapes: [{ shape, name: 'body' }] } },
+        createMockKernelRuntime(),
+        firstContext,
+      );
+      if (!serialized) {
+        throw new Error('The first native instance did not serialize its solid.');
+      }
+      assertExportSuccess(await exportLastRender(second, 'stl', { binary: true }));
+      expect(snapshotLibrary.getOC()).toBe(secondOc);
+      const restored = await replicadDefinition.deserializeHandle!(
+        { serialized },
+        createMockKernelRuntime(),
+        firstContext,
+      );
+      try {
+        assertExportSuccess(await exportLastRender(second, 'stl', { binary: true }));
+        expect(snapshotLibrary.getOC()).toBe(secondOc);
+        const placed = await replicadDefinition.composeHandles!(
+          {
+            occurrences: [
+              {
+                handle: restored,
+                occurrencePath: ['placed'],
+                worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+              },
+            ],
+          },
+          createMockKernelRuntime(),
+          firstContext,
+        );
+        try {
+          const physical = await measureReplicadPhysical({ shape: placed.shapes[0]!.shape }, firstOc);
+          expect(physical.volume).toMatchObject({ state: 'measured', valueMm3: 765 });
+          expect(placed.shapes[0]!.shape.boundingBox.bounds).toEqual(shape.boundingBox.bounds);
+        } finally {
+          placed.shapes[0]?.shape.delete();
+        }
+      } finally {
+        restored.shapes[0]?.shape.delete();
+      }
+    } finally {
+      shape.delete();
+    }
+  });
+
   it('should serialize nativeHandle to BRep strings with metadata', async () => {
     const { drawRoundedRectangle } = await import('replicad');
     const { shapes: serialized } = serializeHandle(
@@ -4658,12 +4787,16 @@ describe('serializeNativeHandle', () => {
     );
 
     expect(serialized).toHaveLength(1);
-    expect(typeof serialized[0]!.brep).toBe('string');
-    expect(serialized[0]!.brep.length).toBeGreaterThan(0);
-    expect(serialized[0]!.metadata.name).toBe('TestBox');
-    expect(serialized[0]!.metadata.color).toBe('#ff0000');
-    expect(serialized[0]!.metadata.metalness).toBe(0.8);
-    expect(serialized[0]!.metadata.roughness).toBe(0.3);
+    expect(serialized[0]?.kind).toBe('brep');
+    if (serialized[0]?.kind !== 'brep') {
+      throw new Error('Expected a BRep snapshot.');
+    }
+    expect(typeof serialized[0].brep).toBe('string');
+    expect(serialized[0].brep.length).toBeGreaterThan(0);
+    expect(serialized[0].metadata.name).toBe('TestBox');
+    expect(serialized[0].metadata.color).toBe('#ff0000');
+    expect(serialized[0].metadata.metalness).toBe(0.8);
+    expect(serialized[0].metadata.roughness).toBe(0.3);
   });
 
   it('should round-trip serialize/deserialize preserving shape geometry', async () => {
@@ -4694,10 +4827,10 @@ describe('serializeNativeHandle', () => {
       mechanism,
     );
 
-    const restored = replicadDefinition.deserializeHandle!(
+    const restored = await replicadDefinition.deserializeHandle!(
       { serialized: structuredClone(snapshot) },
       createMockKernelRuntime(),
-      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+      contextWithLibrary(replicad),
     );
 
     expect(snapshot.mechanism).toEqual(mechanism);
@@ -4705,9 +4838,445 @@ describe('serializeNativeHandle', () => {
     expect(restored.shapes.map((entry) => entry.name)).toEqual(['Box']);
   });
 
-  it('should have serializeNativeHandle and deserializeNativeHandle defined on the kernel', () => {
+  it('should restore an imported STL MeshShape without labelling it BRep exact', async () => {
+    const meshFile = createGeometryFile('imported-mesh.ts');
+    const client = createClient({
+      'imported-mesh.ts': `import { importSTLAsMesh, makeBox } from 'replicad';
+        export default async function main() {
+          return { shape: await importSTLAsMesh(makeBox([0, 0, 0], [1, 1, 1]).blobSTL({ binary: true })), name: 'Imported mesh' };
+        }`,
+    });
+    assertRenderingSuccess(await renderGeometry(client, { file: meshFile, parameters: {} }));
+    const brep = snapshotLibrary.makeBox([0, 0, 0], [1, 1, 1]);
+    const mesh = await snapshotLibrary.importSTLAsMesh(brep.blobSTL({ binary: true }));
+    const snapshot = serializeHandle([{ shape: mesh, name: 'Mesh' } as unknown as NativeHandleEntry]);
+    expect(snapshot.shapes[0]?.kind).toBe('mesh');
+    // A fresh worker sees the persisted snapshot before any authored import runs.
+    let coldManifold: ReturnType<typeof snapshotLibrary.getManifold> | undefined;
+    const installManifold = vi.fn((module: ReturnType<typeof snapshotLibrary.getManifold>) => {
+      module.setup();
+      coldManifold = module;
+    });
+    const coldLibrary: ReplicadLibrary = {
+      ...snapshotLibrary,
+      getManifold: () => {
+        if (!coldManifold) {
+          throw new Error('manifold has not been loaded');
+        }
+        return coldManifold;
+      },
+      setManifold: installManifold,
+    };
+    const restored = await replicadDefinition.deserializeHandle!(
+      { serialized: structuredClone(snapshot) },
+      createMockKernelRuntime(),
+      contextWithLibrary(coldLibrary),
+    );
+    expect(installManifold).toHaveBeenCalledOnce();
+    const restoredShape = restored.shapes[0]!.shape;
+    expect(restoredShape).toBeInstanceOf(snapshotLibrary.MeshShape);
+    expect((restoredShape as unknown as typeof mesh).numTri()).toBe(mesh.numTri());
+    expect((restoredShape as unknown as typeof mesh).volume()).toBeCloseTo(mesh.volume(), 6);
+    const before = render(normalizeRenderShapes({ shape: mesh, name: 'Mesh' }));
+    const after = render(normalizeRenderShapes(restored.shapes));
+    expect(after).toEqual(before);
+    expect(after[0]?.format).toBe('replicad');
+    expect(
+      replicadDefinition.describeHandleSnapshot!(
+        { serialized: snapshot },
+        createMockKernelRuntime(),
+        mock<ReplicadKernelContext>({ exactProviderVersion: 'identified-build' }),
+      ),
+    ).toBeUndefined();
+    restoredShape.delete();
+    mesh.delete();
+    brep.delete();
+  });
+
+  it('should leave a Drawing handle without a restorable native snapshot', () => {
+    const drawing = snapshotLibrary.drawRoundedRectangle(10, 10);
+    expect(serializeHandleMaybe([{ shape: drawing, name: 'Drawing' } as unknown as NativeHandleEntry])).toBeUndefined();
+  });
+
+  it('should describe only identified whole-handle snapshots and keep density outside geometry identity', () => {
+    const shape = snapshotLibrary.makeBox([0, 0, 0], [2, 2, 3.12]);
+    const first = serializeHandle([{ shape, density: 1.55, name: 'Part' }]);
+    const second = serializeHandle([{ shape, density: 2.7, name: 'Part' }]);
+    if (first.shapes[0]?.kind !== 'brep' || second.shapes[0]?.kind !== 'brep') {
+      throw new Error('Expected BRep snapshots.');
+    }
+    expect(first.shapes[0].brep).toBe(second.shapes[0].brep);
+    expect(first.shapes[0].metadata.density).toBe(1.55);
+    expect(second.shapes[0].metadata.density).toBe(2.7);
+    const describe = replicadDefinition.describeHandleSnapshot!;
+    const known = mock<ReplicadKernelContext>({
+      exactProviderVersion: 'current-build',
+      legacyExactProviderVersion: 'identified-build',
+    });
+    const missingAsset = mock<ReplicadKernelContext>({ exactProviderVersion: undefined });
+    expect(describe({ serialized: first }, createMockKernelRuntime(), known)).toEqual({
+      provider: '@taucad/replicad',
+      providerVersion: 'identified-build',
+      codec: 'replicad.native-handle-msgpack',
+      codecVersion: '1',
+      unit: 'millimeter',
+      linearToleranceMm: 0,
+      angularToleranceRad: 0,
+    });
+    expect(describe({ serialized: second }, createMockKernelRuntime(), known)).toEqual(
+      describe({ serialized: first }, createMockKernelRuntime(), known),
+    );
+    expect(describe({ serialized: first }, createMockKernelRuntime(), missingAsset)).toBeUndefined();
+    const bound = {
+      ...first,
+      componentIdentityVersion: 1,
+      shapes: first.shapes.map((entry) => ({
+        ...entry,
+        metadata: { ...entry.metadata, sourceComponentId: 'component:part' },
+      })),
+    } as const;
+    expect(describe({ serialized: bound }, createMockKernelRuntime(), known)).toMatchObject({
+      providerVersion: 'current-build',
+      codecVersion: '2',
+    });
+    expect(
+      describe(
+        { serialized: { ...bound, shapes: [bound.shapes[0]!, bound.shapes[0]!] } },
+        createMockKernelRuntime(),
+        known,
+      ),
+    ).toBeUndefined();
+    expect(
+      describe({ serialized: { ...bound, shapes: first.shapes } }, createMockKernelRuntime(), known),
+    ).toBeUndefined();
+    for (const invalidMarker of [undefined, null, 0, 2, '1', true]) {
+      const invalid = { ...bound };
+      Reflect.set(invalid, 'componentIdentityVersion', invalidMarker);
+      expect(describe({ serialized: invalid }, createMockKernelRuntime(), known)).toBeUndefined();
+    }
+
+    shape.delete();
+  });
+
+  it('should omit absent physical and material fields across MessagePack restore', async () => {
+    const shape = snapshotLibrary.makeBox([0, 0, 0], [1, 1, 1]);
+    const snapshot = serializeHandle([{ shape, name: 'Plain part' }]);
+    const decoded = msgpackDecode(msgpackEncode(snapshot)) as typeof snapshot;
+    expect(decoded.shapes[0]?.metadata).not.toHaveProperty('density');
+    expect(decoded.shapes[0]?.metadata).not.toHaveProperty('material');
+    const restored = await replicadDefinition.deserializeHandle!(
+      { serialized: decoded },
+      createMockKernelRuntime(),
+      contextWithLibrary(snapshotLibrary),
+    );
+    expect(restored.shapes[0]?.density).toBeUndefined();
+    expect(restored.shapes[0]?.material).toBeUndefined();
+    restored.shapes[0]?.shape.delete();
+    shape.delete();
+  });
+
+  it('should have serializeHandle and deserializeHandle defined on the kernel', () => {
     expect(replicadDefinition.serializeHandle).toBeDefined();
     expect(replicadDefinition.deserializeHandle).toBeDefined();
+  });
+
+  it('should join restored entries by stored identity and reject incomplete, duplicate, or legacy bindings', () => {
+    const shape = snapshotLibrary.makeBox([10, 0, 0], [12, 3, 4]);
+    const entries = bindSourceComponentIds([
+      { shape, name: 'A' },
+      { shape, name: 'B' },
+    ]);
+    const worldTransform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
+    const occurrence = {
+      handle: { shapes: [...entries].reverse(), componentIdentityVersion: 1 },
+      occurrencePath: ['part'],
+      worldTransform,
+      displaySourceComponentIds: ['component:a', 'component:b'],
+      components: [
+        { sourceComponentId: 'component:a', componentId: 'canonical:a', worldTransform },
+        { sourceComponentId: 'component:b', componentId: 'canonical:b', worldTransform },
+      ],
+    } as const;
+    expect(resolvePublishedComponentBindings(occurrence).map(({ placement }) => placement.componentId)).toEqual([
+      'canonical:b',
+      'canonical:a',
+    ]);
+    for (const displaySourceComponentIds of [
+      ['component:a'],
+      ['component:a', 'component:c'],
+      ['component:a', 'component:a'],
+    ]) {
+      expect(() => resolvePublishedComponentBindings({ ...occurrence, displaySourceComponentIds })).toThrow(/sets/u);
+    }
+    expect(() => resolvePublishedComponentBindings({ ...occurrence, components: [occurrence.components[0]] })).toThrow(
+      /incomplete/u,
+    );
+    expect(() =>
+      resolvePublishedComponentBindings({
+        ...occurrence,
+        components: [occurrence.components[0], occurrence.components[0]],
+      }),
+    ).toThrow(/ambiguous/u);
+    expect(() => resolvePublishedComponentBindings({ ...occurrence, handle: { shapes: entries } })).toThrow(
+      /codec-v2/u,
+    );
+    expect(() =>
+      resolvePublishedComponentBindings({
+        ...occurrence,
+        handle: { shapes: [entries[0]!, entries[0]!], componentIdentityVersion: 1 },
+      }),
+    ).toThrow(/sets/u);
+    shape.delete();
+  });
+
+  it('should retain intrinsic native placement exactly once while composing canonical posed entries', async () => {
+    // Intrinsic source placement S=10mm is already baked into the BRep. O*D=32mm must produce 42mm, not 52mm.
+    const shape = snapshotLibrary.makeBox([10, 0, 0], [12, 3, 4]);
+    const nativeHandle = {
+      shapes: bindSourceComponentIds([{ shape, name: 'Body' }]),
+      componentIdentityVersion: 1,
+    } as const;
+    const snapshot = replicadDefinition.serializeHandle!(
+      { handle: nativeHandle },
+      createMockKernelRuntime(),
+      contextWithLibrary(snapshotLibrary),
+    );
+    expect(snapshot).toMatchObject({
+      componentIdentityVersion: 1,
+      shapes: [{ metadata: { sourceComponentId: 'component:body' } }],
+    });
+    if (!snapshot) {
+      throw new Error('Expected a restorable bound snapshot.');
+    }
+    const restored = await replicadDefinition.deserializeHandle!(
+      { serialized: snapshot },
+      createMockKernelRuntime(),
+      contextWithLibrary(snapshotLibrary),
+    );
+    const context = contextWithLibrary(snapshotLibrary);
+    context.openCascade = snapshotLibrary.getOC();
+    const composed = await replicadDefinition.composeHandles!(
+      {
+        occurrences: [
+          {
+            handle: restored,
+            occurrencePath: ['part'],
+            worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.03, 0, 0, 1],
+            displaySourceComponentIds: ['component:body'],
+            components: [
+              {
+                sourceComponentId: 'component:body',
+                componentId: 'canonical:body',
+                worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.032, 0, 0, 1],
+              },
+            ],
+          },
+        ],
+      },
+      createMockKernelRuntime(),
+      context,
+    );
+    expect(composed.shapes[0]!.name).toBe('canonical:body');
+    expect(composed.shapes[0]!.shape.boundingBox.bounds[0][0]).toBeCloseTo(42, 5);
+    expect(composed.shapes[0]!.shape.boundingBox.bounds[1][0]).toBeCloseTo(44, 5);
+    const intrinsicRotated = snapshotLibrary
+      .makeBox([0, 0, 0], [2, 3, 4])
+      .rotate(90, [0, 0, 0], [0, 0, 1])
+      .translate([10, 0, 0]);
+    const placedRotated = placePublishedEntry({
+      entry: { shape: intrinsicRotated, name: 'Rotated' },
+      componentId: 'canonical:rotated',
+      occurrencePath: ['part'],
+      worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.032, 0, 0, 1],
+      library: snapshotLibrary,
+      oc: snapshotLibrary.getOC(),
+    });
+    // Intrinsic quarter-turn bounds [7,10]mm become [39,42]mm; no inverse/reconstruction of S enters placement.
+    expect(placedRotated.shape.boundingBox.bounds[0][0]).toBeCloseTo(39, 5);
+    expect(placedRotated.shape.boundingBox.bounds[1][0]).toBeCloseTo(42, 5);
+    placedRotated.shape.delete();
+    intrinsicRotated.delete();
+    composed.shapes[0]!.shape.delete();
+    restored.shapes[0]!.shape.delete();
+    shape.delete();
+  });
+
+  it.each([1, 2])(
+    'exports nested pinned STEP parent relations with %i world-placed leaves and releases their handles',
+    async (leafCount) => {
+      const shape = snapshotLibrary.makeBox([0, 0, 0], [2, 3, 4]);
+      const shapeDelete = vi.spyOn(shape, 'delete');
+      const entries = [10, 30].slice(0, leafCount).map((translation, index) =>
+        placePublishedEntry({
+          entry: { shape, name: 'body' },
+          occurrencePath: ['group', `leaf-${index}`],
+          worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, translation / 1000, 0, 0, 1],
+          library: snapshotLibrary,
+          oc: snapshotLibrary.getOC(),
+        }),
+      );
+      const deletes = entries.map(({ shape: placed }) => vi.spyOn(placed, 'delete'));
+      let imported: Awaited<ReturnType<typeof snapshotLibrary.importSTEP>> | undefined;
+      try {
+        const blob = exportSTEP(snapshotLibrary.getOC(), entries);
+        const stepText = await blob.text();
+        const text = stepText.replaceAll(/\r?\n/g, '');
+        // Match the existing STEP conformance owner's native occurrence records, including parent/child definitions.
+        const usages = [
+          ...text.matchAll(
+            /NEXT_ASSEMBLY_USAGE_OCCURRENCE\('[^']*','([^']*)','[^']*',\s*(#\d+)\s*,\s*(#\d+)\s*,[^)]*\)/g,
+          ),
+        ];
+        expect(usages).toHaveLength(leafCount + 1);
+        const parent = usages.find((usage) => usage[1] === 'group');
+        expect(parent).toBeDefined();
+        const leaves = usages.filter((usage) => usage[1]?.startsWith('group/leaf-'));
+        expect(leaves).toHaveLength(leafCount);
+        expect(leaves.every((usage) => usage[2] === parent?.[3])).toBe(true);
+        expect(leaves.every((usage) => usage[2] !== parent?.[2])).toBe(true);
+        imported = await snapshotLibrary.importSTEP(blob);
+        expect(snapshotLibrary.isShape3D(imported)).toBe(true);
+        if (!snapshotLibrary.isShape3D(imported)) {
+          throw new Error('Expected nested STEP solids.');
+        }
+        const nativeBox = imported.boundingBox;
+        const nativeBounds = nativeBox.bounds;
+        nativeBox.delete();
+        // Match the existing native STEP precision: BRepBndLib's OCCT envelope includes the confusion gap.
+        for (const [corner, expected] of [
+          [10, 0, 0],
+          [leafCount === 1 ? 12 : 32, 3, 4],
+        ].entries()) {
+          for (const [axis, value] of expected.entries()) {
+            expect(nativeBounds[corner]![axis]).toBeCloseTo(value, 5);
+          }
+        }
+        expect(snapshotLibrary.measureVolume(imported)).toBeCloseTo(24 * leafCount, 5);
+        expect(shapeDelete).not.toHaveBeenCalled();
+      } finally {
+        imported?.delete();
+        for (const entry of entries) {
+          entry.shape.delete();
+        }
+        shape.delete();
+      }
+      expect(deletes.every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
+      expect(shapeDelete).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('places a restored BRep and datum in millimetres and rejects lossy affine matrices', () => {
+    const shape = snapshotLibrary.makeBox([0, 0, 0], [2, 3, 4]);
+    const entry: NativeHandleEntry = {
+      shape,
+      name: 'body',
+      density: 1.55,
+      resolvedInterfaces: [{ kind: 'datum', name: 'mount', origin: [1, 0, 0], xAxis: [1, 0, 0], zAxis: [0, 0, 1] }],
+    };
+    const worldTransform = [0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0.1, 0.2, 0.3, 1];
+    const input = {
+      entry,
+      worldTransform,
+      occurrencePath: ['placed'],
+      library: snapshotLibrary,
+      oc: snapshotLibrary.getOC(),
+    };
+    const placed = placePublishedEntry(input);
+    expect(placed.name).toBe('placed/body');
+    for (const [index, expected] of [
+      [97, -300, 200],
+      [100, -298, 204],
+    ].entries()) {
+      for (const [axis, coordinate] of expected.entries()) {
+        expect(placed.shape.boundingBox.bounds[index]![axis]).toBeCloseTo(coordinate, 5);
+      }
+    }
+    expect(placed.density).toBe(1.55);
+    expect(placed.resolvedInterfaces?.[0]).toEqual({
+      kind: 'datum',
+      name: 'mount',
+      origin: [100, -299, 200],
+      xAxis: [0, 1, 0],
+      zAxis: [0, 0, 1],
+    });
+    const nested = placePublishedEntry({ ...input, occurrencePath: ['parent', 'placed'] });
+    expect(nested.publishedOccurrencePath).toEqual(['parent', 'placed']);
+    expect(nested.name).toBe('parent/placed/body');
+    expect(nested.shape.boundingBox.bounds).toEqual(placed.shape.boundingBox.bounds);
+    nested.shape.delete();
+    const escaped = placePublishedEntry({ ...input, occurrencePath: ['placed/variant'] });
+    expect(escaped.name).toBe('placed%2Fvariant/body');
+    expect(() =>
+      placePublishedEntry({ ...input, worldTransform: [1, 0, 0, 0, 0.2, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }),
+    ).toThrow(/rigid/u);
+    expect(() =>
+      placePublishedEntry({ ...input, worldTransform: [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }),
+    ).toThrow(/non-reflected/u);
+    expect(() =>
+      placePublishedEntry({ ...input, worldTransform: [1, 0, 0, 1e-9, 0, 1, 0, 0, 0, 0, 1, 0, 1e12, 0, 0, 1] }),
+    ).toThrow(/invalid world transform/u);
+    escaped.shape.delete();
+    placed.shape.delete();
+    shape.delete();
+  });
+
+  it('releases earlier native allocations when a later restored or placed entry fails', async () => {
+    const source = snapshotLibrary.makeBox([0, 0, 0], [2, 3, 4]);
+    const snapshot = serializeHandle([{ shape: source, name: 'body' }]);
+    const restoredShapes: Array<ReturnType<typeof snapshotLibrary.deserializeShape>> = [];
+    let restoreCount = 0;
+    const restoreLibrary: ReplicadLibrary = {
+      ...snapshotLibrary,
+      deserializeShape: (brep) => {
+        if (restoreCount++ > 0) {
+          throw new Error('second restore failed');
+        }
+        const restored = snapshotLibrary.deserializeShape(brep);
+        vi.spyOn(restored, 'delete');
+        restoredShapes.push(restored);
+        return restored;
+      },
+    };
+    await expect(
+      replicadDefinition.deserializeHandle!(
+        { serialized: { ...snapshot, shapes: [snapshot.shapes[0]!, snapshot.shapes[0]!] } },
+        createMockKernelRuntime(),
+        contextWithLibrary(restoreLibrary),
+      ),
+    ).rejects.toThrow('second restore failed');
+    expect(restoredShapes).toHaveLength(1);
+    expect(restoredShapes[0]!.delete).toHaveBeenCalledOnce();
+
+    const placedShapes: Array<ReturnType<typeof snapshotLibrary.cast>> = [];
+    const placementLibrary: ReplicadLibrary = {
+      ...snapshotLibrary,
+      cast: (wrapped) => {
+        const placed = snapshotLibrary.cast(wrapped);
+        vi.spyOn(placed, 'delete');
+        placedShapes.push(placed);
+        return placed;
+      },
+    };
+    const context = contextWithLibrary(placementLibrary);
+    context.openCascade = snapshotLibrary.getOC();
+    const nativeHandle = { shapes: [{ shape: source, name: 'body' }] };
+    const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    const shear = [1, 0, 0, 0, 0.2, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    await expect(async () =>
+      replicadDefinition.composeHandles!(
+        {
+          occurrences: [
+            { handle: nativeHandle, occurrencePath: ['valid'], worldTransform: identity },
+            { handle: nativeHandle, occurrencePath: ['invalid'], worldTransform: shear },
+          ],
+        },
+        createMockKernelRuntime(),
+        context,
+      ),
+    ).rejects.toThrow(/rigid/u);
+    expect(placedShapes).toHaveLength(1);
+    expect(placedShapes[0]!.delete).toHaveBeenCalledOnce();
+    source.delete();
   });
 });
 

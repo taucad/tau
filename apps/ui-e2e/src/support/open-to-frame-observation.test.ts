@@ -5,8 +5,15 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, expect, it } from 'vitest';
 
-// oxlint-disable-next-line no-restricted-imports -- Node-only unit test imports the directly executed driver's helper.
-import { epochForRelativeMarks, observedKernelSelection, observedRuntimeWindow } from './open-to-frame-observation.ts';
+// oxlint-disable no-restricted-imports -- Node-only unit test imports the directly executed driver's helper.
+import {
+  epochForRelativeMarks,
+  observedKernelSelection,
+  observedReplicadLoadedWasm,
+  observedReplicadNativeVariant,
+  observedRuntimeWindow,
+} from './open-to-frame-observation.ts';
+// oxlint-enable no-restricted-imports
 
 let directory: string | undefined;
 const execFileAsync = promisify(execFile);
@@ -19,6 +26,84 @@ afterEach(async () => {
 it('anchors relative sample marks at their actual wall-clock time', () => {
   const anchor = epochForRelativeMarks(500, 100_000, 510);
   expect(anchor + 20).toBe(100_010);
+});
+
+it('should require the selected Replicad native build to finish initialization in the same sample', () => {
+  const autoSingle = '[Kernel:worker] Replicad WASM variant auto-selected: single (shared memory unavailable)';
+  const autoMulti = '[Kernel:worker] Replicad WASM variant auto-selected: multi (cross-origin isolated)';
+  const singleReady = '[Kernel:worker] Replicad OCCT initialised: variant=single (single-threaded)';
+  const multiReady = '[Kernel:worker] OCCT parallel defaults activated: 4 threads';
+  const customReady = '[Kernel:worker] Replicad OCCT initialised: variant=custom (single-threaded)';
+  expect(observedReplicadNativeVariant([autoSingle, singleReady], 'auto')).toBe('auto-single');
+  expect(observedReplicadNativeVariant([autoMulti, multiReady], 'auto')).toBe('auto-multi');
+  expect(
+    observedReplicadNativeVariant(
+      [autoMulti, '[Kernel:worker] OCCT parallel defaults partially activated: BOPAlgo + BRepMesh defaults ON'],
+      'auto',
+    ),
+  ).toBe('auto-multi');
+  expect(observedReplicadNativeVariant([customReady], 'custom')).toBe('custom-single');
+  expect(observedReplicadNativeVariant([autoMulti], 'auto')).toBeUndefined();
+  expect(observedReplicadNativeVariant([autoMulti, singleReady], 'auto')).toBeUndefined();
+  expect(observedReplicadNativeVariant([autoSingle, autoMulti, multiReady], 'auto')).toBeUndefined();
+  expect(observedReplicadNativeVariant([customReady, autoSingle], 'custom')).toBeUndefined();
+  expect(observedReplicadNativeVariant([singleReady], 'custom')).toBeUndefined();
+  expect(
+    observedReplicadNativeVariant(
+      Array.from({ length: 17 }, () => customReady),
+      'custom',
+    ),
+  ).toBeUndefined();
+  expect(
+    observedReplicadNativeVariant(['Replicad OCCT initialised: variant=custom (single-threaded)'], 'custom'),
+  ).toBeUndefined();
+});
+
+it('joins a completed native request to the initialized variant and the immutable binary pin', () => {
+  const custom = {
+    url: 'http://127.0.0.1:61901/assets/engines/replicad/density-single-v1/replicad_single.wasm',
+    method: 'GET',
+    status: 200,
+    byteLength: 23_000_363,
+    sha256: 'custom-pin',
+  };
+  const auto = { ...custom, url: 'http://127.0.0.1:61901/assets/replicad_multi-abc123.wasm', sha256: 'auto-pin' };
+  const selected = {
+    origin: 'http://127.0.0.1:61901',
+    variant: 'custom-single',
+    expectedSha256: 'custom-pin',
+  } as const;
+  expect(observedReplicadLoadedWasm([custom], selected)).toEqual({
+    url: custom.url,
+    variant: 'single',
+    byteLength: custom.byteLength,
+    sha256: 'custom-pin',
+  });
+  expect(
+    observedReplicadLoadedWasm([auto], { ...selected, variant: 'auto-multi', expectedSha256: 'auto-pin' })?.variant,
+  ).toBe('multi');
+  expect(observedReplicadLoadedWasm([], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, { ...custom }], selected)).toEqual({
+    url: custom.url,
+    variant: 'single',
+    byteLength: custom.byteLength,
+    sha256: custom.sha256,
+  });
+  expect(observedReplicadLoadedWasm([{ ...custom, method: 'HEAD' }, custom], selected)?.sha256).toBe(custom.sha256);
+  expect(observedReplicadLoadedWasm([{ ...custom, method: 'HEAD' }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([{ ...custom, method: 'POST' }, custom], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, { ...custom, sha256: 'other' }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, { ...custom, byteLength: 1 }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, { ...custom, url: auto.url }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom, custom, custom], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom], { ...selected, variant: undefined })).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom], { ...selected, expectedSha256: undefined })).toBeUndefined();
+  expect(observedReplicadLoadedWasm([{ ...custom, status: 404 }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([{ ...custom, sha256: 'other' }], selected)).toBeUndefined();
+  expect(observedReplicadLoadedWasm([custom], { ...selected, variant: 'auto-multi' })).toBeUndefined();
+  expect(
+    observedReplicadLoadedWasm([{ ...custom, url: 'http://other.test/replicad_single.wasm' }], selected),
+  ).toBeUndefined();
 });
 
 it('should refuse browser link-intent before waiting for a project that only desktop seeds', async () => {
@@ -35,6 +120,51 @@ it('should refuse browser link-intent before waiting for a project that only des
     'stderr',
     expect.stringContaining('link-intent requires the desktop host: only it seeds a project visible from Home.'),
   );
+}, 15_000);
+
+it('refuses an incomplete cold reference population before launching Chromium', async () => {
+  await Promise.all(
+    (
+      [
+        ['tray', 'webgl', '3'],
+        ['unselected', 'webgl', '5'],
+        ['honeycomb', 'unselected', '5'],
+      ] as const
+    ).map(async ([fixture, backend, count]) =>
+      expect(
+        execFileAsync(process.execPath, [
+          resolve(import.meta.dirname, 'open-to-frame.ts'),
+          'browser',
+          'replicad',
+          count,
+          'http://127.0.0.1:3110',
+          'reference-cold',
+          fixture,
+          backend,
+        ]),
+      ).rejects.toHaveProperty('stderr', expect.stringContaining('reference-cold requires browser replicad 5')),
+    ),
+  );
+}, 15_000);
+
+it('keeps a one-process native structural probe outside measured reference populations', async () => {
+  const driver = resolve(import.meta.dirname, 'open-to-frame.ts');
+  const structuralProbeEnvironment = 'TAU_OPEN_TO_FRAME_NATIVE_STRUCTURAL_PROBE';
+  await expect(
+    execFileAsync(process.execPath, [driver, 'browser', 'replicad', '1', 'http://127.0.0.1:3110', 'reference-cold']),
+  ).rejects.toHaveProperty('stderr', expect.stringContaining('Repeat count must be an integer of at least two'));
+  await expect(
+    execFileAsync(process.execPath, [driver, 'browser', 'replicad', '1', 'http://127.0.0.1:3110', 'home'], {
+      env: { ...process.env, [structuralProbeEnvironment]: '1' },
+    }),
+  ).rejects.toHaveProperty('stderr', expect.stringContaining('only available for reference-cold'));
+  await expect(
+    execFileAsync(
+      process.execPath,
+      [driver, 'browser', 'replicad', '5', 'http://127.0.0.1:3110', 'reference-cold', 'tray', 'webgl'],
+      { env: { ...process.env, [structuralProbeEnvironment]: '1' } },
+    ),
+  ).rejects.toHaveProperty('stderr', expect.stringContaining('1 structural probe'));
 }, 15_000);
 
 it('accepts a selected kernel only when it belongs to a render in the same utility', async () => {

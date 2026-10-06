@@ -82,6 +82,7 @@ const contentCapabilitySchema = z
 const exportRouteSchema = z
   .object({
     targetFormat: z.string().min(1),
+    exportId: z.string().min(1).optional(),
     kernelId: z.string(),
     sourceFormat: z.string().min(1),
     transcoderId: z.string().optional(),

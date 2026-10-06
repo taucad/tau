@@ -13,5 +13,6 @@
     "version": 4.7
   },
   "scale": 1,
+  "side": 2,
   "type": "Line2NodeMaterial"
 }

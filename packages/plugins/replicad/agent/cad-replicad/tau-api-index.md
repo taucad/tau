@@ -10,7 +10,7 @@ ShapeConfig (type) [10 members] — A shape with optional display and material m
   ShapeConfig.shape (property) [id: typescript:ShapeConfig.shape]
   ShapeConfig.name (property) [id: typescript:ShapeConfig.name]
   ShapeConfig.strokeType (property) [id: typescript:ShapeConfig.strokeType]
-  ShapeConfig.density (property) — Physical density in g/cm³ for STEP mass computation [id: typescript:ShapeConfig.density]
+  ShapeConfig.density (property) — Authored density in g/cm³ for physical inspection and native STEP… [id: typescript:ShapeConfig.density]
   ShapeConfig.interfaces (property) [id: typescript:ShapeConfig.interfaces]
   ShapeConfig.color (property) — CSS color, converted from sRGB to linear glTF base color [id: typescript:ShapeConfig.color]
   ShapeConfig.opacity (property) [id: typescript:ShapeConfig.opacity]

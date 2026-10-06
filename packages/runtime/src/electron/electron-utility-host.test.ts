@@ -8,6 +8,8 @@ import { serveElectronFileSystemBridgePort } from '#electron/filesystem-bridge-p
 import type { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import type { MessagePortMainLike } from '@taucad/rpc';
 import type * as DispatcherModule from '#transport/_internal/runtime-document-dispatcher.js';
+import { fromMemoryFs } from '#filesystem/index.js';
+import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 
 const dispatcherCalls = vi.hoisted(
   () => [] as Array<Parameters<typeof DispatcherModule.createDocumentWorkerDispatcher>>,
@@ -39,6 +41,135 @@ afterEach(() => {
 });
 
 describe('electronUtilityHost filesystem boot', () => {
+  it.each([true, false])(
+    'keeps transferred publication separate and omits a readonly writer (writable=%s)',
+    async (writable) => {
+      let receive: ((event: { data?: unknown; ports: readonly MessagePortMainLike[] }) => void) | undefined;
+      Object.defineProperty(process, 'parentPort', {
+        configurable: true,
+        value: {
+          once: (_event: string, listener: typeof receive) => {
+            receive = listener;
+          },
+        },
+      });
+      const runtimePorts = new MessageChannel();
+      const evaluatorPorts = new MessageChannel();
+      const publicationPorts = new MessageChannel();
+      const evaluator = new MemoryProvider();
+      const publication = new MemoryProvider();
+      await evaluator.writeFile('value.txt', 'evaluator');
+      await publication.writeFile('value.txt', 'publication');
+      const readonlyPublication = new Proxy(publication, {
+        get(target, property): unknown {
+          if (property === 'capabilities') {
+            return { ...publication.capabilities, writable };
+          }
+          const value = Reflect.get(target, property, target) as unknown;
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const evaluatorServer = serveElectronFileSystemBridgePort(evaluator, evaluatorPorts.port1);
+      const publicationServer = serveElectronFileSystemBridgePort(readonlyPublication, publicationPorts.port1);
+      const host = electronUtilityHost({ worker: Object.create(null) as KernelRuntimeWorker });
+      try {
+        const opening = host.open();
+        receive?.({
+          data: { runtimePortIndex: 0, fileSystemPortIndex: 1, publicationFileSystemPortIndex: 2 },
+          ports: [runtimePorts.port1, evaluatorPorts.port2, publicationPorts.port2] as unknown as MessagePortMainLike[],
+        });
+        await opening;
+        const bindings = dispatcherCalls[0]?.[2];
+        await expect(bindings?.inlineFileSystem?.readFile('value.txt', 'utf8')).resolves.toBe('evaluator');
+        if (writable) {
+          const writerPort = bindings?.publicationFileSystem?.port;
+          if (!writerPort) {
+            throw new Error('Missing independent publication binding.');
+          }
+          const writer = await createWorkerFileSystemProxy(writerPort);
+          await expect(writer.readFile('value.txt', 'utf8')).resolves.toBe('publication');
+          writer.dispose();
+        } else {
+          expect(bindings?.publicationFileSystem?.port).toBeUndefined();
+        }
+      } finally {
+        await host.close();
+        evaluatorServer.dispose();
+        publicationServer.dispose();
+        runtimePorts.port2.close();
+      }
+    },
+  );
+
+  it.each([
+    { publicationFileSystemPortIndex: 2 },
+    { publicationFileSystemPortIndex: -1 },
+    { publicationFileSystemPortIndex: 0 },
+    { publicationFileSystemPortIndex: 0.5 },
+  ])(
+    'rejects invalid publication port indices before wiring and closes siblings when one close throws: %j',
+    async (data) => {
+      let receive: ((event: { data?: unknown; ports: readonly MessagePortMainLike[] }) => void) | undefined;
+      Object.defineProperty(process, 'parentPort', {
+        configurable: true,
+        value: {
+          once: (_event: string, listener: typeof receive) => {
+            receive = listener;
+          },
+        },
+      });
+      const first = {
+        close: vi.fn(() => {
+          throw new Error('close failed');
+        }),
+      };
+      const second = { close: vi.fn() };
+      const host = electronUtilityHost({
+        fileSystem: fromMemoryFs(),
+        worker: Object.create(null) as KernelRuntimeWorker,
+      });
+      const opening = host.open();
+      receive?.({
+        data: { runtimePortIndex: 0, computeStorePortIndex: 1, ...data },
+        ports: [first, second] as unknown as MessagePortMainLike[],
+      });
+      await expect(opening).rejects.toThrow('invalid MessagePortMain indices');
+      expect(first.close).toHaveBeenCalledOnce();
+      expect(second.close).toHaveBeenCalledOnce();
+      expect(dispatcherCalls).toHaveLength(0);
+      await host.close();
+    },
+  );
+
+  it('rejects simultaneous static and transferred publication bindings', async () => {
+    let receive: ((event: { data?: unknown; ports: readonly MessagePortMainLike[] }) => void) | undefined;
+    Object.defineProperty(process, 'parentPort', {
+      configurable: true,
+      value: {
+        once: (_event: string, listener: typeof receive) => {
+          receive = listener;
+        },
+      },
+    });
+    const ports = [{ close: vi.fn() }, { close: vi.fn() }];
+    const host = electronUtilityHost({
+      fileSystem: fromMemoryFs(),
+      publicationFileSystem: fromMemoryFs(),
+      worker: Object.create(null) as KernelRuntimeWorker,
+    });
+    const opening = host.open();
+    receive?.({
+      data: { runtimePortIndex: 0, publicationFileSystemPortIndex: 1 },
+      ports: ports as unknown as MessagePortMainLike[],
+    });
+    await expect(opening).rejects.toThrow('static and transferred publication');
+    expect(dispatcherCalls).toHaveLength(0);
+    for (const port of ports) {
+      expect(port.close).toHaveBeenCalledOnce();
+    }
+    await host.close();
+  });
+
   it('awaits a transferred rooted bridge before wiring the dispatcher and owns its close', async () => {
     let receive: ((event: { data?: unknown; ports: readonly MessagePortMainLike[] }) => void) | undefined;
     Object.defineProperty(process, 'parentPort', {

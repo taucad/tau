@@ -8,6 +8,7 @@ import { StrictMode, useLayoutEffect, useState } from 'react';
 import { createActor, createAsyncLogic } from 'xstate';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page, commands, userEvent } from 'vitest/browser';
+import { base64ToUint8Array } from 'uint8array-extras';
 import { Allotment } from '#components/panes/allotment.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -33,6 +34,21 @@ declare module 'vitest/internal/browser' {
   }
 }
 
+type NativeGpu = {
+  requestAdapter(options?: unknown): Promise<unknown>;
+};
+
+type NativeGpuDevice = {
+  queue: { onSubmittedWorkDone(): Promise<void> };
+  addEventListener(type: 'uncapturederror', listener: (event: GPUUncapturedErrorEvent) => void): void;
+  removeEventListener(type: 'uncapturederror', listener: (event: GPUUncapturedErrorEvent) => void): void;
+};
+
+type NativeWebGpuRenderer = {
+  domElement: HTMLCanvasElement;
+  backend: { device: NativeGpuDevice };
+};
+
 const frame = async (): Promise<void> =>
   new Promise((resolve) => {
     requestAnimationFrame(() => {
@@ -49,6 +65,125 @@ afterEach(() => {
 });
 
 describe('rendered viewer resize', () => {
+  it('keeps WebGPU depth and color attachments coherent during the first large canvas resize', async () => {
+    await page.viewport(1280, 1100);
+    const actor = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) } }),
+      { input: {} },
+    ).start();
+    actors.push(actor);
+    let state: RootState | undefined;
+    let frames = 0;
+    let adapterRequests = 0;
+    let releaseFirstAdapter: (() => void) | undefined;
+    const firstAdapterGate = new Promise<void>((resolve) => {
+      releaseFirstAdapter = resolve;
+    });
+    const { gpu } = navigator as unknown as { gpu: NativeGpu };
+    const requestAdapter = gpu.requestAdapter.bind(gpu);
+    vi.spyOn(gpu, 'requestAdapter').mockImplementation(async (options) => {
+      const ordinal = ++adapterRequests;
+      const adapter = await requestAdapter(options);
+      if (ordinal === 1) {
+        await firstAdapterGate;
+      }
+      return adapter;
+    });
+    const errors: GPUError[] = [];
+    const onError = (event: GPUUncapturedErrorEvent): void => {
+      errors.push(event.error);
+    };
+    const Probe = (): undefined => {
+      const get = useThree((value) => value.get);
+      useLayoutEffect(() => {
+        state = get();
+        const renderer = state.gl as unknown as NativeWebGpuRenderer;
+        const { device } = renderer.backend;
+        device.addEventListener('uncapturederror', onError);
+        return () => {
+          device.removeEventListener('uncapturederror', onError);
+        };
+      }, [get]);
+      useFrame(() => {
+        frames += 1;
+      }, 4);
+      return undefined;
+    };
+    const view = render(
+      <div data-testid='first-resize-frame' style={{ width: 300, height: 150 }}>
+        <GraphicsProvider graphicsRef={actor}>
+          <ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined}>
+            <mesh>
+              <boxGeometry args={[2, 2, 2]} />
+              <meshStandardMaterial color='#16aaa4' />
+            </mesh>
+            <Probe />
+          </ThreeCanvasInstance>
+        </GraphicsProvider>
+      </div>,
+    );
+    try {
+      await vi.waitFor(
+        () => {
+          expect(adapterRequests).toBe(1);
+        },
+        { timeout: 45_000 },
+      );
+      const root = view.getByTestId('first-resize-frame');
+      root.style.width = '955px';
+      root.style.height = '1044px';
+      await frame();
+    } finally {
+      releaseFirstAdapter?.();
+    }
+    await vi.waitFor(
+      () => {
+        expect(state).toBeDefined();
+      },
+      { timeout: 45_000 },
+    );
+    const renderer = state!.gl as unknown as NativeWebGpuRenderer;
+    await vi.waitFor(
+      () => {
+        expect(renderer.domElement.width).toBe(955);
+      },
+      { timeout: 45_000 },
+    );
+    expect(renderer.domElement.height).toBe(1044);
+    const canvasRect = renderer.domElement.getBoundingClientRect();
+    expect(canvasRect.width).toBe(955);
+    expect(canvasRect.height).toBe(1044);
+    await vi.waitFor(
+      () => {
+        expect(frames).toBeGreaterThan(0);
+      },
+      { timeout: 45_000 },
+    );
+    const { device } = renderer.backend;
+    await device.queue.onSubmittedWorkDone();
+    const screenshot = await page.screenshot({ save: false });
+    await page.screenshot({
+      path: '../../../../../../../out/test-results/vitest-browser/viewer-resize/webgpu-first-resize-useful.png',
+    });
+    const png = base64ToUint8Array(screenshot);
+    const image = await createImageBitmap(new Blob([png], { type: 'image/png' }));
+    const readback = document.createElement('canvas');
+    readback.width = image.width;
+    readback.height = image.height;
+    const context = readback.getContext('2d');
+    if (!context) {
+      throw new TypeError('Expected 2D canvas readback');
+    }
+    context.drawImage(image, 0, 0);
+    image.close();
+    const center = context.getImageData(Math.floor(readback.width / 2), Math.floor(readback.height / 2), 1, 1).data;
+    expect(center[3]).toBeGreaterThan(0);
+    expect(Math.max(center[0]!, center[1]!, center[2]!) - Math.min(center[0]!, center[1]!, center[2]!)).toBeGreaterThan(
+      32,
+    );
+    expect(adapterRequests).toBe(1);
+    expect(errors).toEqual([]);
+  });
   it.each(['webgl', 'webgpu'] as const)(
     'should present each resized %s canvas before the next frame',
     async (backend) => {

@@ -4,6 +4,11 @@ import { INTERSECTED, NOT_INTERSECTED } from 'three-mesh-bvh';
 import { getOrBuildBvh } from '#components/geometry/graphics/three/utils/bvh-cache.js';
 import {
   getModelComponentId,
+  getModelComponentHitOwner,
+  getModelComponentInstanceSlots,
+  getModelComponentInstanceSlot,
+  getModelComponentWorldMatrix,
+  getModelComponentSourceGeometry,
   getModelComponentOwnerInHierarchy,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import type { ModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
@@ -34,6 +39,9 @@ export type SectionTopologyFailure = Readonly<{
 
 type SectionSurfaceParticipant = {
   readonly mesh: SectionSurfaceMesh;
+  readonly geometry: THREE.BufferGeometry;
+  readonly instanceId?: number;
+  readonly sourceBinding?: GltfSectionSourceBinding;
   readonly localToSource: THREE.Matrix4;
   readonly order: number;
   readonly nodeIndex: number | undefined;
@@ -204,6 +212,12 @@ export type SectionTopologyGltfParser = Readonly<{
   json: GltfParserJson;
   associations: ReadonlyMap<THREE.Object3D, GltfAssociation>;
   getDependency(type: 'accessor', index: number): Promise<unknown>;
+}>;
+
+/** Definition-local decoding and placed occurrence identity, owned by one presentation. @internal */
+export type GltfSectionSourceBinding = Readonly<{
+  parser: SectionTopologyGltfParser;
+  occurrenceId: string;
 }>;
 
 type ManifoldPrimitiveJson = Readonly<{
@@ -870,10 +884,14 @@ const buildCanonicalTopologyAsync = async (input: TopologyBuildInput): Promise<S
   }
 };
 
-const materialAtTriangle = (mesh: SectionSurfaceMesh, triangleIndex: number): readonly [THREE.Material, number] => {
+const materialAtTriangle = (
+  mesh: SectionSurfaceMesh,
+  triangleIndex: number,
+  geometry = mesh.geometry,
+): readonly [THREE.Material, number] => {
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
   const indexOffset = triangleIndex * 3;
-  const group = mesh.geometry.groups.find(
+  const group = geometry.groups.find(
     (candidate) => indexOffset >= candidate.start && indexOffset < candidate.start + candidate.count,
   );
   const materialIndex = group?.materialIndex ?? 0;
@@ -909,7 +927,7 @@ const createFallbackTopologyInput = (options: {
   for (const participant of options.participants) {
     participant.topologyTrianglesByGeometryTriangle.clear();
     participant.usedMaterialOrders.clear();
-    const { position } = participant.mesh.geometry.attributes;
+    const { position } = participant.geometry.attributes;
     if (!position || position.itemSize < 3) {
       return topologyFailure(options.sourceKey, 'missing-position', 'is missing a VEC3 position attribute');
     }
@@ -927,13 +945,13 @@ const createFallbackTopologyInput = (options: {
 
   const epsilon = sourceTopologyEpsilon(positions);
   for (const participant of options.participants) {
-    const position = participant.mesh.geometry.attributes['position']!;
+    const position = participant.geometry.attributes['position']!;
     const vertexBase = vertexBaseByParticipant.get(participant)!;
 
-    const index = participant.mesh.geometry.getIndex();
+    const index = participant.geometry.getIndex();
     const indexCount = index?.count ?? position.count;
-    const drawStart = Math.max(0, participant.mesh.geometry.drawRange.start);
-    const requestedCount = participant.mesh.geometry.drawRange.count;
+    const drawStart = Math.max(0, participant.geometry.drawRange.start);
+    const requestedCount = participant.geometry.drawRange.count;
     const drawEnd = Math.min(
       indexCount,
       requestedCount === Number.POSITIVE_INFINITY ? indexCount : drawStart + requestedCount,
@@ -968,7 +986,11 @@ const createFallbackTopologyInput = (options: {
         continue;
       }
       const participantTriangleIndex = Math.floor(offset / 3);
-      const [material, materialOrder] = materialAtTriangle(participant.mesh, participantTriangleIndex);
+      const [material, materialOrder] = materialAtTriangle(
+        participant.mesh,
+        participantTriangleIndex,
+        participant.geometry,
+      );
       participant.usedMaterialOrders.add(materialOrder);
       const topologyTriangleIndex = triangles.length;
       triangles.push({
@@ -1033,7 +1055,11 @@ const isVisibleInHierarchy = (object: THREE.Object3D): boolean => {
 };
 
 const participantVisibility = (participant: SectionSurfaceParticipant): 'visible' | 'hidden' | 'partial' => {
-  if (!isVisibleInHierarchy(participant.mesh)) {
+  if (
+    !isVisibleInHierarchy(participant.mesh) ||
+    (participant.mesh instanceof THREE.InstancedMesh &&
+      !getModelComponentInstanceSlot(participant.mesh, participant.instanceId))
+  ) {
     return 'hidden';
   }
   const materials = Array.isArray(participant.mesh.material) ? participant.mesh.material : [participant.mesh.material];
@@ -1051,15 +1077,33 @@ const participantVisibility = (participant: SectionSurfaceParticipant): 'visible
 
 const createParticipant = (options: {
   mesh: SectionSurfaceMesh;
-  rootInverse: THREE.Matrix4;
+  instanceId?: number;
+  root: THREE.Object3D;
   order: number;
   association?: GltfAssociation;
+  sourceBinding?: GltfSectionSourceBinding;
+  worldMatricesCurrent?: boolean;
 }): SectionSurfaceParticipant => {
-  getOrBuildBvh(options.mesh.geometry);
-
+  const geometry = getModelComponentSourceGeometry(options.mesh, options.instanceId);
+  if (!geometry) {
+    throw new Error('Section participant has no live canonical source geometry');
+  }
+  getOrBuildBvh(geometry);
+  if (!options.worldMatricesCurrent) {
+    options.root.updateWorldMatrix(true, true);
+    options.mesh.updateWorldMatrix(true, false);
+  }
+  const rootInverse = new THREE.Matrix4().copy(options.root.matrixWorld).invert();
+  const placement = getModelComponentWorldMatrix(options.mesh, options.instanceId, new THREE.Matrix4());
+  if (!placement) {
+    throw new Error('Section participant has no live canonical instance placement');
+  }
   return {
     mesh: options.mesh,
-    localToSource: new THREE.Matrix4().multiplyMatrices(options.rootInverse, options.mesh.matrixWorld),
+    geometry,
+    instanceId: options.instanceId,
+    sourceBinding: options.sourceBinding,
+    localToSource: new THREE.Matrix4().multiplyMatrices(rootInverse, placement),
     order: options.order,
     nodeIndex: options.association?.nodes,
     meshIndex: options.association?.meshes,
@@ -1078,7 +1122,7 @@ const createStandaloneSource = (mesh: SectionSurfaceMesh): SectionSurfaceSource 
   mesh.updateWorldMatrix(true, true);
   const participant = createParticipant({
     mesh,
-    rootInverse: new THREE.Matrix4().copy(mesh.matrixWorld).invert(),
+    root: mesh,
     order: 0,
   });
   const builtRevision = geometryRevision(mesh.geometry);
@@ -1347,7 +1391,11 @@ const decodeManifoldTopology = async (options: {
           continue;
         }
         const participantTriangleIndex = primitiveOffset / 3;
-        const [material, materialOrder] = materialAtTriangle(participant.mesh, participantTriangleIndex);
+        const [material, materialOrder] = materialAtTriangle(
+          participant.mesh,
+          participantTriangleIndex,
+          participant.geometry,
+        );
         participant.usedMaterialOrders.add(materialOrder);
         const topologyTriangleIndex = triangles.length;
         triangles.push({
@@ -1453,21 +1501,26 @@ const createRegisteredSource = async (options: {
   owner: ModelComponentOwner | undefined;
   participants: readonly SectionSurfaceParticipant[];
 }): Promise<SectionSurfaceSource> => {
-  const meshIdentities = new Map<string, SectionSurfaceParticipant[]>();
+  const meshIdentities = new Map<SectionTopologyGltfParser, Map<string, SectionSurfaceParticipant[]>>();
   for (const participant of options.participants) {
     if (participant.nodeIndex === undefined || participant.meshIndex === undefined) {
       continue;
     }
-    const identity = `${participant.nodeIndex}:${participant.meshIndex}`;
-    const entries = meshIdentities.get(identity) ?? [];
+    const parser = participant.sourceBinding?.parser ?? options.parser;
+    const identities = meshIdentities.get(parser) ?? new Map<string, SectionSurfaceParticipant[]>();
+    const identity = `${participant.sourceBinding?.occurrenceId ?? ''}:${participant.nodeIndex}:${participant.meshIndex}`;
+    const entries = identities.get(identity) ?? [];
     entries.push(participant);
-    meshIdentities.set(identity, entries);
+    identities.set(identity, entries);
+    meshIdentities.set(parser, identities);
   }
-
+  const groups = [...meshIdentities].flatMap(([parser, identities]) =>
+    [...identities.values()].map((participants) => ({ parser, participants })),
+  );
   const decodedTopologies = await Promise.all(
-    [...meshIdentities.values()].map(async (participants) =>
+    groups.map(async ({ parser, participants }) =>
       decodeManifoldTopology({
-        parser: options.parser,
+        parser,
         sourceKey: options.key,
         participants,
         meshIndex: participants[0]!.meshIndex!,
@@ -1490,7 +1543,7 @@ const createRegisteredSource = async (options: {
       allIdentitiesExact = false;
     }
   }
-  if ([...meshIdentities.values()].flat().length !== options.participants.length) {
+  if (groups.flatMap(({ participants }) => participants).length !== options.participants.length) {
     allIdentitiesExact = false;
   }
   const topology =
@@ -1509,7 +1562,7 @@ const createRegisteredSource = async (options: {
     owner: options.owner,
     participants: options.participants,
     topology,
-    revision: options.participants.map((participant) => geometryRevision(participant.mesh.geometry)).join('|'),
+    revision: options.participants.map((participant) => geometryRevision(participant.geometry)).join('|'),
   };
 };
 
@@ -1519,6 +1572,7 @@ export const registerGltfSectionSurfaceSources = async (options: {
   manifest: GeometryComponentManifest;
   unitId: string;
   parser: SectionTopologyGltfParser;
+  sourceBindings?: ReadonlyMap<THREE.Object3D, GltfSectionSourceBinding>;
   onTiming?: (timing: GltfSectionTopologyTiming) => void;
   isCancelled?: () => boolean;
 }): Promise<readonly SectionSurfaceSource[]> => {
@@ -1526,7 +1580,6 @@ export const registerGltfSectionSurfaceSources = async (options: {
   setGltfSectionSurfaceRegistrationState(options.scene, 'pending');
   const meshes: SectionSurfaceMesh[] = [];
   options.scene.updateWorldMatrix(true, true);
-  const rootInverse = new THREE.Matrix4().copy(options.scene.matrixWorld).invert();
   options.scene.traverse((object) => {
     if (
       isSectionSurfaceMesh(object) &&
@@ -1537,17 +1590,38 @@ export const registerGltfSectionSurfaceSources = async (options: {
       meshes.push(object);
     }
   });
-  const participants = meshes.map((mesh, order) =>
-    createParticipant({
-      mesh,
-      rootInverse,
-      order,
-      association: getAssociation(mesh, options.parser.associations),
-    }),
-  );
+  const participants: SectionSurfaceParticipant[] = [];
+  for (const mesh of meshes) {
+    const slots = getModelComponentInstanceSlots(mesh);
+    if (mesh instanceof THREE.InstancedMesh && !slots) {
+      throw new Error('Section batch has no live canonical instance ownership');
+    }
+    for (let slot = 0; slot < (slots?.length ?? 1); slot++) {
+      const instanceId = slots ? slot : undefined;
+      const evidence = slots?.[slot];
+      const sourceBinding = evidence?.sourceBinding ?? options.sourceBindings?.get(mesh);
+      participants.push(
+        createParticipant({
+          mesh,
+          instanceId,
+          root: options.scene,
+          order: participants.length,
+          worldMatricesCurrent: true,
+          sourceBinding,
+          association: getAssociation(
+            evidence?.sourceObject ?? mesh,
+            (sourceBinding?.parser ?? options.parser).associations,
+          ),
+        }),
+      );
+    }
+  }
   const participantsByComponent = new Map<string, SectionSurfaceParticipant[]>();
   for (const participant of participants) {
-    const componentId = getModelComponentId(participant.mesh);
+    const componentId =
+      participant.mesh instanceof THREE.InstancedMesh
+        ? getModelComponentHitOwner({ object: participant.mesh, instanceId: participant.instanceId })?.componentId
+        : getModelComponentId(participant.mesh);
     if (!componentId) {
       continue;
     }
@@ -1582,20 +1656,26 @@ export const registerGltfSectionSurfaceSources = async (options: {
   }
 
   const remainingByIdentity = new Map<string, SectionSurfaceParticipant[]>();
+  const parserIdentities = new Map<SectionTopologyGltfParser, number>();
   for (const participant of participants) {
     if (claimed.has(participant)) {
       continue;
     }
+    const parser = participant.sourceBinding?.parser ?? options.parser;
+    if (!parserIdentities.has(parser)) {
+      parserIdentities.set(parser, parserIdentities.size);
+    }
     const identity =
       participant.nodeIndex !== undefined && participant.meshIndex !== undefined
-        ? `${participant.nodeIndex}:${participant.meshIndex}`
-        : participant.mesh.uuid;
+        ? `${parserIdentities.get(parser)}:${participant.sourceBinding?.occurrenceId ?? ''}:${participant.nodeIndex}:${participant.meshIndex}`
+        : `${participant.mesh.uuid}:${participant.instanceId ?? 'mesh'}`;
     const entries = remainingByIdentity.get(identity) ?? [];
     entries.push(participant);
     remainingByIdentity.set(identity, entries);
   }
   for (const [identity, sourceParticipants] of remainingByIdentity) {
-    const owner = getModelComponentOwnerInHierarchy(sourceParticipants[0]!.mesh);
+    const first = sourceParticipants[0]!;
+    const owner = getModelComponentHitOwner({ object: first.mesh, instanceId: first.instanceId });
     sourceInputs.push({
       key: owner ? `${owner.unitId}:${owner.componentId}:${identity}` : `${options.unitId}:${identity}`,
       owner,
@@ -1696,6 +1776,7 @@ export const collectSectionSurfaceSources = (
     if (
       isSectionSurfaceMesh(object) &&
       object.type !== 'LineSegments2' &&
+      !(object instanceof THREE.InstancedMesh) &&
       !coveredMeshes.has(object) &&
       !hasAncestorInSet(object, blockedRoots) &&
       hasPositionAttribute(object.geometry) &&
@@ -1783,9 +1864,12 @@ const candidateTopologyTriangles = (source: SectionSurfaceSource, worldPlane: TH
   const localPlane = new THREE.Plane();
   const inverse = new THREE.Matrix4();
   for (const participant of source.participants) {
-    inverse.copy(participant.mesh.matrixWorld).invert();
+    if (!getModelComponentWorldMatrix(participant.mesh, participant.instanceId, inverse)) {
+      continue;
+    }
+    inverse.invert();
     localPlane.copy(worldPlane).applyMatrix4(inverse);
-    const bvh = getOrBuildBvh(participant.mesh.geometry);
+    const bvh = getOrBuildBvh(participant.geometry);
     const meshBounds = bvh.getBoundingBox(new THREE.Box3());
     const planeCandidateDistanceToleranceMeshUnits =
       meshBounds.getSize(new THREE.Vector3()).length() * float32Epsilon * 8;
@@ -1820,7 +1904,12 @@ export const getSectionSourceWorldMatrix = (
   // ponytail: one rigid placement per source, from its first participant; a body posed apart across kinematic
   // links would need per-participant slicing.
   const participant = source.participants[0]!;
-  return target.copy(participant.localToSource).invert().premultiply(participant.mesh.matrixWorld);
+  const placement = getModelComponentWorldMatrix(participant.mesh, participant.instanceId, target);
+  if (!placement) {
+    throw new Error('Section source instance ownership was retired');
+  }
+  const localInverse = new THREE.Matrix4().copy(participant.localToSource).invert();
+  return target.multiply(localInverse);
 };
 
 /**

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
+import type { SpanHandle } from '#types/runtime-tracer.types.js';
 import type { TelemetryEntry } from '#types/runtime-wire.types.js';
 
 describe('RuntimeTracer', () => {
@@ -84,6 +85,100 @@ describe('RuntimeTracer', () => {
       spanId: '0',
       devtools: { dataType: 'track-entry', track: 'Kernel Pipeline', trackGroup: 'Tau' },
     });
+  });
+
+  it('keeps a live descendant when its ancestor ends first without reviving that ancestor', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry));
+    const outer = tracer.startSpan('outer');
+    const inner = tracer.startSpan('inner');
+
+    outer.end();
+    tracer.startSpan('inner-child').end();
+    inner.end();
+    tracer.startSpan('next-operation').end();
+
+    expect(entries.map(({ name, detail }) => ({ name, detail }))).toEqual([
+      { name: 'outer', detail: { spanId: '0', parentSpanId: undefined } },
+      { name: 'inner-child', detail: { spanId: '2', parentSpanId: '1' } },
+      { name: 'inner', detail: { spanId: '1', parentSpanId: '0' } },
+      { name: 'next-operation', detail: { spanId: '3', parentSpanId: undefined } },
+    ]);
+  });
+
+  it('returns to the nearest still-open ancestor after an intermediate scope ends first', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry));
+    const outer = tracer.startSpan('outer');
+    const middle = tracer.startSpan('middle');
+    const inner = tracer.startSpan('inner');
+
+    middle.end();
+    tracer.startSpan('inner-child').end();
+    inner.end();
+    tracer.startSpan('outer-child').end();
+    outer.end();
+    tracer.startSpan('next-operation').end();
+
+    expect(entries.map(({ name, detail }) => ({ name, detail }))).toEqual([
+      { name: 'middle', detail: { spanId: '1', parentSpanId: '0' } },
+      { name: 'inner-child', detail: { spanId: '3', parentSpanId: '2' } },
+      { name: 'inner', detail: { spanId: '2', parentSpanId: '1' } },
+      { name: 'outer-child', detail: { spanId: '4', parentSpanId: '0' } },
+      { name: 'outer', detail: { spanId: '0', parentSpanId: undefined } },
+      { name: 'next-operation', detail: { spanId: '5', parentSpanId: undefined } },
+    ]);
+  });
+
+  it('keeps fresh ancestry when reset scopes finish during a new operation', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    tracer.setEntrySink((entry) => entries.push(entry));
+    const staleOuter = tracer.startSpan('stale-outer');
+    const staleInner = tracer.startSpan('stale-inner');
+
+    tracer.reset();
+    const fresh = tracer.startSpan('fresh');
+    staleOuter.end();
+    staleInner.end();
+    tracer.startSpan('fresh-child').end();
+    fresh.end();
+    tracer.startSpan('next-operation').end();
+
+    expect(entries.map(({ name, detail }) => ({ name, detail }))).toEqual([
+      { name: 'fresh-child', detail: { spanId: '3', parentSpanId: '2' } },
+      { name: 'fresh', detail: { spanId: '2', parentSpanId: undefined } },
+      { name: 'next-operation', detail: { spanId: '4', parentSpanId: undefined } },
+    ]);
+  });
+
+  it('does not parent sink-started work to a completed span or clobber its live scope', () => {
+    const entries: TelemetryEntry[] = [];
+    const tracer = new RuntimeTracer();
+    let sinkSpan: SpanHandle | undefined;
+    tracer.setEntrySink((entry) => {
+      entries.push(entry);
+      if (entry.name === 'completed') {
+        sinkSpan = tracer.startSpan('sink');
+      }
+    });
+
+    tracer.startSpan('completed').end();
+    tracer.startSpan('sink-child').end();
+    if (sinkSpan === undefined) {
+      throw new TypeError('Expected the entry sink to start a span');
+    }
+    sinkSpan.end();
+    tracer.startSpan('next-operation').end();
+
+    expect(entries.map(({ name, detail }) => ({ name, detail }))).toEqual([
+      { name: 'completed', detail: { spanId: '0', parentSpanId: undefined } },
+      { name: 'sink-child', detail: { spanId: '2', parentSpanId: '1' } },
+      { name: 'sink', detail: { spanId: '1', parentSpanId: undefined } },
+      { name: 'next-operation', detail: { spanId: '3', parentSpanId: undefined } },
+    ]);
   });
 
   it('drops stale spans after reset without clearing unrelated timeline entries', () => {

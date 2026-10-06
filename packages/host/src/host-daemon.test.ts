@@ -32,6 +32,7 @@ import * as agentTools from '#agent-tools.js';
 import * as agentServer from '#agent-server.js';
 import * as machineHost from '#machine-host.js';
 import * as projectHosts from '#project-host.js';
+import * as frameSplice from '#frame-splice.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
@@ -1556,17 +1557,31 @@ describe('startHostDaemon', () => {
     await vi.waitFor(() => {
       expect(relay.controlFrames).toContainEqual(expect.objectContaining({ type: 'ready' }));
     });
-    control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
-    await vi.waitFor(() => {
-      expect(relay.controlFrames).toContainEqual({ v: 1, type: 'accept', sessionId: 'session-1' });
-    });
+    const spliceSpy = vi.spyOn(frameSplice, 'spliceFrameSockets');
+    let agentSplice: ReturnType<typeof frameSplice.spliceFrameSockets> | undefined;
+    try {
+      control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
+      await vi.waitFor(() => {
+        expect(relay.controlFrames).toContainEqual({ v: 1, type: 'accept', sessionId: 'session-1' });
+      });
+      expect(spliceSpy).toHaveBeenCalledTimes(3);
+      agentSplice = spliceSpy.mock.results[2]?.value as ReturnType<typeof frameSplice.spliceFrameSockets> | undefined;
+    } finally {
+      spliceSpy.mockRestore();
+    }
+    if (!agentSplice) {
+      throw new Error('Expected the accepted session agent splice.');
+    }
 
     /* The page closed one route; session-1's other routes stay open, so its drain
-     * (and its `disconnected` event) cannot finish. The slot must free anyway.
-     * A loaded runner can take longer than any fixed delay to deliver the close,
-     * so re-offer on BUSY and require the accept before session-1 disconnects. */
+     * (and its `disconnected` event) cannot finish. Wait for the actual splice
+     * close, then re-offer on BUSY until capacity admits session-2. */
     const agentSocket = await relay.route(routePath('session-1', 'agent'));
     agentSocket.close(1000, 'page closed');
+    await agentSplice.closed;
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'session', sessionId: 'session-1', state: 'disconnected' }),
+    );
     const session2Frames = (): unknown[] =>
       relay.controlFrames.filter((frame) => (frame as { sessionId?: string }).sessionId === 'session-2');
     await vi.waitFor(

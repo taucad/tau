@@ -50,7 +50,7 @@ const cadLikeMachine = setup({
       units: { length: 'mm' };
       kernelIssues: Map<string, never[]>;
       kernelClient: undefined;
-      latestGeometryOutcome: 'success';
+      latestRenderingOutcome: 'success';
     }>(),
     events: eventSchemas<{ type: 'scrub' } | { type: 'settle' } | { type: 'present'; geometry: GltfGeometry }>(),
   },
@@ -61,7 +61,7 @@ const cadLikeMachine = setup({
     units: { length: 'mm' },
     kernelIssues: new Map(),
     kernelClient: undefined,
-    latestGeometryOutcome: 'success',
+    latestRenderingOutcome: 'success',
   },
   initial: 'idle',
   states: {

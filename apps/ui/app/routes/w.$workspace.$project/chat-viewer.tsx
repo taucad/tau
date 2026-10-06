@@ -3,7 +3,7 @@ import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
 import { memo, useEffect, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { FileEntry } from '@taucad/types';
-import { asKnownArtifact } from '@taucad/runtime';
+import { asKnownArtifact, runtimeContentSchema } from '@taucad/runtime';
 import type { Evaluation, Rendering, RuntimeDocument, ViewSubscription } from '@taucad/runtime';
 import { canonicalJson } from '@taucad/utils/hash';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
@@ -11,8 +11,11 @@ import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
 import { CadViewer } from '#components/geometry/cad/cad-viewer.js';
 import { RuntimeErrorOverlay } from '#components/model-viewer.js';
 import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
+import { projectPartInspection } from '#components/geometry/cad/part-quantities.js';
+import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
+import { resolveSettledCadGeometry } from '#services/headless-capture.js';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
 import type { PartThumbnailRequest, PartThumbnailState } from '#services/part-thumbnail.service.js';
 import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
@@ -36,6 +39,7 @@ import {
   useKinematicsSelector,
   useModelInteractionSelector,
 } from '#hooks/use-graphics.js';
+import type { PaneRenderingProvenance } from '#machines/graphics.machine.js';
 import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
@@ -48,12 +52,15 @@ import { ArButton } from '#components/cad/ar-button.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import { describeKinematicsHover, getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import {
+  selectCadCommittedRendering,
+  selectCadHasTransientPreview,
   selectCadEvaluation,
   selectCadCapabilities,
   selectCadActiveKernelId,
   selectCadRendering,
   selectCadDocument,
   selectCadFailureIssues,
+  selectCadDisplay,
   selectIsCadLoading,
 } from '#machines/cad.machine.js';
 import {
@@ -97,10 +104,18 @@ function usePaneRuntimeView({
   blocked?: string;
 }>): Readonly<{
   rendering: Rendering | undefined;
+  paneRendering: PaneRenderingProvenance | undefined;
   unavailable: string | undefined;
   captureRendering: () => Promise<Rendering>;
 }> {
-  const [lastSuccess, setLastSuccess] = useState<{ key: string; rendering: Rendering } | undefined>();
+  const [lastSuccess, setLastSuccess] = useState<
+    | {
+        key: string;
+        rendering: Rendering;
+        provenance?: PaneRenderingProvenance;
+      }
+    | undefined
+  >();
   const [viewError, setViewError] = useState<{ key: string; message: string } | undefined>();
   const offered = evaluation?.success
     ? selectedId
@@ -108,9 +123,17 @@ function usePaneRuntimeView({
       : evaluation.views[0]
     : undefined;
   const requestedId = selectedId ?? offered?.id;
-  const content = interactiveViewContent(offered?.mimeType, kernelId, capabilities);
-  const includeEdges = content?.includeEdges === true;
-  const activeView = useRef<{ key: string; view: ViewSubscription; closed: boolean } | undefined>(undefined);
+  const contentKey = canonicalJson(interactiveViewContent(offered?.mimeType, kernelId, capabilities) ?? {});
+  const activeView = useRef<
+    | {
+        key: string;
+        view: ViewSubscription;
+        closed: boolean;
+        ready: boolean;
+        provenance?: PaneRenderingProvenance;
+      }
+    | undefined
+  >(undefined);
   const unavailable =
     blocked ??
     (selectedId && evaluation?.success && !offered
@@ -126,7 +149,7 @@ function usePaneRuntimeView({
   // The presented picture belongs to this document until a replacement succeeds,
   // including while the person switches views or a new view fails.
   const pictureKey = document?.id ?? '';
-  const subscriptionKey = `${document?.id ?? ''}:${requestedId ?? ''}:${optionsKey}:${instance ?? ''}:${includeEdges}`;
+  const subscriptionKey = `${document?.id ?? ''}:${requestedId ?? ''}:${optionsKey}:${instance ?? ''}:${contentKey}`;
 
   useEffect(() => {
     if (!document || Boolean(unavailable) || isEmpty) {
@@ -138,7 +161,7 @@ function usePaneRuntimeView({
       const request = {
         options: JSON.parse(optionsKey) as Record<string, unknown>,
         ...(instance ? { instance } : {}),
-        ...(includeEdges ? { content: { includeEdges: true } } : {}),
+        ...(contentKey === '{}' ? {} : { content: runtimeContentSchema.parse(JSON.parse(contentKey)) }),
       };
       view = requestedId ? document.view(requestedId, request) : document.view();
     } catch (error) {
@@ -154,14 +177,37 @@ function usePaneRuntimeView({
         closed = true;
       };
     }
-    const active = { key: subscriptionKey, view, closed: false };
+    const documentId = document.id;
+    const active: NonNullable<typeof activeView.current> = { key: subscriptionKey, view, closed: false, ready: false };
     activeView.current = active;
     const onRendering = (next: Rendering): void => {
-      if (closed) {
+      if (closed || active.closed) {
         return;
       }
+      active.ready = next.success && !next.transient;
+      active.provenance = undefined;
       if (next.success) {
-        setLastSuccess({ key: pictureKey, rendering: next });
+        if (!next.transient && next.sourceRevision) {
+          const { evaluationId, requestId, hash, sourceRevision } = next;
+          const provenance: PaneRenderingProvenance = {
+            documentId,
+            evaluationId,
+            requestId,
+            hash,
+            sourceRevision,
+            isCurrent: () => {
+              const { current } = activeView;
+              return (
+                current?.key === subscriptionKey &&
+                !current.closed &&
+                current.ready &&
+                current.provenance === provenance
+              );
+            },
+          };
+          active.provenance = provenance;
+        }
+        setLastSuccess({ key: pictureKey, rendering: next, provenance: active.provenance });
       }
       setViewError(
         next.success
@@ -174,6 +220,13 @@ function usePaneRuntimeView({
     };
     const unrendered = view.on('rendered', onRendering);
     const unstatus = view.on('status', (status) => {
+      active.ready = status === 'ready' && active.provenance !== undefined;
+      if (status === 'closed') {
+        active.closed = true;
+        if (activeView.current === active) {
+          activeView.current = undefined;
+        }
+      }
       if (!closed && status === 'error') {
         setViewError((current) =>
           current?.key === subscriptionKey
@@ -209,7 +262,7 @@ function usePaneRuntimeView({
       unstatus();
       view.close();
     };
-  }, [document, isEmpty, requestedId, includeEdges, optionsKey, instance, unavailable, pictureKey, subscriptionKey]);
+  }, [document, isEmpty, requestedId, contentKey, optionsKey, instance, unavailable, pictureKey, subscriptionKey]);
 
   const captureRendering = useCallback(async (): Promise<Rendering> => {
     const active = activeView.current;
@@ -238,6 +291,7 @@ function usePaneRuntimeView({
 
   return {
     captureRendering,
+    paneRendering: lastSuccess?.key === pictureKey ? lastSuccess.provenance : undefined,
     rendering:
       evaluation?.success && evaluation.views.length === 0
         ? undefined
@@ -585,6 +639,7 @@ const ViewerContent = memo(function ({
       : undefined;
   const {
     rendering: paneRendering,
+    paneRendering: paneProvenance,
     unavailable,
     captureRendering,
   } = usePaneRuntimeView({
@@ -613,6 +668,20 @@ const ViewerContent = memo(function ({
     [evaluation, knownArtifact],
   );
   const artifact = rendering?.success && !emptyModel ? rendering.artifact : undefined;
+  const committedGeometry = useCadSelector(selectCadCommittedRendering, undefined);
+  const transientPreview = useCadSelector(selectCadHasTransientPreview, false);
+  const display = useCadSelector(selectCadDisplay, undefined);
+  const assemblyDisplay = display && 'admitted' in display ? display : undefined;
+  const committedManifest = useMemo(
+    () =>
+      transientPreview &&
+      committedGeometry?.success &&
+      committedGeometry.artifact.mimeType === 'model/gltf-binary' &&
+      typeof committedGeometry.artifact.content !== 'string'
+        ? buildGltfComponentManifest(committedGeometry.artifact.content, { sourceFile: entryPath })
+        : undefined,
+    [committedGeometry, entryPath, transientPreview],
+  );
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
   const failureMessage =
     failureIssues?.find((issue) => issue.severity === 'error')?.message ?? failureIssues?.[0]?.message;
@@ -649,6 +718,15 @@ const ViewerContent = memo(function ({
     }
   }, [presentedUnitId, presentedMediaType, projectRef]);
   useEffect(() => {
+    if (assemblyDisplay) {
+      graphicsActor.send({
+        type: 'updateAssembly',
+        key: assemblyDisplay.root.digest,
+        units: cadRef?.getSnapshot().context.units ?? { length: 'mm' },
+        sourceFile: entryPath,
+      });
+      return;
+    }
     if (emptyModel) {
       graphicsActor.send({ type: 'clearArtifact' });
       return;
@@ -663,9 +741,10 @@ const ViewerContent = memo(function ({
         artifact: known,
         hash: rendering.hash,
         sourceFile: rendering.sourceRevision?.entry ?? entryPath,
+        ...(paneProvenance ? { paneRendering: paneProvenance } : {}),
       });
     }
-  }, [rendering, emptyModel, entryPath, graphicsActor]);
+  }, [rendering, paneProvenance, assemblyDisplay, cadRef, emptyModel, entryPath, graphicsActor]);
 
   // Select individual primitive values so that useSelector's reference equality
   // check works correctly. An object-returning selector creates a new reference
@@ -773,55 +852,73 @@ const ViewerContent = memo(function ({
       pendingRetry?.part ?? (viewerPart ? { id: viewerPart.id, primitives: viewerPart.primitiveRefs! } : undefined);
     if (
       !requestedPart ||
-      presentedArtifact?.mimeType !== 'model/gltf-binary' ||
-      presentedArtifactKey !== presentedKey
+      (!assemblyDisplay &&
+        (presentedArtifact?.mimeType !== 'model/gltf-binary' || presentedArtifactKey !== presentedKey)) ||
+      (assemblyDisplay && assemblyDisplay.root.digest !== presentedKey)
     ) {
       thumbnails.releaseOwner('viewer');
       return;
     }
     let active = true;
-    const { content } = presentedArtifact;
-    if (content.buffer.byteLength > 64 * 1024 * 1024) {
-      thumbnails.failPreparationForOwner(
-        'viewer',
-        [requestedPart],
-        new RangeError('Part thumbnail source exceeds 64 MiB'),
-      );
-      return;
-    }
-    let sourceDigest = previewSourceDigests.current.get(content);
-    if (!sourceDigest) {
-      sourceDigest = sourceGlbDigest(content);
-      previewSourceDigests.current.set(content, sourceDigest);
-    }
+    const isActive = (): boolean => active;
+    let content: Uint8Array<ArrayBuffer> | undefined;
+    let sourceDigest: Promise<string> | undefined;
     const prepare = async (): Promise<void> => {
+      let part = requestedPart;
       try {
-        const [hash, prepared] = await Promise.all([
-          sourceDigest,
-          canonicalPartPreviews(content, [requestedPart.primitives]),
-        ]);
-        if (active) {
-          thumbnails.requestForOwner(
-            'viewer',
-            {
+        const projection =
+          assemblyDisplay && cadRef ? await resolveSettledCadGeometry(cadRef.getSnapshot()) : undefined;
+        const source =
+          projection?.geometry ??
+          (presentedArtifact?.mimeType === 'model/gltf-binary'
+            ? { format: 'gltf', content: presentedArtifact.content }
+            : undefined);
+        if (
+          !isActive() ||
+          source?.format !== 'gltf' ||
+          (assemblyDisplay && selectCadDisplay(cadRef!.getSnapshot()) !== assemblyDisplay)
+        ) {
+          return;
+        }
+        content = source.content;
+        if (content.buffer.byteLength > 64 * 1024 * 1024) {
+          throw new RangeError('Part thumbnail source exceeds 64 MiB');
+        }
+        if (assemblyDisplay) {
+          const primitives = buildGltfComponentManifest(content).nodesById[part.id]?.primitiveRefs;
+          if (!primitives?.length) {
+            throw new Error('Pinned part preview lost its canonical component selection');
+          }
+          part = { ...part, primitives };
+        }
+        sourceDigest = previewSourceDigests.current.get(content);
+        if (!sourceDigest) {
+          sourceDigest = sourceGlbDigest(content);
+          previewSourceDigests.current.set(content, sourceDigest);
+        }
+        const [hash, prepared] = await Promise.all([sourceDigest, canonicalPartPreviews(content, [part.primitives])]);
+        if (isActive()) {
+          thumbnails.requestForOwner('viewer', {
+            source: {
               sourcePath: entryPath,
               geometryHash: hash,
+              visualKey: prepared.visualKey,
               content,
               renderContent: prepared.renderContent,
             },
-            [{ ...requestedPart, visualKey: prepared.previews[0]?.key ?? prepared.visualKey }],
-            pendingRetry ? { manualPartId: pendingRetry.part.id } : undefined,
-          );
+            parts: [{ ...part, visualKey: prepared.previews[0]?.key }],
+            options: pendingRetry ? { manualPartId: pendingRetry.part.id } : undefined,
+          });
           if (pendingRetry) {
             submittedRetryId.current = pendingRetry.requestId;
           }
         }
       } catch (error) {
-        if (active) {
-          if (previewSourceDigests.current.get(content) === sourceDigest) {
+        if (isActive()) {
+          if (content && previewSourceDigests.current.get(content) === sourceDigest) {
             previewSourceDigests.current.delete(content);
           }
-          thumbnails.failPreparationForOwner('viewer', [requestedPart], error);
+          thumbnails.failPreparationForOwner('viewer', [part], error);
         }
       }
     };
@@ -829,11 +926,26 @@ const ViewerContent = memo(function ({
     return () => {
       active = false;
     };
-  }, [entryPath, presentedArtifact, presentedArtifactKey, presentedKey, previewRetry, thumbnails, viewerPart]);
+  }, [
+    entryPath,
+    presentedArtifact,
+    presentedArtifactKey,
+    assemblyDisplay,
+    cadRef,
+    presentedKey,
+    previewRetry,
+    thumbnails,
+    viewerPart,
+  ]);
   useEffect(() => () => thumbnails?.releaseOwner('viewer'), [thumbnails]);
   const viewerMenuWithPreview = viewerActionMenuData
     ? {
         ...viewerActionMenuData,
+        inspection: projectPartInspection({
+          node: viewerActionMenuData.node,
+          committedNode: committedManifest?.nodesById[viewerActionMenuData.node.id],
+          transientPreview,
+        }),
         preview: previews.get(viewerActionMenuData.node.id),
         onRetryPreview: retryPreview,
         onPreviewDecodeError: () => {
@@ -1059,7 +1171,7 @@ const ViewerContent = memo(function ({
         onPointerMove={updateViewerPointerPosition}
         onPointerLeave={clearViewerPointerPosition}
       >
-        {artifact && presentedArtifact ? (
+        {(assemblyDisplay ?? (artifact && presentedArtifact)) ? (
           <CadViewer
             enableZoom
             enablePan
@@ -1074,6 +1186,7 @@ const ViewerContent = memo(function ({
             artifact={presentedArtifact}
             artifactHash={presentedArtifactKey}
             sourceFile={presentedSourceFile}
+            assemblyDisplay={assemblyDisplay}
             // Keep R3F on default offsetX/Y compute; eventPrefix='client'
             // is window-relative and mis-rays docked panels.
             eventSource={canvasEventSource}
@@ -1088,7 +1201,7 @@ const ViewerContent = memo(function ({
         ) : (
           <GeometryPlaceholder isEmpty={emptyModel} />
         )}
-        {artifact && overlayFailureMessage ? (
+        {(assemblyDisplay ?? artifact) && overlayFailureMessage ? (
           <RuntimeErrorOverlay
             message={overlayFailureMessage}
             className='absolute top-4 right-4 left-4 z-10 mx-auto w-fit max-w-[calc(100%-2rem)] rounded-md border border-feature/40 bg-background/90 p-2 shadow-sm backdrop-blur-sm'
@@ -1131,7 +1244,13 @@ const ViewerContent = memo(function ({
       >
         <div className='flex w-full items-end gap-2 [&>*]:pointer-events-auto'>
           {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
-          <ArButton artifact={artifact} runtimeDocument={runtimeDocument} className='ml-auto shrink-0' />
+          <ArButton
+            artifact={artifact}
+            runtimeDocument={runtimeDocument}
+            cadRef={cadRef}
+            graphicsRef={graphicsActor}
+            className='ml-auto shrink-0'
+          />
         </div>
         <ChatViewerControls
           shouldEnableCapture={profile === 'editor'}

@@ -1,3 +1,4 @@
+import { getModelComponentInstanceSlot } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import type { JSX } from 'react';
 import { useEffect, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -8,6 +9,9 @@ import {
   DoubleSide,
   Group,
   Mesh,
+  InstancedMesh,
+  InstancedBufferAttribute,
+  Matrix4,
   MeshBasicMaterial,
   NearestFilter,
   OneFactor,
@@ -25,7 +29,10 @@ import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/thr
 import { SceneOverlay, useOverlayDepthRestorer } from '#components/geometry/graphics/three/scene-overlay.js';
 import type { DepthRestore } from '#components/geometry/graphics/three/scene-overlay.js';
 import { useModelEmphasisSet } from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
-import type { ModelEmphasisSet } from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
+import type {
+  ModelEmphasisSet,
+  ModelEmphasisInstanceSelection,
+} from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
 import {
   createWebGlSilhouetteMaterial,
   setWebGlSilhouetteMaskSize,
@@ -63,7 +70,17 @@ type ModelEmphasisMaskLayer = (typeof modelEmphasisMaskLayers)[number];
  */
 export const modelEmphasisMaskSamples = 4;
 
-type Proxy = Readonly<{ source: Mesh; state: ModelEmphasisState; mask: Mesh; visibility: Mesh; wash: Mesh }>;
+type Proxy = {
+  source: Mesh;
+  state: ModelEmphasisState;
+  mask: Mesh;
+  visibility: Mesh;
+  wash: Mesh;
+  selection?: ModelEmphasisInstanceSelection;
+  instanceAttribute?: InstancedBufferAttribute;
+  sourceInstanceAttribute?: InstancedBufferAttribute;
+  sourceInstanceVersion?: number;
+};
 
 type CompositeMaterial =
   | ReturnType<typeof createWebGlSilhouetteMaterial>
@@ -161,6 +178,68 @@ function createProxy(source: Mesh, material: Material): Mesh {
   return proxy;
 }
 
+function disposeInstanceProxies(proxies: readonly Proxy[]): void {
+  for (const proxy of proxies) {
+    if (!proxy.selection) {
+      continue;
+    }
+    for (const object of [proxy.mask, proxy.visibility, proxy.wash]) {
+      if (object instanceof InstancedMesh) {
+        object.dispose();
+      }
+    }
+  }
+}
+
+/** Count this overlay's owned instance backing capacity, viewed byte ranges and attribute handles. */
+export function getModelEmphasisInstanceBytes(resources: ModelEmphasisResources): {
+  cpuBytes: number;
+  payloadBytes: number;
+  bufferCount: number;
+  attributeCount: number;
+  gpuBytesEstimate: number;
+  proxyCount: number;
+} {
+  const buffers = new Set<ArrayBufferLike>();
+  const attributes = new Set<InstancedBufferAttribute>();
+  const ranges = new Map<ArrayBufferLike, Array<readonly [number, number]>>();
+  let proxyCount = 0;
+  for (const proxy of resources.proxies) {
+    if (!proxy.instanceAttribute) {
+      continue;
+    }
+    const { array } = proxy.instanceAttribute;
+    buffers.add(array.buffer);
+    const views = ranges.get(array.buffer) ?? [];
+    views.push([array.byteOffset, array.byteOffset + array.byteLength]);
+    ranges.set(array.buffer, views);
+    attributes.add(proxy.instanceAttribute);
+    proxyCount += 3;
+  }
+  let cpuBytes = 0;
+  let payloadBytes = 0;
+  let gpuBytesEstimate = 0;
+  for (const buffer of buffers) {
+    cpuBytes += buffer.byteLength;
+    let end = 0;
+    for (const [start, stop] of ranges.get(buffer)!.toSorted((left, right) => left[0] - right[0])) {
+      payloadBytes += Math.max(0, stop - Math.max(start, end));
+      end = Math.max(end, stop);
+    }
+  }
+  for (const attribute of attributes) {
+    gpuBytesEstimate += attribute.array.byteLength;
+  }
+  return {
+    cpuBytes,
+    payloadBytes,
+    bufferCount: buffers.size,
+    attributeCount: attributes.size,
+    gpuBytesEstimate,
+    proxyCount,
+  };
+}
+
 /**
  * @param backend - The viewer's graphics backend.
  * @param clip - The viewer's section clip. Coverage and wash take it, so the outline and tint follow what is drawn;
@@ -234,6 +313,7 @@ export function createModelEmphasisResources(
     proxies,
     setMaskSize,
     dispose: () => {
+      disposeInstanceProxies(proxies);
       proxies.length = 0;
       maskScene.clear();
       washGroup.clear();
@@ -257,6 +337,7 @@ export function createModelEmphasisResources(
 /** Rebuild the proxy pair per emphasised mesh; called only when the emphasis set changes. */
 export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set: ModelEmphasisSet): void {
   const washGroup = resources.overlayGroup.children[0] as Group;
+  disposeInstanceProxies(resources.proxies);
   resources.proxies.length = 0;
   resources.maskScene.clear();
   washGroup.clear();
@@ -268,6 +349,55 @@ export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set:
     washGroup.add(wash);
     resources.proxies.push({ source, state, mask, visibility, wash });
   };
+  const addInstances = (selection: ModelEmphasisInstanceSelection, state: ModelEmphasisState): void => {
+    if (
+      selection.instanceIds.length === 0 ||
+      selection.instanceIds.length !== selection.slots.length ||
+      selection.instanceIds.some(
+        (id, index) => getModelComponentInstanceSlot(selection.source, id) !== selection.slots[index],
+      )
+    ) {
+      return;
+    }
+    const attribute = new InstancedBufferAttribute(new Float32Array(selection.instanceIds.length * 16), 16);
+    const matrix = new Matrix4();
+    for (const [index, id] of selection.instanceIds.entries()) {
+      selection.source.getMatrixAt(id, matrix);
+      matrix.toArray(attribute.array, index * 16);
+    }
+    const make = (material: Material): InstancedMesh => {
+      const object = new InstancedMesh(selection.source.geometry, material, 0);
+      object.instanceMatrix = attribute;
+      object.count = selection.instanceIds.length;
+      object.matrixAutoUpdate = false;
+      object.matrixWorldAutoUpdate = false;
+      object.frustumCulled = false;
+      object.raycast = disableRaycast;
+      return object;
+    };
+    const mask = make(resources.mask.coverage[state]);
+    const visibility = make(resources.mask.visibility[state]);
+    const wash = make(resources.wash[state]);
+    resources.maskScene.add(mask, visibility);
+    washGroup.add(wash);
+    resources.proxies.push({
+      source: selection.source,
+      state,
+      mask,
+      visibility,
+      wash,
+      selection,
+      instanceAttribute: attribute,
+      sourceInstanceAttribute: selection.source.instanceMatrix,
+      sourceInstanceVersion: selection.source.instanceMatrix.version,
+    });
+  };
+  for (const selection of set.hoverInstances ?? []) {
+    addInstances(selection, 'hover');
+  }
+  for (const selection of set.selectedInstances ?? []) {
+    addInstances(selection, 'selected');
+  }
   for (const source of set.hover) {
     add(source, 'hover');
   }
@@ -278,7 +408,31 @@ export function syncModelEmphasisProxies(resources: ModelEmphasisResources, set:
 
 /** Per-frame CPU work: follow the sources' world transforms. */
 export function syncModelEmphasisFrame(resources: ModelEmphasisResources): void {
-  for (const { source, mask, visibility, wash } of resources.proxies) {
+  const matrix = new Matrix4();
+  for (const proxy of resources.proxies) {
+    const { source, mask, visibility, wash, selection, instanceAttribute } = proxy;
+    if (selection && instanceAttribute) {
+      const live = selection.instanceIds.every(
+        (id, index) => getModelComponentInstanceSlot(selection.source, id) === selection.slots[index],
+      );
+      mask.visible = live;
+      visibility.visible = live;
+      wash.visible = live;
+      if (!live) {
+        continue;
+      }
+      const sourceAttributeChanged = proxy.sourceInstanceAttribute !== selection.source.instanceMatrix;
+      const sourceVersionChanged = proxy.sourceInstanceVersion !== selection.source.instanceMatrix.version;
+      if (sourceAttributeChanged || sourceVersionChanged) {
+        for (const [index, id] of selection.instanceIds.entries()) {
+          selection.source.getMatrixAt(id, matrix);
+          matrix.toArray(instanceAttribute.array, index * 16);
+        }
+        instanceAttribute.needsUpdate = true;
+        proxy.sourceInstanceAttribute = selection.source.instanceMatrix;
+        proxy.sourceInstanceVersion = selection.source.instanceMatrix.version;
+      }
+    }
     mask.matrixWorld.copy(source.matrixWorld);
     visibility.matrixWorld.copy(source.matrixWorld);
     wash.matrixWorld.copy(source.matrixWorld);

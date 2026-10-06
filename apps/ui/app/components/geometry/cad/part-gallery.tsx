@@ -10,7 +10,7 @@ import {
 } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useSelector } from '@xstate/react';
+import { shallowEqual, useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import { ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
@@ -26,10 +26,17 @@ import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-pa
 import { disclosureMotion } from '#components/revisions/revision-actions.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
+import { useProject } from '#hooks/use-project.js';
+import { selectCadDisplay, selectCadFailureIssues } from '#machines/cad.machine.js';
+import { resolveSettledCadGeometry } from '#services/headless-capture.js';
+import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import type { PartThumbnailRequest, PartThumbnailState } from '#services/part-thumbnail.service.js';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
+import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
+import { ENV } from '#environment.config.js';
+import { hashString } from '@taucad/utils/hash';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
-import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
+import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
@@ -172,14 +179,21 @@ function PartGallery({
     keybindingOptions,
   );
 
-  const { previews, retry } = useGalleryPreviews({ graphicsRef, unitId, parts, index });
+  const { previews, retry, isUnavailable } = useGalleryPreviews({
+    graphicsRef,
+    modelRef,
+    unitId,
+    manifest,
+    parts,
+    index,
+  });
   const preview = part ? previews.get(part.id) : undefined;
   const imageUrl = usePreviewUrl(preview?.bytes);
 
   if (!part || !manifest) {
     return undefined;
   }
-  const isRendering = !preview?.bytes && preview?.status !== 'failed';
+  const isRendering = !isUnavailable && !preview?.bytes && preview?.status !== 'failed';
   return (
     <>
       <ImageCarouselDialog
@@ -269,20 +283,22 @@ function PartGallery({
                 Rendering preview
               </span>
             ) : undefined}
-            {preview?.status === 'failed' && !preview.bytes ? (
+            {isUnavailable || (preview?.status === 'failed' && !preview.bytes) ? (
               <>
                 <span role='alert' className='text-xs font-normal text-muted-foreground'>
                   Preview unavailable
                 </span>
-                <Button
-                  size='xs'
-                  variant='outline'
-                  onClick={() => {
-                    retry(part.id);
-                  }}
-                >
-                  Retry
-                </Button>
+                {isUnavailable ? undefined : (
+                  <Button
+                    size='xs'
+                    variant='outline'
+                    onClick={() => {
+                      retry(part.id);
+                    }}
+                  >
+                    Retry
+                  </Button>
+                )}
               </>
             ) : undefined}
           </div>
@@ -318,15 +334,23 @@ function usePreviewUrl(bytes: Uint8Array<ArrayBuffer> | undefined): string | und
  */
 function useGalleryPreviews({
   graphicsRef,
+  modelRef,
   unitId,
+  manifest,
   parts,
   index,
 }: {
   readonly graphicsRef: GraphicsActorRef;
+  readonly modelRef: ModelInteractionRef;
   readonly unitId: string;
+  readonly manifest: GeometryComponentManifest | undefined;
   readonly parts: readonly GeometryComponentNode[];
   readonly index: number;
-}): { readonly previews: ReadonlyMap<string, PartThumbnailState>; readonly retry: (id: string) => void } {
+}): {
+  readonly previews: ReadonlyMap<string, PartThumbnailState>;
+  readonly retry: (id: string) => void;
+  readonly isUnavailable: boolean;
+} {
   const thumbnails = useOptionalPartThumbnailService(unitId);
   const subscribe = useCallback(
     (listener: () => void) => thumbnails?.subscribe(listener) ?? (() => undefined),
@@ -336,11 +360,46 @@ function useGalleryPreviews({
   const previews = useSyncExternalStore(subscribe, snapshot, snapshot);
   const artifact = useSelector(graphicsRef, (state) => state.context.artifact);
   const artifactKey = useSelector(graphicsRef, (state) => state.context.artifactKey);
-  const presentedKey = useSelector(graphicsRef, (state) => state.context.gltfPresentation.presentedKey);
-  const sourcePath = useSelector(graphicsRef, (state) => state.context.artifactSourceFile) ?? '';
+  const presentation = useSelector(graphicsRef, (state) => state.context.gltfPresentation);
+  const { presentedKey } = presentation;
+  const artifactSourcePath = useSelector(graphicsRef, (state) => state.context.artifactSourceFile);
+  const sourcePath = manifest?.sourceFile ?? '';
+  const project = useProject({ enableNoContext: true });
+  const cadRef = project?.geometryUnits.get(sourcePath);
+  const cadSnapshot = useSelector(
+    cadRef,
+    (snapshot) => snapshot,
+    (previous, next) => {
+      if (previous === next) {
+        return true;
+      }
+      if (!previous || !next) {
+        return false;
+      }
+      // Export telemetry changes the snapshot without retiring its held preparation authority.
+      return (
+        previous.status === next.status &&
+        previous.value === next.value &&
+        previous.error === next.error &&
+        previous.output === next.output &&
+        selectCadDisplay(previous) === selectCadDisplay(next) &&
+        selectCadFailureIssues(previous) === selectCadFailureIssues(next) &&
+        shallowEqual(
+          { ...previous.context, telemetryEntries: undefined },
+          { ...next.context, telemetryEntries: undefined },
+        )
+      );
+    },
+  );
+  const display = cadSnapshot ? selectCadDisplay(cadSnapshot) : undefined;
+  const assemblyDisplay = display && 'admitted' in display ? display : undefined;
   const submittedRetry = useRef(0);
   const digests = useRef(new WeakMap<Uint8Array<ArrayBuffer>, Promise<string>>());
-  const [retryId, setRetryId] = useState<{ readonly partId: string; readonly attempt: number }>();
+  const [retryId, setRetryId] = useState<{
+    readonly partId: string;
+    readonly attempt: number;
+    readonly sourceKey: string;
+  }>();
   const neighbours = useMemo(() => {
     if (index < 0 || parts.length === 0) {
       return [];
@@ -349,33 +408,216 @@ function useGalleryPreviews({
     return [...new Set(offsets.map((offset) => parts[(index + offset + parts.length) % parts.length]!))];
   }, [index, parts]);
 
+  const isCurrent = useCallback(
+    (allowPreparing = false): boolean => {
+      const current = cadRef?.getSnapshot();
+      const graphics = graphicsRef.getSnapshot().context;
+      const currentManifest = getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).manifest;
+      if (!current || !display || !sourcePath) {
+        return false;
+      }
+      const ownsCurrent =
+        project?.geometryUnits.get(sourcePath) === cadRef &&
+        current.status === 'active' &&
+        current.matches('idle') &&
+        !current.context.parkWhenIdle &&
+        current.context.entryPath === sourcePath &&
+        current.context.latestRenderingOutcome === 'success' &&
+        current.context.lastRequestedRenderId > 0 &&
+        current.context.lastRequestedRenderId === current.context.lastSettledRenderId &&
+        selectCadDisplay(current) === display &&
+        graphics.modelInteractionRef === modelRef &&
+        currentManifest === manifest &&
+        deriveModelInteractionUnitId({ sourceFile: sourcePath }) === unitId &&
+        graphics.modelInteractionUnitId === unitId &&
+        (graphics.gltfPresentation.phase === 'presented' ||
+          (allowPreparing &&
+            (graphics.gltfPresentation.phase === 'preparing' ||
+              graphics.gltfPresentation.phase === 'awaiting-analysis') &&
+            graphics.gltfPresentation.requestedKey === presentedKey)) &&
+        graphics.gltfPresentation.presentedKey === presentedKey;
+      if (!ownsCurrent) {
+        return false;
+      }
+      return assemblyDisplay
+        ? assemblyDisplay.root.digest === presentedKey &&
+            assemblyDisplay.document.root.path === assemblyDisplay.root.path &&
+            assemblyDisplay.document.root.digest === assemblyDisplay.root.digest &&
+            assemblyDisplay.document.root.byteLength === assemblyDisplay.root.byteLength &&
+            assemblyDisplay.document.admitted === assemblyDisplay.admitted
+        : 'success' in display &&
+            display.success &&
+            !display.transient &&
+            artifact?.mimeType === 'model/gltf-binary' &&
+            artifactKey === presentedKey &&
+            artifactSourcePath === sourcePath &&
+            graphics.artifact === artifact &&
+            graphics.artifactKey === artifactKey;
+    },
+    [
+      artifact,
+      artifactKey,
+      artifactSourcePath,
+      assemblyDisplay,
+      cadRef,
+      display,
+      graphicsRef,
+      manifest,
+      modelRef,
+      presentedKey,
+      project,
+      sourcePath,
+      unitId,
+    ],
+  );
+  const currentGraphics = graphicsRef.getSnapshot().context;
+  const isPreparing = Boolean(
+    thumbnails &&
+    cadSnapshot &&
+    sourcePath &&
+    project?.geometryUnits.get(sourcePath) === cadRef &&
+    cadSnapshot.status === 'active' &&
+    !cadSnapshot.context.parkWhenIdle &&
+    cadSnapshot.context.entryPath === sourcePath &&
+    cadSnapshot.context.latestRenderingOutcome !== 'failure' &&
+    deriveModelInteractionUnitId({ sourceFile: sourcePath }) === unitId &&
+    currentGraphics.modelInteractionRef === modelRef &&
+    currentGraphics.modelInteractionUnitId === unitId &&
+    getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).manifest === manifest &&
+    (cadSnapshot.matches('buffering') ||
+      cadSnapshot.matches('connecting') ||
+      cadSnapshot.matches('rendering') ||
+      (cadSnapshot.matches('idle') &&
+        display &&
+        cadSnapshot.context.lastRequestedRenderId > 0 &&
+        cadSnapshot.context.lastRequestedRenderId === cadSnapshot.context.lastSettledRenderId &&
+        currentGraphics.gltfPresentation.requestedKey === (assemblyDisplay?.root.digest ?? artifactKey) &&
+        (currentGraphics.gltfPresentation.phase === 'preparing' ||
+          currentGraphics.gltfPresentation.phase === 'awaiting-analysis'))),
+  );
+  const isUnavailable = !thumbnails || (!isCurrent() && !isPreparing);
+
   useEffect(() => () => thumbnails?.releaseOwner('gallery'), [thumbnails]);
   useEffect(() => {
+    if (retryId && retryId.sourceKey !== presentedKey) {
+      submittedRetry.current = retryId.attempt;
+    }
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Workers and SSR have no page environment; gate diagnostic acquisition before reading it.
+    const isDebugEnabled = (): boolean => Boolean(globalThis.window) && ENV.TAU_DEBUG;
+    const requestProjectId = isDebugEnabled() ? project?.projectId : undefined;
+    const observe = (stage: string, detail: Readonly<Record<string, unknown>> = {}): void => {
+      if (!isDebugEnabled()) {
+        return;
+      }
+      const current = cadRef?.getSnapshot();
+      const graphics = graphicsRef.getSnapshot().context;
+      const currentManifest = getModelInteractionUnitState(modelRef.getSnapshot().context, unitId).manifest;
+      recordHeadlessImageTiming('thumbnail.gallery.prepare', performance.now(), {
+        stage,
+        projectId: requestProjectId,
+        unitId,
+        sourcePath,
+        root: assemblyDisplay ? { ...assemblyDisplay.root } : undefined,
+        presentedKeyHash: hashString(presentedKey ?? ''),
+        currentPresentedKeyHash: hashString(graphics.gltfPresentation.presentedKey ?? ''),
+        currentRequestedKeyHash: hashString(graphics.gltfPresentation.requestedKey ?? ''),
+        requestedIds: neighbours.map(({ id }) => id),
+        cadExists: current !== undefined,
+        projectOwnsCad: project?.geometryUnits.get(sourcePath) === cadRef,
+        cadActive: current?.status === 'active',
+        cadIdle: current?.matches('idle') ?? false,
+        parked: current?.context.parkWhenIdle,
+        entryMatches: current?.context.entryPath === sourcePath,
+        outcome: current?.context.latestRenderingOutcome,
+        requestedRenderId: current?.context.lastRequestedRenderId,
+        settledRenderId: current?.context.lastSettledRenderId,
+        displayMatches: current ? selectCadDisplay(current) === display : false,
+        modelOwnerMatches: graphics.modelInteractionRef === modelRef,
+        manifestMatches: currentManifest === manifest,
+        unitMatches: graphics.modelInteractionUnitId === unitId,
+        derivedUnitMatches: deriveModelInteractionUnitId({ sourceFile: sourcePath }) === unitId,
+        presentationPhase: graphics.gltfPresentation.phase,
+        presentedRevision: graphics.gltfPresentation.presentedRevision,
+        requestedRevision: graphics.gltfPresentation.requestedRevision,
+        presentedKeyMatches: graphics.gltfPresentation.presentedKey === presentedKey,
+        admittedReaderMatches: assemblyDisplay
+          ? assemblyDisplay.document.admitted === assemblyDisplay.admitted
+          : undefined,
+        admittedRootMatches: assemblyDisplay
+          ? assemblyDisplay.document.root.path === assemblyDisplay.root.path &&
+            assemblyDisplay.document.root.digest === assemblyDisplay.root.digest &&
+            assemblyDisplay.document.root.byteLength === assemblyDisplay.root.byteLength
+          : undefined,
+        current: isCurrent(),
+        ...detail,
+      });
+    };
+    observe('entry', { thumbnailsAvailable: thumbnails !== undefined });
     if (!thumbnails) {
       return undefined;
     }
-    const requested: PartThumbnailRequest[] = neighbours.map((node) => ({
+    thumbnails.announcePresentedSource(presentedKey);
+    let requested: PartThumbnailRequest[] = neighbours.map((node) => ({
       id: node.id,
       primitives: node.primitiveRefs!,
     }));
-    if (artifact?.mimeType !== 'model/gltf-binary' || artifactKey !== presentedKey || requested.length === 0) {
-      thumbnails.releaseOwner('gallery');
+    let active = true;
+    const isActive = (): boolean => active;
+    if (!isCurrent() || requested.length === 0) {
+      observe('entry-denied');
+      if (requested.length === 0 || !isCurrent(true)) {
+        thumbnails.releaseOwner('gallery');
+      }
       return undefined;
     }
-    const { content } = artifact;
-    if (content.buffer.byteLength > 64 * 1024 * 1024) {
-      thumbnails.failPreparationForOwner('gallery', requested, new RangeError('Part thumbnail source exceeds 64 MiB'));
-      return undefined;
-    }
-    let digest = digests.current.get(content);
-    if (!digest) {
-      digest = sourceGlbDigest(content);
-      digests.current.set(content, digest);
-    }
-    const pendingRetry = retryId && retryId.attempt !== submittedRetry.current ? retryId : undefined;
-    let isActive = true;
+    const pendingRetry =
+      retryId !== undefined && retryId.sourceKey === presentedKey && retryId.attempt !== submittedRetry.current
+        ? retryId
+        : undefined;
+    let content: Uint8Array<ArrayBuffer> | undefined;
+    let digest: Promise<string> | undefined;
+    let preparationStage = 'projection';
     const prepare = async (): Promise<void> => {
       try {
+        const projection = assemblyDisplay && cadSnapshot ? await resolveSettledCadGeometry(cadSnapshot) : undefined;
+        observe('projection-completed', { active: isActive(), projectionAvailable: projection !== undefined });
+        const source =
+          projection?.geometry ??
+          (artifact?.mimeType === 'model/gltf-binary' ? { format: 'gltf', content: artifact.content } : undefined);
+        if (!isActive() || !isCurrent() || source?.format !== 'gltf') {
+          observe('projection-denied', { active: isActive(), gltfSource: source?.format === 'gltf' });
+          return;
+        }
+        content = source.content;
+        if (content.buffer.byteLength > 64 * 1024 * 1024) {
+          throw new RangeError('Part thumbnail source exceeds 64 MiB');
+        }
+        preparationStage = 'canonical-selection';
+        if (assemblyDisplay) {
+          const projected = buildGltfComponentManifest(content);
+          if (isDebugEnabled()) {
+            observe('canonical-selection', {
+              canonicalMatchCount: requested.filter(
+                ({ id }) => (projected.nodesById[id]?.primitiveRefs?.length ?? 0) > 0,
+              ).length,
+              requestedCount: requested.length,
+            });
+          }
+          requested = requested.map((part) => {
+            const primitives = projected.nodesById[part.id]?.primitiveRefs;
+            if (!primitives?.length) {
+              throw new Error('Pinned part preview lost its canonical component selection');
+            }
+            // Use addresses from the actual whole-assembly projection, never a definition-local address.
+            return { ...part, primitives };
+          });
+        }
+        digest = digests.current.get(content);
+        if (!digest) {
+          digest = sourceGlbDigest(content);
+          digests.current.set(content, digest);
+        }
+        preparationStage = 'visual-preparation';
         const [hash, prepared] = await Promise.all([
           digest,
           canonicalPartPreviews(
@@ -383,34 +625,92 @@ function useGalleryPreviews({
             requested.map((part) => part.primitives),
           ),
         ]);
-        if (isActive) {
-          thumbnails.requestForOwner(
-            'gallery',
-            { sourcePath, geometryHash: hash, content, renderContent: prepared.renderContent },
-            requested.map((part, position) => ({
+        if (isDebugEnabled()) {
+          observe('visual-preparation-completed', {
+            active: isActive(),
+            geometryHash: hash,
+            visualKeyHash: hashString(prepared.visualKey),
+            preparedCount: prepared.previews.length,
+            requested: requested.map(({ id }, position) => {
+              const key = prepared.previews[position]?.key;
+              return { id, visualKeyHash: key ? hashString(key) : undefined };
+            }),
+          });
+        }
+        if (isActive() && isCurrent()) {
+          observe('request');
+          thumbnails.requestForOwner('gallery', {
+            source: {
+              sourcePath,
+              geometryHash: hash,
+              visualKey: prepared.visualKey,
+              content,
+              renderContent: prepared.renderContent,
+            },
+            parts: requested.map((part, position) => ({
               ...part,
-              visualKey: prepared.previews[position]?.key ?? prepared.visualKey,
+              visualKey: prepared.previews[position]?.key,
             })),
-            pendingRetry ? { manualPartId: pendingRetry.partId } : undefined,
-          );
+            options: pendingRetry ? { manualPartId: pendingRetry.partId } : undefined,
+          });
           if (pendingRetry) {
             submittedRetry.current = pendingRetry.attempt;
           }
+        } else {
+          observe('visual-preparation-denied', { active: isActive() });
         }
       } catch (error) {
-        if (isActive) {
+        observe('preparation-failed', {
+          active: isActive(),
+          preparationStage,
+          errorCategory:
+            error instanceof RangeError
+              ? 'range'
+              : error instanceof TypeError
+                ? 'type'
+                : error instanceof Error
+                  ? 'error'
+                  : 'unknown',
+        });
+        if (isActive() && isCurrent()) {
+          if (content && digests.current.get(content) === digest) {
+            digests.current.delete(content);
+          }
           thumbnails.failPreparationForOwner('gallery', requested, error);
         }
       }
     };
     void prepare();
     return () => {
-      isActive = false;
+      active = false;
+      observe('cleanup', { active });
     };
-  }, [artifact, artifactKey, neighbours, presentedKey, retryId, sourcePath, thumbnails]);
+  }, [
+    artifact,
+    assemblyDisplay,
+    cadRef,
+    cadSnapshot,
+    display,
+    graphicsRef,
+    manifest,
+    modelRef,
+    isCurrent,
+    neighbours,
+    presentedKey,
+    project,
+    retryId,
+    sourcePath,
+    thumbnails,
+    unitId,
+  ]);
 
-  const retry = useCallback((partId: string) => {
-    setRetryId((current) => ({ partId, attempt: (current?.attempt ?? 0) + 1 }));
-  }, []);
-  return { previews, retry };
+  const retry = useCallback(
+    (partId: string) => {
+      if (isCurrent() && presentedKey) {
+        setRetryId((current) => ({ partId, attempt: (current?.attempt ?? 0) + 1, sourceKey: presentedKey }));
+      }
+    },
+    [isCurrent, presentedKey],
+  );
+  return { previews, retry, isUnavailable };
 }

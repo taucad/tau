@@ -124,13 +124,30 @@ const onCapability = (capability: KernelComputeCapability): Extract<KernelComput
 describe('compute capability contract', () => {
   it('emits one settlement against the immutable scope operation identity', async () => {
     const summaries: Array<{ operationId: string; status: string }> = [];
+    const admitted: Array<{ owner: string; operationId: string; status: string }> = [];
+    let currentOwner = 'old-document';
+    const admission = () => {
+      const owner = currentOwner;
+      return {
+        onScopeSettled: ({
+          operationId,
+          settlement,
+        }: Parameters<NonNullable<Parameters<typeof createComputeCapabilityHost>[0]['onScopeSettled']>>[0]) => {
+          admitted.push({ owner, operationId, status: settlement.status });
+        },
+      };
+    };
     const host = createComputeCapabilityHost({
       binding: { mode: 'memory' },
       workspace: 'w',
       onScopeSettled: ({ operationId, settlement }) => summaries.push({ operationId, status: settlement.status }),
     });
     const oldResident = createResident({ throwOnExport: true });
-    const oldScope = onCapability(host.capability(signal, 'render-old')).openScope({
+    const oldAdmission = admission();
+    const oldCapability = onCapability(host.capability(signal, 'render-old', oldAdmission));
+    const replacedObserver = vi.fn();
+    oldAdmission.onScopeSettled = replacedObserver;
+    const oldScope = oldCapability.openScope({
       namespace: 'test.semantic',
       producer: action(1).producer,
       environment: {},
@@ -143,13 +160,17 @@ describe('compute capability contract', () => {
     });
     const oldReceipt = oldScope.close({ outcome: 'delivered' });
 
-    const newScope = onCapability(host.capability(signal, 'render-new')).openScope({
+    currentOwner = 'new-document';
+    const newScope = onCapability(host.capability(signal, 'render-new', admission())).openScope({
       namespace: 'test.semantic',
       producer: action(1).producer,
       environment: {},
       resident: createResident(),
     });
     const newReceipt = newScope.close({ outcome: 'cancelled' });
+    currentOwner = 'unrelated-current-document';
+    expect(oldScope.close({ outcome: 'failed' })).toBe(oldReceipt);
+    expect(newScope.close({ outcome: 'delivered' })).toBe(newReceipt);
     host.permitPublication();
 
     await expect(oldReceipt.settled).resolves.toMatchObject({ status: 'failed', reason: 'export blew up' });
@@ -158,7 +179,48 @@ describe('compute capability contract', () => {
       { operationId: 'render-new', status: 'abandoned' },
       { operationId: 'render-old', status: 'failed' },
     ]);
+    expect(admitted).toStrictEqual([
+      { owner: 'new-document', operationId: 'render-new', status: 'abandoned' },
+      { owner: 'old-document', operationId: 'render-old', status: 'failed' },
+    ]);
+    await host.dispose();
+    expect(summaries).toHaveLength(2);
+    expect(admitted).toHaveLength(2);
+    expect(replacedObserver).not.toHaveBeenCalled();
   });
+
+  it.each(['delivered', 'cancelled', 'failed'] as const)(
+    'keeps %s receipts and the host observer exactly once when capability telemetry throws',
+    async (outcome) => {
+      const observed = vi.fn();
+      const telemetry = vi.fn(() => {
+        throw new Error('Telemetry sink failed');
+      });
+      const host = createComputeCapabilityHost({
+        binding: { mode: 'memory' },
+        workspace: 'w',
+        onScopeSettled: observed,
+      });
+      const scope = onCapability(host.capability(signal, 'actual-capability', { onScopeSettled: telemetry })).openScope(
+        {
+          namespace: 'test.semantic',
+          producer: action(1).producer,
+          environment: {},
+          resident: createResident(),
+        },
+      );
+      const receipt = scope.close({ outcome });
+      expect(scope.close({ outcome })).toBe(receipt);
+      host.permitPublication();
+      await expect(receipt.settled).resolves.toMatchObject({
+        status: outcome === 'delivered' ? 'published' : 'abandoned',
+      });
+      await host.dispose();
+      expect(telemetry).toHaveBeenCalledTimes(1);
+      expect(observed).toHaveBeenCalledTimes(1);
+      expect(observed).toHaveBeenCalledWith(expect.objectContaining({ operationId: 'actual-capability' }));
+    },
+  );
 
   it('U1: an off binding constructs nothing and carries no operations', () => {
     const host = createComputeCapabilityHost({ binding: { mode: 'off' }, workspace: 'w' });

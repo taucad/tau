@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { mock } from 'vitest-mock-extended';
+import { contentDigest } from '@taucad/cache-core';
+import type { AdmittedAssembly, PublishedAssembly, PublishedPartAsset } from '@taucad/runtime/types';
+import { publishedPartRecordSchema } from '@taucad/runtime/types';
+import type { CadAssemblyDisplay, cadMachine } from '#machines/cad.machine.js';
 import type { ActorRefFrom } from 'xstate';
-import type { CapabilitiesManifest, ExportRoute, Rendering } from '@taucad/runtime';
+import type { CapabilitiesManifest, ExportRoute, Rendering, KernelIssue } from '@taucad/runtime';
 import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { FileExtension, FileParameterEntry, JSONValue } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
@@ -10,9 +15,9 @@ import { bambuA1MiniMachine, bambuMachine } from '@taucad/bambu';
 import { imageEdgeSchemas } from '@taucad/image';
 import { toJSONSchema } from 'zod';
 import type * as RjsfCore from '@rjsf/core';
-import type { cadMachine } from '#machines/cad.machine.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
+import type * as AwaitFreshRenderModule from '#machines/await-fresh-render.js';
 import { toast } from '#components/ui/sonner.js';
 
 vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
@@ -26,12 +31,18 @@ vi.mock('@xstate/react', () => ({
   },
 }));
 
+const mockPublishedExport = vi.fn();
+
 let mockCapabilities: CapabilitiesManifest | undefined;
 let mockRendering: Rendering | undefined;
 let mockHelperRendering: Rendering | undefined;
 let mockDocumentFixture = createMockRuntimeDocument();
 let mockEvaluation = mockDocumentFixture.evaluation;
 let mockActiveKernelId: string | undefined = 'replicad';
+let mockAssemblyDisplay: CadAssemblyDisplay | undefined;
+let mockAssemblyRootOverride: PublishedPartAsset | undefined;
+let mockRequestedRenderId = 1;
+let mockSettledRenderId = 1;
 let mockLatestRenderingOutcome: 'success' | 'failure' | undefined = 'success';
 let mockKernelIssues = new Map<string, Array<{ message: string; code: string; type: string; severity: string }>>();
 
@@ -79,16 +90,28 @@ const mockKernelClient = {
   },
 };
 
+const mockCadSend = vi.fn<ActorRefFrom<typeof cadMachine>['send']>();
+
 const mockCadRef = {
+  send: mockCadSend,
   getSnapshot: vi.fn(() => ({
+    status: 'active',
+    matches: (value: string) => value === 'idle',
     context: {
       rendering: mockRendering,
-      evaluation: mockEvaluation,
+      evaluation: mockAssemblyDisplay ? undefined : mockEvaluation,
       capabilities: mockCapabilities,
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
-      document: mockDocumentFixture.document,
+      document: mockAssemblyDisplay ? undefined : mockDocumentFixture.document,
       entryPath: 'main.ts',
+      committedAssemblyDisplay: mockAssemblyDisplay,
+      admittedAssembly: mockAssemblyDisplay?.admitted,
+      publishedAssembly: mockAssemblyDisplay?.admitted.publication,
+      publishedAssemblyRoot: mockAssemblyRootOverride ?? mockAssemblyDisplay?.root,
+      publishedAssemblyEntryPath: mockAssemblyDisplay ? 'main.ts' : undefined,
+      lastRequestedRenderId: mockRequestedRenderId,
+      lastSettledRenderId: mockSettledRenderId,
       latestRenderingOutcome: mockLatestRenderingOutcome,
       kernelIssues: mockKernelIssues,
     },
@@ -113,7 +136,7 @@ const mockHelperCadRef = {
   })),
 } as unknown as ActorRefFrom<typeof cadMachine>;
 
-const mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
+let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 mockGeometryUnits.set('main.ts', mockCadRef);
 const mockProjectSend = vi.fn();
 let mockViewSettings: Record<string, { entryPath: string }> = {};
@@ -134,9 +157,13 @@ const mockParameterService = {
           subscribe: () => ({ unsubscribe: () => undefined }),
         }
       : undefined,
-  readSettled: vi.fn(async () => undefined),
+  readSettled: vi.fn(async (entry: string) => mockParameterSnapshots.get(entry)),
   resolveTarget: vi.fn(async (target: { entry: string }) => {
     const { entry } = target;
+    const existing = mockParameterSnapshots.get(entry);
+    if (existing) {
+      return existing;
+    }
     const record: FileParameterEntry = {
       activeGroup: 'default',
       groups: { default: { values: {} } },
@@ -164,7 +191,7 @@ const mockParameterService = {
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     projectRef: {
-      getSnapshot: vi.fn(() => ({ context: { project: { name: 'test-model' } } })),
+      getSnapshot: vi.fn(() => ({ context: { project: { name: 'test-model' }, geometryUnits: mockGeometryUnits } })),
       subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
       on: vi.fn(() => ({ unsubscribe: vi.fn() })),
       send: mockProjectSend,
@@ -274,6 +301,16 @@ vi.mock('@rjsf/core', async (importOriginal) => ({
           }}
         >
           Enable edges
+        </button>
+      ) : null}
+      {schema.properties?.['includePhysical'] ? (
+        <button
+          type='button'
+          onClick={() => {
+            onChange({ formData: { ...formData, includeEdges: true, includePhysical: true } });
+          }}
+        >
+          Enable physical evidence
         </button>
       ) : null}
       {schema.properties?.['mode'] ? (
@@ -491,7 +528,9 @@ describe('ChatConverter', () => {
       files: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
       issues: [],
     });
-    vi.mocked(awaitFreshRender).mockImplementation(async (actor) => actor.getSnapshot());
+    vi.mocked(awaitFreshRender)
+      .mockReset()
+      .mockImplementation(async (actor) => actor.getSnapshot());
     mockRendering = mockDocumentFixture.rendering;
     mockEvaluation = mockDocumentFixture.evaluation;
     if (!mockRendering.success) {
@@ -504,6 +543,15 @@ describe('ChatConverter', () => {
     mockCapabilities = createCapabilities();
     mockActiveKernelId = 'replicad';
     mockLatestRenderingOutcome = 'success';
+    mockAssemblyDisplay = undefined;
+    mockAssemblyRootOverride = undefined;
+    mockRequestedRenderId = 1;
+    mockSettledRenderId = 1;
+    mockPublishedExport.mockReset().mockResolvedValue({
+      success: true,
+      files: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
+      issues: [],
+    });
     mockKernelIssues = new Map();
     mockContentService = contentServiceStub();
     mockReadFile.mockRejectedValue(new Error('File not found'));
@@ -552,19 +600,257 @@ describe('ChatConverter', () => {
     expect(screen.getByText('No geometry to export for this file')).toBeDefined();
   });
 
-  it('should export a successful document that offers no view', async () => {
-    mockRendering = undefined;
-    const { evaluation } = mockDocumentFixture;
-    if (!evaluation.success) {
-      throw new Error('The document fixture must evaluate successfully');
-    }
-    mockEvaluation = { ...evaluation, views: [] };
-    render(<ChatConverter isExpanded />);
-    fireEvent.click(screen.getByRole('button', { name: /glb/i }));
-    fireEvent.click(screen.getByRole('button', { name: /export glb/i }));
-    await waitFor(() => {
-      expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('glb', { options: {} });
+  const committedAssemblyFixture = (): CadAssemblyDisplay => {
+    const root: PublishedPartAsset = {
+      path: '.tau/artifacts/reusable-parts/fixture/scene.json',
+      digest: contentDigest({ value: `sha256:${'a'.repeat(64)}`, name: 'converter committed root' }),
+      byteLength: 123,
+    };
+    const publication: PublishedAssembly = {
+      schemaVersion: 1,
+      parts: {
+        housing: {
+          schemaVersion: 1,
+          variants: {
+            default: {
+              source: { entry: 'part.ts', files: { 'part.ts': root.digest } },
+              glb: { ...root, path: '.tau/artifacts/reusable-parts/fixture/display.glb' },
+              exact: {
+                asset: { ...root, path: '.tau/artifacts/reusable-parts/fixture/native.msgpack' },
+                kernelId: 'replicad',
+                provider: '@taucad/replicad',
+                providerVersion: '1.4.2',
+                codec: 'replicad.native-handle-msgpack',
+                codecVersion: '2',
+                unit: 'millimeter',
+                linearToleranceMm: 0.001,
+                angularToleranceRad: 0.001,
+              },
+            },
+          },
+        },
+      },
+      occurrences: [
+        {
+          id: 'housing',
+          part: 'housing',
+          variant: 'default',
+          transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        },
+      ],
+    };
+    // UI boundary control only; actual source-free admission/STEP is qualified by the runtime/product gates.
+    const admitted: AdmittedAssembly = {
+      ...mock<AdmittedAssembly>(),
+      publication,
+      readAsset: vi.fn(),
+    };
+    const parsedRecord = publishedPartRecordSchema.parse({
+      schemaVersion: 1,
+      variants: { default: { source: { entry: 'part.ts', files: { 'part.ts': root.digest } }, glb: root } },
     });
+    const parsedVariant = parsedRecord.variants['default'];
+    if (!parsedVariant) {
+      throw new Error('Missing parsed converter fixture variant');
+    }
+    const document = Object.assign(mock<CadAssemblyDisplay['document']>(), {
+      projection: 'assembly',
+      root: parsedVariant.glb,
+      admitted,
+      exportPublished: mockPublishedExport,
+    } satisfies Partial<CadAssemblyDisplay['document']>);
+    return { root, admitted, document };
+  };
+
+  it('should offer and export the coherent admitted source-free assembly arm without source geometry', async () => {
+    const actualFreshness = await vi.importActual<typeof AwaitFreshRenderModule>('#machines/await-fresh-render.js');
+    vi.mocked(awaitFreshRender).mockImplementationOnce(actualFreshness.awaitFreshRender);
+    mockCapabilities = createCapabilities({
+      routes: [
+        {
+          targetFormat: 'step',
+          kernelId: 'replicad',
+          sourceFormat: 'step',
+          exportId: 'step',
+          fidelity: 'brep',
+          exportOptions: { schema: {}, defaults: {} },
+        },
+      ],
+    });
+    mockRendering = undefined;
+    mockActiveKernelId = undefined;
+    mockAssemblyDisplay = committedAssemblyFixture();
+    expect(mockAssemblyDisplay.document.root).not.toBe(mockAssemblyDisplay.root);
+    expect(mockAssemblyDisplay.document.root).toEqual(mockAssemblyDisplay.root);
+    mockPublishedExport.mockResolvedValueOnce({
+      success: true,
+      files: [{ bytes: new TextEncoder().encode('ISO-10303-21;'), name: 'model.step', mimeType: 'model/step' }],
+      issues: [],
+    });
+    render(<ChatConverter isExpanded />);
+    expect(screen.queryByText('No geometry to export for this file')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Formats' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^step step$/iu }));
+    fireEvent.click(screen.getByRole('button', { name: /^export step$/iu }));
+    await waitFor(() => {
+      expect(mockPublishedExport).toHaveBeenCalledWith({
+        format: 'step',
+        exportOptions: {},
+        publishedAssembly: { root: mockAssemblyDisplay?.root },
+      });
+      expect(toast.success).toHaveBeenCalledWith('Exported STEP');
+    });
+    expect(mockDocumentFixture.document.evaluation).not.toHaveBeenCalled();
+    expect(mockDocumentFixture.view.rendering).not.toHaveBeenCalled();
+    expect(mockDocumentFixture.document.export).not.toHaveBeenCalled();
+  });
+
+  it('should deny Formats when retained assembly metadata does not identify the selected committed pin', () => {
+    mockRendering = undefined;
+    mockAssemblyDisplay = committedAssemblyFixture();
+    mockAssemblyRootOverride = { ...mockAssemblyDisplay.root };
+    render(<ChatConverter isExpanded />);
+    expect(screen.getByText('No geometry to export for this file')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Formats' })).toBeNull();
+    expect(mockPublishedExport).not.toHaveBeenCalled();
+  });
+
+  it('should deny a pin that becomes incoherent while waiting for the fresh CAD result', async () => {
+    mockRendering = undefined;
+    mockAssemblyDisplay = committedAssemblyFixture();
+    vi.mocked(awaitFreshRender).mockImplementationOnce(async (actor) => {
+      mockAssemblyRootOverride = mockAssemblyDisplay && { ...mockAssemblyDisplay.root };
+      return actor.getSnapshot();
+    });
+    render(<ChatConverter isExpanded />);
+    fireEvent.click(screen.getByRole('button', { name: /^glb$/iu }));
+    fireEvent.click(screen.getByRole('button', { name: /^export glb$/iu }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('No current successful geometry is available for main.ts');
+    });
+    expect(mockPublishedExport).not.toHaveBeenCalled();
+  });
+
+  it('should discard exported bytes when the selected admitted pin changes during the runtime await', async () => {
+    mockRendering = undefined;
+    mockAssemblyDisplay = committedAssemblyFixture();
+    mockPublishedExport.mockImplementationOnce(async () => {
+      mockAssemblyDisplay = committedAssemblyFixture();
+      mockRequestedRenderId += 1;
+      mockSettledRenderId += 1;
+      return {
+        success: true,
+        files: [{ bytes: new Uint8Array([7]), name: 'stale.glb', mimeType: 'model/gltf-binary' }],
+        issues: [],
+      };
+    });
+    const view = render(<ChatConverter isExpanded />);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^glb$/iu }));
+      const beforeExport = mockProjectSend.mock.calls.length;
+      fireEvent.click(screen.getByRole('button', { name: /^export glb$/iu }));
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('The selected CAD display changed during export');
+      });
+      expect(mockPublishedExport).toHaveBeenCalledOnce();
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+      const expectedDiagnosticData: unknown = expect.objectContaining({
+        entryPath: 'main.ts',
+        activeKernelId: undefined,
+        requestedRenderId: 1,
+        settledRenderId: 1,
+        format: 'glb',
+        stage: 'current-display-after-export',
+        kernelId: 'replicad',
+        transcoderId: undefined,
+        reason: 'exception',
+        errorType: 'object',
+        errorName: 'Error',
+        errorMessage: 'The selected CAD display changed during export',
+        reachedWrite: false,
+        completedWrite: false,
+      });
+      expect(mockCadSend).toHaveBeenCalledWith({
+        type: 'kernelLog',
+        level: 'error',
+        message: 'CAD export failed',
+        origin: { component: 'export', file: 'main.ts' },
+        data: expectedDiagnosticData,
+      });
+      const operationClaim = mockProjectSend.mock.calls
+        .slice(beforeExport)
+        .map(([event]) => event as { type: string; claimId: string })
+        .find((event) => event.type === 'claimGeometryUnit');
+      expect(operationClaim).toBeDefined();
+      expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: operationClaim?.claimId });
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it('should discard exported bytes when the project replaces the actor map during export without rerender', async () => {
+    mockRendering = undefined;
+    mockAssemblyDisplay = committedAssemblyFixture();
+    const replacementActor = mock<ActorRefFrom<typeof cadMachine>>({
+      getSnapshot: () => mockCadRef.getSnapshot(),
+    });
+    mockPublishedExport.mockImplementationOnce(async () => {
+      mockGeometryUnits = new Map(mockGeometryUnits);
+      mockGeometryUnits.set('main.ts', replacementActor);
+      return {
+        success: true,
+        files: [{ bytes: new Uint8Array([7]), name: 'replaced.glb', mimeType: 'model/gltf-binary' }],
+        issues: [],
+      };
+    });
+    render(<ChatConverter isExpanded />);
+    fireEvent.click(screen.getByRole('button', { name: /^glb$/iu }));
+    fireEvent.click(screen.getByRole('button', { name: /^export glb$/iu }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('The selected CAD display changed during export');
+    });
+    expect(mockPublishedExport).toHaveBeenCalledOnce();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('should discard exported bytes when the selected entry switches during export', async () => {
+    const { scrollIntoView } = Element.prototype;
+    Element.prototype.scrollIntoView = vi.fn();
+    let finishExport = (): void => undefined;
+    const exportPending = new Promise<void>((resolve) => {
+      finishExport = resolve;
+    });
+    mockRendering = undefined;
+    mockAssemblyDisplay = committedAssemblyFixture();
+    mockGeometryUnits.set('helper.ts', mockHelperCadRef);
+    mockPublishedExport.mockImplementationOnce(async () => {
+      await exportPending;
+      return {
+        success: true,
+        files: [{ bytes: new Uint8Array([7]), name: 'previous.glb', mimeType: 'model/gltf-binary' }],
+        issues: [],
+      };
+    });
+    try {
+      render(<ChatConverter isExpanded />);
+      fireEvent.click(screen.getByRole('button', { name: /^glb$/iu }));
+      fireEvent.click(screen.getByRole('button', { name: /^export glb$/iu }));
+      await waitFor(() => {
+        expect(mockPublishedExport).toHaveBeenCalledOnce();
+      });
+      fireEvent.click(screen.getByRole('button', { name: /main\.ts/iu }));
+      fireEvent.click(await screen.findByText('helper.ts'));
+      expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('helper.ts');
+      finishExport();
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('The selected CAD display changed during export');
+      });
+      expect(toast.success).not.toHaveBeenCalled();
+    } finally {
+      finishExport();
+      Element.prototype.scrollIntoView = scrollIntoView;
+    }
   });
 
   it('should identify the export source when only one geometry unit exists', () => {
@@ -803,10 +1089,10 @@ describe('ChatConverter', () => {
           content: {
             schema: {
               type: 'object',
-              properties: { includeEdges: { type: 'boolean' } },
+              properties: { includeEdges: { type: 'boolean' }, includePhysical: { type: 'boolean' } },
               additionalProperties: false,
             },
-            defaults: { includeEdges: false },
+            defaults: { includeEdges: false, includePhysical: false },
           },
         },
       ],
@@ -817,18 +1103,24 @@ describe('ChatConverter', () => {
     const contentForm = await screen.findByTestId('rjsf-form');
     expect(screen.getByRole('region', { name: 'Content' })).toBeDefined();
     expect(screen.queryByRole('heading', { name: 'Content' })).toBeNull();
-    expect(contentForm.dataset['fields']).toBe('includeEdges');
+    expect(contentForm.dataset['fields']).toBe('includeEdges,includePhysical');
     expect(screen.getByRole('button', { name: /webp options defaults/i })).toBeDefined();
 
     fireEvent.click(screen.getByRole('button', { name: 'Enable edges' }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /webp options modified/i })).toBeDefined();
     });
+    fireEvent.click(screen.getByRole('button', { name: 'Enable physical evidence' }));
+    await vi.waitFor(() => {
+      expect(
+        mockParameterService.replaceTargetValues.mock.calls.some((call) => call[2].values['includePhysical'] === true),
+      ).toBe(true);
+    });
     fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
 
     await vi.waitFor(() => {
       expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('webp', {
-        content: { includeEdges: true },
+        content: { includeEdges: true, includePhysical: true },
         options: {},
       });
     });
@@ -1014,6 +1306,120 @@ describe('ChatConverter', () => {
     });
   });
 
+  it('should retain runtime export issues without writing failed artifacts', async () => {
+    const issues: KernelIssue[] = [
+      {
+        message: 'The export codec failed',
+        code: 'RUNTIME',
+        type: 'kernel',
+        severity: 'error',
+        details: { stage: 'codec' },
+      },
+    ];
+    vi.mocked(mockDocumentFixture.document.export).mockResolvedValueOnce({ success: false, issues });
+    const view = render(<ChatConverter isExpanded />);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^glb$/iu }));
+      fireEvent.click(screen.getByLabelText('Download to disk'));
+      fireEvent.click(screen.getByLabelText('Save to project'));
+      const beforeExport = mockProjectSend.mock.calls.length;
+      fireEvent.click(screen.getByRole('button', { name: /^export glb$/iu }));
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Failed to export GLB');
+      });
+      expect(mockDocumentFixture.document.export).toHaveBeenCalledOnce();
+      const expectedDiagnosticData: unknown = expect.objectContaining({
+        entryPath: 'main.ts',
+        activeKernelId: 'replicad',
+        requestedRenderId: 1,
+        settledRenderId: 1,
+        format: 'glb',
+        stage: 'runtime-result',
+        kernelId: 'replicad',
+        transcoderId: undefined,
+        reason: 'runtime-result',
+        issues,
+        reachedWrite: false,
+        completedWrite: false,
+      });
+      expect(mockCadSend).toHaveBeenCalledWith({
+        type: 'kernelLog',
+        level: 'error',
+        message: 'CAD export failed',
+        origin: { component: 'export', file: 'main.ts' },
+        data: expectedDiagnosticData,
+      });
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+      const operationClaim = mockProjectSend.mock.calls
+        .slice(beforeExport)
+        .map(([event]) => event as { type: string; claimId: string })
+        .find((event) => event.type === 'claimGeometryUnit');
+      expect(operationClaim).toBeDefined();
+      expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: operationClaim?.claimId });
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it('should release the export claim when project writing and diagnostic delivery fail', async () => {
+    mockWriteFiles.mockRejectedValueOnce(new Error('Project write denied'));
+    mockCadSend.mockImplementationOnce(() => {
+      throw new TypeError('Diagnostic delivery denied');
+    });
+    const view = render(<ChatConverter isExpanded />);
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^glb$/iu }));
+      fireEvent.click(screen.getByLabelText('Download to disk'));
+      fireEvent.click(screen.getByLabelText('Save to project'));
+      const beforeExport = mockProjectSend.mock.calls.length;
+      fireEvent.click(screen.getByRole('button', { name: /^export glb$/iu }));
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Failed to export GLB');
+      });
+      expect(mockDocumentFixture.document.export).toHaveBeenCalledOnce();
+      expect(mockWriteFiles).toHaveBeenCalledWith({
+        'exports/model.glb': { content: new Uint8Array([1, 2, 3]) },
+      });
+      expect(mockCadSend).toHaveBeenCalledOnce();
+      const expectedDiagnosticData: unknown = expect.objectContaining({
+        entryPath: 'main.ts',
+        activeKernelId: 'replicad',
+        requestedRenderId: 1,
+        settledRenderId: 1,
+        format: 'glb',
+        stage: 'project-write',
+        kernelId: 'replicad',
+        transcoderId: undefined,
+        reason: 'exception',
+        errorType: 'object',
+        errorName: 'Error',
+        errorMessage: 'Project write denied',
+        reachedWrite: true,
+        completedWrite: false,
+      });
+      expect(mockCadSend).toHaveBeenCalledWith({
+        type: 'kernelLog',
+        level: 'error',
+        message: 'CAD export failed',
+        origin: { component: 'export', file: 'main.ts' },
+        data: expectedDiagnosticData,
+      });
+      expect(toast.success).not.toHaveBeenCalled();
+      const operationClaim = mockProjectSend.mock.calls
+        .slice(beforeExport)
+        .map(([event]) => event as { type: string; claimId: string })
+        .find((event) => event.type === 'claimGeometryUnit');
+      expect(operationClaim).toBeDefined();
+      expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: operationClaim?.claimId });
+      expect(screen.getByRole('button', { name: /^export glb$/iu })).not.toBeDisabled();
+    } finally {
+      view.unmount();
+      mockWriteFiles.mockReset().mockResolvedValue(undefined);
+      mockCadSend.mockReset();
+    }
+  });
+
   it('should show "Select a destination" when both toggles are unchecked', () => {
     render(<ChatConverter isExpanded />);
 
@@ -1029,7 +1435,7 @@ describe('ChatConverter', () => {
   });
 
   describe('kernel-aware route selection', () => {
-    it('should return empty formats when activeKernelId is undefined', () => {
+    it('should show settled unsupported formats when activeKernelId is undefined', () => {
       mockActiveKernelId = undefined;
       mockCapabilities = createCapabilities();
       render(<ChatConverter isExpanded />);
@@ -1037,13 +1443,60 @@ describe('ChatConverter', () => {
       expect(screen.queryByRole('button', { name: /glb/i })).toBeNull();
       expect(screen.queryByRole('button', { name: /stl/i })).toBeNull();
       expect(screen.queryByRole('button', { name: /step/i })).toBeNull();
-      expect(screen.getByText('Export formats are still loading')).toBeDefined();
+      expect(screen.getByRole('status', { name: 'No supported export formats' })).toHaveAttribute('aria-busy', 'false');
+      expect(screen.queryByRole('status', { name: 'Export formats are still loading' })).toBeNull();
+      expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('main.ts');
+      expect(mockPublishedExport).not.toHaveBeenCalled();
+    });
+
+    it('should keep the export status busy only while capabilities are undefined', () => {
+      mockCapabilities = undefined;
+      render(<ChatConverter isExpanded />);
+
       expect(screen.getByRole('status', { name: 'Export formats are still loading' })).toHaveAttribute(
         'aria-busy',
         'true',
       );
+      expect(screen.queryByRole('status', { name: 'No supported export formats' })).toBeNull();
+      expect(screen.queryByRole('region', { name: 'Formats' })).toBeNull();
       expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('main.ts');
+      expect(mockPublishedExport).not.toHaveBeenCalled();
     });
+
+    it.each([
+      { reason: 'empty settled routes', routes: [] },
+      {
+        reason: 'missing matching exact provider',
+        routes: [
+          {
+            targetFormat: 'step',
+            kernelId: 'jscad',
+            sourceFormat: 'step',
+            fidelity: 'brep',
+            exportOptions: { schema: {}, defaults: {} },
+          },
+        ],
+      },
+    ] satisfies Array<{ reason: string; routes: ExportRoute[] }>)(
+      'should show settled unsupported formats for a coherent pin with $reason',
+      ({ routes }) => {
+        mockRendering = undefined;
+        mockActiveKernelId = undefined;
+        mockAssemblyDisplay = committedAssemblyFixture();
+        mockCapabilities = createCapabilities({ routes });
+        render(<ChatConverter isExpanded />);
+
+        expect(screen.getByRole('status', { name: 'No supported export formats' })).toHaveAttribute(
+          'aria-busy',
+          'false',
+        );
+        expect(screen.queryByText('No geometry to export for this file')).toBeNull();
+        expect(screen.queryByRole('status', { name: 'Export formats are still loading' })).toBeNull();
+        expect(screen.queryByRole('region', { name: 'Formats' })).toBeNull();
+        expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('main.ts');
+        expect(mockPublishedExport).not.toHaveBeenCalled();
+      },
+    );
 
     it('should show only replicad routes when activeKernelId is replicad', () => {
       mockActiveKernelId = 'replicad';

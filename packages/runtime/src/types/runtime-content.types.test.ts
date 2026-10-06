@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   normalizeRuntimeContent,
-  runtimeContentDefaults,
   runtimeContentSchema,
   RuntimeContentUnsupportedError,
 } from '#types/runtime-content.types.js';
@@ -12,10 +11,12 @@ import { z } from 'zod';
 
 describe('runtime content', () => {
   it('uses render defaults only for properties owned by the route', () => {
-    expect(normalizeRuntimeContent('render', ['includeEdges', 'includeTopology'], undefined)).toEqual(
-      runtimeContentDefaults.render,
-    );
+    expect(normalizeRuntimeContent('render', ['includeEdges', 'includeTopology'], undefined)).toEqual({
+      includeEdges: false,
+      includeTopology: true,
+    });
     expect(normalizeRuntimeContent('render', ['includeEdges'], undefined)).toEqual({ includeEdges: false });
+    expect(normalizeRuntimeContent('render', ['includePhysical'], undefined)).toEqual({ includePhysical: false });
   });
 
   it('uses false export defaults and canonicalizes explicit defaults', () => {
@@ -25,8 +26,11 @@ describe('runtime content', () => {
       includeTopology: false,
     });
 
-    expect(omitted).toEqual(runtimeContentDefaults.export);
+    expect(omitted).toEqual({ includeEdges: false, includeTopology: false });
     expect(explicit).toEqual(omitted);
+    expect(normalizeRuntimeContent('export', ['includePhysical'], { includePhysical: true })).toEqual({
+      includePhysical: true,
+    });
   });
 
   it('rejects a known property that the concrete route does not own', () => {

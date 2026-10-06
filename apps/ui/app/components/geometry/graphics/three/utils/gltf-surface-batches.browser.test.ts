@@ -8,13 +8,14 @@ import {
   InstancedMesh,
   Mesh,
   MeshStandardMaterial,
+  Matrix4,
   OrthographicCamera,
   RenderTarget,
   Scene,
   WebGLRenderer,
   WebGLRenderTarget,
 } from 'three';
-import { WebGPUBackend } from 'three/webgpu';
+import { Node, NodeBuilder, WebGPUBackend } from 'three/webgpu';
 import type { RendererInstance } from '#components/geometry/graphics/three/renderer.js';
 import { createRenderer } from '#components/geometry/graphics/three/renderer.js';
 import {
@@ -315,6 +316,9 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
       split.dispose();
       expect(await render()).toEqual(posed);
       if (backend === 'webgpu') {
+        if (renderer instanceof WebGLRenderer) {
+          throw new TypeError('Expected native WebGPU renderer');
+        }
         const initialOwned = instanceLifetime().allocated;
         expect(instanceLifetime().destroyed).toBe(initialOwned);
         const sharedMaterial = new MeshStandardMaterial({ color: 0xcc_cc_cc });
@@ -396,6 +400,117 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
         geometryDispose.mockRestore();
         sharedMaterial.removeEventListener('dispose', materialDispose);
         console.info('E06 surviving/large owners', JSON.stringify(instanceLifetime()));
+
+        instanceSizes.add(4 * 64);
+        const controlLifetimeStart = instanceLifetime();
+        const controlScene = new Scene();
+        controlScene.background = new Color(0);
+        controlScene.add(new AmbientLight(0xff_ff_ff, 1));
+        const controlLight = new DirectionalLight(0xff_ff_ff, 2);
+        controlLight.position.set(0, 0, 10);
+        controlScene.add(controlLight);
+        const controlRoot = new Group();
+        controlScene.add(controlRoot);
+        const controlMaterials = [0xcc_cc_cc, 0xff_33_33].map((color) => {
+          const material = new MeshStandardMaterial({ color, roughness: 0.5 });
+          qualifyGltfSurfaceMaterial(material);
+          sealGltfSurfaceMaterial(material);
+          resources.push(material);
+          return material;
+        });
+        const controlSources = Array.from({ length: 8 }, (_, index) => {
+          const source = new Mesh(geometry, controlMaterials[Math.floor(index / 4)]);
+          source.position.set((index % 4) * 2 - 7, Math.floor(index / 4) * 4 - 2, 0);
+          controlRoot.add(source);
+          return source;
+        });
+        let control = createGltfSurfaceBatches(controlRoot, controlSources);
+        resources.push(control);
+        control.sync();
+        const controlBatches = () =>
+          control.group.children.map((object) => {
+            if (!(object instanceof InstancedMesh)) {
+              throw new TypeError('Expected two native instanced surface groups');
+            }
+            const material: unknown = object.material;
+            if (!(material instanceof MeshStandardMaterial)) {
+              throw new TypeError('Expected native surface material');
+            }
+            return {
+              uuid: object.uuid,
+              material: material.uuid,
+              version: material.version,
+              slots: object.count,
+              matrices: [...object.instanceMatrix.array],
+            };
+          });
+        const controlRender = async (): Promise<Uint8Array<ArrayBuffer>> => {
+          renderer.setRenderTarget(target);
+          renderer.render(controlScene, camera);
+          renderer.setRenderTarget(null);
+          return new Uint8Array(await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size));
+        };
+        const nodeBuild = vi.spyOn(Node.prototype, 'build');
+        const builderBuild = vi.spyOn(NodeBuilder.prototype, 'build');
+        try {
+          const firstPixels = await controlRender();
+          const firstBatches = controlBatches();
+          expect(firstBatches.map(({ slots }) => slots)).toEqual([4, 4]);
+          expect(firstPixels.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
+          const stableBuilds = [nodeBuild.mock.calls.length, builderBuild.mock.calls.length];
+          const stableDraws = rawCounts.indexed;
+          control.sync();
+          expect(await controlRender()).toEqual(firstPixels);
+          expect(rawCounts.indexed - stableDraws).toBe(2);
+          expect(controlBatches()).toEqual(firstBatches);
+          const stableResult = [nodeBuild.mock.calls.length, builderBuild.mock.calls.length];
+          expect(stableResult).toEqual(stableBuilds);
+
+          control.dispose();
+          control = createGltfSurfaceBatches(controlRoot, controlSources);
+          resources.push(control);
+          control.sync();
+          const replacementBuilds = [nodeBuild.mock.calls.length, builderBuild.mock.calls.length];
+          const replacementDraws = rawCounts.indexed;
+          expect(await controlRender()).toEqual(firstPixels);
+          expect(rawCounts.indexed - replacementDraws).toBe(2);
+          const replacementBatches = controlBatches();
+          expect(replacementBatches.map(({ uuid }) => uuid)).not.toEqual(firstBatches.map(({ uuid }) => uuid));
+          expect(replacementBatches.map(({ material }) => material)).toEqual(
+            firstBatches.map(({ material }) => material),
+          );
+          expect(replacementBatches.map(({ matrices }) => matrices)).toEqual(
+            firstBatches.map(({ matrices }) => matrices),
+          );
+          expect(nodeBuild.mock.calls.length).toBeGreaterThan(replacementBuilds[0]!);
+          expect(builderBuild.mock.calls.length).toBeGreaterThan(replacementBuilds[1]!);
+
+          controlMaterials[1]!.flatShading = true;
+          controlMaterials[1]!.needsUpdate = true;
+          control.sync();
+          const changedBuilds = [nodeBuild.mock.calls.length, builderBuild.mock.calls.length];
+          const changedDraws = rawCounts.indexed;
+          const changedPixels = await controlRender();
+          expect(rawCounts.indexed - changedDraws).toBe(2);
+          expect(changedPixels.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
+          const changedBatches = controlBatches();
+          expect(changedBatches[0]).toEqual(replacementBatches[0]);
+          expect(changedBatches[1]!.uuid).not.toBe(replacementBatches[1]!.uuid);
+          expect(changedBatches[1]!.material).toBe(replacementBatches[1]!.material);
+          expect(changedBatches[1]!.version).toBeGreaterThan(replacementBatches[1]!.version);
+          expect(changedBatches[1]!.matrices).toEqual(replacementBatches[1]!.matrices);
+          expect(nodeBuild.mock.calls.length).toBeGreaterThan(changedBuilds[0]!);
+          expect(builderBuild.mock.calls.length).toBeGreaterThan(changedBuilds[1]!);
+        } finally {
+          nodeBuild.mockRestore();
+          builderBuild.mockRestore();
+          control.dispose();
+        }
+        const controlLifetimeEnd = instanceLifetime();
+        expect(controlLifetimeEnd.allocated).toBeGreaterThan(controlLifetimeStart.allocated);
+        expect(controlLifetimeEnd.destroyed - controlLifetimeStart.destroyed).toBe(
+          controlLifetimeEnd.allocated - controlLifetimeStart.allocated,
+        );
       }
       expect(validation).toEqual([]);
       console.info(
@@ -413,6 +528,145 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
     } finally {
       restoreRaw();
       consoleErrors.mockRestore();
+      for (const resource of resources.reverse()) {
+        resource.dispose();
+      }
+    }
+  });
+  it('should retain existing canonical instances and posed pixels while batching ordinary meshes', async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const renderer = await createRenderer('viewport', backend, canvas);
+    const resources: Array<{ dispose(): void }> = [renderer];
+    const restore: Array<() => void> = [];
+    const scene = new Scene();
+    scene.background = new Color(0);
+    scene.add(new AmbientLight(0xff_ff_ff, 1));
+    const light = new DirectionalLight(0xff_ff_ff, 2);
+    light.position.set(0, 0, 10);
+    scene.add(light);
+    const root = new Group();
+    scene.add(root);
+    const parent = new Group();
+    parent.position.set(0.5, 1, 0);
+    parent.rotation.z = 0.3;
+    parent.scale.setScalar(1.25);
+    root.add(parent);
+    const geometry = new BoxGeometry(0.8, 0.8, 0.4);
+    const material = new MeshStandardMaterial({ color: 0x44_cc_88, roughness: 0.5 });
+    qualifyGltfSurfaceMaterial(material);
+    resources.push(geometry, material);
+    const canonical = [2, 3].map((count, index) => {
+      const source = new InstancedMesh(geometry, material, count);
+      source.position.set(index * 3 - 1.5, 0, 0);
+      source.rotation.z = -0.2;
+      for (let slot = 0; slot < count; slot++) {
+        const matrix = new Matrix4().makeRotationZ(slot * 0.15);
+        matrix.setPosition(slot * 0.9 - 0.5, slot * 0.8 - 0.5, 0);
+        source.setMatrixAt(slot, matrix);
+      }
+      parent.add(source);
+      resources.push(source);
+      return source;
+    });
+    const ordinary = [-3, 3].map((x) => {
+      const source = new Mesh(geometry, material);
+      source.position.set(x, -3, 0);
+      root.add(source);
+      return source;
+    });
+    const camera = new OrthographicCamera(-6, 6, 6, -6, 0.1, 100);
+    camera.position.set(0, 0, 20);
+    camera.updateMatrixWorld();
+    const webGlTarget = renderer instanceof WebGLRenderer ? new WebGLRenderTarget(size, size) : undefined;
+    const target = webGlTarget ?? new RenderTarget(size, size);
+    resources.push(target);
+    let indexedCount = (): number => 0;
+    try {
+      if (renderer instanceof WebGLRenderer) {
+        const gl = renderer.getContext();
+        if (!(gl instanceof WebGL2RenderingContext)) {
+          throw new TypeError('Expected WebGL2 context');
+        }
+        const direct = vi.spyOn(gl, 'drawElements');
+        const instanced = vi.spyOn(gl, 'drawElementsInstanced');
+        indexedCount = () => direct.mock.calls.length + instanced.mock.calls.length;
+        restore.push(
+          () => {
+            direct.mockRestore();
+          },
+          () => {
+            instanced.mockRestore();
+          },
+        );
+      } else {
+        nativeDevice(renderer);
+        const indexed = vi.spyOn(GPURenderPassEncoder.prototype, 'drawIndexed');
+        indexedCount = () => indexed.mock.calls.length;
+        restore.push(() => {
+          indexed.mockRestore();
+        });
+      }
+      const render = async (): Promise<Uint8Array<ArrayBuffer>> => {
+        if (renderer instanceof WebGLRenderer) {
+          if (!webGlTarget) {
+            throw new TypeError('Expected WebGL render target');
+          }
+          renderer.setRenderTarget(webGlTarget);
+        } else {
+          renderer.setRenderTarget(target);
+        }
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
+        if (renderer instanceof WebGLRenderer) {
+          if (!webGlTarget) {
+            throw new TypeError('Expected WebGL render target');
+          }
+          const pixels = new Uint8Array(size * size * 4);
+          renderer.readRenderTargetPixels(webGlTarget, 0, 0, size, size, pixels);
+          return pixels;
+        }
+        return new Uint8Array(await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size));
+      };
+      const before = indexedCount();
+      const baseline = await render();
+      expect(indexedCount() - before).toBe(4);
+      expect(baseline.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
+      const owner = createGltfSurfaceBatches(root, [...ordinary, ...canonical]);
+      resources.push(owner);
+      owner.sync();
+      const batchedStart = indexedCount();
+      expect(await render()).toEqual(baseline);
+      expect(indexedCount() - batchedStart).toBe(3);
+      expect(canonical.map((source) => source.count)).toEqual([2, 3]);
+      expect(canonical.map((source) => source.layers.mask)).toEqual([1, 1]);
+      expect(ordinary.map((source) => source.layers.mask)).toEqual([0, 0]);
+      parent.position.x += 0.75;
+      parent.rotation.z += 0.25;
+      owner.syncMatrices([parent]);
+      const posedStart = indexedCount();
+      const posed = await render();
+      expect(indexedCount() - posedStart).toBe(3);
+      expect(posed).not.toEqual(baseline);
+      owner.dispose();
+      const directPosedStart = indexedCount();
+      expect(await render()).toEqual(posed);
+      expect(indexedCount() - directPosedStart).toBe(4);
+      const successor = createGltfSurfaceBatches(root, [...ordinary, ...canonical]);
+      resources.push(successor);
+      successor.sync();
+      const successorStart = indexedCount();
+      expect(await render()).toEqual(posed);
+      expect(indexedCount() - successorStart).toBe(3);
+      console.info(
+        'C6 canonical instance registration',
+        JSON.stringify({ backend, canonicalSlots: 5, directCommands: 4, batchedCommands: 3, changedParent: true }),
+      );
+    } finally {
+      for (const dispose of restore.reverse()) {
+        dispose();
+      }
       for (const resource of resources.reverse()) {
         resource.dispose();
       }

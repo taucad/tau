@@ -5,7 +5,14 @@ import { dirname, join, resolve } from 'node:path';
 import type { Page } from 'playwright';
 import { afterEach, expect, test } from 'vitest';
 
-import { captureNextDesktopDownload, launchDesktopApp } from '#support/desktop-app.js';
+import {
+  captureNextDesktopDownload,
+  desktopRuntimeLeases,
+  expectDesktopRuntimeLeaseExit,
+  launchDesktopApp,
+  observeDesktopRuntimeLeases,
+  waitForDesktopRuntimeLease,
+} from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
@@ -41,11 +48,16 @@ map_Kd tau-texture.png
 let session: DesktopSession | undefined;
 
 afterEach(async (context) => {
-  if (context.task.result?.state === 'fail') {
-    await session?.capture('converter-failure');
+  const failed = context.task.result?.state === 'fail';
+  if (failed) {
+    await Promise.allSettled([session?.capture(`converter-failure-${context.task.id}`)]);
   }
-  await session?.close();
+  const [closed] = await Promise.allSettled([session?.close()]);
   session = undefined;
+  if (!failed && closed.status === 'rejected') {
+    const error: unknown = closed.reason;
+    throw error;
+  }
 });
 
 const directorySnapshot = async (root: string): Promise<readonly string[]> => {
@@ -64,8 +76,11 @@ const visibleCount = async (locator: ReturnType<Page['getByText']>): Promise<num
 };
 
 const waitForConverterReady = async (page: Page): Promise<void> => {
+  const inputFormats = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Input formats', exact: true }),
+  });
   await expect
-    .poll(async () => visibleCount(page.getByText(/^[1-9]\d* formats supported$/u)), { timeout: 120_000 })
+    .poll(async () => visibleCount(inputFormats.getByRole('listitem')), { timeout: 120_000 })
     .toBeGreaterThan(0);
 };
 
@@ -99,22 +114,15 @@ const expectUsdzDownload = async (path: string, expectTexture: boolean): Promise
 };
 
 const expectCapabilityParity = async (page: Page): Promise<void> => {
-  await expect.poll(async () => visibleCount(page.getByText(/^[1-9]\d* formats supported$/u))).toBeGreaterThan(0);
+  const inputFormats = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Input formats', exact: true }),
+  });
+  await expect.poll(async () => visibleCount(inputFormats.getByRole('listitem'))).toBeGreaterThan(0);
   for (const format of ['GLB', 'OBJ', 'STEP', 'USDZ']) {
     // oxlint-disable-next-line no-await-in-loop -- Each required route must be represented in the capability lists.
-    expect(await visibleCount(page.getByText(format, { exact: true }))).toBeGreaterThan(0);
+    expect(await visibleCount(inputFormats.getByText(format, { exact: true }))).toBeGreaterThan(0);
   }
 };
-
-const utilityProcesses = async (desktopSession: DesktopSession): Promise<ReadonlySet<number>> =>
-  new Set(
-    await desktopSession.application.evaluate(({ app }) =>
-      app
-        .getAppMetrics()
-        .filter((metric) => metric.type === 'Utility' && metric.name === 'tau-kernel-host')
-        .map((metric) => metric.pid),
-    ),
-  );
 
 const chooseUsdzAndDownload = async (
   desktopSession: DesktopSession,
@@ -122,24 +130,17 @@ const chooseUsdzAndDownload = async (
   options: { readonly expectTexture?: boolean; readonly name: string },
 ): Promise<void> => {
   const format = page.getByLabel(/\(USDZ\)$/u);
-  const glbFormat = page.getByLabel(/\(GLB\)$/u);
   await format.waitFor({ state: 'visible', timeout: 60_000 });
-  if ((await format.getAttribute('data-state')) !== 'checked') {
-    await format.click();
+  const reset = page.getByRole('button', { name: 'Reset', exact: true });
+  if (await reset.isVisible()) {
+    await reset.click();
   }
-  if ((await glbFormat.getAttribute('data-state')) !== 'checked') {
-    await glbFormat.click();
-  }
-  const zipOption = page.getByLabel('Download as ZIP file', { exact: true });
-  await zipOption.waitFor({ state: 'visible' });
-  if (await zipOption.isChecked()) {
-    await zipOption.click();
-  }
-  await glbFormat.click();
+  await format.click();
+  await expect.poll(async () => format.isChecked()).toBe(true);
   const path = join(dirname(desktopSession.homeRoot), `.e2e-${options.name}.usdz`);
-  const download = await captureNextDesktopDownload(desktopSession, path, async () =>
-    page.getByRole('button', { name: 'Download', exact: true }).click(),
-  );
+  const button = page.getByRole('button', { name: 'Download USDZ', exact: true });
+  await button.waitFor({ state: 'visible' });
+  const download = await captureNextDesktopDownload(desktopSession, path, async () => button.click());
   expect(download.filename).toMatch(/\.usdz$/u);
   await expectUsdzDownload(path, options.expectTexture ?? false);
 };
@@ -233,7 +234,8 @@ test('[completed-artifact] converts GLB, OBJ sidecars, and STEP to USDZ without 
 
   await openRoute(session.page, '/convert');
   const heading = session.page.getByRole('heading', {
-    name: '3D Model Converter',
+    name: 'Convert',
+    exact: true,
   });
   await heading.waitFor({ state: 'visible' });
   expect(await heading.isVisible()).toBe(true);
@@ -299,19 +301,10 @@ test('[completed-artifact] converts GLB, OBJ sidecars, and STEP to USDZ without 
 
 test('[completed-artifact] releases an in-flight conversion utility on unmount and recovers with a fresh utility', async () => {
   session = await launchDesktopApp({ packaged: true, token: 'converter-cancellation-probe' });
-  const utilitiesBefore = await utilityProcesses(session);
+  await observeDesktopRuntimeLeases(session);
   await openRoute(session.page, '/convert');
   await waitForConverterReady(session.page);
-  let converterPid: number | undefined;
-  await expect
-    .poll(
-      async () => {
-        converterPid = [...(await utilityProcesses(session!))].find((pid) => !utilitiesBefore.has(pid));
-        return converterPid;
-      },
-      { timeout: 60_000 },
-    )
-    .toBeDefined();
+  const converterLease = await waitForDesktopRuntimeLease(session, session.page, { leaseTimeout: 60_000 });
 
   const slowObject = `v 0 0 0\nv 1 0 0\nv 0 1 0\n${'f 1 2 3\n'.repeat(500_000)}`;
   await session.page
@@ -322,20 +315,22 @@ test('[completed-artifact] releases an in-flight conversion utility on unmount a
       mimeType: 'model/obj',
       name: 'slow.obj',
     });
-  await session.page.getByText('Converting file…', { exact: true }).waitFor({ state: 'visible', timeout: 60_000 });
+  const openingModel = session.page.getByRole('status', { name: 'Opening model', exact: true });
+  await openingModel.waitFor({ state: 'visible', timeout: 60_000 });
+  expect(await openingModel.getAttribute('aria-busy')).toBe('true');
   await openRoute(session.page, '/');
-  await expect
-    .poll(
-      async () => {
-        const utilities = await utilityProcesses(session!);
-        return utilities.has(converterPid!);
-      },
-      { timeout: 60_000 },
-    )
-    .toBe(false);
+  await expectDesktopRuntimeLeaseExit(session, converterLease, { released: true });
 
+  const priorLeases = await desktopRuntimeLeases(session);
+  const previousRequestIds = priorLeases.map(({ requestId }) => requestId);
   await openRoute(session.page, '/convert');
   await waitForConverterReady(session.page);
+  const recoveredLease = await waitForDesktopRuntimeLease(session, session.page, {
+    previousRequestIds,
+    leaseTimeout: 60_000,
+  });
+  expect(recoveredLease.hostId).not.toBe(converterLease.hostId);
+  expect(recoveredLease.pid).not.toBe(converterLease.pid);
   await session.page.locator('input[type="file"]').first().setInputFiles(glbFixture);
   await session.page.getByText('cube.glb', { exact: true }).waitFor({ state: 'visible', timeout: 120_000 });
   await chooseUsdzAndDownload(session, session.page, { name: 'after-cancel' });

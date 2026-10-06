@@ -11,7 +11,7 @@ Optional env: GEOSPEC_DELIVERY_CACHE, GEOSPEC_DELIVERY_RUST_PREFIX,
 GEOSPEC_DELIVERY_EMSDK_PREFIX (existing tools are read-only), GEOSPEC_OCCT_JOBS.
 prefixes --reuse-prefix native|mixed verifies only that existing prefix; never builds it.
 prefixes --build-prefix native|mixed prepares only that prefix; default prepares both.
-Explicit reuse reserves mixedBuildReserve plus the source allowance if inputs are missing.
+Explicit reuse verifies existing inputs; missing sources retain their allocation allowance.
 Optional GIT_CEILING_DIRECTORIES is preserved in the selected environment and checked exactly.
 GEOSPEC_OCCT_PRODUCER_BUILDER selects preserved builder source for existing
 prefix verification only; new prefixes always execute the current builder.
@@ -185,13 +185,19 @@ def verify_tree(archive, destination):
 
 def room(stage):
     available = shutil.disk_usage(ROOT).free
-    if stage == 'reuse-prefix':
-        # Verification does not allocate a new OCCT build tree. Missing source
-        # archives/trees still need their selected allowance before preparation.
+    if stage == 'tools':
+        # External prefixes are validated, not installed; owned prefixes only
+        # need installation space when one is absent.
+        missing = (('GEOSPEC_DELIVERY_EMSDK_PREFIX' not in os.environ and not SDK.exists()) or
+                   ('GEOSPEC_DELIVERY_RUST_PREFIX' not in os.environ and not RUST.exists()))
+        required_gib = RECIPE['diskGiB']['tools'] if missing else 0
+    elif stage in ('sources', 'reuse-prefix'):
+        # Existing archives and trees are verified below without allocation.
+        # Missing selected sources still need their allowance before preparation.
         sources = {'occt': SOURCE, **{name: CACHE / 'sources' / name for name in RECIPE['headers']}}
         missing = any(not directory.is_dir() or not (CACHE / 'downloads' / f'{name}.tar.gz').is_file()
                       for name, directory in sources.items())
-        required_gib = RECIPE['diskGiB']['mixedBuildReserve'] + (RECIPE['diskGiB']['sources'] if missing else 0)
+        required_gib = RECIPE['diskGiB']['sources'] if missing else 0
     else:
         reserve = RECIPE['diskGiB']['mixedBuildReserve'] if stage == 'prefixes' else 0
         required_gib = RECIPE['diskGiB'][stage] + reserve

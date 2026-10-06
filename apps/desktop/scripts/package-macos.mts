@@ -62,14 +62,18 @@ type PicoGkResourceManifest = {
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
 const outputRoot = resolve(process.env['TAU_MACOS_PACKAGE_OUTPUT_ROOT'] ?? resolve(desktopRoot, 'package-out'));
-if (process.platform !== 'darwin') {
-  throw new Error('The macOS package can only be assembled on macOS.');
+if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+  throw new Error('The macOS arm64 package can only be assembled on macOS arm64.');
 }
 const stageRoot = resolve(outputRoot, 'stage');
 const extensionRoot = resolve(desktopRoot, 'macos/dist/extensions');
 const hostInfo = resolve(desktopRoot, 'macos/generated/TauHost-Info.plist');
 const extensionEntitlements = resolve(desktopRoot, 'macos/Config/TauQuickLook.entitlements');
 const uiClientRoot = resolve(workspaceRoot, 'apps/ui/desktop/build/client');
+const replicadResourceRoot = resolve(
+  workspaceRoot,
+  'apps/ui/desktop/build/host-assets/engines/replicad/density-single-v1',
+);
 const pythonResourceRoot = resolve(desktopRoot, 'resources/python');
 const picoGkResourceRoot = resolve(desktopRoot, 'resources/picogk');
 /* The `git` this app records revisions with, prepared beside python and picogk
@@ -329,6 +333,7 @@ try {
   ]);
   await Promise.all([
     copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
+    copyTree(replicadResourceRoot, resolve(resources, 'engines/replicad/density-single-v1')),
     cp(resolve(desktopRoot, 'resources/icon.png'), resolve(resources, 'branding/icon.png')),
     cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
     /* The legal routes stay web-only; the notices (OCCT's LGPL-2.1 and exception included) still ship offline. */

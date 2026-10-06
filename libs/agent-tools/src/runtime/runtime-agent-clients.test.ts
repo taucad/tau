@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient, RuntimeAgentImageExporter } from '#runtime/runtime-agent-clients.js';
 import type {
   Description,
+  PublishedAssembly,
+  PublishedAssemblyDocument,
   Evaluation,
   ExportFile,
   ExportResult,
@@ -18,6 +21,7 @@ import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import type { ParameterSetActors, ParameterSetLoadInput } from '@taucad/parameters/set-machine';
 import { admitParameterManifest, compileParameterManifest, resolveParameterSnapshot } from '@taucad/parameters';
+import { digestContent } from '@taucad/cache-core';
 import type { ParameterSnapshot } from '@taucad/parameters';
 
 const glb = (): Uint8Array<ArrayBuffer> => {
@@ -701,4 +705,215 @@ describe('createRuntimeParameterAgentClient', () => {
     expect(result.current.identity).toEqual({ manifestRevision: current.manifest.revision });
     actor.stop();
   });
+});
+
+it('uses the declared immutable assembly projection and export route without ordinary evaluation or unsupported selection fallback', async () => {
+  const fixture = runtimeFixture();
+  const root: PublishedAssemblyDocument['root'] = {
+    path: 'scene.json',
+    digest: await digestContent({ bytes: glb() }),
+    byteLength: 12,
+  };
+  const exportPublished = vi.fn<PublishedAssemblyDocument['exportPublished']>(async ({ format }) => ({
+    success: true,
+    exportId: format === 'step' || format === 'stl' ? 'solid' : 'glb',
+    issues: [],
+    files: [{ name: 'assembly.glb', mimeType: 'model/gltf-binary', bytes: glb() }],
+  }));
+  const close = vi.fn();
+  const publication: PublishedAssembly = {
+    schemaVersion: 1,
+    parts: {
+      part: {
+        schemaVersion: 1,
+        variants: {
+          selected: {
+            source: { entry: 'part.ts', files: { 'part.ts': root.digest } },
+            glb: root,
+            exact: {
+              asset: root,
+              kernelId: 'native',
+              provider: 'provider',
+              providerVersion: '1',
+              codec: 'codec',
+              codecVersion: '1',
+              unit: 'millimeter',
+              linearToleranceMm: 0,
+              angularToleranceRad: 0,
+            },
+          },
+        },
+      },
+    },
+    occurrences: [
+      { id: 'part', part: 'part', variant: 'selected', transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+    ],
+  };
+  const nativeOptions = {
+    schema: { type: 'object', properties: { tolerance: { type: 'number' } } } as const,
+    defaults: { tolerance: 0.01 },
+  };
+  const capabilities: NonNullable<RuntimeAgentClient['capabilities']> = {
+    ...mock<NonNullable<RuntimeAgentClient['capabilities']>>(),
+    routes: [
+      {
+        kernelId: 'native',
+        exportId: 'solid',
+        sourceFormat: 'step',
+        targetFormat: 'step',
+        fidelity: 'brep',
+        exportOptions: nativeOptions,
+      },
+      {
+        kernelId: 'native',
+        exportId: 'solid',
+        sourceFormat: 'step',
+        targetFormat: 'stl',
+        fidelity: 'brep',
+        transcoderId: 'mesh',
+        exportOptions: { schema: {}, defaults: { targetOnly: true } },
+      },
+      {
+        kernelId: 'display',
+        exportId: 'ordinaryMesh',
+        sourceFormat: 'glb',
+        targetFormat: 'glb',
+        fidelity: 'mesh',
+        exportOptions: { schema: {}, defaults: {} },
+      },
+      {
+        kernelId: 'display',
+        exportId: 'ordinaryMesh',
+        sourceFormat: 'glb',
+        targetFormat: 'obj',
+        fidelity: 'mesh',
+        transcoderId: 'mesh',
+        exportOptions: { schema: {}, defaults: { objOnly: true } },
+      },
+      {
+        kernelId: 'unrelated',
+        exportId: 'unrelated',
+        sourceFormat: 'stl',
+        targetFormat: 'stl',
+        fidelity: 'brep',
+        exportOptions: { schema: {}, defaults: {} },
+      },
+    ],
+  };
+  const published: PublishedAssemblyDocument = {
+    ...mock<PublishedAssemblyDocument>(),
+    root,
+    projection: 'assembly',
+    admitted: { ...mock<PublishedAssemblyDocument['admitted']>(), publication },
+    exportPublished,
+    close,
+  };
+  const exportImage = vi.fn<RuntimeAgentImageExporter>(async () => [
+    { name: 'render.webp', mimeType: 'image/webp', bytes: Uint8Array.of(1) },
+  ]);
+  const clients = createRuntimeAgentClients({
+    runtime: { ...fixture.runtime, capabilities },
+    exportImage,
+    openPublishedAssembly: async () => published,
+    mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+  });
+  const exported = await clients.graphics.exportModel({ targetFile: 'scene.json', to: 'glb' });
+  expect(exported).toMatchObject({ success: true, exportId: 'glb' });
+  const captured = await clients.images.captureImages({ targetFile: 'scene.json', mode: 'single', view: 'assembly' });
+  expect(captured).toMatchObject({ success: true, images: [{ view: 'assembly', angle: 'isometric' }] });
+  expect(exportImage).toHaveBeenCalledOnce();
+  expect(exportPublished).toHaveBeenCalledTimes(2);
+  expect(close).toHaveBeenCalledTimes(2);
+  const evaluated = await clients.kernelClient.evaluateModel({ targetFile: 'scene.json', includeCapabilities: true });
+  expect(evaluated).toMatchObject({
+    success: true,
+    status: 'ready',
+    views: ['assembly'],
+    exports: { solid: 'step', glb: 'glb' },
+    capabilities: {
+      views: { assembly: { schema: { type: 'object', properties: {} }, defaults: {} } },
+      exports: { solid: nativeOptions, glb: { schema: {}, defaults: {} } },
+    },
+  });
+  if (!evaluated.success || evaluated.capabilities === undefined) {
+    throw new Error('Expected eligible published metadata.');
+  }
+  expect(evaluated.capabilities.targets.toSorted()).toEqual(['glb', 'obj', 'solid', 'step', 'stl']);
+  expect(Object.keys(evaluated.capabilities.exports).toSorted()).toEqual(['glb', 'solid']);
+  expect(close).toHaveBeenCalledTimes(3);
+  const declaredExport = await clients.graphics.exportModel({ targetFile: 'scene.json', to: 'solid' });
+  expect(declaredExport).toMatchObject({ success: true, exportId: 'solid' });
+  expect(exportPublished).toHaveBeenLastCalledWith(
+    expect.objectContaining({ format: 'step', publishedAssembly: { root } }),
+  );
+  for (const [to, exportId] of [
+    ['obj', 'glb'],
+    ['stl', 'solid'],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- Each target must retain its actual source declaration identity.
+    await expect(clients.graphics.exportModel({ targetFile: 'scene.json', to })).resolves.toMatchObject({
+      success: true,
+      exportId,
+    });
+    expect(exportPublished).toHaveBeenLastCalledWith(
+      expect.objectContaining({ format: to, publishedAssembly: { root } }),
+    );
+  }
+  const collidingClients = createRuntimeAgentClients({
+    runtime: {
+      ...fixture.runtime,
+      capabilities: {
+        ...capabilities,
+        routes: capabilities.routes.map((route) =>
+          route.sourceFormat === 'step' && route.targetFormat === 'step' ? { ...route, exportId: 'obj' } : route,
+        ),
+      },
+    },
+    exportImage,
+    openPublishedAssembly: async () => published,
+    mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+  });
+  exportPublished.mockResolvedValueOnce({
+    success: true,
+    exportId: 'obj',
+    issues: [],
+    files: [{ name: 'declared.step', mimeType: 'application/step', bytes: Uint8Array.of(1) }],
+  });
+  await expect(collidingClients.graphics.exportModel({ targetFile: 'scene.json', to: 'obj' })).resolves.toMatchObject({
+    success: true,
+    exportId: 'obj',
+  });
+  expect(exportPublished).toHaveBeenLastCalledWith(
+    expect.objectContaining({ format: 'step', publishedAssembly: { root } }),
+  );
+  const invalidMetadataClients = createRuntimeAgentClients({
+    runtime: {
+      ...fixture.runtime,
+      capabilities: {
+        ...capabilities,
+        routes: capabilities.routes.map((route) =>
+          route.sourceFormat === 'step' && route.targetFormat === 'step'
+            ? { ...route, exportOptions: { ...route.exportOptions, defaults: { invalid: () => undefined } } }
+            : route,
+        ),
+      },
+    },
+    exportImage,
+    openPublishedAssembly: async () => published,
+    mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+  });
+  await expect(
+    invalidMetadataClients.kernelClient.evaluateModel({ targetFile: 'scene.json', includeCapabilities: true }),
+  ).resolves.toMatchObject({ success: false });
+  for (const selection of [{ view: 'model' }, { instance: 'sheet' }, { options: { scale: 2 } }]) {
+    // oxlint-disable-next-line no-await-in-loop -- Each unsupported selection must settle without a projection or source fallback.
+    await expect(
+      clients.images.captureImages({ targetFile: 'scene.json', mode: 'single', ...selection }),
+    ).resolves.toMatchObject({ success: false });
+  }
+  expect(exportImage).toHaveBeenCalledOnce();
+  expect(exportPublished).toHaveBeenCalledTimes(8);
+  expect(close).toHaveBeenCalledTimes(11);
+  expect(fixture.open).not.toHaveBeenCalled();
+  expect(fixture.runtime.describe).not.toHaveBeenCalled();
 });

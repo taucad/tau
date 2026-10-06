@@ -68,6 +68,7 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/bambu": "workspace:*",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/geometry-core": "workspace:*",
     "@taucad/jobs": "workspace:*",
     "@taucad/mcp": "workspace:*",
     "@taucad/parameters": "workspace:*",

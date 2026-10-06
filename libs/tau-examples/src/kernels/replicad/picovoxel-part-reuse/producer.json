@@ -1,0 +1,15 @@
+{
+  "family": "picovoxel",
+  "producerInputs": ["upstream.ts", "upstream.settings.ts"],
+  "inputs": {
+    "upstream.ts": "84fb3599674929a1ab7edafe646b43be9045db252e252bc6b86fbe42614f753f",
+    "upstream.settings.ts": "9837478c9eea098be68e06ae4085695897d43a6442d78752b02784775c2ffa64"
+  },
+  "stlDigest": "acfe1666f31a168abad79917b7619cdeac11621581e143223f1f5cbe795b2681",
+  "upstreamGlbDigest": "sha256:608b1367792a8930a2d4752ed6dacbfdbc09acb36f517f94169da1f4f9ad57fc",
+  "baseline": {
+    "builds": 2,
+    "meshes": 1,
+    "restores": 0
+  }
+}

@@ -2,6 +2,11 @@
 import { render, renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { Remote } from 'comlink';
+import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
+import type * as EnvironmentConfig from '#environment.config.js';
+import type * as ProjectManagerMachineModule from '#hooks/project-manager.machine.js';
 import type { ReactNode } from 'react';
 import { createElement, useEffect, useState } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
@@ -21,6 +26,19 @@ import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js'
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { storedRef } from '#utils/attachment.test-utils.js';
+
+const creationDebug = vi.hoisted(() => ({ enabled: false }));
+vi.mock('#environment.config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof EnvironmentConfig>();
+  return {
+    ...actual,
+    ENV: new Proxy(actual.ENV, {
+      get(target, key): unknown {
+        return key === 'TAU_DEBUG' ? creationDebug.enabled : Reflect.get(target, key);
+      },
+    }),
+  };
+});
 
 const fakeProject: ProjectManifest = projectToManifest({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -480,45 +498,49 @@ vi.mock('#chat-clients/use-project-name-client.js', () => ({
   useProjectNameClient: () => ({ generate: mockGenerateProjectName }),
 }));
 
-vi.mock('#hooks/project-manager.machine.js', async () => {
-  const xstate = await import('xstate');
-  return {
-    projectManagerMachine: xstate.setup({}).createMachine({
-      id: 'projectManager',
-      initial: 'ready',
-      context: { worker: undefined, wrappedWorker: undefined, error: undefined },
-      states: { ready: {} },
-    }),
-  };
-});
+vi.mock('#hooks/object-store.worker.js?worker', () => ({
+  default: class MockWorker {
+    public terminate = vi.fn();
+  },
+}));
 
-vi.mock('xstate', async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
+vi.mock('#hooks/project-manager.machine.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof ProjectManagerMachineModule>();
+  const { fromSafeAsync } = await import('#lib/xstate.lib.js');
   return {
     ...actual,
-    waitFor: vi.fn(async () => ({
-      matches: (state: string) => state === 'ready',
-      context: {
-        wrappedWorker: {
-          prepareProjectCreation: mockPrepareProjectCreation,
-          resumePendingProjectOperationResources: mockResumeResources,
-          completePendingProjectOperation: mockCompletePending,
-          getPendingProjectOperations: mockGetPendingProjectOperations,
-          getProjectLibraryState: mockGetProjectLibraryState,
-          getProjectLibraryStates: mockGetProjectLibraryStates,
-          createProjectLibraryState: mockCreateProjectLibraryState,
-          createProjectLibraryStates: mockCreateProjectLibraryStates,
-          trashProject: mockTrashProject,
-          restoreProject: mockRestoreProject,
-          touchProjectActivity: mockTouchProjectActivity,
-          touchChatRecency: mockTouchChatRecency,
-          patchChat: mockPatchChat,
-          beginPermanentDeleteProject: mockBeginPermanentDeleteProject,
-          deleteProjectResources: mockDeleteProjectResources,
-          setProjectDisclosure: mockSetProjectDisclosure,
-        },
+    projectManagerMachine: actual.projectManagerMachine.provide({
+      actors: {
+        initializeWorkerActor: fromSafeAsync(
+          async (): Promise<{
+            type: 'workerInitialized';
+            worker: Worker;
+            wrappedWorker: Remote<ObjectStoreWorker>;
+          }> => ({
+            type: 'workerInitialized',
+            worker: mock<Worker>({ terminate: vi.fn() }),
+            wrappedWorker: Object.assign(mock<Remote<ObjectStoreWorker>>(), {
+              prepareProjectCreation: mockPrepareProjectCreation,
+              resumePendingProjectOperationResources: mockResumeResources,
+              completePendingProjectOperation: mockCompletePending,
+              getPendingProjectOperations: mockGetPendingProjectOperations,
+              getProjectLibraryState: mockGetProjectLibraryState,
+              getProjectLibraryStates: mockGetProjectLibraryStates,
+              createProjectLibraryState: mockCreateProjectLibraryState,
+              createProjectLibraryStates: mockCreateProjectLibraryStates,
+              trashProject: mockTrashProject,
+              restoreProject: mockRestoreProject,
+              touchProjectActivity: mockTouchProjectActivity,
+              touchChatRecency: mockTouchChatRecency,
+              patchChat: mockPatchChat,
+              beginPermanentDeleteProject: mockBeginPermanentDeleteProject,
+              deleteProjectResources: mockDeleteProjectResources,
+              setProjectDisclosure: mockSetProjectDisclosure,
+            }),
+          }),
+        ),
       },
-    })),
+    }),
   };
 });
 
@@ -578,6 +600,7 @@ const seedHomeAttachment = async (bytes: Uint8Array<ArrayBuffer>, mediaType: str
 
 describe('useProjectManager.createProject', () => {
   beforeEach(() => {
+    creationDebug.enabled = false;
     vi.clearAllMocks();
     const storage = new Map<string, string>();
     vi.stubGlobal('localStorage', {
@@ -669,6 +692,177 @@ describe('useProjectManager.createProject', () => {
     libraryFileContent = undefined;
     projectRootConfigurationListener = undefined;
     workerChangeSubscriptions.clear();
+  });
+
+  const observationInput = (): CreateProjectOptions => ({
+    project: { name: 'Creation observation', description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } },
+    files: pendingCreate.files,
+    location: { kind: 'home' },
+  });
+
+  it('should observe held durable preparation without inventing its operation ID, then bind actual commit', async () => {
+    creationDebug.enabled = true;
+    const preparation = Promise.withResolvers<Extract<PendingProjectOperation, { kind: 'create' }>>();
+    const preparing = Promise.withResolvers<PrepareProjectCreationInput>();
+    const commit = Promise.withResolvers<Awaited<ReturnType<FileManagerProxy['commitPendingProjectDirectory']>>>();
+    const committing = Promise.withResolvers<void>();
+    mockPrepareProjectCreation.mockImplementationOnce(async (input) => {
+      preparing.resolve(input);
+      return preparation.promise;
+    });
+    mockCommitPendingProjectDirectory.mockImplementationOnce(async () => {
+      committing.resolve();
+      return commit.promise;
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const input = observationInput();
+    const completed = result.current.createProject(input);
+    const preparedInput = await preparing.promise;
+    const actor = result.current.projectManagerRef;
+    expect(actor.getSnapshot().context.creation).toMatchObject({
+      phase: 'prepare-journal',
+      projectId: preparedInput.manifest.id,
+      backend: 'opfs',
+    });
+    expect(actor.getSnapshot().context.creation?.owner).toBe(input);
+    expect(actor.getSnapshot().context.creation?.operationId).toBeUndefined();
+    preparation.resolve({ ...pendingCreate, manifest: preparedInput.manifest });
+    await committing.promise;
+    expect(actor.getSnapshot().context.creation).toMatchObject({
+      phase: 'commit-directory',
+      projectId: preparedInput.manifest.id,
+      operationId: pendingCreate.operationId,
+      backend: 'opfs',
+    });
+    commit.resolve({ status: 'committed' });
+    await act(async () => {
+      await completed;
+    });
+    expect(actor.getSnapshot().context.creation).toBeUndefined();
+    expect(phaseOrder.indexOf('resources')).toBeLessThan(phaseOrder.indexOf('complete'));
+    expect(mockCompletePending).toHaveBeenCalledWith(pendingCreate.operationId);
+  });
+
+  it('should preserve actual nested rejection and pending journal after the observed commit fails', async () => {
+    creationDebug.enabled = true;
+    const commit = Promise.withResolvers<Awaited<ReturnType<FileManagerProxy['commitPendingProjectDirectory']>>>();
+    const committing = Promise.withResolvers<void>();
+    mockCommitPendingProjectDirectory.mockImplementationOnce(async () => {
+      committing.resolve();
+      return commit.promise;
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const completed = result.current.createProject(observationInput());
+    const cause = new DOMException('Private fixture detail must not be copied', 'QuotaExceededError');
+    const rejected = expect(completed).rejects.toMatchObject({
+      name: 'PendingProjectRecoveryError',
+      reason: 'filesystem-error',
+      cause,
+    });
+    await committing.promise;
+    expect(result.current.projectManagerRef.getSnapshot().context.creation?.phase).toBe('commit-directory');
+    commit.reject(cause);
+    await act(async () => {
+      await rejected;
+    });
+    expect(result.current.projectManagerRef.getSnapshot().context.creation).toBeUndefined();
+    expect(mockResumeResources).not.toHaveBeenCalled();
+    expect(mockCompletePending).not.toHaveBeenCalled();
+    expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
+  });
+
+  it.each(['foreign argument', 'duplicate argument'])(
+    'should deny concurrent %s creation until both actual promises drain',
+    async (overlap) => {
+      creationDebug.enabled = true;
+      const first = Promise.withResolvers<Extract<PendingProjectOperation, { kind: 'create' }>>();
+      const second = Promise.withResolvers<Extract<PendingProjectOperation, { kind: 'create' }>>();
+      const firstEntered = Promise.withResolvers<PrepareProjectCreationInput>();
+      const secondEntered = Promise.withResolvers<PrepareProjectCreationInput>();
+      mockPrepareProjectCreation.mockImplementationOnce(async (input) => {
+        firstEntered.resolve(input);
+        return first.promise;
+      });
+      mockPrepareProjectCreation.mockImplementationOnce(async (input) => {
+        secondEntered.resolve(input);
+        return second.promise;
+      });
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      const input = observationInput();
+      const firstCompleted = result.current.createProject(input);
+      const firstInput = await firstEntered.promise;
+      const secondCompleted = result.current.createProject(
+        overlap === 'duplicate argument' ? input : observationInput(),
+      );
+      const secondInput = await secondEntered.promise;
+      const actor = result.current.projectManagerRef;
+      expect(actor.getSnapshot().context.creation).toBeUndefined();
+      expect(actor.getSnapshot().context.creationUnavailable).toBe(true);
+      first.resolve({ ...pendingCreate, manifest: firstInput.manifest });
+      await act(async () => {
+        await firstCompleted;
+      });
+      expect(actor.getSnapshot().context.creationUnavailable).toBe(true);
+      expect(actor.getSnapshot().context.creation).toBeUndefined();
+      second.resolve({ ...pendingCreate, manifest: secondInput.manifest });
+      await act(async () => {
+        await secondCompleted;
+      });
+      expect(actor.getSnapshot().context.creationUnavailable).toBe(false);
+      expect(actor.getSnapshot().context.creation).toBeUndefined();
+    },
+  );
+
+  it('should keep debug-off creation inert and preserve work when an observation callback throws', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const actor = result.current.projectManagerRef;
+    const originalSend = actor.send.bind(actor);
+    const send = vi.fn<typeof actor.send>(originalSend);
+    Object.defineProperty(actor, 'send', { configurable: true, value: send });
+    try {
+      await act(async () => {
+        await result.current.createProject(observationInput());
+      });
+      expect(
+        send.mock.calls.some(([event]) => event.type === 'creationStarted' || event.type === 'creationObserved'),
+      ).toBe(false);
+      creationDebug.enabled = true;
+      send.mockImplementation((event) => {
+        if (event.type === 'creationObserved') {
+          throw new Error('Observer unavailable');
+        }
+        originalSend(event);
+      });
+      await act(async () => {
+        await result.current.createProject(observationInput());
+      });
+      expect(mockCommitPendingProjectDirectory).toHaveBeenCalledTimes(2);
+      expect(mockCompletePending).toHaveBeenCalledTimes(2);
+      expect(actor.getSnapshot().context.creation).toBeUndefined();
+    } finally {
+      Object.defineProperty(actor, 'send', { configurable: true, value: originalSend });
+    }
+  });
+
+  it('should not let a settling old provider supply a replacement creation observation', async () => {
+    creationDebug.enabled = true;
+    const pending = Promise.withResolvers<Extract<PendingProjectOperation, { kind: 'create' }>>();
+    const entered = Promise.withResolvers<PrepareProjectCreationInput>();
+    mockPrepareProjectCreation.mockImplementationOnce(async (input) => {
+      entered.resolve(input);
+      return pending.promise;
+    });
+    const first = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    const completed = first.result.current.createProject(observationInput());
+    const actualInput = await entered.promise;
+    const oldActor = first.result.current.projectManagerRef;
+    first.unmount();
+    const replacement = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    pending.resolve({ ...pendingCreate, manifest: actualInput.manifest });
+    await completed;
+    expect(replacement.result.current.projectManagerRef).not.toBe(oldActor);
+    expect(replacement.result.current.projectManagerRef.getSnapshot().context.creation).toBeUndefined();
+    replacement.unmount();
   });
 
   it('publishes connected-workspace projects into the one listing key before resolving', async () => {
@@ -2008,12 +2202,14 @@ describe('useProjectManager.createProject', () => {
         const listing = useQuery({
           queryKey: ['projects', { includeDeleted: true }],
           queryFn: async () => projectManager.getProjectListing({ includeDeleted: true }),
+          enabled: !projectManager.isLoading,
         });
         return { projectManager, listing };
       },
       { wrapper },
     );
     await waitFor(() => {
+      expect(result.current.listing.error).toBeNull();
       expect(result.current.listing.data?.projects).toEqual([]);
     });
     mockListProjectManifests.mockClear();

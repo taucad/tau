@@ -80,36 +80,38 @@ import thumbnail73 from './kernels/replicad/hex-screwdriver/thumbnail.webp?url';
 import thumbnail74 from './kernels/replicad/hollow-box/thumbnail.webp?url';
 import thumbnail75 from './kernels/replicad/ibeam/thumbnail.webp?url';
 import thumbnail76 from './kernels/replicad/jscad-logo/thumbnail.webp?url';
-import thumbnail77 from './kernels/replicad/kestrel-240-quadcopter/thumbnail.webp?url';
-import thumbnail78 from './kernels/replicad/lego/thumbnail.webp?url';
-import thumbnail79 from './kernels/replicad/libassimp-format-prism/thumbnail.webp?url';
-import thumbnail80 from './kernels/replicad/logo/thumbnail.webp?url';
-import thumbnail81 from './kernels/replicad/logo-keychain/thumbnail.webp?url';
-import thumbnail82 from './kernels/replicad/nanoraster-logo/thumbnail.webp?url';
-import thumbnail83 from './kernels/replicad/picovoxel-logo/thumbnail.webp?url';
-import thumbnail84 from './kernels/replicad/planetary-gear-system/thumbnail.webp?url';
-import thumbnail85 from './kernels/replicad/pot-plant/thumbnail.webp?url';
-import thumbnail86 from './kernels/replicad/projection-test/thumbnail.webp?url';
-import thumbnail87 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
-import thumbnail88 from './kernels/replicad/replicad-logo/thumbnail.webp?url';
-import thumbnail89 from './kernels/replicad/simple-tray/thumbnail.webp?url';
-import thumbnail90 from './kernels/replicad/six-axis-arm/thumbnail.webp?url';
-import thumbnail91 from './kernels/replicad/spur-gearbox/thumbnail.webp?url';
-import thumbnail92 from './kernels/replicad/staircase/thumbnail.webp?url';
-import thumbnail93 from './kernels/replicad/standing-fan/thumbnail.webp?url';
-import thumbnail94 from './kernels/replicad/stress-test/thumbnail.webp?url';
-import thumbnail95 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
-import thumbnail96 from './kernels/replicad/table/thumbnail.webp?url';
-import thumbnail97 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
-import thumbnail98 from './kernels/replicad/tray/thumbnail.webp?url';
-import thumbnail99 from './kernels/replicad/turbofan/thumbnail.webp?url';
-import thumbnail100 from './kernels/replicad/v8-engine/thumbnail.webp?url';
-import thumbnail101 from './kernels/replicad/vase/thumbnail.webp?url';
-import thumbnail102 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
-import thumbnail103 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
-import thumbnail104 from './kernels/replicad/wheelbarrow/thumbnail.webp?url';
-import thumbnail105 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
-import thumbnail106 from './kernels/tscircuit/led-board/thumbnail.webp?url';
+import thumbnail77 from './kernels/replicad/jscad-part-reuse/thumbnail.webp?url';
+import thumbnail78 from './kernels/replicad/kestrel-240-quadcopter/thumbnail.webp?url';
+import thumbnail79 from './kernels/replicad/lego/thumbnail.webp?url';
+import thumbnail80 from './kernels/replicad/libassimp-format-prism/thumbnail.webp?url';
+import thumbnail81 from './kernels/replicad/logo/thumbnail.webp?url';
+import thumbnail82 from './kernels/replicad/logo-keychain/thumbnail.webp?url';
+import thumbnail83 from './kernels/replicad/nanoraster-logo/thumbnail.webp?url';
+import thumbnail84 from './kernels/replicad/picovoxel-logo/thumbnail.webp?url';
+import thumbnail85 from './kernels/replicad/picovoxel-part-reuse/thumbnail.webp?url';
+import thumbnail86 from './kernels/replicad/planetary-gear-system/thumbnail.webp?url';
+import thumbnail87 from './kernels/replicad/pot-plant/thumbnail.webp?url';
+import thumbnail88 from './kernels/replicad/projection-test/thumbnail.webp?url';
+import thumbnail89 from './kernels/replicad/rao-nozzle/thumbnail.webp?url';
+import thumbnail90 from './kernels/replicad/replicad-logo/thumbnail.webp?url';
+import thumbnail91 from './kernels/replicad/simple-tray/thumbnail.webp?url';
+import thumbnail92 from './kernels/replicad/six-axis-arm/thumbnail.webp?url';
+import thumbnail93 from './kernels/replicad/spur-gearbox/thumbnail.webp?url';
+import thumbnail94 from './kernels/replicad/staircase/thumbnail.webp?url';
+import thumbnail95 from './kernels/replicad/standing-fan/thumbnail.webp?url';
+import thumbnail96 from './kernels/replicad/stress-test/thumbnail.webp?url';
+import thumbnail97 from './kernels/replicad/t-slot-rail/thumbnail.webp?url';
+import thumbnail98 from './kernels/replicad/table/thumbnail.webp?url';
+import thumbnail99 from './kernels/replicad/tau-wordmark/thumbnail.webp?url';
+import thumbnail100 from './kernels/replicad/tray/thumbnail.webp?url';
+import thumbnail101 from './kernels/replicad/turbofan/thumbnail.webp?url';
+import thumbnail102 from './kernels/replicad/v8-engine/thumbnail.webp?url';
+import thumbnail103 from './kernels/replicad/vase/thumbnail.webp?url';
+import thumbnail104 from './kernels/replicad/wavy-vase/thumbnail.webp?url';
+import thumbnail105 from './kernels/replicad/wedge-door-stopper/thumbnail.webp?url';
+import thumbnail106 from './kernels/replicad/wheelbarrow/thumbnail.webp?url';
+import thumbnail107 from './kernels/replicad/worm-gear-system/thumbnail.webp?url';
+import thumbnail108 from './kernels/tscircuit/led-board/thumbnail.webp?url';
 
 /** Static thumbnail URLs keyed by `<kernel>/<example>`. @public */
 export const thumbnailAssets = {
@@ -190,36 +192,38 @@ export const thumbnailAssets = {
   'replicad/hollow-box': thumbnail74,
   'replicad/ibeam': thumbnail75,
   'replicad/jscad-logo': thumbnail76,
-  'replicad/kestrel-240-quadcopter': thumbnail77,
-  'replicad/lego': thumbnail78,
-  'replicad/libassimp-format-prism': thumbnail79,
-  'replicad/logo': thumbnail80,
-  'replicad/logo-keychain': thumbnail81,
-  'replicad/nanoraster-logo': thumbnail82,
-  'replicad/picovoxel-logo': thumbnail83,
-  'replicad/planetary-gear-system': thumbnail84,
-  'replicad/pot-plant': thumbnail85,
-  'replicad/projection-test': thumbnail86,
-  'replicad/rao-nozzle': thumbnail87,
-  'replicad/replicad-logo': thumbnail88,
-  'replicad/simple-tray': thumbnail89,
-  'replicad/six-axis-arm': thumbnail90,
-  'replicad/spur-gearbox': thumbnail91,
-  'replicad/staircase': thumbnail92,
-  'replicad/standing-fan': thumbnail93,
-  'replicad/stress-test': thumbnail94,
-  'replicad/t-slot-rail': thumbnail95,
-  'replicad/table': thumbnail96,
-  'replicad/tau-wordmark': thumbnail97,
-  'replicad/tray': thumbnail98,
-  'replicad/turbofan': thumbnail99,
-  'replicad/v8-engine': thumbnail100,
-  'replicad/vase': thumbnail101,
-  'replicad/wavy-vase': thumbnail102,
-  'replicad/wedge-door-stopper': thumbnail103,
-  'replicad/wheelbarrow': thumbnail104,
-  'replicad/worm-gear-system': thumbnail105,
-  'tscircuit/led-board': thumbnail106,
+  'replicad/jscad-part-reuse': thumbnail77,
+  'replicad/kestrel-240-quadcopter': thumbnail78,
+  'replicad/lego': thumbnail79,
+  'replicad/libassimp-format-prism': thumbnail80,
+  'replicad/logo': thumbnail81,
+  'replicad/logo-keychain': thumbnail82,
+  'replicad/nanoraster-logo': thumbnail83,
+  'replicad/picovoxel-logo': thumbnail84,
+  'replicad/picovoxel-part-reuse': thumbnail85,
+  'replicad/planetary-gear-system': thumbnail86,
+  'replicad/pot-plant': thumbnail87,
+  'replicad/projection-test': thumbnail88,
+  'replicad/rao-nozzle': thumbnail89,
+  'replicad/replicad-logo': thumbnail90,
+  'replicad/simple-tray': thumbnail91,
+  'replicad/six-axis-arm': thumbnail92,
+  'replicad/spur-gearbox': thumbnail93,
+  'replicad/staircase': thumbnail94,
+  'replicad/standing-fan': thumbnail95,
+  'replicad/stress-test': thumbnail96,
+  'replicad/t-slot-rail': thumbnail97,
+  'replicad/table': thumbnail98,
+  'replicad/tau-wordmark': thumbnail99,
+  'replicad/tray': thumbnail100,
+  'replicad/turbofan': thumbnail101,
+  'replicad/v8-engine': thumbnail102,
+  'replicad/vase': thumbnail103,
+  'replicad/wavy-vase': thumbnail104,
+  'replicad/wedge-door-stopper': thumbnail105,
+  'replicad/wheelbarrow': thumbnail106,
+  'replicad/worm-gear-system': thumbnail107,
+  'tscircuit/led-board': thumbnail108,
 } as const;
 
 /** Key of a generated example thumbnail asset. @public */

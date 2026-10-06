@@ -1,4 +1,5 @@
 import { setup, types } from 'xstate';
+import type { SnapshotFrom } from 'xstate';
 import { wrap } from 'comlink';
 import type { Remote } from 'comlink';
 import { safeDispose } from '@taucad/utils/dispose';
@@ -6,11 +7,42 @@ import { safeDispose } from '@taucad/utils/dispose';
 import ObjectStoreWorker from '#hooks/object-store.worker.js?worker';
 import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
 import { eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
+import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
+
+/** Actual suspended steps of one private project creation; never a work-progress estimate. */
+export type ProjectCreationPhase =
+  | 'worker-ready'
+  | 'storage-root'
+  | 'allocate-directory'
+  | 'prepare-journal'
+  | 'pin-backend'
+  | 'resolve-storage-scope'
+  | 'commit-directory'
+  | 'persist-route'
+  | 'sync-roots'
+  | 'resume-resources'
+  | 'promote-attachments'
+  | 'persist-chats'
+  | 'complete-journal'
+  | 'prior-discovery'
+  | 'invalidate-projects'
+  | 'persist-location';
+
+/** One live observation; the original argument is kept only by reference and is never serialized. */
+export type ProjectCreationObservation = Readonly<{
+  owner: CreateProjectOptions;
+  phase: ProjectCreationPhase;
+  projectId?: string;
+  operationId?: string;
+  backend?: 'indexeddb' | 'opfs' | 'node' | 'webaccess';
+}>;
 
 type ProjectManagerContext = {
   worker: Worker | undefined;
   wrappedWorker: Remote<ObjectStoreWorkerType> | undefined;
   error: Error | undefined;
+  creation: ProjectCreationObservation | undefined;
+  creationUnavailable: boolean;
 };
 
 type WorkerInitializedEvent = {
@@ -42,7 +74,12 @@ const projectManagerActors = {
   initializeWorkerActor,
 } as const;
 
-type ProjectManagerEvent = { type: 'initialize' } | WorkerInitializedEvent;
+type ProjectManagerEvent =
+  | { type: 'initialize' }
+  | WorkerInitializedEvent
+  | { type: 'creationStarted'; owner: CreateProjectOptions }
+  | { type: 'creationObserved'; observation: ProjectCreationObservation }
+  | { type: 'creationsDrained' };
 
 /**
  * Project Manager Machine
@@ -63,13 +100,32 @@ export const projectManagerMachine = setup({
     worker: undefined,
     wrappedWorker: undefined,
     error: undefined,
+    creation: undefined,
+    creationUnavailable: false,
+  },
+  on: {
+    creationStarted: {
+      context: ({ context, event }) =>
+        context.creation !== undefined || context.creationUnavailable
+          ? { creation: undefined, creationUnavailable: true }
+          : { creation: { owner: event.owner, phase: 'worker-ready' }, creationUnavailable: false },
+    },
+    creationObserved: {
+      context: ({ context, event }) =>
+        context.creation?.owner === event.observation.owner && !context.creationUnavailable
+          ? { creation: event.observation }
+          : {}, // Foreign/overlapping scopes cannot supply an observation.
+    },
+    creationsDrained: { context: { creation: undefined, creationUnavailable: false } },
   },
   initial: 'initializing',
   exit: ({ context }, enq) => {
     enq(() => {
       safeDispose(() => context.worker?.terminate());
     });
-    return { context: { worker: undefined, wrappedWorker: undefined } };
+    return {
+      context: { worker: undefined, wrappedWorker: undefined, creation: undefined, creationUnavailable: false },
+    };
   },
   states: {
     initializing: {
@@ -133,5 +189,12 @@ export const projectManagerMachine = setup({
     },
   },
 });
+
+/** Select current authority only; XState retains immutable context in a stopped snapshot. */
+export const selectProjectCreation = (
+  snapshot: SnapshotFrom<typeof projectManagerMachine>,
+  owner: CreateProjectOptions | undefined,
+): ProjectCreationObservation | undefined =>
+  snapshot.status === 'active' && snapshot.context.creation?.owner === owner ? snapshot.context.creation : undefined;
 
 export type ProjectManagerMachine = typeof projectManagerMachine;

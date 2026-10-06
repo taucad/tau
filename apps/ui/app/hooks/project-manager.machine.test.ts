@@ -3,7 +3,8 @@ import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import type { Remote } from 'comlink';
 import type { ObjectStoreWorker as ObjectStoreWorkerType } from '#hooks/object-store.worker.js';
-import { projectManagerMachine } from '#hooks/project-manager.machine.js';
+import { projectManagerMachine, selectProjectCreation } from '#hooks/project-manager.machine.js';
+import type { CreateProjectOptions } from '#hooks/use-project-manager.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 vi.mock('#hooks/object-store.worker.js?worker', () => ({
@@ -62,6 +63,12 @@ async function startAndInit(options?: Parameters<typeof createTestActor>[0]) {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+const creationInput = (): CreateProjectOptions => ({
+  project: { name: 'Creation observation', description: '', tags: [], assets: { main: { entryPath: 'main.ts' } } },
+  files: {},
+  location: { kind: 'home' },
+});
 
 describe('projectManagerMachine', () => {
   afterEach(() => {
@@ -162,6 +169,66 @@ describe('projectManagerMachine', () => {
       expect(context.wrappedWorker).toBeUndefined();
       expect(context.error).toBeUndefined();
       actor.stop();
+    });
+  });
+
+  describe('private live creation observation', () => {
+    it('should bind actual argument identity and reject a foreign phase', async () => {
+      const actor = await startAndInit();
+      const owner = creationInput();
+      actor.send({ type: 'creationStarted', owner });
+      actor.send({
+        type: 'creationObserved',
+        observation: { owner, phase: 'prepare-journal', projectId: 'proj_owned' },
+      });
+      expect(selectProjectCreation(actor.getSnapshot(), owner)?.owner).toBe(owner);
+      expect(actor.getSnapshot().context.creation?.phase).toBe('prepare-journal');
+      expect(actor.getSnapshot().context.creation?.operationId).toBeUndefined();
+      actor.send({
+        type: 'creationObserved',
+        observation: { owner: creationInput(), phase: 'commit-directory', operationId: 'foreign' },
+      });
+      expect(actor.getSnapshot().context.creation?.phase).toBe('prepare-journal');
+      expect(actor.getSnapshot().context.creation?.operationId).toBeUndefined();
+      expect(selectProjectCreation(actor.getSnapshot(), creationInput())).toBeUndefined();
+      actor.send({ type: 'creationsDrained' });
+      expect(actor.getSnapshot().context.creation).toBeUndefined();
+      actor.stop();
+    });
+
+    it.each(['foreign argument', 'duplicate argument'])(
+      'should deny %s overlap until all live scopes drain',
+      async (overlap) => {
+        const actor = await startAndInit();
+        const owner = creationInput();
+        actor.send({ type: 'creationStarted', owner });
+        actor.send({ type: 'creationStarted', owner: overlap === 'duplicate argument' ? owner : creationInput() });
+        expect(actor.getSnapshot().context.creation).toBeUndefined();
+        expect(actor.getSnapshot().context.creationUnavailable).toBe(true);
+        actor.send({ type: 'creationObserved', observation: { owner, phase: 'commit-directory' } });
+        actor.send({ type: 'creationStarted', owner: creationInput() });
+        expect(actor.getSnapshot().context.creation).toBeUndefined();
+        expect(actor.getSnapshot().context.creationUnavailable).toBe(true);
+        actor.send({ type: 'creationsDrained' });
+        actor.send({ type: 'creationStarted', owner });
+        expect(actor.getSnapshot().context.creation?.owner).toBe(owner);
+        expect(actor.getSnapshot().context.creationUnavailable).toBe(false);
+        actor.stop();
+      },
+    );
+
+    it('should revoke the slot on actor exit and reject a stale settle in its replacement', async () => {
+      const actor = await startAndInit();
+      const owner = creationInput();
+      actor.send({ type: 'creationStarted', owner });
+      expect(selectProjectCreation(actor.getSnapshot(), owner)?.owner).toBe(owner);
+      actor.stop();
+      expect(actor.getSnapshot().status).toBe('stopped');
+      expect(selectProjectCreation(actor.getSnapshot(), owner)).toBeUndefined();
+      const replacement = await startAndInit();
+      replacement.send({ type: 'creationObserved', observation: { owner, phase: 'commit-directory' } });
+      expect(selectProjectCreation(replacement.getSnapshot(), owner)).toBeUndefined();
+      replacement.stop();
     });
   });
 });

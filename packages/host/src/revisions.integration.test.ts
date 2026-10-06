@@ -1275,7 +1275,10 @@ for (const row of ports) {
         payload: { chatId: 'chat-1', runId: 'run-1' },
       });
 
-      expect(resumed.status).toBe('applied');
+      expect(
+        resumed.status,
+        resumed.status === 'refused' ? `Resume refusal code: ${resumed.code}` : 'Resume should be applied.',
+      ).toBe('applied');
       await expect
         .poll(async () => settlementsOf(held.launcher).then((settlements) => settlements?.length), {
           timeout: 10_000,

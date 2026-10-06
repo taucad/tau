@@ -197,6 +197,24 @@ describe('finishing a review', () => {
     expect(await finishReview({ canvas, root: artifacts })).toMatchObject({ status: 'refused', code: 'INVALID_EVENT' });
   });
 
+  it('should check tracked review edits without reading a large unrelated untracked inventory', async () => {
+    const { root, artifacts, canvas } = repository();
+    await appendReviewEvent({ canvas, root: artifacts, event: comment });
+    expect(await finishReview({ canvas, root: artifacts })).toMatchObject({ status: 'committed', events: 1 });
+    const [file] = readdirSync(join(artifacts, canvas, 'review'));
+    writeFileSync(join(artifacts, canvas, 'review', file!), '{}');
+
+    const unrelated = join(artifacts, canvas, 'untracked');
+    mkdirSync(unrelated);
+    for (let index = 0; index < 4200; index++) {
+      writeFileSync(join(unrelated, `${String(index).padStart(4, '0')}-${'x'.repeat(230)}.txt`), '');
+    }
+    expect(() => git(root, 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--', 'artifacts')).toThrow(
+      /ENOBUFS/,
+    );
+    expect(changedReviewEvents(artifacts)).toEqual([`artifacts/${canvas}/review/${file}`]);
+  });
+
   it('should report a canvas outside Git as read-only', async () => {
     const artifacts = mkdtempSync(resolve(tmpdir(), 'tau-canvas-review-nogit-'));
     temporaryPaths.push(artifacts);

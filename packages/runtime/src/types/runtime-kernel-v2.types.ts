@@ -7,6 +7,7 @@ import type { CadUnits, ExportFile as ExistingExportFile, MediaType as SharedMed
 import type { ParameterDeclaration, ParameterResolutionOptions } from '@taucad/parameters';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
 import type { KernelIssue, KernelErrorResult, KernelSuccessResult } from '#types/runtime.types.js';
+import type { PublishedPartExact, PublishedAssemblyComponentPlacement } from '#types/runtime-assembly.types.js';
 import type {
   KernelRuntime,
   NativeBuildInputCarrier,
@@ -169,6 +170,21 @@ export type RenderResult = PipelineResult<Artifact>;
 /** Admitted nonempty export envelope. @public */
 export type KernelExportResult = PipelineResult<NonemptyExportFiles>;
 
+/** Producer-qualified portable exact snapshot metadata. @public */
+export type HandleSnapshotExactDescriptor = Omit<PublishedPartExact, 'asset' | 'kernelId'>;
+/** Restored exact handles placed in an admitted assembly, in column-major world metres. @public */
+export type ComposeHandlesInput<Handle> = Readonly<{
+  occurrences: ReadonlyArray<
+    Readonly<{
+      handle: Handle;
+      occurrencePath: readonly string[];
+      worldTransform: readonly number[];
+      components?: ReadonlyArray<PublishedAssemblyComponentPlacement & { readonly sourceComponentId: string }>;
+      displaySourceComponentIds?: readonly string[];
+    }>
+  >;
+}>;
+
 type SnapshotHooks<Context, Handle, Serialized> =
   | {
       serializeHandle(input: Readonly<{ handle: Handle }>, services: KernelServices, context: Context): Serialized;
@@ -176,9 +192,14 @@ type SnapshotHooks<Context, Handle, Serialized> =
         input: Readonly<{ serialized: Serialized }>,
         services: KernelServices,
         context: Context,
-      ): Handle;
+      ): Handle | Promise<Handle>;
+      describeHandleSnapshot?(
+        input: Readonly<{ serialized: Serialized }>,
+        services: KernelServices,
+        context: Context,
+      ): HandleSnapshotExactDescriptor | undefined;
     }
-  | { serializeHandle?: never; deserializeHandle?: never };
+  | { serializeHandle?: never; deserializeHandle?: never; describeHandleSnapshot?: never };
 type RenderRequirement<Views> = [keyof Views] extends [never] ? { render?: never } : { render: unknown };
 type ExportRequirement<Exports> = [keyof Exports] extends [never] ? { export?: never } : { export: unknown };
 
@@ -229,6 +250,11 @@ export type KernelDefinitionV2<
     services: KernelServices,
     context: Context,
   ): boolean | Promise<boolean>;
+  composeHandles?(
+    input: ComposeHandlesInput<NoInfer<Handle>>,
+    services: KernelServices,
+    context: NoInfer<Context>,
+  ): Promise<Handle>;
   releaseHandle?(input: Readonly<{ handle: Handle }>, services: KernelServices, context: Context): void;
   onDispose?(context: Context): Promise<void>;
 } & SnapshotHooks<Context, Handle, Serialized> &
@@ -457,6 +483,9 @@ export function defineKernelV2<
   }
   if ((typeof definition.serializeHandle === 'function') !== (typeof definition.deserializeHandle === 'function')) {
     throw new TypeError(`Kernel "${id}" handle snapshots require both serializeHandle and deserializeHandle.`);
+  }
+  if (definition.describeHandleSnapshot && typeof definition.serializeHandle !== 'function') {
+    throw new TypeError(`Kernel "${id}" exact snapshot descriptors require paired snapshot hooks.`);
   }
   const viewMetadata = Object.fromEntries(
     Object.entries(views).map(([viewId, view]) => [viewId, declarationMetadata(view, `${id} view ${viewId}`)]),

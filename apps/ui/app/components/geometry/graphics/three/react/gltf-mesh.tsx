@@ -907,34 +907,55 @@ type GltfMeshDisplayProperties = {
   ) => void;
 };
 
-/** Project a source deviation through the actual posed O*S and camera frame, conservatively in both axes. */
-export function estimateAssemblyDetailPixelError({
-  sourceBounds,
-  sourceError,
-  drawToRender,
-  camera,
-  viewport,
-}: {
+type AssemblyDetailPixelErrorInput = {
   sourceBounds: Box3;
   sourceError: number;
   drawToRender: Matrix4;
   camera: Camera;
   viewport: Readonly<{ width: number; height: number }>;
-}): number {
+};
+
+type AssemblyDetailCameraFrame = Readonly<{
+  inverse: Matrix4;
+  near: number | undefined;
+  projection: Camera['projectionMatrix']['elements'];
+  projectionFinite: boolean;
+}>;
+
+function prepareAssemblyDetailCameraFrame(camera: Camera): AssemblyDetailCameraFrame {
+  camera.updateWorldMatrix(true, false);
+  const projection = camera.projectionMatrix.elements;
+  return {
+    inverse: camera.matrixWorldInverse,
+    near: 'near' in camera && typeof camera.near === 'number' ? camera.near : undefined,
+    projection,
+    projectionFinite: projection.every((value) => Number.isFinite(value)),
+  };
+}
+
+function isValidAssemblyDetailViewport(viewport: AssemblyDetailPixelErrorInput['viewport']): boolean {
+  return (
+    Number.isFinite(viewport.width) && viewport.width > 0 && Number.isFinite(viewport.height) && viewport.height > 0
+  );
+}
+
+/** Project a source deviation through the actual posed O*S and camera frame, conservatively in both axes. */
+function estimateAssemblyDetailPixelErrorWithFrame(
+  { sourceBounds, sourceError, drawToRender, viewport }: Omit<AssemblyDetailPixelErrorInput, 'camera'>,
+  getCameraFrame: () => AssemblyDetailCameraFrame,
+  validViewport: boolean,
+): number {
   if (
     sourceBounds.isEmpty() ||
     ![...sourceBounds.min.toArray(), ...sourceBounds.max.toArray()].every((value) => Number.isFinite(value)) ||
     !Number.isFinite(sourceError) ||
     sourceError < 0 ||
-    !Number.isFinite(viewport.width) ||
-    viewport.width <= 0 ||
-    !Number.isFinite(viewport.height) ||
-    viewport.height <= 0
+    !validViewport
   ) {
     return Infinity;
   }
-  camera.updateWorldMatrix(true, false);
-  const view = camera.matrixWorldInverse.clone().multiply(drawToRender);
+  const { inverse, near, projection, projectionFinite } = getCameraFrame();
+  const view = inverse.clone().multiply(drawToRender);
   const { elements } = view;
   if (
     !elements.every((value) => Number.isFinite(value)) ||
@@ -960,12 +981,10 @@ export function estimateAssemblyDetailPixelError({
       elements[10],
     );
   const bounds = sourceBounds.clone().applyMatrix4(view);
-  const near = 'near' in camera && typeof camera.near === 'number' ? camera.near : undefined;
   if (near === undefined || !Number.isFinite(near) || bounds.max.z + error >= -near) {
     return Infinity;
   }
-  const projection = camera.projectionMatrix.elements;
-  if (!projection.every((value) => Number.isFinite(value))) {
+  if (!projectionFinite) {
     return Infinity;
   }
   let minW = Infinity;
@@ -990,6 +1009,15 @@ export function estimateAssemblyDetailPixelError({
     pixels *
     0.5;
   return Math.hypot(projected(0, maxX, viewport.width), projected(1, maxY, viewport.height));
+}
+
+/** Project a source deviation through the actual posed O*S and camera frame, conservatively in both axes. */
+export function estimateAssemblyDetailPixelError(input: AssemblyDetailPixelErrorInput): number {
+  return estimateAssemblyDetailPixelErrorWithFrame(
+    input,
+    () => prepareAssemblyDetailCameraFrame(input.camera),
+    isValidAssemblyDetailViewport(input.viewport),
+  );
 }
 
 /** Full evidence exits detail immediately; only entry is tightened to prevent threshold oscillation. */
@@ -1677,6 +1705,12 @@ function resolveAssemblyDetailSelections({
       linkByComponent.set(id, linkId);
     }
   }
+  const validViewport = isValidAssemblyDetailViewport(viewport);
+  let cameraFrame: AssemblyDetailCameraFrame | undefined;
+  const getCameraFrame = (): AssemblyDetailCameraFrame => {
+    cameraFrame ??= prepareAssemblyDetailCameraFrame(camera);
+    return cameraFrame;
+  };
   for (const path of resident) {
     const leaf = demand.index.keyToLeaf.get(path);
     const occurrence = leaf === undefined ? undefined : metadata.occurrences[demand.index.occurrenceIndices[leaf]!];
@@ -1717,13 +1751,16 @@ function resolveAssemblyDetailSelections({
       if (!sourceBounds) {
         throw new Error('Detail demand lost source-local primitive bounds');
       }
-      const approximatePixelError = estimateAssemblyDetailPixelError({
-        sourceBounds,
-        sourceError: primitive.detail.approximateSourceError,
-        drawToRender: renderPlacement.clone().multiply(placed),
-        camera,
-        viewport,
-      });
+      const approximatePixelError = estimateAssemblyDetailPixelErrorWithFrame(
+        {
+          sourceBounds,
+          sourceError: primitive.detail.approximateSourceError,
+          drawToRender: renderPlacement.clone().multiply(placed),
+          viewport,
+        },
+        getCameraFrame,
+        validViewport,
+      );
       if (calibration) {
         if (Number.isFinite(approximatePixelError)) {
           calibration.maxProjectedApproximateErrorPixels = Math.max(

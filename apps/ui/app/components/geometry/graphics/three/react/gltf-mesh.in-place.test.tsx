@@ -3885,6 +3885,34 @@ describe('actual assembly detail producer oracle', () => {
     expect(detailDispose).toHaveBeenCalledOnce();
     expect(canonicalDispose).toHaveBeenCalledOnce();
   });
+  it('should refresh the camera once for a synchronous screen-space detail selection pass', async () => {
+    const display = await residentAssembly({ occurrenceCount: 20, sourceGrid: 16, spacing: 20 });
+    const updateWorldMatrix = vi.spyOn(mocks.camera!, 'updateWorldMatrix');
+    const view = render(
+      <GltfMesh
+        assemblyDisplay={display}
+        sourceFile='assembly.json'
+        geometryHash={display.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+        assemblyDetailPolicy={{
+          triangleRatio: 0.5,
+          approximateRelativeError: 0.05,
+          screenSpace: { maxApproximatePixelError: 2, enterDetailRatio: 0.6 },
+        }}
+      />,
+    );
+    try {
+      await waitFor(() => {
+        expect(committedRevisions()).toEqual([1]);
+      });
+      // Initial preparation and its latest-candidate check each select all 20 primitives.
+      expect(updateWorldMatrix).toHaveBeenCalledTimes(2);
+    } finally {
+      view.unmount();
+      updateWorldMatrix.mockRestore();
+    }
+  });
   it('should retain derived upload owners while canonical engineering geometry and selected full evidence stay intact', async () => {
     const scenes: Object3D[] = [];
     mocks.observePreparation = vi.fn((scene: Object3D) => {

@@ -4037,6 +4037,9 @@ export function GltfMesh({
   const isViewerHoverSuppressed = useGraphicsSelector(
     (state) => state.context.viewerHoverSuppressionReasons.length > 0,
   );
+  const isCameraDragHoverSuppressed = useGraphicsSelector((state) =>
+    state.context.viewerHoverSuppressionReasons.includes('cameraControls'),
+  );
   const kinematicsHoveredComponentIds = useKinematicsSelector(
     (state) => getKinematicsUnitState(state.context, unitId).hoveredComponentIds,
   );
@@ -6056,13 +6059,14 @@ export function GltfMesh({
     return undefined;
   }
 
+  // R3F excludes objects without hover handlers before pointer-move raycasting; presses still pick.
   return (
     <group matrix={assetMatrix} matrixAutoUpdate={false}>
       <primitive
         object={scene}
-        onPointerMove={handlePointerMove}
+        onPointerMove={isCameraDragHoverSuppressed ? undefined : handlePointerMove}
         onPointerDown={handlePointerDown}
-        onPointerOut={handlePointerOut}
+        onPointerOut={isCameraDragHoverSuppressed ? undefined : handlePointerOut}
         onClick={handleClick}
         onPointerMissed={handlePointerMissed}
       />

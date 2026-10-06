@@ -60,7 +60,9 @@ type RendererMock = {
 const mocks = vi.hoisted(() => {
   const gl: RendererMock = {};
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
+  const viewerHoverSuppressionReasons: string[] = [];
   return {
+    viewerHoverSuppressionReasons,
     noHoveredComponentIds: [] as readonly string[],
     kinematics: undefined as ActorRefFrom<typeof kinematicsMachine> | undefined,
     camera: { name: 'perspective' },
@@ -84,9 +86,12 @@ const mocks = vi.hoisted(() => {
       send: vi.fn(),
       getSnapshot: () => ({
         context: {
+          assemblyDetailCalibration: undefined,
+          isMeasureActive: false,
+          measurements: [],
           modelPointerClickSuppressionReasons: [],
           suppressNextModelPointerClick: false,
-          viewerHoverSuppressionReasons: [],
+          viewerHoverSuppressionReasons,
         },
       }),
     },
@@ -148,7 +153,8 @@ vi.mock('#components/geometry/graphics/three/react/section-clipping-group.js', (
 vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => mocks.cameraRig,
   useGraphics: () => mocks.graphicsActor,
-  useGraphicsSelector: () => false,
+  useGraphicsSelector: (selector: (snapshot: ReturnType<typeof mocks.graphicsActor.getSnapshot>) => unknown) =>
+    selector(mocks.graphicsActor.getSnapshot()),
   useRenderFrame: () => mocks.renderFrame,
   useRenderFrameRetarget: (handler: (frame: RenderFrame) => void) => {
     useLayoutEffect(() => {
@@ -334,6 +340,7 @@ describe('GltfMesh camera lifecycle', () => {
     mocks.cameraRig.orthographicCamera.coordinateSystem = undefined;
     mocks.sectionView = { isActive: false };
     mocks.raycastClipState = undefined;
+    mocks.viewerHoverSuppressionReasons.length = 0;
   });
 
   it('should commit the active scene without compiling a detached context or inactive projection', async () => {
@@ -793,7 +800,7 @@ describe('GltfMesh camera lifecycle', () => {
     view.unmount();
   });
 
-  it('should reuse the authoritative R3F hit for hover, selection and the secondary-pointer menu', async () => {
+  it('should skip camera-drag hover queries but retain R3F press, click and restored hover hits', async () => {
     const gltf = createGltf();
     const near = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
     const far = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
@@ -884,6 +891,43 @@ describe('GltfMesh camera lifecycle', () => {
       expect(raycast).toHaveBeenCalledTimes(1);
 
       near.layers.set(0);
+      mocks.viewerHoverSuppressionReasons.push('cameraControls');
+      await act(async () => {
+        root.render(
+          <GltfMesh
+            gltfFile={bytes}
+            enableMatcap={false}
+            onModelComponentSecondaryPointerCandidate={secondaryPointer}
+          />,
+        );
+      });
+      raycast.mockClear();
+      await act(async () => handlers?.onPointerMove(pointer));
+      expect(raycast).not.toHaveBeenCalled();
+
+      await act(async () => handlers?.onPointerDown(pointer));
+      await act(async () => handlers?.onPointerDown(secondaryPointerEvent));
+      await act(async () => handlers?.onClick(pointer));
+      expect(raycast).toHaveBeenCalledTimes(3);
+      expect(secondaryPointer).toHaveBeenLastCalledWith({ unitId: 'unit:test', componentId: 'near' });
+
+      mocks.viewerHoverSuppressionReasons.length = 0;
+      await act(async () => {
+        root.render(
+          <GltfMesh
+            gltfFile={bytes}
+            enableMatcap={false}
+            onModelComponentSecondaryPointerCandidate={secondaryPointer}
+          />,
+        );
+      });
+      raycast.mockClear();
+      await act(async () => handlers?.onPointerMove(pointer));
+      expect(raycast).toHaveBeenCalledOnce();
+      raycast.mockClear();
+      await act(async () => handlers?.onClick(pointer));
+      expect(raycast).toHaveBeenCalledOnce();
+
       mocks.raycastClipState = clipBeyond(
         direction.clone().negate(),
         nearCenter.clone().add(farCenter).multiplyScalar(0.5),

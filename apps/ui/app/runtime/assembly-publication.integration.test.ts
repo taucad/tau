@@ -350,9 +350,24 @@ it.each(['jscad', 'picovoxel'])(
       return rooted.readFile(path);
     });
     let notifyRoot: (() => void) | undefined;
+    let notifyExternal: (() => void) | undefined;
     const unsubscribe = vi.fn();
+    contentService.onDidContentChange.mockReturnValue(() => undefined);
+    contentService.watchReady.mockImplementation(({ paths }, onEvent) => {
+      const path = paths[0];
+      if (path !== 'scene.json') {
+        throw new Error('Expected the selected scene watch.');
+      }
+      notifyExternal = () => {
+        onEvent({ type: 'change', path });
+      };
+      return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() };
+    });
     contentService.subscribe.mockImplementation((_path, listener) => {
-      notifyRoot = listener;
+      notifyRoot = () => {
+        notifyExternal?.();
+        listener();
+      };
       return unsubscribe;
     });
     const openFileSystemBridge = vi.fn((_root: string, consumer: 'agent' | 'user' | 'working-copy') =>
@@ -864,6 +879,12 @@ it('should keep source and pinned reads available on a read-only host while deny
   };
   const contentService = mock<FileContentService>();
   contentService.readRawBytes.mockImplementation(async (path) => rooted.readFile(path));
+  contentService.onDidContentChange.mockReturnValue(() => undefined);
+  contentService.watchReady.mockImplementation(() => ({
+    ready: Promise.resolve(),
+    closed: Promise.withResolvers<void>().promise,
+    dispose: vi.fn(),
+  }));
   contentService.subscribe.mockReturnValue(() => undefined);
   const openFileSystemBridge = vi.fn(() => createFileSystemBridgePort(readOnly));
   const snapshot = mock<ReturnType<NonNullable<CadContext['fileManagerRef']>['getSnapshot']>>({
@@ -950,6 +971,24 @@ it('publishes an authored CAD entry through host authority and refreshes its roo
   const contentService = mock<FileContentService>();
   contentService.readRawBytes.mockImplementation(async (path) => rooted.readFile(path));
   const listeners = new Map<string, () => void>();
+  const watchEvents = new Map<string, () => void>();
+  contentService.onDidContentChange.mockReturnValue(() => undefined);
+  contentService.watchReady.mockImplementation(({ paths }, onEvent) => {
+    const path = paths[0];
+    if (!path) {
+      throw new Error('Expected a bounded assembly watch path.');
+    }
+    watchEvents.set(path, () => {
+      onEvent({ type: 'change', path });
+    });
+    return {
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      dispose: () => {
+        watchEvents.delete(path);
+      },
+    };
+  });
   contentService.subscribe.mockImplementation((path, listener) => {
     if (!path) {
       throw new Error('Expected a bounded selected entry subscription.');
@@ -1006,12 +1045,14 @@ it('publishes an authored CAD entry through host authority and refreshes its roo
     expect(actor.getSnapshot().context.publishedAssemblyEntryPath).toBe('assembly.json');
     expect(publish).toHaveBeenCalledOnce();
     expect(listeners.has(root.path)).toBe(true);
+    expect(watchEvents.has(root.path)).toBe(true);
     const calls = producerCalls;
     const current = await readStoredLogicalRoot(rooted, root.path);
     const nextBytes = await writeStoredLogicalRoot(rooted, root.path, {
       ...current,
       generation: current.generation + 1,
     });
+    watchEvents.get(root.path)?.();
     listeners.get(root.path)?.();
     await waitFor(
       actor,
@@ -1028,6 +1069,7 @@ it('publishes an authored CAD entry through host authority and refreshes its roo
     agent.dispose();
   }
   expect(listeners.size).toBe(0);
+  expect(watchEvents.size).toBe(0);
 });
 
 it.each(['', '/nested'])(

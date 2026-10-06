@@ -46,9 +46,14 @@ type ReplicadTestOptions = {
   readonly workerOptions?: Parameters<typeof replicadKernel>[0];
 };
 
+// The suite runs every runtime in this one isolate. The multi-threaded build parks
+// an `Atomics.waitAsync` on its pthread mailbox that never settles, so each multi
+// runtime keeps its whole OpenCASCADE heap reachable after shutdown: about 100 MB
+// a test, which took this file past the 16 GB CI runner. Tests take the
+// single-threaded build unless they name a variant.
 const createReplicadRuntime = (options?: ReplicadTestOptions) =>
   defineRuntime({
-    kernels: [replicadKernel(options?.workerOptions)],
+    kernels: [replicadKernel({ wasm: 'single', ...options?.workerOptions })],
     bundlers: [esbuildBundler()],
   });
 

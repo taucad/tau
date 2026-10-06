@@ -82,6 +82,8 @@ type ViewerSettingsProps = {
   readonly side?: DropdownMenuContentProps['side'];
   /** How the menu aligns against the trigger. */
   readonly align?: DropdownMenuContentProps['align'];
+  /** The current view's kernel settings, closing the Rendering section; the viewer supplies them per pane. */
+  readonly kernelSettings?: React.ReactNode;
 };
 
 /**
@@ -157,7 +159,12 @@ function FieldOfViewRow(): React.JSX.Element {
  * All settings are per-view, read from the per-view GraphicsMachine state via GraphicsProvider
  * and the per-view CadMachine state via CadProvider.
  */
-export function ViewerSettings({ className, side = 'right', align = 'end' }: ViewerSettingsProps): React.ReactNode {
+export function ViewerSettings({
+  className,
+  side = 'right',
+  align = 'end',
+  kernelSettings,
+}: ViewerSettingsProps): React.ReactNode {
   const graphicsRef = useGraphics();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -287,38 +294,28 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
               <PenLine />
               Lines
             </DropdownMenuSwitchItem>
-            <DropdownMenuSwitchItem className='h-10' isChecked={enableMatcap} onIsCheckedChange={handleMatcapToggle}>
-              <Sparkles />
-              <div className='flex flex-col'>
-                <span className='flex items-center gap-1'>
-                  Matcap{' '}
-                  <InfoTooltip>
-                    A material that gives models a consistent appearance independent of scene lighting.
-                    <br /> Rendering performance is improved with this enabled.
-                  </InfoTooltip>
-                </span>
-                <span className='text-xs font-medium text-muted-foreground/80'>
-                  Lighting effects are {enableMatcap ? 'inactive' : 'active'}
-                </span>
-              </div>
+            <DropdownMenuSwitchItem
+              icon={<Sparkles />}
+              description={`Lighting effects are ${enableMatcap ? 'inactive' : 'active'}`}
+              isChecked={enableMatcap}
+              onIsCheckedChange={handleMatcapToggle}
+            >
+              Matcap{' '}
+              <InfoTooltip>
+                A material that gives models a consistent appearance independent of scene lighting.
+                <br /> Rendering performance is improved with this enabled.
+              </InfoTooltip>
             </DropdownMenuSwitchItem>
             <DropdownMenuSwitchItem
-              className='h-10'
+              icon={<Layers />}
+              description={`Ambient occlusion is ${enablePostProcessing ? 'active' : 'inactive'}`}
               isChecked={enablePostProcessing}
               onIsCheckedChange={handlePostProcessingToggle}
             >
-              <Layers />
-              <div className='flex flex-col'>
-                <span className='flex items-center gap-1'>
-                  Post-processing{' '}
-                  <InfoTooltip>
-                    Enables screen-space ambient occlusion for more realistic depth and contact shadows.
-                  </InfoTooltip>
-                </span>
-                <span className='text-xs font-medium text-muted-foreground/80'>
-                  Ambient occlusion is {enablePostProcessing ? 'active' : 'inactive'}
-                </span>
-              </div>
+              Post-processing{' '}
+              <InfoTooltip>
+                Enables screen-space ambient occlusion for more realistic depth and contact shadows.
+              </InfoTooltip>
             </DropdownMenuSwitchItem>
             <DropdownMenuSeparator />
           </>
@@ -371,6 +368,7 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
           <Timer />
           Timeout
         </DropdownMenuSelectItem>
+        {kernelSettings}
       </DropdownMenuContent>
     </DropdownMenu>
   );

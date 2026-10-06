@@ -53,7 +53,7 @@ const presentation = (job: JobRecord): Presentation => {
     }
     case 'rejected':
     case 'failed': {
-      return { verb: 'Job failed', tone: 'destructive', separated: true };
+      return { verb: 'Job failed', tone: 'error', separated: true };
     }
     case 'unknown': {
       return { verb: 'Start not confirmed', tone: 'warning', separated: true };

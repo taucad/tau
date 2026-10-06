@@ -383,7 +383,7 @@ function JogPad({
   };
   const button = ({ axis, direction: shown, icon: Icon, area }: (typeof jogButtons)[number]): React.JSX.Element => {
     const isBed = axis === 'z' && isBedOnZ;
-    const direction = isBed ? -shown : shown;
+    const direction = isBed ? (shown === 1 ? -1 : 1) : shown;
     const label = `${axis.toUpperCase()}${direction > 0 ? '+' : '−'}`;
     const begin = (): void => {
       if (isEnabled && isHold) {
@@ -975,7 +975,10 @@ function CalibrationResults({
             key={result.id}
             label={result.label}
             badge={
-              <Badge variant={result.confidence === 'good' ? 'secondary' : 'destructive'}>
+              <Badge
+                variant={result.confidence === 'good' ? 'secondary' : 'outline'}
+                className={result.confidence === 'good' ? undefined : 'border-transparent bg-feature/10 text-feature'}
+              >
                 {resultWords[result.confidence]}
               </Badge>
             }
@@ -1085,7 +1088,7 @@ function ActivityCard({
         {isWaiting ? (
           <Hand aria-hidden className='size-4 shrink-0 text-information' />
         ) : activity.state === 'failed' ? (
-          <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
         ) : isFinished ? (
           <Check aria-hidden className='size-4 shrink-0 text-success' />
         ) : (
@@ -1360,7 +1363,7 @@ function CameraView({
           </figcaption>
         ) : null}
       </figure>
-      {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+      {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
     </div>
   );
 }

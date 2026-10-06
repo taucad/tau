@@ -109,12 +109,12 @@ export const describeRun = (entry: MachineDirectoryEntry): string | undefined =>
     .join(' · ');
 };
 
-type AlertTone = 'destructive' | 'warning' | 'neutral';
+type AlertTone = 'error' | 'warning' | 'neutral';
 
 const toneOf = ({ severity }: MachineAlert): AlertTone =>
-  severity === 'fatal' || severity === 'serious' ? 'destructive' : severity === 'info' ? 'neutral' : 'warning';
+  severity === 'fatal' || severity === 'serious' ? 'error' : severity === 'info' ? 'neutral' : 'warning';
 
-const alertGlyph = { destructive: OctagonAlert, warning: TriangleAlert, neutral: Info } as const;
+const alertGlyph = { error: OctagonAlert, warning: TriangleAlert, neutral: Info } as const;
 
 const severityLabel: Readonly<Record<NonNullable<MachineAlert['severity']>, string>> = {
   fatal: 'Fatal',
@@ -137,14 +137,14 @@ export function MachineAlerts({ control }: { readonly control: MachineControl })
     return undefined;
   }
   const tones = new Set(alerts.map((alert) => toneOf(alert)));
-  const tone: AlertTone = tones.has('destructive') ? 'destructive' : tones.has('warning') ? 'warning' : 'neutral';
+  const tone: AlertTone = tones.has('error') ? 'error' : tones.has('warning') ? 'warning' : 'neutral';
   return (
     <div
       role='alert'
       aria-label={alerts.length === 1 ? 'Machine alert' : 'Machine alerts'}
       className={cn(
         'min-w-0 rounded-lg border p-2 text-xs',
-        tone === 'destructive' && 'border-destructive/30 bg-destructive/10',
+        tone === 'error' && 'border-feature/30 bg-feature/10',
         tone === 'warning' && 'border-warning/30 bg-warning/10',
         tone === 'neutral' && 'border-border/70 bg-muted/30',
       )}
@@ -159,7 +159,7 @@ export function MachineAlerts({ control }: { readonly control: MachineControl })
                 aria-hidden
                 className={cn(
                   'mt-0.5 size-3.5 shrink-0',
-                  alertTone === 'destructive' && 'text-destructive',
+                  alertTone === 'error' && 'text-feature',
                   alertTone === 'warning' && 'text-warning',
                   alertTone === 'neutral' && 'text-muted-foreground',
                 )}
@@ -312,7 +312,12 @@ function Position({
         <h4 className='font-medium'>Position</h4>
         <span className='flex items-center gap-2'>
           {isObservationStale({ entry, componentId: motionId, group: 'position', now }) ? <StaleBadge /> : null}
-          <Badge variant={isKnown ? 'secondary' : 'destructive'}>{trustWords[trust]}</Badge>
+          <Badge
+            variant={isKnown ? 'secondary' : 'outline'}
+            className={isKnown ? undefined : 'border-transparent bg-feature/10 text-feature'}
+          >
+            {trustWords[trust]}
+          </Badge>
         </span>
       </div>
       <table className='w-full table-fixed text-xs tabular-nums'>
@@ -381,7 +386,14 @@ function MillingRows({ entry }: { readonly entry: MachineDirectoryEntry }): Reac
             </PrintRow>
           )}
           {motionValue.limits.length === 0 ? null : (
-            <PrintRow label='Limits' badge={<Badge variant='destructive'>Pressed</Badge>}>
+            <PrintRow
+              label='Limits'
+              badge={
+                <Badge variant='outline' className='border-transparent bg-feature/10 text-feature'>
+                  Pressed
+                </Badge>
+              }
+            >
               {motionValue.limits.map((axis) => axis.toUpperCase()).join(', ')}
             </PrintRow>
           )}
@@ -436,7 +448,9 @@ function MillingRows({ entry }: { readonly entry: MachineDirectoryEntry }): Reac
               label={component.label}
               badge={
                 state === 'safe' ? undefined : (
-                  <Badge variant='destructive'>{state === 'unsafe' ? 'Not safe' : 'Unknown'}</Badge>
+                  <Badge variant='outline' className='border-transparent bg-feature/10 text-feature'>
+                    {state === 'unsafe' ? 'Not safe' : 'Unknown'}
+                  </Badge>
                 )
               }
             >

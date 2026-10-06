@@ -60,7 +60,7 @@ export function PublicationEmailTagsField({
       >
         <TagsTrigger id={id} inputAriaLabel={label} placeholder={placeholder} disabled={disabled} />
       </Tags>
-      {error ? <p className='text-xs text-destructive'>{error}</p> : null}
+      {error ? <p className='text-xs text-feature'>{error}</p> : null}
     </div>
   );
 }

@@ -6,15 +6,15 @@ import type { toolName } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 
-const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog, mockStartEditingMessage } = vi.hoisted(
-  () => ({
+const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog, mockStartEditingMessage, textRenderCounts } =
+  vi.hoisted(() => ({
     mockMessagesById: new Map<string, MyUIMessage>(),
     mockMessageOrder: [] as string[],
     mockStatus: { value: 'ready' as 'ready' | 'streaming' | 'submitted' | 'error' },
     mockSkillsCatalog: [] as SkillMetadata[],
     mockStartEditingMessage: vi.fn(),
-  }),
-);
+    textRenderCounts: new Map<string, number>(),
+  }));
 
 const getMockChatSelectorState = (): {
   messages: MyUIMessage[];
@@ -142,6 +142,7 @@ vi.mock('#routes/w.$workspace.$project/chat-message-context-compaction.js', () =
 
 vi.mock('#routes/w.$workspace.$project/chat-message-text.js', () => ({
   ChatMessageText({ part }: { readonly part: { text: string } }) {
+    textRenderCounts.set(part.text, (textRenderCounts.get(part.text) ?? 0) + 1);
     return <div data-testid='chat-message-text'>{part.text}</div>;
   },
 }));
@@ -304,6 +305,36 @@ afterEach(() => {
   mockMessageOrder.length = 0;
   mockStatus.value = 'ready';
   mockSkillsCatalog.length = 0;
+  textRenderCounts.clear();
+});
+
+describe('ChatMessage completed activity rendering', () => {
+  it('renders a completed paragraph once while the active tail receives five updates', () => {
+    const completed: MyUIMessage['parts'][number] = { type: 'text', text: 'Completed paragraph', state: 'done' };
+    setMessages(
+      [{ id: 'stream', role: 'assistant', parts: [completed, { type: 'text', text: 'Live 0', state: 'streaming' }] }],
+      'streaming',
+    );
+    const view = render(<ChatMessage messageId='stream' footer={<span>0</span>} />);
+    for (let index = 1; index <= 5; index++) {
+      setMessages(
+        [
+          {
+            id: 'stream',
+            role: 'assistant',
+            parts: [completed, { type: 'text', text: `Live ${String(index)}`, state: 'streaming' }],
+          },
+        ],
+        'streaming',
+      );
+      view.rerender(<ChatMessage messageId='stream' footer={<span>{index}</span>} />);
+    }
+    expect(screen.getByText('Live 5')).toBeDefined();
+    expect(textRenderCounts.get('Completed paragraph')).toBe(1);
+    expect([...textRenderCounts].filter(([text]) => text.startsWith('Live')).map(([, count]) => count)).toEqual([
+      1, 1, 1, 1, 1, 1,
+    ]);
+  });
 });
 
 describe('ChatMessage column wrapper layout', () => {

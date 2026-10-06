@@ -19,7 +19,9 @@
 # **production context** only (`[build]` + `[context.production]` include them);
 # previews skip sourcemaps uploads to avoid leaking prod PostHog project keys into
 # PR builds (POSTHOG_CLI_* are still present on staging for main-branch builds —
-# use a distinct PostHog env per site in Terraform if needed).
+# use a distinct PostHog env per site in Terraform if needed). A failed upload
+# fails the build unless `TAU_SOURCEMAPS_OPTIONAL=true`, which `deploy-ui.yml`
+# sets for staging only, so a bad staging PostHog key cannot block the deploy.
 #
 # NX_PREFER_NODE_STRIP_TYPES: NODE_ENV=production at build time would make pnpm
 # skip devDependencies (including @swc/core). Nx needs a TS transpiler to load
@@ -28,15 +30,23 @@
 [build]
 # Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && pnpm nx run ui:sourcemaps"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 publish = "build/client"
 
 [build.environment]
 # Temporary: current Netlify plan cannot create Builds-scoped secrets.
 NX_NO_CLOUD = "true"
 
+# The React Router plugin writes the SSR function to `.netlify/v1/functions`
+# under this base. Naming that directory makes Netlify bundle the function from
+# its real path, where its import of `build/server/server.js` resolves, as a
+# user function that outranks the copy `deploy-ui.yml` exposes as a framework
+# function through its `.netlify` link (which ships without the server build).
+[functions]
+directory = ".netlify/v1/functions"
+
 [context.production]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && pnpm nx run ui:sourcemaps"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 
 [context.deploy-preview]
 command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
@@ -54,6 +64,10 @@ NODE_ENV = "development"
 TAU_API_URL = "http://localhost:4000"
 TAU_FRONTEND_URL = "http://localhost:3000"
 TAU_WEBSOCKET_URL = "ws://localhost:4001"
+
+# Marketing site: `netlify/edge-functions/marketing.ts` proxies a full load of
+# `/` and the apps/www pages to the deploy named by the `MARKETING_ORIGIN` site
+# variable (set per site in tau-cloud). Unset, every request reaches the app.
 
 # The docs site serves documentation at its root, so the old runtime-scoped
 # LLM indexes are replaced by its top-level ones rather than moving verbatim.

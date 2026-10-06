@@ -158,8 +158,12 @@ const projectRef = {
   /* `matches` is not decoration: the session's `closing.flushingProducers`
    * awaits `waitFor(projectRef, (state) => state.matches(...))`, so a snapshot
    * without it threw, the session settled in `failed` instead of `closed`, and
-   * the registry never dropped its ref. */
-  getSnapshot: () => ({ context: { project: undefined, viewGraphics }, matches: () => true }),
+   * the registry never dropped its ref. `closeProjectRuntime` reads it too: a
+   * project whose runtime closed cleanly is not also in `runtimeCloseFailed`. */
+  getSnapshot: () => ({
+    context: { project: undefined, viewGraphics },
+    matches: (state: unknown) => state !== 'runtimeCloseFailed',
+  }),
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 const parameterService = {

@@ -68,9 +68,9 @@ describe('availableUpdate', () => {
 });
 
 describe('updateFeedUrl', () => {
-  it('reads the platform feed from the latest release', () => {
+  it('reads the platform feed from the fixed desktop-feed release, not the Latest badge', () => {
     expect(updateFeedUrl('win32', 'x64')).toBe(
-      'https://github.com/taucad/tau/releases/latest/download/desktop-update-win32-x64.json',
+      'https://github.com/taucad/tau/releases/download/desktop-feed/desktop-update-win32-x64.json',
     );
   });
 });
@@ -80,6 +80,7 @@ describe('startDesktopUpdater', () => {
     ['unpackaged', { packaged: false }],
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
     ['switched off', { environment: { TAU_DESKTOP_UPDATES: 'off' } }],
+    ['a staging package', { channel: 'staging' }],
   ] as const)('does nothing when %s', async (_case, overrides) => {
     const disabled = options(overrides);
     const updater = startDesktopUpdater(disabled);
@@ -93,7 +94,7 @@ describe('startDesktopUpdater', () => {
     const updater = startDesktopUpdater(options({ autoUpdater, schedule: vi.fn() }));
     await updater.check();
     expect(autoUpdater.setFeedURL).toHaveBeenCalledWith({
-      url: 'https://github.com/taucad/tau/releases/latest/download/desktop-update-darwin-arm64.json',
+      url: 'https://github.com/taucad/tau/releases/download/desktop-feed/desktop-update-darwin-arm64.json',
       serverType: 'json',
     });
     expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);

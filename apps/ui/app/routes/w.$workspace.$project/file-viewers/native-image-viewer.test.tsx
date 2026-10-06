@@ -175,11 +175,31 @@ describe('NativeImageViewer', () => {
       readFile: vi.fn().mockImplementation(async () => new Uint8Array(bytes)),
     });
     let emitFileChanged: (event: unknown) => void = () => undefined;
+    const watches = new Set<(event: { type: 'change'; path: string }) => void>();
+    /* As the worker reports a write: the exact authority watch, then the coalesced tree notification. */
+    const writeFile = (): void => {
+      for (const watch of watches) {
+        watch({ type: 'change', path: 'preview.png' });
+      }
+      emitFileChanged({ type: 'fileWritten', path: 'preview.png', backend: 'indexeddb' });
+    };
     const channel = new WorkerChangeChannel({
       transport: {
         listen: (_event, callback) => {
           emitFileChanged = callback;
           return () => undefined;
+        },
+        watchReady: (_request, handler) => {
+          watches.add(handler);
+          return {
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              // Never closes.
+            }),
+            unsubscribe: () => {
+              watches.delete(handler);
+            },
+          };
         },
       },
     });
@@ -208,7 +228,7 @@ describe('NativeImageViewer', () => {
       // The viewer's raw bytes come from the classified content the service already cached.
       expect(proxy.readFile).toHaveBeenCalledOnce();
 
-      emitFileChanged({ type: 'fileWritten', path: 'preview.png', backend: 'indexeddb' });
+      writeFile();
       await waitFor(() => {
         expect(proxy.readFile).toHaveBeenCalledTimes(2);
         expect(digest).toHaveBeenCalledTimes(2);
@@ -227,7 +247,7 @@ describe('NativeImageViewer', () => {
 
       bytes = new Uint8Array(bytes);
       bytes[bytes.length - 1] = 1;
-      emitFileChanged({ type: 'fileWritten', path: 'preview.png', backend: 'indexeddb' });
+      writeFile();
       await waitFor(() => {
         expect(screen.getByRole('img', { name: 'preview.png' })).toHaveAttribute('src', 'blob:second');
       });
@@ -247,7 +267,7 @@ describe('NativeImageViewer', () => {
 
     fireEvent.error(image);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/browser could not decode/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/could not be decoded/i);
     expect(screen.queryByRole('img', { name: 'broken.png' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'File actions for broken.png' })).toBeEmptyDOMElement();
     expect(URL.createObjectURL).toHaveBeenCalledOnce();

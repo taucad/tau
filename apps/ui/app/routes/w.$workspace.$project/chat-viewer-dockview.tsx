@@ -111,7 +111,6 @@ function ViewerPanel({
   readonly profile: ViewerProfile;
 }): React.JSX.Element | undefined {
   const { viewId, entryPath } = properties.params;
-  const viewCommands = useWorkbenchViewCommands();
   const subscribeVisibility = useCallback(
     (onChange: () => void) => {
       const subscription = properties.api.onDidVisibilityChange(onChange);
@@ -127,25 +126,7 @@ function ViewerPanel({
     () => true,
   );
   return isVisible ? (
-    <ChatViewer
-      viewId={viewId}
-      entryPath={entryPath}
-      panelApi={properties.api}
-      profile={profile}
-      onOpenProjectionBeside={
-        profile === 'editor' && entryPath
-          ? (kernelViewId) => {
-              openProjectionBeside({
-                containerApi: properties.containerApi,
-                group: properties.api.group,
-                viewCommands,
-                entryPath,
-                kernelViewId,
-              });
-            }
-          : undefined
-      }
-    />
+    <ChatViewer viewId={viewId} entryPath={entryPath} panelApi={properties.api} profile={profile} />
   ) : undefined;
 }
 
@@ -476,41 +457,15 @@ function ViewerLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.E
   );
 }
 
-function openProjectionBeside({
-  containerApi,
-  group,
-  viewCommands,
-  entryPath,
-  kernelViewId,
-}: {
-  readonly containerApi: DockviewApi;
-  readonly group: DockviewGroupPanel;
-  readonly viewCommands: ReturnType<typeof useWorkbenchViewCommands>;
-  readonly entryPath: string;
-  readonly kernelViewId: string;
-}): void {
-  const viewId = mintViewRecordId();
-  containerApi.addPanel({
-    id: viewId,
-    component: 'viewer',
-    title: entryPath.split('/').pop() ?? entryPath,
-    params: { viewId, entryPath },
-    position: { direction: 'right', referenceGroup: group },
-  });
-  void viewCommands.edit(viewId, () => ({ ...newViewRecord(entryPath), selectedKernelView: kernelViewId }));
-}
-
 /** Palette actions follow the active Dockview panel and the build's current offers. */
 export function ViewerProjectionCommandItems({
   cadActor,
   viewId,
   entryPath,
-  api,
 }: {
   readonly cadActor: ActorRefFrom<typeof cadMachine>;
   readonly viewId: string;
   readonly entryPath: string;
-  readonly api: DockviewApi;
 }): undefined {
   const evaluation = useSelector(cadActor, selectCadEvaluation);
   const viewCommands = useWorkbenchViewCommands();
@@ -530,28 +485,9 @@ export function ViewerProjectionCommandItems({
                 chooseProjection({ viewCommands, viewId, entryPath, evaluation, nextId: view.id });
               },
             },
-            {
-              id: `open-view-beside-${view.id}`,
-              label: `Open ${view.title} beside`,
-              detail: entryPath,
-              group: 'Viewer',
-              icon: <Box />,
-              disabled: !api.activeGroup,
-              action: () => {
-                if (api.activeGroup) {
-                  openProjectionBeside({
-                    containerApi: api,
-                    group: api.activeGroup,
-                    viewCommands,
-                    entryPath,
-                    kernelViewId: view.id,
-                  });
-                }
-              },
-            },
           ])
         : [],
-    [api, entryPath, evaluation, viewCommands, viewId],
+    [entryPath, evaluation, viewCommands, viewId],
   );
   return undefined;
 }
@@ -1052,12 +988,11 @@ export const ViewerDockview = memo(function ({
 
   return (
     <DockviewFileActionProvider value={handleOpenFile}>
-      {profile === 'editor' && api && activeViewerParams && activeViewerEntryPath && activeViewerCadActor ? (
+      {profile === 'editor' && activeViewerParams && activeViewerEntryPath && activeViewerCadActor ? (
         <ViewerProjectionCommandItems
           cadActor={activeViewerCadActor}
           viewId={activeViewerParams.viewId}
           entryPath={activeViewerEntryPath}
-          api={api}
         />
       ) : null}
       <div className='@container/viewer relative size-full'>

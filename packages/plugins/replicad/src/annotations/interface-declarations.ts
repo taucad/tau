@@ -1,4 +1,4 @@
-import type { FaceFinder, SimplePoint, SingleFace } from 'replicad';
+import type { FaceFinder, SimplePoint } from 'replicad';
 
 /**
  * Named face selector declaration resolved by the Tau Replicad kernel before export.
@@ -7,7 +7,7 @@ import type { FaceFinder, SimplePoint, SingleFace } from 'replicad';
  */
 export type FaceDeclaration = {
   kind: 'face';
-  select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>;
+  select: (finder: FaceFinder) => FaceFinder;
 };
 
 /**
@@ -17,7 +17,7 @@ export type FaceDeclaration = {
  */
 export type AxisDeclaration = {
   kind: 'axis';
-  select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>;
+  select: (finder: FaceFinder) => FaceFinder;
 };
 
 /**
@@ -63,7 +63,7 @@ export type InterfaceDeclarations = Record<string, InterfaceDeclaration>;
  * @returns Face interface declaration.
  * @public
  */
-export const face = (select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>): FaceDeclaration => ({
+export const face = (select: (finder: FaceFinder) => FaceFinder): FaceDeclaration => ({
   kind: 'face',
   select,
 });
@@ -75,7 +75,7 @@ export const face = (select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>)
  * @returns Axis interface declaration.
  * @public
  */
-export const axis = (select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>): AxisDeclaration => ({
+export const axis = (select: (finder: FaceFinder) => FaceFinder): AxisDeclaration => ({
   kind: 'axis',
   select,
 });

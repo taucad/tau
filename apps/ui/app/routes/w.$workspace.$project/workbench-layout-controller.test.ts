@@ -73,6 +73,45 @@ function memoryFiles(initial: WorkbenchLayout | undefined = layout()) {
 }
 
 describe('workbench layout checked store', () => {
+  it('fences internal publication immediately when its source invalidates during a read', async () => {
+    const data = memoryFiles();
+    const entered = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    const onChange = vi.fn();
+    let hold = true;
+    const owner = createWorkbenchLayoutStore({
+      root: '/root',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          const bytes = await data.files.readFile();
+          if (hold) {
+            hold = false;
+            entered.resolve();
+            await gate.promise;
+          }
+          return bytes;
+        },
+      },
+      onChange,
+      onError: () => undefined,
+    });
+    try {
+      const pending = owner.read();
+      await entered.promise;
+      owner.invalidateRead();
+      gate.resolve();
+      await pending;
+      expect(onChange).not.toHaveBeenCalled();
+      expect(owner.ready()).toBe(false);
+      await owner.read();
+      expect(owner.ready()).toBe(true);
+      expect(onChange).toHaveBeenCalledOnce();
+    } finally {
+      owner.dispose();
+    }
+  });
+
   it('should keep invalid bytes preservable when an unchanged edit owes no fields', async () => {
     const data = memoryFiles();
     const store = createWorkbenchLayoutStore({

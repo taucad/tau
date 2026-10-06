@@ -23,7 +23,7 @@ export const ChatErrorTool = memo(function ({
 
   return (
     <ChatErrorCard
-      tone='destructive'
+      tone='warning'
       icon={AlertTriangle}
       className={cn('overflow-hidden', className)}
       title='Processing error'
@@ -33,8 +33,8 @@ export const ChatErrorTool = memo(function ({
             className={cn(
               'min-w-0 text-xs break-words text-muted-foreground',
               // Inline-code styles for error messages
-              '[&_code]:text-destructive',
-              '[&_code]:border-destructive/30',
+              '[&_code]:text-feature',
+              '[&_code]:border-feature/30',
               '[&_code]:bg-background/80',
             )}
           >

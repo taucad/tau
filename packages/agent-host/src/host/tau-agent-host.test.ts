@@ -2491,7 +2491,7 @@ the cancelled tools left the system unchanged.
       code: 'EXTERNAL_AGENT_LIMIT_REACHED',
       message: 'The agent is rate limited.',
     });
-    expect(isResumableRunFailure(stopped.failure)).toBe(resumable);
+    expect(isResumableRunFailure(stopped.failure, 'external')).toBe(resumable);
     await host.resume(chatId);
     if (!resumable) {
       const settled = await readLog(file);

@@ -651,16 +651,27 @@ export const projectTurnFinalized = (event: AgentLogEvent): TurnFinalizedEvent |
   return settlement?.type === 'turn.finalized' ? settlement : undefined;
 };
 
-/** Extract an admitted Tau user provisionally, or its later canonical committed row. */
+/** Extract an authoritative admitted user, canonical user row, or authentic steering input. */
 export const projectAgentHostUserTurn = (event: AgentLogEvent): MyUIMessage | undefined => {
   if (event.type === 'run.lifecycle' && event.state === 'admitted' && 'admission' in event) {
     const admission = isRecord(event.admission) ? event.admission : undefined;
     const message = userProviderMessageSchema.safeParse(admission?.['message']);
-    if (admission?.['kind'] === 'tau' && message.success && admission['turnId'] === message.data.id) {
+    if (
+      (admission?.['kind'] === 'tau' || admission?.['kind'] === 'external') &&
+      message.success &&
+      admission['turnId'] === message.data.id
+    ) {
       return projectAgentHostUserMessage(message.data, event.recordedAt);
     }
   }
   if (event.type === 'message.appended' && event.message.role === 'user') {
+    const internal = event.message.metadata?.tauInternal;
+    if (internal !== undefined && internal['kind'] !== 'external-agent') {
+      return undefined;
+    }
+    if (event.message.id.startsWith('tau:')) {
+      return undefined;
+    }
     return projectAgentHostUserMessage(event.message, event.recordedAt);
   }
   if (event.type === 'turn.history-projection-committed') {

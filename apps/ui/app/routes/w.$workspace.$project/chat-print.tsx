@@ -97,11 +97,11 @@ export const presentMachine = (entry: MachineDirectoryEntry, openJob?: MachineJo
             ? 'Unreachable'
             : 'Disconnected',
       icon: CircleAlert,
-      iconClassName: 'text-destructive',
+      iconClassName: 'text-feature',
     };
   }
   if (state.status === 'alarm') {
-    return { label: 'Alarm', icon: CircleAlert, iconClassName: 'text-destructive' };
+    return { label: 'Alarm', icon: CircleAlert, iconClassName: 'text-feature' };
   }
   if (run?.state === 'paused' || state.status === 'held') {
     return { label: 'Paused', icon: PauseCircle, iconClassName: 'text-warning' };
@@ -215,7 +215,7 @@ function ObservationNotice({ entry }: { readonly entry: MachineDirectoryEntry })
   }
   if (connection !== 'connected') {
     return (
-      <PrintNotice tone='destructive' role='status'>
+      <PrintNotice tone='error' role='status'>
         {connection === 'occupied'
           ? `${entry.name} serves one app at a time and another app holds it. Use its own stop if it is moving.`
           : `${entry.name} is ${connection === 'unreachable' ? 'unreachable' : 'disconnected'}. Controls and jobs wait until the host reconnects${resets ? '; reconnecting restarts its controller, so it will need homing' : ''}. Use its own stop if it is moving.`}
@@ -478,7 +478,7 @@ function ConnectedPrintPanel({
         <>
           {header(undefined)}
           <div className='relative flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3'>
-            {directory.error ? <PrintNotice tone='destructive'>{directory.error}</PrintNotice> : null}
+            {directory.error ? <PrintNotice tone='error'>{directory.error}</PrintNotice> : null}
             {directory.snapshot ? (
               <NoMachines />
             ) : (
@@ -547,7 +547,7 @@ function MachinePanel({
       <div className='relative flex min-h-0 min-w-0 flex-1 scroll-shadows-y flex-col gap-3 overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
         {errors.map((error) =>
           error === undefined ? null : (
-            <PrintNotice key={error} tone='destructive'>
+            <PrintNotice key={error} tone='error'>
               {error}
             </PrintNotice>
           ),
@@ -556,7 +556,7 @@ function MachinePanel({
         <ObservationNotice entry={entry} />
         <MachineAlerts control={control} />
         {control.error === undefined ? null : (
-          <PrintNotice tone='destructive' role='alert'>
+          <PrintNotice tone='error' role='alert'>
             {control.error}
           </PrintNotice>
         )}

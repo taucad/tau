@@ -60,7 +60,14 @@ vi.mock('#components/geometry/graphics/three/renderer.js', () => ({
     if (rendererFailure.error) {
       throw rendererFailure.error;
     }
-    return { coordinateSystem: WebGLCoordinateSystem };
+    let pixelRatio = 1;
+    return {
+      coordinateSystem: WebGLCoordinateSystem,
+      getPixelRatio: () => pixelRatio,
+      setPixelRatio(value: number) {
+        pixelRatio = value;
+      },
+    };
   },
 }));
 

@@ -59,6 +59,10 @@ _3DShape: export declare class _3DShape<Type extends TopoDS_Shape> extends Shape
   // _3DShape.intersectAll (method)
   intersectAll(tools: readonly AnyShape[], options?: BooleanOperationOptions): Shape3D;
 
+  // Cuts this shape with a plane and retains one of its half-spaces
+  // _3DShape.cutPlane (method)
+  cutPlane(plane?: Plane | PlaneName, offset?: number, keep?: PlaneSide): Solid | Compound | null;
+
   // _3DShape.meshShape (method)
   meshShape(options?: {
           tolerance?: number;
@@ -71,22 +75,22 @@ _3DShape: export declare class _3DShape<Type extends TopoDS_Shape> extends Shape
           filter: FaceFinder;
           thickness: number;
       }, tolerance?: number): Shape3D;
-  shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;
+  shell(thickness: number, finderFcn: FinderFunction<FaceFinder, AnyShape>, tolerance?: number): Shape3D;
 
   // Creates a new shapes with some edges filletted, as specified in the radius config
   // Remarks: If the radius is a filter finder object (with an EdgeFinder as filter, and a radius to specifiy the fillet radius), the fillet will only be applied to the edges as selected by the finder. The finder will be deleted unless it is explicitly specified to `keep` it. If the radius is a number all the edges will be filletted. If the radius is a function edges will be filletted according to the value returned by the function (0 or null will not add any fillet).
   // _3DShape.fillet (method)
-  fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
+  fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: FinderFunction<EdgeFinder, AnyShape>): Shape3D;
 
   // Creates a new shapes with some edges chamfered, as specified in the radius config
   // Remarks: If the radius is a filter finder object (with an EdgeFinder as filter, and a radius to specifiy the chamfer radius), the fillet will only be applied to the edges as selected by the finder. The finder will be deleted unless it is explicitly specified to `keep` it. If the radius is a number all the edges will be chamfered. If the radius is a function edges will be chamfered according to the value returned by the function (0 or null will not add any chamfer).
   // _3DShape.chamfer (method)
-  chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
+  chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: FinderFunction<EdgeFinder, AnyShape>): Shape3D;
 
   // Applies a draft angle to selected faces of the shape
   // Remarks: A draft angle is a taper applied to faces, commonly used in moulding and casting to allow parts to be released from a mould. The selected faces are tilted by the given angle relative to the neutral plane. The face finder function receives a `FaceFinder` and should return it with the desired filters applied to select which faces to draft. The neutral plane defines the reference from which the draft angle is measured — faces are unchanged where they intersect this plane and taper away from it.
   // _3DShape.draft (method)
-  draft(angle: number, faceFinder: (e: FaceFinder) => FaceFinder, neutralPlane?: Plane | PlaneName): AnyShape;
+  draft(angle: number, faceFinder: FinderFunction<FaceFinder, AnyShape>, neutralPlane?: Plane | PlaneName): Shape3D;
 
 AssemblyExporter: export declare class AssemblyExporter extends WrappingObj<TDocStd_Document>
 
@@ -707,11 +711,11 @@ Drawing: export declare class Drawing implements DrawingInterface
 
   // Creates a new drawing with some corners filletted, as specified by the radius and the corner finder function
   // Drawing.fillet (method)
-  fillet(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;
+  fillet(radius: number, filter?: FinderFunction<CornerFinder, Shape2D>): Drawing;
 
   // Creates a new drawing with some corners filletted, as specified by the radius and the corner finder function
   // Drawing.chamfer (method)
-  chamfer(radius: number, filter?: (c: CornerFinder) => CornerFinder): Drawing;
+  chamfer(radius: number, filter?: FinderFunction<CornerFinder, Shape2D>): Drawing;
 
   // Returns the sketched version of the drawing, on a plane
   // Drawing.sketchOnPlane (method)
@@ -782,7 +786,7 @@ EdgeFinder: export declare class EdgeFinder extends Finder3d<Edge>
 
   // Filter to find edges that are in a certain direction
   // EdgeFinder.inDirection (method)
-  inDirection(direction: Direction_2 | Point): this;
+  inDirection(direction: Direction): this;
 
   // Filter to find edges of a certain length
   // EdgeFinder.ofLength (method)

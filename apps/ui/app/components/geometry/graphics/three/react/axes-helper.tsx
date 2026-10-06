@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Line } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
 import React from 'react';
-import { LineGeometry } from 'three/addons';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { Line2 as Line2WebGpu } from 'three/addons/lines/webgpu/Line2.js';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';

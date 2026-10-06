@@ -57,6 +57,9 @@ COPY . .
 # pre-run dependency check would otherwise re-run a full install here and
 # exhaust the builder's 2 GB Node heap, so it only warns, as CI does.
 ENV pnpm_config_verify_deps_before_run=warn
+# Nx's native PTY runner intermittently segfaults; CI turns it off the same way
+# in .github/actions/setup-nx.
+ENV NX_NATIVE_COMMAND_RUNNER=false
 # The script builds the API without the GeoSpec native engine's Darwin-only artifact gate;
 # its header says why the runtime image does not need it.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \

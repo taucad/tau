@@ -169,6 +169,39 @@ afterEach(() => {
 });
 
 describe('Print pane screenshots', () => {
+  it.each(Object.entries(widths).flatMap(([size, width]) => themes.map((theme) => ({ size, width, theme }))))(
+    'should keep the Prepare reset beside its title at $size in $theme',
+    async ({ size, width, theme }) => {
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+      await page.viewport(size === 'desktop' ? 1000 : width, 900);
+      await mount('studio', width);
+      const prepare = screen.getByRole('region', { name: 'Prepare' });
+      const trigger = within(prepare).getByRole('button', { name: /^Prepare/u });
+      const title = within(trigger).getByText('Prepare', { exact: true });
+      const reset = within(prepare).getByRole('button', { name: 'Reset print settings' });
+      const titleBounds = title.getBoundingClientRect();
+      const resetBounds = reset.getBoundingClientRect();
+      expect(resetBounds.left - titleBounds.right).toBe(8);
+      expect(resetBounds.top + resetBounds.height / 2).toBe(titleBounds.top + titleBounds.height / 2);
+      expect(trigger).not.toContainElement(reset);
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      const evidence = '../../../../../out/artifacts/print-reset-placement';
+      await page.screenshot({ element: prepare, path: `${evidence}/prepare-${size}-${theme}.png` });
+      await page.getByRole('button', { name: 'Reset print settings' }).hover();
+      await screen.findByRole('tooltip', { name: 'Reset print settings' });
+      await page.screenshot({ element: prepare, path: `${evidence}/prepare-${size}-${theme}-hover.png` });
+
+      await page.getByRole('button', { name: /^Prepare/u }).click();
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(reset.getBoundingClientRect().left).toBe(resetBounds.left);
+      await page.getByRole('button', { name: 'Reset print settings' }).click();
+      await waitFor(() => {
+        expect(within(prepare).queryByRole('button', { name: 'Reset print settings' })).not.toBeInTheDocument();
+      });
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    },
+  );
+
   it.each(
     ['Machine', 'Plate', 'Material', 'Process', 'Filament A1'].flatMap((label) => [
       { label, width: 720, theme: 'light' },

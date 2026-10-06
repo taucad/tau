@@ -279,7 +279,10 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   };
 
   return (
-    <div className='group/field @container/parameter my-1.5 flex flex-col gap-0.5 px-2.5 transition-colors'>
+    <div
+      data-slot='parameter-field'
+      className='group/field @container/parameter my-1.5 flex flex-col gap-0.5 px-2.5 transition-colors'
+    >
       <div className='flex items-center gap-2 @[240px]/parameter:flex-row'>
         <div className='flex min-w-0 shrink-0 items-center gap-1.5 @[240px]/parameter:w-[40%]'>
           <div className='flex min-w-0 items-center gap-0.5'>
@@ -291,7 +294,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
               aria-label={`Parameter: ${prettyLabel}`}
             >
               <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
-              {required ? <span className='text-destructive/50'>*</span> : null}
+              {required ? <span className='text-feature/50'>*</span> : null}
             </span>
             {inferredHint ? (
               <Tooltip>
@@ -381,7 +384,7 @@ function ObjectFieldTemplate(
   if (isRoot) {
     if (formContext.rootPresentation === 'embedded') {
       return (
-        <div data-slot='embedded-form-root' className='properties p-2 empty:hidden'>
+        <div data-slot='embedded-form-root' className='properties empty:hidden'>
           <ParameterPropertyList
             properties={properties}
             schema={schema}
@@ -879,14 +882,14 @@ export const templates: TemplatesType<Record<string, unknown>, RJSFSchema, RJSFC
       {errors.map((error) => (
         <div
           key={`${error.schemaPath}-${error.property}-${error.name}-${JSON.stringify(error.params)}`}
-          className='text-sm text-destructive'
+          className='text-sm text-feature'
         >
           {error.stack}
         </div>
       ))}
     </div>
   ),
-  FieldErrorTemplate: ({ errors }) => (errors ? <div className='mt-1 text-xs text-destructive'>{errors}</div> : null),
+  FieldErrorTemplate: ({ errors }) => (errors ? <div className='mt-1 text-xs text-feature'>{errors}</div> : null),
   FieldHelpTemplate: ({ help }) => (help ? <div className='mt-1 text-xs text-muted-foreground'>{help}</div> : null),
   TitleFieldTemplate: ({ title }) => (title ? <h2 className='mb-2 text-lg font-medium'>{title}</h2> : null),
   UnsupportedFieldTemplate({ reason, schema }) {

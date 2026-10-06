@@ -246,7 +246,7 @@ catalog:
   oxc-transform-react: 0.148.0
   pdf-parse: 2.4.5
   polygon-clipping: ^0.15.7
-  replicad: npm:@taulabs/replicad@0.23.4-beta.2
+  replicad: npm:@taulabs/replicad@1.1.0-taulabs.0
   replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
   publint: ^0.3.21
   qrcode-terminal: ^0.12.0
@@ -320,6 +320,7 @@ catalog:
   '@napi-rs/cli': 3.8.6
   '@parcel/watcher': ^2.6.0
   cheerio: 1.2.0
+  sharp: 0.34.5
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0
@@ -406,7 +407,6 @@ peerDependencyRules:
     fumadocs-mdx>vite: ^8.0.0
     vite-svg-sprite-wrapper>vite: ^8.0.0
 patchedDependencies:
-  '@taulabs/replicad@0.23.4-beta.2': patches/@taulabs__replicad@0.23.4-beta.2.patch
   '@ai-sdk/langchain@2.0.181': patches/@ai-sdk__langchain@2.0.181.patch
   '@kittycad/lib@2.0.48': patches/@kittycad__lib@2.0.48.patch
   vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch

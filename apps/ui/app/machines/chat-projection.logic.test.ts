@@ -12,6 +12,7 @@ import type { AgentLogEvent } from '@taucad/agent-host';
 import { projectAgentHostEvent, runFailureText } from '#services/agent-host-event-projection.js';
 import {
   chatProjectionLogic,
+  chunksOf,
   digestLogSegments,
   initialChatProjection,
   materializeTranscript,
@@ -36,7 +37,11 @@ const logs = [
   'recorded/daemon-reattach-hexnut-4runs',
   'seeded/legal-attempts',
   'seeded/cancel-after-settled-pause',
+  'recorded/kinetic-regenerate-resume',
 ] as const;
+
+const terminalChunk = new Set(['finish', 'error', 'abort']);
+const durable = (chunks: ReadonlyArray<{ type: string }>) => chunks.filter((chunk) => !terminalChunk.has(chunk.type));
 
 const readLog = (name: string): AgentLogEvent[] =>
   readFileSync(
@@ -107,6 +112,152 @@ const pageScan = () => {
 };
 
 describe('chatProjectionLogic (PV-S7)', () => {
+  it('should preserve external admission before its canonical user arrives', async () => {
+    const user = {
+      id: 'external-user',
+      role: 'user',
+      content: 'Which other printer?',
+    } as const;
+    const rows = [
+      {
+        ...lifecycleRow(0, 'admitted'),
+        admission: { kind: 'external', turnId: user.id, message: user },
+      },
+    ];
+    expect(await materializeTranscript(project(rows, 1), 'run_1')).toEqual([
+      expect.objectContaining({
+        id: user.id,
+        role: 'user',
+        parts: [{ type: 'text', text: user.content }],
+      }),
+    ]);
+  });
+
+  it('should keep original input and authentic steering between their assistant segments for every read chunking', async () => {
+    const user = {
+      id: 'original-user',
+      role: 'user',
+      content: 'Original prompt',
+    } as const;
+    const rows = [
+      {
+        ...lifecycleRow(0, 'admitted'),
+        admission: { kind: 'tau', turnId: user.id, message: user },
+      },
+      lifecycleRow(1, 'running'),
+      logRow(2, { type: 'message.appended', message: user }),
+      logRow(3, {
+        type: 'message.appended',
+        message: {
+          id: 'answer-before',
+          role: 'assistant',
+          content: 'Before steering',
+        },
+      }),
+      logRow(4, {
+        type: 'message.appended',
+        message: {
+          id: 'tau:approval-answer:1',
+          role: 'user',
+          content: 'Internal reminder',
+          metadata: { tauInternal: { kind: 'approval-answer' } },
+        },
+      }),
+      logRow(5, {
+        type: 'message.appended',
+        message: {
+          id: 'steer:command-1',
+          role: 'user',
+          content: 'Real steering',
+        },
+      }),
+      logRow(6, {
+        type: 'message.appended',
+        message: {
+          id: 'answer-after',
+          role: 'assistant',
+          content: 'After steering',
+        },
+      }),
+      lifecycleRow(7, 'completed'),
+    ];
+    await Promise.all(
+      Array.from({ length: rows.length }, async (_unused, index) => {
+        const result = await materializeTranscript(project(rows, index + 1));
+        expect(result.map((message) => message.id)).toEqual([
+          'original-user',
+          'run_1',
+          'steer:command-1',
+          'run_1:steer:command-1',
+        ]);
+        expect(
+          result.map((message) =>
+            message.parts
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text)
+              .join(''),
+          ),
+        ).toEqual(['Original prompt', 'Before steering', 'Real steering', 'After steering']);
+      }),
+    );
+    const replacement = {
+      id: 'steer:command-1',
+      role: 'user',
+      content: 'Edited steering',
+    } as const;
+    const rewindRows = [
+      ...rows,
+      {
+        ...lifecycleRow(8, 'admitted', 'run_2'),
+        admission: {
+          kind: 'tau',
+          turnId: replacement.id,
+          message: replacement,
+          rewind: {
+            trigger: 'edit',
+            retainedMessageIds: ['original-user', 'answer-before', 'tau:approval-answer:1'],
+          },
+        },
+      },
+      logRow(9, {
+        runId: 'run_2',
+        type: 'history.rewound',
+        trigger: 'edit',
+        retainedMessageIds: ['original-user', 'answer-before', 'tau:approval-answer:1'],
+      }),
+      lifecycleRow(10, 'running', 'run_2'),
+      logRow(11, {
+        runId: 'run_2',
+        type: 'message.appended',
+        message: replacement,
+      }),
+      logRow(12, {
+        runId: 'run_2',
+        type: 'message.appended',
+        message: {
+          id: 'replacement-answer',
+          role: 'assistant',
+          content: 'Replacement output',
+        },
+      }),
+      lifecycleRow(13, 'completed', 'run_2'),
+    ];
+    await Promise.all(
+      Array.from({ length: rewindRows.length }, async (_unused, index) => {
+        const result = await materializeTranscript(project(rewindRows, index + 1));
+        expect(result.map((message) => message.id)).toEqual(['original-user', 'run_1', 'steer:command-1', 'run_2']);
+        expect(
+          result.map((message) =>
+            message.parts
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text)
+              .join(''),
+          ),
+        ).toEqual(['Original prompt', 'Before steering', 'Edited steering', 'Replacement output']);
+      }),
+    );
+  });
+
   it('keeps the admitted Tau user until canonical history replaces it once', async () => {
     const message = { id: 'u-seed', role: 'user', content: 'Make a cube' } as const;
     const admitted = {
@@ -164,10 +315,10 @@ describe('chatProjectionLogic (PV-S7)', () => {
         delta: 'Partial reply',
       },
     }).state;
-    expect(preview.live?.chunks.filter((chunk) => chunk.type === 'text-delta')).toEqual([
+    expect(chunksOf(preview.live?.chunks).filter((chunk) => chunk.type === 'text-delta')).toEqual([
       expect.objectContaining({ delta: 'Partial reply' }),
     ]);
-    expect(preview.views['run_1']?.chunks.some((chunk) => chunk.type === 'text-delta')).toBe(false);
+    expect(chunksOf(preview.views['run_1']?.chunks).some((chunk) => chunk.type === 'text-delta')).toBe(false);
 
     const completed = reduceChatProjection(preview, {
       type: 'batch',
@@ -183,12 +334,20 @@ describe('chatProjectionLogic (PV-S7)', () => {
         4,
       ),
     }).state;
-    expect(completed.live?.chunks.filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
-    expect(completed.views['run_1']?.chunks.filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
-    expect(reduceChatProjection(completed, { type: 'clear-live', runId: 'another-run' }).state.live).toBeDefined();
-    const retired = reduceChatProjection(completed, { type: 'clear-live', runId: 'run_1' }).state;
+    expect(chunksOf(completed.live?.chunks).filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
+    expect(chunksOf(completed.views['run_1']?.chunks).filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
+    expect(
+      reduceChatProjection(completed, {
+        type: 'clear-live',
+        runId: 'another-run',
+      }).state.live,
+    ).toBeDefined();
+    const retired = reduceChatProjection(completed, {
+      type: 'clear-live',
+      runId: 'run_1',
+    }).state;
     expect(retired.live).toBeUndefined();
-    expect(retired.views['run_1']?.chunks.filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
+    expect(chunksOf(retired.views['run_1']?.chunks).filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
   });
   it.each(logs)('agrees with the page’s run phase and tool scans at every row of %s', (name) => {
     const rows = readLog(name);
@@ -225,7 +384,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
     const rows = readLog('recorded/in-project-ping-pong-turn');
     const state = project(rows, 7);
     const { runId } = rows.find((row) => row.type === 'run.lifecycle' && row.state === 'admitted')!;
-    const chunks = state.views[runId]?.chunks ?? [];
+    const chunks = chunksOf(state.views[runId]?.chunks);
 
     expect(chunks[0]).toMatchObject({ type: 'start', messageId: runId });
     expect(chunks.some((chunk) => chunk.type === 'finish')).toBe(true);
@@ -365,7 +524,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(selectRunFailure(project(rows.slice(0, reopened + 1), 1), failed.runId)).toBeUndefined();
   });
 
-  it('should replay only the new attempt after a failed run reopens, while retaining a paused continuation', async () => {
+  it('should keep the committed attempt and drop only its terminal marker when a failed run reopens', async () => {
     const rows = readLog('seeded/legal-attempts');
     const failedAt = rows.findIndex((row) => row.type === 'run.lifecycle' && row.state === 'failed');
     const reopenedAt = rows.findIndex(
@@ -379,18 +538,158 @@ describe('chatProjectionLogic (PV-S7)', () => {
     );
     const { runId } = rows[failedAt]!;
     const failed = project(rows.slice(0, failedAt + 1), 1).views[runId]!;
-    expect(failed.chunks.some((chunk) => chunk.type === 'error')).toBe(true);
+    expect(chunksOf(failed.chunks).at(-1)?.type).toBe('error');
 
     const reopened = project(rows.slice(0, reopenedAt + 1), 1).views[runId]!;
-    expect(reopened.chunks.map((chunk) => chunk.type)).toEqual(['start', 'start-step']);
+    expect(chunksOf(reopened.chunks)).toEqual([...durable(chunksOf(failed.chunks)), { type: 'start-step' }]);
     const paused = project(rows.slice(0, pausedAt + 1), 1).views[runId]!;
     const continued = project(rows.slice(0, continuedAt + 1), 1).views[runId]!;
-    expect(continued.chunks.slice(0, paused.chunks.length)).toEqual(paused.chunks);
+    expect(chunksOf(continued.chunks).slice(0, chunksOf(paused.chunks).length)).toEqual(chunksOf(paused.chunks));
 
     const completed = project(rows.slice(0, rows.findIndex((row) => row.type === 'turn.finalized') + 1), 1);
-    expect(completed.views[runId]?.chunks.some((chunk) => chunk.type === 'error')).toBe(false);
+    expect(chunksOf(completed.views[runId]?.chunks).some((chunk) => chunk.type === 'error')).toBe(false);
     const messages = await materializeTranscript(completed);
     expect(messages.some((message) => message.role === 'assistant')).toBe(true);
+  });
+
+  /* The kinetic-desk-toy chat (sanitized): a failed first turn, two regenerates of it — the first stopped by the
+   * person, resumed and failed again, the second completed — then a turn orphaned while waiting for approval. */
+  it('should keep a stopped turn whole when it resumes, and show a regenerated turn once', async () => {
+    const rows = readLog('recorded/kinetic-regenerate-resume');
+    const stoppedAt = rows.findIndex((row) => row.type === 'run.lifecycle' && row.state === 'cancelled');
+    const { runId } = rows[stoppedAt]!;
+    const resumedAt = rows.findIndex(
+      (row, index) => index > stoppedAt && row.type === 'run.lifecycle' && row.state === 'running',
+    );
+    const before = project(rows.slice(0, stoppedAt + 1), 7).views[runId]!;
+    const after = project(rows.slice(0, resumedAt + 1), 7).views[runId]!;
+    expect(durable(chunksOf(before.chunks)).length).toBeGreaterThan(20);
+    expect(chunksOf(after.chunks).slice(0, durable(chunksOf(before.chunks)).length)).toEqual(
+      durable(chunksOf(before.chunks)),
+    );
+
+    const transcript = await materializeTranscript(project(rows, 7));
+    const users = transcript.filter((message) => message.role === 'user').map((message) => message.id);
+    expect(users).toEqual(['msg_1JskO6ClYBK41k3UxSBc9', 'msg_qhR4h2Hntr2ECEKBa5LFy']);
+    expect(transcript.map((message) => message.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+  });
+
+  /* Resume everywhere, over every corpus: a reopen never removes durable content, and a rewind leaves each user turn
+   * in the transcript at most once. */
+  it.each(logs)('should never lose durable chunks to a reopen, nor repeat a user turn, in %s', async (name) => {
+    const rows = readLog(name);
+    for (const [index, row] of rows.entries()) {
+      const before =
+        row.type === 'run.lifecycle' && row.state === 'running' ? project(rows.slice(0, index), 1) : undefined;
+      const view = before?.views[row.runId];
+      if (view?.terminal !== undefined) {
+        const after = project(rows.slice(0, index + 1), 1).views[row.runId]!;
+        expect(chunksOf(after.chunks).slice(0, durable(chunksOf(view.chunks)).length)).toEqual(
+          durable(chunksOf(view.chunks)),
+        );
+      }
+    }
+    const transcript = await materializeTranscript(project(rows, 3));
+    const users = transcript.filter((message) => message.role === 'user').map((message) => message.id);
+    expect(new Set(users).size).toBe(users.length);
+  });
+
+  it('should hide a run whose user turn a regenerate dropped, but keep a turn a compaction evicted', async () => {
+    const user = (id: string) => ({ id, role: 'user', content: 'x' });
+    const assistant = (id: string) => ({ id, role: 'assistant', content: [{ type: 'text', text: id }] });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: user('u1') }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('a1') }),
+      lifecycleRow(4, 'completed', 'r1'),
+      lifecycleRow(5, 'admitted', 'r2'),
+      logRow(6, { runId: 'r2', type: 'message.appended', message: user('u2') }),
+      lifecycleRow(7, 'running', 'r2'),
+      logRow(8, {
+        runId: 'r2',
+        type: 'history.compacted',
+        evictedMessageIds: ['u1', 'a1'],
+        summary: { id: 's1', role: 'user', content: 'summary' },
+      }),
+      logRow(9, { runId: 'r2', type: 'message.appended', message: assistant('a2') }),
+      logRow(10, {
+        runId: 'r2',
+        type: 'run.lifecycle',
+        state: 'failed',
+        attempt: 1,
+        detail: { message: 'no', code: 'FATAL_TEST' },
+      }),
+      lifecycleRow(11, 'admitted', 'r3'),
+      logRow(12, { runId: 'r3', type: 'history.rewound', trigger: 'regenerate', retainedMessageIds: ['s1'] }),
+      logRow(13, { runId: 'r3', type: 'message.appended', message: user('u2') }),
+    ];
+    const projection = project(rows, 2);
+    expect(selectTranscriptSource(projection).map((run) => run.runId)).toEqual(['r1', 'r3']);
+    const transcript = await materializeTranscript(projection);
+    expect(transcript.filter((message) => message.role === 'user')).toHaveLength(2);
+  });
+
+  it('should trim only the messages a rewind dropped from a run that keeps its user turn', async () => {
+    const user = (id: string) => ({ id, role: 'user', content: 'x' });
+    const assistant = (id: string) => ({ id, role: 'assistant', content: [{ type: 'text', text: id }] });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: user('u1') }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('a1') }),
+      logRow(4, { runId: 'r1', type: 'message.appended', message: assistant('a2') }),
+      logRow(5, { runId: 'r1', type: 'run.lifecycle', state: 'failed', attempt: 1, detail: { message: 'no' } }),
+      logRow(6, { runId: 'r1', type: 'history.rewound', trigger: 'retry', retainedMessageIds: ['u1', 'a1'] }),
+    ];
+    const projection = project(rows, 1);
+    const texts = chunksOf(projection.views['r1']?.chunks)
+      .filter((chunk) => chunk.type === 'text-delta')
+      .map((chunk) => chunk.delta);
+    expect(texts).toEqual(['a1']);
+    expect(selectTranscriptSource(projection).map((run) => run.runId)).toEqual(['r1']);
+  });
+
+  it('should keep a turn a compaction evicted even when a rewind drops its summary', () => {
+    const user = (id: string) => ({ id, role: 'user', content: 'x' });
+    const assistant = (id: string) => ({ id, role: 'assistant', content: [{ type: 'text', text: id }] });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: user('u1') }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('a1') }),
+      lifecycleRow(4, 'completed', 'r1'),
+      lifecycleRow(5, 'admitted', 'r2'),
+      logRow(6, {
+        runId: 'r2',
+        type: 'history.compacted',
+        evictedMessageIds: ['u1', 'a1'],
+        summary: { id: 's1', role: 'user', content: 'summary' },
+      }),
+      logRow(7, { runId: 'r2', type: 'history.rewound', trigger: 'edit', retainedMessageIds: [] }),
+    ];
+    expect(selectTranscriptSource(project(rows, 1)).map((run) => run.runId)).toEqual(['r1', 'r2']);
+  });
+
+  it('should not repeat streamed text when a resumed run replays an earlier envelope', async () => {
+    const assistant = (text: string) => ({ id: 'a1', role: 'assistant', content: [{ type: 'text', text }] });
+    const rows = [
+      lifecycleRow(0, 'admitted', 'r1'),
+      logRow(1, { runId: 'r1', type: 'message.appended', message: { id: 'u1', role: 'user', content: 'x' } }),
+      lifecycleRow(2, 'running', 'r1'),
+      logRow(3, { runId: 'r1', type: 'message.appended', message: assistant('hello') }),
+      logRow(4, { runId: 'r1', type: 'run.lifecycle', state: 'cancelled', attempt: 1, detail: { message: 'stop' } }),
+      lifecycleRow(5, 'running', 'r1'),
+      logRow(6, {
+        runId: 'r1',
+        type: 'message.envelope-replaced',
+        messageId: 'a1',
+        replacement: assistant('hello'),
+      }),
+    ];
+    const transcript = await materializeTranscript(project(rows, 1));
+    const message = transcript.find((entry) => entry.role === 'assistant');
+    expect(message?.parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(['hello']);
   });
 
   it('keeps the newest row that asks for the person, and never a cancelled run (PV-S8)', () => {

@@ -1,3 +1,4 @@
+import { Profiler } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanel } from 'dockview-react';
 import { mock } from 'vitest-mock-extended';
@@ -69,6 +70,11 @@ const hover = (trigger: HTMLElement): HTMLElement => {
   return screen.getByRole('dialog');
 };
 
+/** JSDOM has no PointerEvent; a MouseEvent named pointermove carries the coordinates. */
+const moveTo = (clientX: number, clientY: number): void => {
+  fireEvent(document, new MouseEvent('pointermove', { clientX, clientY, bubbles: true }));
+};
+
 const scrollDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
 
 beforeEach(() => {
@@ -86,6 +92,24 @@ afterEach(() => {
 });
 
 describe('WorkbenchToggle', () => {
+  it('should ignore layout notifications when the tab list is unchanged', () => {
+    const panels = [createPanel('one')];
+    const workbench = createApi(panels);
+    const commit = vi.fn();
+    render(
+      <TooltipProvider>
+        <Profiler id='toggle' onRender={commit}>
+          <WorkbenchToggle isOpen={false} onOpenChange={vi.fn()} api={workbench.api} />
+        </Profiler>
+      </TooltipProvider>,
+    );
+    commit.mockClear();
+    workbench.setPanels(panels);
+    expect(commit).not.toHaveBeenCalled();
+    workbench.setPanels([...panels, createPanel('two')]);
+    expect(screen.getByRole('button', { name: 'Toggle Workbench lane' })).toHaveTextContent('2');
+  });
+
   it('should count workbench tabs while closed and follow panel changes', () => {
     const workbench = createApi(Array.from({ length: 12 }, (_, index) => createPanel(`tab-${index}`)));
     const { trigger } = renderToggle({ api: workbench.api });
@@ -156,20 +180,46 @@ describe('WorkbenchToggle', () => {
     hover(trigger);
   });
 
-  it('should keep the list reachable across the portal gap and close after leaving it', () => {
+  it('should stay open across the gap, even after a pause, and close once the pointer settles elsewhere', () => {
     vi.useFakeTimers();
     const { trigger } = renderToggle({ api: createApi([createPanel('one')]).api });
     const menu = hover(trigger);
+    // The header's bottom-right corner: a 28 px button, an 8 px gap, then the list.
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(
+      DOMRect.fromRect({ x: 972, y: 4, width: 28, height: 28 }),
+    );
+    vi.spyOn(menu, 'getBoundingClientRect').mockReturnValue(
+      DOMRect.fromRect({ x: 712, y: 40, width: 288, height: 160 }),
+    );
+
+    moveTo(985, 18);
     fireEvent.pointerLeave(trigger);
+    moveTo(950, 36);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    // Heading for a far row: across the header, inside the triangle to the list's top edge.
+    moveTo(985, 18);
+    moveTo(900, 25);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    moveTo(800, 60);
+    moveTo(500, 300);
     act(() => {
       vi.advanceTimersByTime(100);
     });
-    fireEvent.pointerEnter(menu);
+    moveTo(800, 60);
     act(() => {
       vi.advanceTimersByTime(150);
     });
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    fireEvent.pointerLeave(menu);
+
+    moveTo(500, 300);
     act(() => {
       vi.advanceTimersByTime(150);
     });
@@ -210,7 +260,7 @@ describe('WorkbenchToggle', () => {
     vi.useFakeTimers();
     const { trigger, view } = renderToggle({ api: createApi([createPanel('one')]).api });
     hover(trigger);
-    fireEvent.pointerLeave(trigger);
+    moveTo(500, 300);
     const clearTimer = vi.spyOn(globalThis, 'clearTimeout');
     view.unmount();
     expect(clearTimer).toHaveBeenCalled();

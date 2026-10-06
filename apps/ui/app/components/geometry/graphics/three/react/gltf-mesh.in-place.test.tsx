@@ -4,10 +4,11 @@ import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial } from '@taucad/geometry-core';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Raycaster, Vector3 } from 'three';
 import type { BufferAttribute, Intersection, Mesh, Object3D } from 'three';
+import * as gltfEdges from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import * as surfaceBatchOwners from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
@@ -41,6 +42,7 @@ const mocks = vi.hoisted(() => {
     gl: Object.create(null) as { compileAsync?: ReturnType<typeof vi.fn>; coordinateSystem?: number },
     frameCallback: undefined as (() => void) | undefined,
     invalidate: vi.fn(),
+    size: { height: 768, width: 1024 },
     rootScene: { name: 'viewport-lighting-scene' },
     modelUnit: {
       focusedComponentId: undefined as string | undefined,
@@ -71,7 +73,7 @@ vi.mock('@react-three/fiber', () => ({
       gl: mocks.gl,
       invalidate: mocks.invalidate,
       scene: mocks.rootScene,
-      size: { height: 768, width: 1024 },
+      size: mocks.size,
     };
     return selector ? selector(state) : state;
   },
@@ -171,6 +173,7 @@ const committedRevisions = (): number[] =>
 
 describe('GltfMesh in-place updates', () => {
   afterEach(() => {
+    mocks.size = { height: 768, width: 1024 };
     cleanup();
     vi.restoreAllMocks();
     mocks.graphicsActor.send.mockClear();
@@ -179,6 +182,28 @@ describe('GltfMesh in-place updates', () => {
     mocks.frameCallback = undefined;
     mocks.sectionView = { isActive: false };
     mocks.modelUnit = { ...mocks.modelUnit, selectedComponentIds: [] };
+  });
+
+  it('should update edge resolution before the resized frame without parsing or scheduling a later frame', async () => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const updateResolution = vi.spyOn(gltfEdges, 'updateLineMaterialResolution');
+    const source = buildGlb();
+    const view = render(
+      <GltfMesh gltfFile={source} geometryHash='resize' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame');
+    updateResolution.mockClear();
+    mocks.invalidate.mockClear();
+    mocks.size = { width: 640, height: 480 };
+    view.rerender(<GltfMesh gltfFile={source} geometryHash='resize' presentationRevision={1} enableMatcap={false} />);
+    expect(updateResolution).toHaveBeenCalledOnce();
+    expect(updateResolution.mock.calls[0]?.[1].toArray()).toEqual([640, 480]);
+    expect(requestFrame).not.toHaveBeenCalled();
+    expect(parseAsync).toHaveBeenCalledOnce();
+    expect(mocks.invalidate).not.toHaveBeenCalled();
   });
 
   it('should present a same-topology result without reparsing it', async () => {
@@ -443,6 +468,7 @@ describe('GltfMesh in-place updates', () => {
 
 describe('GltfMesh model raycast', () => {
   afterEach(() => {
+    mocks.size = { height: 768, width: 1024 };
     cleanup();
     vi.restoreAllMocks();
     mocks.graphicsActor.send.mockClear();

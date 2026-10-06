@@ -1548,18 +1548,28 @@ describe('startHostDaemon', () => {
       expect(relay.controlFrames).toContainEqual({ v: 1, type: 'accept', sessionId: 'session-1' });
     });
 
-    /* The page closed its only socket. 20 ms is an order of magnitude under the
-     * 50 ms child-exit attribution grace the drain still owes, and an order of
-     * magnitude over a loopback close. */
+    /* The page closed one route; session-1's other routes stay open, so its drain
+     * (and its `disconnected` event) cannot finish. The slot must free anyway.
+     * A loaded runner can take longer than any fixed delay to deliver the close,
+     * so re-offer on BUSY and require the accept before session-1 disconnects. */
     const agentSocket = await relay.route(routePath('session-1', 'agent'));
     agentSocket.close(1000, 'page closed');
-    await delay(20);
-    control.send(JSON.stringify(agentOffer(relay.url, 'session-2')));
-
-    await vi.waitFor(() => {
-      expect(relay.controlFrames).toContainEqual(expect.objectContaining({ sessionId: 'session-2' }));
-    });
-    expect(relay.controlFrames).toContainEqual({ v: 1, type: 'accept', sessionId: 'session-2' });
+    const session2Frames = (): unknown[] =>
+      relay.controlFrames.filter((frame) => (frame as { sessionId?: string }).sessionId === 'session-2');
+    await vi.waitFor(
+      async () => {
+        const answered = session2Frames().length;
+        control.send(JSON.stringify(agentOffer(relay.url, 'session-2')));
+        await vi.waitFor(() => {
+          expect(session2Frames().length).toBeGreaterThan(answered);
+        });
+        expect(session2Frames().at(-1)).toEqual({ v: 1, type: 'accept', sessionId: 'session-2' });
+      },
+      { timeout: 10_000, interval: 20 },
+    );
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'session', sessionId: 'session-1', state: 'disconnected' }),
+    );
 
     await daemon.close();
   }, 20_000);

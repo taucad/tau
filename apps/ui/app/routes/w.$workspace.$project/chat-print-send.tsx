@@ -181,7 +181,7 @@ const checkIcon = (state: MachineCheck['state']): React.JSX.Element =>
   state === 'passed' ? (
     <Check aria-hidden className='mt-0.5 size-3.5 shrink-0 text-success' />
   ) : state === 'blocked' ? (
-    <CircleAlert aria-hidden className='mt-0.5 size-3.5 shrink-0 text-destructive' />
+    <CircleAlert aria-hidden className='mt-0.5 size-3.5 shrink-0 text-feature' />
   ) : (
     <Info aria-hidden className='mt-0.5 size-3.5 shrink-0 text-information' />
   );
@@ -368,7 +368,7 @@ function JobReview({
           {blocker}
         </PrintNotice>
       )}
-      {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+      {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
       <div className='flex flex-wrap items-center gap-2'>
         <Button
           type='button'
@@ -477,7 +477,7 @@ function JobProgress({
           The press at the machine is the proof someone is there.
           {delivery === 'streamed' ? ' Keep this computer awake: Tau feeds the program for the whole run.' : ''}
         </p>
-        {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+        {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
         <div>
           <Button
             type='button'
@@ -574,7 +574,7 @@ function UnknownCard({ client, job }: { readonly client: MachineClient; readonly
           {reconciled.state === 'accepted' ? 'Checked: the machine took it' : `Checked: ${reconciled.state}`}
         </p>
       ) : null}
-      {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+      {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
       {operationId === undefined ? null : (
         <div>
           <Button
@@ -616,7 +616,7 @@ function FailureCard({
     job.failure ??
     (job.receipt?.status === 'rejected' ? { code: job.receipt.code, message: job.receipt.message } : undefined);
   return (
-    <PrintNotice tone='destructive'>
+    <PrintNotice tone='error'>
       <p className='font-medium'>
         {job.state === 'rejected' ? 'The machine rejected the start' : 'The job was refused before anything was sent'}
         {failure ? ` (${failure.code})` : ''}
@@ -769,7 +769,7 @@ function ActionApproval({
           {check.message}
         </PrintNotice>
       ) : null}
-      {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+      {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
       <div className='flex flex-wrap gap-2'>
         <Button
           type='button'

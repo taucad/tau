@@ -78,12 +78,9 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
   }
 
   return (
-    <div className='@container'>
-      <div className='flex min-h-9 flex-wrap items-center justify-between gap-y-1 border-b border-border bg-background px-1 py-1 text-muted-foreground'>
-        <nav
-          aria-label='File breadcrumbs'
-          className='flex min-w-0 flex-1 items-center gap-1 @max-lg:w-full @max-lg:flex-none'
-        >
+    <div className='min-w-0'>
+      <div className='flex min-h-9 items-center justify-between border-b border-border bg-background px-1 py-1 text-muted-foreground'>
+        <nav aria-label='File breadcrumbs' className='flex min-w-0 flex-1 items-center gap-1'>
           {returnTo ? (
             <PaneButton
               size='icon'
@@ -98,7 +95,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
           <OmniScroller
             key={filePath}
             ref={attachScroller}
-            className='flex min-w-0 scroll-shadows-x [scrollbar-width:none] flex-row items-center gap-0 overscroll-x-none [&::-webkit-scrollbar]:hidden'
+            className='flex min-w-0 flex-1 scroll-shadows-x [scrollbar-width:none] flex-row items-center gap-0 overscroll-x-none [&::-webkit-scrollbar]:hidden'
           >
             {breadcrumbs.length > 0 ? (
               breadcrumbs.map((crumb) => (
@@ -112,7 +109,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
                   >
                     <PaneButton
                       size='label'
-                      className='max-w-48 gap-1 px-1! text-sm! font-medium'
+                      className='max-w-48 gap-1 text-sm! font-medium'
                       aria-current={crumb.isLast ? 'page' : undefined}
                       title={crumb.name}
                     >
@@ -122,7 +119,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
                       <span className='truncate'>{crumb.name}</span>
                     </PaneButton>
                   </FileSelector>
-                  {crumb.isLast ? undefined : <ChevronRight aria-hidden className='size-4 shrink-0' />}
+                  {crumb.isLast ? undefined : <ChevronRight aria-hidden className='-mx-1 size-4 shrink-0' />}
                 </Fragment>
               ))
             ) : (

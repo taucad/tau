@@ -509,7 +509,7 @@ function FileSelectorBrowseErrorRow({
 }): React.JSX.Element {
   return (
     <div className='flex flex-col items-center gap-2 p-4 text-center text-sm'>
-      <p className='text-destructive'>{message}</p>
+      <p className='text-feature'>{message}</p>
       <Button type='button' variant='outline' size='sm' onClick={onRetry}>
         Retry
       </Button>

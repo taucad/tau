@@ -391,6 +391,8 @@ const config = [
       '**/agent/resources.js',
       '**/agent/resources.d.ts',
       '**/agent/skills.d.cts',
+      // Geometry-core's build-generated schema declaration is outside its source TypeScript project.
+      'packages/core/geometry/schema/tau-cad-topology.schema.d.cts',
       '**/assets',
       '**/.netlify',
       '**/*.prompt.example.*',

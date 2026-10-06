@@ -855,6 +855,8 @@ export const replicadKernel = defineKernel({
         }
         entryUrl = executeResult.entryUrl;
 
+        // The module shares Replicad's OC registration with other in-process clients.
+        context.replicadLibrary.setOC(context.openCascade);
         const mainResult = await tracedPhase(tracer, 'create.runOcMain', async () => {
           const mainSpan = tracer.startSpan('replicad.run-main', {
             phase: 'computingGeometry',
@@ -906,6 +908,7 @@ export const replicadKernel = defineKernel({
           validateGlbResources(model);
         }
         const defaultName = extractDefaultName(executeResult.value);
+        context.replicadLibrary.setOC(context.openCascade);
         const { mechanism, issues } = await readMechanismExport({
           module: executeResult.value,
           parameters,
@@ -914,6 +917,7 @@ export const replicadKernel = defineKernel({
             formatOcRuntimeError(error, context.openCascade, buildErrorContext(context, { bundleSourceMap, entryUrl })),
         });
 
+        context.replicadLibrary.setOC(context.openCascade);
         // Build phase ends here: normalize main() output and resolve GeoSpec
         // interfaces (pure BRep queries) onto the nativeHandle. The handle carries
         // all export-facing evidence — tessellation is deferred to meshGeometry

@@ -2,8 +2,8 @@
   "baseline": "faecc9ac8f456b7fa5639fc0eb146012e3e499c8",
   "assemblySource": {
     "path": "libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts",
-    "bytes": 17755,
-    "sha256": "464caa7c826d12ace762c36cef7e61d279203d446827387192e52181a76b9f64"
+    "bytes": 18706,
+    "sha256": "1f7b4e11f80020eb19f5fbbb5beb7ee9b6112a6b0384bac006450e3205d65931"
   },
   "assemblyParts": 34,
   "illustrationOnly": true,
@@ -30,18 +30,18 @@
     },
     {
       "path": "apps/www/public/planetary.bin.gz",
-      "bytes": 876329,
-      "sha256": "8062b780dfb01a2ddc0841a4504843ca69587935f252f97df9d504c1f175a8ca"
+      "bytes": 955158,
+      "sha256": "847c7e6739255da9cb5955c6cd8377e48098a488f97e672e73c063092d99ae31"
     },
     {
       "path": "apps/www/public/planetary.json",
-      "bytes": 10086,
-      "sha256": "718ce4658f341546f4afbe28a1c163b80d06475e74a04087e821a2e9f961d3bc"
+      "bytes": 10087,
+      "sha256": "dc4ec724d6ac5f36a88a9a4a0f341b0789116f2711773c7a423576f14607c4e6"
     },
     {
       "path": "apps/www/public/social.png",
-      "bytes": 143901,
-      "sha256": "672471c1637d00ece2ae3c22a03dfbccd5a1d8f3b097e888ec2fd6e1b4c29c2b"
+      "bytes": 151747,
+      "sha256": "e9ddf0e76126e28581f52121c56309f65e18fe8dd43527e362e0870b0840c930"
     }
   ],
   "metalHero": {
@@ -67,13 +67,13 @@
   "liveViews": [
     {
       "path": "apps/www/public/hero-gearbox.webp",
-      "bytes": 88854,
-      "sha256": "2cc3fb6a35e1d52e4aa9abaaaa7442a4c33fac58990c062c893c5fa6b679e9ee"
+      "bytes": 120742,
+      "sha256": "fc2ccc1b2bb7fd4157aface1c49e8a6ad378404c62d74ba8df88de296b30cd65"
     },
     {
       "path": "apps/www/public/hero-gearbox-720.webp",
-      "bytes": 53210,
-      "sha256": "826939304ce339a4193e3560b053f56e8027318ecef69265fc56920d61a32ee2"
+      "bytes": 58372,
+      "sha256": "5aa9e7ea667e4f695eabfa833e81da75fcb967438a3eff20daf3db8c57deb233"
     },
     {
       "path": "apps/www/public/story-0.webp",
@@ -87,50 +87,50 @@
     },
     {
       "path": "apps/www/public/story-2.webp",
-      "bytes": 36518,
-      "sha256": "f2e9209f10aea39147104bd8848a1890773cb5f5009a6436156f4de1b51cd4b6"
+      "bytes": 37272,
+      "sha256": "43e4dd1fac09145bc5397df55f0af0044dd1a8db313ac86507609322e5fb616d"
     },
     {
       "path": "apps/www/public/story-3.webp",
-      "bytes": 18496,
-      "sha256": "372db87a2e632ba723f06ad61aa83fa47f162f7687308d56830d2088975d7833"
+      "bytes": 21038,
+      "sha256": "862ce7b195523d7a8be1ec75a68b4e9d84d25a507b551e252799e6f871bc59d3"
     },
     {
       "path": "apps/www/public/story-4.webp",
-      "bytes": 51800,
-      "sha256": "dfb2740921dd94c14545c006e2a0d3547e5c72db1d6273a107e52d3d14bac540"
+      "bytes": 63962,
+      "sha256": "93e52901f53f4acdb165712872fbbf522456e8aed1bef3dc079fbf902bdb3b1d"
     },
     {
       "path": "apps/www/public/story-5.webp",
-      "bytes": 69882,
-      "sha256": "d34d4a85ad9cbe1910f8b418d898d21b1370094b07bb625d2df8f93081d4e558"
+      "bytes": 88964,
+      "sha256": "a226f26de3ff95a5f58e451cbade22b4a4df1810a6f4b3f18134fda7a14a3f3e"
     },
     {
       "path": "apps/www/public/story-6.webp",
-      "bytes": 73082,
-      "sha256": "ef46da38d73f8d0256beaa1169b0b515ad2987be5e6a2867ecbc45da63a52239"
+      "bytes": 97904,
+      "sha256": "f44e86c6c6064d7080decbf044322468208c0baacf925d7f64f925170b715da8"
     },
     {
       "path": "apps/www/public/story-7.webp",
-      "bytes": 47946,
-      "sha256": "e50969c939d81e4eb2699666beb13f6432e9a316f08fec1093b025e7d86af080"
+      "bytes": 50850,
+      "sha256": "b26e737f7d6b47966ec3a8a0e4d4407a01dc73b4cb60fe30a976212f7a6e2b88"
     },
     {
       "path": "apps/www/public/story-8.webp",
-      "bytes": 16208,
-      "sha256": "d6481c2280209039c55217bda54aad86319de714668874f07288ecfd713c431c"
+      "bytes": 17780,
+      "sha256": "c6d2e02ad4c238eab6d1053d1aedd2b44183a86a9958785a6c654fd91cc25163"
     }
   ],
   "variantGeometry": [
     {
       "path": "apps/www/public/planetary-face18.json",
       "bytes": 2501,
-      "sha256": "6f1d03d761a37b0754004094e08ef79411e5323193f04f56b4d002bc6131711b"
+      "sha256": "63d72fde78ecee506f5bd2214ffa5953fc7d626c09be2764d8c90eee58dfb487"
     },
     {
       "path": "apps/www/public/planetary-face18.bin.gz",
-      "bytes": 1776,
-      "sha256": "16816bb5e658dfcab1ab43da40473a9729b865e98f2dcff52f429372550d3603"
+      "bytes": 2225,
+      "sha256": "52ee23b6d9cf33bad1b2661291732d062f17bce7fddb93e0010f4f18ce92906a"
     }
   ]
 }

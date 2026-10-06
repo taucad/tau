@@ -63,7 +63,10 @@ const showSvg = (actor: GraphicsActor): void => {
   });
 };
 
-const renderBar = (actor: GraphicsActor, properties: { shouldEnableCapture?: boolean } = {}): void => {
+const renderBar = (
+  actor: GraphicsActor,
+  properties: { shouldEnableCapture?: boolean; leading?: React.ReactNode; aboveControls?: React.ReactNode } = {},
+): void => {
   render(
     <KeyboardProvider>
       <TooltipProvider>
@@ -165,10 +168,22 @@ describe('ChatViewerControls', () => {
       mocks.hasGridReadout = false;
       renderBar(startGraphics());
 
-      const row = screen.getByRole('group', { name: 'Viewer controls' });
+      const controls = screen.getByRole('group', { name: 'Viewer controls' }).firstElementChild!;
       expect(controlNames()[0]).toBe('Section view');
       // The hairline that follows the readout hides itself when it starts its line.
-      expect(row.firstElementChild).toHaveClass('first:hidden');
+      expect(controls.firstElementChild).toHaveClass('first:hidden');
+    });
+
+    it('should start the controls line with the leading group, divided from the controls', () => {
+      renderBar(startGraphics(), { leading: <button type='button'>View: Model</button> });
+
+      const row = screen.getByRole('group', { name: 'Viewer controls' });
+      const leading = row.firstElementChild!;
+      expect(leading).toContainElement(screen.getByRole('button', { name: 'View: Model' }));
+      expect(leading.nextElementSibling).toHaveAttribute('data-orientation', 'vertical');
+      // An empty group hides, and so does the hairline after it.
+      expect(leading).toHaveClass('empty:hidden');
+      expect(leading.nextElementSibling).toHaveClass('[[data-slot=viewer-leading]:empty+&]:hidden');
     });
   });
 
@@ -212,6 +227,16 @@ describe('ChatViewerControls', () => {
       expect(screen.getByRole('button', { name: 'Done with measure' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Section view', pressed: true })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Measure', pressed: true })).toBeInTheDocument();
+    });
+
+    it('should put the issues list directly above the controls, below a running tool', () => {
+      const actor = startGraphics();
+      actor.send({ type: 'setSectionViewActive', payload: true });
+      renderBar(actor, { aboveControls: <div role='region' aria-label='Issues' /> });
+
+      const issues = screen.getByRole('region', { name: 'Issues' });
+      expect(sectionRow().compareDocumentPosition(issues)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(issues.nextElementSibling).toBe(screen.getByRole('group', { name: 'Viewer controls' }));
     });
 
     it('should end the Section row with its last cut', async () => {

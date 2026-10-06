@@ -37,7 +37,7 @@ import {
   useModelInteractionSelector,
 } from '#hooks/use-graphics.js';
 import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
-import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
+import { ViewerIssues } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 import { ViewerKernelSettings } from '#routes/w.$workspace.$project/chat-viewer-kernel-settings.js';
@@ -617,6 +617,13 @@ const ViewerContent = memo(function ({
   const failureMessage =
     failureIssues?.find((issue) => issue.severity === 'error')?.message ?? failureIssues?.[0]?.message;
   const overlayFailureMessage = profile === 'shared' ? failureMessage : undefined;
+  const restoreDefaultView = (): void => {
+    void viewCommands.edit(viewId, (current) => ({
+      ...(current ?? newViewRecord(entryPath)),
+      selectedKernelView: undefined,
+    }));
+    setLocalInstanceChoice(viewId, undefined);
+  };
 
   // The geometry unit can be closed via the parameters panel context menu.
   // When that happens cadRef goes undefined, geometry clears, but the panel
@@ -1012,29 +1019,13 @@ const ViewerContent = memo(function ({
         }));
       }}
     >
-      {profile === 'editor' && cadRef ? (
-        <div className='absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)] items-center'>
-          <ViewerProjectionPicker viewId={viewId} entryPath={entryPath} cadActor={cadRef} />
-        </div>
-      ) : null}
-      {/* Status overlays */}
+      {/* Status overlays. In the editor the view menus, the build status and a view notice live in the bottom bar. */}
       <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
-        <ChatViewerStatus />
-        {unavailable ? (
+        <ChatViewerStatus shouldShowLoading={profile !== 'editor'} />
+        {unavailable && profile !== 'editor' ? (
           <div role='alert' className='rounded-md border border-border bg-background/95 p-3 text-sm shadow-sm'>
             <p>{unavailable}</p>
-            <Button
-              size='sm'
-              variant='outline'
-              className='mt-2'
-              onClick={() => {
-                void viewCommands.edit(viewId, (current) => ({
-                  ...(current ?? newViewRecord(entryPath)),
-                  selectedKernelView: undefined,
-                }));
-                setLocalInstanceChoice(viewId, undefined);
-              }}
-            >
+            <Button size='sm' variant='outline' className='mt-2' onClick={restoreDefaultView}>
               Use default view
             </Button>
           </div>
@@ -1122,26 +1113,45 @@ const ViewerContent = memo(function ({
         </div>
       )}
 
-      {/* Bottom controls: the bar is centred on the last line and grows upward as tools start. The issues card and
-          the AR button (mobile iOS only) share the line above it, so the bar never covers them. In a pane narrower
-          than the bar, the bar starts at the left edge, keeping the grid readout and Section in view. */}
+      {/* Bottom controls: the bar is centred on the last line and grows upward as tools start. In the editor it starts
+          with the view menus and the build status, and the issues list unfolds above its controls. The AR button
+          (mobile iOS only) has the line above it, so the bar never covers it. In a pane narrower than the bar, the
+          bar starts at the left edge, keeping the grid readout and Section in view. */}
       <div
         ref={bottomControlsRef}
         className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex flex-col items-center-safe gap-2'
       >
         <div className='flex w-full items-end gap-2 [&>*]:pointer-events-auto'>
-          {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
           <ArButton artifact={artifact} runtimeDocument={runtimeDocument} className='ml-auto shrink-0' />
         </div>
-        <ChatViewerControls
-          shouldEnableCapture={profile === 'editor'}
-          captureRendering={captureRendering}
-          kernelSettings={
-            profile === 'editor' && cadRef ? (
-              <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} />
-            ) : undefined
-          }
-        />
+        {profile === 'editor' ? (
+          <ViewerIssues
+            entryPath={entryPath}
+            notice={
+              unavailable
+                ? { message: unavailable, actionLabel: 'Use default view', onAct: restoreDefaultView }
+                : undefined
+            }
+          >
+            {({ segment, list }) => (
+              <ChatViewerControls
+                captureRendering={captureRendering}
+                kernelSettings={
+                  cadRef ? <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} /> : undefined
+                }
+                leading={
+                  <>
+                    {cadRef ? <ViewerProjectionPicker viewId={viewId} entryPath={entryPath} cadActor={cadRef} /> : null}
+                    {segment}
+                  </>
+                }
+                aboveControls={list}
+              />
+            )}
+          </ViewerIssues>
+        ) : (
+          <ChatViewerControls shouldEnableCapture={false} captureRendering={captureRendering} />
+        )}
       </div>
     </div>
   );

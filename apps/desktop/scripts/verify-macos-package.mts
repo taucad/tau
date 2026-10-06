@@ -190,18 +190,34 @@ const printQuickLookDiagnostics = (): void => {
     'eventMessage CONTAINS[c] "TauQuickLook"',
     'eventMessage CONTAINS[c] "com.taucad.tau.desktop.quicklook"',
   ].join(' OR ');
-  const log = spawnSync('log', ['show', '--last', '3m', '--info', '--style', 'compact', '--predicate', predicate], {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    timeout: 60_000,
-  });
-  // ponytail: last 300 lines keeps the CI log readable; widen --last or the slice if the cause scrolls off.
-  const lines = `${log.stdout}${log.stderr}`.trim().split('\n').slice(-300);
-  console.error(`::group::Quick Look unified log (last ${String(lines.length)} lines)\n${lines.join('\n')}\n::endgroup::`);
-  const reportsRoot = join(process.env.HOME ?? '', 'Library/Logs/DiagnosticReports');
-  const reports = existsSync(reportsRoot) ? readdirSync(reportsRoot).filter((name) => name.includes('TauQuickLook')) : [];
+  const log = spawnSync(
+    '/usr/bin/log',
+    ['show', '--last', '3m', '--info', '--style', 'compact', '--predicate', predicate],
+    {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 60_000,
+    },
+  );
+  if (log.error || log.status !== 0) {
+    console.error(
+      `Could not collect the Quick Look unified log (status ${String(log.status)}): ${String(log.error ?? log.stderr)}`,
+    );
+  } else {
+    // ponytail: last 300 lines keeps the CI log readable; widen --last or the slice if the cause scrolls off.
+    const lines = log.stdout.trim().split('\n').slice(-300);
+    console.error(
+      `::group::Quick Look unified log (last ${String(lines.length)} lines)\n${lines.join('\n')}\n::endgroup::`,
+    );
+  }
+  const reportsRoot = join(process.env['HOME'] ?? '', 'Library/Logs/DiagnosticReports');
+  const reports = existsSync(reportsRoot)
+    ? readdirSync(reportsRoot).filter((name) => name.includes('TauQuickLook'))
+    : [];
   for (const report of reports) {
-    console.error(`::group::${report}\n${readFileSync(join(reportsRoot, report), 'utf8').slice(0, 20_000)}\n::endgroup::`);
+    console.error(
+      `::group::${report}\n${readFileSync(join(reportsRoot, report), 'utf8').slice(0, 20_000)}\n::endgroup::`,
+    );
   }
   if (reports.length === 0) {
     console.error('No TauQuickLook crash reports in ~/Library/Logs/DiagnosticReports.');
@@ -846,7 +862,12 @@ if (unsigned) {
         try {
           return await runMeasured(options);
         } catch (retryError) {
-          printQuickLookDiagnostics();
+          try {
+            printQuickLookDiagnostics();
+          } catch (diagnosticError) {
+            // Diagnostics are supplementary; never let them replace the probe failure.
+            console.error(`Could not collect Quick Look diagnostics: ${String(diagnosticError)}`);
+          }
           throw retryError;
         }
       }

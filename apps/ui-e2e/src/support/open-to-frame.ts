@@ -51,8 +51,9 @@ import { cpus, loadavg, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import process from 'node:process';
 import { setTimeout as wait } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 import { _electron as electron, chromium } from 'playwright';
-import type { Page } from 'playwright';
+import type { Page, Request } from 'playwright';
 // oxlint-disable-next-line no-restricted-imports -- one owner for the measurement contract both harnesses answer to.
 import { budgetVerdict, readContention, rendererAngle } from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
 // oxlint-disable-next-line no-restricted-imports -- same owner, type only.
@@ -67,6 +68,7 @@ import { classifyWebGpuAdapter } from './webgpu-profile.ts';
 import {
   epochForRelativeMarks,
   observedKernelSelection,
+  observedReplicadLoadedWasm,
   observedReplicadNativeVariant,
   observedRuntimeWindow,
 } from './open-to-frame-observation.ts';
@@ -112,7 +114,8 @@ const hostArgument = process.argv[2] ?? 'desktop';
 const host: Host = hostArgument === 'browser' ? 'browser' : 'desktop';
 const kernelId = process.argv[3] ?? 'jscad';
 const repeats = Number(process.argv[4] ?? 3);
-if (!Number.isSafeInteger(repeats) || repeats < 2) {
+const referenceStructuralProbe = process.env['TAU_OPEN_TO_FRAME_NATIVE_STRUCTURAL_PROBE'] === '1';
+if (!Number.isSafeInteger(repeats) || repeats < (referenceStructuralProbe ? 1 : 2)) {
   throw new Error('Repeat count must be an integer of at least two for a variation verdict.');
 }
 const baseUrl = process.argv[5] ?? 'http://127.0.0.1:3110';
@@ -129,18 +132,21 @@ if (
   );
 }
 const scenario: Scenario = scenarioArgument;
+if (referenceStructuralProbe && scenario !== 'reference-cold') {
+  throw new Error('The native structural probe is only available for reference-cold.');
+}
 const referenceName = process.argv[7];
 const referenceBackend = process.argv[8] as ReferenceBackend | undefined;
 if (
   scenario === 'reference-cold' &&
   (host !== 'browser' ||
     kernelId !== 'replicad' ||
-    repeats !== 5 ||
+    repeats !== (referenceStructuralProbe ? 1 : 5) ||
     (referenceName !== 'tray' && referenceName !== 'birdhouse' && referenceName !== 'honeycomb') ||
     (referenceBackend !== 'webgl' && referenceBackend !== 'webgpu'))
 ) {
   throw new Error(
-    'reference-cold requires browser replicad 5 [base-url] reference-cold [tray|birdhouse|honeycomb] [webgl|webgpu].',
+    `reference-cold requires browser replicad ${referenceStructuralProbe ? '1 structural probe' : '5'} [base-url] reference-cold [tray|birdhouse|honeycomb] [webgl|webgpu].`,
   );
 }
 if (scenario === 'restart-warm' && host !== 'desktop') {
@@ -153,7 +159,7 @@ const scenarioSuffix =
   scenario === 'cold'
     ? ''
     : scenario === 'reference-cold'
-      ? `-${scenario}-${referenceName}-${referenceBackend}`
+      ? `-${scenario}-${referenceName}-${referenceBackend}${referenceStructuralProbe ? '-structural-probe' : ''}`
       : `-${scenario}`;
 const origin = host === 'desktop' ? 'app://tau' : baseUrl;
 const outputDirectory = process.env['TAU_OPEN_TO_FRAME_OUT'] ?? join(repoRoot, 'out/test-results/open-to-frame');
@@ -759,6 +765,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   let referenceAssets: ReadonlyArray<Readonly<{ name: string; sha256: string; bytes: number }>> | undefined;
   const consoleErrors: string[] = [];
   const nativeLogs: string[] = [];
+  const nativeRequests: Request[] = [];
   try {
     at('launchIntent');
     if (host === 'desktop') {
@@ -792,6 +799,14 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
         viewport: scenario === 'reference-cold' ? { width: 1920, height: 1080 } : { width: 1440, height: 900 },
         deviceScaleFactor: 1,
       });
+      if (referenceFixture) {
+        context.on('requestfinished', (request) => {
+          // This browser-network event excludes the driver's later APIRequestContext availability check.
+          if (request.url().includes('replicad_') && request.url().includes('.wasm') && nativeRequests.length < 2) {
+            nativeRequests.push(request);
+          }
+        });
+      }
       await context.addInitScript(instrument, kernelId);
       page = await context.newPage();
       page.on('console', (message) => {
@@ -1141,6 +1156,44 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   const nativeVariant = referenceFixture
     ? observedReplicadNativeVariant(nativeLogs, referenceNativeTreatment)
     : undefined;
+  // Native response bytes are inspected only after the checked-PNG timing mark. The request
+  // completed in this fresh browser context, alongside the consistent post-init marker.
+  const loadedNativeWasm = nativeVariant
+    ? await Promise.all(
+        nativeRequests.map(async (request) => {
+          const response = await request.response();
+          if (!response) {
+            throw new Error('The completed native request has no response.');
+          }
+          const bytes = await response.body();
+          return {
+            url: request.url(),
+            status: response.status(),
+            byteLength: bytes.byteLength,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+          };
+        }),
+      )
+        .then(async (responses) =>
+          observedReplicadLoadedWasm(responses, {
+            origin: new URL(origin).origin,
+            variant: nativeVariant,
+            expectedSha256:
+              nativeVariant === 'custom-single'
+                ? referenceAssetPins.find((asset) => asset.name === 'replicad_single.wasm')?.sha256
+                : await hashFile(
+                    fileURLToPath(
+                      import.meta.resolve(
+                        nativeVariant === 'auto-multi'
+                          ? 'replicad-opencascadejs/multi/wasm'
+                          : 'replicad-opencascadejs/wasm',
+                      ),
+                    ),
+                  ),
+          }),
+        )
+        .catch(() => undefined)
+    : undefined;
   const reason =
     warmup?.error ??
     (warmup !== undefined && warmup.appIsPackaged !== true
@@ -1150,7 +1203,9 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
         : (invalidReason ??
           (referenceFixture && nativeVariant === undefined
             ? 'the selected Replicad native build did not complete a consistent initialization'
-            : undefined)));
+            : referenceFixture && loadedNativeWasm === undefined
+              ? 'the initialized Replicad variant has no matching completed browser-network WASM response'
+              : undefined)));
   if (reason !== undefined) {
     await page
       ?.screenshot({
@@ -1272,6 +1327,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
             source: referenceFixture,
             assets: referenceAssets,
             nativeVariant,
+            loadedNativeWasm,
             browserVersion,
             process: browserExit,
             browserProfile: 'default Chromium launch with existing unsafe-WebGPU flag',
@@ -1361,22 +1417,26 @@ for (let iteration = 0; iteration < repeats; iteration += 1) {
 
 const spread = coefficientOfVariation(durations);
 const distinctBrowserPids = new Set(samples.map((sample) => sample.browserPid).filter((pid) => pid !== undefined)).size;
-const sampleVerdicts = samples.map((sample) =>
-  budgetVerdict({ tags: sample.measurement, coefficientOfVariation: spread }),
-);
-const refusals = [
-  ...(durations.length === repeats
-    ? []
-    : [`${String(repeats - durations.length)} sample(s) had invalid timing or changed client/binary assets`]),
-  ...(referenceFixture && distinctBrowserPids !== repeats
-    ? ['the reference population did not use five distinct fresh Chromium OS processes']
-    : []),
-  ...(referenceFixture && durations.length === repeats && (spread === undefined || spread > 0.1)
-    ? ['fresh-browser launch-to-checked-PNG CV exceeds 0.1']
-    : []),
-  'launch-to-pixel wall attribution below 95%: host launch, route admission, renderer/GPU and screenshot latency remain unjoined',
-  ...sampleVerdicts.flatMap((sample, index) => sample.refusals.map((reason) => `sample ${String(index)}: ${reason}`)),
-];
+const sampleVerdicts = referenceStructuralProbe
+  ? []
+  : samples.map((sample) => budgetVerdict({ tags: sample.measurement, coefficientOfVariation: spread }));
+const refusals = referenceStructuralProbe
+  ? ['non-measured native structural probe; no CV or population qualification']
+  : [
+      ...(durations.length === repeats
+        ? []
+        : [`${String(repeats - durations.length)} sample(s) had invalid timing or changed client/binary assets`]),
+      ...(referenceFixture && distinctBrowserPids !== repeats
+        ? ['the reference population did not use five distinct fresh Chromium OS processes']
+        : []),
+      ...(referenceFixture && durations.length === repeats && (spread === undefined || spread > 0.1)
+        ? ['fresh-browser launch-to-checked-PNG CV exceeds 0.1']
+        : []),
+      'launch-to-pixel wall attribution below 95%: host launch, route admission, renderer/GPU and screenshot latency remain unjoined',
+      ...sampleVerdicts.flatMap((sample, index) =>
+        sample.refusals.map((reason) => `sample ${String(index)}: ${reason}`),
+      ),
+    ];
 const verdict = { eligible: refusals.length === 0, refusals };
 lines.push(
   JSON.stringify({
@@ -1384,6 +1444,7 @@ lines.push(
     host,
     kernelId,
     scenario,
+    referenceStructuralProbe,
     ...(referenceFixture === undefined
       ? {}
       : {
@@ -1393,12 +1454,19 @@ lines.push(
             requestedFreshProcesses: repeats,
             distinctBrowserPids,
           },
-          referenceCvGate: {
-            bound: 0.1,
-            measured: durations.length === repeats ? spread : undefined,
-            passed:
-              durations.length === repeats && distinctBrowserPids === repeats && spread !== undefined && spread <= 0.1,
-          },
+          ...(referenceStructuralProbe
+            ? {}
+            : {
+                referenceCvGate: {
+                  bound: 0.1,
+                  measured: durations.length === repeats ? spread : undefined,
+                  passed:
+                    durations.length === repeats &&
+                    distinctBrowserPids === repeats &&
+                    spread !== undefined &&
+                    spread <= 0.1,
+                },
+              }),
         }),
     valid: durations.length,
     requested: repeats,

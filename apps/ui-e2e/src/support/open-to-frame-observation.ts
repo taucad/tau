@@ -65,6 +65,37 @@ export const observedReplicadNativeVariant = (
       : undefined;
 };
 
+/** Complete browser-network WASM response for the variant that initialized in this sample. */
+export const observedReplicadLoadedWasm = (
+  responses: ReadonlyArray<Readonly<{ url: string; status: number; byteLength: number; sha256: string }>>,
+  input: Readonly<{
+    origin: string;
+    variant: 'auto-single' | 'auto-multi' | 'custom-single' | undefined;
+    expectedSha256: string | undefined;
+  }>,
+): Readonly<{ url: string; variant: 'single' | 'multi'; byteLength: number; sha256: string }> | undefined => {
+  const { origin, variant, expectedSha256 } = input;
+  if (variant === undefined || expectedSha256 === undefined || responses.length !== 1) {
+    return undefined;
+  }
+  const response = responses[0]!;
+  let url: URL;
+  try {
+    url = new URL(response.url);
+  } catch {
+    return undefined;
+  }
+  const requestedVariant = /\/replicad_(single|multi)(?:-[\w-]+)?\.wasm$/u.exec(url.pathname)?.[1];
+  const selectedVariant = variant === 'auto-multi' ? 'multi' : 'single';
+  return url.origin === origin &&
+    requestedVariant === selectedVariant &&
+    response.status === 200 &&
+    response.byteLength > 0 &&
+    response.sha256 === expectedSha256
+    ? { url: response.url, variant: selectedVariant, byteLength: response.byteLength, sha256: response.sha256 }
+    : undefined;
+};
+
 /** Read the selected kernel from a render span in the same utility origin. */
 export const observedKernelSelection = async (traceFile: string | undefined): Promise<string | undefined> => {
   if (traceFile === undefined) {

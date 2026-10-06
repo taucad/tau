@@ -63,6 +63,11 @@ const createMockAppRuntimeClient = () => ({
   openAssembly: vi.fn<AppRuntimeClient['openAssembly']>(),
   publishAssembly: vi.fn<AppRuntimeClient['publishAssembly']>(),
 });
+const openContentWatch = () => ({
+  ready: Promise.resolve(),
+  closed: Promise.withResolvers<void>().promise,
+  dispose: vi.fn(),
+});
 const createKernelOptionsFactory = (): LazyKernelOptionsFactory => kernelOptionsFactory;
 
 function fixture(options: { fileManagerRef?: CadContext['fileManagerRef']; fileSystemRoot?: string } = {}) {
@@ -955,11 +960,19 @@ describe('published assembly authority and connection lifecycle', () => {
     });
   });
   describe('cached assembly resume ownership', () => {
-    it.each(['entry', 'root'] as const)(
-      'watches changed %s bytes without replacing admission for initial or equal content outcomes',
-      async (watched) => {
+    it.each([
+      ['entry', 'ordinary'],
+      ['root', 'ordinary'],
+      ['entry', 'local-write'],
+      ['entry', 'external-write'],
+      ['entry', 'external-delete'],
+      ['entry', 'external-reset'],
+      ['entry', 'external-nested-write'],
+      ['entry', 'watch-refused'],
+    ] as const)(
+      'watches changed %s bytes without replacing admission for initial or equal content outcomes (%s)',
+      async (watched, mutation) => {
         const runtime = await import('@taucad/runtime/client');
-        const digests = vi.spyOn(cache, 'digestContent');
         const { sha256String } = await import('@taucad/utils/hash');
         const client = createMockAppRuntimeClient();
         vi.spyOn(runtime, 'createRuntimeClient').mockReturnValue(client);
@@ -994,12 +1007,22 @@ describe('published assembly authority and connection lifecycle', () => {
         });
         const listen = vi.fn<WorkerChangeChannelTransport['listen']>(() => () => undefined);
         const channel = new WorkerChangeChannel({ transport: { listen } });
+        const nested = mutation === 'external-nested-write';
+        const contentRoot = nested ? '/projects' : '/projects/test';
         const contentService = new FileContentService({
           proxy,
           channel,
-          paths: new WorkspacePathResolver('/projects/test'),
+          paths: new WorkspacePathResolver(contentRoot),
           refreshGuard: new RefreshGenerationGuard(),
         });
+        const watchRegistration = Promise.withResolvers<void>();
+        if (mutation === 'watch-refused') {
+          vi.spyOn(contentService, 'watchReady').mockReturnValue({
+            ready: watchRegistration.promise,
+            closed: Promise.withResolvers<void>().promise,
+            dispose: vi.fn(),
+          });
+        }
         const read = vi.spyOn(contentService, 'readRawBytes');
         const admitted = mock<Awaited<ReturnType<AppRuntimeClient['openAssembly']>>['admitted']>();
         const rootBytes = encode(published);
@@ -1025,7 +1048,7 @@ describe('published assembly authority and connection lifecycle', () => {
           setup({}).createMachine({
             initial: 'ready',
             context: {
-              rootDirectory: '/projects/test',
+              rootDirectory: contentRoot,
               contentService,
               openFileSystemBridge: () =>
                 createFileSystemBridgePort({
@@ -1057,37 +1080,118 @@ describe('published assembly authority and connection lifecycle', () => {
           },
         }).start();
         const selectedPath = watched === 'entry' ? 'assembly.json' : publicationPath;
+        const contentPath = nested ? `test/${selectedPath}` : selectedPath;
         const initialBytes = watched === 'entry' ? encode(source) : rootBytes;
         try {
-          await waitFor(actor, (state) => state.matches('idle'));
+          await waitFor(actor, (state) => state.matches('idle') || state.matches('error'));
+          expect(selectCadFailureIssues(actor.getSnapshot())).toBeUndefined();
+          expect(actor.getSnapshot().matches('idle')).toBe(true);
+          if (mutation === 'watch-refused') {
+            const late = Promise.withResolvers<Awaited<ReturnType<AppRuntimeClient['publishAssembly']>>>();
+            client.publishAssembly.mockImplementationOnce(async () => late.promise);
+            actor.send({ type: 'initializeModel', entryPath: 'assembly.json' });
+            await vi.waitFor(() => {
+              expect(contentService.watchReady).toHaveBeenCalledOnce();
+              expect(client.publishAssembly).toHaveBeenCalledOnce();
+            });
+            watchRegistration.reject(new Error('captured watch refused'));
+            await waitFor(actor, (state) => state.matches('error'));
+            late.resolve(
+              mock<Awaited<ReturnType<AppRuntimeClient['publishAssembly']>>>({
+                status: 'published',
+                root,
+                admitted,
+                document,
+              }),
+            );
+            await late.promise;
+            await Promise.resolve();
+            expect(actor.getSnapshot().context.entryPath).toBe('assembly.json');
+            expect(actor.getSnapshot().matches('error')).toBe(true);
+            expect(actor.getSnapshot().context.committedAssemblyDisplay).toBeUndefined();
+            await contentService.write(contentPath, encode({ ...source, name: 'after refused watch' }), 'user');
+            await Promise.resolve();
+            expect(actor.getSnapshot().matches('error')).toBe(true);
+            expect(actor.getSnapshot().context.lastRequestedRenderId).toBe(1);
+            expect(client.publishAssembly).toHaveBeenCalledOnce();
+            return;
+          }
+          if (mutation !== 'ordinary') {
+            const first = Promise.withResolvers<Awaited<ReturnType<AppRuntimeClient['publishAssembly']>>>();
+            const second = Promise.withResolvers<Awaited<ReturnType<AppRuntimeClient['publishAssembly']>>>();
+            client.publishAssembly.mockImplementationOnce(async () => first.promise);
+            client.publishAssembly.mockImplementationOnce(async () => second.promise);
+            actor.send({ type: 'initializeModel', entryPath: 'assembly.json' });
+            await vi.waitFor(() => {
+              expect(client.publishAssembly).toHaveBeenCalledOnce();
+            });
+            const latest = encode({ ...source, name: 'latest edit' });
+            if (mutation === 'local-write') {
+              await contentService.write(contentPath, latest, 'user');
+            } else {
+              const registration = listen.mock.calls.find(([event]) => event === 'fileChanged');
+              if (!registration) {
+                throw new Error('Expected the real worker change subscription.');
+              }
+              if (mutation === 'external-delete') {
+                files.delete('/projects/test/assembly.json');
+                registration[1]({ type: 'fileDeleted', path: contentPath, backend: 'indexeddb' });
+                await waitFor(actor, (state) => state.context.lastSettledRenderId === 2);
+                first.reject(new Error('stale initial publication failed'));
+                expect(actor.getSnapshot().context.lastRequestedRenderId).toBe(2);
+                expect(client.publishAssembly).toHaveBeenCalledOnce();
+                expect(selectCadFailureIssues(actor.getSnapshot())).toBeDefined();
+                return;
+              }
+              files.set('/projects/test/assembly.json', latest);
+              registration[1](
+                mutation === 'external-reset'
+                  ? { type: 'backendChanged', backend: 'indexeddb' }
+                  : { type: 'fileWritten', path: contentPath, backend: 'indexeddb' },
+              );
+            }
+            await vi.waitFor(() => {
+              expect(client.publishAssembly).toHaveBeenCalledTimes(2);
+            });
+            first.reject(new Error('stale initial publication failed'));
+            second.resolve(
+              mock<Awaited<ReturnType<AppRuntimeClient['publishAssembly']>>>({
+                status: 'published',
+                root,
+                admitted,
+                document,
+              }),
+            );
+            await waitFor(actor, (state) => state.matches('idle') && state.context.lastSettledRenderId === 2);
+            expect(actor.getSnapshot().context.lastRequestedRenderId).toBe(2);
+            expect(actor.getSnapshot().context.committedAssemblyDisplay?.entryRead).toEqual({
+              path: 'assembly.json',
+              digest: await cache.digestContent({ bytes: latest }),
+              byteLength: latest.byteLength,
+            });
+            expect(selectCadFailureIssues(actor.getSnapshot())).toBeUndefined();
+            return;
+          }
           actor.send({ type: 'initializeModel', entryPath: 'assembly.json' });
-          await waitFor(actor, (state) => state.matches('idle') && state.context.lastSettledRenderId === 1);
+          await waitFor(
+            actor,
+            (state) => state.matches('error') || (state.matches('idle') && state.context.lastSettledRenderId === 1),
+          );
+          expect(selectCadFailureIssues(actor.getSnapshot())).toBeUndefined();
+          expect(actor.getSnapshot().matches('idle')).toBe(true);
           const display = actor.getSnapshot().context.committedAssemblyDisplay;
           expect(display?.entryRead).toEqual({
             path: 'assembly.json',
             digest: await cache.digestContent({ bytes: encode(source) }),
             byteLength: encode(source).byteLength,
           });
-          const awaitObservation = async (): Promise<void> => {
-            const result = read.mock.results.at(-1);
-            if (result?.type !== 'return') {
-              throw new Error('Expected the actual content observation read.');
-            }
-            await result.value;
-            const digest = digests.mock.results.at(-1);
-            if (digest?.type !== 'return') {
-              throw new Error('Expected the actual observation digest.');
-            }
-            await digest.value;
-          };
           read.mockClear();
-          await contentService.resolve(selectedPath);
-          expect(read).toHaveBeenCalledOnce();
-          await awaitObservation();
+          await contentService.resolve(contentPath);
+          expect(read).not.toHaveBeenCalled();
           expect(actor.getSnapshot().context.lastRequestedRenderId).toBe(1);
           expect(actor.getSnapshot().context.committedAssemblyDisplay).toBe(display);
-          await contentService.write(selectedPath, initialBytes, 'user');
-          expect(read).toHaveBeenCalledOnce();
+          await contentService.write(contentPath, initialBytes, 'user');
+          expect(read).not.toHaveBeenCalled();
           expect(client.publishAssembly).toHaveBeenCalledOnce();
           expect(client.openAssembly).not.toHaveBeenCalled();
 
@@ -1112,7 +1216,7 @@ describe('published assembly authority and connection lifecycle', () => {
             }
           };
           await refreshExternal(initialBytes);
-          expect(read).toHaveBeenCalledOnce();
+          expect(read).not.toHaveBeenCalled();
           expect(actor.getSnapshot().context.lastRequestedRenderId).toBe(1);
           expect(actor.getSnapshot().context.committedAssemblyDisplay).toBe(display);
           const externalBytes =
@@ -1224,6 +1328,8 @@ describe('published assembly authority and connection lifecycle', () => {
         secondClient.openAssembly.mockResolvedValue(document);
         const listeners = new Map<string, Set<() => void>>();
         const contentService = mock<FileContentService>();
+        contentService.onDidContentChange.mockReturnValue(() => undefined);
+        contentService.watchReady.mockImplementation(openContentWatch);
         let sourceUnavailable = false;
         contentService.readRawBytes.mockImplementation(async (path) => {
           if (sourceUnavailable && path === 'assembly.json') {
@@ -1373,6 +1479,8 @@ describe('selected assembly admission ownership', () => {
   }
   it('keeps pending pin admission independent of old document events and cancels it on source selection', async () => {
     const contentService = mock<FileContentService>();
+    contentService.onDidContentChange.mockReturnValue(() => undefined);
+    contentService.watchReady.mockImplementation(openContentWatch);
     const read = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
     contentService.readRawBytes.mockReturnValue(read.promise);
     const f = await connected(fixture({ fileManagerRef: authority(contentService) }));
@@ -1398,6 +1506,8 @@ describe('selected assembly admission ownership', () => {
   });
   it('denies an entry outside captured content authority before reading bytes', async () => {
     const contentService = mock<FileContentService>();
+    contentService.onDidContentChange.mockReturnValue(() => undefined);
+    contentService.watchReady.mockImplementation(openContentWatch);
     const f = await connected(
       fixture({ fileManagerRef: authority(contentService), fileSystemRoot: '/projects/foreign' }),
     );
@@ -1426,6 +1536,8 @@ describe('selected assembly admission ownership', () => {
     'retains the ordinary document route for JSON %s',
     async (text) => {
       const contentService = mock<FileContentService>();
+      contentService.onDidContentChange.mockReturnValue(() => undefined);
+      contentService.watchReady.mockImplementation(openContentWatch);
       contentService.readRawBytes.mockResolvedValue(new TextEncoder().encode(text));
       const f = await connected(fixture({ fileManagerRef: authority(contentService) }));
       try {

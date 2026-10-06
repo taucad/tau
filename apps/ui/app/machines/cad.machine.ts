@@ -416,7 +416,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     readBaseline: () => PublishedPartAsset | undefined,
     listener: () => void,
   ): (() => void) => {
-    const selectedPath = normalizePath(`${fileSystemRoot}/${assertRootedPath(path)}`);
+    const projectRelativePath = assertRootedPath(path);
+    const selectedPath = normalizePath(`${fileSystemRoot}/${projectRelativePath}`);
     const rootDirectory: unknown = snapshot.context.rootDirectory;
     if (typeof rootDirectory !== 'string') {
       throw new TypeError('Assembly watch has no captured workspace root.');
@@ -429,26 +430,33 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     const relativePath = assertRootedPath(selectedPath.slice(prefix.length));
     let closed = false;
     let pending: { baseline: PublishedPartAsset | undefined } | undefined;
-    const observe = async (): Promise<void> => {
+    let externalMutationPending = false;
+    const ownsWatch = (): boolean => {
+      const files = fileManagerRef.getSnapshot();
+      return (
+        !closed &&
+        !replacementState.notified &&
+        machineRef.getSnapshot().status === 'active' &&
+        files.status === 'active' &&
+        files.matches('ready') &&
+        assemblyContext?.fileManagerRef === fileManagerRef &&
+        assemblyContext.fileSystemRoot === fileSystemRoot &&
+        (assemblyContext.entryPath === projectRelativePath ||
+          assemblyContext.publishedAssemblyRoot?.path === projectRelativePath) &&
+        files.context.contentService === capturedContentService &&
+        files.context.rootDirectory === rootDirectory
+      );
+    };
+    const observe = async (durableMutation = false): Promise<void> => {
       const baseline = readBaseline();
+      // A subscription's first content read is not a new edit. A durable write or deletion
+      // during admission is new intent even before the first committed entryRead exists.
+      if (!baseline && !durableMutation && assemblyContext?.pendingAssemblyEntryPath === projectRelativePath) {
+        return;
+      }
       const observation = { baseline };
       pending = observation;
-      const isCurrent = (): boolean => {
-        const files = fileManagerRef.getSnapshot();
-        return (
-          !closed &&
-          pending === observation &&
-          !replacementState.notified &&
-          machineRef.getSnapshot().status === 'active' &&
-          files.status === 'active' &&
-          files.matches('ready') &&
-          assemblyContext?.fileManagerRef === fileManagerRef &&
-          assemblyContext.fileSystemRoot === fileSystemRoot &&
-          files.context.contentService === capturedContentService &&
-          files.context.rootDirectory === rootDirectory &&
-          readBaseline() === baseline
-        );
-      };
+      const isCurrent = (): boolean => ownsWatch() && pending === observation && readBaseline() === baseline;
       if (!isCurrent()) {
         return;
       }
@@ -478,15 +486,80 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
       }
       listener();
     };
-    const unsubscribe = capturedContentService.subscribe(relativePath, () => {
-      // async-iife: event handler -- A content outcome may be the first read of already admitted bytes.
-      void observe();
+    const externalWatch = capturedContentService.watchReady({ paths: [relativePath] }, (event) => {
+      if (!ownsWatch()) {
+        return;
+      }
+      if (event.type === 'change') {
+        externalMutationPending = true;
+      } else {
+        externalMutationPending = false;
+        // Delete, rename and reset may have no ready outcome to notify. Re-read the captured
+        // authority before admitting the invalidation, including ancestor changes.
+        const refresh = async (): Promise<void> => {
+          try {
+            await capturedContentService.resolve(relativePath, { forceText: true });
+          } catch {
+            // The existing admission path reports a refused or missing selected entry.
+          }
+          await observe(true);
+        };
+        // async-iife: authority invalidation -- the owner fence is checked again by observe.
+        void refresh();
+      }
     });
-    return () => {
+    const refuseWatch = (error: unknown): void => {
+      if (ownsWatch()) {
+        stop();
+        machineRef.send({ type: 'stateChanged', state: 'error', detail: `Assembly watch closed: ${String(error)}` });
+      }
+    };
+    const register = async (): Promise<void> => {
+      try {
+        await externalWatch.ready;
+      } catch (error) {
+        refuseWatch(error);
+      }
+    };
+    const awaitClose = async (): Promise<void> => {
+      try {
+        await externalWatch.closed;
+        refuseWatch('authority closed');
+      } catch (error) {
+        refuseWatch(error);
+      }
+    };
+    const unsubscribe = capturedContentService.subscribe(relativePath, () => {
+      const durableMutation = externalMutationPending;
+      externalMutationPending = false;
+      // async-iife: event handler -- A content outcome may be the first read of already admitted bytes.
+      void observe(durableMutation);
+    });
+    const unsubscribeMutation = capturedContentService.onDidContentChange((event) => {
+      const changed =
+        event.type === 'written' || event.type === 'deleted'
+          ? event.path === relativePath
+          : event.type === 'batchWritten' && event.paths.includes(relativePath);
+      if (changed && !readBaseline() && assemblyContext?.pendingAssemblyEntryPath === projectRelativePath) {
+        externalMutationPending = false;
+        // async-iife: durable mutation -- replay the latest admitted entry, not the initial observer read.
+        void observe(true);
+      }
+    });
+    const stop = (): void => {
+      if (closed) {
+        return;
+      }
       closed = true;
       pending = undefined;
       unsubscribe();
+      unsubscribeMutation();
+      externalWatch.dispose();
     };
+    // async-iife: captured watch lifetime -- either failed registration or closure refuses admission.
+    void register();
+    void awaitClose();
+    return stop;
   };
   const entrySubscription = machineRef.subscribe((state: { context: CadContext }) => {
     const { context } = state;

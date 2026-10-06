@@ -54,22 +54,21 @@ function getNamedInputs(
   };
 }
 
-type BuildablePackage = { project: string; manifest: PackageJson };
+type BuiltPackage = { project: string; manifest: PackageJson };
 
-/** Package name → its Nx project and manifest, for every package tsdown builds. */
-function buildablePackages(configFiles: readonly string[]): Map<string, BuildablePackage> {
-  const packages = new Map<string, BuildablePackage>();
+/** Package name → Nx project and manifest, for every package that tsdown builds. */
+function readBuiltPackages(configFiles: readonly string[]): Map<string, BuiltPackage> {
+  const packages = new Map<string, BuiltPackage>();
   for (const configFile of configFiles) {
     const directory = dirname(configFile);
     const packageJsonPath = join(directory, 'package.json');
-    if (basename(configFile) !== 'tsdown.config.ts' || directory === '.' || !existsSync(packageJsonPath)) {
+    const projectJsonPath = join(directory, 'project.json');
+    if (directory === '.' || !existsSync(packageJsonPath) || !existsSync(projectJsonPath)) {
       continue;
     }
 
     const manifest = readJsonFile<PackageJson>(packageJsonPath);
-    const projectJsonPath = join(directory, 'project.json');
-    const project = existsSync(projectJsonPath) ? readJsonFile<ProjectConfiguration>(projectJsonPath).name : undefined;
-    const name = project ?? manifest.name;
+    const { name } = readJsonFile<ProjectConfiguration>(projectJsonPath);
     if (manifest.name !== undefined && name !== undefined) {
       packages.set(manifest.name, { project: name, manifest });
     }
@@ -79,31 +78,34 @@ function buildablePackages(configFiles: readonly string[]): Map<string, Buildabl
 }
 
 /**
- * Every workspace package pkgcheck stages for a strict consumer: the transitive
- * closure of dependencies and peer dependencies. `^build` reaches only direct
- * graph dependencies, and a build without `^build` (a peer-only package such as
- * workbench) stops there, so a transitive peer's `dist` would otherwise be missing.
+ * The projects whose dist pkgcheck stages: every built workspace package reachable
+ * through `dependencies` and `peerDependencies`. `^build` alone reaches only direct
+ * dependencies, and a build without its own `^build` (workbench, three) leaves the
+ * peers it names unbuilt. Development dependencies are not followed; they form cycles.
  */
-function stagedProjects(manifest: PackageJson, packages: Map<string, BuildablePackage>): string[] {
-  const projects = new Set<string>();
+function stagedProjects(manifest: PackageJson, packages: Map<string, BuiltPackage>): string[] {
+  const seen = new Set<string>();
   const pending = [manifest];
-  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    for (const dependency of Object.keys({ ...next.dependencies, ...next.peerDependencies })) {
-      const workspacePackage = packages.get(dependency);
-      if (workspacePackage && !projects.has(workspacePackage.project)) {
-        projects.add(workspacePackage.project);
-        pending.push(workspacePackage.manifest);
+  for (let current = pending.pop(); current; current = pending.pop()) {
+    for (const dependency of [
+      ...Object.keys(current.dependencies ?? {}),
+      ...Object.keys(current.peerDependencies ?? {}),
+    ]) {
+      const built = packages.get(dependency);
+      if (built && dependency !== manifest.name && !seen.has(built.project)) {
+        seen.add(built.project);
+        pending.push(built.manifest);
       }
     }
   }
 
-  return [...projects].toSorted();
+  return [...seen].toSorted();
 }
 
 const createPkgcheckTarget = (
   configFilePath: string,
   context: Parameters<CreateNodesV2[1]>[2],
-  packages: Map<string, BuildablePackage>,
+  packages: Map<string, BuiltPackage>,
 ): CreateNodesResult | undefined => {
   const projectRoot = dirname(configFilePath);
 
@@ -128,10 +130,14 @@ const createPkgcheckTarget = (
     projects: {
       [projectRoot]: {
         targets: {
+          'pkgcheck-deps': {
+            executor: 'nx:noop',
+            dependsOn: staged.length > 0 ? [{ target: 'build', projects: staged }] : [],
+          },
           pkgcheck: {
             executor: 'nx:run-commands',
             cache: true,
-            dependsOn: ['build', '^build', ...(staged.length > 0 ? [{ target: 'build', projects: staged }] : [])],
+            dependsOn: ['build', '^build', 'pkgcheck-deps'],
             options: {
               command: `tsx tools/pkgcheck.ts ${projectRoot}`,
               cwd: '.',
@@ -182,7 +188,7 @@ export const createNodesV2: CreateNodesV2 = [
   // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- not necessary as already has an explicit return type
   (configFiles, _options, context) => {
     const results: Array<[string, CreateNodesResult]> = [];
-    const packages = buildablePackages(configFiles);
+    const packages = readBuiltPackages(configFiles.filter((configFile) => basename(configFile) === 'tsdown.config.ts'));
 
     for (const configFile of configFiles) {
       const target =

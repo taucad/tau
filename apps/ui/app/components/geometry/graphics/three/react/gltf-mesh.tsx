@@ -1340,25 +1340,14 @@ export function GltfMesh({
     getPickableMeshes: getModelPickableMeshes,
   });
 
-  // Update resolution when size changes. Deferred via requestAnimationFrame
-  // so that rapid resize events (e.g. dragging a Dockview divider) batch into
-  // a single scene traversal + invalidation per animation frame.
-  useEffect(() => {
+  // R3F already invalidates on resize. Update line uniforms before that frame,
+  // without a second RAF/traversal after the resized canvas has been presented.
+  useLayoutEffect(() => {
     resolutionRef.current.set(size.width, size.height);
-
-    if (!scene) {
-      return;
-    }
-
-    const frameId = requestAnimationFrame(() => {
+    if (scene) {
       updateLineMaterialResolution(scene, resolutionRef.current);
-      invalidate();
-    });
-
-    return () => {
-      cancelAnimationFrame(frameId);
-    };
-  }, [size, scene, invalidate]);
+    }
+  }, [size.width, size.height, scene]);
 
   const emitTelemetry = useCallback(
     (bundle: PreparedGltfPresentation, outcome: GltfPresentationTelemetry['outcome']): void => {

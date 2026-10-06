@@ -1839,6 +1839,15 @@ describe('billing payments PostgreSQL foundation', () => {
         .where(eq(billingProviderLeg.id, legId));
     };
 
+    /** The error code the sweep left on a leg, for a failing assertion's message. */
+    const legError = async (legId: string): Promise<string | undefined> => {
+      const [row] = await database
+        .select({ errorCode: billingProviderLeg.errorCode })
+        .from(billingProviderLeg)
+        .where(eq(billingProviderLeg.id, legId));
+      return row?.errorCode ?? undefined;
+    };
+
     /** Delivers one signed event the way Stripe's endpoint would, once it is re-enabled. */
     const deliverLater = async (type: string, object: { readonly id: string; readonly object: string }) => {
       const body = JSON.stringify({
@@ -1861,7 +1870,10 @@ describe('billing payments PostgreSQL foundation', () => {
       payHostedTopup(topup);
       await onlyDue(topup.leg.id);
       const recovery = await payments.recoverPayments({ environment: 'development', limit: 1 });
-      expect(recovery, JSON.stringify(requests.slice(-20))).toEqual({
+      expect(
+        recovery,
+        JSON.stringify({ errorCode: await legError(topup.leg.id), requests: requests.slice(-20) }),
+      ).toEqual({
         processed: [topup.leg.id],
         pending: [],
         failed: [],
@@ -1967,7 +1979,8 @@ describe('billing payments PostgreSQL foundation', () => {
       });
       await onlyDue(leg.id);
       // The sweep links the Stripe subscription and queues its first invoice, as `invoice.paid` would.
-      expect(await payments.recoverPayments({ environment: 'development', limit: 1 })).toEqual({
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(swept, JSON.stringify({ errorCode: await legError(leg.id), requests: requests.slice(-20) })).toEqual({
         processed: [leg.id],
         pending: [],
         failed: [],

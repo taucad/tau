@@ -1705,14 +1705,20 @@ export class BillingPaymentsService {
         }
         if (leg.providerObjectId !== null && leg.providerObjectId !== recovered.object.object.id)
           throw new ConflictException({ code: 'provider_object_mismatch' });
+        // A leg that already carries its provider object keeps that dispatch identity: the database forbids
+        // rewriting it, and a completed or expired Checkout reads `url: null`, which must not replace the link.
         const linked = await this.databaseService.database
           .update(billingProviderLeg)
-          .set({
-            providerObjectId: recovered.object.object.id,
-            redirectUrl: recovered.object.kind === 'checkout' ? recovered.object.object.url : null,
-            state: 'known',
-            errorCode: null,
-          })
+          .set(
+            leg.providerObjectId === null
+              ? {
+                  providerObjectId: recovered.object.object.id,
+                  redirectUrl: recovered.object.kind === 'checkout' ? recovered.object.object.url : null,
+                  state: 'known',
+                  errorCode: null,
+                }
+              : { state: 'known', errorCode: null },
+          )
           .where(
             and(
               eq(billingProviderLeg.id, leg.id),

@@ -2202,12 +2202,14 @@ describe('useProjectManager.createProject', () => {
         const listing = useQuery({
           queryKey: ['projects', { includeDeleted: true }],
           queryFn: async () => projectManager.getProjectListing({ includeDeleted: true }),
+          enabled: !projectManager.isLoading,
         });
         return { projectManager, listing };
       },
       { wrapper },
     );
     await waitFor(() => {
+      expect(result.current.listing.error).toBeNull();
       expect(result.current.listing.data?.projects).toEqual([]);
     });
     mockListProjectManifests.mockClear();

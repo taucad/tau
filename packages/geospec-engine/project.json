@@ -28,7 +28,7 @@
       "cache": false
     },
     "pkgcheck": {
-      "dependsOn": ["generate-provenance", "^build"]
+      "dependsOn": ["generate-provenance", "^build", "pkgcheck-deps"]
     },
     "e2e": {
       "executor": "nx:run-commands",

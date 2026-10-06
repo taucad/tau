@@ -191,8 +191,8 @@ jobs:
             echo "- Action: $ACTION (production ran \`$PREVIOUS\`)"
             echo "- Commit: \`$COMMIT\`"
             if [ "$APP" = api ]; then
-              echo "- Started **Deploy to Fly.io** at \`$RELEASE\`; approve it on the `production` environment under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy.yml)."
+              echo "- Started **Deploy to Fly.io** at \`$RELEASE\`; approve it on the \`production\` environment under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy.yml)."
             else
-              echo "- Started **Deploy UI to Netlify** and **Deploy docs to Netlify** at \`$RELEASE\`; approve both on the `production` environment under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy-ui.yml)."
+              echo "- Started **Deploy UI to Netlify** and **Deploy docs to Netlify** at \`$RELEASE\`; approve both on the \`production\` environment under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy-ui.yml)."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

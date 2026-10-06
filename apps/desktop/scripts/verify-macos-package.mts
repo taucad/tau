@@ -176,6 +176,38 @@ const stopPackagedApp = (): void => {
   }
 };
 
+/**
+ * Prints what macOS recorded about a Quick Look request that failed twice. The
+ * probe only sees `QLThumbnailErrorDomain error 0`; the reason (sandbox denial,
+ * launch refusal, extension crash) is in the unified log and crash reports.
+ */
+const printQuickLookDiagnostics = (): void => {
+  const predicate = [
+    'subsystem == "com.taucad.tau.desktop"',
+    'process BEGINSWITH "TauQuickLook"',
+    'process == "ThumbnailsAgent"',
+    'process == "quicklookd"',
+    'eventMessage CONTAINS[c] "TauQuickLook"',
+    'eventMessage CONTAINS[c] "com.taucad.tau.desktop.quicklook"',
+  ].join(' OR ');
+  const log = spawnSync('log', ['show', '--last', '3m', '--info', '--style', 'compact', '--predicate', predicate], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: 60_000,
+  });
+  // ponytail: last 300 lines keeps the CI log readable; widen --last or the slice if the cause scrolls off.
+  const lines = `${log.stdout}${log.stderr}`.trim().split('\n').slice(-300);
+  console.error(`::group::Quick Look unified log (last ${String(lines.length)} lines)\n${lines.join('\n')}\n::endgroup::`);
+  const reportsRoot = join(process.env.HOME ?? '', 'Library/Logs/DiagnosticReports');
+  const reports = existsSync(reportsRoot) ? readdirSync(reportsRoot).filter((name) => name.includes('TauQuickLook')) : [];
+  for (const report of reports) {
+    console.error(`::group::${report}\n${readFileSync(join(reportsRoot, report), 'utf8').slice(0, 20_000)}\n::endgroup::`);
+  }
+  if (reports.length === 0) {
+    console.error('No TauQuickLook crash reports in ~/Library/Logs/DiagnosticReports.');
+  }
+};
+
 const temporarySessions = (): ReadonlySet<string> =>
   new Set(existsSync(extensionTemporaryRoot) ? readdirSync(extensionTemporaryRoot) : []);
 
@@ -811,7 +843,12 @@ if (unsigned) {
         return await runMeasured(options);
       } catch (error) {
         console.warn(`thumbnail request failed once, retrying (host-side Quick Look teardown race): ${String(error)}`);
-        return runMeasured(options);
+        try {
+          return await runMeasured(options);
+        } catch (retryError) {
+          printQuickLookDiagnostics();
+          throw retryError;
+        }
       }
     };
 

@@ -12,7 +12,17 @@ export class BillingAddressRequired extends Error {
   }
 }
 
-const parseAddressRefusal = async (response: Response): Promise<BillingAddressRequired | undefined> => {
+/** Account closure waits until no payment action can still settle; the customer finishes or cancels it first. */
+export class AccountClosurePaymentPending extends Error {
+  public constructor() {
+    super('payment_action_pending');
+    this.name = 'AccountClosurePaymentPending';
+  }
+}
+
+const parseConflictRefusal = async (
+  response: Response,
+): Promise<BillingAddressRequired | AccountClosurePaymentPending | undefined> => {
   if (response.status !== 409) {
     return undefined;
   }
@@ -21,7 +31,11 @@ const parseAddressRefusal = async (response: Response): Promise<BillingAddressRe
     .json()
     .catch(() => undefined);
   const code = body && typeof body === 'object' ? (body as { code?: unknown }).code : undefined;
-  return code === 'customer_tax_location_invalid' ? new BillingAddressRequired() : undefined;
+  return code === 'customer_tax_location_invalid'
+    ? new BillingAddressRequired()
+    : code === 'payment_action_pending'
+      ? new AccountClosurePaymentPending()
+      : undefined;
 };
 
 const base = (binding: PaymentActionBinding): string => `${binding.apiBaseUrl.replace(/\/$/u, '')}/v1/billing`;
@@ -39,7 +53,7 @@ const request = async (binding: PaymentActionBinding, path: string, init?: Reque
   if (!response.ok) {
     throw (
       (await parseCollectionRefusal(response)) ??
-      (await parseAddressRefusal(response)) ??
+      (await parseConflictRefusal(response)) ??
       new Error(`Billing lifecycle request failed with ${response.status}`)
     );
   }

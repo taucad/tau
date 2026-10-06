@@ -6,7 +6,12 @@ import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { authClient } from '#lib/auth-client.js';
 import { createPaymentRequestId } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
-import { getAccountClosure, getCurrentAccountClosure, prepareAccountClosure } from '#lib/billing-lifecycle-client.js';
+import {
+  AccountClosurePaymentPending,
+  getAccountClosure,
+  getCurrentAccountClosure,
+  prepareAccountClosure,
+} from '#lib/billing-lifecycle-client.js';
 import { useFinancialSession } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
@@ -59,9 +64,13 @@ export function AccountClosureSettings({
     setError(undefined);
     try {
       await operation();
-    } catch {
+    } catch (error_) {
       if (guard.isCurrent()) {
-        setError('Could not continue account closure. Try again.');
+        setError(
+          error_ instanceof AccountClosurePaymentPending
+            ? 'Finish or cancel your pending payment first.'
+            : 'Could not continue account closure. Try again.',
+        );
       }
     } finally {
       if (guard.isCurrent()) {

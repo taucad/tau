@@ -10,7 +10,9 @@ const prepare = vi.hoisted(() => vi.fn());
 const current = vi.hoisted(() => vi.fn());
 const getClosure = vi.hoisted(() => vi.fn());
 const deleteUser = vi.hoisted(() => vi.fn());
+const PaymentPending = vi.hoisted(() => class extends Error {});
 vi.mock('#lib/billing-lifecycle-client.js', () => ({
+  AccountClosurePaymentPending: PaymentPending,
   prepareAccountClosure: prepare,
   getCurrentAccountClosure: current,
   getAccountClosure: getClosure,
@@ -56,6 +58,14 @@ describe('AccountClosureSettings', () => {
     expect(refresh).toBeEnabled();
     await userEvent.click(refresh);
     expect(getClosure).toHaveBeenCalledOnce();
+  });
+
+  it('should ask the customer to finish or cancel a pending payment when closure is refused for it', async () => {
+    prepare.mockRejectedValue(new PaymentPending());
+    renderClosure();
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: 'Prepare account closure' }));
+    expect(await screen.findByText('Finish or cancel your pending payment first.')).toBeInTheDocument();
   });
 
   it('invokes Better Auth only for a deletion-ready closure', async () => {

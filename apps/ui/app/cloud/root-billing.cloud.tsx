@@ -155,6 +155,15 @@ export const useCloudPaymentActionReturn = (): void => {
     const inspectReturn = async (): Promise<void> => {
       try {
         let action = await getPaymentAction(binding, actionId);
+        if (active && action.state === 'redirect_required') {
+          // A paid Checkout whose webhook has not arrived settles from Stripe's own session on recovery;
+          // an open one comes back unchanged, still offering Resume Checkout.
+          try {
+            action = await recoverPaymentAction({ ...binding, subjectId: action.subjectId }, actionId);
+          } catch {
+            // The fetched action stands; the bounded re-check below keeps following it.
+          }
+        }
         if (!active) {
           return;
         }

@@ -15,12 +15,10 @@ Site identity, the per-environment variable matrices, DNS authority, and the pro
                     │ Pull request vs main   │
                     └────────────┬───────────┘
                                  │
-                   ┌─────────────┴─────────────┐
-                   │                           │
-                   ▼                           ▼
-   ┌───────────────────────────┐    ┌─────────────────────────────┐
-   │ ci.yml (no UI preview)    │    │ review.yml (Fly review app) │
-   └───────────────────────────┘    └─────────────────────────────┘
+                                 ▼
+                   ┌───────────────────────────┐
+                   │ ci.yml (no UI preview)    │
+                   └───────────────────────────┘
 
 
                     ┌────────────────────────┐

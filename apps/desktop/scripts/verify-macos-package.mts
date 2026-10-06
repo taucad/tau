@@ -758,26 +758,35 @@ if (unsigned) {
     throw new Error('Tau remained running; offline extension verification is invalid');
   }
 
-  const classifications = [
-    ['packages/plugins/gltf/src/fixtures/cube.glb', ['org.khronos.glb']],
-    ['packages/plugins/brep/src/fixtures/cube.step', ['com.taucad.step', 'com.shapr3d.step', 'com.shapr3d.stp']],
-    ['packages/plugins/rhino/src/fixtures/cube-mesh.3dm', ['com.mcneel.rhinoceros.3dm', 'com.shapr3d.rhino.3dm']],
-    ['packages/plugins/assimp/src/fixtures/cube-ascii.fbx', ['com.autodesk.mac.fbx']],
-  ] as const;
-  for (const [relativePath, expectedTypes] of classifications) {
-    const path = resolve(workspaceRoot, relativePath);
-    const metadata = run('mdls', ['-raw', '-name', 'kMDItemContentType', path]).trim();
-    if (!(expectedTypes as readonly string[]).includes(metadata)) {
-      throw new Error(`${relativePath} resolved to unexpected UTI ${metadata}`);
-    }
-  }
-
   const testRoot = mkdtempSync(join(tmpdir(), 'tau-quick-look-verify-'));
+  const contentTypeProbe = resolve(testRoot, 'content-type-probe');
   const thumbnailProbe = resolve(testRoot, 'quick-look-thumbnail-probe');
   const previewProbe = resolve(testRoot, 'quick-look-preview-probe');
   const initialSessions = temporarySessions();
   const measurements: string[] = [];
   try {
+    const classifications = [
+      ['packages/plugins/gltf/src/fixtures/cube.glb', ['org.khronos.glb']],
+      ['packages/plugins/brep/src/fixtures/cube.step', ['com.taucad.step', 'com.shapr3d.step', 'com.shapr3d.stp']],
+      ['packages/plugins/rhino/src/fixtures/cube-mesh.3dm', ['com.mcneel.rhinoceros.3dm', 'com.shapr3d.rhino.3dm']],
+      ['packages/plugins/assimp/src/fixtures/cube-ascii.fbx', ['com.autodesk.mac.fbx']],
+    ] as const;
+    // Ask Launch Services rather than Spotlight: kMDItemContentType is indexed
+    // when the checkout is written, before the packaged app declares its types.
+    run('xcrun', ['swiftc', '-O', resolve(desktopRoot, 'scripts/content-type-probe.swift'), '-o', contentTypeProbe]);
+    const contentTypes = run(
+      contentTypeProbe,
+      classifications.map(([relativePath]) => resolve(workspaceRoot, relativePath)),
+    )
+      .trim()
+      .split('\n');
+    for (const [index, [relativePath, expectedTypes]] of classifications.entries()) {
+      const contentType = contentTypes[index] ?? '';
+      if (!(expectedTypes as readonly string[]).includes(contentType)) {
+        throw new Error(`${relativePath} resolved to unexpected UTI ${contentType}`);
+      }
+    }
+
     run('xcrun', [
       'swiftc',
       '-O',

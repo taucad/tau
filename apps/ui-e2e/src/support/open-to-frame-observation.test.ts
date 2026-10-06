@@ -5,8 +5,14 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, expect, it } from 'vitest';
 
-// oxlint-disable-next-line no-restricted-imports -- Node-only unit test imports the directly executed driver's helper.
-import { epochForRelativeMarks, observedKernelSelection, observedRuntimeWindow } from './open-to-frame-observation.ts';
+// oxlint-disable no-restricted-imports -- Node-only unit test imports the directly executed driver's helper.
+import {
+  epochForRelativeMarks,
+  observedKernelSelection,
+  observedReplicadNativeVariant,
+  observedRuntimeWindow,
+} from './open-to-frame-observation.ts';
+// oxlint-enable no-restricted-imports
 
 let directory: string | undefined;
 const execFileAsync = promisify(execFile);
@@ -19,6 +25,37 @@ afterEach(async () => {
 it('anchors relative sample marks at their actual wall-clock time', () => {
   const anchor = epochForRelativeMarks(500, 100_000, 510);
   expect(anchor + 20).toBe(100_010);
+});
+
+it('should require the selected Replicad native build to finish initialization in the same sample', () => {
+  const autoSingle = '[Kernel:worker] Replicad WASM variant auto-selected: single (shared memory unavailable)';
+  const autoMulti = '[Kernel:worker] Replicad WASM variant auto-selected: multi (cross-origin isolated)';
+  const singleReady = '[Kernel:worker] Replicad OCCT initialised: variant=single (single-threaded)';
+  const multiReady = '[Kernel:worker] OCCT parallel defaults activated: 4 threads';
+  const customReady = '[Kernel:worker] Replicad OCCT initialised: variant=custom (single-threaded)';
+  expect(observedReplicadNativeVariant([autoSingle, singleReady], 'auto')).toBe('auto-single');
+  expect(observedReplicadNativeVariant([autoMulti, multiReady], 'auto')).toBe('auto-multi');
+  expect(
+    observedReplicadNativeVariant(
+      [autoMulti, '[Kernel:worker] OCCT parallel defaults partially activated: BOPAlgo + BRepMesh defaults ON'],
+      'auto',
+    ),
+  ).toBe('auto-multi');
+  expect(observedReplicadNativeVariant([customReady], 'custom')).toBe('custom-single');
+  expect(observedReplicadNativeVariant([autoMulti], 'auto')).toBeUndefined();
+  expect(observedReplicadNativeVariant([autoMulti, singleReady], 'auto')).toBeUndefined();
+  expect(observedReplicadNativeVariant([autoSingle, autoMulti, multiReady], 'auto')).toBeUndefined();
+  expect(observedReplicadNativeVariant([customReady, autoSingle], 'custom')).toBeUndefined();
+  expect(observedReplicadNativeVariant([singleReady], 'custom')).toBeUndefined();
+  expect(
+    observedReplicadNativeVariant(
+      Array.from({ length: 17 }, () => customReady),
+      'custom',
+    ),
+  ).toBeUndefined();
+  expect(
+    observedReplicadNativeVariant(['Replicad OCCT initialised: variant=custom (single-threaded)'], 'custom'),
+  ).toBeUndefined();
 });
 
 it('should refuse browser link-intent before waiting for a project that only desktop seeds', async () => {

@@ -24,6 +24,47 @@ export type RuntimeWindowObservation = Readonly<{
 export const epochForRelativeMarks = (start: number, wallNow: number, monotonicNow: number): number =>
   wallNow - monotonicNow + start;
 
+/** Native build that actually completed Replicad initialization in this browser sample. */
+export const observedReplicadNativeVariant = (
+  lines: readonly string[],
+  treatment: 'auto' | 'custom',
+): 'auto-single' | 'auto-multi' | 'custom-single' | undefined => {
+  if (lines.length === 0 || lines.length > 16) {
+    return undefined;
+  }
+  const selected = new Set<string>();
+  const initialized = new Set<string>();
+  for (const line of lines) {
+    const message = /^\[Kernel:[^\]]+\] (?<message>.*)$/u.exec(line)?.groups?.['message'];
+    if (message === undefined) {
+      return undefined;
+    }
+    const auto = /^Replicad WASM variant auto-selected: (?<variant>single|multi) \([^)]+\)$/u.exec(message);
+    if (auto) {
+      selected.add(auto.groups!['variant']!);
+    } else if (message === 'Replicad OCCT initialised: variant=single (single-threaded)') {
+      initialized.add('single');
+    } else if (message === 'Replicad OCCT initialised: variant=custom (single-threaded)') {
+      initialized.add('custom');
+    } else if (
+      message.startsWith('OCCT parallel defaults activated:') ||
+      message.startsWith('OCCT parallel defaults partially activated:')
+    ) {
+      initialized.add('multi');
+    } else {
+      return undefined;
+    }
+  }
+  if (treatment === 'custom') {
+    return selected.size === 0 && initialized.size === 1 && initialized.has('custom') ? 'custom-single' : undefined;
+  }
+  return selected.size === 1 && initialized.size === 1 && selected.has('single') && initialized.has('single')
+    ? 'auto-single'
+    : selected.size === 1 && initialized.size === 1 && selected.has('multi') && initialized.has('multi')
+      ? 'auto-multi'
+      : undefined;
+};
+
 /** Read the selected kernel from a render span in the same utility origin. */
 export const observedKernelSelection = async (traceFile: string | undefined): Promise<string | undefined> => {
   if (traceFile === undefined) {

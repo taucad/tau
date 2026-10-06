@@ -63,8 +63,14 @@ import { mergeRuntimeTrace } from '../../../runtime-e2e/src/benchmarks/runtime-t
 import type { RuntimeTraceSummary } from '../../../runtime-e2e/src/benchmarks/runtime-trace.ts';
 // oxlint-disable-next-line no-restricted-imports -- executable driver: no package alias before install.
 import { classifyWebGpuAdapter } from './webgpu-profile.ts';
-// oxlint-disable-next-line no-restricted-imports -- executable driver runs directly in Node without the test aliases.
-import { epochForRelativeMarks, observedKernelSelection, observedRuntimeWindow } from './open-to-frame-observation.ts';
+// oxlint-disable no-restricted-imports -- executable driver runs directly in Node without the test aliases.
+import {
+  epochForRelativeMarks,
+  observedKernelSelection,
+  observedReplicadNativeVariant,
+  observedRuntimeWindow,
+} from './open-to-frame-observation.ts';
+// oxlint-enable no-restricted-imports
 
 type Host = 'browser' | 'desktop';
 type Scenario = 'cold' | 'home' | 'restart-warm' | 'link-intent' | 'reference-cold';
@@ -191,6 +197,7 @@ const referenceFixtures: Readonly<
   },
 };
 const referenceFixture = scenario === 'reference-cold' ? referenceFixtures[referenceName as ReferenceName] : undefined;
+const referenceNativeTreatment = 'custom';
 const referenceAssetPins = [
   {
     name: 'replicad_single.wasm',
@@ -751,6 +758,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   let projectUrl: string | undefined;
   let referenceAssets: ReadonlyArray<Readonly<{ name: string; sha256: string; bytes: number }>> | undefined;
   const consoleErrors: string[] = [];
+  const nativeLogs: string[] = [];
   try {
     at('launchIntent');
     if (host === 'desktop') {
@@ -789,6 +797,22 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
       page.on('console', (message) => {
         if (message.type() === 'error') {
           consoleErrors.push(message.text().slice(0, 300));
+        }
+        if (referenceFixture && (message.type() === 'debug' || message.type() === 'warning')) {
+          const line = message.text();
+          if (
+            line.startsWith('[Kernel:') &&
+            (line.includes('Replicad WASM variant auto-selected:') ||
+              line.includes('Replicad OCCT initialised: variant=') ||
+              line.includes('OCCT parallel defaults activated:') ||
+              line.includes('OCCT parallel defaults partially activated:'))
+          ) {
+            if (nativeLogs.length < 16 && line.length <= 300) {
+              nativeLogs.push(line);
+            } else if (nativeLogs.length <= 16) {
+              nativeLogs.push('');
+            }
+          }
         }
       });
       if (referenceFixture) {
@@ -1114,13 +1138,19 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     appIsPackaged,
     sampleError,
   });
+  const nativeVariant = referenceFixture
+    ? observedReplicadNativeVariant(nativeLogs, referenceNativeTreatment)
+    : undefined;
   const reason =
     warmup?.error ??
     (warmup !== undefined && warmup.appIsPackaged !== true
       ? 'warmup did not run a packaged Electron app'
       : warmup !== undefined && warmupSelection !== kernelId
         ? 'warmup selected kernel was not observed for the seeded project'
-        : invalidReason);
+        : (invalidReason ??
+          (referenceFixture && nativeVariant === undefined
+            ? 'the selected Replicad native build did not complete a consistent initialization'
+            : undefined)));
   if (reason !== undefined) {
     await page
       ?.screenshot({
@@ -1241,6 +1271,7 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
             backend: referenceBackend,
             source: referenceFixture,
             assets: referenceAssets,
+            nativeVariant,
             browserVersion,
             process: browserExit,
             browserProfile: 'default Chromium launch with existing unsafe-WebGPU flag',

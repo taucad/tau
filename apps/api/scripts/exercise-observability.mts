@@ -298,7 +298,7 @@ await run('sync', async () => {
     'register project',
   );
   const directory = mkdtempSync(join(tmpdir(), 'w36-sync-'));
-  const git = (args: string[], cwd = join(directory, 'work')): string => {
+  const git = (args: string[], cwd = join(directory, 'work'), expectRefused = false): string => {
     // The operator's own signing config must not prompt for a key in an unattended run, and the bearer is
     // scoped to the API: sent to a presigned object-store URL as well, S3 refuses the second auth mechanism.
     // Passed as GIT_CONFIG_* (read by git and git-lfs alike) rather than `-c`, so the token is not on argv.
@@ -324,7 +324,10 @@ await run('sync', async () => {
         ),
       } as unknown as NodeJS.ProcessEnv,
     });
-    check(result.status === 0, `git ${args.join(' ')}: ${result.stderr.trim().split('\n').slice(-3).join(' | ')}`);
+    check(
+      expectRefused ? result.status !== 0 : result.status === 0,
+      `git ${args.join(' ')}${expectRefused ? ' should be refused' : ''}: ${result.stderr.trim().split('\n').slice(-3).join(' | ')}`,
+    );
     return result.stdout.trim();
   };
   try {
@@ -348,6 +351,12 @@ await run('sync', async () => {
     }
     git(['clone', '-q', remote, 'clone'], directory);
     git(['fetch', '-q', 'origin'], join(directory, 'clone'));
+    // W36 D1: a diverged (non-fast-forward) push. The Hosted Remote is forward-only, so git refuses the ref
+    // inside an HTTP 200 report-status; tau_sync_operations_total{outcome="ref_rejected"} is what shows it.
+    git(['reset', '-q', '--hard', 'HEAD~1']);
+    writeFileSync(join(directory, 'work', 'main.scad'), 'sphere(5);\n');
+    git(['commit', '-q', '-am', 'Harness divergence']);
+    git(['push', '-q', '--force', 'origin', 'main'], join(directory, 'work'), true);
     check(succeeded(await status('GET', `/v1/projects/${projectId}/usage`)), 'project usage');
     check(succeeded(await status('GET', '/v1/revisions/salt?workspace=w36')), 'revision salt');
   } finally {

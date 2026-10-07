@@ -12,12 +12,11 @@ import { TauMetrics } from '#registry.js';
 const grafanaRoot = path.resolve(import.meta.dirname, '../../../infra/grafana');
 
 /**
- * Names the dashboards query ahead of the PR that declares them. Each entry goes when that PR
+ * Names the dashboards query ahead of the PR that declares them (taucad/tau#382). Each entry goes when that PR
  * merges; the second test fails until it does.
  */
 /* eslint-disable @typescript-eslint/naming-convention -- keys are Prometheus metric names */
 const pendingDeclaration: Readonly<Record<string, string>> = {
-  ws_upgrade_rejections_total: 'taucad/tau#380',
   tau_agent_sessions_total: 'taucad/tau#382',
   tau_agent_turns_total: 'taucad/tau#382',
   tau_agent_turn_duration: 'taucad/tau#382',

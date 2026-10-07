@@ -59,7 +59,7 @@ units, UV0 and exports.
 
 The symbols real Tau models use most, as verbatim declarations. Anything not shown is in the API reference below.
 
-### Interfaces
+### import from 'picovoxel'
 
 ```ts
 interface Pico
@@ -167,6 +167,41 @@ interface VdbFile
   dispose(): void;
   [Symbol.dispose](): void;
 
+// A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
+Vec3: readonly [number, number, number]
+
+interface AddBeamOptions
+  start: Vec3
+  end: Vec3
+  // Uniform radius
+  radius: number
+  startRadius: number
+  endRadius: number
+  // Hemispherical end caps (default true, as upstream)
+  roundCap: boolean
+
+// A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
+Vec3: readonly [number, number, number]
+
+interface ScalarFieldSlice
+  width: number
+  height: number
+  // Raw field values, row-major
+  data: Float32Array
+
+// An axis-aligned box in millimetres
+interface Bounds
+  min: Vec3
+  max: Vec3
+
+// A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
+Vec3: readonly [number, number, number]
+
+// A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
+Vec3: readonly [number, number, number]
+
+VdbFieldType: 'voxels' | 'scalarField' | 'vectorField' | 'unsupported'
+
 interface Voxels
   // Pure union
   union(...others: Voxels[]): Voxels;
@@ -219,11 +254,6 @@ interface Voxels
   dispose(): void;
   // … 24 more members in the API reference
 
-// An axis-aligned box in millimetres
-interface Bounds
-  min: Vec3
-  max: Vec3
-
 // Signed distance in millimetres at (x, y, z) — scalars, never a vector object
 SdfFunction: (x: number, y: number, z: number) => number
 
@@ -247,11 +277,54 @@ interface Metadata
   // Optional
   dispose(): void;
   [Symbol.dispose](): void;
+
+SdfOperator: '+' | '-' | '*' | '/' | 'abs' | 'sqrt' | 'sin' | 'cos' | 'floor' | 'exp' | 'log' | 'mod' | 'pow' | 'min' | 'max'
+
+MetadataType: 'string' | 'float' | 'vector' | 'unknown'
+
+MetadataValue: string | number | Vec3
+
+declare class PicoError extends Error
+  code: PicoErrorCode
+  constructor(code: PicoErrorCode, message: string, options?: ErrorOptions);
 ```
 
-### Constants
+### import from 'picovoxel/shapekernel'
 
 ```ts
+// Box along a straight frame or spine with width/depth line modulations (C# `BaseBox`)
+declare class BaseBox extends BaseShape implements MeshBaseShape, SurfaceBaseShape
+  constructor(frameOrFrames: Frame | Frames, a?: number, b?: number, c?: number);
+  // From a bounding box
+  static fromBounds(bounds: Bounds): BaseBox;
+  // C# `SetWidth` — modulated width bumps width+length sampling to 500
+  setWidth(modulation: LineModulation): void;
+  // C# `SetDepth` — modulated depth bumps depth+length sampling to 500
+  setDepth(modulation: LineModulation): void;
+  voxConstruct(pk: Pico): Voxels;
+  // … 14 more members in the API reference
+
+// A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
+interface Frame
+  // Origin of the frame in world coordinates (C# `vecPos`)
+  pos: Vec3
+  // Local X axis in world coordinates (C# `vecLx`)
+  lx: Vec3
+  // Local Y axis in world coordinates (C# `vecLy`)
+  ly: Vec3
+  // Local Z axis in world coordinates (C# `vecLz`)
+  lz: Vec3
+
+// Gyroid pattern with a wall-thickness ratio (C# `ImplicitGyroid`)
+declare class ImplicitGyroid implements Implicit
+  // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
+  sdf: SdfFunction
+  // The same field as a tape expression for the parallel fill
+  expression: SdfExpression
+  constructor(unitSize: number, thicknessRatio: number);
+  // Thickness ratio for a target wall thickness in mm (C# `fGetThicknessRatio`)
+  static thicknessRatio(wallThickness: number, unitSize: number): number;
+
 // ShapeKernel `LocalFrame` construction helpers over the numerics `Frame`
 localFrame: {
   // World-aligned frame at the origin (C# `LocalFrame()`)
@@ -272,41 +345,6 @@ localFrame: {
   inverted: (f: Frame, mirrorZ: boolean, mirrorX: boolean) => Frame
   // Y completing Z and X right-handedly (C# `vecGetLocalY`
   localY: (localZ: Vec3, localX: Vec3) => Vec3
-}
-
-// A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
-interface Frame
-  // Origin of the frame in world coordinates (C# `vecPos`)
-  pos: Vec3
-  // Local X axis in world coordinates (C# `vecLx`)
-  lx: Vec3
-  // Local Y axis in world coordinates (C# `vecLy`)
-  ly: Vec3
-  // Local Z axis in world coordinates (C# `vecLz`)
-  lz: Vec3
-
-// A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
-Vec3: readonly [number, number, number]
-
-// `Vector3` operations
-vec3: {
-  zero: Vec3
-  unitX: Vec3
-  unitZ: Vec3
-  add: (a: Vec3, b: Vec3) => Vec3
-  sub: (a: Vec3, b: Vec3) => Vec3
-  neg: (v: Vec3) => Vec3
-  scale: (v: Vec3, f: number) => Vec3
-  dot: (a: Vec3, b: Vec3) => number
-  cross: (a: Vec3, b: Vec3) => Vec3
-  length: (v: Vec3) => number
-  // Unit-length copy
-  normalized: (v: Vec3) => Vec3
-  // Unit-length copy, or (0,0,0) for (almost) zero-length input (C# `vecSafeNormalized`)
-  safeNormalized: (v: Vec3) => Vec3
-  // All components finite (C# `Vector3.bIsFinite`)
-  isFinite: (v: Vec3) => boolean
-  // … 11 more members in the API reference
 }
 
 // ShapeKernel `VecOperations` (Hungarian prefixes dropped)
@@ -332,21 +370,6 @@ vecOps: {
   // … 15 more members in the API reference
 }
 
-// `Frame` factories and operations (C# `Frame3d` surface
-frame: {
-  // The world coordinate system (C# `frmWorld`)
-  world: Frame
-  // Local point (2D points lie in the frame's XY plane) → world (C# `vecPtToWorld`)
-  ptToWorld: (f: Frame, local: Vec2 | Vec3) => Vec3
-  // World point → local coordinates (C# `vecPtFromWorld`)
-  ptFromWorld: (f: Frame, world: Vec3) => Vec3
-  // … 22 more members in the API reference
-}
-```
-
-### Classes
-
-```ts
 // C# `BaseShape` — the vertex-transformation seam every shape shares
 declare abstract class BaseShape
   trafo: VertexTransformation
@@ -369,40 +392,6 @@ declare class BasePipe extends BaseShape implements MeshBaseShape, SurfaceBaseSh
   // Surface point
   surfacePoint(lengthRatio: number, phiRatio: number, radiusRatio: number): Vec3;
   // … 15 more members in the API reference
-
-// C# `IMeshBaseShape`
-interface MeshBaseShape
-  mshConstruct(pk: Pico): Mesh;
-
-// C# `ISurfaceBaseShape`
-interface SurfaceBaseShape
-  surfacePoint(ratio1: number, ratio2: number, ratio3: number): Vec3;
-
-// Box along a straight frame or spine with width/depth line modulations (C# `BaseBox`)
-declare class BaseBox extends BaseShape implements MeshBaseShape, SurfaceBaseShape
-  lengthSteps: number
-  widthSteps: number
-  depthSteps: number
-  widthModulation: LineModulation
-  depthModulation: LineModulation
-  frames: Frames
-  constructor(frameOrFrames: Frame | Frames, a?: number, b?: number, c?: number);
-  // From a bounding box
-  static fromBounds(bounds: Bounds): BaseBox;
-  // C# `SetWidth` — modulated width bumps width+length sampling to 500
-  setWidth(modulation: LineModulation): void;
-  // C# `SetDepth` — modulated depth bumps depth+length sampling to 500
-  setDepth(modulation: LineModulation): void;
-  setWidthSteps(steps: number): void;
-  setDepthSteps(steps: number): void;
-  setLengthSteps(steps: number): void;
-  voxConstruct(pk: Pico): Voxels;
-  mshConstruct(pk: Pico): Mesh;
-  protected depthRatioFromStep(step: number): number;
-  protected widthRatioFromStep(step: number): number;
-  protected lengthRatioFromStep(step: number): number;
-  // Surface point
-  surfacePoint(widthRatio: number, depthRatio: number, lengthRatio: number): Vec3;
 
 // 2D modulation over (phi, lengthRatio) (C# `SurfaceModulation`
 declare class SurfaceModulation
@@ -446,35 +435,46 @@ declare class Frames implements Spline
   points(samples?: number): Vec3[];
   // … 8 more members in the API reference
 
-// ShapeKernel `ISpline`
-interface Spline
-  points(samples?: number): Vec3[];
-
 FrameType: 'cylindrical' | 'spherical' | 'z' | 'minRotation'
+```
 
-// Lens/washer
-declare class BaseLens extends BaseShape implements MeshBaseShape, SurfaceBaseShape
-  radialSteps: number
-  polarSteps: number
-  heightSteps: number
-  innerRadius: number
-  outerRadius: number
-  upperModulation: SurfaceModulation
-  lowerModulation: SurfaceModulation
-  frame: Frame
-  constructor(frame: Frame, height: number, innerRadius: number, outerRadius: number);
-  // C# `SetHeight` — modulated faces bump radial sampling to 500
-  setHeight(lowerModulation: SurfaceModulation, upperModulation: SurfaceModulation): void;
-  setRadialSteps(steps: number): void;
-  setPolarSteps(steps: number): void;
-  setHeightSteps(steps: number): void;
-  voxConstruct(pk: Pico): Voxels;
-  mshConstruct(pk: Pico): Mesh;
-  protected radiusRatioFromStep(step: number): number;
-  protected phiRatioFromStep(step: number): number;
-  protected heightRatioFromStep(step: number): number;
-  // Surface point (C# `vecGetSurfacePoint`
-  surfacePoint(heightRatio: number, phiRatio: number, radiusRatio: number): Vec3;
+### import from 'picovoxel/numerics'
+
+```ts
+// `Vector3` operations
+vec3: {
+  zero: Vec3
+  unitX: Vec3
+  unitZ: Vec3
+  add: (a: Vec3, b: Vec3) => Vec3
+  sub: (a: Vec3, b: Vec3) => Vec3
+  neg: (v: Vec3) => Vec3
+  scale: (v: Vec3, f: number) => Vec3
+  dot: (a: Vec3, b: Vec3) => number
+  cross: (a: Vec3, b: Vec3) => Vec3
+  length: (v: Vec3) => number
+  // Unit-length copy
+  normalized: (v: Vec3) => Vec3
+  // Unit-length copy, or (0,0,0) for (almost) zero-length input (C# `vecSafeNormalized`)
+  safeNormalized: (v: Vec3) => Vec3
+  // All components finite (C# `Vector3.bIsFinite`)
+  isFinite: (v: Vec3) => boolean
+  // … 11 more members in the API reference
+}
+
+// `Frame` factories and operations (C# `Frame3d` surface
+frame: {
+  // The world coordinate system (C# `frmWorld`)
+  world: Frame
+  // Local point (2D points lie in the frame's XY plane) → world (C# `vecPtToWorld`)
+  ptToWorld: (f: Frame, local: Vec2 | Vec3) => Vec3
+  // World point → local coordinates (C# `vecPtFromWorld`)
+  ptFromWorld: (f: Frame, world: Vec3) => Vec3
+  // … 22 more members in the API reference
+}
+
+// A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
+Vec2: readonly [number, number]
 ```
 
 ## API reference

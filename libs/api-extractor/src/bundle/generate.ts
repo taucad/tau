@@ -260,6 +260,49 @@ const usageRanking = (slug: string): UsageRanking | undefined => {
   return existsSync(path) ? readJson<UsageRanking>(path) : undefined;
 };
 
+/** The import specifier a PicoVoxel declaration file belongs to, from its path in the package. */
+const picovoxelImportPath = (entry: ApiEntry, packageName: string): string => {
+  const directory = entry.source?.file.split('/').slice(0, -1).join('/');
+  return `import from '${directory === undefined || directory === '' ? packageName : `${packageName}/${directory}`}'`;
+};
+
+const occtCorePins = [
+  'BRepPrimAPI_MakeBox.constructor',
+  'BRepPrimAPI_MakeCylinder.constructor',
+  'BRepPrimAPI_MakeSphere.constructor',
+  'BRepPrimAPI_MakePrism.constructor',
+  'BRepPrimAPI_MakeRevol.constructor',
+  'BRepAlgoAPI_Fuse.constructor',
+  'BRepAlgoAPI_Cut.constructor',
+  'BRepAlgoAPI_Common.constructor',
+  'BRepBuilderAPI_MakeShape.Shape',
+  'BRepFilletAPI_MakeFillet.constructor',
+  'BRepFilletAPI_MakeFillet.Add',
+  'BRepFilletAPI_MakeChamfer.constructor',
+  'BRepFilletAPI_MakeChamfer.Add',
+  'TopExp_Explorer.constructor',
+  'TopExp_Explorer.More',
+  'TopExp_Explorer.Next',
+  'TopExp_Explorer.Current',
+  'TopoDS.Edge',
+  'TopoDS.Face',
+  'TopAbs_ShapeEnum',
+  'gp_Pnt.constructor',
+  'gp_Dir.constructor',
+  'gp_Vec.constructor',
+  'gp_Ax1.constructor',
+  'gp_Ax2.constructor',
+  'gp_Trsf.constructor',
+  'gp_Trsf.SetTranslation',
+  'gp_Trsf.SetRotation',
+  'BRepBuilderAPI_Transform.constructor',
+  'BRepBuilderAPI_MakeEdge.constructor',
+  'BRepBuilderAPI_MakeWire.constructor',
+  'BRepBuilderAPI_MakeWire.Add',
+  'BRepBuilderAPI_MakeFace.constructor',
+] as const;
+const occtCoreClasses = new Set(occtCorePins.map((pin) => pin.split('.')[0]));
+
 /**
  * Every skill-owning package, and how its bundle is built.
  *
@@ -287,7 +330,18 @@ export const bundleOwners: readonly BundleOwner[] = [
     authoredReferences: ['tau-authoring-reference.md', 'kinematics-reference.md'],
     core: {
       budgetTokens: 4000,
-      pins: ['draw', 'drawCircle', 'drawRoundedRectangle', 'makeCylinder', 'Sketch', 'Drawing', 'ShapeConfig'],
+      pins: [
+        'draw',
+        'DrawingPen',
+        'drawCircle',
+        'drawRoundedRectangle',
+        'makeCylinder',
+        'makeBox',
+        'Sketch',
+        'Drawing',
+        'EdgeFinder',
+        'ShapeConfig',
+      ],
     },
   },
   {
@@ -333,7 +387,13 @@ export const bundleOwners: readonly BundleOwner[] = [
     groupBy: byOcctPackage,
     eagerGroups: () =>
       readJson<{ readonly eager: readonly string[] }>(join(generatedRoot, 'opencascade/opencascade.shards.json')).eager,
-    core: { budgetTokens: 3000 },
+    // Three workspace models cannot rank OCCT's 11k-symbol surface (return types reach its internals),
+    // so the core is the authoring classes alone, each with the members a model calls.
+    core: {
+      budgetTokens: 4000,
+      pins: occtCorePins,
+      exclude: (entry) => !occtCoreClasses.has(entry.name),
+    },
   },
   {
     slug: 'cad-build123d',
@@ -347,7 +407,21 @@ export const bundleOwners: readonly BundleOwner[] = [
     groupBy: byCategory,
     core: {
       budgetTokens: 4000,
-      pins: ['BuildPart', 'BuildSketch', 'Box', 'Cylinder', 'Pos', 'Locations', 'extrude', 'fillet'],
+      pins: [
+        'BuildPart',
+        'BuildSketch',
+        'Box',
+        'Cylinder',
+        'Rectangle',
+        'Circle',
+        'Hole',
+        'CounterBoreHole',
+        'Pos',
+        'Locations',
+        'extrude',
+        'fillet',
+        'chamfer',
+      ],
     },
   },
   {
@@ -394,7 +468,12 @@ export const bundleOwners: readonly BundleOwner[] = [
       groupBy: byKind,
     },
     authoredReferences: ['materials-reference.md', 'kinematics-reference.md'],
-    core: { budgetTokens: 4500 },
+    core: {
+      budgetTokens: 4500,
+      pins: ['Pico', 'Voxels', 'BaseBox', 'ImplicitGyroid'],
+      // Headings name the module to import from: `picovoxel`, `picovoxel/shapekernel`, …
+      groupBy: picovoxelImportPath,
+    },
   },
   {
     slug: 'cad-openscad',

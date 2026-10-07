@@ -59,6 +59,7 @@ public static class Params
 ## Wrong / Correct
 
 - Wrong: `Voxels.voxBox(…)` or `Voxels.voxField(…)`; neither exists. Correct: a box is `new Voxels(Utils.mshCreateCube(new BBox3(min, max)))`; a field or SDF is an `IImplicit`/`IBoundedImplicit` passed to `new Voxels(implicit, bounds)`.
+- Wrong: searching for a cylinder primitive; there is none. Correct: a cylinder is a flat-capped beam, `var lat = new Lattice(); lat.AddBeam(a, r, b, r, bRoundCap: false); var vox = new Voxels(lat);`, and a sphere is `Voxels.voxSphere(center, r)`.
 - Wrong: geometry created outside `Library.Go`. Correct: build and `Add` inside the task lambda.
 
 ## Verify
@@ -275,11 +276,12 @@ public sealed record Material
   public static implicit operator ColorFloat(string hex)
   // … 7 more members in the API reference
 
-// OpenVdbFile handles the creation, loading and saving of openvdb .VDB files
-public partial class OpenVdbFile : IDisposable
-  // Types of fields in .VDB files
-  public enum EFieldType
-  // … 15 more members in the API reference
+public class AnimationQueue
+  public AnimationQueue()
+  public void Clear()
+  public bool bPulse()
+  public bool bIsIdle()
+  public void Add(Animation oAnim)
 ```
 
 ### Advanced embedding/native — PicoGK
@@ -318,6 +320,8 @@ public readonly record struct GpuTexHandle(IntPtr Value)
 ```csharp
 // Create a new Library instance, using the specified voxel size in MM
 public Library(float fVoxelSizeMM)
+
+public static void RegisterGlobalLibrary(Library oLibrary)
 ```
 
 ## API reference

@@ -34,6 +34,7 @@ Every matcher takes one expectation object:
 
 - Wrong: `expectGeo(model).toHaveVolume(5000, { tolerance: 5 })`. Correct: `expectGeo(model).toHaveVolume({ value: 5000, tolerance: 5 })`.
 - Wrong: `await expectGeo(model)…`. Correct: await `loadModel`, then assert synchronously.
+- Wrong: exact-feature matchers on a mesh kernel (Manifold, JSCAD, OpenSCAD, PicoGK, PicoVoxel). Correct: `toBeValidBrep`, `toHaveTopologyCounts`, the face, hole, pattern, chamfer, fillet and wall-thickness matchers, `toHaveStepUnits`, `toHaveProductStructure` and `toHaveVoidContinuity` need STEP BRep evidence and report unsupported on meshes; assert meshes with bounds, volume, surface area, connected components and `toBeWatertight`.
 
 ## Coverage
 
@@ -85,13 +86,11 @@ LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadMode
   // Angular tolerance in degrees used while meshing exact BRep evidence
   meshAngularToleranceDegrees: number
 
-// GeoSpec test helper used inside VM-executed test modules
-export declare function it(name: string, function_: GeoSpecTestCallback): void;
-  skip(name: string, function_?: GeoSpecTestCallback): void;
+// Geometry formats accepted by {@link import ('./load-model.js').loadModel}
+GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
 
-// GeoSpec suite helper used inside VM-executed test modules
-export declare function describe(name: string, function_: GeoSpecTestCallback): void;
-  skip(name: string, function_?: GeoSpecTestCallback): void;
+// STEP reader strategy used by GeoSpec
+StepStreamingMode: 'auto' | 'native-stream' | 'filesystem'
 ```
 
 ### Types
@@ -344,6 +343,50 @@ GeoSpecVoidContinuityExpectation: {
       }
 }
 
+// Axis-keyed numeric expectation used by high-level geometry matchers
+GeoSpecAxisExpectation: {
+  x: number
+  y: number
+  z: number
+}
+
+// Shared scalar expectation used by geometry measurements
+GeoSpecNumericExpectation: number | {
+    value?: number;
+    greaterThan?: number;
+    greaterThanOrEqual?: number;
+    lessThan?: number;
+    lessThanOrEqual?: number;
+}
+
+// A pair-specific component-interference check accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
+GeoSpecComponentInterferencePairExpectation: {
+  left: GeoSpecComponentSelector
+  right: GeoSpecComponentSelector
+}
+
+// Intentional component interference allowance accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
+GeoSpecComponentInterferenceAllowance: {
+  kind: 'intentionalInterference'
+  left: GeoSpecComponentSelector
+  right: GeoSpecComponentSelector
+  maxVolume: number
+  reason: string
+}
+
+// Assembly occurrence rule accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)`
+GeoSpecAssemblyOccurrenceExpectation: {
+  name: GeoSpecComponentSelector
+  count: GeoSpecNumericExpectation
+  bounds: {
+          within?: GeoSpecComponentSelector;
+          min?: Vec3 | GeoSpecAxisExpectation;
+          max?: Vec3 | GeoSpecAxisExpectation;
+          center?: GeoSpecPointExpectation;
+          tolerance?: number;
+      }
+}
+
 // One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
 GeoSpecSpatialRelationshipExpectation: {
   id: string
@@ -363,13 +406,27 @@ GeoSpecSpatialRelationshipExpectation: {
   reason: string
 }
 
-// Intentional component interference allowance accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
-GeoSpecComponentInterferenceAllowance: {
-  kind: 'intentionalInterference'
-  left: GeoSpecComponentSelector
-  right: GeoSpecComponentSelector
-  maxVolume: number
-  reason: string
+// Shared scalar expectation used by geometry measurements
+GeoSpecNumericExpectation: number | {
+    value?: number;
+    greaterThan?: number;
+    greaterThanOrEqual?: number;
+    lessThan?: number;
+    lessThanOrEqual?: number;
+}
+
+// Diagnostic emitted by GeoSpec loaders, analyzers, and matchers
+GeometryDiagnostic: {
+  code: KernelIssueCode | (string & {})
+  severity: 'error' | 'warning' | 'info'
+  message: string
+  suggestion: string
+  spatial: {
+          min?: Vec3;
+          max?: Vec3;
+          center?: Vec3;
+      }
+  details: unknown
 }
 
 // Shared scalar expectation used by geometry measurements
@@ -381,91 +438,47 @@ GeoSpecNumericExpectation: number | {
     lessThanOrEqual?: number;
 }
 
-// Inline code-CAD model load options
-LoadModelCodeOptions: {
-  // Source files keyed by project-relative path
-  code: Code
-  // Entry path to render from {@link code }
-  file: keyof Code & string
-  // Geometry format to export
-  format: GeoSpecModelFormat
-  // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
-  // Runtime client or lazy runtime factory
-  runtime: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
-  // Source-specific runtime adapters, e.g
-  sourceAdapters: readonly GeoSpecRuntimeSourceAdapter[]
-  // Project root used by runtime integrations
-  projectPath: string
-  // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
-  // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
-  // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
-  // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+// Shared scalar expectation used by geometry measurements
+GeoSpecNumericExpectation: number | {
+    value?: number;
+    greaterThan?: number;
+    greaterThanOrEqual?: number;
+    lessThan?: number;
+    lessThanOrEqual?: number;
 }
 
-// Geometry formats accepted by {@link import ('./load-model.js').loadModel}
-GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
-
-// Runtime client surface consumed by `geospec/model`
-GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & {
-  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>
-  on?(event: 'telemetry', handler: (batch: {
-          readonly entries: ReadonlyArray<{
-              name: string;
-              duration: number;
-              startTime: number;
-              workerTimeOrigin: number;
-          }>;
-      }) => void): () => void;
+// Shared scalar expectation used by geometry measurements
+GeoSpecNumericExpectation: number | {
+    value?: number;
+    greaterThan?: number;
+    greaterThanOrEqual?: number;
+    lessThan?: number;
+    lessThanOrEqual?: number;
 }
 
-// Lazy runtime factory consumed by `geospec/model`
-GeoSpecRuntimeClientFactory: () => Promise<GeoSpecRuntimeClient>
+// Point expectation accepted by center and feature matchers
+GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
 
-// Explicit source adapter for formats whose runtime setup is not part of the generic…
-GeoSpecRuntimeSourceAdapter: {
-  id: string
-  extensions: readonly string[]
-  createRuntime(options: {
-          projectPath?: string;
-          file?: string;
-      }): Promise<GeoSpecRuntimeClient>;
+// Shared scalar expectation used by geometry measurements
+GeoSpecNumericExpectation: number | {
+    value?: number;
+    greaterThan?: number;
+    greaterThanOrEqual?: number;
+    lessThan?: number;
+    lessThanOrEqual?: number;
 }
 
-// STEP reader strategy used by GeoSpec
-StepStreamingMode: 'auto' | 'native-stream' | 'filesystem'
-
-// Direct geometry-source model load options
-LoadModelSourceOptions: {
-  // Source geometry format
-  format: GeoSpecModelFormat
-  // Explicit parameters recorded in provenance
-  parameters: Record<string, unknown>
-  // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
-  // … 8 more members in the API reference
+// Shared scalar expectation used by geometry measurements
+GeoSpecNumericExpectation: number | {
+    value?: number;
+    greaterThan?: number;
+    greaterThanOrEqual?: number;
+    lessThan?: number;
+    lessThanOrEqual?: number;
 }
 
-// Analyze source bytes or an already retained subject, never both
-AnalyzeMeshOptions: (LoadMeshOptions & {
-  source: MeshSource
-  format: MeshFileFormat
-  path: string
-  name: string
-  // Unit exposed by the returned GeoSpec subject
-  unit: GeoSpecUnit
-  // Coordinate unit of the supplied mesh data before normalization
-  sourceUnit: GeoSpecUnit
-  parameters: Record<string, unknown>
-  subject: never
-}
-
-// Geometry file formats supported by the P0 mesh loader
-MeshFileFormat: 'glb' | 'gltf' | 'mesh-buffer'
+// Point expectation accepted by center and feature matchers
+GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
 ```
 
 ## API reference

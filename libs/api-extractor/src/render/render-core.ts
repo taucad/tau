@@ -48,6 +48,11 @@ export type CoreApiOptions = {
   readonly pins?: readonly string[];
   /** Top-level entries never offered, such as a selected standard-library slice. */
   readonly exclude?: (entry: ApiEntry) => boolean;
+  /**
+   * The section's own grouping, when the reference's axis would not help an author:
+   * PicoVoxel groups by import path, since its symbols come from several subpath modules.
+   */
+  readonly groupBy?: (entry: ApiEntry, packageName: string) => string;
   /** Offer every non-excluded top-level entry, ranked or not: for a surface small enough to show whole. */
   readonly includeUnused?: boolean;
 };
@@ -129,7 +134,7 @@ const containerHeader = (entry: ApiEntry): { readonly line: string; readonly clo
 };
 
 const memberWeight = (entry: ApiEntry): number =>
-  (entry.members ?? []).reduce((sum, member) => sum + estimateTokens(renderLeaf(member, '').join('\n')), 0);
+  (entry.members ?? []).reduce((sum, member) => sum + estimateTokens(renderMember(member).join('\n')), 0);
 
 /** A member or childless entry: summary, then its verbatim declaration. */
 const renderLeaf = (entry: ApiEntry, indent: string): readonly string[] => [
@@ -145,7 +150,7 @@ const renderEntry = (entry: ApiEntry, members: readonly ApiEntry[]): readonly st
   const header = containerHeader(entry);
   const lines = [...summaryLine(entry, ''), header.line];
   for (const member of members) {
-    lines.push(...renderLeaf(member, '  '));
+    lines.push(...renderMember(member));
   }
   const omitted = entry.members.length - members.length;
   if (omitted > 0) {
@@ -155,6 +160,18 @@ const renderEntry = (entry: ApiEntry, members: readonly ApiEntry[]): readonly st
     lines.push('}');
   }
   return lines;
+};
+
+/**
+ * A member of a container: its declaration, plus the fields of a small nested
+ * record (a namespace's `ExtrudeLinearOptions`), which a bare header would hide.
+ */
+const renderMember = (member: ApiEntry): readonly string[] => {
+  const nested = member.members ?? [];
+  const whole = nested.length > 0 ? renderEntry(member, nested) : [];
+  return whole.length > 0 && estimateTokens(whole.join('\n')) <= smallReferencedTokens
+    ? whole.map((line) => `  ${line}`)
+    : renderLeaf(member, '  ');
 };
 
 const displayName = (entry: ApiEntry): string =>
@@ -189,7 +206,7 @@ type Ordering = {
 };
 
 /** Every offered top-level entry, plus a lookup by each name a pin may use. */
-const indexSources = (sources: readonly CoreSource[], exclude: CoreApiOptions['exclude']): SourceIndex => {
+const indexSources = (sources: readonly CoreSource[], { exclude, groupBy: regroup }: CoreApiOptions): SourceIndex => {
   const candidates: Candidate[] = [];
   const byName = new Map<string, Candidate>();
   const seen = new Set<string>();
@@ -200,7 +217,7 @@ const indexSources = (sources: readonly CoreSource[], exclude: CoreApiOptions['e
         continue;
       }
       seen.add(entry.id);
-      const candidate = { entry, group: groupBy(entry), fence };
+      const candidate = { entry, group: regroup?.(entry, corpus.metadata.packageName) ?? groupBy(entry), fence };
       candidates.push(candidate);
       for (const name of pinNames(entry)) {
         if (!byName.has(name)) {
@@ -272,6 +289,12 @@ const isRecordKind = (entry: ApiEntry): boolean =>
 const hasDeclaration = (entry: ApiEntry): boolean =>
   (entry.members?.length ?? 0) > 0 || declarationText(entry) !== entry.name;
 
+/** Type names after `extends` or `implements` on an entry's declaration line. */
+const heritageNames = (entry: ApiEntry): readonly string[] =>
+  /\b(?:extends|implements)\b(.*)$/u
+    .exec(declarationText(entry).split('\n')[0] ?? '')?.[1]
+    ?.match(/[$A-Z_a-z][\w$]*/gu) ?? [];
+
 /** A rendered block without its summary comments, so prose words never name a type. */
 const declarationOnly = (block: string): string =>
   block
@@ -307,7 +330,7 @@ export const renderCoreApi = (
     (entry.members ?? []).reduce((sum, member) => sum + scoreOf(member) + memberScore(member), 0);
   const total = (entry: ApiEntry): number => scoreOf(entry) + memberScore(entry);
 
-  const index = indexSources(sources, options.exclude);
+  const index = indexSources(sources, options);
   const { byName } = index;
   const { ordered, pinnedMembers, allMembers } = orderCandidates(index, total, options);
 
@@ -366,16 +389,30 @@ export const renderCoreApi = (
           estimateTokens(renderEntry(target.entry, target.entry.members ?? []).join('\n')) <= smallReferencedTokens,
       );
 
+  /** Interfaces an offered class implements or extends: the class block already lists their used members. */
+  const inherited = new Set(
+    ordered
+      .filter((candidate) => candidate.entry.kind === 'class')
+      .flatMap((candidate) => heritageNames(candidate.entry)),
+  );
   for (const candidate of ordered) {
-    if (shown.has(candidate.entry.id)) {
+    if (
+      shown.has(candidate.entry.id) ||
+      (candidate.entry.kind === 'interface' && inherited.has(candidate.entry.name))
+    ) {
       continue;
     }
     const members = chooseMembers(candidate.entry);
     if (!add(candidate, candidate.entry, members)) {
       continue;
     }
-    for (const dependency of referenced(renderEntry(candidate.entry, members).join('\n'))) {
-      add({ ...dependency, group: candidate.group }, dependency.entry, dependency.entry.members ?? []);
+    // Two levels: `toHaveCircularHole(expected)` brings its expectation type, which brings the axis type it names.
+    let level = referenced(renderEntry(candidate.entry, members).join('\n'));
+    for (let depth = 0; depth < 2 && level.length > 0; depth += 1) {
+      const added = level
+        .filter((target) => !inherited.has(target.entry.name) && !shown.has(target.entry.id))
+        .filter((target) => add({ ...target, group: candidate.group }, target.entry, target.entry.members ?? []));
+      level = added.flatMap((target) => referenced(renderEntry(target.entry, target.entry.members ?? []).join('\n')));
     }
   }
 

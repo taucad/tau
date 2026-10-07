@@ -77,12 +77,31 @@ Point: SimplePoint | Vector | [number, number] | {
 // A vector-like point or a named principal axis
 Direction: Point | AxisName
 
+SimplePoint: [number, number, number]
+
+AxisName: (typeof AXIS_NAMES)[number]
+
+// Creates a box with the given corner points
+export declare function makeBox(corner1: Point, corner2: Point): Solid;
+
 export declare function makeFace(wire: Wire, holes?: Wire[]): Face;
 ```
 
 ### Classes
 
 ```ts
+// DrawingPen is a helper class to draw in 2D
+export declare class DrawingPen extends BaseSketcher2d implements GenericSketcher<Drawing>
+  constructor(origin?: Point2D);
+  // Stop drawing and returns the sketch
+  done(): Drawing;
+  // Stop drawing, make sure the sketch is closed (by adding a straight line to…
+  close(): Drawing;
+  // Stop drawing, make sure the sketch is closed (by mirroring the lines between the…
+  closeWithMirror(): Drawing;
+  // Stop drawing, make sure the sketch is closed (by adding a straight line to…
+  closeWithCustomCorner(radius: number, mode?: "fillet" | "chamfer"): Drawing;
+
 // A line drawing to be acted upon
 export declare class Sketch implements SketchInterface
   wire: Wire
@@ -114,26 +133,6 @@ export declare class Sketch implements SketchInterface
   // Loft between this sketch and another sketch (or an array of them)
   loftWith(otherSketches: this | this[], loftConfig?: LoftConfig, returnShell?: boolean): Shape3D;
   // … 2 more members in the API reference
-
-export declare interface SketchInterface
-  // Transforms the lines into a face
-  face(): Face;
-  // Revolves the drawing on an axis (defined by its direction and an origin (defaults…
-  revolve(revolutionAxis?: Point, config?: {
-          origin?: Point;
-          angle?: number;
-      }): Shape3D;
-  // Extrudes the sketch to a certain distance.(along the default direction and origin of the…
-  extrude(extrusionDistance: number, extrusionConfig?: {
-          extrusionDirection?: Point;
-          extrusionProfile?: ExtrusionProfile;
-          twistAngle?: number;
-          origin?: Point;
-      }): Shape3D;
-  // Loft between this sketch and another sketch (or an array of them)
-  loftWith(otherSketches: this | this[], loftConfig: LoftConfig, returnShell?: boolean): Shape3D;
-
-Shape3D: Shell | Solid | CompSolid | Compound
 
 export declare interface ExtrusionProfile
   profile: "s-curve" | "linear"
@@ -192,6 +191,25 @@ PlaneName: "XY" | "YZ" | "ZX" | "XZ" | "YX" | "ZY" | "front" | "back" | "left" |
 
 ScaleMode: "original" | "bounds" | "native"
 
+// With an EdgeFinder you can apply a set of filters to find specific edges…
+export declare class EdgeFinder extends Finder3d<Edge>
+  clone(): EdgeFinder;
+  // Filter to find edges that are in a certain direction
+  inDirection(direction: Direction): this;
+  // Filter to find edges of a certain length
+  ofLength(length: number | ((l: number) => boolean)): this;
+  // Filter to find edges that are of a cetain curve type
+  ofCurveType(curveType: CurveType): this;
+  // Filter to find edges that are parallel to a plane
+  parallelTo(plane: Plane | StandardPlane | Face): this;
+  // Filter to find edges that within a plane
+  inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
+  // Check if a particular element should be filtered or not according to the current…
+  shouldKeep(element: Edge): boolean;
+  protected applyFilter(shape: AnyShape): Edge[];
+
+CurveType: "LINE" | "CIRCLE" | "ELLIPSE" | "HYPERBOLA" | "PARABOLA" | "BEZIER_CURVE" | "BSPLINE_CURVE" | "OFFSET_CURVE" | "OTHER_CURVE"
+
 export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> implements Shape3DLike<Shape3D, ShapeMesh, AnyShape,
   // Builds a new shape out of the two, fused, shapes
   fuse(other: Shape3D, options?: BooleanOperationOptions): Shape3D;
@@ -216,16 +234,6 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
   // Creates a new shapes with some edges chamfered, as specified in the radius config
   chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: FinderFunction<EdgeFinder, AnyShape>): Shape3D;
   // … 3 more members in the API reference
-
-export declare interface ShapeMesh
-  triangles: number[]
-  vertices: number[]
-  normals: number[]
-  faceGroups: {
-          start: number;
-          count: number;
-          faceId: number;
-      }[]
 
 export declare interface BooleanOperationOptions
   optimisation: "none" | "commonFace" | "sameFace"
@@ -284,6 +292,40 @@ export declare interface PlaneSplitResult<T>
   negative: T | null
   on: T | null
 
+export declare class BaseSketcher2d
+  firstPoint: Point2D
+  constructor(origin?: Point2D);
+  movePointerTo(point: Point2D): this;
+  lineTo(point: Point2D): this;
+  line(xDist: number, yDist: number): this;
+  vLine(distance: number): this;
+  hLine(distance: number): this;
+  vLineTo(yPos: number): this;
+  hLineTo(xPos: number): this;
+  threePointsArcTo(end: Point2D, midPoint: Point2D): this;
+  threePointsArc(xDist: number, yDist: number, viaXDist: number, viaYDist: number): this;
+  sagittaArcTo(end: Point2D, sagitta: number): this;
+  hSagittaArc(distance: number, sagitta: number): this;
+  bulgeArcTo(end: Point2D, bulge: number): this;
+  tangentArcTo(end: Point2D): this;
+  tangentArc(xDist: number, yDist: number): this;
+  ellipse(xDist: number, yDist: number, horizontalRadius: number, verticalRadius: number, rotation?: number, longAxis?: boolean, sweep?: boolean): this;
+  halfEllipse(xDist: number, yDist: number, minorRadius: number, sweep?: boolean): this;
+  bezierCurveTo(end: Point2D, controlPoints: Point2D | Point2D[]): this;
+  quadraticBezierCurveTo(end: Point2D, controlPoint: Point2D): this;
+  cubicBezierCurveTo(end: Point2D, startControlPoint: Point2D, endControlPoint: Point2D): this;
+  smoothSplineTo(end: Point2D, config?: SplineConfig): this;
+  // Changes the corner between the previous and next segments
+  customCorner(radius: number | ((first: Curve2D, second: Curve2D) => Curve2D[]), mode?: "fillet" | "chamfer" | "dogbone"): this;
+  // … 16 more members in the API reference
+
+SplineConfig: SplineTangent | {
+    endTangent?: SplineTangent;
+    startTangent?: StartSplineTangent;
+    startFactor?: number;
+    endFactor?: number;
+}
+
 export declare class Sketches
   sketches: Array<Sketch | CompoundSketch>
   constructor(sketches: Array<Sketch | CompoundSketch>);
@@ -301,6 +343,61 @@ export declare class Sketches
           origin?: Point;
           angle?: number;
       }): Shape3D;
+
+// The FaceSketcher allows you to sketch on a plane
+export declare class Sketcher implements GenericSketcher<Sketch>
+  constructor(plane: Plane);
+  constructor(plane?: PlaneName, origin?: Point | number);
+  // Changes the point to start your drawing from
+  movePointerTo([x, y]: Point2D): this;
+  // Draws a line from the current point to the point given in argument
+  lineTo([x, y]: Point2D): this;
+  // Draws a line at the horizontal distance xDist and the vertical distance yDist of…
+  line(xDist: number, yDist: number): this;
+  // Draws a vertical line of length distance from the current point
+  vLine(distance: number): this;
+  // Draws an horizontal line of length distance from the current point
+  hLine(distance: number): this;
+  // Draws an arc of circle by defining its end point and a third point…
+  threePointsArcTo(end: Point2D, innerPoint: Point2D): this;
+  // Draws an arc of circle from the current point as a tangent to the…
+  tangentArcTo(end: Point2D): this;
+  // Draws an arc of circle from the current point as a tangent to the…
+  tangentArc(xDist: number, yDist: number): this;
+  // Draws a generic bezier curve to the end point, going using a set of…
+  bezierCurveTo(end: Point2D, controlPoints: Point2D | Point2D[]): this;
+  // Draws a cubic bezier curve to the end point, attempting to make the line…
+  smoothSplineTo(end: Point2D, config?: SplineConfig): this;
+  // Stop drawing and returns the sketch
+  done(): Sketch;
+  // Stop drawing, make sure the sketch is closed (by adding a straight line to…
+  close(): Sketch;
+  // … 28 more members in the API reference
+
+export declare class BoundingBox extends WrappingObj<Bnd_Box>
+  constructor(wrapped?: Bnd_Box);
+  static fromBounds(min: Point, max: Point): BoundingBox;
+  repr
+  bounds
+  center
+  width
+  height
+  depth
+  add(other: BoundingBox): void;
+  isOut(other: BoundingBox): boolean;
+
+// With a FaceFinder you can apply a set of filters to find specific faces…
+export declare class FaceFinder extends Finder3d<Face>
+  clone(): FaceFinder;
+  // Filter to find faces that are parallel to plane or another face
+  parallelTo(plane: Plane | StandardPlane | Face): this;
+  // Filter to find faces that are of a cetain surface type
+  ofSurfaceType(surfaceType: SurfaceType): this;
+  // Filter to find faces that are contained in a plane
+  inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
+  // Check if a particular element should be filtered or not according to the current…
+  shouldKeep(element: Face): boolean;
+  protected applyFilter(shape: AnyShape): Face[];
 ```
 
 ### Types
@@ -319,105 +416,11 @@ ShapeConfig: {
   density: number
 }
 
-AnyShape: Vertex | Edge | Wire | Face | Shell | Solid | CompSolid | Compound
+Shape3D: Shell | Solid | CompSolid | Compound
 
 ManifoldBox: Box
   min: Vec3
   max: Vec3
-```
-
-### Interfaces
-
-```ts
-export declare interface Shape3DLike<ShapeT, MeshT, OtherT = ShapeT, MeshOptionsT = any>
-  fuse(other: ShapeT, options?: any): ShapeT;
-  cut(other: ShapeT, options?: any): ShapeT;
-  intersect(other: OtherT): ShapeT;
-  translate(xDist: number, yDist: number, zDist: number): ShapeT;
-  translate(vector: Point): ShapeT;
-  translateX(distance: number): ShapeT;
-  translateY(distance: number): ShapeT;
-  translateZ(distance: number): ShapeT;
-  rotate(angle: number, position?: Point, direction?: Direction): ShapeT;
-  scale(scale: number, center?: Point): ShapeT;
-  mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): ShapeT;
-  mesh(options?: MeshOptionsT): MeshT;
-  boundingBox: BoundingBox
-
-// Sketchers allow the user to draw a two dimentional shape using segment of curve
-export declare interface GenericSketcher<ReturnType>
-  // Changes the point to start your drawing from
-  movePointerTo(point: Point2D): this;
-  // Draws a line from the current point to the point given in argument
-  lineTo(point: Point2D): this;
-  // Draws a line at the horizontal distance xDist and the vertical distance yDist of…
-  line(xDist: number, yDist: number): this;
-  // Draws a vertical line of length distance from the current point
-  vLine(distance: number): this;
-  // Draws an horizontal line of length distance from the current point
-  hLine(distance: number): this;
-  // Draws a vertical line to the y coordinate
-  vLineTo(yPos: number): this;
-  // Draws an horizontal line to the x coordinate
-  hLineTo(xPos: number): this;
-  // Draws an arc of circle by defining its end point and a third point…
-  threePointsArcTo(end: Point2D, innerPoint: Point2D): this;
-  // Draws an arc of circle by defining its end point and a third point…
-  threePointsArc(xDist: number, yDist: number, viaXDist: number, viaYDist: number): this;
-  // Draws an arc of circle by defining its end point and the sagitta -…
-  sagittaArcTo(end: Point2D, sagitta: number): this;
-  // Draws an horizontal arc of circle by defining its end point and the sagitta…
-  hSagittaArc(distance: number, sagitta: number): this;
-  // Draws an arc of circle by defining its end point and the bulge -…
-  bulgeArcTo(end: Point2D, bulge: number): this;
-  // Draws an arc of circle from the current point as a tangent to the…
-  tangentArcTo(end: Point2D): this;
-  // Draws an arc of circle from the current point as a tangent to the…
-  tangentArc(xDist: number, yDist: number): this;
-  // Draws an arc of ellipse by defining its end point and an ellipse
-  ellipse(xDist: number, yDist: number, horizontalRadius: number, verticalRadius: number, rotation: number, longAxis: boolean, sweep: boolean): this;
-  // Draws an arc as half an ellipse, defined by the sagitta of the ellipse…
-  halfEllipse(xDist: number, yDist: number, radius: number, sweep: boolean): this;
-  // Draws a generic bezier curve to the end point, going using a set of…
-  bezierCurveTo(end: Point2D, controlPoints: Point2D | Point2D[]): this;
-  // Draws a quadratic bezier curve to the end point, using the single control point
-  quadraticBezierCurveTo(end: Point2D, controlPoint: Point2D): this;
-  // Draws a cubic bezier curve to the end point, using the start and end…
-  cubicBezierCurveTo(end: Point2D, startControlPoint: Point2D, endControlPoint: Point2D): this;
-  // Draws a cubic bezier curve to the end point, attempting to make the line…
-  smoothSplineTo(end: Point2D, config?: SplineConfig): this;
-  // Stop drawing and returns the sketch
-  done(): ReturnType;
-  // Stop drawing, make sure the sketch is closed (by adding a straight line to…
-  close(): ReturnType;
-  // Stop drawing, make sure the sketch is closed (by mirroring the lines between the…
-  closeWithMirror(): ReturnType;
-  // … 11 more members in the API reference
-
-SplineConfig: SplineTangent | {
-    endTangent?: SplineTangent;
-    startTangent?: StartSplineTangent;
-    startFactor?: number;
-    endFactor?: number;
-}
-
-export declare interface DrawingInterface
-  clone(): DrawingInterface;
-  boundingBox: BoundingBox2d
-  rotate(angle: number, center: Point2D): DrawingInterface;
-  translate(xDist: number, yDist: number): DrawingInterface;
-  translate(translationVector: Point2D): DrawingInterface;
-  // Returns the mirror image of this drawing made with a single point (in center…
-  mirror(centerOrDirection: Point2D, origin?: Point2D, mode?: "center" | "plane"): DrawingInterface;
-  // Returns the sketched version of the drawing, on a plane
-  sketchOnPlane(inputPlane: Plane): SketchInterface | Sketches;
-  sketchOnPlane(inputPlane?: PlaneName, origin?: Point | number): SketchInterface | Sketches;
-  sketchOnPlane(inputPlane?: PlaneName | Plane, origin?: Point | number): SketchInterface | Sketches;
-  // Returns the sketched version of the drawing, on a face
-  sketchOnFace(face: Face, scaleMode: ScaleMode): SketchInterface | Sketches;
-  // Formats the drawing as a list of SVG paths
-  toSVGPaths(): string[] | string[][];
-  // … 3 more members in the API reference
 ```
 
 ## API reference

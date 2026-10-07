@@ -46,9 +46,172 @@ Check overload suffixes, unfreed temporaries, build order, and missing disposal 
 
 The symbols real Tau models use most, as verbatim declarations. Anything not shown is in the API reference below.
 
+### BRepPrimAPI
+
+```ts
+declare class BRepPrimAPI_MakeBox extends BRepBuilderAPI_MakeShape
+  constructor();
+  constructor(P1: gp_Pnt, P2: gp_Pnt);
+  constructor(dx: number, dy: number, dz: number);
+  constructor(P: gp_Pnt, dx: number, dy: number, dz: number);
+  constructor(Axes: gp_Ax2, dx: number, dy: number, dz: number);
+  Init(thePnt1: gp_Pnt, thePnt2: gp_Pnt): void;
+  Init(theDX: number, theDY: number, theDZ: number): void;
+  Init(thePnt: gp_Pnt, theDX: number, theDY: number, theDZ: number): void;
+  Init(theAxes: gp_Ax2, theDX: number, theDY: number, theDZ: number): void;
+  Wedge(): BRepPrim_Wedge;
+  Build(theRange?: Message_ProgressRange): void;
+  Shell(): TopoDS_Shell;
+  Solid(): TopoDS_Solid;
+  BottomFace(): TopoDS_Face;
+  BackFace(): TopoDS_Face;
+  FrontFace(): TopoDS_Face;
+  LeftFace(): TopoDS_Face;
+  RightFace(): TopoDS_Face;
+  TopFace(): TopoDS_Face;
+  delete(): void;
+  [Symbol.dispose](): void;
+
+declare class BRepPrimAPI_MakeCylinder extends BRepPrimAPI_MakeOneAxis
+  constructor(R: number, H: number);
+  constructor(R: number, H: number, Angle: number);
+  constructor(Axes: gp_Ax2, R: number, H: number);
+  constructor(Axes: gp_Ax2, R: number, H: number, Angle: number);
+  Cylinder(): BRepPrim_Cylinder;
+  delete(): void;
+  [Symbol.dispose](): void;
+
+declare class BRepPrimAPI_MakeSphere extends BRepPrimAPI_MakeOneAxis
+  constructor(R: number);
+  constructor(R: number, angle: number);
+  constructor(Center: gp_Pnt, R: number);
+  constructor(Axis: gp_Ax2, R: number);
+  constructor(R: number, angle1: number, angle2: number);
+  constructor(Center: gp_Pnt, R: number, angle: number);
+  constructor(Axis: gp_Ax2, R: number, angle: number);
+  constructor(R: number, angle1: number, angle2: number, angle3: number);
+  constructor(Center: gp_Pnt, R: number, angle1: number, angle2: number);
+  constructor(Axis: gp_Ax2, R: number, angle1: number, angle2: number);
+  constructor(Center: gp_Pnt, R: number, angle1: number, angle2: number, angle3: number);
+  constructor(Axis: gp_Ax2, R: number, angle1: number, angle2: number, angle3: number);
+  Sphere(): BRepPrim_Sphere;
+  delete(): void;
+  [Symbol.dispose](): void;
+
+declare class BRepPrimAPI_MakePrism extends BRepPrimAPI_MakeSweep
+  constructor(S: TopoDS_Shape, V: gp_Vec, Copy?: boolean, Canonize?: boolean);
+  constructor(S: TopoDS_Shape, D: gp_Dir, Inf?: boolean, Copy?: boolean, Canonize?: boolean);
+  Prism(): BRepSweep_Prism;
+  Build(theRange?: Message_ProgressRange): void;
+  FirstShape(): TopoDS_Shape;
+  FirstShape(theShape: TopoDS_Shape): TopoDS_Shape;
+  LastShape(): TopoDS_Shape;
+  LastShape(theShape: TopoDS_Shape): TopoDS_Shape;
+  Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  IsDeleted(S: TopoDS_Shape): boolean;
+  delete(): void;
+  [Symbol.dispose](): void;
+
+declare class BRepPrimAPI_MakeRevol extends BRepPrimAPI_MakeSweep
+  constructor(S: TopoDS_Shape, A: gp_Ax1, Copy?: boolean);
+  constructor(S: TopoDS_Shape, A: gp_Ax1, D: number, Copy?: boolean);
+  Revol(): BRepSweep_Revol;
+  Build(theRange?: Message_ProgressRange): void;
+  FirstShape(): TopoDS_Shape;
+  FirstShape(theShape: TopoDS_Shape): TopoDS_Shape;
+  LastShape(): TopoDS_Shape;
+  LastShape(theShape: TopoDS_Shape): TopoDS_Shape;
+  Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  IsDeleted(S: TopoDS_Shape): boolean;
+  HasDegenerated(): boolean;
+  Degenerated(): NCollection_List_TopoDS_Shape;
+  delete(): void;
+  [Symbol.dispose](): void;
+```
+
+### BRepAlgoAPI
+
+```ts
+declare class BRepAlgoAPI_Fuse extends BRepAlgoAPI_BooleanOperation
+  constructor();
+  constructor(S1: TopoDS_Shape, S2: TopoDS_Shape, theRange?: Message_ProgressRange);
+  delete(): void;
+  [Symbol.dispose](): void;
+
+declare class BRepAlgoAPI_Cut extends BRepAlgoAPI_BooleanOperation
+  constructor();
+  constructor(S1: TopoDS_Shape, S2: TopoDS_Shape, theRange?: Message_ProgressRange);
+  delete(): void;
+  [Symbol.dispose](): void;
+
+declare class BRepAlgoAPI_Common extends BRepAlgoAPI_BooleanOperation
+  constructor();
+  constructor(S1: TopoDS_Shape, S2: TopoDS_Shape, theRange?: Message_ProgressRange);
+  delete(): void;
+  [Symbol.dispose](): void;
+```
+
 ### BRepBuilderAPI
 
 ```ts
+declare class BRepBuilderAPI_MakeShape extends BRepBuilderAPI_Command
+  Build(theRange?: Message_ProgressRange): void;
+  Shape(): TopoDS_Shape;
+  Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  IsDeleted(S: TopoDS_Shape): boolean;
+  delete(): void;
+  [Symbol.dispose](): void;
+
+declare class BRepBuilderAPI_Transform extends BRepBuilderAPI_ModifyShape
+  constructor(T: gp_Trsf);
+  constructor(theShape: TopoDS_Shape, theTrsf: gp_Trsf, theCopyGeom?: boolean, theCopyMesh?: boolean);
+  Perform(theShape: TopoDS_Shape, theCopyGeom?: boolean, theCopyMesh?: boolean): void;
+  ModifiedShape(S: TopoDS_Shape): TopoDS_Shape;
+  Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  delete(): void;
+  [Symbol.dispose](): void;
+
+declare class BRepBuilderAPI_MakeEdge extends BRepBuilderAPI_MakeShape
+  constructor();
+  constructor(L: gp_Lin);
+  constructor(L: gp_Circ);
+  constructor(L: gp_Elips);
+  constructor(L: gp_Hypr);
+  constructor(L: gp_Parab);
+  constructor(L: Geom_Curve);
+  constructor(V1: TopoDS_Vertex, V2: TopoDS_Vertex);
+  constructor(P1: gp_Pnt, P2: gp_Pnt);
+  constructor(L: Geom2d_Curve, S: Geom_Surface);
+  constructor(L: gp_Lin, p1: number, p2: number);
+  constructor(L: gp_Lin, P1: gp_Pnt, P2: gp_Pnt);
+  constructor(L: gp_Lin, V1: TopoDS_Vertex, V2: TopoDS_Vertex);
+  constructor(L: gp_Circ, p1: number, p2: number);
+  constructor(L: gp_Circ, P1: gp_Pnt, P2: gp_Pnt);
+  constructor(L: gp_Circ, V1: TopoDS_Vertex, V2: TopoDS_Vertex);
+  constructor(L: gp_Elips, p1: number, p2: number);
+  constructor(L: gp_Elips, P1: gp_Pnt, P2: gp_Pnt);
+  constructor(L: gp_Elips, V1: TopoDS_Vertex, V2: TopoDS_Vertex);
+  constructor(L: gp_Hypr, p1: number, p2: number);
+  constructor(L: gp_Hypr, P1: gp_Pnt, P2: gp_Pnt);
+  constructor(L: gp_Hypr, V1: TopoDS_Vertex, V2: TopoDS_Vertex);
+  constructor(L: gp_Parab, p1: number, p2: number);
+  constructor(L: gp_Parab, P1: gp_Pnt, P2: gp_Pnt);
+  constructor(L: gp_Parab, V1: TopoDS_Vertex, V2: TopoDS_Vertex);
+  constructor(L: Geom_Curve, p1: number, p2: number);
+  constructor(L: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt);
+  constructor(L: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex);
+  constructor(L: Geom2d_Curve, S: Geom_Surface, p1: number, p2: number);
+  constructor(L: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt);
+  constructor(L: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex);
+  constructor(L: Geom_Curve, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number);
+  constructor(L: Geom_Curve, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number);
+  constructor(L: Geom2d_Curve, S: Geom_Surface, P1: gp_Pnt, P2: gp_Pnt, p1: number, p2: number);
+  constructor(L: Geom2d_Curve, S: Geom_Surface, V1: TopoDS_Vertex, V2: TopoDS_Vertex, p1: number, p2: number);
+  Edge(): TopoDS_Edge;
+  delete(): void;
+  // … 6 more members in the API reference
+
 declare class BRepBuilderAPI_MakeWire extends BRepBuilderAPI_MakeShape
   constructor();
   constructor(E: TopoDS_Edge);
@@ -67,8 +230,6 @@ declare class BRepBuilderAPI_MakeWire extends BRepBuilderAPI_MakeShape
   Vertex(): TopoDS_Vertex;
   delete(): void;
   [Symbol.dispose](): void;
-
-BRepBuilderAPI_WireError: typeof BRepBuilderAPI_WireError[keyof typeof BRepBuilderAPI_WireError]
 
 declare class BRepBuilderAPI_MakeFace extends BRepBuilderAPI_MakeShape
   constructor();
@@ -97,168 +258,13 @@ declare class BRepBuilderAPI_MakeFace extends BRepBuilderAPI_MakeShape
   Face(): TopoDS_Face;
   delete(): void;
   // … 4 more members in the API reference
-
-declare class BRepBuilderAPI_MakePolygon extends BRepBuilderAPI_MakeShape
-  constructor();
-  constructor(P1: gp_Pnt, P2: gp_Pnt);
-  constructor(V1: TopoDS_Vertex, V2: TopoDS_Vertex);
-  constructor(P1: gp_Pnt, P2: gp_Pnt, P3: gp_Pnt, Close?: boolean);
-  constructor(V1: TopoDS_Vertex, V2: TopoDS_Vertex, V3: TopoDS_Vertex, Close?: boolean);
-  constructor(P1: gp_Pnt, P2: gp_Pnt, P3: gp_Pnt, P4: gp_Pnt, Close?: boolean);
-  constructor(V1: TopoDS_Vertex, V2: TopoDS_Vertex, V3: TopoDS_Vertex, V4: TopoDS_Vertex, Close?: boolean);
-  Add(P: gp_Pnt): void;
-  Add(V: TopoDS_Vertex): void;
-  Added(): boolean;
-  Close(): void;
-  FirstVertex(): TopoDS_Vertex;
-  LastVertex(): TopoDS_Vertex;
-  IsDone(): boolean;
-  Edge(): TopoDS_Edge;
-  Wire(): TopoDS_Wire;
-  delete(): void;
-  [Symbol.dispose](): void;
-```
-
-### TransferBRep
-
-```ts
-declare class TransferBRep_ShapeListBinder extends Transfer_Binder
-  constructor();
-  constructor(list: NCollection_HSequence_TopoDS_Shape);
-  IsMultiple(): boolean;
-  ResultType(): Standard_Type;
-  ResultTypeName(): string;
-  AddResult(res: TopoDS_Shape): void;
-  AddResult(next: Transfer_Binder): void;
-  Result(): NCollection_HSequence_TopoDS_Shape;
-  SetResult(num: number, res: TopoDS_Shape): void;
-  NbShapes(): number;
-  Shape(num: number): TopoDS_Shape;
-  ShapeType(num: number): TopAbs_ShapeEnum;
-  Vertex(num: number): TopoDS_Vertex;
-  Edge(num: number): TopoDS_Edge;
-  Wire(num: number): TopoDS_Wire;
-  Face(num: number): TopoDS_Face;
-  Shell(num: number): TopoDS_Shell;
-  Solid(num: number): TopoDS_Solid;
-  CompSolid(num: number): TopoDS_CompSolid;
-  Compound(num: number): TopoDS_Compound;
-  static get_type_name(): string;
-  static get_type_descriptor(): Standard_Type;
-  DynamicType(): Standard_Type;
-  delete(): void;
-  [Symbol.dispose](): void;
-
-TopAbs_ShapeEnum: typeof TopAbs_ShapeEnum[keyof typeof TopAbs_ShapeEnum]
-```
-
-### BRepAlgoAPI
-
-```ts
-declare class BRepAlgoAPI_BuilderAlgo extends BRepAlgoAPI_Algo
-  constructor();
-  SetArguments(theLS: NCollection_List_TopoDS_Shape): void;
-  Arguments(): NCollection_List_TopoDS_Shape;
-  SetNonDestructive(theFlag: boolean): void;
-  NonDestructive(): boolean;
-  SetGlue(theGlue: BOPAlgo_GlueEnum): void;
-  Glue(): BOPAlgo_GlueEnum;
-  SetCheckInverted(theCheck: boolean): void;
-  CheckInverted(): boolean;
-  Build(theRange?: Message_ProgressRange): void;
-  SimplifyResult(theUnifyEdges?: boolean, theUnifyFaces?: boolean, theAngularTol?: number): void;
-  Modified(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
-  Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
-  IsDeleted(S: TopoDS_Shape): boolean;
-  HasModified(): boolean;
-  HasGenerated(): boolean;
-  HasDeleted(): boolean;
-  SetToFillHistory(theHistFlag: boolean): void;
-  HasHistory(): boolean;
-  SectionEdges(): NCollection_List_TopoDS_Shape;
-  Builder(): BOPAlgo_Builder;
-  History(): BRepTools_History;
-  delete(): void;
-  [Symbol.dispose](): void;
-
-BOPAlgo_GlueEnum: typeof BOPAlgo_GlueEnum[keyof typeof BOPAlgo_GlueEnum]
-
-declare class BRepAlgoAPI_Algo extends BRepBuilderAPI_MakeShape
-  Shape(): TopoDS_Shape;
-  Clear(): void;
-  ClearWarnings(): void;
-  FuzzyValue(): number;
-  GetReport(): Message_Report;
-  HasError(theType: Standard_Type): boolean;
-  HasErrors(): boolean;
-  HasWarning(theType: Standard_Type): boolean;
-  HasWarnings(): boolean;
-  RunParallel(): boolean;
-  SetFuzzyValue(theFuzz: number): void;
-  SetRunParallel(theFlag: boolean): void;
-  SetUseOBB(theUseOBB: boolean): void;
-  delete(): void;
-  [Symbol.dispose](): void;
-```
-
-### BRepFill
-
-```ts
-declare class BRepFill_Pipe
-  constructor();
-  constructor(Spine: TopoDS_Wire, Profile: TopoDS_Shape, aMode?: GeomFill_Trihedron, ForceApproxC1?: boolean, GeneratePartCase?: boolean);
-  Perform(Spine: TopoDS_Wire, Profile: TopoDS_Shape, GeneratePartCase?: boolean): void;
-  Spine(): TopoDS_Shape;
-  Profile(): TopoDS_Shape;
-  Shape(): TopoDS_Shape;
-  ErrorOnSurface(): number;
-  FirstShape(): TopoDS_Shape;
-  LastShape(): TopoDS_Shape;
-  Generated(S: TopoDS_Shape, L: NCollection_List_TopoDS_Shape): void;
-  Face(ESpine: TopoDS_Edge, EProfile: TopoDS_Edge): TopoDS_Face;
-  Edge(ESpine: TopoDS_Edge, VProfile: TopoDS_Vertex): TopoDS_Edge;
-  Section(VSpine: TopoDS_Vertex): TopoDS_Shape;
-  PipeLine(Point: gp_Pnt): TopoDS_Wire;
-  delete(): void;
-  [Symbol.dispose](): void;
-
-GeomFill_Trihedron: typeof GeomFill_Trihedron[keyof typeof GeomFill_Trihedron]
-
-declare class BRepFill_PipeShell extends Standard_Transient
-  Add(Profile: TopoDS_Shape, WithContact: boolean, WithCorrection: boolean): void;
-  Add(Profile: TopoDS_Shape, Location: TopoDS_Vertex, WithContact: boolean, WithCorrection: boolean): void;
-  Build(): boolean;
-  Shape(): TopoDS_Shape;
-  delete(): void;
-  // … 26 more members in the API reference
-
-declare class BRepFill_Filling
-  Add(Point: gp_Pnt): number;
-  Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-  Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
-  Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
-  Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-  Build(): void;
-  Face(): TopoDS_Face;
-  delete(): void;
-  // … 11 more members in the API reference
-
-GeomAbs_Shape: typeof GeomAbs_Shape[keyof typeof GeomAbs_Shape]
 ```
 
 ### BRepFilletAPI
 
 ```ts
-declare class BRepFilletAPI_MakeChamfer extends BRepFilletAPI_LocalOperation
-  Add(E: TopoDS_Edge): void;
-  Add(Dis: number, E: TopoDS_Edge): void;
-  Add(Dis1: number, Dis2: number, E: TopoDS_Edge, F: TopoDS_Face): void;
-  Edge(I: number, J: number): TopoDS_Edge;
-  Build(theRange?: Message_ProgressRange): void;
-  delete(): void;
-  // … 33 more members in the API reference
-
 declare class BRepFilletAPI_MakeFillet extends BRepFilletAPI_LocalOperation
+  constructor(S: TopoDS_Shape, FShape?: ChFi3d_FilletShape);
   Add(E: TopoDS_Edge): void;
   Add(Radius: number, E: TopoDS_Edge): void;
   Add(L: Law_Function, E: TopoDS_Edge): void;
@@ -267,125 +273,105 @@ declare class BRepFilletAPI_MakeFillet extends BRepFilletAPI_LocalOperation
   Edge(I: number, J: number): TopoDS_Edge;
   Build(theRange?: Message_ProgressRange): void;
   delete(): void;
-  // … 43 more members in the API reference
+  // … 42 more members in the API reference
+
+declare class BRepFilletAPI_MakeChamfer extends BRepFilletAPI_LocalOperation
+  constructor(S: TopoDS_Shape);
+  Add(E: TopoDS_Edge): void;
+  Add(Dis: number, E: TopoDS_Edge): void;
+  Add(Dis1: number, Dis2: number, E: TopoDS_Edge, F: TopoDS_Face): void;
+  Edge(I: number, J: number): TopoDS_Edge;
+  Build(theRange?: Message_ProgressRange): void;
+  delete(): void;
+  // … 32 more members in the API reference
 ```
 
-### BRepAlgo
+### TopExp
 
 ```ts
-declare class BRepAlgo_FaceRestrictor
+declare class TopExp_Explorer
   constructor();
-  Init(F: TopoDS_Face, Proj?: boolean, ControlOrientation?: boolean): void;
-  Add(W: TopoDS_Wire): void;
-  Clear(): void;
-  Perform(): void;
-  IsDone(): boolean;
+  constructor(S: TopoDS_Shape, ToFind: TopAbs_ShapeEnum, ToAvoid?: TopAbs_ShapeEnum);
+  Init(S: TopoDS_Shape, ToFind: TopAbs_ShapeEnum, ToAvoid?: TopAbs_ShapeEnum): void;
   More(): boolean;
   Next(): void;
-  Current(): TopoDS_Face;
+  Value(): TopoDS_Shape;
+  Current(): TopoDS_Shape;
+  ReInit(): void;
+  ExploredShape(): TopoDS_Shape;
+  Depth(): number;
+  Clear(): void;
+  end(): NCollection_ForwardRangeSentinel;
   delete(): void;
   [Symbol.dispose](): void;
+
+TopAbs_ShapeEnum: typeof TopAbs_ShapeEnum[keyof typeof TopAbs_ShapeEnum]
 ```
 
-### BRepGraphInc
+### TopoDS
 
 ```ts
-declare class BRepGraphInc_Storage
-  Edge(theEdge: BRepGraph_EdgeId): BRepGraphInc_EdgeDef;
-  Wire(theWire: BRepGraph_WireId): BRepGraphInc_WireDef;
-  Face(theFace: BRepGraph_FaceId): BRepGraphInc_FaceDef;
-  delete(): void;
-  // … 244 more members in the API reference
+declare class TopoDS
+  static Edge(shape: TopoDS_Shape): TopoDS_Edge;
+  static Wire(shape: TopoDS_Shape): TopoDS_Wire;
+  static Face(shape: TopoDS_Shape): TopoDS_Face;
+  static Vertex(shape: TopoDS_Shape): TopoDS_Vertex;
+  static Shell(shape: TopoDS_Shape): TopoDS_Shell;
+  static Solid(shape: TopoDS_Shape): TopoDS_Solid;
+  static Compound(shape: TopoDS_Shape): TopoDS_Compound;
 ```
 
-### BOPDS
+### gp
 
 ```ts
-declare class BOPDS_DS
-  SetArguments(theLS: NCollection_List_TopoDS_Shape): void;
-  Append(theSI: BOPDS_ShapeInfo): number;
-  Append(theS: TopoDS_Shape): number;
-  Shape(theIndex: number): TopoDS_Shape;
-  delete(): void;
-  // … 71 more members in the API reference
-
-declare class BOPDS_PaveBlock extends Standard_Transient
-  Edge(): number;
-  delete(): void;
-  // … 30 more members in the API reference
-```
-
-### BRepLib
-
-```ts
-declare class BRepLib_MakePolygon extends BRepLib_MakeShape
+declare class gp_Pnt
   constructor();
-  constructor(P1: gp_Pnt, P2: gp_Pnt);
-  constructor(V1: TopoDS_Vertex, V2: TopoDS_Vertex);
-  constructor(P1: gp_Pnt, P2: gp_Pnt, P3: gp_Pnt, Close?: boolean);
-  constructor(V1: TopoDS_Vertex, V2: TopoDS_Vertex, V3: TopoDS_Vertex, Close?: boolean);
-  constructor(P1: gp_Pnt, P2: gp_Pnt, P3: gp_Pnt, P4: gp_Pnt, Close?: boolean);
-  constructor(V1: TopoDS_Vertex, V2: TopoDS_Vertex, V3: TopoDS_Vertex, V4: TopoDS_Vertex, Close?: boolean);
-  Add(P: gp_Pnt): void;
-  Add(V: TopoDS_Vertex): void;
-  Added(): boolean;
-  Close(): void;
-  FirstVertex(): TopoDS_Vertex;
-  LastVertex(): TopoDS_Vertex;
-  Edge(): TopoDS_Edge;
-  Wire(): TopoDS_Wire;
-  delete(): void;
-  [Symbol.dispose](): void;
+  constructor(theCoord: gp_XYZ);
+  constructor(theXp: number, theYp: number, theZp: number);
+  // … 27 more members in the API reference
 
-declare class BRepLib_MakeWire extends BRepLib_MakeShape
+declare class gp_Dir
   constructor();
-  constructor(E: TopoDS_Edge);
-  constructor(W: TopoDS_Wire);
-  constructor(E1: TopoDS_Edge, E2: TopoDS_Edge);
-  constructor(W: TopoDS_Wire, E: TopoDS_Edge);
-  constructor(E1: TopoDS_Edge, E2: TopoDS_Edge, E3: TopoDS_Edge);
-  constructor(E1: TopoDS_Edge, E2: TopoDS_Edge, E3: TopoDS_Edge, E4: TopoDS_Edge);
-  Add(E: TopoDS_Edge): void;
-  Add(W: TopoDS_Wire): void;
-  Add(L: NCollection_List_TopoDS_Shape): void;
-  Error(): BRepLib_WireError;
-  Wire(): TopoDS_Wire;
-  Edge(): TopoDS_Edge;
-  Vertex(): TopoDS_Vertex;
-  delete(): void;
-  [Symbol.dispose](): void;
+  constructor(theDir: gp_Dir_D);
+  constructor(theV: gp_Vec);
+  constructor(theCoord: gp_XYZ);
+  constructor(a0: gp_Dir);
+  constructor(theXv: number, theYv: number, theZv: number);
+  // … 32 more members in the API reference
 
-BRepLib_WireError: typeof BRepLib_WireError[keyof typeof BRepLib_WireError]
-```
+declare class gp_Vec
+  constructor();
+  constructor(theV: gp_Dir);
+  constructor(theCoord: gp_XYZ);
+  constructor(theP1: gp_Pnt, theP2: gp_Pnt);
+  constructor(theXv: number, theYv: number, theZv: number);
+  Add(theOther: gp_Vec): void;
+  // … 48 more members in the API reference
 
-### ShapeExtend
-
-```ts
-declare class ShapeExtend_WireData extends Standard_Transient
-  Add(edge: TopoDS_Edge, atnum: number): void;
-  Add(wire: TopoDS_Wire, atnum: number): void;
-  Add(wire: ShapeExtend_WireData, atnum: number): void;
-  Add(shape: TopoDS_Shape, atnum: number): void;
-  Edge(num: number): TopoDS_Edge;
-  Wire(): TopoDS_Wire;
+declare class gp_Ax1
+  constructor();
+  constructor(theDir: gp_Dir_D);
+  constructor(theP: gp_Pnt, theV: gp_Dir);
+  constructor(theP: gp_Pnt, theDir: gp_Dir_D);
   // … 23 more members in the API reference
-```
 
-### BOPTools
-
-```ts
-declare class BOPTools_Set
+declare class gp_Ax2
   constructor();
-  constructor(theAllocator: NCollection_BaseAllocator);
-  constructor(theOther: BOPTools_Set);
-  Assign(Other: BOPTools_Set): BOPTools_Set;
-  Shape(): TopoDS_Shape;
-  Add(theS: TopoDS_Shape, theType: TopAbs_ShapeEnum): void;
-  NbShapes(): number;
-  IsEqual(aOther: BOPTools_Set): boolean;
-  GetSum(): number;
-  delete(): void;
-  [Symbol.dispose](): void;
+  constructor(theV: gp_Dir_D);
+  constructor(P: gp_Pnt, V: gp_Dir);
+  constructor(theP: gp_Pnt, theV: gp_Dir_D);
+  constructor(P: gp_Pnt, N: gp_Dir, Vx: gp_Dir);
+  constructor(theP: gp_Pnt, theN: gp_Dir_D, theVx: gp_Dir_D);
+  // … 24 more members in the API reference
+
+declare class gp_Trsf
+  constructor();
+  constructor(theT: gp_Trsf2d);
+  SetRotation(theA1: gp_Ax1, theAng: number): void;
+  SetRotation(theR: gp_Quaternion): void;
+  SetTranslation(theV: gp_Vec): void;
+  SetTranslation(theP1: gp_Pnt, theP2: gp_Pnt): void;
+  // … 27 more members in the API reference
 ```
 
 ## API reference

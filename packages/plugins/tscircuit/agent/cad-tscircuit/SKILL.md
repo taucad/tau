@@ -110,6 +110,14 @@ interface CommonLayoutProps extends PcbLayoutProps
   // If true, schX/schY will be interpreted relative to the parent group
   schRelative: boolean
 
+FootprintProp: AutocompleteString<FootprinterStringAutocomplete> | KicadAutocompleteStringPath | JlcpcbAutocompleteStringPath | ReactElement | FootprintSoupElements[]
+
+SymbolProp: string | ReactElement | AnyCircuitElement[]
+
+interface SchStyle
+  defaultPassiveSize: "xs" | "sm" | "md" | string | number
+  defaultCapacitorOrientation: "vertical" | "none"
+
 // Props every element extending CommonComponentProps accepts
 interface CommonComponentProps extends CommonLayoutProps
   name: string
@@ -191,6 +199,89 @@ interface KicadSymbolMetadata
   properties: KicadSymbolProperties
   embeddedFonts: boolean
 
+PinCapability: "i2c_sda" | "i2c_scl" | "spi_cs" | "spi_sck" | "spi_mosi" | "spi_miso" | "uart_tx" | "uart_rx"
+
+SupplierName: "jlcpcb" | "macrofab" | "pcbway" | "digikey" | "mouser" | "lcsc"
+
+// A Footprinter string used to procedurally generate the component's CAD model, independently of the…
+CadModelFootprinterString: string
+
+// Required stlUrl
+interface CadModelStl extends CadModelBase
+  stlUrl: string
+
+// Required objUrl
+interface CadModelObj extends CadModelBase
+  objUrl: string
+  mtlUrl: string
+
+// Required gltfUrl
+interface CadModelGltf extends CadModelBase
+  gltfUrl: string
+
+// Required glbUrl
+interface CadModelGlb extends CadModelBase
+  glbUrl: string
+
+// Required stepUrl
+interface CadModelStep extends CadModelBase
+  stepUrl: string
+
+// Required wrlUrl
+interface CadModelWrl extends CadModelBase
+  wrlUrl: string
+
+// Required jscad
+interface CadModelJscad extends CadModelBase
+  jscad: Record<string, any>
+
+interface KicadFootprintProperties
+  Reference: KicadProperty
+  Value: KicadProperty
+  Datasheet: KicadProperty
+  Description: KicadProperty
+
+interface KicadFootprintAttributes
+  through_hole: boolean
+  smd: boolean
+  exclude_from_pos_files: boolean
+  exclude_from_bom: boolean
+
+// Required name, type
+interface KicadFootprintPad
+  name: string
+  type: string
+  shape: string
+  at: KicadAt
+  size: {x: number | string; y: number | string; }
+  drill: number | string
+  layers: string[]
+  removeUnusedLayers: boolean
+  uuid: string
+
+// Required path
+interface KicadFootprintModel
+  path: string
+  offset: {x: number | string; y: number | string; z: number | string; }
+  scale: {x: number | string; y: number | string; z: number | string; }
+  rotate: {x: number | string; y: number | string; z: number | string; }
+
+interface KicadSymbolPinNumbers
+  hide: boolean
+
+interface KicadSymbolPinNames
+  offset: number | string
+  hide: boolean
+
+interface KicadSymbolProperties
+  Reference: KicadSymbolProperty
+  Value: KicadSymbolProperty
+  Footprint: KicadSymbolProperty
+  Datasheet: KicadSymbolProperty
+  Description: KicadSymbolProperty
+  ki_keywords: KicadSymbolProperty
+  ki_fp_filters: KicadSymbolProperty
+
 // Props every element extending PcbLayoutProps accepts
 interface PcbLayoutProps
   pcbX: string | number
@@ -230,6 +321,16 @@ interface PcbStyle
   silkscreenTextVisibility: "hidden" | "visible" | "inherit"
 
 PcbSx: PcbSxBase & {[K in PcbSxSelector]?: PcbSxValue; }
+
+PcbSxBase: Record<string, PcbSxValue>
+
+PcbSxSelector: "& footprint[src^='kicad:'] silkscreentext" | "& footprint[src^='jlcpcb:'] silkscreentext" | "& silkscreentext" | "& fabricationnotetext"
+
+interface PcbSxValue
+  fontSize: string | number
+  pcbX: string | number
+  pcbY: string | number
+  visibility: "hidden" | "visible" | "inherit"
 ```
 
 ### Components
@@ -272,6 +373,34 @@ SchematicPinStyle: Record<string, {marginTop?: number | string; marginRight?: nu
 SpiceModelElement: ReactElement<SpiceModelProps>
 
 InternalCircuitElement: ReactElement<InternalCircuitProps, "internalcircuit">
+
+interface SchematicPortArrangementWithSizes
+  leftSize: number
+  topSize: number
+  rightSize: number
+  bottomSize: number
+
+interface SchematicPortArrangementWithSides
+  leftSide: PinSideDefinitionInput
+  topSide: PinSideDefinitionInput
+  rightSide: PinSideDefinitionInput
+  bottomSide: PinSideDefinitionInput
+
+// Specifies the number of pins on each side of the schematic box component
+interface SchematicPortArrangementWithPinCounts
+  leftPinCount: number
+  topPinCount: number
+  rightPinCount: number
+  bottomPinCount: number
+
+// Required source
+interface SpiceModelProps
+  source: string
+  spicePinMapping: Record<string, string>
+
+// Props for a semantic container that groups the functional components inside a physical chip…
+interface InternalCircuitProps
+  children: ReactNode
 
 // JSX element <resistor> with ResistorProps, required resistance, name
 <resistor>: ResistorProps extends CommonComponentProps
@@ -330,34 +459,11 @@ CapacitorPinLabels: "pin1" | "pin2" | "pos" | "neg" | "anode" | "cathode"
   // Connections to other components
   connections: Connections<string>
   // … 16 more members in the API reference
-
-// JSX element <diode> with DiodeProps, required name
-<diode>: DiodeProps extends CommonComponentProps
-  pinLabels: DiodePinLabelsProp<PinLabel>
-  connections: {anode?: string | string[] | readonly string[]; cathode?: string | string[] | readonly string[]; pin1?: string | string[] | readonly string[]; pin2?: string | string[] | readonly string[]; pos?: string | string[] | readonly string[]; neg?: string | string[] | readonly string[]; }
-  variant: "standard" | "schottky" | "zener" | "avalanche" | "photo" | "tvs"
-  standard: boolean
-  schottky: boolean
-  zener: boolean
-  avalanche: boolean
-  photo: boolean
-  tvs: boolean
-  schOrientation: SchematicOrientation
 ```
 
 ### Connectivity
 
 ```ts
-// JSX element <net> with NetProps, required name
-<net>: NetProps
-  name: string
-  connectsTo: string | string[]
-  routingPhaseIndex: number | null
-  highlightColor: string
-  isPowerNet: boolean
-  isGroundNet: boolean
-  nominalTraceWidth: Distance
-
 // JSX element <trace> with TraceProps
 <trace>: TraceProps
   width: string | number
@@ -366,110 +472,6 @@ CapacitorPinLabels: "pin1" | "pin2" | "pos" | "neg" | "anode" | "cathode"
   from: string | {getPortSelector: () => string; }
   to: string | {getPortSelector: () => string; }
   // … 17 more members in the API reference
-```
-
-### PCB, footprint and CAD primitives
-
-```ts
-// JSX element <hole> with HoleProps
-<hole>: HoleProps extends PcbLayoutProps
-  name: string
-  shape: "circle"
-  diameter: Distance
-  radius: Distance
-  solderMaskMargin: Distance
-  coveredWithSolderMask: boolean
-  width: Distance
-  height: Distance
-
-// JSX element <platedhole> with PlatedHoleProps, required shape
-<platedhole>: PlatedHoleProps extends Omit<PcbLayoutProps, "layer">
-  name: string
-  connectsTo: string | string[]
-  shape: "circle"
-  holeDiameter: number | string
-  outerDiameter: number | string
-  padDiameter: number | string
-  portHints: PortHints
-  solderMaskMargin: Distance
-  coveredWithSolderMask: boolean
-  outerWidth: number | string
-  outerHeight: number | string
-  holeWidth: number | string
-  holeHeight: number | string
-  rectPad: boolean
-  holeOffsetX: number | string
-  holeOffsetY: number | string
-  rectPadWidth: number | string
-  rectPadHeight: number | string
-  rectBorderRadius: number | string
-  holeShape: "circle"
-  padShape: "rect"
-  padOutline: Point[]
-
-PortHints: (string | number)[]
-
-Point: {x: number | string; y: number | string; }
-
-// JSX element <courtyardrect> with CourtyardRectProps, required width, height
-<courtyardrect>: CourtyardRectProps extends PcbLayoutProps
-  width: string | number
-  height: string | number
-  strokeWidth: string | number
-  color: string
-  isFilled: boolean
-  hasStroke: boolean
-  isStrokeDashed: boolean
-
-// JSX element <silkscreenrect> with SilkscreenRectProps, required width, height
-<silkscreenrect>: SilkscreenRectProps extends Omit<PcbLayoutProps, "pcbRotation">
-  width: string | number
-  height: string | number
-  strokeWidth: string | number
-  cornerRadius: string | number
-  filled: boolean
-  stroke: "none" | "dashed" | "solid"
-
-// JSX element <silkscreentext> with SilkscreenTextProps, required text
-<silkscreentext>: SilkscreenTextProps extends PcbLayoutProps
-  text: string
-  font: "tscircuit2024"
-  layers: ("top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; })[]
-  fontSize: string | number
-  anchorAlignment: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"
-  isKnockout: boolean
-  knockoutPadding: string | number
-  knockoutPaddingLeft: string | number
-  knockoutPaddingRight: string | number
-  knockoutPaddingTop: string | number
-  knockoutPaddingBottom: string | number
-
-// JSX element <silkscreencircle> with SilkscreenCircleProps, required radius
-<silkscreencircle>: SilkscreenCircleProps extends Omit<PcbLayoutProps, "pcbRotation">
-  radius: string | number
-  strokeWidth: string | number
-  isFilled: boolean
-  isOutline: boolean
-
-// JSX element <footprint> with FootprintProps & {name?
-<footprint>: FootprintProps & {name?: string; }
-  children: any
-  name: string
-  // The layer that the footprint is designed for
-  originalLayer: LayerRef
-  // Serialized circuit JSON describing a precompiled footprint
-  circuitJson: any[]
-  // Can be a footprint or kicad string
-  src: FootprintProp
-  // Direction a cable or mating part is attached from, in the footprint's own frame…
-  insertionDirection: FootprintInsertionDirection
-  // Direction the part's enclosure opening faces, named the same way as `insertionDirection` and in…
-  cutoutApertureDirection: FootprintInsertionDirection
-
-FootprintProp: AutocompleteString<FootprinterStringAutocomplete> | KicadAutocompleteStringPath | JlcpcbAutocompleteStringPath | ReactElement | FootprintSoupElements[]
-
-// Direction a cable or mating part is attached from, named for the side of…
-FootprintInsertionDirection: InsertionDirectionInput
 ```
 
 ## API reference

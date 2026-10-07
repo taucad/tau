@@ -52,6 +52,7 @@ public static class Params
 ## Wrong / Correct
 
 - Wrong: `Voxels.voxBox(…)` or `Voxels.voxField(…)`; neither exists. Correct: a box is `new Voxels(Utils.mshCreateCube(new BBox3(min, max)))`; a field or SDF is an `IImplicit`/`IBoundedImplicit` passed to `new Voxels(implicit, bounds)`.
+- Wrong: searching for a cylinder primitive; there is none. Correct: a cylinder is a flat-capped beam, `var lat = new Lattice(); lat.AddBeam(a, r, b, r, bRoundCap: false); var vox = new Voxels(lat);`, and a sphere is `Voxels.voxSphere(center, r)`.
 - Wrong: geometry created outside `Library.Go`. Correct: build and `Add` inside the task lambda.
 
 ## Verify

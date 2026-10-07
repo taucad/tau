@@ -128,6 +128,86 @@ describe('renderCoreApi', () => {
     expect(core?.markdown).not.toMatch(/^bool$/mu);
   });
 
+  it('should leave out an interface a shown class already implements', () => {
+    const shapes = createApiCorpus(metadata, [
+      {
+        name: 'Drawing',
+        kind: 'class',
+        type: { text: 'export declare class Drawing implements DrawingInterface' },
+        members: [
+          { name: 'cut', kind: 'method', signatures: [{ parameters: [], text: 'cut(other: Drawing): Drawing;' }] },
+        ],
+      },
+      {
+        name: 'DrawingInterface',
+        kind: 'interface',
+        type: { text: 'export declare interface DrawingInterface' },
+        members: [
+          { name: 'cut', kind: 'method', signatures: [{ parameters: [], text: 'cut(other: Drawing): Drawing;' }] },
+        ],
+      },
+    ]);
+    const core = renderCoreApi(
+      [{ corpus: shapes, groupBy }],
+      ranking({ [idOf('Drawing.cut')]: 5, [idOf('DrawingInterface.cut')]: 4 }),
+      { budgetTokens: 4000 },
+    );
+
+    expect(core?.markdown).toContain('class Drawing implements DrawingInterface');
+    expect(core?.markdown).not.toContain('export declare interface DrawingInterface');
+  });
+
+  it('should show the fields of a small record nested in a namespace', () => {
+    const jscad = createApiCorpus(metadata, [
+      {
+        name: 'extrusions',
+        kind: 'namespace',
+        members: [
+          {
+            name: 'extrudeLinear',
+            kind: 'function',
+            signatures: [
+              {
+                parameters: [],
+                text: 'declare function extrudeLinear(options: ExtrudeLinearOptions, geometry: Geometry): Geom3',
+              },
+            ],
+          },
+          {
+            name: 'ExtrudeLinearOptions',
+            kind: 'interface',
+            type: { text: 'export interface ExtrudeLinearOptions' },
+            members: [
+              { name: 'height', kind: 'property', type: { text: 'number' } },
+              { name: 'twistAngle', kind: 'property', type: { text: 'number' } },
+            ],
+          },
+        ],
+      },
+    ]);
+    const core = renderCoreApi([{ corpus: jscad, groupBy }], undefined, { budgetTokens: 4000, pins: ['extrusions.*'] });
+
+    expect(core?.markdown).toContain(
+      '  export interface ExtrudeLinearOptions\n    height: number\n    twistAngle: number',
+    );
+  });
+
+  it('should follow an inlined option type with the small type it names in turn', () => {
+    const nested = createApiCorpus(metadata, [
+      {
+        name: 'hole',
+        kind: 'function',
+        signatures: [{ parameters: [], text: 'declare function hole(expected: HoleExpectation): void;' }],
+      },
+      { name: 'HoleExpectation', kind: 'type', type: { text: '{ axis: AxisExpectation; diameter: number }' } },
+      { name: 'AxisExpectation', kind: 'type', type: { text: '{ origin: Vec3; direction: Vec3 }' } },
+    ]);
+    const core = renderCoreApi([{ corpus: nested, groupBy }], ranking({ [idOf('hole')]: 1 }), { budgetTokens: 4000 });
+
+    expect(core?.markdown).toContain('HoleExpectation: { axis: AxisExpectation; diameter: number }');
+    expect(core?.markdown).toContain('AxisExpectation: { origin: Vec3; direction: Vec3 }');
+  });
+
   it('should skip whole blocks that do not fit rather than truncate them', () => {
     const core = renderCoreApi([{ corpus, groupBy }], ranking({ [idOf('drawCircle')]: 5, [idOf('Solid')]: 4 }), {
       budgetTokens: 90,

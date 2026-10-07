@@ -54,31 +54,109 @@ The symbols real Tau models use most, as verbatim declarations. Anything not sho
 ```ts
 primitives
   export interface ArcOptions
+    center: Vec2
+    radius: number
+    startAngle: number
+    endAngle: number
+    segments: number
+    makeTangent: boolean
   declare function circle(options?: CircleOptions): Geom2
   export interface CircleOptions
+    center: Vec2
+    radius: number
+    startAngle: number
+    endAngle: number
+    segments: number
   declare function cube(options?: CubeOptions): Geom3
   export interface CubeOptions
+    center: Vec3
+    size: number
   declare function cuboid(options?: CuboidOptions): Geom3
   export interface CuboidOptions
+    center: Vec3
+    size: Vec3
   declare function cylinder(options?: CylinderOptions): Geom3
   export interface CylinderOptions
+    center: Vec3
+    height: number
+    radius: number
+    segments: number
   export interface CylinderEllipticOptions
+    center: Vec3
+    height: number
+    startRadius: [number, number]
+    startAngle: number
+    endRadius: [number, number]
+    endAngle: number
+    segments: number
   export interface EllipseOptions
+    center: Vec2
+    radius: Vec2
+    startAngle: number
+    endAngle: number
+    segments: number
   export interface EllipsoidOptions
+    center: Vec3
+    radius: Vec3
+    segments: number
+    axes: Vec3
   export interface GeodesicSphereOptions
+    radius: number
+    frequency: number
   declare function polygon(options: PolygonOptions): Geom2
   export interface PolygonOptions
+    points: Array<Vec2> | Array<Array<Vec2>>
+    paths: Array<number> | Array<Array<number>>
+    orientation: 'counterclockwise' | 'clockwise'
   export interface PolyhedronOptions
+    points: Array<Vec3>
+    faces: Array<Array<number>>
+    colors: Array<RGB | RGBA>
+    orientation: 'outward' | 'inward'
   declare function rectangle(options?: RectangleOptions): Geom2
   export interface RectangleOptions
+    center: Vec2
+    size: Vec2
   export interface RoundedCuboidOptions
+    center: Vec3
+    size: Vec3
+    roundRadius: number
+    segments: number
   export interface RoundedCylinderOptions
+    center: Vec3
+    height: number
+    radius: number
+    roundRadius: number
+    segments: number
   export interface RoundedRectangleOptions
+    center: Vec2
+    size: Vec2
+    roundRadius: number
+    segments: number
   export interface SphereOptions
+    center: Vec3
+    radius: number
+    segments: number
+    axes: Vec3
   export interface SquareOptions
+    center: Vec2
+    size: number
   export interface StarOptions
+    center: Vec2
+    vertices: number
+    density: number
+    outerRadius: number
+    innerRadius: number
+    startAngle: number
   declare function torus(options?: TorusOptions): Geom3
   export interface TorusOptions
+    innerRadius: number
+    outerRadius: number
+    innerSegments: number
+    outerSegments: number
+    innerRotation: number
+    outerRotation: number
+    startAngle: number
   // … 15 more members in the API reference
 ```
 
@@ -135,9 +213,38 @@ extrusions
   declare function extrudeLinear(options: ExtrudeLinearOptions, geometry: Geometry): Geom3
   declare function extrudeLinear(options: ExtrudeLinearOptions, ...geometries: RecursiveArray<Geometry>): Geom3
   export interface ExtrudeLinearOptions
+    height: number
+    twistAngle: number
+    twistSteps: number
   export interface ExtrudeRectangularOptions
+    size: number
+    height: number
+    corners: Corners
+    segments: number
   export interface ExtrudeHelicalOptions
+    angle: number
+    startAngle: number
+    pitch: number
+    height: number
+    endOffset: number
+    segmentsPerRotation: number
   slice
+    declare function calculatePlane(slice: Slice): Plane
+    declare function clone(slice: Slice): Slice
+    declare function clone(out: Slice, slice: Slice): Slice
+    declare function create(edges?: Slice['edges']): Slice
+    declare function equals(a: Slice, b: Slice): boolean
+    declare function fromPoints(points: Array<Point>): Slice
+    declare function fromSides(sides: Geom2['sides']): Slice
+    declare function isA(object: any): object is Slice
+    declare function reverse(slice: Slice): Slice
+    declare function reverse(out: Slice, slice: Slice): Slice
+    declare function toEdges(slice: Slice): Slice['edges']
+    declare function toPolygons(slice: Slice): Array<Poly3>
+    declare function toString(slice: Slice): string
+    declare function transform(matrix: Mat4, slice: Slice): Slice
+    interface Slice
+      edges: Array<[Vec3, Vec3]>
   // … 8 more members in the API reference
 ```
 
@@ -145,15 +252,19 @@ extrusions
 
 ```ts
 maths
-  constants
   line2
   line3
-  mat4
-  plane
   utils
+    declare function aboutEqualNormals(a: Vec3, b: Vec3): boolean
+    declare function area(points: Array<Vec2>): number
+    declare function interpolateBetween2DPointsForY(point1: Vec2, point2: Vec2, y: number): number
+    declare function intersect(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2): Vec2
+    declare function solve2Linear(a: number, b: number, c: number, d: number, u: number, v: number): Vec2
+    export function sin(radians: number): number
+    export function cos(radians: number): number
   vec2
   vec3
-  vec4
+  // … 4 more members in the API reference
 ```
 
 ### geometries
@@ -164,6 +275,12 @@ geometries
   geom3
   path2
   poly2
+    declare function arePointsInside(points: Array<Vec2>, polygon: Poly2): number
+    declare function create(vertices?: Array<Vec2>): Poly2
+    declare function flip(polygon: Poly2): Poly2
+    declare function measureArea(polygon: Poly2): number
+    declare interface Poly2
+      vertices: Array<Vec2>
   poly3
 ```
 
@@ -182,18 +299,26 @@ colors
 
 ```ts
 text
-  declare function vectorChar(): VectorChar
-  declare function vectorChar(char: string): VectorChar
-  declare function vectorChar(options: VectorCharOptions): VectorChar
-  declare function vectorChar(options: Omit<VectorCharOptions, 'input'>, char: string): VectorChar
   export interface VectorChar
+    width: number
+    height: number
+    segments: Array<Array<Vec2>>
   export interface VectorCharOptions
-  declare function vectorText(): VectorText
-  declare function vectorText(text: string): VectorText
-  declare function vectorText(options: VectorTextOptions): VectorText
-  declare function vectorText(options: Omit<VectorTextOptions, 'input'>, text: string): VectorText
-  export interface VectorText extends Array<Array<Vec2>>
+    xOffset: number
+    yOffset: number
+    height: number
+    extrudeOffset: number
+    input: string
   export interface VectorTextOptions
+    xOffset: number
+    yOffset: number
+    height: number
+    lineSpacing: number
+    letterSpacing: number
+    align: 'left' | 'center' | 'right'
+    extrudeOffset: number
+    input: string
+  // … 3 more members in the API reference
 ```
 
 ### utils
@@ -214,6 +339,18 @@ utils
 ```ts
 curves
   bezier
+    declare function create(points: Array<number> | Array<Array<number>>): Bezier
+    declare function tangentAt(t: number, bezier: Bezier): Array<number> | number
+    declare function valueAt(t: number, bezier: Bezier): Array<number> | number
+    declare function lengths(segments: number, bezier: Bezier): Array<number>
+    declare function length(segments: number, bezier: Bezier): number
+    declare function arcLengthToT(options: ArcLengthToTOptions, bezier: Bezier): number
+    declare interface Bezier
+      points: Array<number> | Array<Array<number>>
+      pointType: string
+      dimensions: number
+      permutations: Array<number>
+      tangentPermutations: Array<number>
 ```
 
 ### measurements
@@ -224,20 +361,6 @@ measurements
   declare function measureBoundingBox(geometry: any): [[0, 0, 0], [0, 0, 0]]
   declare function measureBoundingBox(...geometries: RecursiveArray<Geometry | any>): Array<BoundingBox>
   // … 12 more members in the API reference
-```
-
-### expansions
-
-```ts
-expansions
-  declare function expand(options: ExpandOptions, geometry: Path2 | Geom2): Geom2
-  declare function expand(options: ExpandOptions, geometry: Geom3): Geom3
-  declare function expand<T extends Geom>(options?: ExpandOptions, ...geometries: RecursiveArray<T>): Array<T>
-  declare function expand(options?: ExpandOptions, ...geometries: RecursiveArray<Geom>): Array<Geom>
-  export interface ExpandOptions
-  declare function offset<T extends Geometry>(options: OffsetOptions, geometry: T): T
-  declare function offset(options?: OffsetOptions, ...geometries: RecursiveArray<Geometry>): Geometry
-  export interface OffsetOptions
 ```
 
 ## API reference

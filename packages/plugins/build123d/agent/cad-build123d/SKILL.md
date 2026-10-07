@@ -116,6 +116,26 @@ class Align(Enum)
 # Part Object
 class Cylinder(BasePartObject)
   Cylinder(radius: float, height: float, arc_size: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
+
+# Part Operation
+class Hole(BasePartObject)
+  Hole(radius: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
+
+# Part Operation
+class CounterBoreHole(BasePartObject)
+  CounterBoreHole(radius: float, counter_bore_radius: float, counter_bore_depth: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
+```
+
+### objects_sketch
+
+```python
+# Sketch Object
+class Rectangle(BaseSketchObject)
+  Rectangle(width: float, height: float, rotation: float = 0, align: Align | tuple[Align, Align] | None = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
+
+# Sketch Object
+class Circle(BaseSketchObject)
+  Circle(radius: float, arc_size: float = 360.0, align: Align | tuple[Align, Align] | None = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
 ```
 
 ### geometry
@@ -269,6 +289,9 @@ class Until(Enum)
 ```python
 # Generic Operation
 fillet(objects: ChamferFilletType | Iterable[ChamferFilletType], radius: float) -> Sketch | Part | Curve
+
+# Generic Operation
+chamfer(objects: ChamferFilletType | Iterable[ChamferFilletType], length: float, length2: float | None = None, angle: float | None = None, reference: Edge | Face | None = None) -> Sketch | Part
 ```
 
 ### shape_core
@@ -310,41 +333,6 @@ class Shape(NodeMixin, Generic)
   # Return the Wire
   wire() -> Wire
   # … 65 more members in the API reference
-
-# Subclass of list with custom filter and sort methods appropriate to CAD
-class ShapeList(list)
-  # The average of the center of objects within the ShapeList
-  center() -> Vector
-  # edges - all the edges in this ShapeList
-  edges() -> ShapeList[Edge]
-  # filter by
-  filter_by(filter_by: Callable[[T], bool] | Axis | Plane | GeomType | property, reverse: bool = False, tolerance: float = 1e-05) -> ShapeList[T]
-  # Return the Shell
-  shell() -> Shell
-  # solids - all the solids in this ShapeList
-  solids() -> ShapeList[Solid]
-  # vertices - all the vertices in this ShapeList
-  vertices() -> ShapeList[Vertex]
-  # … 27 more members in the API reference
-
-# CAD geometry object type
-class GeomType(Enum)
-  PLANE
-  CYLINDER
-  CONE
-  SPHERE
-  TORUS
-  BEZIER
-  BSPLINE
-  REVOLUTION
-  EXTRUSION
-  OFFSET
-  LINE
-  CIRCLE
-  ELLIPSE
-  HYPERBOLA
-  PARABOLA
-  OTHER
 ```
 
 ### three_d
@@ -373,6 +361,18 @@ class Transition(Enum)
   RIGHT
   ROUND
   TRANSFORMED
+
+# Additional methods to add to 3D Shape classes
+class Mixin3D(Shape)
+  # Unused - only here because Mixin1D is a subclass of Shape
+  extrude(obj: Shape, direction: VectorLike) -> Edge | Face | Shell | Solid | Compound
+  # Chamfer
+  chamfer(length: float, length2: float | None, edge_list: Iterable[Edge], face: Face | None = None) -> Solid | Part
+  # Fillet
+  fillet(radius: float, edge_list: Iterable[Edge]) -> Solid | Part
+  # Shell
+  offset_3d(openings: Iterable[Face] | None, thickness: float, tolerance: float = 0.0001, kind: Kind = Kind.ARC) -> Solid
+  # … 8 more members in the API reference
 ```
 
 ### two_d

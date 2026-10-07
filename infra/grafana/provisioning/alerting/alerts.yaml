@@ -43,6 +43,52 @@ groups:
           service: tau-api
           component: redis
 
+      - uid: supplier-auth-failure
+        title: "P0: Supplier Rejected Tau's Key"
+        condition: supplier_auth
+        data:
+          - refId: supplier_auth
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: >
+                sum by (gen_ai_provider_name) (increase(gen_ai_client_operation_duration_count{service_name="tau-api",error_type="upstream_auth"}[5m])) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: A supplier answered a funded call with 401/403 (F-11). Every funded call to that supplier fails until Tau's key is replaced.
+          runbook_url: docs/handbooks/cloud/playbooks/supplier-outage.md
+        labels:
+          severity: critical
+          service: tau-api
+          component: billing
+
+      - uid: supplier-credit-exhausted
+        title: 'P0: Supplier Account Out of Credit'
+        condition: supplier_credit
+        data:
+          - refId: supplier_credit
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: >
+                sum by (providerId) (increase(tau_billing_provider_account_refusals_total{service_name="tau-api",reason!="credential_rejected"}[5m])) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: A supplier refused a funded call because Tau's account with it is out of credit (BIL-11). Credential rejections page as supplier-auth-failure instead.
+          runbook_url: docs/handbooks/cloud/playbooks/supplier-outage.md
+        labels:
+          severity: critical
+          service: tau-api
+          component: billing
+
   - orgId: 1
     name: tau-warning
     folder: Tau Alerts

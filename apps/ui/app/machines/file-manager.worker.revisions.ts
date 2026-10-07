@@ -886,9 +886,6 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
   actor.start();
   published = selectRevisionStatus(actor.getSnapshot());
-  /* After `start`, because the invoked children exist only once the root runs.
-   * Restore's toasts are the one thing in this tree that needs a person to see
-   * them, so they cross the port rather than being re-derived on the page. */
   /* W36 D1: each settled push or pull, on the existing telemetry ingest. The desktop's disk host reports its own. */
   actor.getSnapshot().children.sync?.on('syncAttempt', (attempt: SyncMachineEmitted & { type: 'syncAttempt' }) => {
     const apiBaseUrl = options.apiBaseUrl?.();
@@ -903,6 +900,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       detail: { ...detail, placement: 'browser' },
     });
   });
+  /* After `start`, because the invoked children exist only once the root runs.
+   * Restore's toasts are the one thing in this tree that needs a person to see
+   * them, so they cross the port rather than being re-derived on the page. */
   const restoreChild = actor.getSnapshot().children.restore;
   restoreChild?.on('toast.restored', (toast) => {
     toasts.emit({ type: 'restored', revisionNumber: toast.revisionNumber });

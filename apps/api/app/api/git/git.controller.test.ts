@@ -294,7 +294,7 @@ describe('receivePackOutcome', () => {
       'quota_refused',
     ],
     ['an unpack failure', report('unpack index-pack abnormal exit\n', 'ng refs/heads/main unpacker error\n'), 'error'],
-    ['the empty flush-only push', Buffer.from('0000'), 'ok'],
+    ['the flush-only probe before a large push, which is not a push', Buffer.from('0000'), undefined],
   ])('maps %s', (_label, body, outcome) => {
     expect(receivePackOutcome(body)).toBe(outcome);
   });

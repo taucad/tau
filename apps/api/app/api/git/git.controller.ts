@@ -58,10 +58,14 @@ type SyncOutcome = SyncOperationAttributes['outcome'];
  * status code, is what tells a failed push from a good one.
  *
  * @param report - The receive-pack response body, verbatim.
- * @returns The bounded outcome label.
+ * @returns The bounded outcome label, or `undefined` for a body with no report-status:
+ *   the flush-only probe git sends before a large push, which is not a push of its own.
  */
-export const receivePackOutcome = (report: Uint8Array<ArrayBuffer>): SyncOutcome => {
+export const receivePackOutcome = (report: Uint8Array<ArrayBuffer>): SyncOutcome | undefined => {
   const text = Buffer.from(report).toString('latin1');
+  if (!/[\da-f]{4}unpack /u.test(text)) {
+    return undefined;
+  }
   /* The pre-receive hook's sentences, relayed on side-band 2, name the refusal the `ng` line does not. */
   if (text.includes(quotaRefusalMarker) || text.includes(ceilingRefusalMarker)) {
     return 'quota_refused';
@@ -282,7 +286,10 @@ export class GitController {
       this.recordSync('push', syncOutcomeOf(error), startedAt);
       throw error;
     }
-    this.recordSync('push', receivePackOutcome(output), startedAt);
+    const outcome = receivePackOutcome(output);
+    if (outcome !== undefined) {
+      this.recordSync('push', outcome, startedAt);
+    }
     return new StreamableFile(Buffer.from(output), { type: 'application/x-git-receive-pack-result' });
   }
 
@@ -491,6 +498,13 @@ export class GitController {
     return abort.signal;
   }
 
+  /** One sync request's count and latency, recorded once where its answer is decided. */
+  private recordSync(operation: SyncOperation, outcome: SyncOutcome, startedAt: number): void {
+    const attributes = { 'tau.sync.operation': operation, outcome } satisfies SyncOperationAttributes;
+    this.metrics.syncOperations.add(1, attributes);
+    this.metrics.syncOperationDuration.record((performance.now() - startedAt) / 1000, attributes);
+  }
+
   /**
    * Attaches `Retry-After` to every 503 and service-raised 429 this controller
    * answers.
@@ -502,13 +516,6 @@ export class GitController {
    * git-protocol refusal writes status and body onto this same reply, so a
    * header set here survives it.
    */
-  /** One sync request's count and latency, recorded once where its answer is decided. */
-  private recordSync(operation: SyncOperation, outcome: SyncOutcome, startedAt: number): void {
-    const attributes = { 'tau.sync.operation': operation, outcome } satisfies SyncOperationAttributes;
-    this.metrics.syncOperations.add(1, attributes);
-    this.metrics.syncOperationDuration.record((performance.now() - startedAt) / 1000, attributes);
-  }
-
   private async withRetryAfter<T>(reply: FastifyReply, work: () => Promise<T>): Promise<T> {
     try {
       return await work();

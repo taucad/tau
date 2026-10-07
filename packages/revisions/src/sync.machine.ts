@@ -170,6 +170,8 @@ type SyncMachineContextFields = Readonly<{
   reason: SyncFailureReason | undefined;
   /** When this device first minted a revision the remote has not acknowledged, for the lag report. */
   unsyncedSince: number | undefined;
+  /** The first mint since the current push was assembled: what is still unsynced once that push is acknowledged. */
+  mintedSincePushAt: number | undefined;
   /** When the push or pull under way started, and the queue depth a push started with (`syncAttempt`). */
   attemptStartedAt: number;
   pushPending: number;
@@ -766,6 +768,8 @@ const rememberHead = (context: SyncMachineContext, event: SyncMachineEvent): Syn
   localHead: event.type === 'revisionMinted' && event.branch === context.branch ? event.revisionId : context.localHead,
   pendingMint: event.type === 'revisionMinted' ? true : context.pendingMint,
   unsyncedSince: event.type === 'revisionMinted' ? (context.unsyncedSince ?? Date.now()) : context.unsyncedSince,
+  mintedSincePushAt:
+    event.type === 'revisionMinted' ? (context.mintedSincePushAt ?? Date.now()) : context.mintedSincePushAt,
   /* The trigger travels with the fact, because the state that *acts* on the
    * remembered mint is never the state the event arrived in (C17). */
   pendingFlush:
@@ -1053,6 +1057,7 @@ const syncMachineDefinition = setup({
     error: undefined,
     reason: undefined,
     unsyncedSince: undefined,
+    mintedSincePushAt: undefined,
     attemptStartedAt: 0,
     pushPending: 0,
     debounceMilliseconds: input.debounceMilliseconds ?? defaultDebounceMilliseconds,
@@ -1513,6 +1518,7 @@ const syncMachineDefinition = setup({
           nextPushIds: [],
           attemptStartedAt: Date.now(),
           pushPending: context.pending.length,
+          mintedSincePushAt: undefined,
         },
       }),
       invoke: {
@@ -1577,7 +1583,8 @@ const syncMachineDefinition = setup({
             context: {
               leases,
               pending,
-              unsyncedSince: acknowledged ? undefined : context.unsyncedSince,
+              /* A revision minted while this push was on the wire is still unsent, from its own mint. */
+              unsyncedSince: acknowledged ? context.mintedSincePushAt : context.unsyncedSince,
               /* Rule 19: a refused history is terminal, as the thrown class is; a
                * record's refusal never blocks history, so it keeps retrying. */
               failure: quota && refusedHistory !== undefined ? 'fatal' : pending.length > 0 ? 'retry' : 'none',

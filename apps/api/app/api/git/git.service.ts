@@ -780,7 +780,6 @@ export class GitRepositoryService {
       const request = this.pipeRequestBody({ ...args, child, service: 'git-receive-pack' });
       const [body] = await Promise.all([output, this.awaitChild(child), request.done]);
 
-      this.metrics.syncPackBytes.record(request.counter.bytes, { 'tau.sync.operation': 'push' });
       if (request.counter.bytes <= flushPacketBytes) {
         /* The flush-only body `git push` authenticates a chunked push with.
            Nothing arrived, so there is nothing to commit and no generation to
@@ -793,6 +792,7 @@ export class GitRepositoryService {
          upload, and the client re-pushes against a Machine that is staying.
          One that has started finishes, because the drain waits for it. */
       this.refuseWhenStopping('This server is restarting; retry the push.');
+      this.metrics.syncPackBytes.record(request.counter.bytes, { 'tau.sync.operation': 'push' });
       const result = await this.commit({
         store: this.store,
         lease,

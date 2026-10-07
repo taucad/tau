@@ -350,6 +350,7 @@ async function main(): Promise<void> {
         try {
           while (!shutdown.signal.aborted) {
             let failed = 0;
+            let batchThrew = false;
             let fullBatch = false;
             for (const pool of ['primary', 'helper'] as const) {
               const startedAt = Date.now();
@@ -420,6 +421,7 @@ async function main(): Promise<void> {
                 );
               } catch (error) {
                 failed += 1;
+                batchThrew = true;
                 metrics.billingFundedOperationRecoveries.add(1, {
                   ...attributes,
                   'tau.billing.recovery.outcome': 'failed',
@@ -441,8 +443,10 @@ async function main(): Promise<void> {
               }
             }
             consecutiveFailures = failed === 0 ? 0 : consecutiveFailures + 1;
-            // F-10: the per-pass gauges keep exporting their last value, so a stalled worker is only visible here.
-            metrics.billingWorkerPasses.add(1, { 'tau.worker': 'recovery', outcome: failed === 0 ? 'ok' : 'error' });
+            /* F-10: the per-pass gauges keep exporting their last value, so a stalled worker is only visible here.
+               A pass is `error` only when a batch threw: one operation that keeps failing recovery is counted
+               by `recoveries{failed}`, and must not make a live worker read as stalled. */
+            metrics.billingWorkerPasses.add(1, { 'tau.worker': 'recovery', outcome: batchThrew ? 'error' : 'ok' });
             if (fullBatch && failed === 0) {
               continue;
             }

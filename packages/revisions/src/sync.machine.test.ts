@@ -2828,6 +2828,30 @@ describe('syncMachine telemetry (W36 D1)', () => {
     harness.stop();
   });
 
+  it('keeps the lag of a revision minted while the previous push was on the wire', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    mint(harness, 'r1');
+    harness.clock.advance(2000);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    mint(harness, 'r2');
+    const mintedMidPush = harness.actor.getSnapshot().context.mintedSincePushAt;
+    expect(mintedMidPush).toEqual(expect.any(Number) as unknown);
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    await vi.waitFor(() => {
+      expect(attempts(harness).at(-1)).toMatchObject({ direction: 'push', outcome: 'ok' });
+    });
+    /* Once r1 is acknowledged, r2 is still owed, and its lag runs from its own mint. */
+    expect(harness.actor.getSnapshot().context.unsyncedSince).toBe(mintedMidPush);
+
+    harness.stop();
+  });
+
   it('reports a push the remote refused for storage as quota_refused', async () => {
     const harness = start();
     await openCleanly(harness);

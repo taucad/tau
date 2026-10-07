@@ -1001,9 +1001,9 @@ jobs:
     needs: [workspace, affected, plan, api]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
-      contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
       needs.workspace.result == 'success' && needs.affected.result == 'success' &&
-      needs.plan.result == 'success' && needs.api.result == 'success'
+      needs.api.result == 'success'
     uses: ./.github/workflows/deploy.yml
     with:
       environment: staging
@@ -1019,7 +1019,7 @@ jobs:
     needs: [workspace, affected, plan, geospec-producer]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
-      contains(fromJSON(needs.plan.outputs.deploy-apps), 'ui') &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'ui') &&
       needs.workspace.result == 'success' && needs.affected.result == 'success' &&
       (needs.geospec-producer.result == 'success' || needs.plan.outputs.geospec-cached == 'true')
     permissions:

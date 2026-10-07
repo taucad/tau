@@ -211,10 +211,10 @@ describe('paid top-up', () => {
       const canceled = await account.api.request('POST', `${path}/cancel`);
       return {
         outcome: 'blocked',
-        defect: 'F-01',
+        defect: 'F-02',
         evidence: [
           `paid action ${paid.actionId}: recover ${recovered.status} ${failure(recovered).code}, cancel ${canceled.status} ${failure(canceled).code}`,
-          'credits wait for the webhook (F-01); the refused recover of a paid Checkout is F-02 (WP-4)',
+          'the refused recover of a paid Checkout is F-02 (WP-4); its credits then arrive only by webhook',
         ],
       };
     }),

@@ -10,7 +10,7 @@ export type Priority = 'P0' | 'P1' | 'P2';
 /**
  * What a row observed. `defect` names the finding (F-nn) or harness issue behind a fail or block. Harness issues:
  * H-01 the Pay click never submits from this host; H-02 the Stripe read key cannot see the staging endpoint;
- * H-03 an earlier row left no state for this one.
+ * H-03 an earlier row left no state for this one; H-04 the harness does not pay the subscription Checkout.
  */
 export type Verdict = { readonly outcome: Outcome; readonly defect?: string; readonly evidence: readonly string[] };
 
@@ -33,12 +33,20 @@ export const runId = configuredRunId;
 /** Retained run output (tool-output policy): results.json, results-matrix.md, screenshots and traces. */
 export const runDirectory = resolve(import.meta.dirname, '../../../../out/test-results/billing-e2e', runId);
 
-const readRows = async (path: string): Promise<Row[]> => {
+/** A staging account the run could not delete; an operator sweeps it by `userId`. */
+export type Orphan = { readonly caseId: string; readonly email: string; readonly userId: string };
+
+type Results = { readonly rows: readonly Row[]; readonly orphans: readonly Orphan[] };
+
+const resultsPath = join(runDirectory, 'results.json');
+
+const readResults = async (): Promise<Results> => {
   try {
-    return (JSON.parse(await readFile(path, 'utf8')) as { readonly rows: Row[] }).rows;
+    const parsed = JSON.parse(await readFile(resultsPath, 'utf8')) as Partial<Results>;
+    return { rows: parsed.rows ?? [], orphans: parsed.orphans ?? [] };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return [];
+      return { rows: [], orphans: [] };
     }
     throw error;
   }
@@ -49,8 +57,8 @@ const cell = (text: string): string => {
   return flat.length > 600 ? `${flat.slice(0, 600)}…` : flat;
 };
 
-/** The same table shape as the program's results matrix: ID, P, outcome, evidence. */
-const renderMatrix = (rows: readonly Row[]): string => {
+/** The same table shape as the program's results matrix: ID, P, outcome, evidence; then the accounts left behind. */
+const renderMatrix = ({ rows, orphans }: Results): string => {
   const outcomes: readonly Outcome[] = ['pass', 'fail', 'blocked', 'skipped'];
   const counts = outcomes.map((outcome) => `${rows.filter((row) => row.outcome === outcome).length} ${outcome}`);
   const lines = rows.map((row) => {
@@ -69,7 +77,21 @@ const renderMatrix = (rows: readonly Row[]): string => {
     '| --- | --- | --- | --- |',
     ...lines,
     '',
+    ...(orphans.length === 0
+      ? []
+      : [
+          `Accounts the run could not delete, for an operator to sweep: ${orphans
+            .map(({ email, userId, caseId }) => `\`${email}\` (user ${userId}, row ${caseId})`)
+            .join(', ')}.`,
+          '',
+        ]),
   ].join('\n');
+};
+
+const writeResults = async (results: Results): Promise<void> => {
+  await mkdir(runDirectory, { recursive: true });
+  await writeFile(resultsPath, `${JSON.stringify({ runId, baseUrl, apiUrl, ...results }, undefined, 2)}\n`);
+  await writeFile(join(runDirectory, 'results-matrix.md'), renderMatrix(results));
 };
 
 /** Upserts one row into results.json and re-renders results-matrix.md beside it. */
@@ -77,14 +99,20 @@ export const recordRow = async (row: Row): Promise<void> => {
   if ((row.outcome === 'fail' || row.outcome === 'blocked') && row.defect === undefined) {
     throw new Error(`${row.id}: a ${row.outcome} row must name its finding (F-nn) or harness issue (H-nn)`);
   }
-  await mkdir(runDirectory, { recursive: true });
-  const path = join(runDirectory, 'results.json');
-  const previous = await readRows(path);
-  const rows = [...previous.filter(({ id }) => id !== row.id), row].sort((left, right) =>
+  const previous = await readResults();
+  const rows = [...previous.rows.filter(({ id }) => id !== row.id), row].sort((left, right) =>
     left.id.localeCompare(right.id),
   );
-  await writeFile(path, `${JSON.stringify({ runId, baseUrl, apiUrl, rows }, undefined, 2)}\n`);
-  await writeFile(join(runDirectory, 'results-matrix.md'), renderMatrix(rows));
+  await writeResults({ rows, orphans: previous.orphans });
+};
+
+/** Names an account the run could not delete, in results.json and under the matrix, so it is swept rather than lost. */
+export const recordOrphan = async (orphan: Orphan): Promise<void> => {
+  const previous = await readResults();
+  await writeResults({
+    rows: previous.rows,
+    orphans: [...previous.orphans.filter(({ userId }) => userId !== orphan.userId), orphan],
+  });
 };
 
 /**

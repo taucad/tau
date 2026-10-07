@@ -5,6 +5,7 @@ import { closeAccount, createAccount } from '#support/account.js';
 import type { Account } from '#support/account.js';
 import { baseUrl, ok } from '#support/api.js';
 import { screenshot, withBrowser } from '#support/checkout.js';
+import { deleteMailbox } from '#support/mailbox.js';
 import { matrixRow } from '#support/results.js';
 
 describe('account closure', () => {
@@ -14,9 +15,8 @@ describe('account closure', () => {
   beforeAll(async () => {
     account = await createAccount('ac01');
     return async () => {
-      if (!isDeleted) {
-        await closeAccount(account);
-      }
+      // The row deletes the user itself; its inbox is then the only thing left to clean.
+      await (isDeleted ? deleteMailbox(account.mailbox).catch(() => undefined) : closeAccount(account));
     };
   });
 
@@ -67,7 +67,7 @@ describe('account closure', () => {
         evidence: [
           ...evidence,
           `get-session afterwards ${JSON.stringify(session.body)}, sign-in afterwards ${signIn.status}`,
-          'balance was 0: closing a funded account needs a paid top-up, so the webhook (F-01)',
+          'balance was 0: closing a funded account needs a paid top-up, which this host cannot submit (H-01)',
         ],
       };
     }),

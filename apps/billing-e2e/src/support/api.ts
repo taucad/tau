@@ -17,11 +17,11 @@ const refuseProduction = (value: string): string => {
   return url.origin;
 };
 
-/** Seconds a 429 asks us to wait: a numeric `x-retry-after` or `Retry-After`, else 10; never more than 60. */
+/** Seconds a 429 asks us to wait: a numeric `x-retry-after` or `Retry-After`, else 10; never more than 30. */
 export const retryAfterSeconds = (headers: Headers): number => {
   const raw = (headers.get('x-retry-after') ?? headers.get('retry-after') ?? '').trim();
   const seconds = raw === '' ? Number.NaN : Number(raw);
-  return Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), 60) : 10;
+  return Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), 30) : 10;
 };
 
 /** A `Set-Cookie` that deletes: a non-positive `Max-Age` (so not `Max-Age=01`) or an `Expires` already past. */
@@ -35,8 +35,8 @@ const cookieExpired = (cookie: string): boolean =>
         return Number(attribute.slice('max-age='.length)) <= 0;
       }
       if (attribute.startsWith('expires=')) {
-        const expires = Date.parse(attribute.slice('expires='.length));
-        return Number.isFinite(expires) && expires <= Date.now();
+        const cookieExpiresAt = Date.parse(attribute.slice('expires='.length));
+        return Number.isFinite(cookieExpiresAt) && cookieExpiresAt <= Date.now();
       }
       return false;
     });
@@ -123,7 +123,8 @@ export const createApi = (): Api => {
     };
     apiCalls.push(call);
     const body = parseBody(await response.text());
-    // Bounded like the mail.tm client: five waits, each as long as the server asks (capped), then the 429 is the answer.
+    // Bounded like the mail.tm client: five waits, each as long as the server asks (capped so all five fit the
+    // 180 s row budget and a rate-limited row still reaches the matrix), then the 429 is the answer.
     const attempt = options.attempt ?? 0;
     if (response.status === 429 && options.retryRateLimit !== false && attempt < 5) {
       await delay((retryAfterSeconds(response.headers) + 1) * 1000);

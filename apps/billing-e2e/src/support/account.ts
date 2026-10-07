@@ -7,7 +7,7 @@ import { baseUrl, createApi, ok } from '#support/api.js';
 import type { Api } from '#support/api.js';
 import { createMailbox, deleteMailbox, waitForMail } from '#support/mailbox.js';
 import type { Mailbox } from '#support/mailbox.js';
-import { runId } from '#support/results.js';
+import { recordOrphan, runId } from '#support/results.js';
 
 /** A throwaway staging account; nothing here ever reaches a real person's account. */
 export type Account = {
@@ -50,12 +50,19 @@ export const verifyAccount = async (account: Account): Promise<void> => {
   }
 };
 
-/** Deletes the Tau user when a session can, and the inbox always; a failure here must not mask the row's own. */
+/**
+ * Deletes the Tau user when a session can. Without one (an unverified sign-up cannot sign in) the user stays, so
+ * the run names it for an operator to sweep and keeps its inbox; nothing here may mask the row's own failure.
+ */
 const discardAccount = async (account: Account): Promise<void> => {
-  if (hasSession(account)) {
-    await account.api.request('POST', '/v1/auth/delete-user', { body: {} }).catch(() => undefined);
+  const deleted = hasSession(account)
+    ? await account.api.request('POST', '/v1/auth/delete-user', { body: {} }).catch(() => undefined)
+    : undefined;
+  if (deleted?.status === 200) {
+    await deleteMailbox(account.mailbox).catch(() => undefined);
+    return;
   }
-  await deleteMailbox(account.mailbox).catch(() => undefined);
+  await recordOrphan({ caseId: account.caseId, email: account.email, userId: account.userId }).catch(() => undefined);
 };
 
 /**
@@ -70,13 +77,20 @@ export const createAccount = async (
   // ponytail: throwaway password, never written to evidence.
   const password = `${randomBytes(18).toString('base64url')}-Aa1`;
   const api = createApi();
-  const signUp = ok(
-    await api.request('POST', '/v1/auth/sign-up/email', {
-      body: { name: `Tau E2E ${caseId}`, email: mailbox.address, password, callbackURL: `${baseUrl}/` },
-    }),
-    z.object({ user: z.object({ id: z.string() }) }),
-  );
-  const account = { caseId, email: mailbox.address, password, userId: signUp.user.id, mailbox, api };
+  let userId: string;
+  try {
+    userId = ok(
+      await api.request('POST', '/v1/auth/sign-up/email', {
+        body: { name: `Tau E2E ${caseId}`, email: mailbox.address, password, callbackURL: `${baseUrl}/` },
+      }),
+      z.object({ user: z.object({ id: z.string() }) }),
+    ).user.id;
+  } catch (error) {
+    // No Tau user was made, so nothing needs the inbox.
+    await deleteMailbox(mailbox).catch(() => undefined);
+    throw error;
+  }
+  const account = { caseId, email: mailbox.address, password, userId, mailbox, api };
   if (options.verified !== false) {
     try {
       await verifyAccount(account);
@@ -104,5 +118,6 @@ export const closeAccount = async (account: Account): Promise<void> => {
     open.map(async ({ actionId }) => account.api.request('POST', `/v1/billing/payment-actions/${actionId}/cancel`)),
   );
   ok(await account.api.request('POST', '/v1/auth/delete-user', { body: {} }), z.object({ success: z.literal(true) }));
-  await deleteMailbox(account.mailbox);
+  // Inbox housekeeping never overrules a verdict: this runs from afterAll hooks and a row's finally.
+  await deleteMailbox(account.mailbox).catch(() => undefined);
 };

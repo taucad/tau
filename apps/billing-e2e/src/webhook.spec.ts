@@ -14,7 +14,28 @@ const webhookEndpointsSchema = z.object({
       enabled_events: z.array(z.string()),
     }),
   ),
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe wire field
+  has_more: z.boolean(),
 });
+type Endpoint = z.infer<typeof webhookEndpointsSchema>['data'][number];
+
+/** Every endpoint the key can see, following `has_more`; a refusal (401 bad key, 403 role) comes back as its status. */
+const listEndpoints = async (key: string, after?: string): Promise<Endpoint[] | number> => {
+  const query = new URLSearchParams({ limit: '100' });
+  if (after !== undefined) {
+    query.set('starting_after', after);
+  }
+  const response = await fetch(`https://api.stripe.com/v1/webhook_endpoints?${query.toString()}`, {
+    headers: { authorization: `Bearer ${key}` },
+  });
+  if (!response.ok) {
+    return response.status;
+  }
+  const page = webhookEndpointsSchema.parse(await response.json());
+  const last = page.data.at(-1);
+  const rest = page.has_more && last !== undefined ? await listEndpoints(key, last.id) : [];
+  return typeof rest === 'number' ? rest : [...page.data, ...rest];
+};
 
 describe('webhooks', () => {
   it(
@@ -42,10 +63,11 @@ describe('webhooks', () => {
       if (!/^[rs]k_test_/u.test(key)) {
         throw new Error('STRIPE_TEST_READ_KEY must be a test-mode key (rk_test_ or sk_test_)');
       }
-      const response = await fetch('https://api.stripe.com/v1/webhook_endpoints?limit=100', {
-        headers: { authorization: `Bearer ${key}` },
-      });
-      const { data } = webhookEndpointsSchema.parse(await response.json());
+      const data = await listEndpoints(key);
+      if (typeof data === 'number') {
+        // The key, not the endpoint, is what is missing: 401 is a bad key, 403 a role without webhook-endpoint read.
+        return { outcome: 'blocked', defect: 'H-02', evidence: [`Stripe answered ${data} to the endpoint listing`] };
+      }
       const url = `${apiUrl}/v1/auth/stripe/webhook`;
       const endpoint = data.find((candidate) => candidate.url === url);
       const strays = data.filter(

@@ -34,13 +34,14 @@ describe('Pro subscription', () => {
         frozen: { principalMinor: '2000', creditAtoms: '20000000' },
       });
       expect(new URL(pending.redirectUrl ?? '').hostname).toBe('checkout.stripe.com');
-      // Paying is pointless until the webhook is on: Tau would never activate Pro (F-01).
+      // The harness does not pay the Pro Checkout (H-04). Since #376 a paid one settles its first invoice through
+      // the leg sweep, so paying from here is what the row needs next, not the webhook.
       return {
         outcome: 'blocked',
-        defect: 'F-01',
+        defect: 'H-04',
         evidence: [
           `action ${pending.actionId} redirect_required at ${checkoutSession(pending.redirectUrl ?? '')}`,
-          'frozen 2000 minor a month, 20000000 atoms; not paid, activation needs the webhook',
+          'frozen 2000 minor a month, 20000000 atoms; not paid: the harness does not pay the Pro Checkout (H-04)',
         ],
       };
     }),
@@ -63,10 +64,10 @@ describe('Pro subscription', () => {
       expect(refusal.action?.actionId).toBe(first.actionId);
       return {
         outcome: 'blocked',
-        defect: 'F-01',
+        defect: 'H-04',
         evidence: [
           `409 action_already_pending carrying the pending Pro action ${first.actionId}`,
-          'subscription_already_exists needs an active subscription, which needs the webhook',
+          'subscription_already_exists needs an active subscription, so a paid PR-01 (H-04)',
         ],
       };
     }),

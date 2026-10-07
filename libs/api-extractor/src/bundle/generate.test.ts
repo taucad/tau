@@ -71,7 +71,7 @@ describe('GeoSpec reference roles', () => {
     expect(supplemental?.entries.some((entry) => entry.name === 'GeoSpecAssertionClient')).toBe(true);
     expect(supplemental?.entries.some((entry) => entry.name === 'expectGeo')).toBe(true);
     expect(owner?.supplementalApi?.prefix).toBe('public');
-    expect(owner?.description).toContain('Python/pytest');
+    expect(owner?.description).toContain('TypeScript or JavaScript');
     const [classEntry] = primary?.entries.filter((entry) => entry.kind === 'class') ?? [];
     if (classEntry === undefined || owner?.groupBy === undefined) {
       throw new Error('Expected a public class');

@@ -26,6 +26,19 @@ ShapeConfig: {
     metalness?: never;
     roughness?: never;
 })
+// Example (Shape with PBR material properties):
+//   import { makeCylinder } from 'replicad';
+//   
+//   export default function main() {
+//   return {
+//   shape: makeCylinder(10, 30),
+//   material: {
+//   pbrMetallicRoughness: { metallicFactor: 1, roughnessFactor: 0.25 },
+//   extensions: { KHR_materials_anisotropy: { anisotropyStrength: 0.8 } },
+//   },
+//   density: 7.85,
+//   };
+//   }
 
   shape: AnyShape
 

@@ -90,12 +90,14 @@ log(x)
 // Category: Math functions
 // Smallest of the arguments
 // min (function)
-min(a, b, ...) | min(vector)
+min(a, b, ...)
+min(values)
 
 // Category: Math functions
 // Largest of the arguments
 // max (function)
-max(a, b, ...) | max(vector)
+max(a, b, ...)
+max(values)
 
 // Category: Math functions
 // Euclidean length of a vector

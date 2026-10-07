@@ -9,7 +9,7 @@ export declare function createGeoSpec(): GeoSpec;
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
-(name: string, function_: GeoSpecTestCallback): void;
+export declare function describe(name: string, function_: GeoSpecTestCallback): void;
 
   // describe.skip (method)
   skip(name: string, function_?: GeoSpecTestCallback): void;
@@ -21,21 +21,21 @@ export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
 
 // GeoSpec test helper used inside VM-executed test modules
 // it (function)
-(name: string, function_: GeoSpecTestCallback): void;
+export declare function it(name: string, function_: GeoSpecTestCallback): void;
 
   // it.skip (method)
   skip(name: string, function_?: GeoSpecTestCallback): void;
 
 // Alias for {@link it}
 // test (function)
-(name: string, function_: GeoSpecTestCallback): void;
+export declare function test(name: string, function_: GeoSpecTestCallback): void;
 
   // test.skip (method)
   skip(name: string, function_?: GeoSpecTestCallback): void;
 
 // Create a {@link loadModel} function with shared defaults
 // createModelLoader (function)
-(defaults?: CreateModelLoaderOptions) => ManagedGeoSpecModelLoader
+export declare function createModelLoader(defaults?: CreateModelLoaderOptions): ManagedGeoSpecModelLoader;
 //   defaults: Model loading defaults
 
 // Load a CAD model into GeoSpec evidence
@@ -46,9 +46,9 @@ export declare function loadModel<Code extends Record<string, string> = Record<s
 //   options: Source, code, or file model load options
 
 // resolveRuntimeExportIntent (function)
-(options: {
+export declare function resolveRuntimeExportIntent(options: {
     runtime: GeoSpecRuntimeClient;
     format: RuntimeBackedModelFormat;
     meshLinearTolerance?: number;
     meshAngularToleranceDegrees?: number;
-}) => RuntimeExportIntent | RuntimeExportIntentFailure
+}): RuntimeExportIntent | RuntimeExportIntentFailure;

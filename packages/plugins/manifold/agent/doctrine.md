@@ -29,3 +29,8 @@ export default function main(p = defaultParams): Manifold {
 ```
 
 Check missing imports, undefined returns, invalid boolean inputs, and non-positive dimensions first.
+
+## Wrong / Correct
+
+- Wrong: `Manifold.cylinder(radius, height)`. Correct: height first: `Manifold.cylinder(height, radiusLow, radiusHigh, segments, center)`; pass `-1` for `radiusHigh` to match `radiusLow`.
+- Wrong: chaining `a.add(b).add(c)…` over many parts. Correct: `Manifold.union([a, b, c])` once.

@@ -55,9 +55,431 @@ for maps. Find all six `@taucad/picovoxel` authoring types in `tau-api-index.md`
 Read [materials-reference.md](materials-reference.md) for all 17 maps, 11 extensions,
 units, UV0 and exports.
 
+## Core API
+
+The symbols real Tau models use most, as verbatim declarations. Anything not shown is in the API reference below.
+
+### Interfaces
+
+```ts
+interface Pico
+  voxelSize: number
+  createVoxels(options: CreateVoxelsOptions): Voxels;
+  // Builds a mesh from vertex/triangle data via the bulk imports (two crossings)
+  createMesh(options: {
+      vertices: ArrayLike<number>;
+      triangles: ArrayLike<number>;
+    }): Mesh;
+  createLattice(): Lattice;
+  createScalarField(options?: CreateScalarFieldOptions): ScalarField;
+  createVectorField(options?: CreateVectorFieldOptions): VectorField;
+  // An empty writable .vdb container
+  createVdb(): VdbFile;
+  // Opens .vdb bytes as a container for field-level access
+  openVdb(bytes: Uint8Array): VdbFile;
+  // Escape hatch
+  handle: bigint
+  // Deterministic teardown
+  dispose(): void;
+  // … 14 more members in the API reference
+
+CreateVoxelsOptions: {
+  shape: 'empty'
+}
+
+interface Lattice
+  addSphere(options: {
+      center: Vec3;
+      radius: number;
+    }): void;
+  addBeam(options: AddBeamOptions): void;
+  // Renders the lattice into a fresh voxel field
+  toVoxels(): Voxels;
+  memUsage: number
+  // Raw ABI handle — escape hatch
+  handle: bigint
+  // Optional
+  dispose(): void;
+  [Symbol.dispose](): void;
+
+CreateScalarFieldOptions: {
+  from: Voxels
+  value: number
+  sdThreshold: number
+}
+
+interface ScalarField extends FieldBase
+  // Sets (and activates) the value at a position in mm
+  set(position: Vec3, value: number): void;
+  // Value at the position, or null when the position holds no value
+  get(position: Vec3): number | null;
+  remove(position: Vec3): void;
+  // Visits every active value
+  traverse(callback: (x: number, y: number, z: number, value: number) => void): void;
+  // Field extent in discrete voxel units
+  dimensions(): {
+      origin: Vec3;
+      size: Vec3;
+    };
+  // One Z slice of raw field values
+  getSlice(options: {
+      index: number;
+    }): ScalarFieldSlice;
+  // Bounding box of active voxels in mm (dims × voxel size, as C# does)
+  bounds(): Bounds;
+  // Stored values are voxel-unit signed distance
+  signedDistanceAt(position: Vec3): number | null;
+  clone(): ScalarField;
+
+CreateVectorFieldOptions: {
+  from: Voxels
+  value: Vec3
+  sdThreshold: number
+}
+
+interface VectorField extends FieldBase
+  set(position: Vec3, value: Vec3): void;
+  get(position: Vec3): Vec3 | null;
+  remove(position: Vec3): void;
+  // Visits every active value
+  traverse(callback: (x: number, y: number, z: number, vx: number, vy: number, vz: number) => void): void;
+  clone(): VectorField;
+
+interface VdbFile
+  fieldCount: number
+  // Name + type of every field, index order
+  fields(): Array<{
+      name: string;
+      type: VdbFieldType;
+    }>;
+  // Adds a field under `name`
+  add(field: Voxels | ScalarField | VectorField, name?: string): number;
+  getVoxels(indexOrName: number | string): Voxels;
+  getScalarField(indexOrName: number | string): ScalarField;
+  getVectorField(indexOrName: number | string): VectorField;
+  // Serialises the container to .vdb bytes
+  toBytes(options?: {
+      acceptLane?: 'fast';
+    }): Uint8Array;
+  // Raw ABI handle — escape hatch
+  handle: bigint
+  // Optional
+  dispose(): void;
+  [Symbol.dispose](): void;
+
+interface Voxels
+  // Pure union
+  union(...others: Voxels[]): Voxels;
+  // Pure subtraction of every operand
+  subtract(...others: Voxels[]): Voxels;
+  // Pure intersection
+  intersect(other: Voxels): Voxels;
+  // Pure surface offset
+  offset(options: {
+      distance: number;
+      fastRenorm?: boolean;
+    }): Voxels;
+  // In, 2× out, in again
+  smoothen(options: {
+      distance: number;
+      fastRenorm?: boolean;
+    }): Voxels;
+  // Over-offset composition
+  fillet(options: {
+      rounding: number;
+      finalSurfaceDistance?: number;
+      fastRenorm?: boolean;
+    }): Voxels;
+  // Everything outside the box is trimmed away (cube-mesh intersect, as C#)
+  trim(bounds: Bounds): Voxels;
+  // Projects the slice at startZ through endZ (mm)
+  projectZSlice(options: {
+      startZ: number;
+      endZ: number;
+    }): Voxels;
+  // The gyroid-in-sphere idiom
+  maskedByImplicit(options: {
+      sdf: SdfFunction | SdfExpression;
+    }): Voxels;
+  // Volume in mm³ from the raw grid — fast but approximate after booleans (use…
+  volume: number
+  // Volume (mm³), surface area (mm²) and bounds free of boolean residue, from one native…
+  properties(): {
+      volume: number;
+      area: number;
+      bounds: Bounds;
+    };
+  // Bounding box via the intermediate mesh (the only accurate way)
+  bounds(): Bounds;
+  toMesh(): Mesh;
+  metadata: Metadata
+  // Raw ABI handle — escape hatch
+  handle: bigint
+  // Optional
+  dispose(): void;
+  // … 24 more members in the API reference
+
+// An axis-aligned box in millimetres
+interface Bounds
+  min: Vec3
+  max: Vec3
+
+// Signed distance in millimetres at (x, y, z) — scalars, never a vector object
+SdfFunction: (x: number, y: number, z: number) => number
+
+// A serializable SDF
+SdfExpression: number | 'x' | 'y' | 'z' | readonly [SdfOperator, ...SdfExpression[]]
+
+interface Metadata
+  // Number of entries in the table
+  count: number
+  // Every entry name, index order
+  names(): string[];
+  typeOf(name: string): MetadataType;
+  // Typed read
+  get(name: string): MetadataValue | undefined;
+  // Reserved names (`PicoGK.*`, `PicoVoxel.*`, `class`, `name`, `file_*`) throw
+  set(name: string, value: MetadataValue): void;
+  // The reserved-name guard applies here too
+  remove(name: string): void;
+  // Raw ABI handle — escape hatch
+  handle: bigint
+  // Optional
+  dispose(): void;
+  [Symbol.dispose](): void;
+```
+
+### Constants
+
+```ts
+// ShapeKernel `LocalFrame` construction helpers over the numerics `Frame`
+localFrame: {
+  // World-aligned frame at the origin (C# `LocalFrame()`)
+  identity: Frame
+  // World-aligned axes at a position (C# `LocalFrame(vecPos)`)
+  create: (pos: Vec3) => Frame
+  // Same axes as the base frame at a new position (C# `LocalFrame(oBaseFrame, vecNewPos)`)
+  at: (base: Frame, newPos: Vec3) => Frame
+  // Position + local Z
+  createZ: (pos: Vec3, localZ: Vec3) => Frame
+  // Position + local Z + local X
+  createZX: (pos: Vec3, localZ: Vec3, localX: Vec3) => Frame
+  // Translated frame, axes unchanged (C# `oTranslate` / `oGetTranslatedFrame`)
+  translated: (f: Frame, delta: Vec3) => Frame
+  // All axes rotated about an axis, position unchanged (C# `oRotate` / `oGetRotatedFrame`)
+  rotated: (f: Frame, deltaPhi: number, axis: Vec3) => Frame
+  // Selected axes negated, position unchanged (C# `oGetInvertFrame`
+  inverted: (f: Frame, mirrorZ: boolean, mirrorX: boolean) => Frame
+  // Y completing Z and X right-handedly (C# `vecGetLocalY`
+  localY: (localZ: Vec3, localX: Vec3) => Vec3
+}
+
+// A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
+interface Frame
+  // Origin of the frame in world coordinates (C# `vecPos`)
+  pos: Vec3
+  // Local X axis in world coordinates (C# `vecLx`)
+  lx: Vec3
+  // Local Y axis in world coordinates (C# `vecLy`)
+  ly: Vec3
+  // Local Z axis in world coordinates (C# `vecLz`)
+  lz: Vec3
+
+// A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
+Vec3: readonly [number, number, number]
+
+// `Vector3` operations
+vec3: {
+  zero: Vec3
+  unitX: Vec3
+  unitZ: Vec3
+  add: (a: Vec3, b: Vec3) => Vec3
+  sub: (a: Vec3, b: Vec3) => Vec3
+  neg: (v: Vec3) => Vec3
+  scale: (v: Vec3, f: number) => Vec3
+  dot: (a: Vec3, b: Vec3) => number
+  cross: (a: Vec3, b: Vec3) => Vec3
+  length: (v: Vec3) => number
+  // Unit-length copy
+  normalized: (v: Vec3) => Vec3
+  // Unit-length copy, or (0,0,0) for (almost) zero-length input (C# `vecSafeNormalized`)
+  safeNormalized: (v: Vec3) => Vec3
+  // All components finite (C# `Vector3.bIsFinite`)
+  isFinite: (v: Vec3) => boolean
+  // … 11 more members in the API reference
+}
+
+// ShapeKernel `VecOperations` (Hungarian prefixes dropped)
+vecOps: {
+  // Cartesian point from cylindrical coordinates (C# `vecGetCylPoint`)
+  cylPoint: (radius: number, phi: number, z: number) => Vec3
+  // Planar (XY) radius about the absolute Z axis (C# `fGetRadius` / the `R` extension)
+  radius: (pt: Vec3) => number
+  // Planar polar angle about the absolute Z axis, radians (C# `fGetPhi`)
+  phi: (pt: Vec3) => number
+  // Same phi and z, new radius (C# `vecSetRadius`)
+  setRadius: (pt: Vec3, newRadius: number) => Vec3
+  // Radially shifted by deltaRadius (C# `vecUpdateRadius`)
+  updateRadius: (pt: Vec3, deltaRadius: number) => Vec3
+  // Normalized planar radial direction from the Z axis to the point (C# `vecGetPlanarDir`)
+  planarDir: (pt: Vec3) => Vec3
+  // The vector or its negation, whichever aligns better with the target (C# `vecFlipForAlignment`)
+  flipForAlignment: (dir: Vec3, targetDir: Vec3) => Vec3
+  // Rotate a point about the absolute Z axis through an optional origin (C# `vecRotateAroundZ`)
+  rotateAroundZ: (pt: Vec3, deltaPhi: number, axisOrigin?: Vec3) => Vec3
+  // Rotate a point about an arbitrary axis through an optional origin (C# `vecRotateAroundAxis`)
+  rotateAroundAxis: (pt: Vec3, deltaPhi: number, axis: Vec3, axisOrigin?: Vec3) => Vec3
+  // … 15 more members in the API reference
+}
+
+// `Frame` factories and operations (C# `Frame3d` surface
+frame: {
+  // The world coordinate system (C# `frmWorld`)
+  world: Frame
+  // Local point (2D points lie in the frame's XY plane) → world (C# `vecPtToWorld`)
+  ptToWorld: (f: Frame, local: Vec2 | Vec3) => Vec3
+  // World point → local coordinates (C# `vecPtFromWorld`)
+  ptFromWorld: (f: Frame, world: Vec3) => Vec3
+  // … 22 more members in the API reference
+}
+```
+
+### Classes
+
+```ts
+// C# `BaseShape` — the vertex-transformation seam every shape shares
+declare abstract class BaseShape
+  trafo: VertexTransformation
+  // Point-wise transformation applied during construction (C# `SetTransformation`)
+  setTransformation(trafo: VertexTransformation): void;
+  abstract voxConstruct(pk: Pico): Voxels;
+
+// Point-wise vertex transformation applied during construction (C# `fnVertexTransformation`)
+VertexTransformation: (pt: Vec3) => Vec3
+
+// Pipe (annular cylinder) along a straight frame or spine (C# `BasePipe`)
+declare class BasePipe extends BaseShape implements MeshBaseShape, SurfaceBaseShape
+  constructor(frameOrFrames: Frame | Frames, a?: number, b?: number, c?: number);
+  // C# `SetRadius(inner, outer)` — bumps length sampling to 500
+  setRadius(innerRadius: SurfaceModulation, outerRadius: SurfaceModulation): void;
+  setRadialSteps(steps: number): void;
+  setPolarSteps(steps: number): void;
+  setLengthSteps(steps: number): void;
+  voxConstruct(pk: Pico): Voxels;
+  // Surface point
+  surfacePoint(lengthRatio: number, phiRatio: number, radiusRatio: number): Vec3;
+  // … 15 more members in the API reference
+
+// C# `IMeshBaseShape`
+interface MeshBaseShape
+  mshConstruct(pk: Pico): Mesh;
+
+// C# `ISurfaceBaseShape`
+interface SurfaceBaseShape
+  surfacePoint(ratio1: number, ratio2: number, ratio3: number): Vec3;
+
+// Box along a straight frame or spine with width/depth line modulations (C# `BaseBox`)
+declare class BaseBox extends BaseShape implements MeshBaseShape, SurfaceBaseShape
+  lengthSteps: number
+  widthSteps: number
+  depthSteps: number
+  widthModulation: LineModulation
+  depthModulation: LineModulation
+  frames: Frames
+  constructor(frameOrFrames: Frame | Frames, a?: number, b?: number, c?: number);
+  // From a bounding box
+  static fromBounds(bounds: Bounds): BaseBox;
+  // C# `SetWidth` — modulated width bumps width+length sampling to 500
+  setWidth(modulation: LineModulation): void;
+  // C# `SetDepth` — modulated depth bumps depth+length sampling to 500
+  setDepth(modulation: LineModulation): void;
+  setWidthSteps(steps: number): void;
+  setDepthSteps(steps: number): void;
+  setLengthSteps(steps: number): void;
+  voxConstruct(pk: Pico): Voxels;
+  mshConstruct(pk: Pico): Mesh;
+  protected depthRatioFromStep(step: number): number;
+  protected widthRatioFromStep(step: number): number;
+  protected lengthRatioFromStep(step: number): number;
+  // Surface point
+  surfacePoint(widthRatio: number, depthRatio: number, lengthRatio: number): Vec3;
+
+// 2D modulation over (phi, lengthRatio) (C# `SurfaceModulation`
+declare class SurfaceModulation
+  constructor(value: number | SurfaceRatioFunc);
+  // Lift a 1D modulation
+  static fromLineModulation(lineModulation: LineModulation, line?: ModulationLine): SurfaceModulation;
+  // The modulation value at the given ratios (C# `fGetModulation`)
+  modulation(phi: number, lengthRatio: number): number;
+  // Sum of two modulations (C# `operator +`)
+  add(other: SurfaceModulation): SurfaceModulation;
+  // Difference of two modulations (C# `operator -`)
+  sub(other: SurfaceModulation): SurfaceModulation;
+  // Scaled modulation (C# `operator *`)
+  scale(factor: number): SurfaceModulation;
+
+SurfaceRatioFunc: (phi: number, lengthRatio: number) => number
+
+ModulationLine: 'first' | 'second'
+
+// Cylinder along a straight frame or a spine, with a surface-modulated radius (C# `BaseCylinder`)
+declare class BaseCylinder extends BaseShape implements MeshBaseShape, SurfaceBaseShape
+  constructor(frameOrFrames: Frame | Frames, lengthOrRadius?: number, radius?: number);
+  // C# `SetRadius` — modulated radii bump the length sampling to 500
+  setRadius(modulation: SurfaceModulation): void;
+  setRadialSteps(steps: number): void;
+  setPolarSteps(steps: number): void;
+  setLengthSteps(steps: number): void;
+  voxConstruct(pk: Pico): Voxels;
+  // … 13 more members in the API reference
+
+declare class Frames implements Spline
+  // Tangential Z along the spline, X aligned to a const target direction, then NURBS…
+  static withTargetX(points: readonly Vec3[], targetX: Vec3, reparametrisationSpacing?: number): Frames;
+  // Tangential Z along the spline, X from a coordinate-system-dependent target — incl
+  static ofType(points: readonly Vec3[], frameType: FrameType, reparametrisationSpacing?: number): Frames;
+  // Spine position at a length ratio 0..1 (C# `vecGetSpineAlongLength`)
+  spineAt(lengthRatio: number): Vec3;
+  // The full local frame at a length ratio (C# `oGetLocalFrame`)
+  frameAt(lengthRatio: number): Frame;
+  // The spine points (C# `aGetPoints()`)
+  points(samples?: number): Vec3[];
+  // … 8 more members in the API reference
+
+// ShapeKernel `ISpline`
+interface Spline
+  points(samples?: number): Vec3[];
+
+FrameType: 'cylindrical' | 'spherical' | 'z' | 'minRotation'
+
+// Lens/washer
+declare class BaseLens extends BaseShape implements MeshBaseShape, SurfaceBaseShape
+  radialSteps: number
+  polarSteps: number
+  heightSteps: number
+  innerRadius: number
+  outerRadius: number
+  upperModulation: SurfaceModulation
+  lowerModulation: SurfaceModulation
+  frame: Frame
+  constructor(frame: Frame, height: number, innerRadius: number, outerRadius: number);
+  // C# `SetHeight` — modulated faces bump radial sampling to 500
+  setHeight(lowerModulation: SurfaceModulation, upperModulation: SurfaceModulation): void;
+  setRadialSteps(steps: number): void;
+  setPolarSteps(steps: number): void;
+  setHeightSteps(steps: number): void;
+  voxConstruct(pk: Pico): Voxels;
+  mshConstruct(pk: Pico): Mesh;
+  protected radiusRatioFromStep(step: number): number;
+  protected phiRatioFromStep(step: number): number;
+  protected heightRatioFromStep(step: number): number;
+  // Surface point (C# `vecGetSurfacePoint`
+  surfacePoint(heightRatio: number, phiRatio: number, radiusRatio: number): Vec3;
+```
+
 ## API reference
 
-All 964 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 964 symbols by file.
 
 - `api-interfaces.md` — Interfaces
 - `api-interfaces-2.md` — Interfaces (2)

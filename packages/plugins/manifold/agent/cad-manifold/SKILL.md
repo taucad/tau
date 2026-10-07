@@ -37,9 +37,67 @@ export default function main(p = defaultParams): Manifold {
 
 Check missing imports, undefined returns, invalid boolean inputs, and non-positive dimensions first.
 
+## Wrong / Correct
+
+- Wrong: `Manifold.cylinder(radius, height)`. Correct: height first: `Manifold.cylinder(height, radiusLow, radiusHigh, segments, center)`; pass `-1` for `radiusHigh` to match `radiusLow`.
+- Wrong: chaining `a.add(b).add(c)…` over many parts. Correct: `Manifold.union([a, b, c])` once.
+
+## Core API
+
+The symbols real Tau models use most, as verbatim declarations. Anything not shown is in the API reference below.
+
+### Classes
+
+```ts
+// This library's internal representation of an oriented, 2-manifold, triangle mesh - a simple boundary-representation…
+export declare class Manifold
+  constructor(mesh: Mesh);
+  // Constructs a unit cube (edge lengths all one), by default in the first octant,…
+  static cube(size?: Readonly<Vec3>|number, center?: boolean): Manifold;
+  // Move this Manifold in space
+  translate(v: Readonly<Vec3>): Manifold;
+  translate(x: number, y?: number, z?: number): Manifold;
+  // Applies an Euler or Tait-Bryan angle rotation to the manifold
+  rotate(v: Readonly<Vec3>): Manifold;
+  rotate(x: number, y?: number, z?: number): Manifold;
+  // Scale this Manifold in space
+  scale(v: Readonly<Vec3>|number): Manifold;
+  // Fills in vertex properties for normal vectors, calculated from the mesh geometry
+  calculateNormals(normalIdx: number, minSharpAngle?: number): Manifold;
+  // Boolean union of the manifolds a and b Boolean union of a list of…
+  static union(a: Manifold, b: Manifold): Manifold;
+  static union(manifolds: readonly Manifold[]): Manifold;
+  // Boolean difference of the manifold b from the manifold a Boolean difference of the…
+  static difference(a: Manifold, b: Manifold): Manifold;
+  static difference(manifolds: readonly Manifold[]): Manifold;
+  // … 52 more members in the API reference
+
+// A vector in three dimensional space
+Vec3: [number, number, number]
+```
+
+### Functions
+
+```ts
+declare function Module(config?: {locateFile: () => string}):
+Promise<ManifoldToplevel>;
+
+export declare interface ManifoldToplevel
+  CrossSection: typeof CrossSection
+  Manifold: typeof Manifold
+  Mesh: typeof Mesh
+  triangulate: typeof triangulate
+  setMinCircularAngle: typeof setMinCircularAngle
+  setMinCircularEdgeLength: typeof setMinCircularEdgeLength
+  setCircularSegments: typeof setCircularSegments
+  getCircularSegments: typeof getCircularSegments
+  resetToCircularDefaults: typeof resetToCircularDefaults
+  setup: () => void
+```
+
 ## API reference
 
-All 166 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 166 symbols by file.
 
 - `api-functions.md` — Functions
 - `api-types.md` — Types

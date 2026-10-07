@@ -1,10 +1,25 @@
 # kcl-std — std.types
 
-30 top-level symbols. Signatures are verbatim kcl.
+33 top-level symbols. Signatures are verbatim kcl.
 
 // Category: std.types
 // The `any` type is the type of all possible values in KCL
 any
+// Example:
+//   fn acceptAnything(@input: any) {
+//     return true
+//   }
+//   
+//   acceptAnything(42)
+//   acceptAnything('hello')
+//   acceptAnything(XY)
+//   acceptAnything([0, 1, 2])
+
+// Category: std.types
+// The uninhabited type of computations that never complete normally
+// Remarks: `never` has no values and is a subtype of every type. Use it as the return type of a function that always stops evaluation by raising an error. A function declared to return `never` produces a type error if it returns a value or reaches the end of its body.
+// EXPERIMENTAL
+never
 
 // Category: std.types
 // The type of the none (aka null) value
@@ -26,6 +41,9 @@ bool
 // A sequence of characters
 // Remarks: Strings may be delimited using either single or double quotes.
 string
+// Example:
+//   "hello,"
+//   'world!'
 
 // Category: std.types
 // Tags are used to give a name (tag) to a specific path
@@ -44,6 +62,7 @@ TaggedFace
 
 // Category: std.types
 // Represents geometry which is defined using some other CAD system and imported into KCL
+// Remarks: `ImportedGeometry` is distinct from `Solid`, and there is no conversion between them. An import can be positioned and styled, but not modelled against.
 ImportedGeometry
 
 // Category: std.types
@@ -54,6 +73,12 @@ fn
 // An abstract plane
 // Remarks: A plane has a position and orientation in space defined by its origin and axes. A plane is abstract in the sense that it is not part of the objects being drawn. A plane can be used to sketch on. A plane can be created in several ways: - you can use one of the default planes, e.g., `XY`. - you can use `offsetPlane` to create a new plane offset from an existing one, e.g., `offsetPlane(XY, offset = 150)`. - you can use negation to create a plane from an existing one which is identical but has an opposite normal e.g., `-XY`. - you can define an entirely custom plane, e.g., ```js myXY = { origin = { x = 0, y = 0, z = 0 }, xAxis = { x = 1, y = 0, z = 0 }, yAxis = { x = 0, y = 1, z = 0 }, } ``` Any object with appropriate `origin`, `xAxis`, and `yAxis` fields can be used as a plane. The plane's Z axis (i.e. which way is "up") will be the cross product X x Y. In other words, KCL planes follow the right-hand rule.
 Plane
+
+// Category: std.types
+// A segment in a sketch created in a sketch block
+// Remarks: See the [solver module](/docs/kcl-std/modules/std-solver) for functions that create segments and the [region function](/docs/kcl-std/functions/std-sketch-region) for examples using segments to create a region that can be extruded.
+// EXPERIMENTAL
+Segment
 
 // Category: std.types
 // A sketch is a collection of paths
@@ -71,11 +96,16 @@ Face
 
 // Category: std.types
 // A helix
+// Remarks: A helix can be created by the [`helix` function](/docs/kcl-std/functions/std-helix).
 Helix
 
 // Category: std.types
 // An edge of a solid
 Edge
+
+// Category: std.types
+// A [bounded edge](/docs/kcl-std/functions/std-sketch-getBoundedEdge) of a solid
+BoundedEdge
 
 // Category: std.types
 // A point in two dimensional space
@@ -89,15 +119,16 @@ Point3d: type Point3d = [number(Length); 3]
 
 // Category: std.types
 // An abstract and infinite line in 2d space
+// Remarks: The `X`, `Y`, and `Z` axes are defined in the standard library. You can define custom axes by using an object with origin and direction properties. The 2D version of the X axis could be defined like: ```js xAxis2d = { origin = [0, 0], direction = [1, 0], } ``` The number components of the origin and direction must be usable as lengths. A 3D axis can be used in contexts that require a 2D axis. The Z component is ignored.
 Axis2d
 
 // Category: std.types
 // An abstract and infinite line in 3d space
+// Remarks: The `X`, `Y`, and `Z` axes are defined in the standard library. You can define custom axes by using an object with origin and direction properties. The 3D X axis is defined similar to the following: ```js xAxis = { origin = [0, 0, 0], direction = [1, 0, 0], } ``` The number components of the origin and direction must be usable as lengths. A 3D axis can be used in contexts that require a 2D axis. The Z component is ignored.
 Axis3d
 
 // Category: std.types
-// A GD&T annotation
-// EXPERIMENTAL
+// A GD&T annotation created by one of the [`gdt` functions](/docs/kcl-std/modules/std-gdt)
 GdtAnnotation
 
 // Category: std.types

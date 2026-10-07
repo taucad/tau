@@ -2,826 +2,826 @@
 
 replicad 1.1.0-taulabs.0 · 804 symbols · extracted by TypeScript 5.9.3.
 
-Every symbol appears here exactly once. The heading above each block names the file with its signature.
+Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
 ## Functions — `api-functions.md`
 
-asDir (function) [id: typescript:asDir]
-asPnt (function) [id: typescript:asPnt]
-complexExtrude (function) [id: typescript:complexExtrude]
-createAssembly (function) [id: typescript:createAssembly]
-deserializeDrawing (function) — Deserializes a drawing from a string [id: typescript:deserializeDrawing]
-deserializeShape (function) [id: typescript:deserializeShape]
-downcast (function) [id: typescript:downcast]
-draw (function) — Creates a drawing pen to programatically draw in 2D [id: typescript:draw]
-drawCircle (function) — Creates the `Drawing` of a circle [id: typescript:drawCircle]
-drawEllipse (function) — Creates the `Drawing` of an ellipse [id: typescript:drawEllipse]
-drawFaceOutline (function) — Creates the `Drawing` out of a face [id: typescript:drawFaceOutline]
-drawPolysides (function) — Creates the `Drawing` of an polygon in a defined plane [id: typescript:drawPolysides]
-drawProjection (function) — Creates the `Drawing` of a projection of a shape on… [id: typescript:drawProjection]
-drawRoundedRectangle (function) — Creates the `Drawing` of a rectangle with (optional) rounded corners [id: typescript:drawRoundedRectangle]
-drawSingleCircle (function) — Creates the `Drawing` of a circle as one single curve [id: typescript:drawSingleCircle]
-drawSingleEllipse (function) — Creates the `Drawing` of an ellipse as one single curve [id: typescript:drawSingleEllipse]
-drawText (function) — Creates the `Drawing` of a text, in a defined font… [id: typescript:drawText]
-exportSTEP (function) [id: typescript:exportSTEP]
-genericSweep (function) [id: typescript:genericSweep]
-getSingleFace (function) [id: typescript:getSingleFace]
-importSTEP (function) — Creates a new shapes from a STEP file (as a… [id: typescript:importSTEP]
-importSTL (function) — Creates a new shapes from a STL file (as a… [id: typescript:importSTL]
-importSTLAsMesh (function) — Imports an STL file (as a Blob or a File)… [id: typescript:importSTLAsMesh]
-intersect2D (function) [id: typescript:intersect2D]
-isPoint (function) [id: typescript:isPoint]
-isProjectionPlane (function) [id: typescript:isProjectionPlane]
-isShape3D (function) [id: typescript:isShape3D]
-isWire (function) [id: typescript:isWire]
-iterTopo (function) [id: typescript:iterTopo]
-loadFont (function) — Import a font in the text system [id: typescript:loadFont]
-lookFromPlane (function) [id: typescript:lookFromPlane]
-makeDirVector (function) [id: typescript:makeDirVector]
-makePlane (function) [id: typescript:makePlane]
-makePln (function) [id: typescript:makePln]
-makeProjectedEdges (function) [id: typescript:makeProjectedEdges]
-makeSolid (function) — Welds faces and shells into a single shell and then… [id: typescript:makeSolid]
-measureArea (function) — Measure the area of a shape [id: typescript:measureArea]
-measureDistanceBetween (function) — Measure the distance between two shapes [id: typescript:measureDistanceBetween]
-measureLength (function) — Measure the length of a shape [id: typescript:measureLength]
-measureShapeLinearProperties (function) [id: typescript:measureShapeLinearProperties]
-measureShapeSurfaceProperties (function) [id: typescript:measureShapeSurfaceProperties]
-measureShapeVolumeProperties (function) [id: typescript:measureShapeVolumeProperties]
-measureVolume (function) — Measure the volume of a shape [id: typescript:measureVolume]
-mirror (function) [id: typescript:mirror]
-resolveDirection (function) [id: typescript:resolveDirection]
-rotate (function) [id: typescript:rotate]
-scale (function) [id: typescript:scale]
-sketchText (function) — Creates the `Sketches` of a text, in a defined font… [id: typescript:sketchText]
-textBlueprints (function) — Creates the `Blueprints` of a text, in a defined font… [id: typescript:textBlueprints]
-translate (function) [id: typescript:translate]
-twistExtrude (function) [id: typescript:twistExtrude]
-weldShellsAndFaces (function) — Welds faces and shells into a single shell [id: typescript:weldShellsAndFaces]
-addHolesInFace (function) [id: typescript:addHolesInFace]
-assembleWire (function) [id: typescript:assembleWire]
-atShapeExtremum (function) — Creates a predicate for a finder's `when` method that selects… [id: typescript:atShapeExtremum]
-axis2d (function) [id: typescript:axis2d]
-backMost (function) — Creates a predicate selecting elements touching the shape's minimum Y… [id: typescript:backMost]
-basicFaceExtrusion (function) [id: typescript:basicFaceExtrusion]
-bottomMost (function) — Creates a predicate selecting elements touching the shape's minimum Z… [id: typescript:bottomMost]
-cast (function) [id: typescript:cast]
-combineFinderFilters (function) — Combine a set of finder filters (defined with radius) to… [id: typescript:combineFinderFilters]
-compoundShapes (function) [id: typescript:compoundShapes]
-createNamedPlane (function) [id: typescript:createNamedPlane]
-cut2D (function) [id: typescript:cut2D]
-cutBlueprints (function) [id: typescript:cutBlueprints]
-drawParametricFunction (function) — Creates the `Drawing` of parametric function [id: typescript:drawParametricFunction]
-drawPointsInterpolation (function) — Creates the `Drawing` by interpolating points as a curve [id: typescript:drawPointsInterpolation]
-drawRectangle (function) [id: typescript:drawRectangle]
-frontMost (function) — Creates a predicate selecting elements touching the shape's maximum Y… [id: typescript:frontMost]
-fuse2D (function) [id: typescript:fuse2D]
-fuseBlueprints (function) [id: typescript:fuseBlueprints]
-GCWithObject (function) [id: typescript:GCWithObject]
-GCWithScope (function) [id: typescript:GCWithScope]
-getFont (function) [id: typescript:getFont]
-getManifold (function) [id: typescript:getManifold]
-getOC (function) [id: typescript:getOC]
-intersectBlueprints (function) [id: typescript:intersectBlueprints]
-leftMost (function) — Creates a predicate selecting elements touching the shape's minimum X… [id: typescript:leftMost]
-localGC (function) [id: typescript:localGC]
-loft (function) [id: typescript:loft]
-makeAx1 (function) [id: typescript:makeAx1]
-makeAx2 (function) [id: typescript:makeAx2]
-makeAx3 (function) [id: typescript:makeAx3]
-makeBaseBox (function) — Builds a rectangular box of the given lengths [id: typescript:makeBaseBox]
-makeBezierCurve (function) [id: typescript:makeBezierCurve]
-makeBox (function) — Creates a box with the given corner points [id: typescript:makeBox]
-makeBSplineApproximation (function) [id: typescript:makeBSplineApproximation]
-makeCircle (function) [id: typescript:makeCircle]
-makeCompound (function) [id: typescript:makeCompound]
-makeCylinder (function) — Creates a cylinder with the given radius and height [id: typescript:makeCylinder]
-makeDirection (function) [id: typescript:makeDirection]
-makeEllipse (function) [id: typescript:makeEllipse]
-makeEllipseArc (function) [id: typescript:makeEllipseArc]
-makeEllipsoid (function) — Creates an ellipsoid with the given lengths of the axes,… [id: typescript:makeEllipsoid]
-makeFace (function) [id: typescript:makeFace]
-makeHelix (function) [id: typescript:makeHelix]
-makeLine (function) [id: typescript:makeLine]
-makeNewFaceWithinFace (function) [id: typescript:makeNewFaceWithinFace]
-makeNonPlanarFace (function) [id: typescript:makeNonPlanarFace]
-makeOffset (function) [id: typescript:makeOffset]
-makePlaneFromFace (function) [id: typescript:makePlaneFromFace]
-makePolygon (function) [id: typescript:makePolygon]
-makeSphere (function) — Creates a sphere with the given radius, centred on the… [id: typescript:makeSphere]
-makeTangentArc (function) [id: typescript:makeTangentArc]
-makeThreePointArc (function) [id: typescript:makeThreePointArc]
-makeVertex (function) [id: typescript:makeVertex]
-organiseBlueprints (function) — Groups an array of blueprints such that blueprints that correspond… [id: typescript:organiseBlueprints]
-polysideInnerRadius (function) — Helper function to compute the inner radius of a polyside… [id: typescript:polysideInnerRadius]
-polysidesBlueprint (function) [id: typescript:polysidesBlueprint]
-revolution (function) [id: typescript:revolution]
-rightMost (function) — Creates a predicate selecting elements touching the shape's maximum X… [id: typescript:rightMost]
-roundedRectangleBlueprint (function) [id: typescript:roundedRectangleBlueprint]
-setManifold (function) [id: typescript:setManifold]
-setOC (function) [id: typescript:setOC]
-shapeType (function) [id: typescript:shapeType]
-sketchCircle (function) — Creates the `Sketch` of a circle in a defined plane [id: typescript:sketchCircle]
-sketchEllipse (function) — Creates the `Sketch` of an ellispe in a defined plane [id: typescript:sketchEllipse]
-sketchFaceOffset (function) — Creates the `Sketch` of an offset of a certain face [id: typescript:sketchFaceOffset]
-sketchHelix (function) — Creates the `Sketch` of a helix [id: typescript:sketchHelix]
-sketchParametricFunction (function) — Creates the `Sketch` of parametric function in a specified plane [id: typescript:sketchParametricFunction]
-sketchPolysides (function) — Creates the `Sketch` of an polygon in a defined plane [id: typescript:sketchPolysides]
-sketchRectangle (function) — Creates the `Sketch` of a rectangle in a defined plane [id: typescript:sketchRectangle]
-sketchRoundedRectangle (function) — Creates the `Sketch` of a rounded rectangle in a defined… [id: typescript:sketchRoundedRectangle]
-supportExtrude (function) [id: typescript:supportExtrude]
-topMost (function) — Creates a predicate selecting elements touching the shape's maximum Z… [id: typescript:topMost]
+asDir (function)
+asPnt (function)
+complexExtrude (function)
+createAssembly (function)
+deserializeDrawing (function) — Deserializes a drawing from a string
+deserializeShape (function)
+downcast (function)
+draw (function) — Creates a drawing pen to programatically draw in 2D
+drawCircle (function) — Creates the `Drawing` of a circle
+drawEllipse (function) — Creates the `Drawing` of an ellipse
+drawFaceOutline (function) — Creates the `Drawing` out of a face
+drawPolysides (function) — Creates the `Drawing` of an polygon in a defined plane
+drawProjection (function) — Creates the `Drawing` of a projection of a shape on…
+drawRoundedRectangle (function) — Creates the `Drawing` of a rectangle with (optional) rounded corners
+drawSingleCircle (function) — Creates the `Drawing` of a circle as one single curve
+drawSingleEllipse (function) — Creates the `Drawing` of an ellipse as one single curve
+drawText (function) — Creates the `Drawing` of a text, in a defined font…
+exportSTEP (function)
+genericSweep (function)
+getSingleFace (function)
+importSTEP (function) — Creates a new shapes from a STEP file (as a…
+importSTL (function) — Creates a new shapes from a STL file (as a…
+importSTLAsMesh (function) — Imports an STL file (as a Blob or a File)…
+intersect2D (function)
+isPoint (function)
+isProjectionPlane (function)
+isShape3D (function)
+isWire (function)
+iterTopo (function)
+loadFont (function) — Import a font in the text system
+lookFromPlane (function)
+makeDirVector (function)
+makePlane (function)
+makePln (function)
+makeProjectedEdges (function)
+makeSolid (function) — Welds faces and shells into a single shell and then…
+measureArea (function) — Measure the area of a shape
+measureDistanceBetween (function) — Measure the distance between two shapes
+measureLength (function) — Measure the length of a shape
+measureShapeLinearProperties (function)
+measureShapeSurfaceProperties (function)
+measureShapeVolumeProperties (function)
+measureVolume (function) — Measure the volume of a shape
+mirror (function)
+resolveDirection (function)
+rotate (function)
+scale (function)
+sketchText (function) — Creates the `Sketches` of a text, in a defined font…
+textBlueprints (function) — Creates the `Blueprints` of a text, in a defined font…
+translate (function)
+twistExtrude (function)
+weldShellsAndFaces (function) — Welds faces and shells into a single shell
+addHolesInFace (function)
+assembleWire (function)
+atShapeExtremum (function) — Creates a predicate for a finder's `when` method that selects…
+axis2d (function)
+backMost (function) — Creates a predicate selecting elements touching the shape's minimum Y…
+basicFaceExtrusion (function)
+bottomMost (function) — Creates a predicate selecting elements touching the shape's minimum Z…
+cast (function)
+combineFinderFilters (function) — Combine a set of finder filters (defined with radius) to…
+compoundShapes (function)
+createNamedPlane (function)
+cut2D (function)
+cutBlueprints (function)
+drawParametricFunction (function) — Creates the `Drawing` of parametric function
+drawPointsInterpolation (function) — Creates the `Drawing` by interpolating points as a curve
+drawRectangle (function)
+frontMost (function) — Creates a predicate selecting elements touching the shape's maximum Y…
+fuse2D (function)
+fuseBlueprints (function)
+GCWithObject (function)
+GCWithScope (function)
+getFont (function)
+getManifold (function)
+getOC (function)
+intersectBlueprints (function)
+leftMost (function) — Creates a predicate selecting elements touching the shape's minimum X…
+localGC (function)
+loft (function)
+makeAx1 (function)
+makeAx2 (function)
+makeAx3 (function)
+makeBaseBox (function) — Builds a rectangular box of the given lengths
+makeBezierCurve (function)
+makeBox (function) — Creates a box with the given corner points
+makeBSplineApproximation (function)
+makeCircle (function)
+makeCompound (function)
+makeCylinder (function) — Creates a cylinder with the given radius and height
+makeDirection (function)
+makeEllipse (function)
+makeEllipseArc (function)
+makeEllipsoid (function) — Creates an ellipsoid with the given lengths of the axes,…
+makeFace (function)
+makeHelix (function)
+makeLine (function)
+makeNewFaceWithinFace (function)
+makeNonPlanarFace (function)
+makeOffset (function)
+makePlaneFromFace (function)
+makePolygon (function)
+makeSphere (function) — Creates a sphere with the given radius, centred on the…
+makeTangentArc (function)
+makeThreePointArc (function)
+makeVertex (function)
+organiseBlueprints (function) — Groups an array of blueprints such that blueprints that correspond…
+polysideInnerRadius (function) — Helper function to compute the inner radius of a polyside…
+polysidesBlueprint (function)
+revolution (function)
+rightMost (function) — Creates a predicate selecting elements touching the shape's maximum X…
+roundedRectangleBlueprint (function)
+setManifold (function)
+setOC (function)
+shapeType (function)
+sketchCircle (function) — Creates the `Sketch` of a circle in a defined plane
+sketchEllipse (function) — Creates the `Sketch` of an ellispe in a defined plane
+sketchFaceOffset (function) — Creates the `Sketch` of an offset of a certain face
+sketchHelix (function) — Creates the `Sketch` of a helix
+sketchParametricFunction (function) — Creates the `Sketch` of parametric function in a specified plane
+sketchPolysides (function) — Creates the `Sketch` of an polygon in a defined plane
+sketchRectangle (function) — Creates the `Sketch` of a rectangle in a defined plane
+sketchRoundedRectangle (function) — Creates the `Sketch` of a rounded rectangle in a defined…
+supportExtrude (function)
+topMost (function) — Creates a predicate selecting elements touching the shape's maximum Z…
 
 ## Classes — `api-classes.md`
 
-_1DShape (class) [13 members] [id: typescript:_1DShape]
-  _1DShape.repr (property) [id: typescript:_1DShape.repr]
-  _1DShape.curve (property) [id: typescript:_1DShape.curve]
-  _1DShape.startPoint (property) [id: typescript:_1DShape.startPoint]
-  _1DShape.endPoint (property) [id: typescript:_1DShape.endPoint]
-  _1DShape.tangentAt (method) [id: typescript:_1DShape.tangentAt]
-  _1DShape.pointAt (method) [id: typescript:_1DShape.pointAt]
-  _1DShape.isClosed (property) [id: typescript:_1DShape.isClosed]
-  _1DShape.isPeriodic (property) [id: typescript:_1DShape.isPeriodic]
-  _1DShape.period (property) [id: typescript:_1DShape.period]
-  _1DShape.geomType (property) [id: typescript:_1DShape.geomType]
-  _1DShape.length (property) [id: typescript:_1DShape.length]
-  _1DShape.orientation (property) [id: typescript:_1DShape.orientation]
-  _1DShape.flipOrientation (method) [id: typescript:_1DShape.flipOrientation]
-_3DShape (class) [12 members] [id: typescript:_3DShape]
-  _3DShape.fuse (method) — Builds a new shape out of the two, fused, shapes [id: typescript:_3DShape.fuse]
-  _3DShape.fuseAll (method) — Builds a new shape by fusing this shape with all… [id: typescript:_3DShape.fuseAll]
-  _3DShape.cut (method) — Builds a new shape by removing the tool tape from… [id: typescript:_3DShape.cut]
-  _3DShape.cutAll (method) — Builds a new shape by removing all provided tool shapes… [id: typescript:_3DShape.cutAll]
-  _3DShape.intersect (method) — Builds a new shape by intersecting this shape and another [id: typescript:_3DShape.intersect]
-  _3DShape.intersectAll (method) — Builds a new shape by intersecting this shape with all… [id: typescript:_3DShape.intersectAll]
-  _3DShape.cutPlane (method) — Cuts this shape with a plane and retains one of… [id: typescript:_3DShape.cutPlane]
-  _3DShape.meshShape (method) [id: typescript:_3DShape.meshShape]
-  _3DShape.shell (method) — Hollows out the current shape, removing the faces found by… [id: typescript:_3DShape.shell]
-  _3DShape.fillet (method) — Creates a new shapes with some edges filletted, as specified… [id: typescript:_3DShape.fillet]
-  _3DShape.chamfer (method) — Creates a new shapes with some edges chamfered, as specified… [id: typescript:_3DShape.chamfer]
-  _3DShape.draft (method) — Applies a draft angle to selected faces of the shape [id: typescript:_3DShape.draft]
-AssemblyExporter (class) [id: typescript:AssemblyExporter]
-BaseSketcher2d (class) [39 members] [id: typescript:BaseSketcher2d]
-  BaseSketcher2d.pointer (property) [id: typescript:BaseSketcher2d.pointer]
-  BaseSketcher2d.firstPoint (property) [id: typescript:BaseSketcher2d.firstPoint]
-  BaseSketcher2d.pendingCurves (property) [id: typescript:BaseSketcher2d.pendingCurves]
-  BaseSketcher2d.constructor (constructor) [id: typescript:BaseSketcher2d.constructor]
-  BaseSketcher2d.penPosition (property) — Returns the current pen position as [x, y] coordinates [id: typescript:BaseSketcher2d.penPosition]
-  BaseSketcher2d.penAngle (property) — Returns the current pen angle in degrees [id: typescript:BaseSketcher2d.penAngle]
-  BaseSketcher2d.movePointerTo (method) [id: typescript:BaseSketcher2d.movePointerTo]
-  BaseSketcher2d.saveCurve (method) [id: typescript:BaseSketcher2d.saveCurve]
-  BaseSketcher2d.lineTo (method) [id: typescript:BaseSketcher2d.lineTo]
-  BaseSketcher2d.line (method) [id: typescript:BaseSketcher2d.line]
-  BaseSketcher2d.vLine (method) [id: typescript:BaseSketcher2d.vLine]
-  BaseSketcher2d.hLine (method) [id: typescript:BaseSketcher2d.hLine]
-  BaseSketcher2d.vLineTo (method) [id: typescript:BaseSketcher2d.vLineTo]
-  BaseSketcher2d.hLineTo (method) [id: typescript:BaseSketcher2d.hLineTo]
-  BaseSketcher2d.polarLineTo (method) [id: typescript:BaseSketcher2d.polarLineTo]
-  BaseSketcher2d.polarLine (method) [id: typescript:BaseSketcher2d.polarLine]
-  BaseSketcher2d.tangentLine (method) [id: typescript:BaseSketcher2d.tangentLine]
-  BaseSketcher2d.threePointsArcTo (method) [id: typescript:BaseSketcher2d.threePointsArcTo]
-  BaseSketcher2d.threePointsArc (method) [id: typescript:BaseSketcher2d.threePointsArc]
-  BaseSketcher2d.sagittaArcTo (method) [id: typescript:BaseSketcher2d.sagittaArcTo]
-  BaseSketcher2d.sagittaArc (method) [id: typescript:BaseSketcher2d.sagittaArc]
-  BaseSketcher2d.vSagittaArc (method) [id: typescript:BaseSketcher2d.vSagittaArc]
-  BaseSketcher2d.hSagittaArc (method) [id: typescript:BaseSketcher2d.hSagittaArc]
-  BaseSketcher2d.bulgeArcTo (method) [id: typescript:BaseSketcher2d.bulgeArcTo]
-  BaseSketcher2d.bulgeArc (method) [id: typescript:BaseSketcher2d.bulgeArc]
-  BaseSketcher2d.vBulgeArc (method) [id: typescript:BaseSketcher2d.vBulgeArc]
-  BaseSketcher2d.hBulgeArc (method) [id: typescript:BaseSketcher2d.hBulgeArc]
-  BaseSketcher2d.tangentArcTo (method) [id: typescript:BaseSketcher2d.tangentArcTo]
-  BaseSketcher2d.tangentArc (method) [id: typescript:BaseSketcher2d.tangentArc]
-  BaseSketcher2d.ellipseTo (method) [id: typescript:BaseSketcher2d.ellipseTo]
-  BaseSketcher2d.ellipse (method) [id: typescript:BaseSketcher2d.ellipse]
-  BaseSketcher2d.halfEllipseTo (method) [id: typescript:BaseSketcher2d.halfEllipseTo]
-  BaseSketcher2d.halfEllipse (method) [id: typescript:BaseSketcher2d.halfEllipse]
-  BaseSketcher2d.bezierCurveTo (method) [id: typescript:BaseSketcher2d.bezierCurveTo]
-  BaseSketcher2d.quadraticBezierCurveTo (method) [id: typescript:BaseSketcher2d.quadraticBezierCurveTo]
-  BaseSketcher2d.cubicBezierCurveTo (method) [id: typescript:BaseSketcher2d.cubicBezierCurveTo]
-  BaseSketcher2d.smoothSplineTo (method) [id: typescript:BaseSketcher2d.smoothSplineTo]
-  BaseSketcher2d.smoothSpline (method) [id: typescript:BaseSketcher2d.smoothSpline]
-  BaseSketcher2d.customCorner (method) — Changes the corner between the previous and next segments [id: typescript:BaseSketcher2d.customCorner]
-Blueprint (class) [26 members] — A Blueprint is an abstract Sketch, a 2D set of… [id: typescript:Blueprint]
-  Blueprint.curves (property) [id: typescript:Blueprint.curves]
-  Blueprint.constructor (constructor) [id: typescript:Blueprint.constructor]
-  Blueprint.delete (method) [id: typescript:Blueprint.delete]
-  Blueprint.clone (method) [id: typescript:Blueprint.clone]
-  Blueprint.repr (property) [id: typescript:Blueprint.repr]
-  Blueprint.boundingBox (property) [id: typescript:Blueprint.boundingBox]
-  Blueprint.orientation (property) [id: typescript:Blueprint.orientation]
-  Blueprint.stretch (method) [id: typescript:Blueprint.stretch]
-  Blueprint.scale (method) [id: typescript:Blueprint.scale]
-  Blueprint.rotate (method) [id: typescript:Blueprint.rotate]
-  Blueprint.translate (method) [id: typescript:Blueprint.translate]
-  Blueprint.mirror (method) — Returns the mirror image of this drawing made with a… [id: typescript:Blueprint.mirror]
-  Blueprint.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane [id: typescript:Blueprint.sketchOnPlane]
-  Blueprint.sketchOnFace (method) — Returns the sketched version of the drawing, on a face [id: typescript:Blueprint.sketchOnFace]
-  Blueprint.subFace (method) [id: typescript:Blueprint.subFace]
-  Blueprint.punchHole (method) [id: typescript:Blueprint.punchHole]
-  Blueprint.toSVGPathD (method) [id: typescript:Blueprint.toSVGPathD]
-  Blueprint.toSVGPath (method) [id: typescript:Blueprint.toSVGPath]
-  Blueprint.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing [id: typescript:Blueprint.toSVGViewBox]
-  Blueprint.toSVGPaths (method) — Formats the drawing as a list of SVG paths [id: typescript:Blueprint.toSVGPaths]
-  Blueprint.toSVG (method) — Formats the drawing as an SVG image [id: typescript:Blueprint.toSVG]
-  Blueprint.firstPoint (property) [id: typescript:Blueprint.firstPoint]
-  Blueprint.lastPoint (property) [id: typescript:Blueprint.lastPoint]
-  Blueprint.isInside (method) [id: typescript:Blueprint.isInside]
-  Blueprint.isClosed (method) [id: typescript:Blueprint.isClosed]
-  Blueprint.intersects (method) [id: typescript:Blueprint.intersects]
-Blueprints (class) [16 members] [id: typescript:Blueprints]
-  Blueprints.blueprints (property) [id: typescript:Blueprints.blueprints]
-  Blueprints.constructor (constructor) [id: typescript:Blueprints.constructor]
-  Blueprints.repr (property) [id: typescript:Blueprints.repr]
-  Blueprints.clone (method) [id: typescript:Blueprints.clone]
-  Blueprints.boundingBox (property) [id: typescript:Blueprints.boundingBox]
-  Blueprints.stretch (method) [id: typescript:Blueprints.stretch]
-  Blueprints.rotate (method) [id: typescript:Blueprints.rotate]
-  Blueprints.scale (method) [id: typescript:Blueprints.scale]
-  Blueprints.translate (method) [id: typescript:Blueprints.translate]
-  Blueprints.mirror (method) — Returns the mirror image of this drawing made with a… [id: typescript:Blueprints.mirror]
-  Blueprints.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane [id: typescript:Blueprints.sketchOnPlane]
-  Blueprints.sketchOnFace (method) — Returns the sketched version of the drawing, on a face [id: typescript:Blueprints.sketchOnFace]
-  Blueprints.punchHole (method) [id: typescript:Blueprints.punchHole]
-  Blueprints.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing [id: typescript:Blueprints.toSVGViewBox]
-  Blueprints.toSVGPaths (method) — Formats the drawing as a list of SVG paths [id: typescript:Blueprints.toSVGPaths]
-  Blueprints.toSVG (method) — Formats the drawing as an SVG image [id: typescript:Blueprints.toSVG]
-BlueprintSketcher (class) [5 members] [id: typescript:BlueprintSketcher]
-  BlueprintSketcher.constructor (constructor) [id: typescript:BlueprintSketcher.constructor]
-  BlueprintSketcher.done (method) — Stop drawing and returns the sketch [id: typescript:BlueprintSketcher.done]
-  BlueprintSketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding… [id: typescript:BlueprintSketcher.close]
-  BlueprintSketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring… [id: typescript:BlueprintSketcher.closeWithMirror]
-  BlueprintSketcher.closeWithCustomCorner (method) — Stop drawing, make sure the sketch is closed (by adding… [id: typescript:BlueprintSketcher.closeWithCustomCorner]
-BoundingBox (class) [10 members] [id: typescript:BoundingBox]
-  BoundingBox.constructor (constructor) [id: typescript:BoundingBox.constructor]
-  BoundingBox.fromBounds (method) [id: typescript:BoundingBox.fromBounds]
-  BoundingBox.repr (property) [id: typescript:BoundingBox.repr]
-  BoundingBox.bounds (property) [id: typescript:BoundingBox.bounds]
-  BoundingBox.center (property) [id: typescript:BoundingBox.center]
-  BoundingBox.width (property) [id: typescript:BoundingBox.width]
-  BoundingBox.height (property) [id: typescript:BoundingBox.height]
-  BoundingBox.depth (property) [id: typescript:BoundingBox.depth]
-  BoundingBox.add (method) [id: typescript:BoundingBox.add]
-  BoundingBox.isOut (method) [id: typescript:BoundingBox.isOut]
-BoundingBox2d (class) [10 members] [id: typescript:BoundingBox2d]
-  BoundingBox2d.constructor (constructor) [id: typescript:BoundingBox2d.constructor]
-  BoundingBox2d.repr (property) [id: typescript:BoundingBox2d.repr]
-  BoundingBox2d.bounds (property) [id: typescript:BoundingBox2d.bounds]
-  BoundingBox2d.center (property) [id: typescript:BoundingBox2d.center]
-  BoundingBox2d.width (property) [id: typescript:BoundingBox2d.width]
-  BoundingBox2d.height (property) [id: typescript:BoundingBox2d.height]
-  BoundingBox2d.outsidePoint (method) [id: typescript:BoundingBox2d.outsidePoint]
-  BoundingBox2d.add (method) [id: typescript:BoundingBox2d.add]
-  BoundingBox2d.isOut (method) [id: typescript:BoundingBox2d.isOut]
-  BoundingBox2d.containsPoint (method) [id: typescript:BoundingBox2d.containsPoint]
-Compound (class) [id: typescript:Compound]
-CompoundBlueprint (class) [17 members] [id: typescript:CompoundBlueprint]
-  CompoundBlueprint.blueprints (property) [id: typescript:CompoundBlueprint.blueprints]
-  CompoundBlueprint.constructor (constructor) [id: typescript:CompoundBlueprint.constructor]
-  CompoundBlueprint.clone (method) [id: typescript:CompoundBlueprint.clone]
-  CompoundBlueprint.boundingBox (property) [id: typescript:CompoundBlueprint.boundingBox]
-  CompoundBlueprint.repr (property) [id: typescript:CompoundBlueprint.repr]
-  CompoundBlueprint.stretch (method) [id: typescript:CompoundBlueprint.stretch]
-  CompoundBlueprint.rotate (method) [id: typescript:CompoundBlueprint.rotate]
-  CompoundBlueprint.scale (method) [id: typescript:CompoundBlueprint.scale]
-  CompoundBlueprint.translate (method) [id: typescript:CompoundBlueprint.translate]
-  CompoundBlueprint.mirror (method) — Returns the mirror image of this drawing made with a… [id: typescript:CompoundBlueprint.mirror]
-  CompoundBlueprint.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane [id: typescript:CompoundBlueprint.sketchOnPlane]
-  CompoundBlueprint.sketchOnFace (method) — Returns the sketched version of the drawing, on a face [id: typescript:CompoundBlueprint.sketchOnFace]
-  CompoundBlueprint.punchHole (method) [id: typescript:CompoundBlueprint.punchHole]
-  CompoundBlueprint.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing [id: typescript:CompoundBlueprint.toSVGViewBox]
-  CompoundBlueprint.toSVGPaths (method) — Formats the drawing as a list of SVG paths [id: typescript:CompoundBlueprint.toSVGPaths]
-  CompoundBlueprint.toSVGGroup (method) [id: typescript:CompoundBlueprint.toSVGGroup]
-  CompoundBlueprint.toSVG (method) — Formats the drawing as an SVG image [id: typescript:CompoundBlueprint.toSVG]
-CompoundSketch (class) [10 members] — A group of sketches that should correspond to a unique… [id: typescript:CompoundSketch]
-  CompoundSketch.sketches (property) [id: typescript:CompoundSketch.sketches]
-  CompoundSketch.constructor (constructor) [id: typescript:CompoundSketch.constructor]
-  CompoundSketch.delete (method) [id: typescript:CompoundSketch.delete]
-  CompoundSketch.outerSketch (property) [id: typescript:CompoundSketch.outerSketch]
-  CompoundSketch.innerSketches (property) [id: typescript:CompoundSketch.innerSketches]
-  CompoundSketch.wires (property) [id: typescript:CompoundSketch.wires]
-  CompoundSketch.face (method) — Transforms the lines into a face [id: typescript:CompoundSketch.face]
-  CompoundSketch.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction… [id: typescript:CompoundSketch.extrude]
-  CompoundSketch.revolve (method) — Revolves the drawing on an axis (defined by its direction… [id: typescript:CompoundSketch.revolve]
-  CompoundSketch.loftWith (method) — Loft between this sketch and another sketch (or an array… [id: typescript:CompoundSketch.loftWith]
-CompSolid (class) [id: typescript:CompSolid]
-CornerFinder (class) [8 members] [id: typescript:CornerFinder]
-  CornerFinder.clone (method) [id: typescript:CornerFinder.clone]
-  CornerFinder.inList (method) — Filter to find corner that have their point are in… [id: typescript:CornerFinder.inList]
-  CornerFinder.atDistance (method) — Filter to find elements that are at a specified distance… [id: typescript:CornerFinder.atDistance]
-  CornerFinder.atPoint (method) — Filter to find elements that contain a certain point [id: typescript:CornerFinder.atPoint]
-  CornerFinder.inBox (method) — Filter to find elements that are within a box [id: typescript:CornerFinder.inBox]
-  CornerFinder.ofAngle (method) — Filter to find corner that a certain angle between them… [id: typescript:CornerFinder.ofAngle]
-  CornerFinder.shouldKeep (method) — Check if a particular element should be filtered or not… [id: typescript:CornerFinder.shouldKeep]
-  CornerFinder.applyFilter (method) [id: typescript:CornerFinder.applyFilter]
-Curve (class) [9 members] [id: typescript:Curve]
-  Curve.repr (property) [id: typescript:Curve.repr]
-  Curve.curveType (property) [id: typescript:Curve.curveType]
-  Curve.startPoint (property) [id: typescript:Curve.startPoint]
-  Curve.endPoint (property) [id: typescript:Curve.endPoint]
-  Curve.pointAt (method) [id: typescript:Curve.pointAt]
-  Curve.tangentAt (method) [id: typescript:Curve.tangentAt]
-  Curve.isClosed (property) [id: typescript:Curve.isClosed]
-  Curve.isPeriodic (property) [id: typescript:Curve.isPeriodic]
-  Curve.period (property) [id: typescript:Curve.period]
-Curve2D (class) [19 members] [id: typescript:Curve2D]
-  Curve2D.constructor (constructor) [id: typescript:Curve2D.constructor]
-  Curve2D.boundingBox (property) [id: typescript:Curve2D.boundingBox]
-  Curve2D.repr (property) [id: typescript:Curve2D.repr]
-  Curve2D.innerCurve (property) [id: typescript:Curve2D.innerCurve]
-  Curve2D.serialize (method) [id: typescript:Curve2D.serialize]
-  Curve2D.value (method) [id: typescript:Curve2D.value]
-  Curve2D.firstPoint (property) [id: typescript:Curve2D.firstPoint]
-  Curve2D.lastPoint (property) [id: typescript:Curve2D.lastPoint]
-  Curve2D.firstParameter (property) [id: typescript:Curve2D.firstParameter]
-  Curve2D.lastParameter (property) [id: typescript:Curve2D.lastParameter]
-  Curve2D.adaptor (method) [id: typescript:Curve2D.adaptor]
-  Curve2D.geomType (property) [id: typescript:Curve2D.geomType]
-  Curve2D.clone (method) [id: typescript:Curve2D.clone]
-  Curve2D.reverse (method) [id: typescript:Curve2D.reverse]
-  Curve2D.distanceFrom (method) [id: typescript:Curve2D.distanceFrom]
-  Curve2D.isOnCurve (method) [id: typescript:Curve2D.isOnCurve]
-  Curve2D.parameter (method) [id: typescript:Curve2D.parameter]
-  Curve2D.tangentAt (method) [id: typescript:Curve2D.tangentAt]
-  Curve2D.splitAt (method) [id: typescript:Curve2D.splitAt]
-DistanceQuery (class) [2 members] [id: typescript:DistanceQuery]
-  DistanceQuery.constructor (constructor) [id: typescript:DistanceQuery.constructor]
-  DistanceQuery.distanceTo (method) [id: typescript:DistanceQuery.distanceTo]
-DistanceTool (class) [2 members] [id: typescript:DistanceTool]
-  DistanceTool.constructor (constructor) [id: typescript:DistanceTool.constructor]
-  DistanceTool.distanceBetween (method) [id: typescript:DistanceTool.distanceBetween]
-Drawing (class) [24 members] [id: typescript:Drawing]
-  Drawing.constructor (constructor) [id: typescript:Drawing.constructor]
-  Drawing.clone (method) [id: typescript:Drawing.clone]
-  Drawing.serialize (method) [id: typescript:Drawing.serialize]
-  Drawing.boundingBox (property) [id: typescript:Drawing.boundingBox]
-  Drawing.stretch (method) [id: typescript:Drawing.stretch]
-  Drawing.repr (property) [id: typescript:Drawing.repr]
-  Drawing.rotate (method) [id: typescript:Drawing.rotate]
-  Drawing.translate (method) [id: typescript:Drawing.translate]
-  Drawing.scale (method) [id: typescript:Drawing.scale]
-  Drawing.mirror (method) — Returns the mirror image of this drawing made with a… [id: typescript:Drawing.mirror]
-  Drawing.cut (method) — Builds a new drawing by cuting another drawing into this… [id: typescript:Drawing.cut]
-  Drawing.fuse (method) — Builds a new drawing by merging another drawing into this… [id: typescript:Drawing.fuse]
-  Drawing.intersect (method) — Builds a new drawing by intersection this drawing with another [id: typescript:Drawing.intersect]
-  Drawing.fillet (method) — Creates a new drawing with some corners filletted, as specified… [id: typescript:Drawing.fillet]
-  Drawing.chamfer (method) — Creates a new drawing with some corners filletted, as specified… [id: typescript:Drawing.chamfer]
-  Drawing.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane [id: typescript:Drawing.sketchOnPlane]
-  Drawing.sketchOnFace (method) — Returns the sketched version of the drawing, on a face [id: typescript:Drawing.sketchOnFace]
-  Drawing.punchHole (method) [id: typescript:Drawing.punchHole]
-  Drawing.toSVG (method) — Formats the drawing as an SVG image [id: typescript:Drawing.toSVG]
-  Drawing.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing [id: typescript:Drawing.toSVGViewBox]
-  Drawing.toSVGPaths (method) — Formats the drawing as a list of SVG paths [id: typescript:Drawing.toSVGPaths]
-  Drawing.offset (method) [id: typescript:Drawing.offset]
-  Drawing.approximate (method) [id: typescript:Drawing.approximate]
-  Drawing.blueprint (property) [id: typescript:Drawing.blueprint]
-DrawingPen (class) [5 members] — DrawingPen is a helper class to draw in 2D [id: typescript:DrawingPen]
-  DrawingPen.constructor (constructor) [id: typescript:DrawingPen.constructor]
-  DrawingPen.done (method) — Stop drawing and returns the sketch [id: typescript:DrawingPen.done]
-  DrawingPen.close (method) — Stop drawing, make sure the sketch is closed (by adding… [id: typescript:DrawingPen.close]
-  DrawingPen.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring… [id: typescript:DrawingPen.closeWithMirror]
-  DrawingPen.closeWithCustomCorner (method) — Stop drawing, make sure the sketch is closed (by adding… [id: typescript:DrawingPen.closeWithCustomCorner]
-Edge (class) [id: typescript:Edge]
-EdgeFinder (class) [8 members] — With an EdgeFinder you can apply a set of filters… [id: typescript:EdgeFinder]
-  EdgeFinder.clone (method) [id: typescript:EdgeFinder.clone]
-  EdgeFinder.inDirection (method) — Filter to find edges that are in a certain direction [id: typescript:EdgeFinder.inDirection]
-  EdgeFinder.ofLength (method) — Filter to find edges of a certain length [id: typescript:EdgeFinder.ofLength]
-  EdgeFinder.ofCurveType (method) — Filter to find edges that are of a cetain curve… [id: typescript:EdgeFinder.ofCurveType]
-  EdgeFinder.parallelTo (method) — Filter to find edges that are parallel to a plane [id: typescript:EdgeFinder.parallelTo]
-  EdgeFinder.inPlane (method) — Filter to find edges that within a plane [id: typescript:EdgeFinder.inPlane]
-  EdgeFinder.shouldKeep (method) — Check if a particular element should be filtered or not… [id: typescript:EdgeFinder.shouldKeep]
-  EdgeFinder.applyFilter (method) [id: typescript:EdgeFinder.applyFilter]
-Face (class) [12 members] [id: typescript:Face]
-  Face.surface (property) [id: typescript:Face.surface]
-  Face.orientation (property) [id: typescript:Face.orientation]
-  Face.flipOrientation (method) [id: typescript:Face.flipOrientation]
-  Face.geomType (property) [id: typescript:Face.geomType]
-  Face.UVBounds (property) [id: typescript:Face.UVBounds]
-  Face.pointOnSurface (method) [id: typescript:Face.pointOnSurface]
-  Face.uvCoordinates (method) [id: typescript:Face.uvCoordinates]
-  Face.normalAt (method) [id: typescript:Face.normalAt]
-  Face.center (property) [id: typescript:Face.center]
-  Face.outerWire (method) [id: typescript:Face.outerWire]
-  Face.innerWires (method) [id: typescript:Face.innerWires]
-  Face.triangulation (method) [id: typescript:Face.triangulation]
-FaceFinder (class) [6 members] — With a FaceFinder you can apply a set of filters… [id: typescript:FaceFinder]
-  FaceFinder.clone (method) [id: typescript:FaceFinder.clone]
-  FaceFinder.parallelTo (method) — Filter to find faces that are parallel to plane or… [id: typescript:FaceFinder.parallelTo]
-  FaceFinder.ofSurfaceType (method) — Filter to find faces that are of a cetain surface… [id: typescript:FaceFinder.ofSurfaceType]
-  FaceFinder.inPlane (method) — Filter to find faces that are contained in a plane [id: typescript:FaceFinder.inPlane]
-  FaceFinder.shouldKeep (method) — Check if a particular element should be filtered or not… [id: typescript:FaceFinder.shouldKeep]
-  FaceFinder.applyFilter (method) [id: typescript:FaceFinder.applyFilter]
-FaceSketcher (class) [7 members] — The FaceSketcher allows you to sketch on a face that… [id: typescript:FaceSketcher]
-  FaceSketcher.face (property) [id: typescript:FaceSketcher.face]
-  FaceSketcher.constructor (constructor) [id: typescript:FaceSketcher.constructor]
-  FaceSketcher.buildWire (method) [id: typescript:FaceSketcher.buildWire]
-  FaceSketcher.done (method) — Stop drawing and returns the sketch [id: typescript:FaceSketcher.done]
-  FaceSketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding… [id: typescript:FaceSketcher.close]
-  FaceSketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring… [id: typescript:FaceSketcher.closeWithMirror]
-  FaceSketcher.closeWithCustomCorner (method) — Stop drawing, make sure the sketch is closed (by adding… [id: typescript:FaceSketcher.closeWithCustomCorner]
-LinearPhysicalProperties (class) [1 members] [id: typescript:LinearPhysicalProperties]
-  LinearPhysicalProperties.length (property) [id: typescript:LinearPhysicalProperties.length]
+_1DShape (class) [13 members]
+  _1DShape.repr (property)
+  _1DShape.curve (property)
+  _1DShape.startPoint (property)
+  _1DShape.endPoint (property)
+  _1DShape.tangentAt (method)
+  _1DShape.pointAt (method)
+  _1DShape.isClosed (property)
+  _1DShape.isPeriodic (property)
+  _1DShape.period (property)
+  _1DShape.geomType (property)
+  _1DShape.length (property)
+  _1DShape.orientation (property)
+  _1DShape.flipOrientation (method)
+_3DShape (class) [12 members]
+  _3DShape.fuse (method) — Builds a new shape out of the two, fused, shapes
+  _3DShape.fuseAll (method) — Builds a new shape by fusing this shape with all…
+  _3DShape.cut (method) — Builds a new shape by removing the tool tape from…
+  _3DShape.cutAll (method) — Builds a new shape by removing all provided tool shapes…
+  _3DShape.intersect (method) — Builds a new shape by intersecting this shape and another
+  _3DShape.intersectAll (method) — Builds a new shape by intersecting this shape with all…
+  _3DShape.cutPlane (method) — Cuts this shape with a plane and retains one of…
+  _3DShape.meshShape (method)
+  _3DShape.shell (method) — Hollows out the current shape, removing the faces found by…
+  _3DShape.fillet (method) — Creates a new shapes with some edges filletted, as specified…
+  _3DShape.chamfer (method) — Creates a new shapes with some edges chamfered, as specified…
+  _3DShape.draft (method) — Applies a draft angle to selected faces of the shape
+AssemblyExporter (class)
+BaseSketcher2d (class) [39 members]
+  BaseSketcher2d.pointer (property)
+  BaseSketcher2d.firstPoint (property)
+  BaseSketcher2d.pendingCurves (property)
+  BaseSketcher2d.constructor (constructor)
+  BaseSketcher2d.penPosition (property) — Returns the current pen position as [x, y] coordinates
+  BaseSketcher2d.penAngle (property) — Returns the current pen angle in degrees
+  BaseSketcher2d.movePointerTo (method)
+  BaseSketcher2d.saveCurve (method)
+  BaseSketcher2d.lineTo (method)
+  BaseSketcher2d.line (method)
+  BaseSketcher2d.vLine (method)
+  BaseSketcher2d.hLine (method)
+  BaseSketcher2d.vLineTo (method)
+  BaseSketcher2d.hLineTo (method)
+  BaseSketcher2d.polarLineTo (method)
+  BaseSketcher2d.polarLine (method)
+  BaseSketcher2d.tangentLine (method)
+  BaseSketcher2d.threePointsArcTo (method)
+  BaseSketcher2d.threePointsArc (method)
+  BaseSketcher2d.sagittaArcTo (method)
+  BaseSketcher2d.sagittaArc (method)
+  BaseSketcher2d.vSagittaArc (method)
+  BaseSketcher2d.hSagittaArc (method)
+  BaseSketcher2d.bulgeArcTo (method)
+  BaseSketcher2d.bulgeArc (method)
+  BaseSketcher2d.vBulgeArc (method)
+  BaseSketcher2d.hBulgeArc (method)
+  BaseSketcher2d.tangentArcTo (method)
+  BaseSketcher2d.tangentArc (method)
+  BaseSketcher2d.ellipseTo (method)
+  BaseSketcher2d.ellipse (method)
+  BaseSketcher2d.halfEllipseTo (method)
+  BaseSketcher2d.halfEllipse (method)
+  BaseSketcher2d.bezierCurveTo (method)
+  BaseSketcher2d.quadraticBezierCurveTo (method)
+  BaseSketcher2d.cubicBezierCurveTo (method)
+  BaseSketcher2d.smoothSplineTo (method)
+  BaseSketcher2d.smoothSpline (method)
+  BaseSketcher2d.customCorner (method) — Changes the corner between the previous and next segments
+Blueprint (class) [26 members] — A Blueprint is an abstract Sketch, a 2D set of…
+  Blueprint.curves (property)
+  Blueprint.constructor (constructor)
+  Blueprint.delete (method)
+  Blueprint.clone (method)
+  Blueprint.repr (property)
+  Blueprint.boundingBox (property)
+  Blueprint.orientation (property)
+  Blueprint.stretch (method)
+  Blueprint.scale (method)
+  Blueprint.rotate (method)
+  Blueprint.translate (method)
+  Blueprint.mirror (method) — Returns the mirror image of this drawing made with a…
+  Blueprint.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane
+  Blueprint.sketchOnFace (method) — Returns the sketched version of the drawing, on a face
+  Blueprint.subFace (method)
+  Blueprint.punchHole (method)
+  Blueprint.toSVGPathD (method)
+  Blueprint.toSVGPath (method)
+  Blueprint.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing
+  Blueprint.toSVGPaths (method) — Formats the drawing as a list of SVG paths
+  Blueprint.toSVG (method) — Formats the drawing as an SVG image
+  Blueprint.firstPoint (property)
+  Blueprint.lastPoint (property)
+  Blueprint.isInside (method)
+  Blueprint.isClosed (method)
+  Blueprint.intersects (method)
+Blueprints (class) [16 members]
+  Blueprints.blueprints (property)
+  Blueprints.constructor (constructor)
+  Blueprints.repr (property)
+  Blueprints.clone (method)
+  Blueprints.boundingBox (property)
+  Blueprints.stretch (method)
+  Blueprints.rotate (method)
+  Blueprints.scale (method)
+  Blueprints.translate (method)
+  Blueprints.mirror (method) — Returns the mirror image of this drawing made with a…
+  Blueprints.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane
+  Blueprints.sketchOnFace (method) — Returns the sketched version of the drawing, on a face
+  Blueprints.punchHole (method)
+  Blueprints.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing
+  Blueprints.toSVGPaths (method) — Formats the drawing as a list of SVG paths
+  Blueprints.toSVG (method) — Formats the drawing as an SVG image
+BlueprintSketcher (class) [5 members]
+  BlueprintSketcher.constructor (constructor)
+  BlueprintSketcher.done (method) — Stop drawing and returns the sketch
+  BlueprintSketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding…
+  BlueprintSketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
+  BlueprintSketcher.closeWithCustomCorner (method) — Stop drawing, make sure the sketch is closed (by adding…
+BoundingBox (class) [10 members]
+  BoundingBox.constructor (constructor)
+  BoundingBox.fromBounds (method)
+  BoundingBox.repr (property)
+  BoundingBox.bounds (property)
+  BoundingBox.center (property)
+  BoundingBox.width (property)
+  BoundingBox.height (property)
+  BoundingBox.depth (property)
+  BoundingBox.add (method)
+  BoundingBox.isOut (method)
+BoundingBox2d (class) [10 members]
+  BoundingBox2d.constructor (constructor)
+  BoundingBox2d.repr (property)
+  BoundingBox2d.bounds (property)
+  BoundingBox2d.center (property)
+  BoundingBox2d.width (property)
+  BoundingBox2d.height (property)
+  BoundingBox2d.outsidePoint (method)
+  BoundingBox2d.add (method)
+  BoundingBox2d.isOut (method)
+  BoundingBox2d.containsPoint (method)
+Compound (class)
+CompoundBlueprint (class) [17 members]
+  CompoundBlueprint.blueprints (property)
+  CompoundBlueprint.constructor (constructor)
+  CompoundBlueprint.clone (method)
+  CompoundBlueprint.boundingBox (property)
+  CompoundBlueprint.repr (property)
+  CompoundBlueprint.stretch (method)
+  CompoundBlueprint.rotate (method)
+  CompoundBlueprint.scale (method)
+  CompoundBlueprint.translate (method)
+  CompoundBlueprint.mirror (method) — Returns the mirror image of this drawing made with a…
+  CompoundBlueprint.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane
+  CompoundBlueprint.sketchOnFace (method) — Returns the sketched version of the drawing, on a face
+  CompoundBlueprint.punchHole (method)
+  CompoundBlueprint.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing
+  CompoundBlueprint.toSVGPaths (method) — Formats the drawing as a list of SVG paths
+  CompoundBlueprint.toSVGGroup (method)
+  CompoundBlueprint.toSVG (method) — Formats the drawing as an SVG image
+CompoundSketch (class) [10 members] — A group of sketches that should correspond to a unique…
+  CompoundSketch.sketches (property)
+  CompoundSketch.constructor (constructor)
+  CompoundSketch.delete (method)
+  CompoundSketch.outerSketch (property)
+  CompoundSketch.innerSketches (property)
+  CompoundSketch.wires (property)
+  CompoundSketch.face (method) — Transforms the lines into a face
+  CompoundSketch.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction…
+  CompoundSketch.revolve (method) — Revolves the drawing on an axis (defined by its direction…
+  CompoundSketch.loftWith (method) — Loft between this sketch and another sketch (or an array…
+CompSolid (class)
+CornerFinder (class) [8 members]
+  CornerFinder.clone (method)
+  CornerFinder.inList (method) — Filter to find corner that have their point are in…
+  CornerFinder.atDistance (method) — Filter to find elements that are at a specified distance…
+  CornerFinder.atPoint (method) — Filter to find elements that contain a certain point
+  CornerFinder.inBox (method) — Filter to find elements that are within a box
+  CornerFinder.ofAngle (method) — Filter to find corner that a certain angle between them…
+  CornerFinder.shouldKeep (method) — Check if a particular element should be filtered or not…
+  CornerFinder.applyFilter (method)
+Curve (class) [9 members]
+  Curve.repr (property)
+  Curve.curveType (property)
+  Curve.startPoint (property)
+  Curve.endPoint (property)
+  Curve.pointAt (method)
+  Curve.tangentAt (method)
+  Curve.isClosed (property)
+  Curve.isPeriodic (property)
+  Curve.period (property)
+Curve2D (class) [19 members]
+  Curve2D.constructor (constructor)
+  Curve2D.boundingBox (property)
+  Curve2D.repr (property)
+  Curve2D.innerCurve (property)
+  Curve2D.serialize (method)
+  Curve2D.value (method)
+  Curve2D.firstPoint (property)
+  Curve2D.lastPoint (property)
+  Curve2D.firstParameter (property)
+  Curve2D.lastParameter (property)
+  Curve2D.adaptor (method)
+  Curve2D.geomType (property)
+  Curve2D.clone (method)
+  Curve2D.reverse (method)
+  Curve2D.distanceFrom (method)
+  Curve2D.isOnCurve (method)
+  Curve2D.parameter (method)
+  Curve2D.tangentAt (method)
+  Curve2D.splitAt (method)
+DistanceQuery (class) [2 members]
+  DistanceQuery.constructor (constructor)
+  DistanceQuery.distanceTo (method)
+DistanceTool (class) [2 members]
+  DistanceTool.constructor (constructor)
+  DistanceTool.distanceBetween (method)
+Drawing (class) [24 members]
+  Drawing.constructor (constructor)
+  Drawing.clone (method)
+  Drawing.serialize (method)
+  Drawing.boundingBox (property)
+  Drawing.stretch (method)
+  Drawing.repr (property)
+  Drawing.rotate (method)
+  Drawing.translate (method)
+  Drawing.scale (method)
+  Drawing.mirror (method) — Returns the mirror image of this drawing made with a…
+  Drawing.cut (method) — Builds a new drawing by cuting another drawing into this…
+  Drawing.fuse (method) — Builds a new drawing by merging another drawing into this…
+  Drawing.intersect (method) — Builds a new drawing by intersection this drawing with another
+  Drawing.fillet (method) — Creates a new drawing with some corners filletted, as specified…
+  Drawing.chamfer (method) — Creates a new drawing with some corners filletted, as specified…
+  Drawing.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane
+  Drawing.sketchOnFace (method) — Returns the sketched version of the drawing, on a face
+  Drawing.punchHole (method)
+  Drawing.toSVG (method) — Formats the drawing as an SVG image
+  Drawing.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing
+  Drawing.toSVGPaths (method) — Formats the drawing as a list of SVG paths
+  Drawing.offset (method)
+  Drawing.approximate (method)
+  Drawing.blueprint (property)
+DrawingPen (class) [5 members] — DrawingPen is a helper class to draw in 2D
+  DrawingPen.constructor (constructor)
+  DrawingPen.done (method) — Stop drawing and returns the sketch
+  DrawingPen.close (method) — Stop drawing, make sure the sketch is closed (by adding…
+  DrawingPen.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
+  DrawingPen.closeWithCustomCorner (method) — Stop drawing, make sure the sketch is closed (by adding…
+Edge (class)
+EdgeFinder (class) [8 members] — With an EdgeFinder you can apply a set of filters…
+  EdgeFinder.clone (method)
+  EdgeFinder.inDirection (method) — Filter to find edges that are in a certain direction
+  EdgeFinder.ofLength (method) — Filter to find edges of a certain length
+  EdgeFinder.ofCurveType (method) — Filter to find edges that are of a cetain curve…
+  EdgeFinder.parallelTo (method) — Filter to find edges that are parallel to a plane
+  EdgeFinder.inPlane (method) — Filter to find edges that within a plane
+  EdgeFinder.shouldKeep (method) — Check if a particular element should be filtered or not…
+  EdgeFinder.applyFilter (method)
+Face (class) [12 members]
+  Face.surface (property)
+  Face.orientation (property)
+  Face.flipOrientation (method)
+  Face.geomType (property)
+  Face.UVBounds (property)
+  Face.pointOnSurface (method)
+  Face.uvCoordinates (method)
+  Face.normalAt (method)
+  Face.center (property)
+  Face.outerWire (method)
+  Face.innerWires (method)
+  Face.triangulation (method)
+FaceFinder (class) [6 members] — With a FaceFinder you can apply a set of filters…
+  FaceFinder.clone (method)
+  FaceFinder.parallelTo (method) — Filter to find faces that are parallel to plane or…
+  FaceFinder.ofSurfaceType (method) — Filter to find faces that are of a cetain surface…
+  FaceFinder.inPlane (method) — Filter to find faces that are contained in a plane
+  FaceFinder.shouldKeep (method) — Check if a particular element should be filtered or not…
+  FaceFinder.applyFilter (method)
+FaceSketcher (class) [7 members] — The FaceSketcher allows you to sketch on a face that…
+  FaceSketcher.face (property)
+  FaceSketcher.constructor (constructor)
+  FaceSketcher.buildWire (method)
+  FaceSketcher.done (method) — Stop drawing and returns the sketch
+  FaceSketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding…
+  FaceSketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
+  FaceSketcher.closeWithCustomCorner (method) — Stop drawing, make sure the sketch is closed (by adding…
+LinearPhysicalProperties (class) [1 members]
+  LinearPhysicalProperties.length (property)
 
 ## Classes (2) — `api-classes-2.md`
 
-MeshShape (class) [27 members] [id: typescript:MeshShape]
-  MeshShape.constructor (constructor) [id: typescript:MeshShape.constructor]
-  MeshShape.clone (method) [id: typescript:MeshShape.clone]
-  MeshShape.fuse (method) [id: typescript:MeshShape.fuse]
-  MeshShape.cut (method) [id: typescript:MeshShape.cut]
-  MeshShape.intersect (method) [id: typescript:MeshShape.intersect]
-  MeshShape.translate (method) [id: typescript:MeshShape.translate]
-  MeshShape.translateX (method) [id: typescript:MeshShape.translateX]
-  MeshShape.translateY (method) [id: typescript:MeshShape.translateY]
-  MeshShape.translateZ (method) [id: typescript:MeshShape.translateZ]
-  MeshShape.rotate (method) [id: typescript:MeshShape.rotate]
-  MeshShape.scale (method) [id: typescript:MeshShape.scale]
-  MeshShape.mirror (method) [id: typescript:MeshShape.mirror]
-  MeshShape.simplify (method) [id: typescript:MeshShape.simplify]
-  MeshShape.refine (method) [id: typescript:MeshShape.refine]
-  MeshShape.refineToLength (method) [id: typescript:MeshShape.refineToLength]
-  MeshShape.refineToTolerance (method) [id: typescript:MeshShape.refineToTolerance]
-  MeshShape.hull (method) [id: typescript:MeshShape.hull]
-  MeshShape.asOriginal (method) [id: typescript:MeshShape.asOriginal]
-  MeshShape.mesh (method) [id: typescript:MeshShape.mesh]
-  MeshShape.boundingBox (property) [id: typescript:MeshShape.boundingBox]
-  MeshShape.volume (method) [id: typescript:MeshShape.volume]
-  MeshShape.surfaceArea (method) [id: typescript:MeshShape.surfaceArea]
-  MeshShape.numTri (method) [id: typescript:MeshShape.numTri]
-  MeshShape.numVert (method) [id: typescript:MeshShape.numVert]
-  MeshShape.numEdge (method) [id: typescript:MeshShape.numEdge]
-  MeshShape.isEmpty (property) [id: typescript:MeshShape.isEmpty]
-  MeshShape.blobSTL (method) — Exports the mesh shape as an STL file Blob [id: typescript:MeshShape.blobSTL]
-Plane (class) [18 members] [id: typescript:Plane]
-  Plane.oc (property) [id: typescript:Plane.oc]
-  Plane.xDir (property) [id: typescript:Plane.xDir]
-  Plane.yDir (property) [id: typescript:Plane.yDir]
-  Plane.zDir (property) [id: typescript:Plane.zDir]
-  Plane.constructor (constructor) [id: typescript:Plane.constructor]
-  Plane.delete (method) [id: typescript:Plane.delete]
-  Plane.clone (method) [id: typescript:Plane.clone]
-  Plane.origin (property) [id: typescript:Plane.origin]
-  Plane.translateTo (method) [id: typescript:Plane.translateTo]
-  Plane.translate (method) [id: typescript:Plane.translate]
-  Plane.translateX (method) [id: typescript:Plane.translateX]
-  Plane.translateY (method) [id: typescript:Plane.translateY]
-  Plane.translateZ (method) [id: typescript:Plane.translateZ]
-  Plane.pivot (method) [id: typescript:Plane.pivot]
-  Plane.rotate2DAxes (method) [id: typescript:Plane.rotate2DAxes]
-  Plane.setOrigin2d (method) [id: typescript:Plane.setOrigin2d]
-  Plane.toLocalCoords (method) [id: typescript:Plane.toLocalCoords]
-  Plane.toWorldCoords (method) [id: typescript:Plane.toWorldCoords]
-ProjectionCamera (class) [10 members] [id: typescript:ProjectionCamera]
-  ProjectionCamera.constructor (constructor) [id: typescript:ProjectionCamera.constructor]
-  ProjectionCamera.position (property) [id: typescript:ProjectionCamera.position]
-  ProjectionCamera.direction (property) [id: typescript:ProjectionCamera.direction]
-  ProjectionCamera.xAxis (property) [id: typescript:ProjectionCamera.xAxis]
-  ProjectionCamera.yAxis (property) [id: typescript:ProjectionCamera.yAxis]
-  ProjectionCamera.autoAxes (method) [id: typescript:ProjectionCamera.autoAxes]
-  ProjectionCamera.setPosition (method) [id: typescript:ProjectionCamera.setPosition]
-  ProjectionCamera.setXAxis (method) [id: typescript:ProjectionCamera.setXAxis]
-  ProjectionCamera.setYAxis (method) [id: typescript:ProjectionCamera.setYAxis]
-  ProjectionCamera.lookAt (method) [id: typescript:ProjectionCamera.lookAt]
-Shape (class) [26 members] [id: typescript:Shape]
-  Shape.constructor (constructor) [id: typescript:Shape.constructor]
-  Shape.clone (method) [id: typescript:Shape.clone]
-  Shape.serialize (method) [id: typescript:Shape.serialize]
-  Shape.hashCode (property) [id: typescript:Shape.hashCode]
-  Shape.isNull (property) [id: typescript:Shape.isNull]
-  Shape.isSame (method) [id: typescript:Shape.isSame]
-  Shape.isEqual (method) [id: typescript:Shape.isEqual]
-  Shape.split (method) — Splits the solid parts of this shape with an oriented… [id: typescript:Shape.split]
-  Shape.asShape3D (method) — Asserts that this shape is a 3D shape (Shell, Solid,… [id: typescript:Shape.asShape3D]
-  Shape.simplify (method) — Simplifies the shape by removing unnecessary edges and faces [id: typescript:Shape.simplify]
-  Shape.translate (method) — Translates the shape of an arbitrary vector [id: typescript:Shape.translate]
-  Shape.translateX (method) — Translates the shape on the X axis [id: typescript:Shape.translateX]
-  Shape.translateY (method) — Translates the shape on the Y axis [id: typescript:Shape.translateY]
-  Shape.translateZ (method) — Translates the shape on the Z axis [id: typescript:Shape.translateZ]
-  Shape.rotate (method) — Rotates the shape [id: typescript:Shape.rotate]
-  Shape.mirror (method) — Mirrors the shape through a plane [id: typescript:Shape.mirror]
-  Shape.scale (method) — Returns a scaled version of the shape [id: typescript:Shape.scale]
-  Shape.edges (property) [id: typescript:Shape.edges]
-  Shape.faces (property) [id: typescript:Shape.faces]
-  Shape.solids (property) [id: typescript:Shape.solids]
-  Shape.wires (property) [id: typescript:Shape.wires]
-  Shape.boundingBox (property) [id: typescript:Shape.boundingBox]
-  Shape.mesh (method) — Exports the current shape as a set of triangle [id: typescript:Shape.mesh]
-  Shape.meshEdges (method) — Exports the current shape as a set of lines [id: typescript:Shape.meshEdges]
-  Shape.blobSTEP (method) — Exports the current shape as a STEP file as a… [id: typescript:Shape.blobSTEP]
-  Shape.blobSTL (method) — Exports the current shape as a STL file as a… [id: typescript:Shape.blobSTL]
-Shell (class) [id: typescript:Shell]
-Sketch (class) [14 members] — A line drawing to be acted upon [id: typescript:Sketch]
-  Sketch.wire (property) [id: typescript:Sketch.wire]
-  Sketch.constructor (constructor) [id: typescript:Sketch.constructor]
-  Sketch.baseFace (property) [id: typescript:Sketch.baseFace]
-  Sketch.delete (method) [id: typescript:Sketch.delete]
-  Sketch.clone (method) [id: typescript:Sketch.clone]
-  Sketch.defaultOrigin (property) [id: typescript:Sketch.defaultOrigin]
-  Sketch.defaultDirection (property) [id: typescript:Sketch.defaultDirection]
-  Sketch.face (method) — Transforms the lines into a face [id: typescript:Sketch.face]
-  Sketch.wires (method) [id: typescript:Sketch.wires]
-  Sketch.faces (method) [id: typescript:Sketch.faces]
-  Sketch.revolve (method) — Revolves the drawing on an axis (defined by its direction… [id: typescript:Sketch.revolve]
-  Sketch.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction… [id: typescript:Sketch.extrude]
-  Sketch.sweepSketch (method) — Sweep along this sketch another sketch defined in the function… [id: typescript:Sketch.sweepSketch]
-  Sketch.loftWith (method) — Loft between this sketch and another sketch (or an array… [id: typescript:Sketch.loftWith]
-Sketcher (class) [41 members] — The FaceSketcher allows you to sketch on a plane [id: typescript:Sketcher]
-  Sketcher.plane (property) [id: typescript:Sketcher.plane]
-  Sketcher.pointer (property) [id: typescript:Sketcher.pointer]
-  Sketcher.firstPoint (property) [id: typescript:Sketcher.firstPoint]
-  Sketcher.pendingEdges (property) [id: typescript:Sketcher.pendingEdges]
-  Sketcher.constructor (constructor) [id: typescript:Sketcher.constructor]
-  Sketcher.delete (method) [id: typescript:Sketcher.delete]
-  Sketcher.movePointerTo (method) — Changes the point to start your drawing from [id: typescript:Sketcher.movePointerTo]
-  Sketcher.lineTo (method) — Draws a line from the current point to the point… [id: typescript:Sketcher.lineTo]
-  Sketcher.line (method) — Draws a line at the horizontal distance xDist and the… [id: typescript:Sketcher.line]
-  Sketcher.vLine (method) — Draws a vertical line of length distance from the current… [id: typescript:Sketcher.vLine]
-  Sketcher.hLine (method) — Draws an horizontal line of length distance from the current… [id: typescript:Sketcher.hLine]
-  Sketcher.vLineTo (method) — Draws a vertical line to the y coordinate [id: typescript:Sketcher.vLineTo]
-  Sketcher.hLineTo (method) — Draws an horizontal line to the x coordinate [id: typescript:Sketcher.hLineTo]
-  Sketcher.polarLine (method) — Draws a line from the current point to the point… [id: typescript:Sketcher.polarLine]
-  Sketcher.polarLineTo (method) — Draws a line from the current point to the point… [id: typescript:Sketcher.polarLineTo]
-  Sketcher.tangentLine (method) — Draws a line from the current point as a tangent… [id: typescript:Sketcher.tangentLine]
-  Sketcher.threePointsArcTo (method) — Draws an arc of circle by defining its end point… [id: typescript:Sketcher.threePointsArcTo]
-  Sketcher.threePointsArc (method) — Draws an arc of circle by defining its end point… [id: typescript:Sketcher.threePointsArc]
-  Sketcher.tangentArcTo (method) — Draws an arc of circle from the current point as… [id: typescript:Sketcher.tangentArcTo]
-  Sketcher.tangentArc (method) — Draws an arc of circle from the current point as… [id: typescript:Sketcher.tangentArc]
-  Sketcher.sagittaArcTo (method) — Draws an arc of circle by defining its end point… [id: typescript:Sketcher.sagittaArcTo]
-  Sketcher.sagittaArc (method) — Draws an arc of circle by defining its end point… [id: typescript:Sketcher.sagittaArc]
-  Sketcher.vSagittaArc (method) — Draws a vertical arc of circle by defining its end… [id: typescript:Sketcher.vSagittaArc]
-  Sketcher.hSagittaArc (method) — Draws an horizontal arc of circle by defining its end… [id: typescript:Sketcher.hSagittaArc]
-  Sketcher.bulgeArcTo (method) — Draws an arc of circle by defining its end point… [id: typescript:Sketcher.bulgeArcTo]
-  Sketcher.bulgeArc (method) — Draws an arc of circle by defining its end point… [id: typescript:Sketcher.bulgeArc]
-  Sketcher.vBulgeArc (method) — Draws a vertical arc of circle by defining its end… [id: typescript:Sketcher.vBulgeArc]
-  Sketcher.hBulgeArc (method) — Draws an horizontal arc of circle by defining its end… [id: typescript:Sketcher.hBulgeArc]
-  Sketcher.ellipseTo (method) — Draws an arc of ellipse by defining its end point… [id: typescript:Sketcher.ellipseTo]
-  Sketcher.ellipse (method) — Draws an arc of ellipse by defining its end point… [id: typescript:Sketcher.ellipse]
-  Sketcher.halfEllipseTo (method) — Draws an arc as half an ellipse, defined by the… [id: typescript:Sketcher.halfEllipseTo]
-  Sketcher.halfEllipse (method) — Draws an arc as half an ellipse, defined by the… [id: typescript:Sketcher.halfEllipse]
-  Sketcher.bezierCurveTo (method) — Draws a generic bezier curve to the end point, going… [id: typescript:Sketcher.bezierCurveTo]
-  Sketcher.quadraticBezierCurveTo (method) — Draws a quadratic bezier curve to the end point, using… [id: typescript:Sketcher.quadraticBezierCurveTo]
-  Sketcher.cubicBezierCurveTo (method) — Draws a cubic bezier curve to the end point, using… [id: typescript:Sketcher.cubicBezierCurveTo]
-  Sketcher.smoothSplineTo (method) — Draws a cubic bezier curve to the end point, attempting… [id: typescript:Sketcher.smoothSplineTo]
-  Sketcher.smoothSpline (method) — Draws a cubic bezier curve to the end point, attempting… [id: typescript:Sketcher.smoothSpline]
-  Sketcher.buildWire (method) [id: typescript:Sketcher.buildWire]
-  Sketcher.done (method) — Stop drawing and returns the sketch [id: typescript:Sketcher.done]
-  Sketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding… [id: typescript:Sketcher.close]
-  Sketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring… [id: typescript:Sketcher.closeWithMirror]
-Sketches (class) [6 members] [id: typescript:Sketches]
-  Sketches.sketches (property) [id: typescript:Sketches.sketches]
-  Sketches.constructor (constructor) [id: typescript:Sketches.constructor]
-  Sketches.wires (method) [id: typescript:Sketches.wires]
-  Sketches.faces (method) [id: typescript:Sketches.faces]
-  Sketches.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction… [id: typescript:Sketches.extrude]
-  Sketches.revolve (method) — Revolves the drawing on an axis (defined by its direction… [id: typescript:Sketches.revolve]
-Solid (class) [id: typescript:Solid]
-Surface (class) [1 members] [id: typescript:Surface]
-  Surface.surfaceType (property) [id: typescript:Surface.surfaceType]
-SurfacePhysicalProperties (class) [1 members] [id: typescript:SurfacePhysicalProperties]
-  SurfacePhysicalProperties.area (property) [id: typescript:SurfacePhysicalProperties.area]
-Transformation (class) [11 members] [id: typescript:Transformation]
-  Transformation.constructor (constructor) [id: typescript:Transformation.constructor]
-  Transformation.clone (method) [id: typescript:Transformation.clone]
-  Transformation.translate (method) [id: typescript:Transformation.translate]
-  Transformation.rotate (method) [id: typescript:Transformation.rotate]
-  Transformation.mirror (method) [id: typescript:Transformation.mirror]
-  Transformation.scale (method) [id: typescript:Transformation.scale]
-  Transformation.inverse (method) [id: typescript:Transformation.inverse]
-  Transformation.inverted (method) [id: typescript:Transformation.inverted]
-  Transformation.coordSystemChange (method) [id: typescript:Transformation.coordSystemChange]
-  Transformation.transformPoint (method) [id: typescript:Transformation.transformPoint]
-  Transformation.transform (method) [id: typescript:Transformation.transform]
-Vector (class) [21 members] [id: typescript:Vector]
-  Vector.constructor (constructor) [id: typescript:Vector.constructor]
-  Vector.repr (property) [id: typescript:Vector.repr]
-  Vector.x (property) [id: typescript:Vector.x]
-  Vector.y (property) [id: typescript:Vector.y]
-  Vector.z (property) [id: typescript:Vector.z]
-  Vector.Length (property) [id: typescript:Vector.Length]
-  Vector.toTuple (method) [id: typescript:Vector.toTuple]
-  Vector.cross (method) [id: typescript:Vector.cross]
-  Vector.dot (method) [id: typescript:Vector.dot]
-  Vector.sub (method) [id: typescript:Vector.sub]
-  Vector.add (method) [id: typescript:Vector.add]
-  Vector.multiply (method) [id: typescript:Vector.multiply]
-  Vector.normalized (method) [id: typescript:Vector.normalized]
-  Vector.normalize (method) [id: typescript:Vector.normalize]
-  Vector.getCenter (method) [id: typescript:Vector.getCenter]
-  Vector.getAngle (method) [id: typescript:Vector.getAngle]
-  Vector.projectToPlane (method) [id: typescript:Vector.projectToPlane]
-  Vector.equals (method) [id: typescript:Vector.equals]
-  Vector.toPnt (method) [id: typescript:Vector.toPnt]
-  Vector.toDir (method) [id: typescript:Vector.toDir]
-  Vector.rotate (method) [id: typescript:Vector.rotate]
-Vertex (class) [1 members] [id: typescript:Vertex]
-  Vertex.asTuple (method) [id: typescript:Vertex.asTuple]
-VolumePhysicalProperties (class) [1 members] [id: typescript:VolumePhysicalProperties]
-  VolumePhysicalProperties.volume (property) [id: typescript:VolumePhysicalProperties.volume]
-Wire (class) [1 members] [id: typescript:Wire]
-  Wire.offset2D (method) [id: typescript:Wire.offset2D]
-WrappingObj (class) [4 members] [id: typescript:WrappingObj]
-  WrappingObj.oc (property) [id: typescript:WrappingObj.oc]
-  WrappingObj.constructor (constructor) [id: typescript:WrappingObj.constructor]
-  WrappingObj.wrapped (property) [id: typescript:WrappingObj.wrapped]
-  WrappingObj.delete (method) [id: typescript:WrappingObj.delete]
+MeshShape (class) [27 members]
+  MeshShape.constructor (constructor)
+  MeshShape.clone (method)
+  MeshShape.fuse (method)
+  MeshShape.cut (method)
+  MeshShape.intersect (method)
+  MeshShape.translate (method)
+  MeshShape.translateX (method)
+  MeshShape.translateY (method)
+  MeshShape.translateZ (method)
+  MeshShape.rotate (method)
+  MeshShape.scale (method)
+  MeshShape.mirror (method)
+  MeshShape.simplify (method)
+  MeshShape.refine (method)
+  MeshShape.refineToLength (method)
+  MeshShape.refineToTolerance (method)
+  MeshShape.hull (method)
+  MeshShape.asOriginal (method)
+  MeshShape.mesh (method)
+  MeshShape.boundingBox (property)
+  MeshShape.volume (method)
+  MeshShape.surfaceArea (method)
+  MeshShape.numTri (method)
+  MeshShape.numVert (method)
+  MeshShape.numEdge (method)
+  MeshShape.isEmpty (property)
+  MeshShape.blobSTL (method) — Exports the mesh shape as an STL file Blob
+Plane (class) [18 members]
+  Plane.oc (property)
+  Plane.xDir (property)
+  Plane.yDir (property)
+  Plane.zDir (property)
+  Plane.constructor (constructor)
+  Plane.delete (method)
+  Plane.clone (method)
+  Plane.origin (property)
+  Plane.translateTo (method)
+  Plane.translate (method)
+  Plane.translateX (method)
+  Plane.translateY (method)
+  Plane.translateZ (method)
+  Plane.pivot (method)
+  Plane.rotate2DAxes (method)
+  Plane.setOrigin2d (method)
+  Plane.toLocalCoords (method)
+  Plane.toWorldCoords (method)
+ProjectionCamera (class) [10 members]
+  ProjectionCamera.constructor (constructor)
+  ProjectionCamera.position (property)
+  ProjectionCamera.direction (property)
+  ProjectionCamera.xAxis (property)
+  ProjectionCamera.yAxis (property)
+  ProjectionCamera.autoAxes (method)
+  ProjectionCamera.setPosition (method)
+  ProjectionCamera.setXAxis (method)
+  ProjectionCamera.setYAxis (method)
+  ProjectionCamera.lookAt (method)
+Shape (class) [26 members]
+  Shape.constructor (constructor)
+  Shape.clone (method)
+  Shape.serialize (method)
+  Shape.hashCode (property)
+  Shape.isNull (property)
+  Shape.isSame (method)
+  Shape.isEqual (method)
+  Shape.split (method) — Splits the solid parts of this shape with an oriented…
+  Shape.asShape3D (method) — Asserts that this shape is a 3D shape (Shell, Solid,…
+  Shape.simplify (method) — Simplifies the shape by removing unnecessary edges and faces
+  Shape.translate (method) — Translates the shape of an arbitrary vector
+  Shape.translateX (method) — Translates the shape on the X axis
+  Shape.translateY (method) — Translates the shape on the Y axis
+  Shape.translateZ (method) — Translates the shape on the Z axis
+  Shape.rotate (method) — Rotates the shape
+  Shape.mirror (method) — Mirrors the shape through a plane
+  Shape.scale (method) — Returns a scaled version of the shape
+  Shape.edges (property)
+  Shape.faces (property)
+  Shape.solids (property)
+  Shape.wires (property)
+  Shape.boundingBox (property)
+  Shape.mesh (method) — Exports the current shape as a set of triangle
+  Shape.meshEdges (method) — Exports the current shape as a set of lines
+  Shape.blobSTEP (method) — Exports the current shape as a STEP file as a…
+  Shape.blobSTL (method) — Exports the current shape as a STL file as a…
+Shell (class)
+Sketch (class) [14 members] — A line drawing to be acted upon
+  Sketch.wire (property)
+  Sketch.constructor (constructor)
+  Sketch.baseFace (property)
+  Sketch.delete (method)
+  Sketch.clone (method)
+  Sketch.defaultOrigin (property)
+  Sketch.defaultDirection (property)
+  Sketch.face (method) — Transforms the lines into a face
+  Sketch.wires (method)
+  Sketch.faces (method)
+  Sketch.revolve (method) — Revolves the drawing on an axis (defined by its direction…
+  Sketch.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction…
+  Sketch.sweepSketch (method) — Sweep along this sketch another sketch defined in the function…
+  Sketch.loftWith (method) — Loft between this sketch and another sketch (or an array…
+Sketcher (class) [41 members] — The FaceSketcher allows you to sketch on a plane
+  Sketcher.plane (property)
+  Sketcher.pointer (property)
+  Sketcher.firstPoint (property)
+  Sketcher.pendingEdges (property)
+  Sketcher.constructor (constructor)
+  Sketcher.delete (method)
+  Sketcher.movePointerTo (method) — Changes the point to start your drawing from
+  Sketcher.lineTo (method) — Draws a line from the current point to the point…
+  Sketcher.line (method) — Draws a line at the horizontal distance xDist and the…
+  Sketcher.vLine (method) — Draws a vertical line of length distance from the current…
+  Sketcher.hLine (method) — Draws an horizontal line of length distance from the current…
+  Sketcher.vLineTo (method) — Draws a vertical line to the y coordinate
+  Sketcher.hLineTo (method) — Draws an horizontal line to the x coordinate
+  Sketcher.polarLine (method) — Draws a line from the current point to the point…
+  Sketcher.polarLineTo (method) — Draws a line from the current point to the point…
+  Sketcher.tangentLine (method) — Draws a line from the current point as a tangent…
+  Sketcher.threePointsArcTo (method) — Draws an arc of circle by defining its end point…
+  Sketcher.threePointsArc (method) — Draws an arc of circle by defining its end point…
+  Sketcher.tangentArcTo (method) — Draws an arc of circle from the current point as…
+  Sketcher.tangentArc (method) — Draws an arc of circle from the current point as…
+  Sketcher.sagittaArcTo (method) — Draws an arc of circle by defining its end point…
+  Sketcher.sagittaArc (method) — Draws an arc of circle by defining its end point…
+  Sketcher.vSagittaArc (method) — Draws a vertical arc of circle by defining its end…
+  Sketcher.hSagittaArc (method) — Draws an horizontal arc of circle by defining its end…
+  Sketcher.bulgeArcTo (method) — Draws an arc of circle by defining its end point…
+  Sketcher.bulgeArc (method) — Draws an arc of circle by defining its end point…
+  Sketcher.vBulgeArc (method) — Draws a vertical arc of circle by defining its end…
+  Sketcher.hBulgeArc (method) — Draws an horizontal arc of circle by defining its end…
+  Sketcher.ellipseTo (method) — Draws an arc of ellipse by defining its end point…
+  Sketcher.ellipse (method) — Draws an arc of ellipse by defining its end point…
+  Sketcher.halfEllipseTo (method) — Draws an arc as half an ellipse, defined by the…
+  Sketcher.halfEllipse (method) — Draws an arc as half an ellipse, defined by the…
+  Sketcher.bezierCurveTo (method) — Draws a generic bezier curve to the end point, going…
+  Sketcher.quadraticBezierCurveTo (method) — Draws a quadratic bezier curve to the end point, using…
+  Sketcher.cubicBezierCurveTo (method) — Draws a cubic bezier curve to the end point, using…
+  Sketcher.smoothSplineTo (method) — Draws a cubic bezier curve to the end point, attempting…
+  Sketcher.smoothSpline (method) — Draws a cubic bezier curve to the end point, attempting…
+  Sketcher.buildWire (method)
+  Sketcher.done (method) — Stop drawing and returns the sketch
+  Sketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding…
+  Sketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
+Sketches (class) [6 members]
+  Sketches.sketches (property)
+  Sketches.constructor (constructor)
+  Sketches.wires (method)
+  Sketches.faces (method)
+  Sketches.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction…
+  Sketches.revolve (method) — Revolves the drawing on an axis (defined by its direction…
+Solid (class)
+Surface (class) [1 members]
+  Surface.surfaceType (property)
+SurfacePhysicalProperties (class) [1 members]
+  SurfacePhysicalProperties.area (property)
+Transformation (class) [11 members]
+  Transformation.constructor (constructor)
+  Transformation.clone (method)
+  Transformation.translate (method)
+  Transformation.rotate (method)
+  Transformation.mirror (method)
+  Transformation.scale (method)
+  Transformation.inverse (method)
+  Transformation.inverted (method)
+  Transformation.coordSystemChange (method)
+  Transformation.transformPoint (method)
+  Transformation.transform (method)
+Vector (class) [21 members]
+  Vector.constructor (constructor)
+  Vector.repr (property)
+  Vector.x (property)
+  Vector.y (property)
+  Vector.z (property)
+  Vector.Length (property)
+  Vector.toTuple (method)
+  Vector.cross (method)
+  Vector.dot (method)
+  Vector.sub (method)
+  Vector.add (method)
+  Vector.multiply (method)
+  Vector.normalized (method)
+  Vector.normalize (method)
+  Vector.getCenter (method)
+  Vector.getAngle (method)
+  Vector.projectToPlane (method)
+  Vector.equals (method)
+  Vector.toPnt (method)
+  Vector.toDir (method)
+  Vector.rotate (method)
+Vertex (class) [1 members]
+  Vertex.asTuple (method)
+VolumePhysicalProperties (class) [1 members]
+  VolumePhysicalProperties.volume (property)
+Wire (class) [1 members]
+  Wire.offset2D (method)
+WrappingObj (class) [4 members]
+  WrappingObj.oc (property)
+  WrappingObj.constructor (constructor)
+  WrappingObj.wrapped (property)
+  WrappingObj.delete (method)
 
 ## Types — `api-types.md`
 
-AnyShape (type) [id: typescript:AnyShape]
-AxisName (type) [id: typescript:AxisName]
-ChamferRadius (type) — We can defined a chamfer with only a number -… [id: typescript:ChamferRadius]
-Corner (type) [3 members] [id: typescript:Corner]
-  Corner.firstCurve (property) [id: typescript:Corner.firstCurve]
-  Corner.secondCurve (property) [id: typescript:Corner.secondCurve]
-  Corner.point (property) [id: typescript:Corner.point]
-CubeFace (type) [id: typescript:CubeFace]
-CurveType (type) [id: typescript:CurveType]
-Direction (type) — A vector-like point or a named principal axis [id: typescript:Direction]
-FilletRadius (type) [id: typescript:FilletRadius]
-FilterFcn (type) [2 members] [id: typescript:FilterFcn]
-  FilterFcn.element (property) [id: typescript:FilterFcn.element]
-  FilterFcn.normal (property) [id: typescript:FilterFcn.normal]
-FinderFunction (type) [id: typescript:FinderFunction]
-ManifoldBox (type) [2 members] [id: typescript:ManifoldBox]
-  ManifoldBox.min (property) [id: typescript:ManifoldBox.min]
-  ManifoldBox.max (property) [id: typescript:ManifoldBox.max]
-ManifoldInstance (type) [id: typescript:ManifoldInstance]
-ManifoldMesh (type) [id: typescript:ManifoldMesh]
-ManifoldVec3 (type) [id: typescript:ManifoldVec3]
-PlaneName (type) [id: typescript:PlaneName]
-PlaneSide (type) [id: typescript:PlaneSide]
-Point (type) [id: typescript:Point]
-Point2D (type) [id: typescript:Point2D]
-ProjectionPlane (type) [id: typescript:ProjectionPlane]
-RadiusConfig (type) — A generic way to define radii for fillet or chamfer… [id: typescript:RadiusConfig]
-ScaleMode (type) [id: typescript:ScaleMode]
-Shape2D (type) [id: typescript:Shape2D]
-Shape3D (type) [id: typescript:Shape3D]
-ShapeConfig (type) [7 members] [id: typescript:ShapeConfig]
-  ShapeConfig.shape (property) [id: typescript:ShapeConfig.shape]
-  ShapeConfig.color (property) [id: typescript:ShapeConfig.color]
-  ShapeConfig.alpha (property) [id: typescript:ShapeConfig.alpha]
-  ShapeConfig.name (property) [id: typescript:ShapeConfig.name]
-  ShapeConfig.metalness (property) — PBR metalness factor (0 = dielectric, 1 = metal) [id: typescript:ShapeConfig.metalness]
-  ShapeConfig.roughness (property) — PBR roughness factor — threaded to GLTF only (not STEP [id: typescript:ShapeConfig.roughness]
-  ShapeConfig.density (property) — Material density in g/cm3, written as the shape's STEP material [id: typescript:ShapeConfig.density]
-SimplePoint (type) [id: typescript:SimplePoint]
-SingleFace (type) [id: typescript:SingleFace]
-SplineConfig (type) [id: typescript:SplineConfig]
-SupportedUnit (type) [id: typescript:SupportedUnit]
-SurfaceType (type) [id: typescript:SurfaceType]
-TopoEntity (type) [id: typescript:TopoEntity]
+AnyShape (type)
+AxisName (type)
+ChamferRadius (type) — We can defined a chamfer with only a number -…
+Corner (type) [3 members]
+  Corner.firstCurve (property)
+  Corner.secondCurve (property)
+  Corner.point (property)
+CubeFace (type)
+CurveType (type)
+Direction (type) — A vector-like point or a named principal axis
+FilletRadius (type)
+FilterFcn (type) [2 members]
+  FilterFcn.element (property)
+  FilterFcn.normal (property)
+FinderFunction (type)
+ManifoldBox (type) [2 members]
+  ManifoldBox.min (property)
+  ManifoldBox.max (property)
+ManifoldInstance (type)
+ManifoldMesh (type)
+ManifoldVec3 (type)
+PlaneName (type)
+PlaneSide (type)
+Point (type)
+Point2D (type)
+ProjectionPlane (type)
+RadiusConfig (type) — A generic way to define radii for fillet or chamfer…
+ScaleMode (type)
+Shape2D (type)
+Shape3D (type)
+ShapeConfig (type) [7 members]
+  ShapeConfig.shape (property)
+  ShapeConfig.color (property)
+  ShapeConfig.alpha (property)
+  ShapeConfig.name (property)
+  ShapeConfig.metalness (property) — PBR metalness factor (0 = dielectric, 1 = metal)
+  ShapeConfig.roughness (property) — PBR roughness factor — threaded to GLTF only (not STEP
+  ShapeConfig.density (property) — Material density in g/cm3, written as the shape's STEP material
+SimplePoint (type)
+SingleFace (type)
+SplineConfig (type)
+SupportedUnit (type)
+SurfaceType (type)
+TopoEntity (type)
 
 ## Constants — `api-constants.md`
 
-AXIS_NAMES (constant) [id: typescript:AXIS_NAMES]
-DEG2RAD (constant) [id: typescript:DEG2RAD]
-HASH_CODE_MAX (constant) [id: typescript:HASH_CODE_MAX]
-RAD2DEG (constant) [id: typescript:RAD2DEG]
+AXIS_NAMES (constant)
+DEG2RAD (constant)
+HASH_CODE_MAX (constant)
+RAD2DEG (constant)
 
 ## Interfaces — `api-interfaces.md`
 
-BooleanOperationOptions (interface) [1 members] [id: typescript:BooleanOperationOptions]
-  BooleanOperationOptions.optimisation (property) [id: typescript:BooleanOperationOptions.optimisation]
-BSplineApproximationConfig (interface) [4 members] [id: typescript:BSplineApproximationConfig]
-  BSplineApproximationConfig.tolerance (property) [id: typescript:BSplineApproximationConfig.tolerance]
-  BSplineApproximationConfig.degMax (property) [id: typescript:BSplineApproximationConfig.degMax]
-  BSplineApproximationConfig.degMin (property) [id: typescript:BSplineApproximationConfig.degMin]
-  BSplineApproximationConfig.smoothing (property) [id: typescript:BSplineApproximationConfig.smoothing]
-CurveLike (interface) [9 members] [id: typescript:CurveLike]
-  CurveLike.delete (method) [id: typescript:CurveLike.delete]
-  CurveLike.Value (method) [id: typescript:CurveLike.Value]
-  CurveLike.IsPeriodic (method) [id: typescript:CurveLike.IsPeriodic]
-  CurveLike.Period (method) [id: typescript:CurveLike.Period]
-  CurveLike.IsClosed (method) [id: typescript:CurveLike.IsClosed]
-  CurveLike.FirstParameter (method) [id: typescript:CurveLike.FirstParameter]
-  CurveLike.LastParameter (method) [id: typescript:CurveLike.LastParameter]
-  CurveLike.GetType (method) [id: typescript:CurveLike.GetType]
-  CurveLike.D1 (method) [id: typescript:CurveLike.D1]
-Deletable (interface) [1 members] [id: typescript:Deletable]
-  Deletable.delete (property) [id: typescript:Deletable.delete]
-DrawingInterface (interface) [11 members] [id: typescript:DrawingInterface]
-  DrawingInterface.clone (method) [id: typescript:DrawingInterface.clone]
-  DrawingInterface.boundingBox (property) [id: typescript:DrawingInterface.boundingBox]
-  DrawingInterface.stretch (method) [id: typescript:DrawingInterface.stretch]
-  DrawingInterface.rotate (method) [id: typescript:DrawingInterface.rotate]
-  DrawingInterface.translate (method) [id: typescript:DrawingInterface.translate]
-  DrawingInterface.mirror (method) — Returns the mirror image of this drawing made with a… [id: typescript:DrawingInterface.mirror]
-  DrawingInterface.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane [id: typescript:DrawingInterface.sketchOnPlane]
-  DrawingInterface.sketchOnFace (method) — Returns the sketched version of the drawing, on a face [id: typescript:DrawingInterface.sketchOnFace]
-  DrawingInterface.toSVG (method) — Formats the drawing as an SVG image [id: typescript:DrawingInterface.toSVG]
-  DrawingInterface.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing [id: typescript:DrawingInterface.toSVGViewBox]
-  DrawingInterface.toSVGPaths (method) — Formats the drawing as a list of SVG paths [id: typescript:DrawingInterface.toSVGPaths]
-ExtrusionProfile (interface) [2 members] [id: typescript:ExtrusionProfile]
-  ExtrusionProfile.profile (property) [id: typescript:ExtrusionProfile.profile]
-  ExtrusionProfile.endFactor (property) [id: typescript:ExtrusionProfile.endFactor]
-FaceTriangulation (interface) [3 members] [id: typescript:FaceTriangulation]
-  FaceTriangulation.vertices (property) [id: typescript:FaceTriangulation.vertices]
-  FaceTriangulation.trianglesIndexes (property) [id: typescript:FaceTriangulation.trianglesIndexes]
-  FaceTriangulation.verticesNormals (property) [id: typescript:FaceTriangulation.verticesNormals]
-FaceUVBounds (interface) [4 members] [id: typescript:FaceUVBounds]
-  FaceUVBounds.uMin (property) [id: typescript:FaceUVBounds.uMin]
-  FaceUVBounds.uMax (property) [id: typescript:FaceUVBounds.uMax]
-  FaceUVBounds.vMin (property) [id: typescript:FaceUVBounds.vMin]
-  FaceUVBounds.vMax (property) [id: typescript:FaceUVBounds.vMax]
-GenericSketcher (interface) [34 members] — Sketchers allow the user to draw a two dimentional shape… [id: typescript:GenericSketcher]
-  GenericSketcher.movePointerTo (method) — Changes the point to start your drawing from [id: typescript:GenericSketcher.movePointerTo]
-  GenericSketcher.lineTo (method) — Draws a line from the current point to the point… [id: typescript:GenericSketcher.lineTo]
-  GenericSketcher.line (method) — Draws a line at the horizontal distance xDist and the… [id: typescript:GenericSketcher.line]
-  GenericSketcher.vLine (method) — Draws a vertical line of length distance from the current… [id: typescript:GenericSketcher.vLine]
-  GenericSketcher.hLine (method) — Draws an horizontal line of length distance from the current… [id: typescript:GenericSketcher.hLine]
-  GenericSketcher.vLineTo (method) — Draws a vertical line to the y coordinate [id: typescript:GenericSketcher.vLineTo]
-  GenericSketcher.hLineTo (method) — Draws an horizontal line to the x coordinate [id: typescript:GenericSketcher.hLineTo]
-  GenericSketcher.polarLineTo (method) — Draws a line from the current point to the point… [id: typescript:GenericSketcher.polarLineTo]
-  GenericSketcher.polarLine (method) — Draws a line from the current point to the point… [id: typescript:GenericSketcher.polarLine]
-  GenericSketcher.tangentLine (method) — Draws a line from the current point as a tangent… [id: typescript:GenericSketcher.tangentLine]
-  GenericSketcher.threePointsArcTo (method) — Draws an arc of circle by defining its end point… [id: typescript:GenericSketcher.threePointsArcTo]
-  GenericSketcher.threePointsArc (method) — Draws an arc of circle by defining its end point… [id: typescript:GenericSketcher.threePointsArc]
-  GenericSketcher.sagittaArcTo (method) — Draws an arc of circle by defining its end point… [id: typescript:GenericSketcher.sagittaArcTo]
-  GenericSketcher.sagittaArc (method) — Draws an arc of circle by defining its end point… [id: typescript:GenericSketcher.sagittaArc]
-  GenericSketcher.vSagittaArc (method) — Draws a vertical arc of circle by defining its end… [id: typescript:GenericSketcher.vSagittaArc]
-  GenericSketcher.hSagittaArc (method) — Draws an horizontal arc of circle by defining its end… [id: typescript:GenericSketcher.hSagittaArc]
-  GenericSketcher.bulgeArcTo (method) — Draws an arc of circle by defining its end point… [id: typescript:GenericSketcher.bulgeArcTo]
-  GenericSketcher.bulgeArc (method) — Draws an arc of circle by defining its end point… [id: typescript:GenericSketcher.bulgeArc]
-  GenericSketcher.vBulgeArc (method) — Draws a vertical arc of circle by defining its end… [id: typescript:GenericSketcher.vBulgeArc]
-  GenericSketcher.hBulgeArc (method) — Draws an horizontal arc of circle by defining its end… [id: typescript:GenericSketcher.hBulgeArc]
-  GenericSketcher.tangentArcTo (method) — Draws an arc of circle from the current point as… [id: typescript:GenericSketcher.tangentArcTo]
-  GenericSketcher.tangentArc (method) — Draws an arc of circle from the current point as… [id: typescript:GenericSketcher.tangentArc]
-  GenericSketcher.ellipseTo (method) — Draws an arc of ellipse by defining its end point… [id: typescript:GenericSketcher.ellipseTo]
-  GenericSketcher.ellipse (method) — Draws an arc of ellipse by defining its end point… [id: typescript:GenericSketcher.ellipse]
-  GenericSketcher.halfEllipseTo (method) — Draws an arc as half an ellipse, defined by the… [id: typescript:GenericSketcher.halfEllipseTo]
-  GenericSketcher.halfEllipse (method) — Draws an arc as half an ellipse, defined by the… [id: typescript:GenericSketcher.halfEllipse]
-  GenericSketcher.bezierCurveTo (method) — Draws a generic bezier curve to the end point, going… [id: typescript:GenericSketcher.bezierCurveTo]
-  GenericSketcher.quadraticBezierCurveTo (method) — Draws a quadratic bezier curve to the end point, using… [id: typescript:GenericSketcher.quadraticBezierCurveTo]
-  GenericSketcher.cubicBezierCurveTo (method) — Draws a cubic bezier curve to the end point, using… [id: typescript:GenericSketcher.cubicBezierCurveTo]
-  GenericSketcher.smoothSplineTo (method) — Draws a cubic bezier curve to the end point, attempting… [id: typescript:GenericSketcher.smoothSplineTo]
-  GenericSketcher.smoothSpline (method) — Draws a cubic bezier curve to the end point, attempting… [id: typescript:GenericSketcher.smoothSpline]
-  GenericSketcher.done (method) — Stop drawing and returns the sketch [id: typescript:GenericSketcher.done]
-  GenericSketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding… [id: typescript:GenericSketcher.close]
-  GenericSketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring… [id: typescript:GenericSketcher.closeWithMirror]
-GenericSweepConfig (interface) [7 members] [id: typescript:GenericSweepConfig]
-  GenericSweepConfig.frenet (property) [id: typescript:GenericSweepConfig.frenet]
-  GenericSweepConfig.auxiliarySpine (property) [id: typescript:GenericSweepConfig.auxiliarySpine]
-  GenericSweepConfig.law (property) [id: typescript:GenericSweepConfig.law]
-  GenericSweepConfig.transitionMode (property) [id: typescript:GenericSweepConfig.transitionMode]
-  GenericSweepConfig.withContact (property) [id: typescript:GenericSweepConfig.withContact]
-  GenericSweepConfig.support (property) [id: typescript:GenericSweepConfig.support]
-  GenericSweepConfig.forceProfileSpineOthogonality (property) [id: typescript:GenericSweepConfig.forceProfileSpineOthogonality]
-LoftConfig (interface) [3 members] [id: typescript:LoftConfig]
-  LoftConfig.ruled (property) [id: typescript:LoftConfig.ruled]
-  LoftConfig.startPoint (property) [id: typescript:LoftConfig.startPoint]
-  LoftConfig.endPoint (property) [id: typescript:LoftConfig.endPoint]
-MeshOptions (interface) [2 members] [id: typescript:MeshOptions]
-  MeshOptions.tolerance (property) [id: typescript:MeshOptions.tolerance]
-  MeshOptions.angularTolerance (property) [id: typescript:MeshOptions.angularTolerance]
-MeshShapeMesh (interface) [5 members] [id: typescript:MeshShapeMesh]
-  MeshShapeMesh.vertices (property) [id: typescript:MeshShapeMesh.vertices]
-  MeshShapeMesh.triangles (property) [id: typescript:MeshShapeMesh.triangles]
-  MeshShapeMesh.normals (property) [id: typescript:MeshShapeMesh.normals]
-  MeshShapeMesh.vertProperties (property) [id: typescript:MeshShapeMesh.vertProperties]
-  MeshShapeMesh.numProp (property) [id: typescript:MeshShapeMesh.numProp]
-PlaneFace (interface) [2 members] [id: typescript:PlaneFace]
-  PlaneFace.pointOnSurface (method) [id: typescript:PlaneFace.pointOnSurface]
-  PlaneFace.normalAt (method) [id: typescript:PlaneFace.normalAt]
-PlaneSplitResult (interface) [3 members] — Pieces grouped by their position relative to an oriented plane [id: typescript:PlaneSplitResult]
-  PlaneSplitResult.positive (property) [id: typescript:PlaneSplitResult.positive]
-  PlaneSplitResult.negative (property) [id: typescript:PlaneSplitResult.negative]
-  PlaneSplitResult.on (property) [id: typescript:PlaneSplitResult.on]
-Shape3DLike (interface) [12 members] [id: typescript:Shape3DLike]
-  Shape3DLike.fuse (method) [id: typescript:Shape3DLike.fuse]
-  Shape3DLike.cut (method) [id: typescript:Shape3DLike.cut]
-  Shape3DLike.intersect (method) [id: typescript:Shape3DLike.intersect]
-  Shape3DLike.translate (method) [id: typescript:Shape3DLike.translate]
-  Shape3DLike.translateX (method) [id: typescript:Shape3DLike.translateX]
-  Shape3DLike.translateY (method) [id: typescript:Shape3DLike.translateY]
-  Shape3DLike.translateZ (method) [id: typescript:Shape3DLike.translateZ]
-  Shape3DLike.rotate (method) [id: typescript:Shape3DLike.rotate]
-  Shape3DLike.scale (method) [id: typescript:Shape3DLike.scale]
-  Shape3DLike.mirror (method) [id: typescript:Shape3DLike.mirror]
-  Shape3DLike.mesh (method) [id: typescript:Shape3DLike.mesh]
-  Shape3DLike.boundingBox (property) [id: typescript:Shape3DLike.boundingBox]
-ShapeEdgeMesh (interface) [2 members] [id: typescript:ShapeEdgeMesh]
-  ShapeEdgeMesh.lines (property) [id: typescript:ShapeEdgeMesh.lines]
-  ShapeEdgeMesh.edgeGroups (property) [id: typescript:ShapeEdgeMesh.edgeGroups]
-ShapeMesh (interface) [4 members] [id: typescript:ShapeMesh]
-  ShapeMesh.triangles (property) [id: typescript:ShapeMesh.triangles]
-  ShapeMesh.vertices (property) [id: typescript:ShapeMesh.vertices]
-  ShapeMesh.normals (property) [id: typescript:ShapeMesh.normals]
-  ShapeMesh.faceGroups (property) [id: typescript:ShapeMesh.faceGroups]
-SketchInterface (interface) [4 members] [id: typescript:SketchInterface]
-  SketchInterface.face (method) — Transforms the lines into a face [id: typescript:SketchInterface.face]
-  SketchInterface.revolve (method) — Revolves the drawing on an axis (defined by its direction… [id: typescript:SketchInterface.revolve]
-  SketchInterface.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction… [id: typescript:SketchInterface.extrude]
-  SketchInterface.loftWith (method) — Loft between this sketch and another sketch (or an array… [id: typescript:SketchInterface.loftWith]
-STLExportOptions (interface) [1 members] [id: typescript:STLExportOptions]
-  STLExportOptions.binary (property) [id: typescript:STLExportOptions.binary]
-TopologyMap (interface) [9 members] [id: typescript:TopologyMap]
-  TopologyMap.vertex (property) [id: typescript:TopologyMap.vertex]
-  TopologyMap.edge (property) [id: typescript:TopologyMap.edge]
-  TopologyMap.wire (property) [id: typescript:TopologyMap.wire]
-  TopologyMap.face (property) [id: typescript:TopologyMap.face]
-  TopologyMap.shell (property) [id: typescript:TopologyMap.shell]
-  TopologyMap.solid (property) [id: typescript:TopologyMap.solid]
-  TopologyMap.solidCompound (property) [id: typescript:TopologyMap.solidCompound]
-  TopologyMap.compound (property) [id: typescript:TopologyMap.compound]
-  TopologyMap.shape (property) [id: typescript:TopologyMap.shape]
+BooleanOperationOptions (interface) [1 members]
+  BooleanOperationOptions.optimisation (property)
+BSplineApproximationConfig (interface) [4 members]
+  BSplineApproximationConfig.tolerance (property)
+  BSplineApproximationConfig.degMax (property)
+  BSplineApproximationConfig.degMin (property)
+  BSplineApproximationConfig.smoothing (property)
+CurveLike (interface) [9 members]
+  CurveLike.delete (method)
+  CurveLike.Value (method)
+  CurveLike.IsPeriodic (method)
+  CurveLike.Period (method)
+  CurveLike.IsClosed (method)
+  CurveLike.FirstParameter (method)
+  CurveLike.LastParameter (method)
+  CurveLike.GetType (method)
+  CurveLike.D1 (method)
+Deletable (interface) [1 members]
+  Deletable.delete (property)
+DrawingInterface (interface) [11 members]
+  DrawingInterface.clone (method)
+  DrawingInterface.boundingBox (property)
+  DrawingInterface.stretch (method)
+  DrawingInterface.rotate (method)
+  DrawingInterface.translate (method)
+  DrawingInterface.mirror (method) — Returns the mirror image of this drawing made with a…
+  DrawingInterface.sketchOnPlane (method) — Returns the sketched version of the drawing, on a plane
+  DrawingInterface.sketchOnFace (method) — Returns the sketched version of the drawing, on a face
+  DrawingInterface.toSVG (method) — Formats the drawing as an SVG image
+  DrawingInterface.toSVGViewBox (method) — Returns the SVG viewbox that corresponds to this drawing
+  DrawingInterface.toSVGPaths (method) — Formats the drawing as a list of SVG paths
+ExtrusionProfile (interface) [2 members]
+  ExtrusionProfile.profile (property)
+  ExtrusionProfile.endFactor (property)
+FaceTriangulation (interface) [3 members]
+  FaceTriangulation.vertices (property)
+  FaceTriangulation.trianglesIndexes (property)
+  FaceTriangulation.verticesNormals (property)
+FaceUVBounds (interface) [4 members]
+  FaceUVBounds.uMin (property)
+  FaceUVBounds.uMax (property)
+  FaceUVBounds.vMin (property)
+  FaceUVBounds.vMax (property)
+GenericSketcher (interface) [34 members] — Sketchers allow the user to draw a two dimentional shape…
+  GenericSketcher.movePointerTo (method) — Changes the point to start your drawing from
+  GenericSketcher.lineTo (method) — Draws a line from the current point to the point…
+  GenericSketcher.line (method) — Draws a line at the horizontal distance xDist and the…
+  GenericSketcher.vLine (method) — Draws a vertical line of length distance from the current…
+  GenericSketcher.hLine (method) — Draws an horizontal line of length distance from the current…
+  GenericSketcher.vLineTo (method) — Draws a vertical line to the y coordinate
+  GenericSketcher.hLineTo (method) — Draws an horizontal line to the x coordinate
+  GenericSketcher.polarLineTo (method) — Draws a line from the current point to the point…
+  GenericSketcher.polarLine (method) — Draws a line from the current point to the point…
+  GenericSketcher.tangentLine (method) — Draws a line from the current point as a tangent…
+  GenericSketcher.threePointsArcTo (method) — Draws an arc of circle by defining its end point…
+  GenericSketcher.threePointsArc (method) — Draws an arc of circle by defining its end point…
+  GenericSketcher.sagittaArcTo (method) — Draws an arc of circle by defining its end point…
+  GenericSketcher.sagittaArc (method) — Draws an arc of circle by defining its end point…
+  GenericSketcher.vSagittaArc (method) — Draws a vertical arc of circle by defining its end…
+  GenericSketcher.hSagittaArc (method) — Draws an horizontal arc of circle by defining its end…
+  GenericSketcher.bulgeArcTo (method) — Draws an arc of circle by defining its end point…
+  GenericSketcher.bulgeArc (method) — Draws an arc of circle by defining its end point…
+  GenericSketcher.vBulgeArc (method) — Draws a vertical arc of circle by defining its end…
+  GenericSketcher.hBulgeArc (method) — Draws an horizontal arc of circle by defining its end…
+  GenericSketcher.tangentArcTo (method) — Draws an arc of circle from the current point as…
+  GenericSketcher.tangentArc (method) — Draws an arc of circle from the current point as…
+  GenericSketcher.ellipseTo (method) — Draws an arc of ellipse by defining its end point…
+  GenericSketcher.ellipse (method) — Draws an arc of ellipse by defining its end point…
+  GenericSketcher.halfEllipseTo (method) — Draws an arc as half an ellipse, defined by the…
+  GenericSketcher.halfEllipse (method) — Draws an arc as half an ellipse, defined by the…
+  GenericSketcher.bezierCurveTo (method) — Draws a generic bezier curve to the end point, going…
+  GenericSketcher.quadraticBezierCurveTo (method) — Draws a quadratic bezier curve to the end point, using…
+  GenericSketcher.cubicBezierCurveTo (method) — Draws a cubic bezier curve to the end point, using…
+  GenericSketcher.smoothSplineTo (method) — Draws a cubic bezier curve to the end point, attempting…
+  GenericSketcher.smoothSpline (method) — Draws a cubic bezier curve to the end point, attempting…
+  GenericSketcher.done (method) — Stop drawing and returns the sketch
+  GenericSketcher.close (method) — Stop drawing, make sure the sketch is closed (by adding…
+  GenericSketcher.closeWithMirror (method) — Stop drawing, make sure the sketch is closed (by mirroring…
+GenericSweepConfig (interface) [7 members]
+  GenericSweepConfig.frenet (property)
+  GenericSweepConfig.auxiliarySpine (property)
+  GenericSweepConfig.law (property)
+  GenericSweepConfig.transitionMode (property)
+  GenericSweepConfig.withContact (property)
+  GenericSweepConfig.support (property)
+  GenericSweepConfig.forceProfileSpineOthogonality (property)
+LoftConfig (interface) [3 members]
+  LoftConfig.ruled (property)
+  LoftConfig.startPoint (property)
+  LoftConfig.endPoint (property)
+MeshOptions (interface) [2 members]
+  MeshOptions.tolerance (property)
+  MeshOptions.angularTolerance (property)
+MeshShapeMesh (interface) [5 members]
+  MeshShapeMesh.vertices (property)
+  MeshShapeMesh.triangles (property)
+  MeshShapeMesh.normals (property)
+  MeshShapeMesh.vertProperties (property)
+  MeshShapeMesh.numProp (property)
+PlaneFace (interface) [2 members]
+  PlaneFace.pointOnSurface (method)
+  PlaneFace.normalAt (method)
+PlaneSplitResult (interface) [3 members] — Pieces grouped by their position relative to an oriented plane
+  PlaneSplitResult.positive (property)
+  PlaneSplitResult.negative (property)
+  PlaneSplitResult.on (property)
+Shape3DLike (interface) [12 members]
+  Shape3DLike.fuse (method)
+  Shape3DLike.cut (method)
+  Shape3DLike.intersect (method)
+  Shape3DLike.translate (method)
+  Shape3DLike.translateX (method)
+  Shape3DLike.translateY (method)
+  Shape3DLike.translateZ (method)
+  Shape3DLike.rotate (method)
+  Shape3DLike.scale (method)
+  Shape3DLike.mirror (method)
+  Shape3DLike.mesh (method)
+  Shape3DLike.boundingBox (property)
+ShapeEdgeMesh (interface) [2 members]
+  ShapeEdgeMesh.lines (property)
+  ShapeEdgeMesh.edgeGroups (property)
+ShapeMesh (interface) [4 members]
+  ShapeMesh.triangles (property)
+  ShapeMesh.vertices (property)
+  ShapeMesh.normals (property)
+  ShapeMesh.faceGroups (property)
+SketchInterface (interface) [4 members]
+  SketchInterface.face (method) — Transforms the lines into a face
+  SketchInterface.revolve (method) — Revolves the drawing on an axis (defined by its direction…
+  SketchInterface.extrude (method) — Extrudes the sketch to a certain distance.(along the default direction…
+  SketchInterface.loftWith (method) — Loft between this sketch and another sketch (or an array…
+STLExportOptions (interface) [1 members]
+  STLExportOptions.binary (property)
+TopologyMap (interface) [9 members]
+  TopologyMap.vertex (property)
+  TopologyMap.edge (property)
+  TopologyMap.wire (property)
+  TopologyMap.face (property)
+  TopologyMap.shell (property)
+  TopologyMap.solid (property)
+  TopologyMap.solidCompound (property)
+  TopologyMap.compound (property)
+  TopologyMap.shape (property)

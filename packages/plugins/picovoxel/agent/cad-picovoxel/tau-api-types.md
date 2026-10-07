@@ -33,6 +33,13 @@ PicovoxelModel: GlbResources & Readonly<{
 // A PicoVoxel model's single part, flat list, or model with shared image resources
 // Remarks: Raw geometry keeps generated names. Descriptors attach a display name at the output boundary; names are trimmed, blank names fall back to `Shape N`, and duplicates are preserved. Names do not create stable identity, hierarchy or assembly occurrences. Descriptor materials apply to the final geometry and are copied with image bytes when returned. Absent material retains CAD defaults; authored glTF alpha modes and double-sided values are preserved.
 PicovoxelResult: Part | readonly Part[] | PicovoxelModel
+// Example (Name a delivered part):
+//   import type { Pico } from 'picovoxel';
+//   import type { PicovoxelResult } from '@taucad/picovoxel';
+//   
+//   export default function main(pico: Pico): PicovoxelResult {
+//   return { shape: pico.createVoxels({ shape: 'sphere', radius: 10 }), name: 'Housing' };
+//   }
 
 // Standard glTF 2.0 material properties, including the ratified physical material extensions
 Material: Omit<GLTF.IMaterial, 'extensions' | 'extras'> & {

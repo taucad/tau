@@ -2,778 +2,778 @@
 
 @jscad/modeling 2.13.0 · 729 symbols · extracted by TypeScript 5.9.3.
 
-Every symbol appears here exactly once. The heading above each block names the file with its signature.
+Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
 ## colors — `api-colors.md`
 
-colors (namespace) [16 members] [id: typescript:colors]
-  colors.colorize (function) [id: typescript:colors.colorize]
-  colors.colorNameToRgb (function) [id: typescript:colors.colorNameToRgb]
-  colors.cssColors (namespace) [147 members] [id: typescript:colors.cssColors]
-    colors.cssColors.black (constant) [id: typescript:colors.cssColors.black]
-    colors.cssColors.silver (constant) [id: typescript:colors.cssColors.silver]
-    colors.cssColors.gray (constant) [id: typescript:colors.cssColors.gray]
-    colors.cssColors.white (constant) [id: typescript:colors.cssColors.white]
-    colors.cssColors.maroon (constant) [id: typescript:colors.cssColors.maroon]
-    colors.cssColors.red (constant) [id: typescript:colors.cssColors.red]
-    colors.cssColors.purple (constant) [id: typescript:colors.cssColors.purple]
-    colors.cssColors.fuchsia (constant) [id: typescript:colors.cssColors.fuchsia]
-    colors.cssColors.green (constant) [id: typescript:colors.cssColors.green]
-    colors.cssColors.lime (constant) [id: typescript:colors.cssColors.lime]
-    colors.cssColors.olive (constant) [id: typescript:colors.cssColors.olive]
-    colors.cssColors.yellow (constant) [id: typescript:colors.cssColors.yellow]
-    colors.cssColors.navy (constant) [id: typescript:colors.cssColors.navy]
-    colors.cssColors.blue (constant) [id: typescript:colors.cssColors.blue]
-    colors.cssColors.teal (constant) [id: typescript:colors.cssColors.teal]
-    colors.cssColors.aqua (constant) [id: typescript:colors.cssColors.aqua]
-    colors.cssColors.aliceblue (constant) [id: typescript:colors.cssColors.aliceblue]
-    colors.cssColors.antiquewhite (constant) [id: typescript:colors.cssColors.antiquewhite]
-    colors.cssColors.aquamarine (constant) [id: typescript:colors.cssColors.aquamarine]
-    colors.cssColors.azure (constant) [id: typescript:colors.cssColors.azure]
-    colors.cssColors.beige (constant) [id: typescript:colors.cssColors.beige]
-    colors.cssColors.bisque (constant) [id: typescript:colors.cssColors.bisque]
-    colors.cssColors.blanchedalmond (constant) [id: typescript:colors.cssColors.blanchedalmond]
-    colors.cssColors.blueviolet (constant) [id: typescript:colors.cssColors.blueviolet]
-    colors.cssColors.brown (constant) [id: typescript:colors.cssColors.brown]
-    colors.cssColors.burlywood (constant) [id: typescript:colors.cssColors.burlywood]
-    colors.cssColors.cadetblue (constant) [id: typescript:colors.cssColors.cadetblue]
-    colors.cssColors.chartreuse (constant) [id: typescript:colors.cssColors.chartreuse]
-    colors.cssColors.chocolate (constant) [id: typescript:colors.cssColors.chocolate]
-    colors.cssColors.coral (constant) [id: typescript:colors.cssColors.coral]
-    colors.cssColors.cornflowerblue (constant) [id: typescript:colors.cssColors.cornflowerblue]
-    colors.cssColors.cornsilk (constant) [id: typescript:colors.cssColors.cornsilk]
-    colors.cssColors.crimson (constant) [id: typescript:colors.cssColors.crimson]
-    colors.cssColors.cyan (constant) [id: typescript:colors.cssColors.cyan]
-    colors.cssColors.darkblue (constant) [id: typescript:colors.cssColors.darkblue]
-    colors.cssColors.darkcyan (constant) [id: typescript:colors.cssColors.darkcyan]
-    colors.cssColors.darkgoldenrod (constant) [id: typescript:colors.cssColors.darkgoldenrod]
-    colors.cssColors.darkgray (constant) [id: typescript:colors.cssColors.darkgray]
-    colors.cssColors.darkgreen (constant) [id: typescript:colors.cssColors.darkgreen]
-    colors.cssColors.darkgrey (constant) [id: typescript:colors.cssColors.darkgrey]
-    colors.cssColors.darkkhaki (constant) [id: typescript:colors.cssColors.darkkhaki]
-    colors.cssColors.darkmagenta (constant) [id: typescript:colors.cssColors.darkmagenta]
-    colors.cssColors.darkolivegreen (constant) [id: typescript:colors.cssColors.darkolivegreen]
-    colors.cssColors.darkorange (constant) [id: typescript:colors.cssColors.darkorange]
-    colors.cssColors.darkorchid (constant) [id: typescript:colors.cssColors.darkorchid]
-    colors.cssColors.darkred (constant) [id: typescript:colors.cssColors.darkred]
-    colors.cssColors.darksalmon (constant) [id: typescript:colors.cssColors.darksalmon]
-    colors.cssColors.darkseagreen (constant) [id: typescript:colors.cssColors.darkseagreen]
-    colors.cssColors.darkslateblue (constant) [id: typescript:colors.cssColors.darkslateblue]
-    colors.cssColors.darkslategray (constant) [id: typescript:colors.cssColors.darkslategray]
-    colors.cssColors.darkslategrey (constant) [id: typescript:colors.cssColors.darkslategrey]
-    colors.cssColors.darkturquoise (constant) [id: typescript:colors.cssColors.darkturquoise]
-    colors.cssColors.darkviolet (constant) [id: typescript:colors.cssColors.darkviolet]
-    colors.cssColors.deeppink (constant) [id: typescript:colors.cssColors.deeppink]
-    colors.cssColors.deepskyblue (constant) [id: typescript:colors.cssColors.deepskyblue]
-    colors.cssColors.dimgray (constant) [id: typescript:colors.cssColors.dimgray]
-    colors.cssColors.dimgrey (constant) [id: typescript:colors.cssColors.dimgrey]
-    colors.cssColors.dodgerblue (constant) [id: typescript:colors.cssColors.dodgerblue]
-    colors.cssColors.firebrick (constant) [id: typescript:colors.cssColors.firebrick]
-    colors.cssColors.floralwhite (constant) [id: typescript:colors.cssColors.floralwhite]
-    colors.cssColors.forestgreen (constant) [id: typescript:colors.cssColors.forestgreen]
-    colors.cssColors.gainsboro (constant) [id: typescript:colors.cssColors.gainsboro]
-    colors.cssColors.ghostwhite (constant) [id: typescript:colors.cssColors.ghostwhite]
-    colors.cssColors.gold (constant) [id: typescript:colors.cssColors.gold]
-    colors.cssColors.goldenrod (constant) [id: typescript:colors.cssColors.goldenrod]
-    colors.cssColors.greenyellow (constant) [id: typescript:colors.cssColors.greenyellow]
-    colors.cssColors.grey (constant) [id: typescript:colors.cssColors.grey]
-    colors.cssColors.honeydew (constant) [id: typescript:colors.cssColors.honeydew]
-    colors.cssColors.hotpink (constant) [id: typescript:colors.cssColors.hotpink]
-    colors.cssColors.indianred (constant) [id: typescript:colors.cssColors.indianred]
-    colors.cssColors.indigo (constant) [id: typescript:colors.cssColors.indigo]
-    colors.cssColors.ivory (constant) [id: typescript:colors.cssColors.ivory]
-    colors.cssColors.khaki (constant) [id: typescript:colors.cssColors.khaki]
-    colors.cssColors.lavender (constant) [id: typescript:colors.cssColors.lavender]
-    colors.cssColors.lavenderblush (constant) [id: typescript:colors.cssColors.lavenderblush]
-    colors.cssColors.lawngreen (constant) [id: typescript:colors.cssColors.lawngreen]
-    colors.cssColors.lemonchiffon (constant) [id: typescript:colors.cssColors.lemonchiffon]
-    colors.cssColors.lightblue (constant) [id: typescript:colors.cssColors.lightblue]
-    colors.cssColors.lightcoral (constant) [id: typescript:colors.cssColors.lightcoral]
-    colors.cssColors.lightcyan (constant) [id: typescript:colors.cssColors.lightcyan]
-    colors.cssColors.lightgoldenrodyellow (constant) [id: typescript:colors.cssColors.lightgoldenrodyellow]
-    colors.cssColors.lightgray (constant) [id: typescript:colors.cssColors.lightgray]
-    colors.cssColors.lightgreen (constant) [id: typescript:colors.cssColors.lightgreen]
-    colors.cssColors.lightgrey (constant) [id: typescript:colors.cssColors.lightgrey]
-    colors.cssColors.lightpink (constant) [id: typescript:colors.cssColors.lightpink]
-    colors.cssColors.lightsalmon (constant) [id: typescript:colors.cssColors.lightsalmon]
-    colors.cssColors.lightseagreen (constant) [id: typescript:colors.cssColors.lightseagreen]
-    colors.cssColors.lightskyblue (constant) [id: typescript:colors.cssColors.lightskyblue]
-    colors.cssColors.lightslategray (constant) [id: typescript:colors.cssColors.lightslategray]
-    colors.cssColors.lightslategrey (constant) [id: typescript:colors.cssColors.lightslategrey]
-    colors.cssColors.lightsteelblue (constant) [id: typescript:colors.cssColors.lightsteelblue]
-    colors.cssColors.lightyellow (constant) [id: typescript:colors.cssColors.lightyellow]
-    colors.cssColors.limegreen (constant) [id: typescript:colors.cssColors.limegreen]
-    colors.cssColors.linen (constant) [id: typescript:colors.cssColors.linen]
-    colors.cssColors.magenta (constant) [id: typescript:colors.cssColors.magenta]
-    colors.cssColors.mediumaquamarine (constant) [id: typescript:colors.cssColors.mediumaquamarine]
-    colors.cssColors.mediumblue (constant) [id: typescript:colors.cssColors.mediumblue]
-    colors.cssColors.mediumorchid (constant) [id: typescript:colors.cssColors.mediumorchid]
-    colors.cssColors.mediumpurple (constant) [id: typescript:colors.cssColors.mediumpurple]
-    colors.cssColors.mediumseagreen (constant) [id: typescript:colors.cssColors.mediumseagreen]
-    colors.cssColors.mediumslateblue (constant) [id: typescript:colors.cssColors.mediumslateblue]
-    colors.cssColors.mediumspringgreen (constant) [id: typescript:colors.cssColors.mediumspringgreen]
-    colors.cssColors.mediumturquoise (constant) [id: typescript:colors.cssColors.mediumturquoise]
-    colors.cssColors.mediumvioletred (constant) [id: typescript:colors.cssColors.mediumvioletred]
-    colors.cssColors.midnightblue (constant) [id: typescript:colors.cssColors.midnightblue]
-    colors.cssColors.mintcream (constant) [id: typescript:colors.cssColors.mintcream]
-    colors.cssColors.mistyrose (constant) [id: typescript:colors.cssColors.mistyrose]
-    colors.cssColors.moccasin (constant) [id: typescript:colors.cssColors.moccasin]
-    colors.cssColors.navajowhite (constant) [id: typescript:colors.cssColors.navajowhite]
-    colors.cssColors.oldlace (constant) [id: typescript:colors.cssColors.oldlace]
-    colors.cssColors.olivedrab (constant) [id: typescript:colors.cssColors.olivedrab]
-    colors.cssColors.orange (constant) [id: typescript:colors.cssColors.orange]
-    colors.cssColors.orangered (constant) [id: typescript:colors.cssColors.orangered]
-    colors.cssColors.orchid (constant) [id: typescript:colors.cssColors.orchid]
-    colors.cssColors.palegoldenrod (constant) [id: typescript:colors.cssColors.palegoldenrod]
-    colors.cssColors.palegreen (constant) [id: typescript:colors.cssColors.palegreen]
-    colors.cssColors.paleturquoise (constant) [id: typescript:colors.cssColors.paleturquoise]
-    colors.cssColors.palevioletred (constant) [id: typescript:colors.cssColors.palevioletred]
-    colors.cssColors.papayawhip (constant) [id: typescript:colors.cssColors.papayawhip]
-    colors.cssColors.peachpuff (constant) [id: typescript:colors.cssColors.peachpuff]
-    colors.cssColors.peru (constant) [id: typescript:colors.cssColors.peru]
-    colors.cssColors.pink (constant) [id: typescript:colors.cssColors.pink]
-    colors.cssColors.plum (constant) [id: typescript:colors.cssColors.plum]
-    colors.cssColors.powderblue (constant) [id: typescript:colors.cssColors.powderblue]
-    colors.cssColors.rosybrown (constant) [id: typescript:colors.cssColors.rosybrown]
-    colors.cssColors.royalblue (constant) [id: typescript:colors.cssColors.royalblue]
-    colors.cssColors.saddlebrown (constant) [id: typescript:colors.cssColors.saddlebrown]
-    colors.cssColors.salmon (constant) [id: typescript:colors.cssColors.salmon]
-    colors.cssColors.sandybrown (constant) [id: typescript:colors.cssColors.sandybrown]
-    colors.cssColors.seagreen (constant) [id: typescript:colors.cssColors.seagreen]
-    colors.cssColors.seashell (constant) [id: typescript:colors.cssColors.seashell]
-    colors.cssColors.sienna (constant) [id: typescript:colors.cssColors.sienna]
-    colors.cssColors.skyblue (constant) [id: typescript:colors.cssColors.skyblue]
-    colors.cssColors.slateblue (constant) [id: typescript:colors.cssColors.slateblue]
-    colors.cssColors.slategray (constant) [id: typescript:colors.cssColors.slategray]
-    colors.cssColors.slategrey (constant) [id: typescript:colors.cssColors.slategrey]
-    colors.cssColors.snow (constant) [id: typescript:colors.cssColors.snow]
-    colors.cssColors.springgreen (constant) [id: typescript:colors.cssColors.springgreen]
-    colors.cssColors.steelblue (constant) [id: typescript:colors.cssColors.steelblue]
-    colors.cssColors.tan (constant) [id: typescript:colors.cssColors.tan]
-    colors.cssColors.thistle (constant) [id: typescript:colors.cssColors.thistle]
-    colors.cssColors.tomato (constant) [id: typescript:colors.cssColors.tomato]
-    colors.cssColors.turquoise (constant) [id: typescript:colors.cssColors.turquoise]
-    colors.cssColors.violet (constant) [id: typescript:colors.cssColors.violet]
-    colors.cssColors.wheat (constant) [id: typescript:colors.cssColors.wheat]
-    colors.cssColors.whitesmoke (constant) [id: typescript:colors.cssColors.whitesmoke]
-    colors.cssColors.yellowgreen (constant) [id: typescript:colors.cssColors.yellowgreen]
-  colors.hexToRgb (function) [id: typescript:colors.hexToRgb]
-  colors.hslToRgb (function) [id: typescript:colors.hslToRgb]
-  colors.hsvToRgb (function) [id: typescript:colors.hsvToRgb]
-  colors.hueToColorComponent (function) [id: typescript:colors.hueToColorComponent]
-  colors.rgbToHex (function) [id: typescript:colors.rgbToHex]
-  colors.rgbToHsl (function) [id: typescript:colors.rgbToHsl]
-  colors.rgbToHsv (function) [id: typescript:colors.rgbToHsv]
-  colors.RGB (type) [id: typescript:colors.RGB]
-  colors.RGBA (type) [id: typescript:colors.RGBA]
-  colors.HSL (type) [id: typescript:colors.HSL]
-  colors.HSLA (type) [id: typescript:colors.HSLA]
-  colors.HSV (type) [id: typescript:colors.HSV]
-  colors.HSVA (type) [id: typescript:colors.HSVA]
+colors (namespace) [16 members]
+  colors.colorize (function)
+  colors.colorNameToRgb (function)
+  colors.cssColors (namespace) [147 members]
+    colors.cssColors.black (constant)
+    colors.cssColors.silver (constant)
+    colors.cssColors.gray (constant)
+    colors.cssColors.white (constant)
+    colors.cssColors.maroon (constant)
+    colors.cssColors.red (constant)
+    colors.cssColors.purple (constant)
+    colors.cssColors.fuchsia (constant)
+    colors.cssColors.green (constant)
+    colors.cssColors.lime (constant)
+    colors.cssColors.olive (constant)
+    colors.cssColors.yellow (constant)
+    colors.cssColors.navy (constant)
+    colors.cssColors.blue (constant)
+    colors.cssColors.teal (constant)
+    colors.cssColors.aqua (constant)
+    colors.cssColors.aliceblue (constant)
+    colors.cssColors.antiquewhite (constant)
+    colors.cssColors.aquamarine (constant)
+    colors.cssColors.azure (constant)
+    colors.cssColors.beige (constant)
+    colors.cssColors.bisque (constant)
+    colors.cssColors.blanchedalmond (constant)
+    colors.cssColors.blueviolet (constant)
+    colors.cssColors.brown (constant)
+    colors.cssColors.burlywood (constant)
+    colors.cssColors.cadetblue (constant)
+    colors.cssColors.chartreuse (constant)
+    colors.cssColors.chocolate (constant)
+    colors.cssColors.coral (constant)
+    colors.cssColors.cornflowerblue (constant)
+    colors.cssColors.cornsilk (constant)
+    colors.cssColors.crimson (constant)
+    colors.cssColors.cyan (constant)
+    colors.cssColors.darkblue (constant)
+    colors.cssColors.darkcyan (constant)
+    colors.cssColors.darkgoldenrod (constant)
+    colors.cssColors.darkgray (constant)
+    colors.cssColors.darkgreen (constant)
+    colors.cssColors.darkgrey (constant)
+    colors.cssColors.darkkhaki (constant)
+    colors.cssColors.darkmagenta (constant)
+    colors.cssColors.darkolivegreen (constant)
+    colors.cssColors.darkorange (constant)
+    colors.cssColors.darkorchid (constant)
+    colors.cssColors.darkred (constant)
+    colors.cssColors.darksalmon (constant)
+    colors.cssColors.darkseagreen (constant)
+    colors.cssColors.darkslateblue (constant)
+    colors.cssColors.darkslategray (constant)
+    colors.cssColors.darkslategrey (constant)
+    colors.cssColors.darkturquoise (constant)
+    colors.cssColors.darkviolet (constant)
+    colors.cssColors.deeppink (constant)
+    colors.cssColors.deepskyblue (constant)
+    colors.cssColors.dimgray (constant)
+    colors.cssColors.dimgrey (constant)
+    colors.cssColors.dodgerblue (constant)
+    colors.cssColors.firebrick (constant)
+    colors.cssColors.floralwhite (constant)
+    colors.cssColors.forestgreen (constant)
+    colors.cssColors.gainsboro (constant)
+    colors.cssColors.ghostwhite (constant)
+    colors.cssColors.gold (constant)
+    colors.cssColors.goldenrod (constant)
+    colors.cssColors.greenyellow (constant)
+    colors.cssColors.grey (constant)
+    colors.cssColors.honeydew (constant)
+    colors.cssColors.hotpink (constant)
+    colors.cssColors.indianred (constant)
+    colors.cssColors.indigo (constant)
+    colors.cssColors.ivory (constant)
+    colors.cssColors.khaki (constant)
+    colors.cssColors.lavender (constant)
+    colors.cssColors.lavenderblush (constant)
+    colors.cssColors.lawngreen (constant)
+    colors.cssColors.lemonchiffon (constant)
+    colors.cssColors.lightblue (constant)
+    colors.cssColors.lightcoral (constant)
+    colors.cssColors.lightcyan (constant)
+    colors.cssColors.lightgoldenrodyellow (constant)
+    colors.cssColors.lightgray (constant)
+    colors.cssColors.lightgreen (constant)
+    colors.cssColors.lightgrey (constant)
+    colors.cssColors.lightpink (constant)
+    colors.cssColors.lightsalmon (constant)
+    colors.cssColors.lightseagreen (constant)
+    colors.cssColors.lightskyblue (constant)
+    colors.cssColors.lightslategray (constant)
+    colors.cssColors.lightslategrey (constant)
+    colors.cssColors.lightsteelblue (constant)
+    colors.cssColors.lightyellow (constant)
+    colors.cssColors.limegreen (constant)
+    colors.cssColors.linen (constant)
+    colors.cssColors.magenta (constant)
+    colors.cssColors.mediumaquamarine (constant)
+    colors.cssColors.mediumblue (constant)
+    colors.cssColors.mediumorchid (constant)
+    colors.cssColors.mediumpurple (constant)
+    colors.cssColors.mediumseagreen (constant)
+    colors.cssColors.mediumslateblue (constant)
+    colors.cssColors.mediumspringgreen (constant)
+    colors.cssColors.mediumturquoise (constant)
+    colors.cssColors.mediumvioletred (constant)
+    colors.cssColors.midnightblue (constant)
+    colors.cssColors.mintcream (constant)
+    colors.cssColors.mistyrose (constant)
+    colors.cssColors.moccasin (constant)
+    colors.cssColors.navajowhite (constant)
+    colors.cssColors.oldlace (constant)
+    colors.cssColors.olivedrab (constant)
+    colors.cssColors.orange (constant)
+    colors.cssColors.orangered (constant)
+    colors.cssColors.orchid (constant)
+    colors.cssColors.palegoldenrod (constant)
+    colors.cssColors.palegreen (constant)
+    colors.cssColors.paleturquoise (constant)
+    colors.cssColors.palevioletred (constant)
+    colors.cssColors.papayawhip (constant)
+    colors.cssColors.peachpuff (constant)
+    colors.cssColors.peru (constant)
+    colors.cssColors.pink (constant)
+    colors.cssColors.plum (constant)
+    colors.cssColors.powderblue (constant)
+    colors.cssColors.rosybrown (constant)
+    colors.cssColors.royalblue (constant)
+    colors.cssColors.saddlebrown (constant)
+    colors.cssColors.salmon (constant)
+    colors.cssColors.sandybrown (constant)
+    colors.cssColors.seagreen (constant)
+    colors.cssColors.seashell (constant)
+    colors.cssColors.sienna (constant)
+    colors.cssColors.skyblue (constant)
+    colors.cssColors.slateblue (constant)
+    colors.cssColors.slategray (constant)
+    colors.cssColors.slategrey (constant)
+    colors.cssColors.snow (constant)
+    colors.cssColors.springgreen (constant)
+    colors.cssColors.steelblue (constant)
+    colors.cssColors.tan (constant)
+    colors.cssColors.thistle (constant)
+    colors.cssColors.tomato (constant)
+    colors.cssColors.turquoise (constant)
+    colors.cssColors.violet (constant)
+    colors.cssColors.wheat (constant)
+    colors.cssColors.whitesmoke (constant)
+    colors.cssColors.yellowgreen (constant)
+  colors.hexToRgb (function)
+  colors.hslToRgb (function)
+  colors.hsvToRgb (function)
+  colors.hueToColorComponent (function)
+  colors.rgbToHex (function)
+  colors.rgbToHsl (function)
+  colors.rgbToHsv (function)
+  colors.RGB (type)
+  colors.RGBA (type)
+  colors.HSL (type)
+  colors.HSLA (type)
+  colors.HSV (type)
+  colors.HSVA (type)
 
 ## curves — `api-curves.md`
 
-curves (namespace) [1 members] [id: typescript:curves]
-  curves.bezier (namespace) [7 members] [id: typescript:curves.bezier]
-    curves.bezier.create (function) [id: typescript:curves.bezier.create]
-    curves.bezier.tangentAt (function) [id: typescript:curves.bezier.tangentAt]
-    curves.bezier.valueAt (function) [id: typescript:curves.bezier.valueAt]
-    curves.bezier.lengths (function) [id: typescript:curves.bezier.lengths]
-    curves.bezier.length (function) [id: typescript:curves.bezier.length]
-    curves.bezier.arcLengthToT (function) [id: typescript:curves.bezier.arcLengthToT]
-    curves.bezier.Bezier (interface) [5 members] [id: typescript:curves.bezier.Bezier]
-      curves.bezier.Bezier.points (property) [id: typescript:curves.bezier.Bezier.points]
-      curves.bezier.Bezier.pointType (property) [id: typescript:curves.bezier.Bezier.pointType]
-      curves.bezier.Bezier.dimensions (property) [id: typescript:curves.bezier.Bezier.dimensions]
-      curves.bezier.Bezier.permutations (property) [id: typescript:curves.bezier.Bezier.permutations]
-      curves.bezier.Bezier.tangentPermutations (property) [id: typescript:curves.bezier.Bezier.tangentPermutations]
+curves (namespace) [1 members]
+  curves.bezier (namespace) [7 members]
+    curves.bezier.create (function)
+    curves.bezier.tangentAt (function)
+    curves.bezier.valueAt (function)
+    curves.bezier.lengths (function)
+    curves.bezier.length (function)
+    curves.bezier.arcLengthToT (function)
+    curves.bezier.Bezier (interface) [5 members]
+      curves.bezier.Bezier.points (property)
+      curves.bezier.Bezier.pointType (property)
+      curves.bezier.Bezier.dimensions (property)
+      curves.bezier.Bezier.permutations (property)
+      curves.bezier.Bezier.tangentPermutations (property)
 
 ## geometries — `api-geometries.md`
 
-geometries (namespace) [5 members] [id: typescript:geometries]
-  geometries.geom2 (namespace) [14 members] [id: typescript:geometries.geom2]
-    geometries.geom2.clone (function) [id: typescript:geometries.geom2.clone]
-    geometries.geom2.create (function) [id: typescript:geometries.geom2.create]
-    geometries.geom2.fromPoints (function) [id: typescript:geometries.geom2.fromPoints]
-    geometries.geom2.fromCompactBinary (function) [id: typescript:geometries.geom2.fromCompactBinary]
-    geometries.geom2.isA (function) [id: typescript:geometries.geom2.isA]
-    geometries.geom2.reverse (function) [id: typescript:geometries.geom2.reverse]
-    geometries.geom2.toOutlines (function) [id: typescript:geometries.geom2.toOutlines]
-    geometries.geom2.toPoints (function) [id: typescript:geometries.geom2.toPoints]
-    geometries.geom2.toSides (function) [id: typescript:geometries.geom2.toSides]
-    geometries.geom2.toString (function) [id: typescript:geometries.geom2.toString]
-    geometries.geom2.toCompactBinary (function) [id: typescript:geometries.geom2.toCompactBinary]
-    geometries.geom2.transform (function) [id: typescript:geometries.geom2.transform]
-    geometries.geom2.validate (function) [id: typescript:geometries.geom2.validate]
-    geometries.geom2.Geom2 (interface) [3 members] [id: typescript:geometries.geom2.Geom2]
-      geometries.geom2.Geom2.sides (property) [id: typescript:geometries.geom2.Geom2.sides]
-      geometries.geom2.Geom2.transforms (property) [id: typescript:geometries.geom2.Geom2.transforms]
-      geometries.geom2.Geom2.color (property) [id: typescript:geometries.geom2.Geom2.color]
-  geometries.geom3 (namespace) [15 members] [id: typescript:geometries.geom3]
-    geometries.geom3.clone (function) [id: typescript:geometries.geom3.clone]
-    geometries.geom3.create (function) [id: typescript:geometries.geom3.create]
-    geometries.geom3.fromPointsConvex (function) [id: typescript:geometries.geom3.fromPointsConvex]
-    geometries.geom3.fromPoints (function) [id: typescript:geometries.geom3.fromPoints]
-    geometries.geom3.fromCompactBinary (function) [id: typescript:geometries.geom3.fromCompactBinary]
-    geometries.geom3.invert (function) [id: typescript:geometries.geom3.invert]
-    geometries.geom3.isA (function) [id: typescript:geometries.geom3.isA]
-    geometries.geom3.isConvex (function) [id: typescript:geometries.geom3.isConvex]
-    geometries.geom3.toPoints (function) [id: typescript:geometries.geom3.toPoints]
-    geometries.geom3.toPolygons (function) [id: typescript:geometries.geom3.toPolygons]
-    geometries.geom3.toString (function) [id: typescript:geometries.geom3.toString]
-    geometries.geom3.toCompactBinary (function) [id: typescript:geometries.geom3.toCompactBinary]
-    geometries.geom3.transform (function) [id: typescript:geometries.geom3.transform]
-    geometries.geom3.validate (function) [id: typescript:geometries.geom3.validate]
-    geometries.geom3.Geom3 (interface) [3 members] [id: typescript:geometries.geom3.Geom3]
-      geometries.geom3.Geom3.polygons (property) [id: typescript:geometries.geom3.Geom3.polygons]
-      geometries.geom3.Geom3.transforms (property) [id: typescript:geometries.geom3.Geom3.transforms]
-      geometries.geom3.Geom3.color (property) [id: typescript:geometries.geom3.Geom3.color]
-  geometries.path2 (namespace) [21 members] [id: typescript:geometries.path2]
-    geometries.path2.appendArc (function) [id: typescript:geometries.path2.appendArc]
-    geometries.path2.AppendArcOptions (interface) [6 members] [id: typescript:geometries.path2.AppendArcOptions]
-      geometries.path2.AppendArcOptions.endpoint (property) [id: typescript:geometries.path2.AppendArcOptions.endpoint]
-      geometries.path2.AppendArcOptions.radius (property) [id: typescript:geometries.path2.AppendArcOptions.radius]
-      geometries.path2.AppendArcOptions.xaxisrotation (property) [id: typescript:geometries.path2.AppendArcOptions.xaxisrotation]
-      geometries.path2.AppendArcOptions.clockwise (property) [id: typescript:geometries.path2.AppendArcOptions.clockwise]
-      geometries.path2.AppendArcOptions.large (property) [id: typescript:geometries.path2.AppendArcOptions.large]
-      geometries.path2.AppendArcOptions.segments (property) [id: typescript:geometries.path2.AppendArcOptions.segments]
-    geometries.path2.appendBezier (function) [id: typescript:geometries.path2.appendBezier]
-    geometries.path2.AppendBezierOptions (interface) [2 members] [id: typescript:geometries.path2.AppendBezierOptions]
-      geometries.path2.AppendBezierOptions.controlPoints (property) [id: typescript:geometries.path2.AppendBezierOptions.controlPoints]
-      geometries.path2.AppendBezierOptions.segments (property) [id: typescript:geometries.path2.AppendBezierOptions.segments]
-    geometries.path2.appendPoints (function) [id: typescript:geometries.path2.appendPoints]
-    geometries.path2.clone (function) [id: typescript:geometries.path2.clone]
-    geometries.path2.close (function) [id: typescript:geometries.path2.close]
-    geometries.path2.concat (function) [id: typescript:geometries.path2.concat]
-    geometries.path2.create (function) [id: typescript:geometries.path2.create]
-    geometries.path2.equals (function) [id: typescript:geometries.path2.equals]
-    geometries.path2.fromPoints (function) [id: typescript:geometries.path2.fromPoints]
-    geometries.path2.FromPointsOptions (interface) [1 members] [id: typescript:geometries.path2.FromPointsOptions]
-      geometries.path2.FromPointsOptions.closed (property) [id: typescript:geometries.path2.FromPointsOptions.closed]
-    geometries.path2.fromCompactBinary (function) [id: typescript:geometries.path2.fromCompactBinary]
-    geometries.path2.isA (function) [id: typescript:geometries.path2.isA]
-    geometries.path2.reverse (function) [id: typescript:geometries.path2.reverse]
-    geometries.path2.toPoints (function) [id: typescript:geometries.path2.toPoints]
-    geometries.path2.toString (function) [id: typescript:geometries.path2.toString]
-    geometries.path2.toCompactBinary (function) [id: typescript:geometries.path2.toCompactBinary]
-    geometries.path2.transform (function) [id: typescript:geometries.path2.transform]
-    geometries.path2.validate (function) [id: typescript:geometries.path2.validate]
-    geometries.path2.Path2 (interface) [4 members] [id: typescript:geometries.path2.Path2]
-      geometries.path2.Path2.points (property) [id: typescript:geometries.path2.Path2.points]
-      geometries.path2.Path2.isClosed (property) [id: typescript:geometries.path2.Path2.isClosed]
-      geometries.path2.Path2.transforms (property) [id: typescript:geometries.path2.Path2.transforms]
-      geometries.path2.Path2.color (property) [id: typescript:geometries.path2.Path2.color]
-  geometries.poly2 (namespace) [5 members] [id: typescript:geometries.poly2]
-    geometries.poly2.arePointsInside (function) [id: typescript:geometries.poly2.arePointsInside]
-    geometries.poly2.create (function) [id: typescript:geometries.poly2.create]
-    geometries.poly2.flip (function) [id: typescript:geometries.poly2.flip]
-    geometries.poly2.measureArea (function) [id: typescript:geometries.poly2.measureArea]
-    geometries.poly2.Poly2 (interface) [1 members] [id: typescript:geometries.poly2.Poly2]
-      geometries.poly2.Poly2.vertices (property) [id: typescript:geometries.poly2.Poly2.vertices]
-  geometries.poly3 (namespace) [17 members] [id: typescript:geometries.poly3]
-    geometries.poly3.clone (function) [id: typescript:geometries.poly3.clone]
-    geometries.poly3.create (function) [id: typescript:geometries.poly3.create]
-    geometries.poly3.fromPoints (function) [id: typescript:geometries.poly3.fromPoints]
-    geometries.poly3.fromPointsAndPlane (function) [id: typescript:geometries.poly3.fromPointsAndPlane]
-    geometries.poly3.invert (function) [id: typescript:geometries.poly3.invert]
-    geometries.poly3.isA (function) [id: typescript:geometries.poly3.isA]
-    geometries.poly3.isConvex (function) [id: typescript:geometries.poly3.isConvex]
-    geometries.poly3.measureArea (function) [id: typescript:geometries.poly3.measureArea]
-    geometries.poly3.measureBoundingBox (function) [id: typescript:geometries.poly3.measureBoundingBox]
-    geometries.poly3.measureBoundingSphere (function) [id: typescript:geometries.poly3.measureBoundingSphere]
-    geometries.poly3.measureSignedVolume (function) [id: typescript:geometries.poly3.measureSignedVolume]
-    geometries.poly3.plane (function) [id: typescript:geometries.poly3.plane]
-    geometries.poly3.toPoints (function) [id: typescript:geometries.poly3.toPoints]
-    geometries.poly3.toString (function) [id: typescript:geometries.poly3.toString]
-    geometries.poly3.transform (function) [id: typescript:geometries.poly3.transform]
-    geometries.poly3.validate (function) [id: typescript:geometries.poly3.validate]
-    geometries.poly3.Poly3 (interface) [3 members] [id: typescript:geometries.poly3.Poly3]
-      geometries.poly3.Poly3.vertices (property) [id: typescript:geometries.poly3.Poly3.vertices]
-      geometries.poly3.Poly3.color (property) [id: typescript:geometries.poly3.Poly3.color]
-      geometries.poly3.Poly3.plane (property) [id: typescript:geometries.poly3.Poly3.plane]
+geometries (namespace) [5 members]
+  geometries.geom2 (namespace) [14 members]
+    geometries.geom2.clone (function)
+    geometries.geom2.create (function)
+    geometries.geom2.fromPoints (function)
+    geometries.geom2.fromCompactBinary (function)
+    geometries.geom2.isA (function)
+    geometries.geom2.reverse (function)
+    geometries.geom2.toOutlines (function)
+    geometries.geom2.toPoints (function)
+    geometries.geom2.toSides (function)
+    geometries.geom2.toString (function)
+    geometries.geom2.toCompactBinary (function)
+    geometries.geom2.transform (function)
+    geometries.geom2.validate (function)
+    geometries.geom2.Geom2 (interface) [3 members]
+      geometries.geom2.Geom2.sides (property)
+      geometries.geom2.Geom2.transforms (property)
+      geometries.geom2.Geom2.color (property)
+  geometries.geom3 (namespace) [15 members]
+    geometries.geom3.clone (function)
+    geometries.geom3.create (function)
+    geometries.geom3.fromPointsConvex (function)
+    geometries.geom3.fromPoints (function)
+    geometries.geom3.fromCompactBinary (function)
+    geometries.geom3.invert (function)
+    geometries.geom3.isA (function)
+    geometries.geom3.isConvex (function)
+    geometries.geom3.toPoints (function)
+    geometries.geom3.toPolygons (function)
+    geometries.geom3.toString (function)
+    geometries.geom3.toCompactBinary (function)
+    geometries.geom3.transform (function)
+    geometries.geom3.validate (function)
+    geometries.geom3.Geom3 (interface) [3 members]
+      geometries.geom3.Geom3.polygons (property)
+      geometries.geom3.Geom3.transforms (property)
+      geometries.geom3.Geom3.color (property)
+  geometries.path2 (namespace) [21 members]
+    geometries.path2.appendArc (function)
+    geometries.path2.AppendArcOptions (interface) [6 members]
+      geometries.path2.AppendArcOptions.endpoint (property)
+      geometries.path2.AppendArcOptions.radius (property)
+      geometries.path2.AppendArcOptions.xaxisrotation (property)
+      geometries.path2.AppendArcOptions.clockwise (property)
+      geometries.path2.AppendArcOptions.large (property)
+      geometries.path2.AppendArcOptions.segments (property)
+    geometries.path2.appendBezier (function)
+    geometries.path2.AppendBezierOptions (interface) [2 members]
+      geometries.path2.AppendBezierOptions.controlPoints (property)
+      geometries.path2.AppendBezierOptions.segments (property)
+    geometries.path2.appendPoints (function)
+    geometries.path2.clone (function)
+    geometries.path2.close (function)
+    geometries.path2.concat (function)
+    geometries.path2.create (function)
+    geometries.path2.equals (function)
+    geometries.path2.fromPoints (function)
+    geometries.path2.FromPointsOptions (interface) [1 members]
+      geometries.path2.FromPointsOptions.closed (property)
+    geometries.path2.fromCompactBinary (function)
+    geometries.path2.isA (function)
+    geometries.path2.reverse (function)
+    geometries.path2.toPoints (function)
+    geometries.path2.toString (function)
+    geometries.path2.toCompactBinary (function)
+    geometries.path2.transform (function)
+    geometries.path2.validate (function)
+    geometries.path2.Path2 (interface) [4 members]
+      geometries.path2.Path2.points (property)
+      geometries.path2.Path2.isClosed (property)
+      geometries.path2.Path2.transforms (property)
+      geometries.path2.Path2.color (property)
+  geometries.poly2 (namespace) [5 members]
+    geometries.poly2.arePointsInside (function)
+    geometries.poly2.create (function)
+    geometries.poly2.flip (function)
+    geometries.poly2.measureArea (function)
+    geometries.poly2.Poly2 (interface) [1 members]
+      geometries.poly2.Poly2.vertices (property)
+  geometries.poly3 (namespace) [17 members]
+    geometries.poly3.clone (function)
+    geometries.poly3.create (function)
+    geometries.poly3.fromPoints (function)
+    geometries.poly3.fromPointsAndPlane (function)
+    geometries.poly3.invert (function)
+    geometries.poly3.isA (function)
+    geometries.poly3.isConvex (function)
+    geometries.poly3.measureArea (function)
+    geometries.poly3.measureBoundingBox (function)
+    geometries.poly3.measureBoundingSphere (function)
+    geometries.poly3.measureSignedVolume (function)
+    geometries.poly3.plane (function)
+    geometries.poly3.toPoints (function)
+    geometries.poly3.toString (function)
+    geometries.poly3.transform (function)
+    geometries.poly3.validate (function)
+    geometries.poly3.Poly3 (interface) [3 members]
+      geometries.poly3.Poly3.vertices (property)
+      geometries.poly3.Poly3.color (property)
+      geometries.poly3.Poly3.plane (property)
 
 ## maths — `api-maths.md`
 
-maths (namespace) [9 members] [id: typescript:maths]
-  maths.constants (namespace) [3 members] [id: typescript:maths.constants]
-    maths.constants.EPS (constant) [id: typescript:maths.constants.EPS]
-    maths.constants.NEPS (constant) [id: typescript:maths.constants.NEPS]
-    maths.constants.spatialResolution (constant) [id: typescript:maths.constants.spatialResolution]
-  maths.line2 (namespace) [16 members] [id: typescript:maths.line2]
-    maths.line2.clone (function) [id: typescript:maths.line2.clone]
-    maths.line2.closestPoint (function) [id: typescript:maths.line2.closestPoint]
-    maths.line2.copy (function) [id: typescript:maths.line2.copy]
-    maths.line2.create (function) [id: typescript:maths.line2.create]
-    maths.line2.direction (function) [id: typescript:maths.line2.direction]
-    maths.line2.distanceToPoint (function) [id: typescript:maths.line2.distanceToPoint]
-    maths.line2.equals (function) [id: typescript:maths.line2.equals]
-    maths.line2.fromPoints (function) [id: typescript:maths.line2.fromPoints]
-    maths.line2.fromValues (function) [id: typescript:maths.line2.fromValues]
-    maths.line2.intersectPointOfLines (function) [id: typescript:maths.line2.intersectPointOfLines]
-    maths.line2.origin (function) [id: typescript:maths.line2.origin]
-    maths.line2.reverse (function) [id: typescript:maths.line2.reverse]
-    maths.line2.toString (function) [id: typescript:maths.line2.toString]
-    maths.line2.transform (function) [id: typescript:maths.line2.transform]
-    maths.line2.xAtY (function) [id: typescript:maths.line2.xAtY]
-    maths.line2.Line2 (type) [id: typescript:maths.line2.Line2]
-  maths.line3 (namespace) [16 members] [id: typescript:maths.line3]
-    maths.line3.clone (function) [id: typescript:maths.line3.clone]
-    maths.line3.closestPoint (function) [id: typescript:maths.line3.closestPoint]
-    maths.line3.copy (function) [id: typescript:maths.line3.copy]
-    maths.line3.create (function) [id: typescript:maths.line3.create]
-    maths.line3.direction (function) [id: typescript:maths.line3.direction]
-    maths.line3.distanceToPoint (function) [id: typescript:maths.line3.distanceToPoint]
-    maths.line3.equals (function) [id: typescript:maths.line3.equals]
-    maths.line3.fromPlanes (function) [id: typescript:maths.line3.fromPlanes]
-    maths.line3.fromPointAndDirection (function) [id: typescript:maths.line3.fromPointAndDirection]
-    maths.line3.fromPoints (function) [id: typescript:maths.line3.fromPoints]
-    maths.line3.intersectPointOfLineAndPlane (function) [id: typescript:maths.line3.intersectPointOfLineAndPlane]
-    maths.line3.origin (function) [id: typescript:maths.line3.origin]
-    maths.line3.reverse (function) [id: typescript:maths.line3.reverse]
-    maths.line3.toString (function) [id: typescript:maths.line3.toString]
-    maths.line3.transform (function) [id: typescript:maths.line3.transform]
-    maths.line3.Line3 (type) [id: typescript:maths.line3.Line3]
-  maths.mat4 (namespace) [27 members] [id: typescript:maths.mat4]
-    maths.mat4.add (function) [id: typescript:maths.mat4.add]
-    maths.mat4.clone (function) [id: typescript:maths.mat4.clone]
-    maths.mat4.copy (function) [id: typescript:maths.mat4.copy]
-    maths.mat4.create (function) [id: typescript:maths.mat4.create]
-    maths.mat4.equals (function) [id: typescript:maths.mat4.equals]
-    maths.mat4.fromRotation (function) [id: typescript:maths.mat4.fromRotation]
-    maths.mat4.fromScaling (function) [id: typescript:maths.mat4.fromScaling]
-    maths.mat4.fromTaitBryanRotation (function) [id: typescript:maths.mat4.fromTaitBryanRotation]
-    maths.mat4.fromTranslation (function) [id: typescript:maths.mat4.fromTranslation]
-    maths.mat4.fromValues (function) [id: typescript:maths.mat4.fromValues]
-    maths.mat4.fromXRotation (function) [id: typescript:maths.mat4.fromXRotation]
-    maths.mat4.fromYRotation (function) [id: typescript:maths.mat4.fromYRotation]
-    maths.mat4.fromZRotation (function) [id: typescript:maths.mat4.fromZRotation]
-    maths.mat4.identity (function) [id: typescript:maths.mat4.identity]
-    maths.mat4.isIdentity (function) [id: typescript:maths.mat4.isIdentity]
-    maths.mat4.isMirroring (function) [id: typescript:maths.mat4.isMirroring]
-    maths.mat4.mirrorByPlane (function) [id: typescript:maths.mat4.mirrorByPlane]
-    maths.mat4.multiply (function) [id: typescript:maths.mat4.multiply]
-    maths.mat4.rotate (function) [id: typescript:maths.mat4.rotate]
-    maths.mat4.rotateX (function) [id: typescript:maths.mat4.rotateX]
-    maths.mat4.rotateY (function) [id: typescript:maths.mat4.rotateY]
-    maths.mat4.rotateZ (function) [id: typescript:maths.mat4.rotateZ]
-    maths.mat4.scale (function) [id: typescript:maths.mat4.scale]
-    maths.mat4.subtract (function) [id: typescript:maths.mat4.subtract]
-    maths.mat4.toString (function) [id: typescript:maths.mat4.toString]
-    maths.mat4.translate (function) [id: typescript:maths.mat4.translate]
-    maths.mat4.Mat4 (type) [id: typescript:maths.mat4.Mat4]
-  maths.plane (namespace) [15 members] [id: typescript:maths.plane]
-    maths.plane.clone (function) [id: typescript:maths.plane.clone]
-    maths.plane.copy (function) [id: typescript:maths.plane.copy]
-    maths.plane.create (function) [id: typescript:maths.plane.create]
-    maths.plane.equals (function) [id: typescript:maths.plane.equals]
-    maths.plane.flip (function) [id: typescript:maths.plane.flip]
-    maths.plane.fromNormalAndPoint (function) [id: typescript:maths.plane.fromNormalAndPoint]
-    maths.plane.fromValues (function) [id: typescript:maths.plane.fromValues]
-    maths.plane.fromNoisyPoints (function) [id: typescript:maths.plane.fromNoisyPoints]
-    maths.plane.fromPoints (function) [id: typescript:maths.plane.fromPoints]
-    maths.plane.fromPointsRandom (function) [id: typescript:maths.plane.fromPointsRandom]
-    maths.plane.signedDistanceToPoint (function) [id: typescript:maths.plane.signedDistanceToPoint]
-    maths.plane.projectionOfPoint (function) [id: typescript:maths.plane.projectionOfPoint]
-    maths.plane.toString (function) [id: typescript:maths.plane.toString]
-    maths.plane.transform (function) [id: typescript:maths.plane.transform]
-    maths.plane.Plane (type) [id: typescript:maths.plane.Plane]
-  maths.utils (namespace) [7 members] [id: typescript:maths.utils]
-    maths.utils.aboutEqualNormals (function) [id: typescript:maths.utils.aboutEqualNormals]
-    maths.utils.area (function) [id: typescript:maths.utils.area]
-    maths.utils.interpolateBetween2DPointsForY (function) [id: typescript:maths.utils.interpolateBetween2DPointsForY]
-    maths.utils.intersect (function) [id: typescript:maths.utils.intersect]
-    maths.utils.solve2Linear (function) [id: typescript:maths.utils.solve2Linear]
-    maths.utils.sin (function) [id: typescript:maths.utils.sin]
-    maths.utils.cos (function) [id: typescript:maths.utils.cos]
-  maths.vec2 (namespace) [34 members] [id: typescript:maths.vec2]
-    maths.vec2.abs (function) [id: typescript:maths.vec2.abs]
-    maths.vec2.add (function) [id: typescript:maths.vec2.add]
-    maths.vec2.angle (function) [id: typescript:maths.vec2.angle]
-    maths.vec2.angleDegrees (function) [id: typescript:maths.vec2.angleDegrees]
-    maths.vec2.angleRadians (function) [id: typescript:maths.vec2.angleRadians]
-    maths.vec2.clone (function) [id: typescript:maths.vec2.clone]
-    maths.vec2.copy (function) [id: typescript:maths.vec2.copy]
-    maths.vec2.create (function) [id: typescript:maths.vec2.create]
-    maths.vec2.cross (function) [id: typescript:maths.vec2.cross]
-    maths.vec2.distance (function) [id: typescript:maths.vec2.distance]
-    maths.vec2.divide (function) [id: typescript:maths.vec2.divide]
-    maths.vec2.dot (function) [id: typescript:maths.vec2.dot]
-    maths.vec2.equals (function) [id: typescript:maths.vec2.equals]
-    maths.vec2.fromAngleDegrees (function) [id: typescript:maths.vec2.fromAngleDegrees]
-    maths.vec2.fromAngleRadians (function) [id: typescript:maths.vec2.fromAngleRadians]
-    maths.vec2.fromScalar (function) [id: typescript:maths.vec2.fromScalar]
-    maths.vec2.fromValues (function) [id: typescript:maths.vec2.fromValues]
-    maths.vec2.length (function) [id: typescript:maths.vec2.length]
-    maths.vec2.lerp (function) [id: typescript:maths.vec2.lerp]
-    maths.vec2.max (function) [id: typescript:maths.vec2.max]
-    maths.vec2.min (function) [id: typescript:maths.vec2.min]
-    maths.vec2.multiply (function) [id: typescript:maths.vec2.multiply]
-    maths.vec2.negate (function) [id: typescript:maths.vec2.negate]
-    maths.vec2.normal (function) [id: typescript:maths.vec2.normal]
-    maths.vec2.normalize (function) [id: typescript:maths.vec2.normalize]
-    maths.vec2.rotate (function) [id: typescript:maths.vec2.rotate]
-    maths.vec2.scale (function) [id: typescript:maths.vec2.scale]
-    maths.vec2.snap (function) [id: typescript:maths.vec2.snap]
-    maths.vec2.squaredDistance (function) [id: typescript:maths.vec2.squaredDistance]
-    maths.vec2.squaredLength (function) [id: typescript:maths.vec2.squaredLength]
-    maths.vec2.subtract (function) [id: typescript:maths.vec2.subtract]
-    maths.vec2.toString (function) [id: typescript:maths.vec2.toString]
-    maths.vec2.transform (function) [id: typescript:maths.vec2.transform]
-    maths.vec2.Vec2 (type) [id: typescript:maths.vec2.Vec2]
-  maths.vec3 (namespace) [33 members] [id: typescript:maths.vec3]
-    maths.vec3.abs (function) [id: typescript:maths.vec3.abs]
-    maths.vec3.add (function) [id: typescript:maths.vec3.add]
-    maths.vec3.angle (function) [id: typescript:maths.vec3.angle]
-    maths.vec3.clone (function) [id: typescript:maths.vec3.clone]
-    maths.vec3.copy (function) [id: typescript:maths.vec3.copy]
-    maths.vec3.create (function) [id: typescript:maths.vec3.create]
-    maths.vec3.cross (function) [id: typescript:maths.vec3.cross]
-    maths.vec3.distance (function) [id: typescript:maths.vec3.distance]
-    maths.vec3.divide (function) [id: typescript:maths.vec3.divide]
-    maths.vec3.dot (function) [id: typescript:maths.vec3.dot]
-    maths.vec3.equals (function) [id: typescript:maths.vec3.equals]
-    maths.vec3.fromScalar (function) [id: typescript:maths.vec3.fromScalar]
-    maths.vec3.fromValues (function) [id: typescript:maths.vec3.fromValues]
-    maths.vec3.fromVec2 (function) [id: typescript:maths.vec3.fromVec2]
-    maths.vec3.length (function) [id: typescript:maths.vec3.length]
-    maths.vec3.lerp (function) [id: typescript:maths.vec3.lerp]
-    maths.vec3.max (function) [id: typescript:maths.vec3.max]
-    maths.vec3.min (function) [id: typescript:maths.vec3.min]
-    maths.vec3.multiply (function) [id: typescript:maths.vec3.multiply]
-    maths.vec3.negate (function) [id: typescript:maths.vec3.negate]
-    maths.vec3.normalize (function) [id: typescript:maths.vec3.normalize]
-    maths.vec3.orthogonal (function) [id: typescript:maths.vec3.orthogonal]
-    maths.vec3.rotateX (function) [id: typescript:maths.vec3.rotateX]
-    maths.vec3.rotateY (function) [id: typescript:maths.vec3.rotateY]
-    maths.vec3.rotateZ (function) [id: typescript:maths.vec3.rotateZ]
-    maths.vec3.scale (function) [id: typescript:maths.vec3.scale]
-    maths.vec3.snap (function) [id: typescript:maths.vec3.snap]
-    maths.vec3.squaredDistance (function) [id: typescript:maths.vec3.squaredDistance]
-    maths.vec3.squaredLength (function) [id: typescript:maths.vec3.squaredLength]
-    maths.vec3.subtract (function) [id: typescript:maths.vec3.subtract]
-    maths.vec3.toString (function) [id: typescript:maths.vec3.toString]
-    maths.vec3.transform (function) [id: typescript:maths.vec3.transform]
-    maths.vec3.Vec3 (type) [id: typescript:maths.vec3.Vec3]
-  maths.vec4 (namespace) [10 members] [id: typescript:maths.vec4]
-    maths.vec4.clone (function) [id: typescript:maths.vec4.clone]
-    maths.vec4.copy (function) [id: typescript:maths.vec4.copy]
-    maths.vec4.create (function) [id: typescript:maths.vec4.create]
-    maths.vec4.dot (function) [id: typescript:maths.vec4.dot]
-    maths.vec4.equals (function) [id: typescript:maths.vec4.equals]
-    maths.vec4.fromScalar (function) [id: typescript:maths.vec4.fromScalar]
-    maths.vec4.fromValues (function) [id: typescript:maths.vec4.fromValues]
-    maths.vec4.toString (function) [id: typescript:maths.vec4.toString]
-    maths.vec4.transform (function) [id: typescript:maths.vec4.transform]
-    maths.vec4.Vec4 (type) [id: typescript:maths.vec4.Vec4]
+maths (namespace) [9 members]
+  maths.constants (namespace) [3 members]
+    maths.constants.EPS (constant)
+    maths.constants.NEPS (constant)
+    maths.constants.spatialResolution (constant)
+  maths.line2 (namespace) [16 members]
+    maths.line2.clone (function)
+    maths.line2.closestPoint (function)
+    maths.line2.copy (function)
+    maths.line2.create (function)
+    maths.line2.direction (function)
+    maths.line2.distanceToPoint (function)
+    maths.line2.equals (function)
+    maths.line2.fromPoints (function)
+    maths.line2.fromValues (function)
+    maths.line2.intersectPointOfLines (function)
+    maths.line2.origin (function)
+    maths.line2.reverse (function)
+    maths.line2.toString (function)
+    maths.line2.transform (function)
+    maths.line2.xAtY (function)
+    maths.line2.Line2 (type)
+  maths.line3 (namespace) [16 members]
+    maths.line3.clone (function)
+    maths.line3.closestPoint (function)
+    maths.line3.copy (function)
+    maths.line3.create (function)
+    maths.line3.direction (function)
+    maths.line3.distanceToPoint (function)
+    maths.line3.equals (function)
+    maths.line3.fromPlanes (function)
+    maths.line3.fromPointAndDirection (function)
+    maths.line3.fromPoints (function)
+    maths.line3.intersectPointOfLineAndPlane (function)
+    maths.line3.origin (function)
+    maths.line3.reverse (function)
+    maths.line3.toString (function)
+    maths.line3.transform (function)
+    maths.line3.Line3 (type)
+  maths.mat4 (namespace) [27 members]
+    maths.mat4.add (function)
+    maths.mat4.clone (function)
+    maths.mat4.copy (function)
+    maths.mat4.create (function)
+    maths.mat4.equals (function)
+    maths.mat4.fromRotation (function)
+    maths.mat4.fromScaling (function)
+    maths.mat4.fromTaitBryanRotation (function)
+    maths.mat4.fromTranslation (function)
+    maths.mat4.fromValues (function)
+    maths.mat4.fromXRotation (function)
+    maths.mat4.fromYRotation (function)
+    maths.mat4.fromZRotation (function)
+    maths.mat4.identity (function)
+    maths.mat4.isIdentity (function)
+    maths.mat4.isMirroring (function)
+    maths.mat4.mirrorByPlane (function)
+    maths.mat4.multiply (function)
+    maths.mat4.rotate (function)
+    maths.mat4.rotateX (function)
+    maths.mat4.rotateY (function)
+    maths.mat4.rotateZ (function)
+    maths.mat4.scale (function)
+    maths.mat4.subtract (function)
+    maths.mat4.toString (function)
+    maths.mat4.translate (function)
+    maths.mat4.Mat4 (type)
+  maths.plane (namespace) [15 members]
+    maths.plane.clone (function)
+    maths.plane.copy (function)
+    maths.plane.create (function)
+    maths.plane.equals (function)
+    maths.plane.flip (function)
+    maths.plane.fromNormalAndPoint (function)
+    maths.plane.fromValues (function)
+    maths.plane.fromNoisyPoints (function)
+    maths.plane.fromPoints (function)
+    maths.plane.fromPointsRandom (function)
+    maths.plane.signedDistanceToPoint (function)
+    maths.plane.projectionOfPoint (function)
+    maths.plane.toString (function)
+    maths.plane.transform (function)
+    maths.plane.Plane (type)
+  maths.utils (namespace) [7 members]
+    maths.utils.aboutEqualNormals (function)
+    maths.utils.area (function)
+    maths.utils.interpolateBetween2DPointsForY (function)
+    maths.utils.intersect (function)
+    maths.utils.solve2Linear (function)
+    maths.utils.sin (function)
+    maths.utils.cos (function)
+  maths.vec2 (namespace) [34 members]
+    maths.vec2.abs (function)
+    maths.vec2.add (function)
+    maths.vec2.angle (function)
+    maths.vec2.angleDegrees (function)
+    maths.vec2.angleRadians (function)
+    maths.vec2.clone (function)
+    maths.vec2.copy (function)
+    maths.vec2.create (function)
+    maths.vec2.cross (function)
+    maths.vec2.distance (function)
+    maths.vec2.divide (function)
+    maths.vec2.dot (function)
+    maths.vec2.equals (function)
+    maths.vec2.fromAngleDegrees (function)
+    maths.vec2.fromAngleRadians (function)
+    maths.vec2.fromScalar (function)
+    maths.vec2.fromValues (function)
+    maths.vec2.length (function)
+    maths.vec2.lerp (function)
+    maths.vec2.max (function)
+    maths.vec2.min (function)
+    maths.vec2.multiply (function)
+    maths.vec2.negate (function)
+    maths.vec2.normal (function)
+    maths.vec2.normalize (function)
+    maths.vec2.rotate (function)
+    maths.vec2.scale (function)
+    maths.vec2.snap (function)
+    maths.vec2.squaredDistance (function)
+    maths.vec2.squaredLength (function)
+    maths.vec2.subtract (function)
+    maths.vec2.toString (function)
+    maths.vec2.transform (function)
+    maths.vec2.Vec2 (type)
+  maths.vec3 (namespace) [33 members]
+    maths.vec3.abs (function)
+    maths.vec3.add (function)
+    maths.vec3.angle (function)
+    maths.vec3.clone (function)
+    maths.vec3.copy (function)
+    maths.vec3.create (function)
+    maths.vec3.cross (function)
+    maths.vec3.distance (function)
+    maths.vec3.divide (function)
+    maths.vec3.dot (function)
+    maths.vec3.equals (function)
+    maths.vec3.fromScalar (function)
+    maths.vec3.fromValues (function)
+    maths.vec3.fromVec2 (function)
+    maths.vec3.length (function)
+    maths.vec3.lerp (function)
+    maths.vec3.max (function)
+    maths.vec3.min (function)
+    maths.vec3.multiply (function)
+    maths.vec3.negate (function)
+    maths.vec3.normalize (function)
+    maths.vec3.orthogonal (function)
+    maths.vec3.rotateX (function)
+    maths.vec3.rotateY (function)
+    maths.vec3.rotateZ (function)
+    maths.vec3.scale (function)
+    maths.vec3.snap (function)
+    maths.vec3.squaredDistance (function)
+    maths.vec3.squaredLength (function)
+    maths.vec3.subtract (function)
+    maths.vec3.toString (function)
+    maths.vec3.transform (function)
+    maths.vec3.Vec3 (type)
+  maths.vec4 (namespace) [10 members]
+    maths.vec4.clone (function)
+    maths.vec4.copy (function)
+    maths.vec4.create (function)
+    maths.vec4.dot (function)
+    maths.vec4.equals (function)
+    maths.vec4.fromScalar (function)
+    maths.vec4.fromValues (function)
+    maths.vec4.toString (function)
+    maths.vec4.transform (function)
+    maths.vec4.Vec4 (type)
 
 ## measurements — `api-measurements.md`
 
-measurements (namespace) [13 members] [id: typescript:measurements]
-  measurements.measureAggregateArea (function) [id: typescript:measurements.measureAggregateArea]
-  measurements.measureAggregateBoundingBox (function) [id: typescript:measurements.measureAggregateBoundingBox]
-  measurements.measureAggregateEpsilon (function) [id: typescript:measurements.measureAggregateEpsilon]
-  measurements.measureAggregateVolume (function) [id: typescript:measurements.measureAggregateVolume]
-  measurements.measureArea (function) [id: typescript:measurements.measureArea]
-  measurements.measureBoundingBox (function) [id: typescript:measurements.measureBoundingBox]
-  measurements.measureBoundingSphere (function) [id: typescript:measurements.measureBoundingSphere]
-  measurements.measureCenter (function) [id: typescript:measurements.measureCenter]
-  measurements.measureCenterOfMass (function) [id: typescript:measurements.measureCenterOfMass]
-  measurements.measureDimensions (function) [id: typescript:measurements.measureDimensions]
-  measurements.measureEpsilon (function) [id: typescript:measurements.measureEpsilon]
-  measurements.measureVolume (function) [id: typescript:measurements.measureVolume]
-  measurements.BoundingBox (type) [id: typescript:measurements.BoundingBox]
+measurements (namespace) [13 members]
+  measurements.measureAggregateArea (function)
+  measurements.measureAggregateBoundingBox (function)
+  measurements.measureAggregateEpsilon (function)
+  measurements.measureAggregateVolume (function)
+  measurements.measureArea (function)
+  measurements.measureBoundingBox (function)
+  measurements.measureBoundingSphere (function)
+  measurements.measureCenter (function)
+  measurements.measureCenterOfMass (function)
+  measurements.measureDimensions (function)
+  measurements.measureEpsilon (function)
+  measurements.measureVolume (function)
+  measurements.BoundingBox (type)
 
 ## primitives — `api-primitives.md`
 
-primitives (namespace) [41 members] [id: typescript:primitives]
-  primitives.arc (function) [id: typescript:primitives.arc]
-  primitives.ArcOptions (interface) [6 members] [id: typescript:primitives.ArcOptions]
-    primitives.ArcOptions.center (property) [id: typescript:primitives.ArcOptions.center]
-    primitives.ArcOptions.radius (property) [id: typescript:primitives.ArcOptions.radius]
-    primitives.ArcOptions.startAngle (property) [id: typescript:primitives.ArcOptions.startAngle]
-    primitives.ArcOptions.endAngle (property) [id: typescript:primitives.ArcOptions.endAngle]
-    primitives.ArcOptions.segments (property) [id: typescript:primitives.ArcOptions.segments]
-    primitives.ArcOptions.makeTangent (property) [id: typescript:primitives.ArcOptions.makeTangent]
-  primitives.circle (function) [id: typescript:primitives.circle]
-  primitives.CircleOptions (interface) [5 members] [id: typescript:primitives.CircleOptions]
-    primitives.CircleOptions.center (property) [id: typescript:primitives.CircleOptions.center]
-    primitives.CircleOptions.radius (property) [id: typescript:primitives.CircleOptions.radius]
-    primitives.CircleOptions.startAngle (property) [id: typescript:primitives.CircleOptions.startAngle]
-    primitives.CircleOptions.endAngle (property) [id: typescript:primitives.CircleOptions.endAngle]
-    primitives.CircleOptions.segments (property) [id: typescript:primitives.CircleOptions.segments]
-  primitives.cube (function) [id: typescript:primitives.cube]
-  primitives.CubeOptions (interface) [2 members] [id: typescript:primitives.CubeOptions]
-    primitives.CubeOptions.center (property) [id: typescript:primitives.CubeOptions.center]
-    primitives.CubeOptions.size (property) [id: typescript:primitives.CubeOptions.size]
-  primitives.cuboid (function) [id: typescript:primitives.cuboid]
-  primitives.CuboidOptions (interface) [2 members] [id: typescript:primitives.CuboidOptions]
-    primitives.CuboidOptions.center (property) [id: typescript:primitives.CuboidOptions.center]
-    primitives.CuboidOptions.size (property) [id: typescript:primitives.CuboidOptions.size]
-  primitives.cylinder (function) [id: typescript:primitives.cylinder]
-  primitives.CylinderOptions (interface) [4 members] [id: typescript:primitives.CylinderOptions]
-    primitives.CylinderOptions.center (property) [id: typescript:primitives.CylinderOptions.center]
-    primitives.CylinderOptions.height (property) [id: typescript:primitives.CylinderOptions.height]
-    primitives.CylinderOptions.radius (property) [id: typescript:primitives.CylinderOptions.radius]
-    primitives.CylinderOptions.segments (property) [id: typescript:primitives.CylinderOptions.segments]
-  primitives.cylinderElliptic (function) [id: typescript:primitives.cylinderElliptic]
-  primitives.CylinderEllipticOptions (interface) [7 members] [id: typescript:primitives.CylinderEllipticOptions]
-    primitives.CylinderEllipticOptions.center (property) [id: typescript:primitives.CylinderEllipticOptions.center]
-    primitives.CylinderEllipticOptions.height (property) [id: typescript:primitives.CylinderEllipticOptions.height]
-    primitives.CylinderEllipticOptions.startRadius (property) [id: typescript:primitives.CylinderEllipticOptions.startRadius]
-    primitives.CylinderEllipticOptions.startAngle (property) [id: typescript:primitives.CylinderEllipticOptions.startAngle]
-    primitives.CylinderEllipticOptions.endRadius (property) [id: typescript:primitives.CylinderEllipticOptions.endRadius]
-    primitives.CylinderEllipticOptions.endAngle (property) [id: typescript:primitives.CylinderEllipticOptions.endAngle]
-    primitives.CylinderEllipticOptions.segments (property) [id: typescript:primitives.CylinderEllipticOptions.segments]
-  primitives.ellipse (function) [id: typescript:primitives.ellipse]
-  primitives.EllipseOptions (interface) [5 members] [id: typescript:primitives.EllipseOptions]
-    primitives.EllipseOptions.center (property) [id: typescript:primitives.EllipseOptions.center]
-    primitives.EllipseOptions.radius (property) [id: typescript:primitives.EllipseOptions.radius]
-    primitives.EllipseOptions.startAngle (property) [id: typescript:primitives.EllipseOptions.startAngle]
-    primitives.EllipseOptions.endAngle (property) [id: typescript:primitives.EllipseOptions.endAngle]
-    primitives.EllipseOptions.segments (property) [id: typescript:primitives.EllipseOptions.segments]
-  primitives.ellipsoid (function) [id: typescript:primitives.ellipsoid]
-  primitives.EllipsoidOptions (interface) [4 members] [id: typescript:primitives.EllipsoidOptions]
-    primitives.EllipsoidOptions.center (property) [id: typescript:primitives.EllipsoidOptions.center]
-    primitives.EllipsoidOptions.radius (property) [id: typescript:primitives.EllipsoidOptions.radius]
-    primitives.EllipsoidOptions.segments (property) [id: typescript:primitives.EllipsoidOptions.segments]
-    primitives.EllipsoidOptions.axes (property) [id: typescript:primitives.EllipsoidOptions.axes]
-  primitives.geodesicSphere (function) [id: typescript:primitives.geodesicSphere]
-  primitives.GeodesicSphereOptions (interface) [2 members] [id: typescript:primitives.GeodesicSphereOptions]
-    primitives.GeodesicSphereOptions.radius (property) [id: typescript:primitives.GeodesicSphereOptions.radius]
-    primitives.GeodesicSphereOptions.frequency (property) [id: typescript:primitives.GeodesicSphereOptions.frequency]
-  primitives.line (function) [id: typescript:primitives.line]
-  primitives.polygon (function) [id: typescript:primitives.polygon]
-  primitives.PolygonOptions (interface) [3 members] [id: typescript:primitives.PolygonOptions]
-    primitives.PolygonOptions.points (property) [id: typescript:primitives.PolygonOptions.points]
-    primitives.PolygonOptions.paths (property) [id: typescript:primitives.PolygonOptions.paths]
-    primitives.PolygonOptions.orientation (property) [id: typescript:primitives.PolygonOptions.orientation]
-  primitives.polyhedron (function) [id: typescript:primitives.polyhedron]
-  primitives.PolyhedronOptions (interface) [4 members] [id: typescript:primitives.PolyhedronOptions]
-    primitives.PolyhedronOptions.points (property) [id: typescript:primitives.PolyhedronOptions.points]
-    primitives.PolyhedronOptions.faces (property) [id: typescript:primitives.PolyhedronOptions.faces]
-    primitives.PolyhedronOptions.colors (property) [id: typescript:primitives.PolyhedronOptions.colors]
-    primitives.PolyhedronOptions.orientation (property) [id: typescript:primitives.PolyhedronOptions.orientation]
-  primitives.rectangle (function) [id: typescript:primitives.rectangle]
-  primitives.RectangleOptions (interface) [2 members] [id: typescript:primitives.RectangleOptions]
-    primitives.RectangleOptions.center (property) [id: typescript:primitives.RectangleOptions.center]
-    primitives.RectangleOptions.size (property) [id: typescript:primitives.RectangleOptions.size]
-  primitives.roundedCuboid (function) [id: typescript:primitives.roundedCuboid]
-  primitives.RoundedCuboidOptions (interface) [4 members] [id: typescript:primitives.RoundedCuboidOptions]
-    primitives.RoundedCuboidOptions.center (property) [id: typescript:primitives.RoundedCuboidOptions.center]
-    primitives.RoundedCuboidOptions.size (property) [id: typescript:primitives.RoundedCuboidOptions.size]
-    primitives.RoundedCuboidOptions.roundRadius (property) [id: typescript:primitives.RoundedCuboidOptions.roundRadius]
-    primitives.RoundedCuboidOptions.segments (property) [id: typescript:primitives.RoundedCuboidOptions.segments]
-  primitives.roundedCylinder (function) [id: typescript:primitives.roundedCylinder]
-  primitives.RoundedCylinderOptions (interface) [5 members] [id: typescript:primitives.RoundedCylinderOptions]
-    primitives.RoundedCylinderOptions.center (property) [id: typescript:primitives.RoundedCylinderOptions.center]
-    primitives.RoundedCylinderOptions.height (property) [id: typescript:primitives.RoundedCylinderOptions.height]
-    primitives.RoundedCylinderOptions.radius (property) [id: typescript:primitives.RoundedCylinderOptions.radius]
-    primitives.RoundedCylinderOptions.roundRadius (property) [id: typescript:primitives.RoundedCylinderOptions.roundRadius]
-    primitives.RoundedCylinderOptions.segments (property) [id: typescript:primitives.RoundedCylinderOptions.segments]
-  primitives.roundedRectangle (function) [id: typescript:primitives.roundedRectangle]
-  primitives.RoundedRectangleOptions (interface) [4 members] [id: typescript:primitives.RoundedRectangleOptions]
-    primitives.RoundedRectangleOptions.center (property) [id: typescript:primitives.RoundedRectangleOptions.center]
-    primitives.RoundedRectangleOptions.size (property) [id: typescript:primitives.RoundedRectangleOptions.size]
-    primitives.RoundedRectangleOptions.roundRadius (property) [id: typescript:primitives.RoundedRectangleOptions.roundRadius]
-    primitives.RoundedRectangleOptions.segments (property) [id: typescript:primitives.RoundedRectangleOptions.segments]
-  primitives.sphere (function) [id: typescript:primitives.sphere]
-  primitives.SphereOptions (interface) [4 members] [id: typescript:primitives.SphereOptions]
-    primitives.SphereOptions.center (property) [id: typescript:primitives.SphereOptions.center]
-    primitives.SphereOptions.radius (property) [id: typescript:primitives.SphereOptions.radius]
-    primitives.SphereOptions.segments (property) [id: typescript:primitives.SphereOptions.segments]
-    primitives.SphereOptions.axes (property) [id: typescript:primitives.SphereOptions.axes]
-  primitives.square (function) [id: typescript:primitives.square]
-  primitives.SquareOptions (interface) [2 members] [id: typescript:primitives.SquareOptions]
-    primitives.SquareOptions.center (property) [id: typescript:primitives.SquareOptions.center]
-    primitives.SquareOptions.size (property) [id: typescript:primitives.SquareOptions.size]
-  primitives.star (function) [id: typescript:primitives.star]
-  primitives.StarOptions (interface) [6 members] [id: typescript:primitives.StarOptions]
-    primitives.StarOptions.center (property) [id: typescript:primitives.StarOptions.center]
-    primitives.StarOptions.vertices (property) [id: typescript:primitives.StarOptions.vertices]
-    primitives.StarOptions.density (property) [id: typescript:primitives.StarOptions.density]
-    primitives.StarOptions.outerRadius (property) [id: typescript:primitives.StarOptions.outerRadius]
-    primitives.StarOptions.innerRadius (property) [id: typescript:primitives.StarOptions.innerRadius]
-    primitives.StarOptions.startAngle (property) [id: typescript:primitives.StarOptions.startAngle]
-  primitives.torus (function) [id: typescript:primitives.torus]
-  primitives.TorusOptions (interface) [7 members] [id: typescript:primitives.TorusOptions]
-    primitives.TorusOptions.innerRadius (property) [id: typescript:primitives.TorusOptions.innerRadius]
-    primitives.TorusOptions.outerRadius (property) [id: typescript:primitives.TorusOptions.outerRadius]
-    primitives.TorusOptions.innerSegments (property) [id: typescript:primitives.TorusOptions.innerSegments]
-    primitives.TorusOptions.outerSegments (property) [id: typescript:primitives.TorusOptions.outerSegments]
-    primitives.TorusOptions.innerRotation (property) [id: typescript:primitives.TorusOptions.innerRotation]
-    primitives.TorusOptions.outerRotation (property) [id: typescript:primitives.TorusOptions.outerRotation]
-    primitives.TorusOptions.startAngle (property) [id: typescript:primitives.TorusOptions.startAngle]
-  primitives.triangle (function) [id: typescript:primitives.triangle]
-  primitives.TriangleOptions (interface) [2 members] [id: typescript:primitives.TriangleOptions]
-    primitives.TriangleOptions.type (property) [id: typescript:primitives.TriangleOptions.type]
-    primitives.TriangleOptions.values (property) [id: typescript:primitives.TriangleOptions.values]
+primitives (namespace) [41 members]
+  primitives.arc (function)
+  primitives.ArcOptions (interface) [6 members]
+    primitives.ArcOptions.center (property)
+    primitives.ArcOptions.radius (property)
+    primitives.ArcOptions.startAngle (property)
+    primitives.ArcOptions.endAngle (property)
+    primitives.ArcOptions.segments (property)
+    primitives.ArcOptions.makeTangent (property)
+  primitives.circle (function)
+  primitives.CircleOptions (interface) [5 members]
+    primitives.CircleOptions.center (property)
+    primitives.CircleOptions.radius (property)
+    primitives.CircleOptions.startAngle (property)
+    primitives.CircleOptions.endAngle (property)
+    primitives.CircleOptions.segments (property)
+  primitives.cube (function)
+  primitives.CubeOptions (interface) [2 members]
+    primitives.CubeOptions.center (property)
+    primitives.CubeOptions.size (property)
+  primitives.cuboid (function)
+  primitives.CuboidOptions (interface) [2 members]
+    primitives.CuboidOptions.center (property)
+    primitives.CuboidOptions.size (property)
+  primitives.cylinder (function)
+  primitives.CylinderOptions (interface) [4 members]
+    primitives.CylinderOptions.center (property)
+    primitives.CylinderOptions.height (property)
+    primitives.CylinderOptions.radius (property)
+    primitives.CylinderOptions.segments (property)
+  primitives.cylinderElliptic (function)
+  primitives.CylinderEllipticOptions (interface) [7 members]
+    primitives.CylinderEllipticOptions.center (property)
+    primitives.CylinderEllipticOptions.height (property)
+    primitives.CylinderEllipticOptions.startRadius (property)
+    primitives.CylinderEllipticOptions.startAngle (property)
+    primitives.CylinderEllipticOptions.endRadius (property)
+    primitives.CylinderEllipticOptions.endAngle (property)
+    primitives.CylinderEllipticOptions.segments (property)
+  primitives.ellipse (function)
+  primitives.EllipseOptions (interface) [5 members]
+    primitives.EllipseOptions.center (property)
+    primitives.EllipseOptions.radius (property)
+    primitives.EllipseOptions.startAngle (property)
+    primitives.EllipseOptions.endAngle (property)
+    primitives.EllipseOptions.segments (property)
+  primitives.ellipsoid (function)
+  primitives.EllipsoidOptions (interface) [4 members]
+    primitives.EllipsoidOptions.center (property)
+    primitives.EllipsoidOptions.radius (property)
+    primitives.EllipsoidOptions.segments (property)
+    primitives.EllipsoidOptions.axes (property)
+  primitives.geodesicSphere (function)
+  primitives.GeodesicSphereOptions (interface) [2 members]
+    primitives.GeodesicSphereOptions.radius (property)
+    primitives.GeodesicSphereOptions.frequency (property)
+  primitives.line (function)
+  primitives.polygon (function)
+  primitives.PolygonOptions (interface) [3 members]
+    primitives.PolygonOptions.points (property)
+    primitives.PolygonOptions.paths (property)
+    primitives.PolygonOptions.orientation (property)
+  primitives.polyhedron (function)
+  primitives.PolyhedronOptions (interface) [4 members]
+    primitives.PolyhedronOptions.points (property)
+    primitives.PolyhedronOptions.faces (property)
+    primitives.PolyhedronOptions.colors (property)
+    primitives.PolyhedronOptions.orientation (property)
+  primitives.rectangle (function)
+  primitives.RectangleOptions (interface) [2 members]
+    primitives.RectangleOptions.center (property)
+    primitives.RectangleOptions.size (property)
+  primitives.roundedCuboid (function)
+  primitives.RoundedCuboidOptions (interface) [4 members]
+    primitives.RoundedCuboidOptions.center (property)
+    primitives.RoundedCuboidOptions.size (property)
+    primitives.RoundedCuboidOptions.roundRadius (property)
+    primitives.RoundedCuboidOptions.segments (property)
+  primitives.roundedCylinder (function)
+  primitives.RoundedCylinderOptions (interface) [5 members]
+    primitives.RoundedCylinderOptions.center (property)
+    primitives.RoundedCylinderOptions.height (property)
+    primitives.RoundedCylinderOptions.radius (property)
+    primitives.RoundedCylinderOptions.roundRadius (property)
+    primitives.RoundedCylinderOptions.segments (property)
+  primitives.roundedRectangle (function)
+  primitives.RoundedRectangleOptions (interface) [4 members]
+    primitives.RoundedRectangleOptions.center (property)
+    primitives.RoundedRectangleOptions.size (property)
+    primitives.RoundedRectangleOptions.roundRadius (property)
+    primitives.RoundedRectangleOptions.segments (property)
+  primitives.sphere (function)
+  primitives.SphereOptions (interface) [4 members]
+    primitives.SphereOptions.center (property)
+    primitives.SphereOptions.radius (property)
+    primitives.SphereOptions.segments (property)
+    primitives.SphereOptions.axes (property)
+  primitives.square (function)
+  primitives.SquareOptions (interface) [2 members]
+    primitives.SquareOptions.center (property)
+    primitives.SquareOptions.size (property)
+  primitives.star (function)
+  primitives.StarOptions (interface) [6 members]
+    primitives.StarOptions.center (property)
+    primitives.StarOptions.vertices (property)
+    primitives.StarOptions.density (property)
+    primitives.StarOptions.outerRadius (property)
+    primitives.StarOptions.innerRadius (property)
+    primitives.StarOptions.startAngle (property)
+  primitives.torus (function)
+  primitives.TorusOptions (interface) [7 members]
+    primitives.TorusOptions.innerRadius (property)
+    primitives.TorusOptions.outerRadius (property)
+    primitives.TorusOptions.innerSegments (property)
+    primitives.TorusOptions.outerSegments (property)
+    primitives.TorusOptions.innerRotation (property)
+    primitives.TorusOptions.outerRotation (property)
+    primitives.TorusOptions.startAngle (property)
+  primitives.triangle (function)
+  primitives.TriangleOptions (interface) [2 members]
+    primitives.TriangleOptions.type (property)
+    primitives.TriangleOptions.values (property)
 
 ## text — `api-text.md`
 
-text (namespace) [6 members] [id: typescript:text]
-  text.vectorChar (function) [id: typescript:text.vectorChar]
-  text.VectorChar (interface) [3 members] [id: typescript:text.VectorChar]
-    text.VectorChar.width (property) [id: typescript:text.VectorChar.width]
-    text.VectorChar.height (property) [id: typescript:text.VectorChar.height]
-    text.VectorChar.segments (property) [id: typescript:text.VectorChar.segments]
-  text.VectorCharOptions (interface) [5 members] [id: typescript:text.VectorCharOptions]
-    text.VectorCharOptions.xOffset (property) [id: typescript:text.VectorCharOptions.xOffset]
-    text.VectorCharOptions.yOffset (property) [id: typescript:text.VectorCharOptions.yOffset]
-    text.VectorCharOptions.height (property) [id: typescript:text.VectorCharOptions.height]
-    text.VectorCharOptions.extrudeOffset (property) [id: typescript:text.VectorCharOptions.extrudeOffset]
-    text.VectorCharOptions.input (property) [id: typescript:text.VectorCharOptions.input]
-  text.vectorText (function) [id: typescript:text.vectorText]
-  text.VectorText (interface) [id: typescript:text.VectorText]
-  text.VectorTextOptions (interface) [8 members] [id: typescript:text.VectorTextOptions]
-    text.VectorTextOptions.xOffset (property) [id: typescript:text.VectorTextOptions.xOffset]
-    text.VectorTextOptions.yOffset (property) [id: typescript:text.VectorTextOptions.yOffset]
-    text.VectorTextOptions.height (property) [id: typescript:text.VectorTextOptions.height]
-    text.VectorTextOptions.lineSpacing (property) [id: typescript:text.VectorTextOptions.lineSpacing]
-    text.VectorTextOptions.letterSpacing (property) [id: typescript:text.VectorTextOptions.letterSpacing]
-    text.VectorTextOptions.align (property) [id: typescript:text.VectorTextOptions.align]
-    text.VectorTextOptions.extrudeOffset (property) [id: typescript:text.VectorTextOptions.extrudeOffset]
-    text.VectorTextOptions.input (property) [id: typescript:text.VectorTextOptions.input]
+text (namespace) [6 members]
+  text.vectorChar (function)
+  text.VectorChar (interface) [3 members]
+    text.VectorChar.width (property)
+    text.VectorChar.height (property)
+    text.VectorChar.segments (property)
+  text.VectorCharOptions (interface) [5 members]
+    text.VectorCharOptions.xOffset (property)
+    text.VectorCharOptions.yOffset (property)
+    text.VectorCharOptions.height (property)
+    text.VectorCharOptions.extrudeOffset (property)
+    text.VectorCharOptions.input (property)
+  text.vectorText (function)
+  text.VectorText (interface)
+  text.VectorTextOptions (interface) [8 members]
+    text.VectorTextOptions.xOffset (property)
+    text.VectorTextOptions.yOffset (property)
+    text.VectorTextOptions.height (property)
+    text.VectorTextOptions.lineSpacing (property)
+    text.VectorTextOptions.letterSpacing (property)
+    text.VectorTextOptions.align (property)
+    text.VectorTextOptions.extrudeOffset (property)
+    text.VectorTextOptions.input (property)
 
 ## utils — `api-utils.md`
 
-utils (namespace) [7 members] [id: typescript:utils]
-  utils.areAllShapesTheSameType (function) [id: typescript:utils.areAllShapesTheSameType]
-  utils.degToRad (function) [id: typescript:utils.degToRad]
-  utils.flatten (function) [id: typescript:utils.flatten]
-  utils.fnNumberSort (function) [id: typescript:utils.fnNumberSort]
-  utils.insertSorted (function) [id: typescript:utils.insertSorted]
-  utils.radiusToSegments (function) [id: typescript:utils.radiusToSegments]
-  utils.radToDeg (function) [id: typescript:utils.radToDeg]
+utils (namespace) [7 members]
+  utils.areAllShapesTheSameType (function)
+  utils.degToRad (function)
+  utils.flatten (function)
+  utils.fnNumberSort (function)
+  utils.insertSorted (function)
+  utils.radiusToSegments (function)
+  utils.radToDeg (function)
 
 ## booleans — `api-booleans.md`
 
-booleans (namespace) [5 members] [id: typescript:booleans]
-  booleans.intersect (function) [id: typescript:booleans.intersect]
-  booleans.minkowski (function) [id: typescript:booleans.minkowski]
-  booleans.subtract (function) [id: typescript:booleans.subtract]
-  booleans.union (function) [id: typescript:booleans.union]
-  booleans.scission (function) [id: typescript:booleans.scission]
+booleans (namespace) [5 members]
+  booleans.intersect (function)
+  booleans.minkowski (function)
+  booleans.subtract (function)
+  booleans.union (function)
+  booleans.scission (function)
 
 ## expansions — `api-expansions.md`
 
-expansions (namespace) [4 members] [id: typescript:expansions]
-  expansions.expand (function) [id: typescript:expansions.expand]
-  expansions.ExpandOptions (interface) [3 members] [id: typescript:expansions.ExpandOptions]
-    expansions.ExpandOptions.delta (property) [id: typescript:expansions.ExpandOptions.delta]
-    expansions.ExpandOptions.corners (property) [id: typescript:expansions.ExpandOptions.corners]
-    expansions.ExpandOptions.segments (property) [id: typescript:expansions.ExpandOptions.segments]
-  expansions.offset (function) [id: typescript:expansions.offset]
-  expansions.OffsetOptions (interface) [3 members] [id: typescript:expansions.OffsetOptions]
-    expansions.OffsetOptions.delta (property) [id: typescript:expansions.OffsetOptions.delta]
-    expansions.OffsetOptions.corners (property) [id: typescript:expansions.OffsetOptions.corners]
-    expansions.OffsetOptions.segments (property) [id: typescript:expansions.OffsetOptions.segments]
+expansions (namespace) [4 members]
+  expansions.expand (function)
+  expansions.ExpandOptions (interface) [3 members]
+    expansions.ExpandOptions.delta (property)
+    expansions.ExpandOptions.corners (property)
+    expansions.ExpandOptions.segments (property)
+  expansions.offset (function)
+  expansions.OffsetOptions (interface) [3 members]
+    expansions.OffsetOptions.delta (property)
+    expansions.OffsetOptions.corners (property)
+    expansions.OffsetOptions.segments (property)
 
 ## extrusions — `api-extrusions.md`
 
-extrusions (namespace) [13 members] [id: typescript:extrusions]
-  extrusions.extrudeFromSlices (function) [id: typescript:extrusions.extrudeFromSlices]
-  extrusions.ExtrudeFromSlicesOptions (interface) [5 members] [id: typescript:extrusions.ExtrudeFromSlicesOptions]
-    extrusions.ExtrudeFromSlicesOptions.numberOfSlices (property) [id: typescript:extrusions.ExtrudeFromSlicesOptions.numberOfSlices]
-    extrusions.ExtrudeFromSlicesOptions.capStart (property) [id: typescript:extrusions.ExtrudeFromSlicesOptions.capStart]
-    extrusions.ExtrudeFromSlicesOptions.capEnd (property) [id: typescript:extrusions.ExtrudeFromSlicesOptions.capEnd]
-    extrusions.ExtrudeFromSlicesOptions.close (property) [id: typescript:extrusions.ExtrudeFromSlicesOptions.close]
-    extrusions.ExtrudeFromSlicesOptions.callback (property) [id: typescript:extrusions.ExtrudeFromSlicesOptions.callback]
-  extrusions.extrudeLinear (function) [id: typescript:extrusions.extrudeLinear]
-  extrusions.ExtrudeLinearOptions (interface) [3 members] [id: typescript:extrusions.ExtrudeLinearOptions]
-    extrusions.ExtrudeLinearOptions.height (property) [id: typescript:extrusions.ExtrudeLinearOptions.height]
-    extrusions.ExtrudeLinearOptions.twistAngle (property) [id: typescript:extrusions.ExtrudeLinearOptions.twistAngle]
-    extrusions.ExtrudeLinearOptions.twistSteps (property) [id: typescript:extrusions.ExtrudeLinearOptions.twistSteps]
-  extrusions.extrudeRectangular (function) [id: typescript:extrusions.extrudeRectangular]
-  extrusions.ExtrudeRectangularOptions (interface) [4 members] [id: typescript:extrusions.ExtrudeRectangularOptions]
-    extrusions.ExtrudeRectangularOptions.size (property) [id: typescript:extrusions.ExtrudeRectangularOptions.size]
-    extrusions.ExtrudeRectangularOptions.height (property) [id: typescript:extrusions.ExtrudeRectangularOptions.height]
-    extrusions.ExtrudeRectangularOptions.corners (property) [id: typescript:extrusions.ExtrudeRectangularOptions.corners]
-    extrusions.ExtrudeRectangularOptions.segments (property) [id: typescript:extrusions.ExtrudeRectangularOptions.segments]
-  extrusions.extrudeRotate (function) [id: typescript:extrusions.extrudeRotate]
-  extrusions.ExtrudeRotateOptions (interface) [4 members] [id: typescript:extrusions.ExtrudeRotateOptions]
-    extrusions.ExtrudeRotateOptions.angle (property) [id: typescript:extrusions.ExtrudeRotateOptions.angle]
-    extrusions.ExtrudeRotateOptions.startAngle (property) [id: typescript:extrusions.ExtrudeRotateOptions.startAngle]
-    extrusions.ExtrudeRotateOptions.overflow (property) [id: typescript:extrusions.ExtrudeRotateOptions.overflow]
-    extrusions.ExtrudeRotateOptions.segments (property) [id: typescript:extrusions.ExtrudeRotateOptions.segments]
-  extrusions.extrudeHelical (function) [id: typescript:extrusions.extrudeHelical]
-  extrusions.ExtrudeHelicalOptions (interface) [6 members] [id: typescript:extrusions.ExtrudeHelicalOptions]
-    extrusions.ExtrudeHelicalOptions.angle (property) [id: typescript:extrusions.ExtrudeHelicalOptions.angle]
-    extrusions.ExtrudeHelicalOptions.startAngle (property) [id: typescript:extrusions.ExtrudeHelicalOptions.startAngle]
-    extrusions.ExtrudeHelicalOptions.pitch (property) [id: typescript:extrusions.ExtrudeHelicalOptions.pitch]
-    extrusions.ExtrudeHelicalOptions.height (property) [id: typescript:extrusions.ExtrudeHelicalOptions.height]
-    extrusions.ExtrudeHelicalOptions.endOffset (property) [id: typescript:extrusions.ExtrudeHelicalOptions.endOffset]
-    extrusions.ExtrudeHelicalOptions.segmentsPerRotation (property) [id: typescript:extrusions.ExtrudeHelicalOptions.segmentsPerRotation]
-  extrusions.project (function) [id: typescript:extrusions.project]
-  extrusions.ProjectOptions (interface) [2 members] [id: typescript:extrusions.ProjectOptions]
-    extrusions.ProjectOptions.axis (property) [id: typescript:extrusions.ProjectOptions.axis]
-    extrusions.ProjectOptions.origin (property) [id: typescript:extrusions.ProjectOptions.origin]
-  extrusions.slice (namespace) [13 members] [id: typescript:extrusions.slice]
-    extrusions.slice.calculatePlane (function) [id: typescript:extrusions.slice.calculatePlane]
-    extrusions.slice.clone (function) [id: typescript:extrusions.slice.clone]
-    extrusions.slice.create (function) [id: typescript:extrusions.slice.create]
-    extrusions.slice.equals (function) [id: typescript:extrusions.slice.equals]
-    extrusions.slice.fromPoints (function) [id: typescript:extrusions.slice.fromPoints]
-    extrusions.slice.fromSides (function) [id: typescript:extrusions.slice.fromSides]
-    extrusions.slice.isA (function) [id: typescript:extrusions.slice.isA]
-    extrusions.slice.reverse (function) [id: typescript:extrusions.slice.reverse]
-    extrusions.slice.toEdges (function) [id: typescript:extrusions.slice.toEdges]
-    extrusions.slice.toPolygons (function) [id: typescript:extrusions.slice.toPolygons]
-    extrusions.slice.toString (function) [id: typescript:extrusions.slice.toString]
-    extrusions.slice.transform (function) [id: typescript:extrusions.slice.transform]
-    extrusions.slice.Slice (interface) [1 members] [id: typescript:extrusions.slice.Slice]
-      extrusions.slice.Slice.edges (property) [id: typescript:extrusions.slice.Slice.edges]
+extrusions (namespace) [13 members]
+  extrusions.extrudeFromSlices (function)
+  extrusions.ExtrudeFromSlicesOptions (interface) [5 members]
+    extrusions.ExtrudeFromSlicesOptions.numberOfSlices (property)
+    extrusions.ExtrudeFromSlicesOptions.capStart (property)
+    extrusions.ExtrudeFromSlicesOptions.capEnd (property)
+    extrusions.ExtrudeFromSlicesOptions.close (property)
+    extrusions.ExtrudeFromSlicesOptions.callback (property)
+  extrusions.extrudeLinear (function)
+  extrusions.ExtrudeLinearOptions (interface) [3 members]
+    extrusions.ExtrudeLinearOptions.height (property)
+    extrusions.ExtrudeLinearOptions.twistAngle (property)
+    extrusions.ExtrudeLinearOptions.twistSteps (property)
+  extrusions.extrudeRectangular (function)
+  extrusions.ExtrudeRectangularOptions (interface) [4 members]
+    extrusions.ExtrudeRectangularOptions.size (property)
+    extrusions.ExtrudeRectangularOptions.height (property)
+    extrusions.ExtrudeRectangularOptions.corners (property)
+    extrusions.ExtrudeRectangularOptions.segments (property)
+  extrusions.extrudeRotate (function)
+  extrusions.ExtrudeRotateOptions (interface) [4 members]
+    extrusions.ExtrudeRotateOptions.angle (property)
+    extrusions.ExtrudeRotateOptions.startAngle (property)
+    extrusions.ExtrudeRotateOptions.overflow (property)
+    extrusions.ExtrudeRotateOptions.segments (property)
+  extrusions.extrudeHelical (function)
+  extrusions.ExtrudeHelicalOptions (interface) [6 members]
+    extrusions.ExtrudeHelicalOptions.angle (property)
+    extrusions.ExtrudeHelicalOptions.startAngle (property)
+    extrusions.ExtrudeHelicalOptions.pitch (property)
+    extrusions.ExtrudeHelicalOptions.height (property)
+    extrusions.ExtrudeHelicalOptions.endOffset (property)
+    extrusions.ExtrudeHelicalOptions.segmentsPerRotation (property)
+  extrusions.project (function)
+  extrusions.ProjectOptions (interface) [2 members]
+    extrusions.ProjectOptions.axis (property)
+    extrusions.ProjectOptions.origin (property)
+  extrusions.slice (namespace) [13 members]
+    extrusions.slice.calculatePlane (function)
+    extrusions.slice.clone (function)
+    extrusions.slice.create (function)
+    extrusions.slice.equals (function)
+    extrusions.slice.fromPoints (function)
+    extrusions.slice.fromSides (function)
+    extrusions.slice.isA (function)
+    extrusions.slice.reverse (function)
+    extrusions.slice.toEdges (function)
+    extrusions.slice.toPolygons (function)
+    extrusions.slice.toString (function)
+    extrusions.slice.transform (function)
+    extrusions.slice.Slice (interface) [1 members]
+      extrusions.slice.Slice.edges (property)
 
 ## hulls — `api-hulls.md`
 
-hulls (namespace) [4 members] [id: typescript:hulls]
-  hulls.hull (function) [id: typescript:hulls.hull]
-  hulls.hullChain (function) [id: typescript:hulls.hullChain]
-  hulls.hullPoints2 (function) [id: typescript:hulls.hullPoints2]
-  hulls.hullPoints3 (function) [id: typescript:hulls.hullPoints3]
+hulls (namespace) [4 members]
+  hulls.hull (function)
+  hulls.hullChain (function)
+  hulls.hullPoints2 (function)
+  hulls.hullPoints3 (function)
 
 ## minkowski — `api-minkowski.md`
 
-minkowski (namespace) [1 members] [id: typescript:minkowski]
-  minkowski.minkowskiSum (function) [id: typescript:minkowski.minkowskiSum]
+minkowski (namespace) [1 members]
+  minkowski.minkowskiSum (function)
 
 ## modifiers — `api-modifiers.md`
 
-modifiers (namespace) [1 members] [id: typescript:modifiers]
-  modifiers.retessellate (function) [id: typescript:modifiers.retessellate]
+modifiers (namespace) [1 members]
+  modifiers.retessellate (function)
 
 ## transforms — `api-transforms.md`
 
-transforms (namespace) [26 members] [id: typescript:transforms]
-  transforms.align (function) [id: typescript:transforms.align]
-  transforms.AlignOptions (interface) [3 members] [id: typescript:transforms.AlignOptions]
-    transforms.AlignOptions.modes (property) [id: typescript:transforms.AlignOptions.modes]
-    transforms.AlignOptions.relativeTo (property) [id: typescript:transforms.AlignOptions.relativeTo]
-    transforms.AlignOptions.grouped (property) [id: typescript:transforms.AlignOptions.grouped]
-  transforms.center (function) [id: typescript:transforms.center]
-  transforms.centerX (function) [id: typescript:transforms.centerX]
-  transforms.centerY (function) [id: typescript:transforms.centerY]
-  transforms.centerZ (function) [id: typescript:transforms.centerZ]
-  transforms.CenterOptions (interface) [2 members] [id: typescript:transforms.CenterOptions]
-    transforms.CenterOptions.axes (property) [id: typescript:transforms.CenterOptions.axes]
-    transforms.CenterOptions.relativeTo (property) [id: typescript:transforms.CenterOptions.relativeTo]
-  transforms.mirror (function) [id: typescript:transforms.mirror]
-  transforms.mirrorX (function) [id: typescript:transforms.mirrorX]
-  transforms.mirrorY (function) [id: typescript:transforms.mirrorY]
-  transforms.mirrorZ (function) [id: typescript:transforms.mirrorZ]
-  transforms.MirrorOptions (interface) [2 members] [id: typescript:transforms.MirrorOptions]
-    transforms.MirrorOptions.origin (property) [id: typescript:transforms.MirrorOptions.origin]
-    transforms.MirrorOptions.normal (property) [id: typescript:transforms.MirrorOptions.normal]
-  transforms.rotate (function) [id: typescript:transforms.rotate]
-  transforms.rotateX (function) [id: typescript:transforms.rotateX]
-  transforms.rotateY (function) [id: typescript:transforms.rotateY]
-  transforms.rotateZ (function) [id: typescript:transforms.rotateZ]
-  transforms.scale (function) [id: typescript:transforms.scale]
-  transforms.scaleX (function) [id: typescript:transforms.scaleX]
-  transforms.scaleY (function) [id: typescript:transforms.scaleY]
-  transforms.scaleZ (function) [id: typescript:transforms.scaleZ]
-  transforms.transform (function) [id: typescript:transforms.transform]
-  transforms.translate (function) [id: typescript:transforms.translate]
-  transforms.translateX (function) [id: typescript:transforms.translateX]
-  transforms.translateY (function) [id: typescript:transforms.translateY]
-  transforms.translateZ (function) [id: typescript:transforms.translateZ]
-  transforms.Vec (type) [id: typescript:transforms.Vec]
+transforms (namespace) [26 members]
+  transforms.align (function)
+  transforms.AlignOptions (interface) [3 members]
+    transforms.AlignOptions.modes (property)
+    transforms.AlignOptions.relativeTo (property)
+    transforms.AlignOptions.grouped (property)
+  transforms.center (function)
+  transforms.centerX (function)
+  transforms.centerY (function)
+  transforms.centerZ (function)
+  transforms.CenterOptions (interface) [2 members]
+    transforms.CenterOptions.axes (property)
+    transforms.CenterOptions.relativeTo (property)
+  transforms.mirror (function)
+  transforms.mirrorX (function)
+  transforms.mirrorY (function)
+  transforms.mirrorZ (function)
+  transforms.MirrorOptions (interface) [2 members]
+    transforms.MirrorOptions.origin (property)
+    transforms.MirrorOptions.normal (property)
+  transforms.rotate (function)
+  transforms.rotateX (function)
+  transforms.rotateY (function)
+  transforms.rotateZ (function)
+  transforms.scale (function)
+  transforms.scaleX (function)
+  transforms.scaleY (function)
+  transforms.scaleZ (function)
+  transforms.transform (function)
+  transforms.translate (function)
+  transforms.translateX (function)
+  transforms.translateY (function)
+  transforms.translateZ (function)
+  transforms.Vec (type)

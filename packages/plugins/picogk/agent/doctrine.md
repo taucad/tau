@@ -49,6 +49,15 @@ public static class Params
 }
 ```
 
+## Wrong / Correct
+
+- Wrong: `Voxels.voxBox(…)` or `Voxels.voxField(…)`; neither exists. Correct: a box is `new Voxels(Utils.mshCreateCube(new BBox3(min, max)))`; a field or SDF is an `IImplicit`/`IBoundedImplicit` passed to `new Voxels(implicit, bounds)`.
+- Wrong: geometry created outside `Library.Go`. Correct: build and `Add` inside the task lambda.
+
+## Verify
+
+Test with a TypeScript `main.geospec.ts` (activate `geospec-authoring`): `await loadModel({ file: 'main.cs' })`; Tau captures mesh evidence.
+
 ## Runtime and reference
 
-`runtime-reference.md` covers lifetimes, backends and errors. The main index covers CAD/BCL; `embedding-api-index.md` covers host/native, diagnostics and subclasses. Accessibility is unchanged.
+`runtime-reference.md` covers lifetimes, backends and errors. `api-index.md` covers PicoGK authoring and the selected .NET types; `embedding-api-index.md` covers host/native, diagnostics and subclasses.

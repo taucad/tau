@@ -445,7 +445,7 @@ export function ProjectLibrary(): React.JSX.Element {
         className='mb-6'
         action={
           <Button asChild>
-            <NavLink to='/'>
+            <NavLink to='/projects/new'>
               {({ isPending }) => (
                 <>
                   New project

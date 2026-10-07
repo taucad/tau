@@ -177,7 +177,7 @@ export default function CadCommunity(): React.JSX.Element {
               }}
             />
             <Button asChild>
-              <NavLink to='/'>
+              <NavLink to='/projects/new'>
                 {({ isPending }) => (
                   <>
                     New project

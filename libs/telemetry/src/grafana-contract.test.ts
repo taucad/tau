@@ -23,7 +23,6 @@ const pendingDeclaration: Readonly<Record<string, string>> = {
   tau_agent_time_to_first_update: 'taucad/tau#382',
   tau_agent_tool_calls_total: 'taucad/tau#382',
   tau_agent_tokens_total: 'taucad/tau#382',
-  tau_agent_cost_total: 'taucad/tau#382',
   tau_agent_errors_total: 'taucad/tau#382',
 };
 /* eslint-enable @typescript-eslint/naming-convention -- end of the metric-name map */

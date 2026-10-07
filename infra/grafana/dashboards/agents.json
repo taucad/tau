@@ -46,7 +46,7 @@
           "expr": "sum(increase(tau_agent_turns_total{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])) or vector(0)"
         }
       ],
-      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 }
+      "gridPos": { "h": 5, "w": 5, "x": 0, "y": 1 }
     },
     {
       "title": "Sessions Started (1h)",
@@ -56,7 +56,7 @@
           "expr": "sum(increase(tau_agent_sessions_total{service_name=~\"$service\",agent_id=~\"$agent\",outcome=\"started\"}[1h])) or vector(0)"
         }
       ],
-      "gridPos": { "h": 5, "w": 4, "x": 4, "y": 1 }
+      "gridPos": { "h": 5, "w": 5, "x": 5, "y": 1 }
     },
     {
       "title": "Turn Error Rate",
@@ -79,7 +79,7 @@
           }
         }
       },
-      "gridPos": { "h": 5, "w": 4, "x": 8, "y": 1 }
+      "gridPos": { "h": 5, "w": 5, "x": 10, "y": 1 }
     },
     {
       "title": "Turn p95",
@@ -90,7 +90,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 5, "w": 4, "x": 12, "y": 1 }
+      "gridPos": { "h": 5, "w": 5, "x": 15, "y": 1 }
     },
     {
       "title": "Tool Calls (1h)",
@@ -100,18 +100,6 @@
           "expr": "sum(increase(tau_agent_tool_calls_total{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])) or vector(0)"
         }
       ],
-      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 1 }
-    },
-    {
-      "title": "Agent-Reported Cost (1h)",
-      "type": "stat",
-      "description": "Only agents that report usage over ACP (e.g. Codex, Claude Code). Tau-funded calls are in the LLM row.",
-      "targets": [
-        {
-          "expr": "sum(increase(tau_agent_cost_total{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])) or vector(0)"
-        }
-      ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
       "gridPos": { "h": 5, "w": 4, "x": 20, "y": 1 }
     },
     {

@@ -944,6 +944,9 @@ export class BillingPaymentsService {
             eq(billingPurchase.id, actionId),
             eq(billingPurchase.accountId, owner.accountId),
             eq(billingPurchase.state, 'prepared'),
+            // An automatic reload purchase belongs to its worker: cancelled by hand it would stay immutable without a
+            // terminal outcome, holding the account's one pending slot (billing_purchase_automatic_pending) forever.
+            or(isNull(billingPurchase.purpose), ne(billingPurchase.purpose, 'automatic')),
           ),
         )
         .returning({ id: billingPurchase.id });
@@ -4265,6 +4268,9 @@ export class BillingPaymentsService {
       await this.cash.assertNewCollectionScope(accountId, tx);
       const purchase = await this.ownedPurchase(accountId, actionId, tx);
       if (purchase.state !== 'prepared') return undefined;
+      // An automatic reload purchase is confirmed by its worker from the consent; its leg holds the worker's envelope,
+      // not a bare request, and the customer's dialog has nothing to confirm.
+      if (purchase.purpose === 'automatic') throw new ConflictException({ code: 'action_not_confirmable' });
       const rows = await tx
         .select()
         .from(billingProviderLeg)

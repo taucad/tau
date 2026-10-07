@@ -1,10 +1,31 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BoxGeometry, Group, InstancedMesh, Layers, Matrix4, Mesh, MeshStandardMaterial } from 'three';
+import {
+  BoxGeometry,
+  Group,
+  InstancedMesh,
+  Layers,
+  Matrix4,
+  Mesh,
+  MeshStandardMaterial,
+  Texture,
+  TextureLoader,
+} from 'three';
 import {
   createGltfSurfaceBatches,
   getGltfOccurrenceLayers,
   qualifyGltfSurfaceMaterial,
+  sealGltfSurfaceMaterial,
 } from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
+import { applyMatcap } from '#components/geometry/graphics/three/materials/gltf-matcap.js';
+import {
+  applyGltfSurfaceDepthBias,
+  refreshGltfSurfaceDepthBias,
+} from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
+import { createSectionClip, installSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
+import {
+  applyModelMaterialAppearance,
+  getOrCaptureModelMaterialAppearance,
+} from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 
 const cleanup: Array<() => void> = [];
 afterEach(() => {
@@ -45,6 +66,221 @@ const fixture = (count = 100) => {
 };
 
 describe('glTF surface batches', () => {
+  it.each(['webgl', 'webgpu'] as const)(
+    'should retain initially partial dim capacity through actual PBR to matcap and preserve opaque depth overrides on %s',
+    async (backend) => {
+      const texture = new Texture<HTMLImageElement>();
+      vi.spyOn(TextureLoader.prototype, 'load').mockReturnValue(texture);
+      cleanup.push(() => {
+        texture.dispose();
+      });
+      const { root, occurrences } = fixture(4);
+      const clip = createSectionClip(backend);
+      for (const [index, mesh] of occurrences.entries()) {
+        applyGltfSurfaceDepthBias(mesh.material, backend);
+        installSectionClip(mesh.material, clip);
+        const snapshot = getOrCaptureModelMaterialAppearance(mesh.material);
+        sealGltfSurfaceMaterial(mesh.material);
+        applyModelMaterialAppearance(mesh.material, snapshot, index < 2 ? 0.25 : 1);
+      }
+      await applyMatcap({ scene: root }, 1, backend);
+      for (const mesh of occurrences) {
+        applyGltfSurfaceDepthBias(mesh.material, backend);
+        getOrCaptureModelMaterialAppearance(mesh.material);
+        sealGltfSurfaceMaterial(mesh.material);
+      }
+      const batches = createBatches(root, occurrences);
+      batches.sync();
+      const [batch] = batches.group.children;
+      if (!(batch instanceof InstancedMesh)) {
+        throw new Error('Expected an opaque batch');
+      }
+      expect(batch.count).toBe(2);
+      expect(batch.instanceMatrix.count).toBe(4);
+      const matrix = batch.instanceMatrix;
+      for (const mesh of occurrences) {
+        applyModelMaterialAppearance(mesh.material, getOrCaptureModelMaterialAppearance(mesh.material), 1);
+      }
+      batches.sync();
+      expect(batches.group.children).toEqual([batch]);
+      expect(batch.instanceMatrix).toBe(matrix);
+      expect(batch.count).toBe(4);
+      const override = occurrences[2]!;
+      override.material.depthWrite = false;
+      refreshGltfSurfaceDepthBias(override.material);
+      batches.sync();
+      expect(override.layers.mask).toBe(1);
+      expect(batches.group.children).toHaveLength(1);
+      const [remaining] = batches.group.children;
+      expect(remaining).toBeInstanceOf(InstancedMesh);
+      expect((remaining as InstancedMesh).count).toBe(3);
+    },
+  );
+
+  it.each(['webgl', 'webgpu'] as const)(
+    'should retain initially dimmed classic capacity and preserve current opaque depthWrite on %s',
+    (backend) => {
+      const { root, occurrences } = fixture(4);
+      const clip = createSectionClip(backend);
+      const snapshots = occurrences.map(({ material }) => getOrCaptureModelMaterialAppearance(material));
+      for (const [index, mesh] of occurrences.entries()) {
+        installSectionClip(mesh.material, clip);
+        applyModelMaterialAppearance(mesh.material, snapshots[index]!, index < 2 ? 0.25 : 1);
+        applyGltfSurfaceDepthBias(mesh.material, backend);
+        sealGltfSurfaceMaterial(mesh.material);
+      }
+      const batches = createBatches(root, occurrences);
+      batches.sync();
+      const [batch] = batches.group.children;
+      if (!(batch instanceof InstancedMesh)) {
+        throw new Error('Expected an opaque batch');
+      }
+      expect(batch.count).toBe(2);
+      expect(batch.instanceMatrix.count).toBe(4);
+      const matrix = batch.instanceMatrix;
+      for (const [index, mesh] of occurrences.entries()) {
+        applyModelMaterialAppearance(mesh.material, snapshots[index]!, 1);
+      }
+      batches.sync();
+      expect(batches.group.children).toEqual([batch]);
+      expect(batch.instanceMatrix).toBe(matrix);
+      expect(batch.count).toBe(4);
+      const override = occurrences[2]!;
+      override.material.depthWrite = false;
+      refreshGltfSurfaceDepthBias(override.material);
+      batches.sync();
+      expect(override.layers.mask).toBe(1);
+      expect(batches.group.children).toHaveLength(1);
+      const [remaining] = batches.group.children;
+      expect(remaining).toBeInstanceOf(InstancedMesh);
+      expect((remaining as InstancedMesh).count).toBe(3);
+    },
+  );
+
+  it('should keep authored shader, polygon, backend and current override states in distinct real-bias cohorts', () => {
+    const { root, occurrences } = fixture(8);
+    const clips = { webgl: createSectionClip('webgl'), webgpu: createSectionClip('webgpu') };
+    for (const [index, mesh] of occurrences.entries()) {
+      if (index < 2) {
+        mesh.material.polygonOffset = true;
+        mesh.material.polygonOffsetFactor = 7;
+      }
+      if (index >= 2 && index < 4) {
+        mesh.material.customProgramCacheKey = () => 'authored|tau-gltf-surface-depth-bias-v2|different';
+      }
+      const backend = index >= 4 && index < 6 ? 'webgpu' : 'webgl';
+      applyGltfSurfaceDepthBias(mesh.material, backend);
+      installSectionClip(mesh.material, clips[backend]);
+      sealGltfSurfaceMaterial(mesh.material);
+      if (index >= 6) {
+        mesh.material.polygonOffsetFactor = 99;
+      }
+    }
+    const batches = createBatches(root, occurrences);
+    batches.sync();
+    expect(batches.group.children).toHaveLength(4);
+    expect(batches.group.children.every((batch) => batch instanceof InstancedMesh && batch.count === 2)).toBe(true);
+  });
+
+  it.each(['webgl', 'webgpu'] as const)(
+    'should batch delayed first depth activation but reject an unknown later hook on %s',
+    (backend) => {
+      const { root, occurrences } = fixture(2);
+      const clip = createSectionClip(backend);
+      const snapshots = occurrences.map(({ material }) => getOrCaptureModelMaterialAppearance(material));
+      for (const [index, mesh] of occurrences.entries()) {
+        applyModelMaterialAppearance(mesh.material, snapshots[index]!, 0.25);
+        applyGltfSurfaceDepthBias(mesh.material, backend);
+        installSectionClip(mesh.material, clip);
+        sealGltfSurfaceMaterial(mesh.material);
+        applyModelMaterialAppearance(mesh.material, snapshots[index]!, 1);
+      }
+      const batches = createBatches(root, occurrences);
+      batches.sync();
+      expect(batches.group.children).toHaveLength(1);
+      const { material } = occurrences[0]!;
+      const ownedHook = material.onBeforeCompile;
+      material.onBeforeCompile = (shader, renderer): void => {
+        ownedHook.call(material, shader, renderer);
+      };
+      batches.sync();
+      expect(occurrences[0]!.layers.mask).toBe(1);
+    },
+  );
+
+  it.each(['webgl', 'webgpu'] as const)(
+    'should retain the full real-bias cohort capacity after initially partial dimming on %s',
+    (backend) => {
+      const { root, occurrences } = fixture();
+      const clip = createSectionClip(backend);
+      const snapshots = occurrences.map(({ material }) => {
+        applyGltfSurfaceDepthBias(material, backend);
+        installSectionClip(material, clip);
+        sealGltfSurfaceMaterial(material);
+        return getOrCaptureModelMaterialAppearance(material);
+      });
+      for (const [index, mesh] of occurrences.entries()) {
+        applyModelMaterialAppearance(mesh.material, snapshots[index]!, index < 50 ? 0.25 : 1);
+        applyGltfSurfaceDepthBias(mesh.material, backend);
+      }
+      const batches = createBatches(root, occurrences);
+      batches.sync();
+      const [batch] = batches.group.children;
+      if (!(batch instanceof InstancedMesh)) {
+        throw new Error('Expected an opaque batch');
+      }
+      expect(batch.count).toBe(50);
+      expect(occurrences.slice(0, 50).every((mesh) => mesh.layers.mask === 1)).toBe(true);
+      expect(batch.instanceMatrix.array.byteLength).toBe(64 * 100);
+      const matrix = batch.instanceMatrix;
+      for (const [index, mesh] of occurrences.entries()) {
+        applyModelMaterialAppearance(mesh.material, snapshots[index]!, 1);
+        applyGltfSurfaceDepthBias(mesh.material, backend);
+      }
+      batches.sync();
+      expect(batches.group.children[0]).toBe(batch);
+      expect(batch.instanceMatrix).toBe(matrix);
+      expect(batch.count).toBe(100);
+    },
+  );
+
+  it.each(['webgl', 'webgpu'] as const)(
+    'should retain the real-bias batch through all-dim and restore on %s',
+    (backend) => {
+      const { root, occurrences } = fixture();
+      const clip = createSectionClip(backend);
+      const snapshots = occurrences.map(({ material }) => {
+        applyGltfSurfaceDepthBias(material, backend);
+        installSectionClip(material, clip);
+        sealGltfSurfaceMaterial(material);
+        return getOrCaptureModelMaterialAppearance(material);
+      });
+      const batches = createBatches(root, occurrences);
+      batches.sync();
+      const [batch] = batches.group.children;
+      if (!(batch instanceof InstancedMesh)) {
+        throw new Error('Expected an opaque batch');
+      }
+      const matrix = batch.instanceMatrix;
+      for (const [index, mesh] of occurrences.entries()) {
+        applyModelMaterialAppearance(mesh.material, snapshots[index]!, 0.25);
+        applyGltfSurfaceDepthBias(mesh.material, backend);
+      }
+      batches.sync();
+      expect(occurrences.every((mesh) => mesh.layers.mask === 1)).toBe(true);
+      expect(batches.group.children[0]).toBe(batch);
+      expect(batch.count).toBe(0);
+      for (const [index, mesh] of occurrences.entries()) {
+        applyModelMaterialAppearance(mesh.material, snapshots[index]!, 1);
+        applyGltfSurfaceDepthBias(mesh.material, backend);
+      }
+      batches.sync();
+      expect(batches.group.children[0]).toBe(batch);
+      expect(batch.instanceMatrix).toBe(matrix);
+      expect(batch.count).toBe(100);
+    },
+  );
+
   it('should batch shared opaque surfaces without replacing canonical identities or picking layers', () => {
     const { root, geometry, occurrences } = fixture();
     const batches = createBatches(root, occurrences);

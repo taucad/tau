@@ -9,6 +9,11 @@ const webGlDepthClamp = 0.01;
 const shaderCacheKey = 'tau-gltf-surface-depth-bias-v2';
 
 type SurfaceDepthBiasState = {
+  configuredBackend: ResolvedGraphicsBackend;
+  composed: boolean;
+  hookKeyPrefix?: { previous: string; composed: string };
+  previousHooks?: Pick<Material, 'onBeforeCompile' | 'customProgramCacheKey'>;
+  composedHooks?: Pick<Material, 'onBeforeCompile' | 'customProgramCacheKey'>;
   /** The backend the bias is active for; undefined while the surface is not an opaque depth writer. */
   backend: ResolvedGraphicsBackend | undefined;
   polygonOffset: boolean;
@@ -46,16 +51,13 @@ const isOpaqueDepthWriter = (material: Material): boolean =>
  * Chains the bias into the material's shader hook once, for good. The hook and the program key read the state, so
  * turning the bias off never unwinds the chain and cannot drop a hook composed after it, such as the section clip.
  */
-const composeSurfaceDepthBias = (material: Material): SurfaceDepthBiasState => {
-  const state: SurfaceDepthBiasState = {
-    backend: undefined,
-    polygonOffset: material.polygonOffset,
-    polygonOffsetFactor: material.polygonOffsetFactor,
-    polygonOffsetUnits: material.polygonOffsetUnits,
-  };
-  states.set(material, state);
+const composeSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasState): void => {
+  state.composed = true;
   const previousHook = material.onBeforeCompile;
   const previousKey = material.customProgramCacheKey;
+  state.previousHooks = { onBeforeCompile: previousHook, customProgramCacheKey: previousKey };
+  const previousHookText = previousHook.toString();
+  const hookDerivedKey = previousKey.call(material).startsWith(previousHookText);
   material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms, renderer): void => {
     previousHook.call(material, shader, renderer);
     if (state.backend === 'webgl') {
@@ -70,9 +72,15 @@ const composeSurfaceDepthBias = (material: Material): SurfaceDepthBiasState => {
       );
     }
   };
+  if (hookDerivedKey) {
+    state.hookKeyPrefix = { previous: previousHookText, composed: material.onBeforeCompile.toString() };
+  }
   material.customProgramCacheKey = (): string =>
     state.backend === 'webgl' ? `${previousKey.call(material)}|${shaderCacheKey}` : previousKey.call(material);
-  return state;
+  state.composedHooks = {
+    onBeforeCompile: material.onBeforeCompile,
+    customProgramCacheKey: material.customProgramCacheKey,
+  };
 };
 
 const deactivateSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasState): void => {
@@ -98,22 +106,36 @@ const deactivateSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasS
  * without log depth, so there `polygonOffset*` is the whole mechanism.
  */
 export const applyGltfSurfaceDepthBias = (material: Material, backend: ResolvedGraphicsBackend): void => {
-  const existingState = states.get(material);
+  let state = states.get(material);
+  if (!state) {
+    state = {
+      configuredBackend: backend,
+      composed: false,
+      backend: undefined,
+      polygonOffset: material.polygonOffset,
+      polygonOffsetFactor: material.polygonOffsetFactor,
+      polygonOffsetUnits: material.polygonOffsetUnits,
+    };
+    states.set(material, state);
+  }
+  state.configuredBackend = backend;
   if (!isOpaqueDepthWriter(material)) {
-    if (existingState?.backend) {
-      deactivateSurfaceDepthBias(material, existingState);
+    if (state.backend) {
+      deactivateSurfaceDepthBias(material, state);
     }
     return;
   }
 
-  if (existingState?.backend === backend) {
+  if (state.backend === backend) {
     return;
   }
-  if (existingState?.backend) {
-    deactivateSurfaceDepthBias(material, existingState);
+  if (state.backend) {
+    deactivateSurfaceDepthBias(material, state);
   }
 
-  const state = existingState ?? composeSurfaceDepthBias(material);
+  if (!state.composed) {
+    composeSurfaceDepthBias(material, state);
+  }
   state.backend = backend;
   state.polygonOffset = material.polygonOffset;
   state.polygonOffsetFactor = material.polygonOffsetFactor;
@@ -122,6 +144,77 @@ export const applyGltfSurfaceDepthBias = (material: Material, backend: ResolvedG
   material.polygonOffsetFactor = gltfSurfacePolygonOffset[backend].polygonOffsetFactor;
   material.polygonOffsetUnits = gltfSurfacePolygonOffset[backend].polygonOffsetUnits;
   material.needsUpdate = true;
+};
+
+/** Refresh only explicitly configured surfaces after their final appearance is applied. */
+export const refreshGltfSurfaceDepthBias = (material: Material): void => {
+  const state = states.get(material);
+  if (state) {
+    applyGltfSurfaceDepthBias(material, state.configuredBackend);
+  }
+};
+
+/** Recognize only the exact delayed depth hook composed over an already sealed material. */
+export const isGltfSurfaceDepthBiasHookExtension = (
+  material: Material,
+  sealed: Pick<Material, 'onBeforeCompile' | 'customProgramCacheKey'>,
+): boolean => {
+  const state = states.get(material);
+  return (
+    state?.previousHooks?.onBeforeCompile === sealed.onBeforeCompile &&
+    state.previousHooks.customProgramCacheKey === sealed.customProgramCacheKey &&
+    state.composedHooks?.onBeforeCompile === material.onBeforeCompile &&
+    state.composedHooks.customProgramCacheKey === material.customProgramCacheKey
+  );
+};
+
+type SurfaceDepthBiasCohort = Readonly<{
+  backend: ResolvedGraphicsBackend;
+  polygonOffset: boolean;
+  polygonOffsetFactor: number;
+  polygonOffsetUnits: number;
+  programCacheKey: string;
+}>;
+
+/** Normalize only the owned opacity-dependent bias for retained opaque cohort capacity. */
+export const getGltfSurfaceDepthBiasCohort = (
+  material: Material,
+  programCacheKey: string,
+): SurfaceDepthBiasCohort | undefined => {
+  const state = states.get(material);
+  if (!state || Boolean(state.backend) !== isOpaqueDepthWriter(material)) {
+    return undefined;
+  }
+  const expected = state.backend ? gltfSurfacePolygonOffset[state.backend] : state;
+  if (
+    material.polygonOffset !== (state.backend ? true : state.polygonOffset) ||
+    material.polygonOffsetFactor !== expected.polygonOffsetFactor ||
+    material.polygonOffsetUnits !== expected.polygonOffsetUnits
+  ) {
+    return undefined;
+  }
+  let normalizedKey = programCacheKey;
+  if (state.backend === 'webgl') {
+    const marker = `|${shaderCacheKey}`;
+    const ownMarker = normalizedKey.lastIndexOf(marker);
+    if (ownMarker === -1) {
+      return undefined;
+    }
+    normalizedKey = normalizedKey.slice(0, ownMarker) + normalizedKey.slice(ownMarker + marker.length);
+  }
+  // Three's default key reads the current hook. Undo only this owner's exact outer prefix,
+  // preserving any authored or section suffix and every unrelated key.
+  const prefix = state.hookKeyPrefix;
+  if (prefix && normalizedKey.startsWith(prefix.composed)) {
+    normalizedKey = prefix.previous + normalizedKey.slice(prefix.composed.length);
+  }
+  return {
+    backend: state.configuredBackend,
+    polygonOffset: state.polygonOffset,
+    polygonOffsetFactor: state.polygonOffsetFactor,
+    polygonOffsetUnits: state.polygonOffsetUnits,
+    programCacheKey: normalizedKey,
+  };
 };
 
 export const applyGltfSurfaceDepthBiasToScene = (scene: Object3D, backend: ResolvedGraphicsBackend): void => {

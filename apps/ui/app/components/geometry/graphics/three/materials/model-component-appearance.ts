@@ -2,6 +2,7 @@ import { Color } from 'three';
 import type { Material } from 'three';
 import type { ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import { gltfEdgeHoverColor } from '#components/geometry/graphics/three/overlay-colors.constants.js';
+import { refreshGltfSurfaceDepthBias } from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
 
 /**
  * Emphasis tint used where a component is represented by generated geometry that the overlay
@@ -76,13 +77,16 @@ export function captureModelMaterialAppearance(material: Material): ModelMateria
   };
 }
 
-export function getOrCaptureModelMaterialAppearance(material: Material): ModelMaterialAppearanceSnapshot {
+export function getOrCaptureModelMaterialAppearance(
+  material: Material,
+  initialRenderState?: Pick<ModelMaterialAppearanceSnapshot, 'opacity' | 'transparent' | 'depthWrite'>,
+): ModelMaterialAppearanceSnapshot {
   const snapshot = materialAppearanceSnapshots.get(material);
   if (snapshot) {
     return snapshot;
   }
 
-  const nextSnapshot = captureModelMaterialAppearance(material);
+  const nextSnapshot = { ...captureModelMaterialAppearance(material), ...initialRenderState };
   materialAppearanceSnapshots.set(material, nextSnapshot);
   return nextSnapshot;
 }
@@ -159,6 +163,8 @@ export function applyModelMaterialAppearance(
   if (opacity < 1) {
     applyModelMaterialOpacityOverride(material, opacity);
   }
+
+  refreshGltfSurfaceDepthBias(material);
 
   // Hover/selection reapply this state to every surface; uniform-only changes do not
   // invalidate compiled programs. Transparency and depth writes change render state.

@@ -1,6 +1,11 @@
 import { createGltfEdgeBatches } from '#components/geometry/graphics/three/utils/gltf-edge-batches.js';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { getCapturedModelMaterialAppearance } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
+import {
+  getGltfSurfaceDepthBiasCohort,
+  isGltfSurfaceDepthBiasHookExtension,
+} from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
 import type { Mesh } from 'three';
 import {
   Color,
@@ -67,13 +72,14 @@ export function sealGltfSurfaceMaterial(material: Material): void {
   if (!known || known.sealed) {
     return;
   }
+  const authored = getCapturedModelMaterialAppearance(material) ?? material;
   qualifiedMaterials.set(material, {
     onBeforeCompile: material.onBeforeCompile,
     customProgramCacheKey: material.customProgramCacheKey,
     base: {
-      opacity: material.opacity,
-      transparent: material.transparent,
-      depthWrite: material.depthWrite,
+      opacity: authored.opacity,
+      transparent: authored.transparent,
+      depthWrite: authored.depthWrite,
     },
     sealed: true,
   });
@@ -153,8 +159,9 @@ function materialKey(material: Material, owningCohort = false): string | undefin
   const known = qualifiedMaterials.get(material);
   if (
     !known ||
-    material.onBeforeCompile !== known.onBeforeCompile ||
-    material.customProgramCacheKey !== known.customProgramCacheKey ||
+    ((material.onBeforeCompile !== known.onBeforeCompile ||
+      material.customProgramCacheKey !== known.customProgramCacheKey) &&
+      !isGltfSurfaceDepthBiasHookExtension(material, known)) ||
     (owningCohort ? known.base.transparent || known.base.opacity < 1 : material.transparent || material.opacity < 1) ||
     ('transmission' in material && typeof material.transmission === 'number' && material.transmission > 0)
   ) {
@@ -162,6 +169,8 @@ function materialKey(material: Material, owningCohort = false): string | undefin
   }
   const properties: Record<string, unknown> = {};
   try {
+    const programCacheKey = material.customProgramCacheKey();
+    const bias = owningCohort ? getGltfSurfaceDepthBiasCohort(material, programCacheKey) : undefined;
     const descriptors = Object.getOwnPropertyDescriptors(material);
     for (const key of Object.keys(descriptors).sort()) {
       if (ignoredMaterialFields.has(key)) {
@@ -172,16 +181,20 @@ function materialKey(material: Material, owningCohort = false): string | undefin
         return undefined;
       }
       const value: unknown =
-        owningCohort && (key === 'opacity' || key === 'transparent' || key === 'depthWrite')
-          ? known.base[key]
-          : descriptor.value;
+        bias && (key === 'polygonOffset' || key === 'polygonOffsetFactor' || key === 'polygonOffsetUnits')
+          ? bias[key]
+          : owningCohort &&
+              (material.transparent || material.opacity < 1) &&
+              (key === 'opacity' || key === 'transparent' || key === 'depthWrite')
+            ? known.base[key]
+            : descriptor.value;
       // Unqualified executable material properties cannot be compared by function text.
       if (typeof value === 'function') {
         return undefined;
       }
       properties[key] = renderValue(value);
     }
-    return JSON.stringify([material.type, material.customProgramCacheKey(), properties]);
+    return JSON.stringify([material.type, bias?.programCacheKey ?? programCacheKey, bias?.backend, properties]);
   } catch {
     return undefined;
   }

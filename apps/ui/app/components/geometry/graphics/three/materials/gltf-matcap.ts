@@ -7,7 +7,11 @@ import { DoubleSide, MeshMatcapMaterial } from 'three';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { MeshMatcapNodeMaterial } from 'three/webgpu';
 import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
-import { applyModelMaterialOpacityOverride } from '#components/geometry/graphics/three/materials/model-component-appearance.js';
+import {
+  applyModelMaterialOpacityOverride,
+  getCapturedModelMaterialAppearance,
+  getOrCaptureModelMaterialAppearance,
+} from '#components/geometry/graphics/three/materials/model-component-appearance.js';
 import { transferSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 
 /**
@@ -137,6 +141,15 @@ function applyMatcapMaterialToMesh({
   if (tint !== 1) {
     meshMatcap.color.multiplyScalar(tint);
   }
+
+  const authoredStates = getSourceMaterials(current).map(
+    (material) => getCapturedModelMaterialAppearance(material) ?? material,
+  );
+  getOrCaptureModelMaterialAppearance(meshMatcap, {
+    opacity: authoredStates.length > 0 ? Math.min(...authoredStates.map((state) => state.opacity)) : 1,
+    transparent: authoredStates.some((state) => state.transparent || state.opacity < 1),
+    depthWrite: authoredStates.every((state) => state.depthWrite),
+  });
 
   return meshMatcap;
 }

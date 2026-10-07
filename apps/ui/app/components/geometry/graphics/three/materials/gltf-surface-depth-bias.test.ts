@@ -5,7 +5,13 @@ import type { Material, WebGLProgramParametersWithUniforms, WebGLRenderer } from
 import {
   applyGltfSurfaceDepthBias,
   applyGltfSurfaceDepthBiasToScene,
+  refreshGltfSurfaceDepthBias,
 } from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
+import {
+  applyModelMaterialAppearance,
+  getOrCaptureModelMaterialAppearance,
+} from '#components/geometry/graphics/three/materials/model-component-appearance.js';
+import { createSectionClip, installSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 
 type ShaderProbe = {
   fragmentShader: string;
@@ -18,6 +24,58 @@ const compile = (material: MeshStandardMaterial, fragmentShader = '#include <log
 };
 
 describe('GLTF surface depth bias', () => {
+  it.each(['webgl', 'webgpu'] as const)(
+    'should refresh final appearance without dirtying repeated states on %s',
+    (backend) => {
+      const material = new MeshStandardMaterial({ polygonOffset: true, polygonOffsetFactor: 7, polygonOffsetUnits: 9 });
+      const snapshot = getOrCaptureModelMaterialAppearance(material);
+      applyGltfSurfaceDepthBias(material, backend);
+      const clip = createSectionClip(backend);
+      installSectionClip(material, clip);
+      const hook = material.onBeforeCompile;
+      const key = material.customProgramCacheKey;
+      const mask = (material as Material & { maskNode?: unknown }).maskNode;
+      const opaqueVersion = material.version;
+      applyModelMaterialAppearance(material, snapshot, 1);
+      expect(material.version).toBe(opaqueVersion);
+      applyModelMaterialAppearance(material, snapshot, 0.25);
+      expect(material.polygonOffsetFactor).toBe(7);
+      expect(material.polygonOffsetUnits).toBe(9);
+      expect(material.customProgramCacheKey()).not.toContain('tau-gltf-surface-depth-bias');
+      const dimVersion = material.version;
+      applyModelMaterialAppearance(material, snapshot, 0.5);
+      applyModelMaterialAppearance(material, snapshot, 0.5);
+      expect(material.version).toBe(dimVersion);
+      applyModelMaterialAppearance(material, snapshot, 1);
+      expect(material.polygonOffsetFactor).toBe(backend === 'webgl' ? 1.5 : -1.5);
+      expect(material.onBeforeCompile).toBe(hook);
+      expect(material.customProgramCacheKey).toBe(key);
+      expect((material as Material & { maskNode?: unknown }).maskNode).toBe(mask);
+      if (backend === 'webgl') {
+        expect(material.customProgramCacheKey()).toContain('|tau-section-clip-v1');
+        expect(material.customProgramCacheKey().match(/tau-gltf-surface-depth-bias/g)).toHaveLength(1);
+      }
+    },
+  );
+
+  it('should remember an inactive backend without installing hooks and leave unconfigured materials untouched', () => {
+    const material = new MeshStandardMaterial({ transparent: true, opacity: 0.25, depthWrite: false });
+    const hook = material.onBeforeCompile;
+    const key = material.customProgramCacheKey;
+    const { version } = material;
+    refreshGltfSurfaceDepthBias(material);
+    applyGltfSurfaceDepthBias(material, 'webgl');
+    applyGltfSurfaceDepthBias(material, 'webgpu');
+    expect(material.onBeforeCompile).toBe(hook);
+    expect(material.customProgramCacheKey).toBe(key);
+    expect(material.version).toBe(version);
+    material.opacity = 1;
+    material.transparent = false;
+    material.depthWrite = true;
+    refreshGltfSurfaceDepthBias(material);
+    expect(material.polygonOffsetFactor).toBe(-1.5);
+    expect(material.customProgramCacheKey()).not.toContain('tau-gltf-surface-depth-bias');
+  });
   it('pushes opaque WebGL triangles locally in logarithmic depth', () => {
     const material = new MeshStandardMaterial();
 

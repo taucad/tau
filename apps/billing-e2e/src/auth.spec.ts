@@ -104,8 +104,11 @@ describe('auth and onboarding', () => {
       expect(limited.length).toBeGreaterThan(0);
       expect(limited.length + refused.length).toBe(101);
       const retryAfter = Math.max(...limited.map(({ headers }) => retryAfterSeconds(headers)));
-      const observedRetryAfter =
-        limited[0]?.headers.get('x-retry-after') ?? limited[0]?.headers.get('retry-after') ?? 'absent';
+      const observedRetryAfter = [
+        ...new Set(
+          limited.map(({ headers }) => headers.get('x-retry-after') ?? headers.get('retry-after') ?? 'absent'),
+        ),
+      ].join('/');
       await delay((retryAfter + 1) * 1000);
       const signIn = await account.api.request('POST', '/v1/auth/sign-in/email', {
         body: { email: account.email, password: account.password },

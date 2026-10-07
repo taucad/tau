@@ -33,12 +33,34 @@ export const runId = configuredRunId;
 /** Retained run output (tool-output policy): results.json, results-matrix.md, screenshots and traces. */
 export const runDirectory = resolve(import.meta.dirname, '../../../../out/test-results/billing-e2e', runId);
 
-/** A staging account the run could not delete; an operator sweeps it by `userId`. */
-export type Orphan = { readonly caseId: string; readonly email: string; readonly userId: string };
+/** A staging account the run could not delete, and why; an operator sweeps it by `userId`. */
+export type Orphan = {
+  readonly caseId: string;
+  readonly email: string;
+  readonly userId: string;
+  readonly reason: string;
+};
 
 type Results = { readonly rows: readonly Row[]; readonly orphans: readonly Orphan[] };
 
 const resultsPath = join(runDirectory, 'results.json');
+
+/** Every results.json mutation queues behind the previous one: teardowns run concurrently (auth closes three). */
+let ledger: Promise<void> = Promise.resolve();
+const serialized = async <T>(work: () => Promise<T>): Promise<T> => {
+  const turn = ledger;
+  let release: () => void = () => undefined;
+  ledger = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await turn;
+  try {
+    return await work();
+  } finally {
+    // Released whatever happened, so a failed write leaves the next caller runnable.
+    release();
+  }
+};
 
 const readResults = async (): Promise<Results> => {
   try {
@@ -81,7 +103,7 @@ const renderMatrix = ({ rows, orphans }: Results): string => {
       ? []
       : [
           `Accounts the run could not delete, for an operator to sweep: ${orphans
-            .map(({ email, userId, caseId }) => `\`${email}\` (user ${userId}, row ${caseId})`)
+            .map(({ email, userId, caseId, reason }) => `\`${email}\` (user ${userId}, row ${caseId}: ${reason})`)
             .join(', ')}.`,
           '',
         ]),
@@ -99,19 +121,23 @@ export const recordRow = async (row: Row): Promise<void> => {
   if ((row.outcome === 'fail' || row.outcome === 'blocked') && row.defect === undefined) {
     throw new Error(`${row.id}: a ${row.outcome} row must name its finding (F-nn) or harness issue (H-nn)`);
   }
-  const previous = await readResults();
-  const rows = [...previous.rows.filter(({ id }) => id !== row.id), row].sort((left, right) =>
-    left.id.localeCompare(right.id),
-  );
-  await writeResults({ rows, orphans: previous.orphans });
+  await serialized(async () => {
+    const previous = await readResults();
+    const rows = [...previous.rows.filter(({ id }) => id !== row.id), row].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+    await writeResults({ rows, orphans: previous.orphans });
+  });
 };
 
 /** Names an account the run could not delete, in results.json and under the matrix, so it is swept rather than lost. */
 export const recordOrphan = async (orphan: Orphan): Promise<void> => {
-  const previous = await readResults();
-  await writeResults({
-    rows: previous.rows,
-    orphans: [...previous.orphans.filter(({ userId }) => userId !== orphan.userId), orphan],
+  await serialized(async () => {
+    const previous = await readResults();
+    await writeResults({
+      rows: previous.rows,
+      orphans: [...previous.orphans.filter(({ userId }) => userId !== orphan.userId), orphan],
+    });
   });
 };
 

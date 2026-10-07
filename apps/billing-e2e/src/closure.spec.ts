@@ -67,7 +67,7 @@ describe('account closure', () => {
         evidence: [
           ...evidence,
           `get-session afterwards ${JSON.stringify(session.body)}, sign-in afterwards ${signIn.status}`,
-          'balance was 0: closing a funded account needs a paid top-up, which this host cannot submit (H-01)',
+          'balance was 0: this row closes an account that never topped up',
         ],
       };
     }),

@@ -24,6 +24,8 @@ import type { Verdict } from '#support/results.js';
 const returnPath = '/?settings=billing';
 /** States a just-paid action passes through before the grant lands: the UI's own set (root-billing.cloud.tsx). */
 const settlingStates = new Set<string>(['redirect_required', 'processing', 'funds_received']);
+/** The return page re-checks a settling action 10 × 2 s (root-billing.cloud.tsx); a later grant is never announced. */
+const uiRecheckSeconds = 20;
 
 /** Settings → Billing → Add credits → amount → Review: the prepared quote and its request id. */
 const reviewTopup = async (
@@ -170,28 +172,42 @@ describe('paid top-up', () => {
           settled = await readAction();
         }
         const settleSeconds = Math.round((Date.now() - returned) / 1000);
-        // The verdict waits for the credits toast itself: the return-time recover may announce "Checkout is ready"
-        // first and replace it, so the first matching toast is not the verdict; every toast shown stays in evidence.
-        const creditsToast =
-          settled.state === 'fulfilled'
-            ? await waitForToast(page, /credits added/u, 10_000).catch(() => undefined)
-            : undefined;
+        // The page announces its first read, which can beat the webhook ("Checkout is ready to continue."), and
+        // re-checks for only uiRecheckSeconds; the credits toast is the verdict only when the page could still have
+        // seen the grant, and a receipt is what it announces. Every toast shown stays in the evidence either way.
+        const announceable =
+          settled.state === 'fulfilled' && settled.receipt !== null && settleSeconds <= uiRecheckSeconds;
+        const creditsToast = announceable
+          ? await waitForToast(page, /credits added/u, 10_000).catch(() => undefined)
+          : undefined;
         const credits = ok(await account.api.request('GET', '/v1/billing/credits'), wireBalanceExplanationSchema);
         paid = { actionId: action.actionId, state: settled.state };
         const evidence = [
           `${payment.sessionId} paid with 4242`,
           `action ${action.actionId} ${settled.state} ${settleSeconds} s after return`,
           `toasts ${JSON.stringify(await toasts(page))}`,
+          ...(settled.state === 'fulfilled' && !announceable
+            ? [
+                `granted after the page's ${uiRecheckSeconds} s re-check or without a receipt: no credits toast expected`,
+              ]
+            : []),
           `available ${credits.balance?.eligibleAvailableCreditAtoms ?? 'unavailable'} atoms`,
           await screenshot(page, 'tu-01-return'),
         ];
         if (settled.state === 'redirect_required') {
+          // Nothing accepted the payment in 60 s: no webhook, and no sweep settled the session.
           return { outcome: 'blocked', defect: 'F-01', evidence };
+        }
+        if (settlingStates.has(settled.state)) {
+          // The payment was accepted (processing, or funds received) but the grant did not follow in 60 s.
+          return { outcome: 'blocked', defect: 'F-24', evidence };
         }
         expect(settled.state).toBe('fulfilled');
         expect(settled.receipt?.grantedCreditAtoms).toBe('5000000');
         expect(credits.balance?.eligibleAvailableCreditAtoms).toBe('5000000');
-        expect(creditsToast).toContain('500 credits added.');
+        if (announceable) {
+          expect(creditsToast).toContain('500 credits added.');
+        }
         return { outcome: 'pass', evidence };
       }),
     ),

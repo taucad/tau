@@ -54,7 +54,7 @@ export const verifyAccount = async (account: Account): Promise<void> => {
  * Deletes the Tau user when a session can. Without one (an unverified sign-up cannot sign in) the user stays, so
  * the run names it for an operator to sweep and keeps its inbox; nothing here may mask the row's own failure.
  */
-const discardAccount = async (account: Account): Promise<void> => {
+const discardAccount = async (account: Account, problem?: string): Promise<void> => {
   const deleted = hasSession(account)
     ? await account.api.request('POST', '/v1/auth/delete-user', { body: {} }).catch(() => undefined)
     : undefined;
@@ -62,7 +62,15 @@ const discardAccount = async (account: Account): Promise<void> => {
     await deleteMailbox(account.mailbox).catch(() => undefined);
     return;
   }
-  await recordOrphan({ caseId: account.caseId, email: account.email, userId: account.userId }).catch(() => undefined);
+  const reason = [
+    problem,
+    hasSession(account) ? `delete-user answered ${deleted?.status ?? 'nothing'}` : 'no session to delete with',
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join('; ');
+  await recordOrphan({ caseId: account.caseId, email: account.email, userId: account.userId, reason }).catch(
+    () => undefined,
+  );
 };
 
 /**
@@ -112,6 +120,7 @@ export const closeAccount = async (account: Account): Promise<void> => {
   if (process.env['KEEP_ACCOUNTS'] === '1') {
     return;
   }
+  let problem: string | undefined;
   try {
     if (!hasSession(account)) {
       await verifyAccount(account);
@@ -120,11 +129,17 @@ export const closeAccount = async (account: Account): Promise<void> => {
     const actions: WirePaymentAction[] =
       listed.status === 200 ? z.array(wirePaymentActionSchema).parse(listed.body) : [];
     const open = actions.filter(({ state }) => state === 'prepared' || state === 'redirect_required');
-    await Promise.all(
-      open.map(async ({ actionId }) => account.api.request('POST', `/v1/billing/payment-actions/${actionId}/cancel`)),
+    const cancels = await Promise.all(
+      open.map(async ({ actionId }) => {
+        const response = await account.api.request('POST', `/v1/billing/payment-actions/${actionId}/cancel`);
+        return `cancel ${actionId} answered ${response.status}`;
+      }),
     );
-  } catch {
-    // No session or no cancel: the deletion below still tries, and records the orphan when it cannot.
+    const refused = cancels.filter((line) => !line.endsWith(' 200'));
+    problem = refused.length === 0 ? undefined : refused.join('; ');
+  } catch (error) {
+    // No session or no cancel: the deletion below still tries, and the ledger says what stopped the cleanup.
+    problem = error instanceof Error ? error.message : String(error);
   }
-  await discardAccount(account);
+  await discardAccount(account, problem);
 };

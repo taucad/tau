@@ -113,11 +113,14 @@ for (const { uid, title } of dashboards.filter(({ uid: id }) => !values.dashboar
     }
     checked += 1;
     const search = new URLSearchParams({ 'match[]': String(substitute(match['selector'], variables)) });
-    const { data } = await get<{ data: string[] }>(
+    const labelValues = await get<{ data: string[] }>(
       `/api/datasources/proxy/uid/${resolve(variable.datasource)?.uid ?? ''}/api/v1/label/${match['label']}/values?${search.toString()}`,
-    );
-    if (data.length === 0) {
-      empty.set(`${title} › $${variable.name}`, 'variable has no values');
+    ).then(({ data }) => data, String);
+    if (typeof labelValues === 'string' || labelValues.length === 0) {
+      empty.set(
+        `${title} › $${variable.name}`,
+        typeof labelValues === 'string' ? labelValues : 'variable has no values',
+      );
     }
   }
   const panels = dashboard.panels.flatMap((panel) => (panel.type === 'row' ? (panel.panels ?? []) : [panel]));
@@ -166,8 +169,11 @@ for (const [key, reason] of empty) {
   console.log(`  ${baseline.has(key) ? '·' : '✗'} ${key} — ${reason}`);
 }
 // Deliberately not a failure: a panel fed only by error paths can have data on one run and not the
-// next, so a stale line is reported for pruning rather than failing the gate.
-for (const key of [...baseline].filter((line) => checkedTitles.has(line.split(' › ')[0] ?? '') && !empty.has(line))) {
-  console.log(`  ↑ ${key} — has data now; drop it from the baseline`);
+// next, so a stale line is reported for pruning rather than failing the gate. With `--dashboard`, only
+// that dashboard's lines are judged; otherwise a line naming a dashboard that no longer exists is stale too.
+for (const key of [...baseline].filter(
+  (line) => (!values.dashboard || checkedTitles.has(line.split(' › ')[0] ?? '')) && !empty.has(line),
+)) {
+  console.log(`  ↑ ${key} — has data now or its dashboard is gone; drop it from the baseline`);
 }
 process.exit(unexpected.length === 0 ? 0 : 1);

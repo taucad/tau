@@ -9,6 +9,7 @@
  *
  * Optional env: GRAFANA_URL (default http://localhost:6100), GRAFANA_API_KEY (else anonymous/admin).
  * Usage: node apps/api/scripts/check-grafana-panels.mts [--from=now-1h] [--dashboard=<uid>] [--baseline=<file>]
+ * (`pnpm nx run api:grafana:check` passes `--baseline=infra/grafana/known-empty-panels.txt`)
  * `--baseline` names known-empty panels, one `Dashboard › Panel` per line, so the check can gate new gaps
  * while instrumentation is still landing; baseline lines that now have data are reported as stale.
  * Exit codes: 0 every panel and variable has data (or is in the baseline), 1 otherwise.
@@ -26,13 +27,28 @@ const headers: Record<string, string> = {
   'content-type': 'application/json',
   ...(process.env['GRAFANA_API_KEY'] ? { authorization: `Bearer ${process.env['GRAFANA_API_KEY']}` } : {}),
 };
-// Template variables at the values an operator opens the dashboards with.
-const variables: Record<string, string> = { service: 'tau-api', instance: '.*', agent: '.*', app: 'tau-api' };
 
 type Target = Record<string, unknown> & { refId?: string; datasource?: unknown; hide?: boolean };
 type Panel = { title?: string; type: string; datasource?: unknown; targets?: Target[]; panels?: Panel[] };
 type Datasource = { uid: string; name: string; type: string; isDefault: boolean };
-type Variable = { name: string; type: string; query?: unknown; datasource?: unknown };
+type Variable = {
+  name: string;
+  type: string;
+  query?: unknown;
+  datasource?: unknown;
+  allValue?: string;
+  current?: { value?: string | string[] };
+};
+
+/** A dashboard's variables at the values it opens with: its saved `current`, with `All` as its `allValue`. */
+const openingValues = (list: readonly Variable[]): Record<string, string> =>
+  Object.fromEntries(
+    list.map(({ name, current, allValue }) => {
+      const value = current?.value ?? '$__all';
+      const values = Array.isArray(value) ? value : [value];
+      return [name, values.includes('$__all') ? (allValue ?? '.*') : values.join('|')];
+    }),
+  );
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(`${grafana}${path}`, { headers });
@@ -51,14 +67,17 @@ const resolve = (reference: unknown): Datasource | undefined => {
   const key = typeof reference === 'string' ? reference : (reference as { uid?: string }).uid;
   return datasources.find((source) => source.uid === key || source.name === key);
 };
-const substitute = (value: unknown): unknown =>
+const substitute = (value: unknown, variables: Readonly<Record<string, string>>): unknown =>
   typeof value === 'string'
     ? value
-        .replaceAll(/\$\{?(\w+)\}?/gu, (match, name: string) => variables[name] ?? match)
         .replaceAll('$__range', '1h')
         .replaceAll('$__rate_interval', '1m')
         .replaceAll('$__interval', '1m')
+        .replaceAll(/\$\{?(\w+)\}?/gu, (match, name: string) => variables[name] ?? match)
     : value;
+/** A `$name` left after substitution is a variable the dashboard does not define, not a telemetry gap. */
+const unresolved = (value: unknown): string | undefined =>
+  typeof value === 'string' ? /\$\{?\w+/u.exec(value)?.[0] : undefined;
 
 const hasData = (result: unknown): boolean =>
   Object.values(
@@ -71,16 +90,19 @@ const baseline = new Set(
     ? readFileSync(values.baseline, 'utf8')
         .split('\n')
         .map((line) => line.trim())
-        .filter(Boolean)
+        .filter((line) => line !== '' && !line.startsWith('#'))
     : [],
 );
 // Keyed `Dashboard › Panel` (or `Dashboard › $variable`), the form a baseline line takes.
 const empty = new Map<string, string>();
 let checked = 0;
+const checkedTitles = new Set<string>();
 for (const { uid, title } of dashboards.filter(({ uid: id }) => !values.dashboard || id === values.dashboard)) {
+  checkedTitles.add(title);
   const { dashboard } = await get<{ dashboard: { panels: Panel[]; templating?: { list?: Variable[] } } }>(
     `/api/dashboards/uid/${uid}`,
   );
+  const variables = openingValues(dashboard.templating?.list ?? []);
   for (const variable of dashboard.templating?.list ?? []) {
     const match =
       variable.type === 'query' && typeof variable.query === 'string'
@@ -90,7 +112,7 @@ for (const { uid, title } of dashboards.filter(({ uid: id }) => !values.dashboar
       continue;
     }
     checked += 1;
-    const search = new URLSearchParams({ 'match[]': String(substitute(match['selector'])) });
+    const search = new URLSearchParams({ 'match[]': String(substitute(match['selector'], variables)) });
     const { data } = await get<{ data: string[] }>(
       `/api/datasources/proxy/uid/${resolve(variable.datasource)?.uid ?? ''}/api/v1/label/${match['label']}/values?${search.toString()}`,
     );
@@ -108,7 +130,7 @@ for (const { uid, title } of dashboards.filter(({ uid: id }) => !values.dashboar
     const queries = targets.map((target, index) => {
       const source = resolve(target.datasource ?? panel.datasource);
       return {
-        ...Object.fromEntries(Object.entries(target).map(([key, value]) => [key, substitute(value)])),
+        ...Object.fromEntries(Object.entries(target).map(([key, value]) => [key, substitute(value, variables)])),
         refId: target.refId ?? String.fromCodePoint(65 + index),
         datasource: { uid: source?.uid, type: source?.type },
         // Tempo search panels list traces; the query API needs the search shape spelled out.
@@ -118,6 +140,11 @@ for (const { uid, title } of dashboards.filter(({ uid: id }) => !values.dashboar
         intervalMs: 60_000,
       };
     });
+    const leftover = queries.flatMap((query) => Object.values(query).map((value) => unresolved(value))).find(Boolean);
+    if (leftover !== undefined) {
+      empty.set(`${title} › ${panel.title ?? '(untitled)'}`, `unresolved variable ${leftover}`);
+      continue;
+    }
     const response = await fetch(`${grafana}/api/ds/query`, {
       method: 'POST',
       headers,
@@ -138,7 +165,9 @@ const unexpected = [...empty].filter(([key]) => !baseline.has(key));
 for (const [key, reason] of empty) {
   console.log(`  ${baseline.has(key) ? '·' : '✗'} ${key} — ${reason}`);
 }
-for (const key of [...baseline].filter((line) => !empty.has(line))) {
+// Deliberately not a failure: a panel fed only by error paths can have data on one run and not the
+// next, so a stale line is reported for pruning rather than failing the gate.
+for (const key of [...baseline].filter((line) => checkedTitles.has(line.split(' › ')[0] ?? '') && !empty.has(line))) {
   console.log(`  ↑ ${key} — has data now; drop it from the baseline`);
 }
 process.exit(unexpected.length === 0 ? 0 : 1);

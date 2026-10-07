@@ -130,10 +130,10 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "List Grafana panels whose queries return no data (GRAFANA_URL, default http://localhost:6100)."
+        "description": "List Grafana panels and variables whose queries return no data, failing only on panels missing from infra/grafana/known-empty-panels.txt (GRAFANA_URL, default http://localhost:6100)."
       },
       "options": {
-        "command": "node apps/api/scripts/check-grafana-panels.mts"
+        "command": "node apps/api/scripts/check-grafana-panels.mts --baseline=infra/grafana/known-empty-panels.txt"
       }
     },
     "observability:exercise": {

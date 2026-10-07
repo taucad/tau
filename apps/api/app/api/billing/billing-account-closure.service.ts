@@ -1,6 +1,6 @@
 /* oxlint-disable typescript/no-restricted-types, curly, no-await-in-loop -- persisted nulls and sequential financial reconciliation are deliberate */
 import { createHash, randomUUID } from 'node:crypto';
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { WireAccountClosure, WirePaymentAction } from '@taucad/billing';
 import { activePurchaseStates } from '#api/billing/billing-payment-contract.js';
@@ -54,6 +54,8 @@ class PendingPurchaseRefusal extends Error {
 /** Persists the financial tombstone before auth deletion and reconciles its external obligations. */
 @Injectable()
 export class BillingAccountClosureService {
+  readonly #logger = new Logger(BillingAccountClosureService.name);
+
   public constructor(
     private readonly databaseService: Pick<DatabaseService, 'database'>,
     private readonly cancellation: ClosureCancellationAdapter,
@@ -146,11 +148,20 @@ export class BillingAccountClosureService {
       // Object form, like the payments service's `action_already_pending`: the HTTP filter forwards only `code`
       // and a valid `action` of a structured 409, and the wire action is what the customer sees and can act on.
       // Projected after the transaction: the owner-scoped read needs nothing the account lock protects. A projection
-      // that fails (the purchase settled or was cancelled meanwhile, a legacy snapshot) must not turn the refusal
-      // into a 404 or a 500: the bare code still refuses, and the UI then shows its held-payment copy.
-      const action = await this.cancellation
-        .describeAction?.({ authUserId: input.authUserId, actionId: error.purchaseId })
-        .catch(() => undefined);
+      // that fails must not turn the refusal into a 404 or a 500: the bare code still refuses, the failure is logged,
+      // and the UI then shows its held-payment copy.
+      let action: WirePaymentAction | undefined;
+      try {
+        action = await this.cancellation.describeAction?.({ authUserId: input.authUserId, actionId: error.purchaseId });
+      } catch (projectionError) {
+        // Reached only by a purchase row the service can no longer read (a malformed offer snapshot) or a binding that
+        // vanished meanwhile; a purchase settled or cancelled in the window still projects. Logged to keep the signal.
+        this.#logger.warn(
+          `Closure refused for pending purchase ${error.purchaseId} without its projection: ${
+            projectionError instanceof Error ? projectionError.message : String(projectionError)
+          }`,
+        );
+      }
       throw new ConflictException({ code: 'payment_action_pending', ...(action === undefined ? {} : { action }) });
     }
   }

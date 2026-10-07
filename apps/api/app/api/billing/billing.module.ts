@@ -104,6 +104,8 @@ const providerUpstreamFetch =
         const environment = parsed.success ? parsed.data : 'development';
         return new BillingAccountClosureService(
           database,
+          // Carries `describeAction`, which the closure card's copy depends on; the PostgreSQL closure case builds its
+          // service through this same factory.
           createStripeClosureAdapter(
             {
               database: database.database,

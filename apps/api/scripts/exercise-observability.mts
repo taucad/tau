@@ -2,8 +2,8 @@
 /**
  * Drive every instrumented part of a LOCAL Tau API so each Grafana dashboard has real data.
  *
- * Covers auth, REST, client telemetry ingest (CAD kernel, editor, WASM, IndexedDB), Tau Sync (git smart
- * HTTP + LFS into MinIO), publications, Claude Haiku 4.5 through the LLM gateway, billing attempt
+ * Covers auth, REST, client telemetry ingest (CAD kernel, editor, WASM, IndexedDB, agent turns, client
+ * sync attempts), Tau Sync (git smart HTTP + LFS into MinIO), publications, Claude Haiku 4.5 through the LLM gateway, billing attempt
  * lookups, and the hosts/kernels WebSockets. Codex/ACP and the billing workers run beside it (see the
  * observability handbook); this script does not start them.
  *
@@ -24,6 +24,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
 
@@ -242,7 +243,13 @@ COMMIT;
 
 // ---------------------------------------------------------------------------------------------
 await run('telemetry', async () => {
-  for (let round = 0; round < rounds * 5; round += 1) {
+  const total = rounds * 5;
+  for (let round = 0; round < total; round += 1) {
+    if (round === Math.ceil(total / 2)) {
+      // A counter's first scrape is its baseline, so increments sent before it never show in rate().
+      // Pausing past two 5 s scrapes lets the second half register as an increase.
+      await delay(12_000);
+    }
     const failed = round % 4 === 3;
     const response = await call('POST', '/v1/telemetry/ingest', {
       body: {
@@ -276,6 +283,36 @@ await run('telemetry', async () => {
             name: 'observability.indexeddbOperation',
             duration: random(1, 40),
             detail: { operation: ['get', 'put'][round % 2], store: 'files' },
+          },
+          // The UI and daemon report agent turns and Tau Sync attempts the same way; no real agent runs here.
+          {
+            name: 'agent.session',
+            duration: random(1000, 60_000),
+            detail: { agentId: ['tau', 'codex'][round % 2], placement: 'browser', outcome: 'started' },
+          },
+          {
+            name: 'agent.turn',
+            duration: random(2000, 40_000),
+            detail: {
+              agentId: ['tau', 'codex'][round % 2],
+              placement: ['browser', 'daemon'][round % 2],
+              outcome: failed ? 'refused' : 'completed',
+              ...(failed ? { errorCode: 'CLI_NOT_FOUND' } : {}),
+              timeToFirstUpdate: random(300, 3000),
+              toolCalls: [{ kind: 'edit', status: 'completed', count: 1 + (round % 3) }],
+              tokens: { input: 1200, output: 300, cacheRead: 800, cacheWrite: 0 },
+            },
+          },
+          {
+            name: 'observability.syncAttempt',
+            duration: random(100, 2000),
+            detail: {
+              direction: ['push', 'pull'][round % 2],
+              outcome: failed ? 'retry' : 'ok',
+              placement: 'browser',
+              lagMilliseconds: random(500, 4000),
+              pending: round % 3,
+            },
           },
         ],
       },

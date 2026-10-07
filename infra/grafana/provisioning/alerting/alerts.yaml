@@ -222,7 +222,7 @@ groups:
           service: tau-api
           component: billing
 
-      - uid: billing-funded-operation-recovery-provider-execution
+      - uid: billing-recovery-provider-execution
         title: 'P1: Provider Execution During Recovery'
         condition: billing_funded_operation_recovery_provider_execution
         data:

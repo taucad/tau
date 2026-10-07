@@ -48,9 +48,17 @@ export function RenderFpsOverlay({ hasTopRightGizmo = false }: { readonly hasTop
     };
   }, [gl]);
   useLayoutEffect(() => {
+    const output = outputRef.current;
+    if (
+      !output ||
+      renderLoopObservers.get(gl.domElement) !== observerRef.current ||
+      output.parentElement !== gl.domElement.parentElement
+    ) {
+      return;
+    }
     // The 96px cube and its adjacent Section picker end above this 112px band.
-    outputRef.current?.classList.toggle('top-28', hasTopRightGizmo);
-    outputRef.current?.classList.toggle('top-2', !hasTopRightGizmo);
+    output.classList.toggle('top-28', hasTopRightGizmo);
+    output.classList.toggle('top-2', !hasTopRightGizmo);
   }, [gl, hasTopRightGizmo]);
   useFrame(() => {
     observerRef.current?.record(performance.now());

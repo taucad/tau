@@ -1206,8 +1206,41 @@ describe('BillableModelInvocationService', () => {
     expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledWith(1, {
       'deployment.environment': 'development',
       providerId: 'openai',
+      reason: 'credit_exhausted',
     });
   });
+
+  /* F-11: through the funded gateway the upstream key is Tau's, so a 401 is a supplier-account
+   * failure that pages, while the caller still sees only the opaque unavailable answer. */
+  it.each([401, 403])(
+    'should count an upstream %i as a credential_rejected supplier refusal and answer PROVIDER_UNAVAILABLE',
+    async (status) => {
+      const qualified = qualification();
+      qualified.adapter.executeOnce = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { type: 'authentication_error', message: 'invalid x-api-key' } }), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      const { metrics, service } = exhaustionHarness(qualified);
+
+      const error: unknown = await service.invoke(intent()).catch((error: unknown) => error);
+
+      expect(error).toBeInstanceOf(LlmGatewayError);
+      expect((error as LlmGatewayError).getStatus()).toBe(503);
+      expect((error as LlmGatewayError).getResponse()).toEqual({
+        type: 'error',
+        error: { type: 'PROVIDER_UNAVAILABLE', message: expect.not.stringContaining('x-api-key') as unknown },
+      });
+      expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledOnce();
+      expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledWith(1, {
+        'deployment.environment': 'development',
+        providerId: 'openai',
+        reason: 'credential_rejected',
+      });
+    },
+  );
 
   /* W3: the funded refusal branch logs what the operator needs and classifies the status
    * through the same function the self-host path uses, so the two cannot drift. */

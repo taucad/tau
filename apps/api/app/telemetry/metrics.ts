@@ -401,6 +401,67 @@ export class MetricsService {
     description: TauMetrics.agentErrors.description,
     unit: TauMetrics.agentErrors.unit,
   });
+
+  // --- Tau Sync ---
+
+  public readonly syncOperations = this.apiMeter.createCounter(TauMetrics.syncOperations.name, {
+    description: TauMetrics.syncOperations.description,
+    unit: TauMetrics.syncOperations.unit,
+  });
+
+  public readonly syncOperationDuration = this.apiMeter.createHistogram(TauMetrics.syncOperationDuration.name, {
+    description: TauMetrics.syncOperationDuration.description,
+    unit: TauMetrics.syncOperationDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.syncOperationDuration.buckets] },
+  });
+
+  public readonly syncPackBytes = this.apiMeter.createHistogram(TauMetrics.syncPackBytes.name, {
+    description: TauMetrics.syncPackBytes.description,
+    unit: TauMetrics.syncPackBytes.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.syncPackBytes.buckets] },
+  });
+
+  public readonly syncLeaseDuration = this.apiMeter.createHistogram(TauMetrics.syncLeaseDuration.name, {
+    description: TauMetrics.syncLeaseDuration.description,
+    unit: TauMetrics.syncLeaseDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.syncLeaseDuration.buckets] },
+  });
+
+  public readonly syncManifestConflicts = this.apiMeter.createCounter(TauMetrics.syncManifestConflicts.name, {
+    description: TauMetrics.syncManifestConflicts.description,
+    unit: TauMetrics.syncManifestConflicts.unit,
+  });
+
+  public readonly syncSweeps = this.apiMeter.createCounter(TauMetrics.syncSweeps.name, {
+    description: TauMetrics.syncSweeps.description,
+    unit: TauMetrics.syncSweeps.unit,
+  });
+
+  // Client-reported: Tau Sync
+
+  public readonly syncClientAttempts = this.clientMeter.createCounter(TauMetrics.syncClientAttempts.name, {
+    description: TauMetrics.syncClientAttempts.description,
+    unit: TauMetrics.syncClientAttempts.unit,
+  });
+
+  public readonly syncClientLag = this.clientMeter.createHistogram(TauMetrics.syncClientLag.name, {
+    description: TauMetrics.syncClientLag.description,
+    unit: TauMetrics.syncClientLag.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.syncClientLag.buckets] },
+  });
+
+  public readonly syncClientPending = this.clientMeter.createHistogram(TauMetrics.syncClientPending.name, {
+    description: TauMetrics.syncClientPending.description,
+    unit: TauMetrics.syncClientPending.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.syncClientPending.buckets] },
+  });
+
+  // --- Billing workers ---
+
+  public readonly billingWorkerPasses = this.apiMeter.createCounter(TauMetrics.billingWorkerPasses.name, {
+    description: TauMetrics.billingWorkerPasses.description,
+    unit: TauMetrics.billingWorkerPasses.unit,
+  });
 }
 
 /** `ws.gateway` on the `ws.*` connection series: one value per upgrade route. */
@@ -411,3 +472,6 @@ export type WsCloseReason = NonNullable<z.infer<typeof TauMetrics.wsDisconnectio
 
 /** Attributes of one `ws.upgrade.rejections` increment. */
 export type WsUpgradeRejection = z.infer<typeof TauMetrics.wsUpgradeRejections.attributes>;
+
+/** Attributes of one `tau.sync.operations` increment. */
+export type SyncOperationAttributes = z.infer<typeof TauMetrics.syncOperations.attributes>;

@@ -831,6 +831,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        * by `tau serve --ui` shows the Sync region it can never use.
        */
       apiBaseUrl: options.relayUrl.origin,
+      syncTelemetryPlacement: 'daemon',
       /* The session, not this daemon's device credential: the Git endpoints and
        * `PUT /v1/projects/<id>` authenticate an account, and a paired device
        * credential is only ever offered to the agent relay. A terminal has no

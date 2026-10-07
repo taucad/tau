@@ -6,6 +6,9 @@ import { AuthGuard } from '#auth/auth.guard.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 
+const maximumSyncLagMilliseconds = 24 * 60 * 60 * 1000;
+const maximumSyncPending = 10_000;
+
 /**
  * Receives batched telemetry from the client runtime (web workers).
  * Metrics are reported directly from the observability middleware via fetch().
@@ -55,6 +58,10 @@ export class TelemetryController {
       }
       case IngestEntryName.AGENT_TURN: {
         this.recordAgentTurn(entry, durationSeconds);
+        return;
+      }
+      case IngestEntryName.SYNC_ATTEMPT: {
+        this.recordSyncAttempt(entry);
         return;
       }
       default: {
@@ -167,6 +174,19 @@ export class TelemetryController {
     }
     if (errorCode !== undefined && (outcome === 'error' || outcome === 'refused')) {
       this.metrics.agentErrors.add(1, { ...agent, [AttributeKey.AGENT_ERROR_CODE]: errorCode });
+    }
+  }
+
+  private recordSyncAttempt(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.SYNC_ATTEMPT }>): void {
+    const { direction, outcome, placement, lagMilliseconds, pending } = entry.detail;
+    const attributes = { 'agent.placement': placement };
+    this.metrics.syncClientAttempts.add(1, { direction, outcome, ...attributes });
+    /* A client clock or a corrupt queue must not stretch the histograms: clamp to a day and a bounded depth. */
+    if (lagMilliseconds !== undefined) {
+      this.metrics.syncClientLag.record(Math.min(lagMilliseconds, maximumSyncLagMilliseconds) / 1000, attributes);
+    }
+    if (pending !== undefined) {
+      this.metrics.syncClientPending.record(Math.min(pending, maximumSyncPending), attributes);
     }
   }
 }

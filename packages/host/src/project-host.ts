@@ -81,7 +81,7 @@ export type ProjectHostRuntimeClient = HostRuntimeClient;
 /** Options for {@link createProjectHost}. @public */
 export type ProjectHostOptions = Pick<
   ProjectRevisionsOptions,
-  'projectId' | 'checkoutsDirectory' | 'gitExecutable' | 'apiBaseUrl' | 'tauCredential'
+  'projectId' | 'checkoutsDirectory' | 'gitExecutable' | 'apiBaseUrl' | 'tauCredential' | 'syncTelemetryPlacement'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
   Pick<HostToolRegistryOptions, 'systemSkillBundles' | 'geospecRunner' | 'machines'> &
@@ -355,6 +355,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
     ...(options.apiBaseUrl === undefined ? {} : { apiBaseUrl: options.apiBaseUrl }),
     ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
+    ...(options.syncTelemetryPlacement === undefined ? {} : { syncTelemetryPlacement: options.syncTelemetryPlacement }),
     events: options.onRevisionEvent,
   });
 

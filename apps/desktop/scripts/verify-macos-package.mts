@@ -176,6 +176,76 @@ const stopPackagedApp = (): void => {
   }
 };
 
+/**
+ * Prints what macOS recorded about a Quick Look request that failed twice. The
+ * probe only sees `QLThumbnailErrorDomain error 0`; the reason (sandbox denial,
+ * launch refusal, extension crash) is in the unified log and crash reports.
+ */
+const printQuickLookDiagnostics = async (): Promise<void> => {
+  const predicate = [
+    'subsystem == "com.taucad.tau.desktop"',
+    'process BEGINSWITH "TauQuickLook"',
+    'process == "ThumbnailsAgent"',
+    'process == "quicklookd"',
+    'process == "pkd"',
+    'eventMessage CONTAINS[c] "TauQuickLook"',
+    'eventMessage CONTAINS[c] "com.taucad.tau.desktop.quicklook"',
+  ].join(' OR ');
+  const log = spawnSync(
+    '/usr/bin/log',
+    ['show', '--last', '3m', '--info', '--style', 'compact', '--predicate', predicate],
+    {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 60_000,
+    },
+  );
+  const failed = log.error !== undefined || log.status !== 0;
+  if (failed) {
+    // A timeout or maxBuffer overflow still returns what was captured; print it below as partial.
+    console.error(
+      `Could not fully collect the Quick Look unified log (status ${String(log.status)}): ${String(log.error ?? log.stderr)}`,
+    );
+  }
+  // ponytail: last 300 lines keeps the CI log readable; widen --last or the slice if the cause scrolls off.
+  const lines = log.stdout
+    .trim()
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .slice(-300);
+  if (lines.length === 0) {
+    console.error('The Quick Look unified log has no matching entries in the last 3 minutes.');
+  } else {
+    console.error(
+      `::group::Quick Look unified log${failed ? ' (partial)' : ''} (last ${String(lines.length)} lines)\n${lines.join('\n')}\n::endgroup::`,
+    );
+  }
+  // ReportCrash writes the .ips a moment after the process dies.
+  await new Promise((resolve) => {
+    setTimeout(resolve, 3000);
+  });
+  const home = process.env['HOME'] ?? '';
+  const reportRoots = [
+    join(home, 'Library/Logs/DiagnosticReports'),
+    join(home, 'Library/Logs/DiagnosticReports/Retired'),
+    '/Library/Logs/DiagnosticReports',
+  ];
+  const reports = reportRoots
+    .filter((root) => existsSync(root))
+    .flatMap((root) =>
+      readdirSync(root)
+        .filter((name) => name.includes('TauQuickLook'))
+        .map((name) => join(root, name)),
+    )
+    .toSorted();
+  for (const report of reports) {
+    console.error(`::group::${report}\n${readFileSync(report, 'utf8').slice(0, 20_000)}\n::endgroup::`);
+  }
+  if (reports.length === 0) {
+    console.error(`No TauQuickLook crash reports in ${reportRoots.join(', ')}.`);
+  }
+};
+
 const temporarySessions = (): ReadonlySet<string> =>
   new Set(existsSync(extensionTemporaryRoot) ? readdirSync(extensionTemporaryRoot) : []);
 
@@ -811,7 +881,17 @@ if (unsigned) {
         return await runMeasured(options);
       } catch (error) {
         console.warn(`thumbnail request failed once, retrying (host-side Quick Look teardown race): ${String(error)}`);
-        return runMeasured(options);
+        try {
+          return await runMeasured(options);
+        } catch (retryError) {
+          try {
+            await printQuickLookDiagnostics();
+          } catch (diagnosticError) {
+            // Diagnostics are supplementary; never let them replace the probe failure.
+            console.error(`Could not collect Quick Look diagnostics: ${String(diagnosticError)}`);
+          }
+          throw retryError;
+        }
       }
     };
 

@@ -1,0 +1,8010 @@
+{
+  "slug": "cad-opencascadejs",
+  "sources": {
+    "workspaceFiles": 3,
+    "exampleFiles": 1,
+    "transcriptRuns": 0
+  },
+  "symbols": [
+    {
+      "id": "typescript:BOPAlgo_BuilderShape.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_EdgeInfo.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_MakeConnected.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_MakePeriodic.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_CommonBlock.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_DS.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_PaveBlock.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_ShapeInfo.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPTools_Set.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPTools_Set.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_CompCurve.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_Curve.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_Curve2d.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Algo.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_AsDes.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_FaceRestrictor.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_Image.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_NormalProjection.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBndLib.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_Collect.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_FastSewing.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeEdge.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeEdge2d.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeFace.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakePolygon.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakePolygon.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeShape.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeSolid.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeWire.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeWire.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_Sewing.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_VertexInspector.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass_Edge.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass_FClassifier.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_SolutionElem.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_VertexInspector.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakeDPrism.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakePipe.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakePrism.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakeRevol.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_SplitShape.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_AdvancedEvolved.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_CompatibleWires.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Draft.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Evolved.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Filling.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_LocationLaw.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_OffsetWire.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Pipe.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Pipe.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_PipeShell.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_PipeShell.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_ShapeLaw.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Sweep.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_LocalOperation.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_LocalOperation.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeChamfer.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeChamfer.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeFillet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeFillet.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Storage.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_ShapesView.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_ShapesView.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_TopoView_CoEdgeOps.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_FuseEdges.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeEdge.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeEdge2d.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeFace.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakePolygon.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakePolygon.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeShape.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeSolid.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeWire.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeWire.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_PointCloudShape.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepMAT2d_Explorer.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepMesh_DiscretRoot.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepMesh_VertexInspector.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepMesh_VertexTool.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_DraftAngle.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MakeFilling.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MakePipeShell.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_NormalProjection.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrim_FaceBuilder.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrim_GWedge.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepProj_Projection.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepSweep_Builder.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepSweep_NumLinearRegularSweep.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepSweep_Prism.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepSweep_Revol.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepSweep_Tool.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepTools_Quilt.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BiTgte_Blend.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BinTools_Curve2dSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BinTools_CurveSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BinTools_LocationSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BinTools_ShapeSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BinTools_ShapeSet.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BinTools_SurfaceSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BndLib.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BndLib_Add2dCurve.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BndLib_Add3dCurve.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BndLib_AddSurface.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Bnd_BoundSortBox.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Bnd_Box.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Bnd_Box2d.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Bnd_OBB.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Bnd_Range.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Bnd_Sphere.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CDF_Directory.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ChFi3d_Builder.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ChFi3d_ChBuilder.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ChFi3d_FilBuilder.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ChFiDS_StripeMap.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Contap_Line.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Draft_EdgeInfo.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Draft_FaceInfo.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Draft_Modification.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Draft_VertexInfo.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Draft_VertexInfo.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Expr_SystemRelation.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:FilletSurf_InternalBuilder.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GProp_GProps.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Geom2dConvert_CompCurveToBSplineCurve.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Geom2dHatch_Classifier.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Geom2d_VectorWithMagnitude.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeomBndLib_Curve.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeomBndLib_Curve2d.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeomBndLib_Surface.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeomConvert_CompCurveToBSplineCurve.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeomTools_Curve2dSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeomTools_CurveSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeomTools_SurfaceSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Geom_VectorWithMagnitude.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRAlgo_EdgesBlock.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRBRep_Algo.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRBRep_BiPnt2D.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRBRep_BiPoint.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRBRep_FaceIterator.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRBRep_PolyAlgo.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRBRep_ShapeBounds.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRTopoBRep_Data.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HelixBRep_BuilderHelix.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IFSelect_Activator.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IFSelect_PacketList.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IFSelect_SelectCombine.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IFSelect_SelectPointed.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IFSelect_SignMultiple.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IFSelect_SignatureList.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IGESData_FileProtocol.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IGESData_FileRecognizer.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IGESData_GlobalNodeOfSpecificLib.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IGESData_GlobalNodeOfWriterLib.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IGESSelect_ViewSorter.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IGESSolid_Loop.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IGESSolid_TopoBuilder.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IGESToBRep_Reader.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IMeshData_BndBox2dTreeFiller.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IMeshData_CircleCellFilter.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IMeshData_VertexCellFilter.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntPatch_PrmPrmIntersection_T3Bits.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntPolyh_Point.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntSurf_LineOn2S.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntTools_EdgeFace.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntTools_ShrunkRange.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Interface_CheckIterator.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Interface_EntityList.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Interface_GlobalNodeOfReaderLib.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Interface_IntList.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Interface_LineBuffer.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_BuildShape.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_DPrism.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_FindEdgesInFace.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_Generator.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_LinearForm.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_Pipe.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_Prism.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_SplitDrafts.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_SplitShape.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_SplitShape.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_Spliter.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_WiresOnShape.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_WiresOnShape.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Message_ExecStatus.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MoniTool_CaseData.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MoniTool_Stat.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedDataMap_TCollection_AsciiString_handle_Standard_Transient.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedDataMap_TCollection_AsciiString_int.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedDataMap_TDF_Label_TopoDS_Shape.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedDataMap_TopoDS_Shape_XCAFPrs_Style_TopTools_ShapeMapHasher.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedDataMap_TopoDS_Shape_double_TopTools_ShapeMapHasher.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedDataMap_handle_BOPDS_PaveBlock_NCollection_List_handle_BOPDS_PaveBlock.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedDataMap_handle_BOPDS_PaveBlock_NCollection_List_int.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedDataMap_handle_Standard_Transient_handle_Standard_Transient.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedMap_Message_MetricType.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedMap_TCollection_AsciiString.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedMap_TDF_Label.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedMap_handle_BOPDS_PaveBlock.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedMap_handle_Standard_Transient.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_IndexedMap_handle_TDF_Attribute.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Map_BOPDS_Pair.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Map_TCollection_AsciiString.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Map_TDF_Label.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Map_handle_BOPDS_PaveBlock.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Map_handle_TDF_Attribute.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Map_handle_TNaming_NamedShape.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Map_int.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_PackedMap_int.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Poly_MakeLoops_HeapOfInteger.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RWGltf_GltfFace.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RWMesh_EdgeIterator.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RWMesh_EdgeIterator.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RWMesh_FaceIterator.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RWMesh_ShapeIterator.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RWMesh_TriangulationSource.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RWMesh_VertexIterator.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeAnalysis_FreeBoundsProperties.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeAnalysis_WireOrder.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeExtend_WireData.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeExtend_WireData.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_EdgeConnect.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_Face.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_FaceConnect.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_FixSmallFace.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_Shape.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_Shell.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_Solid.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_SplitCommonVertex.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_Wireframe.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeProcess_ShapeContext.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_UnifySameDomain.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepData_ECDescr.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepData_FileProtocol.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepData_FileRecognizer.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepData_GlobalNodeOfWriterLib.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepData_Plex.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepElement_Surface3dElementDescriptor.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepElement_Volume3dElementDescriptor.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepShape_ReversibleTopologyItem.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepVisual_EdgeOrCurve.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Storage_CallBack.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Storage_DefaultCallBack.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Sweep_NumShapeTool.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TDataStd_IntPackedMap.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TDocStd_Modified.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TNaming_Name.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TNaming_NewShapeIterator.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TNaming_OldShapeIterator.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TNaming_RefShape.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TNaming_ShapesSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TNaming_TranslateTool.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TNaming_Translator.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TopTools_LocationSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TopTools_ShapeSet.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TopTools_ShapeSet.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TopoDS.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TopoDS_Builder.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TopoDS_HShape.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TransferBRep_Reader.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TransferBRep_ShapeBinder.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TransferBRep_ShapeListBinder.Edge",
+      "name": "Edge",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TransferBRep_ShapeListBinder.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Transfer_IteratorOfProcessForFinder.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Transfer_IteratorOfProcessForTransient.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Units_Measurement.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Units_Token.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:XSControl_Reader.Shape",
+      "name": "Shape",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:default",
+      "name": "default",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Mat.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Mat2d.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Quaternion.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Vec.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Vec2d.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_XY.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_XYZ.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:math_Matrix.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:math_VectorBase_double.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:math_VectorBase_int.Add",
+      "name": "Add",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_MCurvesToBSpCurve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_BuilderFace.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_WireEdgeSet.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_DS.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_CompCurve.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_Curve2d.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_Surface.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_BooleanOperation.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_BuilderAlgo.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Defeaturing.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Section.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Splitter.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_NormalProjection.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_Line.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeFace.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakePolygon.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeShape.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeShapeOnMesh.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeWire.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d_Intersector3d.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d_SClassifier.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass_Edge.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_SolutionElem.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_Gluer.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakeCylindricalHole.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_SplitShape.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Filling.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Filling.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_LocationLaw.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Pipe.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_PipeShell.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Section.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Sweep.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeChamfer.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeFillet.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeFillet2d.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Populate.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Storage.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Storage.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_LayerDeferred_Entry_RepresentationStorage.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_TopoView_CoEdgeOps.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_TopoView_CoEdgeOps.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_UsagePath.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepIntCurveSurface_Inter.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeFace.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakePolygon.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeShape.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepLib_MakeWire.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepMesh_PairOfIndex.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_DraftAngle.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MakeEvolved.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MakeFilling.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MakeOffset.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MakeOffsetShape.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MakePipe.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MakePipeShell.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MakeThickSolid.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_MiddlePath.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_NormalProjection.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffsetAPI_ThruSections.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffset_MakeLoops.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepOffset_Offset.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPreviewAPI_MakeBox.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrimAPI_MakeBox.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrimAPI_MakeOneAxis.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrimAPI_MakeOneAxis.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrimAPI_MakePrism.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrimAPI_MakeRevol.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrimAPI_MakeWedge.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrim_FaceBuilder.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrim_GWedge.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepPrim_GWedge.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepTools_Substitution.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BiTgte_Blend.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Bisector_PolyBis.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CDF_MetaDataDriverFactory.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Geom2d_Transformation.SetRotation",
+      "name": "SetRotation",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeomFill_Sweep.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Geom_Transformation.SetRotation",
+      "name": "SetRotation",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRAlgo_WiresBlock.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRBRep_FaceIterator.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:HLRTopoBRep_Data.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IGESSolid_Shell.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntCurvesFace_Intersector.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntCurvesFace_ShapeIntersector.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntTools_EdgeFace.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntWalk_VectorOfInteger.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:IntWalk_VectorOfWalkingData.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Interface_EntityCluster.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Interface_EntityList.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Interface_ParamSet.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Intf_SectionLine.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Intf_TangentZone.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LocOpe_PntFace.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_Curve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_FaceInfo.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfEE.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfEF.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfEZ.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfFF.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfFZ.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfVE.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfVF.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfVV.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfVZ.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_InterfZZ.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_BOPDS_Point.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_ExtremaPC_ExtremumResult.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_MathRoot_NullInterval.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_TopoDS_Face.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_TopoDS_Shape.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_double.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_gp_Pnt2d.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_gp_XYZ.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_handle_Adaptor3d_Surface.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_handle_NCollection_HSequence_int.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_handle_Standard_Transient.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_DynamicArray_int.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_TCollection_AsciiString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_TCollection_ExtendedString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_TopoDS_Shape.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_double.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_gp_Pnt.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_ChFiDS_SurfData.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_Geom2d_BoundedCurve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_Geom_BoundedCurve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_STEPSelections_AssemblyLink.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_Standard_Transient.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_StepElement_ElementMaterial.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_StepFEA_ElementRepresentation.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_Storage_Root.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_TCollection_HAsciiString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_TCollection_HExtendedString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_Transfer_Finder.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_Units_Quantity.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_Units_Token.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_handle_Units_Unit.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_HSequence_int.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_BOPAlgo_CheckResult.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_BOPDS_Pave.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_BOPTools_ConnexityBlock.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_BOPTools_CoupleOfShape.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_BRepCheck_Status.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_BRepOffset_Interval.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_Bnd_Range.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_HLRAlgo_BiPoint.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_HLRAlgo_Interference.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_IntSurf_PntOn2S.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_IntTools_CurveRangeSample.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_IntTools_SurfaceRangeSample.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_Message_Msg.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_NCollection_List_TopoDS_Shape.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_NCollection_Sequence_int.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_Poly_Triangle.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_Standard_GUID.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_TCollection_AsciiString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_TCollection_ExtendedString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_TDF_Label.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_TopoDS_Shape.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_double.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_gp_Pnt.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_BOPDS_PaveBlock.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_BRepMesh_DiscretAlgoFactory.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_BRep_CurveRepresentation.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_BRep_PointRepresentation.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_ChFiDS_ElSpine.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_ChFiDS_Stripe.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_Law_Function.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_Message_Alert.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_Poly_Triangulation.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_TDF_Attribute.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_TDF_AttributeDelta.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_TDF_Delta.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_handle_TNaming_NamedShape.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_int.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_List_uint8_t.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_AppParCurves_MultiCurve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_BRepExtrema_SolutionElem.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_Extrema_POnCurv.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_Extrema_POnCurv2d.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_Extrema_POnSurf.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_HLRBRep_ShapeBounds.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_IntPatch_Point.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_IntRes2d_IntersectionPoint.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_IntSurf_InteriorPoint.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_IntSurf_PathPoint.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_IntTools_CommonPrt.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_IntTools_Curve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_IntTools_PntOn2Faces.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_IntTools_Range.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_IntTools_Root.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_NCollection_Sequence_handle_Geom2d_Geometry.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_PCDM_Reference.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_Plate_PinpointConstraint.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_RWGltf_GltfPrimArrayData.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_ShapeFix_WireSegment.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_TCollection_AsciiString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_TCollection_ExtendedString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_TDF_Label.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_TopoDS_Shape.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_XCAFDimTolObjects_DimensionModif.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_bool.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_double.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_gp_Pnt.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_gp_Pnt2d.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_gp_Trsf.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_gp_XY.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_ChFiDS_SurfData.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Expr_GeneralExpression.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Expr_NamedExpression.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Expr_NamedFunction.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Geom2d_BoundedCurve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Geom2d_Curve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Geom2d_Geometry.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Geom_BoundedCurve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Geom_Curve.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_IFSelect_Selection.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_IntPatch_Line.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_MAT2d_Connexion.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_MAT_Arc.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_MAT_BasicElt.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_PCDM_Document.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Poly_Triangulation.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_STEPSelections_AssemblyLink.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Standard_Transient.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_StepElement_ElementMaterial.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_StepFEA_ElementRepresentation.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Storage_Root.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_TCollection_HAsciiString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_TCollection_HExtendedString.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_TDF_Attribute.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_TDocStd_ApplicationDelta.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_TDocStd_Document.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Transfer_Finder.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Units_Quantity.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Units_Token.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_Units_Unit.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:NCollection_Sequence_int.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:RWMesh_FaceIterator.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeAnalysis_Wire.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeConstruct_MakeTriangulation.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeExtend_WireData.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_EdgeConnect.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_Face.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_FaceConnect.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_Wire.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_Wire.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeFix_WireVertex.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_ConvertCurve2dToBezier.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_ConvertCurve3dToBezier.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_ConvertSurfaceToBezierBasis.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_SplitCurve.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_SplitCurve2d.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_SplitCurve3d.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_SplitSurface.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_UnifySameDomain.Build",
+      "name": "Build",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ShapeUpgrade_WireDivide.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepShape_ReversibleTopologyItem.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:StepVisual_FaceOrSurface.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Storage_BucketOfPersistent.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TDataStd_BooleanList.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TDataStd_ExtStringList.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TDataStd_IntegerList.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TDataStd_NoteBook.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TDataStd_RealList.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TDataStd_ReferenceList.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TDataStd_TreeNode.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TNaming_Name.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TopoDS.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TopoDS.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TransferBRep_ShapeBinder.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TransferBRep_ShapeBinder.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TransferBRep_ShapeListBinder.Face",
+      "name": "Face",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:TransferBRep_ShapeListBinder.Wire",
+      "name": "Wire",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Mat.SetRotation",
+      "name": "SetRotation",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Mat2d.SetRotation",
+      "name": "SetRotation",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Quaternion.SetRotation",
+      "name": "SetRotation",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Trsf.SetRotation",
+      "name": "SetRotation",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:gp_Trsf2d.SetRotation",
+      "name": "SetRotation",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:APIHeaderSection_EditHeader.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:APIHeaderSection_MakeHeader.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor2d_Curve2d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor2d_Line2d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor2d_OffsetCurve.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_Curve.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_CurveOnSurface.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_HSurfaceTool.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_HVertex.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_InterFunc.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_IsoCurve.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_Surface.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_TopolTool.More",
+      "name": "More",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_TopolTool.Next",
+      "name": "Next",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Adaptor3d_TopolTool.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AdvApprox_ApproxAFunction.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AdvApprox_Cutting.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AdvApprox_DichoCutting.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AdvApprox_EvaluatorFunction.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AdvApprox_PrefAndRec.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AdvApprox_PrefCutting.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AdvApprox_SimpleApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppBlend_Approx.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppCont_Function.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppCont_LeastSquare.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppParCurves.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppParCurves_ConstraintCouple.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppParCurves_MultiBSpCurve.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppParCurves_MultiCurve.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppParCurves_MultiPoint.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppStdL_Application.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AppStd_Application.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ApproxInt_KnotTools.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:ApproxInt_SvSurfaces.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_Curve2d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_Curve3d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_CurveOnSurface.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_CurvilinearParameter.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_CurvlinFunc.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_FitAndDivide.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_FitAndDivide2d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_MCurvesToBSpCurve.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_SameParameter.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_SweepApproximation.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:Approx_SweepFunction.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertAcquiredSelfIntersection.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertBOPNotAllowed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertBOPNotSet.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertBadPositioning.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertBuilderFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertBuildingPCurveFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertEmptyShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertFaceBuilderUnusedEdges.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertIntersectionFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertIntersectionOfPairOfShapesFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertMultiDimensionalArguments.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertMultipleArguments.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertNoFacesToRemove.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertNoFiller.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertNoPeriodicityRequired.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertNotSplittableEdge.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertNullInputShapes.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertPostTreatFF.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertRemovalOfIBForEdgesFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertRemovalOfIBForFacesFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertRemovalOfIBForMDimShapes.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertRemovalOfIBForSolidsFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertRemoveFeaturesFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertSelfInterferingShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertShapeIsNotPeriodic.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertShellSplitterFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertSolidBuilderFailed.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertSolidBuilderUnusedFaces.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertTooFewArguments.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertTooSmallEdge.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnableToGlue.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnableToMakeClosedEdgeOnFace.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnableToMakeIdentical.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnableToMakePeriodic.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnableToOrientTheShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnableToRemoveTheFeature.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnableToRepeat.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnableToTrim.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnknownShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUnsupportedType.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_AlertUserBreak.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Algo.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_ArgumentAnalyzer.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_BOP.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Builder.SetArguments",
+      "name": "SetArguments",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Builder.SetCheckInverted",
+      "name": "SetCheckInverted",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Builder.SetNonDestructive",
+      "name": "SetNonDestructive",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Builder.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_BuilderArea.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_BuilderFace.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_BuilderShape.SetToFillHistory",
+      "name": "SetToFillHistory",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_BuilderShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_BuilderSolid.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_CellsBuilder.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_CheckResult.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_CheckerSI.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_EdgeInfo.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_MakeConnected.SetArguments",
+      "name": "SetArguments",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_MakeConnected.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_MakePeriodic.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_MakePeriodic_PeriodicityParams.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_MakerVolume.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Options.HasErrors",
+      "name": "HasErrors",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Options.SetParallelMode",
+      "name": "SetParallelMode",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Options.SetRunParallel",
+      "name": "SetRunParallel",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Options.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_PISteps.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_ParallelAlgo.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_RemoveFeatures.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Section.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_SectionAttribute.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_ShellSplitter.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Splitter.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_Tools.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_ToolsProvider.SetTools",
+      "name": "SetTools",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_ToolsProvider.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_WireEdgeSet.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPAlgo_WireSplitter.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_CommonBlock.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_CoupleOfPaveBlocks.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_Curve.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_DS.SetArguments",
+      "name": "SetArguments",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_DS.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_FaceInfo.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_IndexRange.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_Interf.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfEE.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfEF.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfEZ.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfFF.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfFZ.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfVE.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfVF.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfVV.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfVZ.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_InterfZZ.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_Pair.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_Pave.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_PaveBlock.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_Point.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_ShapeInfo.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_SubIterator.More",
+      "name": "More",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_SubIterator.Next",
+      "name": "Next",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_SubIterator.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPDS_Tools.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPTools_AlgoTools.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPTools_AlgoTools2D.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPTools_AlgoTools3D.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPTools_ConnexityBlock.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPTools_CoupleOfShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BOPTools_Set.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_CompCurve.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_Curve.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_Curve2d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAdaptor_Surface.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Algo.HasErrors",
+      "name": "HasErrors",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Algo.SetRunParallel",
+      "name": "SetRunParallel",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Algo.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_BooleanOperation.SetTools",
+      "name": "SetTools",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_BooleanOperation.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_BuilderAlgo.SetArguments",
+      "name": "SetArguments",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_BuilderAlgo.SetCheckInverted",
+      "name": "SetCheckInverted",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_BuilderAlgo.SetNonDestructive",
+      "name": "SetNonDestructive",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_BuilderAlgo.SetToFillHistory",
+      "name": "SetToFillHistory",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_BuilderAlgo.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Check.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Common.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Cut.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Defeaturing.SetToFillHistory",
+      "name": "SetToFillHistory",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Defeaturing.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Fuse",
+      "name": "BRepAlgoAPI_Fuse",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Fuse.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Fuse.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Section.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Splitter.SetTools",
+      "name": "SetTools",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgoAPI_Splitter.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_AsDes.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_FaceRestrictor.Current",
+      "name": "Current",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_FaceRestrictor.More",
+      "name": "More",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_FaceRestrictor.Next",
+      "name": "Next",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_FaceRestrictor.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_Image.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_Loop.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepAlgo_NormalProjection.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_ApproxLine.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_BSpGradient_BFGSOfMyBSplGradientOfTheComputeLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_BSpParFunctionOfMyBSplGradientOfTheComputeLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_BSpParLeastSquareOfMyBSplGradientOfTheComputeLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_Gradient_BFGSOfMyGradientOfTheComputeLineBezierOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_Gradient_BFGSOfMyGradientbisOfTheComputeLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_MyBSplGradientOfTheComputeLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_MyGradientOfTheComputeLineBezierOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_MyGradientbisOfTheComputeLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_ParFunctionOfMyGradientOfTheComputeLineBezierOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_ParFunctionOfMyGradientbisOfTheComputeLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_ParLeastSquareOfMyGradientOfTheComputeLineBezierOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_ParLeastSquareOfMyGradientbisOfTheComputeLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_SurfaceTool.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_TheComputeLineBezierOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_TheComputeLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_TheImpPrmSvSurfacesOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_TheInt2SOfThePrmPrmSvSurfacesOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_TheMultiLineOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_TheMultiLineToolOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_ThePrmPrmSvSurfacesOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepApprox_TheZerImpFuncOfTheImpPrmSvSurfacesOfApprox.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_AppFunc.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_AppFuncRoot.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_AppFuncRst.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_AppFuncRstRst.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_AppSurf.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_AppSurface.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_BlendTool.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_CSWalking.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_CurvPointRadInv.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_Extremity.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_HCurve2dTool.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_HCurveTool.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_Line.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_PointOnRst.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_RstRstConstRad.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_RstRstEvolRad.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_RstRstLineBuilder.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_SurfCurvConstRadInv.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_SurfCurvEvolRadInv.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_SurfPointConstRadInv.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_SurfPointEvolRadInv.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_SurfRstConstRad.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_SurfRstEvolRad.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBlend_SurfRstLineBuilder.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBndLib.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_BndBoxTreeSelector.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_Collect.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_Command.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_Copy.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_FastSewing.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_FindPlane.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_GTransform.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeEdge",
+      "name": "BRepBuilderAPI_MakeEdge",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeEdge.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeEdge.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeEdge2d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeFace",
+      "name": "BRepBuilderAPI_MakeFace",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeFace.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeFace.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakePolygon.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeShapeOnMesh.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeShell.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeSolid.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeVertex.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeWire",
+      "name": "BRepBuilderAPI_MakeWire",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeWire.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_MakeWire.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_ModifyShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_NurbsConvert.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_Sewing.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_Transform",
+      "name": "BRepBuilderAPI_Transform",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_Transform.constructor",
+      "name": "constructor",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_Transform.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepBuilderAPI_VertexInspector.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck_Analyzer.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck_Edge.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck_Face.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck_Result.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck_Shell.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck_Solid.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck_Vertex.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepCheck_Wire.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d_BndBoxTreeSelectorLine.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d_BndBoxTreeSelectorPoint.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d_Intersector3d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d_SClassifier.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d_SolidClassifier.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d_SolidExplorer.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass3d_SolidPassiveClassifier.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass_Edge.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass_FClass2dOfFClassifier.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass_FClassifier.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass_FaceClassifier.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass_FacePassiveClassifier.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepClass_Intersector.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_DistShapeShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_DistanceSS.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_ElementFilter.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_ExtCC.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_ExtCF.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_ExtFF.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_ExtPC.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_ExtPF.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_OverlapTool.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_Poly.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_ProximityDistTool_PrjState.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_SelfIntersection.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_ShapeProximity.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_SolutionElem.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_TriangleSet.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_UnCompatibleShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepExtrema_VertexInspector.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_Builder.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_Form.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_Gluer.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakeCylindricalHole.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakeDPrism.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakePipe.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakePrism.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_MakeRevol.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_RibSlot.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFeat_SplitShape.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_ACRLaw.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_AdvancedEvolved.SetParallelMode",
+      "name": "SetParallelMode",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_AdvancedEvolved.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_ApproxSeewing.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_CompatibleWires.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_ComputeCLine.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_CurveConstraint.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Draft.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_DraftLaw.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Edge3DLaw.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_EdgeFaceAndOrder.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_EdgeOnSurfLaw.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Evolved.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_FaceAndOrder.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Filling.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Generator.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_LocationLaw.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_MultiLine.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_NSections.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_OffsetAncestors.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_OffsetWire.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Pipe.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_PipeShell.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Section.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_SectionLaw.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_SectionPlacement.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_ShapeLaw.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_Sweep.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_TrimEdgeTool.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFill_TrimShellCorner.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_LocalOperation.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeChamfer.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeFillet.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepFilletAPI_MakeFillet2d.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_Cinert.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_Domain.More",
+      "name": "More",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_Domain.Next",
+      "name": "Next",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_Domain.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_EdgeTool.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_Face.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_MeshCinert.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_Sinert.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_TFunction.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_UFunction.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGProp_Vinert.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph.IsNull",
+      "name": "IsNull",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_BaseDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_BaseRef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_BitFlags.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_ChildRef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_CoEdgeCurve2DRep.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_CoEdgeDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_CoEdgePolygon2DRep.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_CoEdgePolygonOnTriRep.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_CompSolidDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_CompSolidRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_CompoundDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_CompoundRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_EdgeCurve3DRep.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_EdgeDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_EdgePolygon3DRep.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_EdgeRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_FaceDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_FaceRef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_FaceRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_FaceSurfaceRep.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_FaceTriangulationRep.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Load_Counts.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_OccurrenceDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_OccurrenceRef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_OccurrenceRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_ParityOrientation.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Populate.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Populate_Options.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_ProductDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_ProductRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Reconstruct.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Reconstruct_Cache.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Reconstruct_Cache_TempScope.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_ShellDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_ShellRef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_ShellRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_SolidDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_SolidRef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_SolidRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_Storage.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_VertexDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_VertexRef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_VertexRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_WireDef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_WireRef.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraphInc_WireRelations.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_Cache.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_CacheDerivedState.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_CacheIterator.More",
+      "name": "More",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_CacheIterator.Next",
+      "name": "Next",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_CacheIterator.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_CacheMesh_CoEdgeMeshEntry.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_CacheMesh_DirtySet.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_CacheMesh_Driver.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BRepGraph_CacheMesh_EdgeMeshEntry.delete",
+      "name": "delete",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    }
+  ]
+}

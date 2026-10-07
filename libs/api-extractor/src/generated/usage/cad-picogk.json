@@ -1,0 +1,3018 @@
+{
+  "slug": "cad-picogk",
+  "sources": {
+    "workspaceFiles": 96,
+    "exampleFiles": 5,
+    "transcriptRuns": 39
+  },
+  "symbols": [
+    {
+      "id": "csharp:PicoGK.Viewer.SetGroupMaterial",
+      "name": "SetGroupMaterial",
+      "score": 34,
+      "workspace": 21,
+      "examples": 4,
+      "lookups": 9
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Add",
+      "name": "Add",
+      "score": 33,
+      "workspace": 23,
+      "examples": 4,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:PicoGK.IViewerBackend.SetGroupMaterial",
+      "name": "SetGroupMaterial",
+      "score": 32,
+      "workspace": 21,
+      "examples": 4,
+      "lookups": 7
+    },
+    {
+      "id": "csharp:PicoGK.Library",
+      "name": "Library",
+      "score": 28,
+      "workspace": 24,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Library.Library",
+      "name": "Library",
+      "score": 28,
+      "workspace": 24,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Voxels",
+      "name": "Voxels",
+      "score": 28,
+      "workspace": 16,
+      "examples": 3,
+      "lookups": 9
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.Voxels",
+      "name": "Voxels",
+      "score": 28,
+      "workspace": 16,
+      "examples": 3,
+      "lookups": 9
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3",
+      "name": "Vector3",
+      "score": 28,
+      "workspace": 24,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Vector3",
+      "name": "Vector3",
+      "score": 28,
+      "workspace": 24,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Library.Go",
+      "name": "Go",
+      "score": 26,
+      "workspace": 22,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Library.oViewer",
+      "name": "oViewer",
+      "score": 26,
+      "workspace": 22,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Mesh",
+      "name": "Mesh",
+      "score": 22,
+      "workspace": 10,
+      "examples": 1,
+      "lookups": 11
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.Mesh",
+      "name": "Mesh",
+      "score": 22,
+      "workspace": 10,
+      "examples": 1,
+      "lookups": 11
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Zero",
+      "name": "Zero",
+      "score": 19,
+      "workspace": 15,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF",
+      "name": "MathF",
+      "score": 16,
+      "workspace": 15,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Cos",
+      "name": "Cos",
+      "score": 16,
+      "workspace": 15,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Sin",
+      "name": "Sin",
+      "score": 16,
+      "workspace": 15,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Cos",
+      "name": "Cos",
+      "score": 16,
+      "workspace": 15,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Sin",
+      "name": "Sin",
+      "score": 16,
+      "workspace": 15,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.Add",
+      "name": "Add",
+      "score": 15,
+      "workspace": 7,
+      "examples": 2,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:System.MathF.PI",
+      "name": "PI",
+      "score": 15,
+      "workspace": 14,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Add",
+      "name": "Add",
+      "score": 15,
+      "workspace": 7,
+      "examples": 2,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.X",
+      "name": "X",
+      "score": 15,
+      "workspace": 14,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Y",
+      "name": "Y",
+      "score": 15,
+      "workspace": 14,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.nAddTriangle",
+      "name": "nAddTriangle",
+      "score": 14,
+      "workspace": 9,
+      "examples": 1,
+      "lookups": 4
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.voxSphere",
+      "name": "voxSphere",
+      "score": 14,
+      "workspace": 8,
+      "examples": 3,
+      "lookups": 3
+    },
+    {
+      "id": "csharp:PicoGK.Lattice",
+      "name": "Lattice",
+      "score": 12,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 7
+    },
+    {
+      "id": "csharp:PicoGK.Lattice.Lattice",
+      "name": "Lattice",
+      "score": 12,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 7
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.Add",
+      "name": "Add",
+      "score": 12,
+      "workspace": 4,
+      "examples": 2,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Abs",
+      "name": "Abs",
+      "score": 12,
+      "workspace": 11,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Z",
+      "name": "Z",
+      "score": 12,
+      "workspace": 11,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Abs",
+      "name": "Abs",
+      "score": 11,
+      "workspace": 10,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.BBox3",
+      "name": "BBox3",
+      "score": 10,
+      "workspace": 7,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "csharp:PicoGK.BBox3.BBox3",
+      "name": "BBox3",
+      "score": 10,
+      "workspace": 7,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.nAddVertex",
+      "name": "nAddVertex",
+      "score": 10,
+      "workspace": 8,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Viewer.Add",
+      "name": "Add",
+      "score": 10,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 8
+    },
+    {
+      "id": "csharp:System.Collections.Generic.HashSet.Add",
+      "name": "Add",
+      "score": 10,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.Add",
+      "name": "Add",
+      "score": 10,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Length",
+      "name": "Length",
+      "score": 10,
+      "workspace": 9,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Add",
+      "name": "Add",
+      "score": 10,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:PicoGK.IImplicit",
+      "name": "IImplicit",
+      "score": 9,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "csharp:PicoGK.Lattice.AddBeam",
+      "name": "AddBeam",
+      "score": 9,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.AddQuad",
+      "name": "AddQuad",
+      "score": 9,
+      "workspace": 7,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.mshCreateTransformed",
+      "name": "mshCreateTransformed",
+      "score": 9,
+      "workspace": 5,
+      "examples": 1,
+      "lookups": 3
+    },
+    {
+      "id": "csharp:PicoGK.OpenVdbFile.EFieldType.Voxels",
+      "name": "Voxels",
+      "score": 9,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 9
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.BoolSubtract",
+      "name": "BoolSubtract",
+      "score": 9,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "csharp:System.MathF.Sqrt",
+      "name": "Sqrt",
+      "score": 9,
+      "workspace": 8,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.Add",
+      "name": "Add",
+      "score": 9,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Max",
+      "name": "Max",
+      "score": 9,
+      "workspace": 9,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.AnimationQueue.Add",
+      "name": "Add",
+      "score": 8,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:PicoGK.IViewerBackend.Add",
+      "name": "Add",
+      "score": 8,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:PicoGK.PolyLine.Add",
+      "name": "Add",
+      "score": 8,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:PicoGK.Shapes.Path2d.Add",
+      "name": "Add",
+      "score": 8,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:System.Collections.Generic.HashSet.AlternateLookup.Add",
+      "name": "Add",
+      "score": 8,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List",
+      "name": "List",
+      "score": 8,
+      "workspace": 7,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.Count",
+      "name": "Count",
+      "score": 8,
+      "workspace": 7,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.List",
+      "name": "List",
+      "score": 8,
+      "workspace": 7,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math",
+      "name": "Math",
+      "score": 8,
+      "workspace": 8,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Max",
+      "name": "Max",
+      "score": 8,
+      "workspace": 8,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix3x2.Add",
+      "name": "Add",
+      "score": 8,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 6
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2",
+      "name": "Vector2",
+      "score": 8,
+      "workspace": 6,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Vector2",
+      "name": "Vector2",
+      "score": 8,
+      "workspace": 6,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Count",
+      "name": "Count",
+      "score": 8,
+      "workspace": 7,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.nTriangleCount",
+      "name": "nTriangleCount",
+      "score": 7,
+      "workspace": 5,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.RenderImplicit",
+      "name": "RenderImplicit",
+      "score": 7,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 7
+    },
+    {
+      "id": "csharp:System.Math.Abs",
+      "name": "Abs",
+      "score": 7,
+      "workspace": 7,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Cos",
+      "name": "Cos",
+      "score": 7,
+      "workspace": 7,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.PI",
+      "name": "PI",
+      "score": 7,
+      "workspace": 7,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Sin",
+      "name": "Sin",
+      "score": 7,
+      "workspace": 7,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Cos",
+      "name": "Cos",
+      "score": 7,
+      "workspace": 6,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Sin",
+      "name": "Sin",
+      "score": 7,
+      "workspace": 6,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.X",
+      "name": "X",
+      "score": 7,
+      "workspace": 6,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Y",
+      "name": "Y",
+      "score": 7,
+      "workspace": 6,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.GetTriangle",
+      "name": "GetTriangle",
+      "score": 6,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Triangle",
+      "name": "Triangle",
+      "score": 6,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 3
+    },
+    {
+      "id": "csharp:PicoGK.Triangle.Triangle",
+      "name": "Triangle",
+      "score": 6,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 3
+    },
+    {
+      "id": "csharp:System.Math.Clamp",
+      "name": "Clamp",
+      "score": 6,
+      "workspace": 6,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Max",
+      "name": "Max",
+      "score": 6,
+      "workspace": 6,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Length",
+      "name": "Length",
+      "score": 6,
+      "workspace": 5,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Clamp",
+      "name": "Clamp",
+      "score": 6,
+      "workspace": 6,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Min",
+      "name": "Min",
+      "score": 6,
+      "workspace": 6,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Normalize",
+      "name": "Normalize",
+      "score": 6,
+      "workspace": 6,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ColorFloat",
+      "name": "ColorFloat",
+      "score": 5,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 5
+    },
+    {
+      "id": "csharp:PicoGK.ColorFloat.ColorFloat",
+      "name": "ColorFloat",
+      "score": 5,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 5
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.voxLatticeBeam",
+      "name": "voxLatticeBeam",
+      "score": 5,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary",
+      "name": "Dictionary",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.Count",
+      "name": "Count",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.Dictionary",
+      "name": "Dictionary",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.TryGetValue",
+      "name": "TryGetValue",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.ToArray",
+      "name": "ToArray",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Min",
+      "name": "Min",
+      "score": 5,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Atan2",
+      "name": "Atan2",
+      "score": 5,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Min",
+      "name": "Min",
+      "score": 5,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Cross",
+      "name": "Cross",
+      "score": 5,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.UnitY",
+      "name": "UnitY",
+      "score": 5,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.UnitZ",
+      "name": "UnitZ",
+      "score": 5,
+      "workspace": 5,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.IViewerBackend.SetMechanism",
+      "name": "SetMechanism",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Library.Dispose",
+      "name": "Dispose",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Material",
+      "name": "Material",
+      "score": 4,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "csharp:PicoGK.Material.Material",
+      "name": "Material",
+      "score": 4,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.Dispose",
+      "name": "Dispose",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Numerics.Polar",
+      "name": "Polar",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Numerics.Polar.Polar",
+      "name": "Polar",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Utils",
+      "name": "Utils",
+      "score": 4,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Utils.Utils",
+      "name": "Utils",
+      "score": 4,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Utils.mshCreateCube",
+      "name": "mshCreateCube",
+      "score": 4,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "csharp:PicoGK.Viewer",
+      "name": "Viewer",
+      "score": 4,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "csharp:PicoGK.Viewer.SetMechanism",
+      "name": "SetMechanism",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Viewer.Viewer",
+      "name": "Viewer",
+      "score": 4,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.BoolAdd",
+      "name": "BoolAdd",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Array",
+      "name": "Array",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Array.Length",
+      "name": "Length",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.RemoveAt",
+      "name": "RemoveAt",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Sqrt",
+      "name": "Sqrt",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Atan",
+      "name": "Atan",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Abs",
+      "name": "Abs",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Count",
+      "name": "Count",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Zero",
+      "name": "Zero",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.All",
+      "name": "All",
+      "score": 4,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Distance",
+      "name": "Distance",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.IsFinite",
+      "name": "IsFinite",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.ToString",
+      "name": "ToString",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.UnitX",
+      "name": "UnitX",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.StartsWith",
+      "name": "StartsWith",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.Substring",
+      "name": "Substring",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ColorBgr24.B",
+      "name": "B",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ColorBgra32.A",
+      "name": "A",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ColorBgra32.B",
+      "name": "B",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ColorFloat.A",
+      "name": "A",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ColorFloat.B",
+      "name": "B",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ColorRgb24.B",
+      "name": "B",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ColorRgba32.A",
+      "name": "A",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ColorRgba32.B",
+      "name": "B",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.GpuTexHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.GuiSideBarHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.IImplicit.fSignedDistance",
+      "name": "fSignedDistance",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "csharp:PicoGK.LatHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.LibHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Material.Color",
+      "name": "Color",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Material.Name",
+      "name": "Name",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.MaterialImage.Name",
+      "name": "Name",
+      "score": 3,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.MaterialSheen.Color",
+      "name": "Color",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.MaterialSpecular.Color",
+      "name": "Color",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.Append",
+      "name": "Append",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.MshHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.PolyHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.QuadHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ScalarFieldHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Text",
+      "name": "Text",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Text.Text",
+      "name": "Text",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Triangle.A",
+      "name": "A",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Triangle.B",
+      "name": "B",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Triangle.C",
+      "name": "C",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.VdbHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.VdbMetaHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.VectorFieldHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.VoxHandle.Value",
+      "name": "Value",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.voxBoolSubtract",
+      "name": "voxBoolSubtract",
+      "score": 3,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.Keys",
+      "name": "Keys",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.HashSet",
+      "name": "HashSet",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.HashSet.Count",
+      "name": "Count",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.HashSet.HashSet",
+      "name": "HashSet",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.HashSet.TryGetValue",
+      "name": "TryGetValue",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Console",
+      "name": "Console",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Console.WriteLine",
+      "name": "WriteLine",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Acos",
+      "name": "Acos",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Atan2",
+      "name": "Atan2",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Tan",
+      "name": "Tan",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Acos",
+      "name": "Acos",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Pow",
+      "name": "Pow",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Tan",
+      "name": "Tan",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Tau",
+      "name": "Tau",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4",
+      "name": "Matrix4x4",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.CreateTranslation",
+      "name": "CreateTranslation",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.Matrix4x4",
+      "name": "Matrix4x4",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Normalize",
+      "name": "Normalize",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Any",
+      "name": "Any",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Dot",
+      "name": "Dot",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.LengthSquared",
+      "name": "LengthSquared",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Tau",
+      "name": "Tau",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.IBoundedImplicit",
+      "name": "IBoundedImplicit",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Lattice.AddSphere",
+      "name": "AddSphere",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "csharp:PicoGK.Library.oLibrary",
+      "name": "oLibrary",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Material.Volume",
+      "name": "Volume",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.MaterialSpecular",
+      "name": "MaterialSpecular",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.MaterialSpecular.MaterialSpecular",
+      "name": "MaterialSpecular",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.MaterialTextureTransform.Scale",
+      "name": "Scale",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.nVertexCount",
+      "name": "nVertexCount",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.oTriangleAt",
+      "name": "oTriangleAt",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.vecVertexAt",
+      "name": "vecVertexAt",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Numerics.Polar.ToString",
+      "name": "ToString",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.PolyContour.AddVertex",
+      "name": "AddVertex",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "csharp:PicoGK.VoxCutViz.Cut",
+      "name": "Cut",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.BoolIntersect",
+      "name": "BoolIntersect",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.Offset",
+      "name": "Offset",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.Trim",
+      "name": "Trim",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.bIsInside",
+      "name": "bIsInside",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.voxBoolAdd",
+      "name": "voxBoolAdd",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Array.Copy",
+      "name": "Copy",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Array.Empty",
+      "name": "Empty",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Array.Exists",
+      "name": "Exists",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.Clear",
+      "name": "Clear",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.ContainsKey",
+      "name": "ContainsKey",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.KeyCollection.Count",
+      "name": "Count",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.ValueCollection.Count",
+      "name": "Count",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.Values",
+      "name": "Values",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.HashSet.Clear",
+      "name": "Clear",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.AddRange",
+      "name": "AddRange",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.Clear",
+      "name": "Clear",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.Contains",
+      "name": "Contains",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.Insert",
+      "name": "Insert",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Convert",
+      "name": "Convert",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Convert.ToHexString",
+      "name": "ToHexString",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Floor",
+      "name": "Floor",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Round",
+      "name": "Round",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Sign",
+      "name": "Sign",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.CreateRotationZ",
+      "name": "CreateRotationZ",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.X",
+      "name": "X",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.Y",
+      "name": "Y",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Plane.Normal",
+      "name": "Normal",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.All",
+      "name": "All",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Any",
+      "name": "Any",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Max",
+      "name": "Max",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.One",
+      "name": "One",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Create",
+      "name": "Create",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.DistanceSquared",
+      "name": "DistanceSquared",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Lerp",
+      "name": "Lerp",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.One",
+      "name": "One",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Round",
+      "name": "Round",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Transform",
+      "name": "Transform",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Abs",
+      "name": "Abs",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.All",
+      "name": "All",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Clamp",
+      "name": "Clamp",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Cos",
+      "name": "Cos",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Count",
+      "name": "Count",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Cross",
+      "name": "Cross",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Max",
+      "name": "Max",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Sin",
+      "name": "Sin",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.X",
+      "name": "X",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Y",
+      "name": "Y",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.EndsWith",
+      "name": "EndsWith",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.IsNullOrEmpty",
+      "name": "IsNullOrEmpty",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.Join",
+      "name": "Join",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.ToLowerInvariant",
+      "name": "ToLowerInvariant",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.Trim",
+      "name": "Trim",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ActiveVoxelCounterScalar.Run",
+      "name": "Run",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.AddVectorFieldToViewer.Run",
+      "name": "Run",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.BBox2.Include",
+      "name": "Include",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.BBox3.Include",
+      "name": "Include",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.ColorFloat.op_Implicit",
+      "name": "op_Implicit",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Diagnostics.TestCliOutput.Run",
+      "name": "Run",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.IBoundedImplicit.oBounds",
+      "name": "oBounds",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.ILibraryHost.Run",
+      "name": "Run",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.IViewerBackend.GetBoundingBox",
+      "name": "GetBoundingBox",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.IViewerBackend.SetBackgroundColor",
+      "name": "SetBackgroundColor",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Library.Log",
+      "name": "Log",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Library.RegisterGlobalLibrary",
+      "name": "RegisterGlobalLibrary",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Library.UnregisterGlobalLibrary",
+      "name": "UnregisterGlobalLibrary",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Material.Metallic",
+      "name": "Metallic",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Material.Roughness",
+      "name": "Roughness",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.MaterialAnisotropy",
+      "name": "MaterialAnisotropy",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.MaterialAnisotropy.MaterialAnisotropy",
+      "name": "MaterialAnisotropy",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.MaterialClearcoat.Roughness",
+      "name": "Roughness",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.MaterialSheen.Roughness",
+      "name": "Roughness",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.MaterialVolume.Thickness",
+      "name": "Thickness",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Mesh.SaveToStlFile",
+      "name": "SaveToStlFile",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Numerics.Overhang",
+      "name": "Overhang",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Numerics.Overhang.Overhang",
+      "name": "Overhang",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Numerics.Rad",
+      "name": "Rad",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Numerics.Rad.Rad",
+      "name": "Rad",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.ScalarField.fSignedDistance",
+      "name": "fSignedDistance",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Shapes.Circle",
+      "name": "Circle",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Shapes.Circle.Circle",
+      "name": "Circle",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.SurfaceNormalFieldExtractor.Run",
+      "name": "Run",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Text.imgRenderText",
+      "name": "imgRenderText",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Utils.strDocumentsFolder",
+      "name": "strDocumentsFolder",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.VectorFieldMerge.Run",
+      "name": "Run",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Viewer.SetBackgroundColor",
+      "name": "SetBackgroundColor",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.CalculateProperties",
+      "name": "CalculateProperties",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.Fillet",
+      "name": "Fillet",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.IntersectImplicit",
+      "name": "IntersectImplicit",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.RenderMesh",
+      "name": "RenderMesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.mshAsMesh",
+      "name": "mshAsMesh",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.voxBoolIntersect",
+      "name": "voxBoolIntersect",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.voxCombine",
+      "name": "voxCombine",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.voxIntersectImplicit",
+      "name": "voxIntersectImplicit",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.voxMeshShell",
+      "name": "voxMeshShell",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:PicoGK.Voxels.voxOffset",
+      "name": "voxOffset",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Array.Clear",
+      "name": "Clear",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Array.Clone",
+      "name": "Clone",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Array.ConvertAll",
+      "name": "ConvertAll",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Array.Fill",
+      "name": "Fill",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Array.GetValue",
+      "name": "GetValue",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Array.IndexOf",
+      "name": "IndexOf",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.Dictionary.KeyCollection.Contains",
+      "name": "Contains",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.HashSet.Contains",
+      "name": "Contains",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.ConvertAll",
+      "name": "ConvertAll",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.Reverse",
+      "name": "Reverse",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Collections.Generic.List.Sort",
+      "name": "Sort",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Console.Write",
+      "name": "Write",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Convert.ToString",
+      "name": "ToString",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Asin",
+      "name": "Asin",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Ceiling",
+      "name": "Ceiling",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Exp",
+      "name": "Exp",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Floor",
+      "name": "Floor",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Pow",
+      "name": "Pow",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Round",
+      "name": "Round",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Math.Tau",
+      "name": "Tau",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Asin",
+      "name": "Asin",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Ceiling",
+      "name": "Ceiling",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Exp",
+      "name": "Exp",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.MathF.Log",
+      "name": "Log",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix3x2.Create",
+      "name": "Create",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix3x2.Subtract",
+      "name": "Subtract",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.Create",
+      "name": "Create",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.CreateFromAxisAngle",
+      "name": "CreateFromAxisAngle",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.CreateRotationY",
+      "name": "CreateRotationY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.Equals",
+      "name": "Equals",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.Identity",
+      "name": "Identity",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.Subtract",
+      "name": "Subtract",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.Transform",
+      "name": "Transform",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Matrix4x4.Z",
+      "name": "Z",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Plane.Create",
+      "name": "Create",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion",
+      "name": "Quaternion",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.Create",
+      "name": "Create",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.CreateFromAxisAngle",
+      "name": "CreateFromAxisAngle",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.Dot",
+      "name": "Dot",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.Identity",
+      "name": "Identity",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.Normalize",
+      "name": "Normalize",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.Quaternion",
+      "name": "Quaternion",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.Subtract",
+      "name": "Subtract",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.X",
+      "name": "X",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Quaternion.Z",
+      "name": "Z",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Clamp",
+      "name": "Clamp",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Create",
+      "name": "Create",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Cross",
+      "name": "Cross",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Distance",
+      "name": "Distance",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.DistanceSquared",
+      "name": "DistanceSquared",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Lerp",
+      "name": "Lerp",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Min",
+      "name": "Min",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Subtract",
+      "name": "Subtract",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.Tau",
+      "name": "Tau",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.ToString",
+      "name": "ToString",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector2.UnitY",
+      "name": "UnitY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Equals",
+      "name": "Equals",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Exp",
+      "name": "Exp",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Log",
+      "name": "Log",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.NegativeInfinity",
+      "name": "NegativeInfinity",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.PositiveInfinity",
+      "name": "PositiveInfinity",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector3.Subtract",
+      "name": "Subtract",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Any",
+      "name": "Any",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Create",
+      "name": "Create",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Distance",
+      "name": "Distance",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.DistanceSquared",
+      "name": "DistanceSquared",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Dot",
+      "name": "Dot",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Equals",
+      "name": "Equals",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.IsFinite",
+      "name": "IsFinite",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Length",
+      "name": "Length",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.LengthSquared",
+      "name": "LengthSquared",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Log",
+      "name": "Log",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Min",
+      "name": "Min",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Normalize",
+      "name": "Normalize",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Round",
+      "name": "Round",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Subtract",
+      "name": "Subtract",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Tau",
+      "name": "Tau",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Transform",
+      "name": "Transform",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.UnitX",
+      "name": "UnitX",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.UnitY",
+      "name": "UnitY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.UnitZ",
+      "name": "UnitZ",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Z",
+      "name": "Z",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Numerics.Vector4.Zero",
+      "name": "Zero",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.Random.GetString",
+      "name": "GetString",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.Clone",
+      "name": "Clone",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.Concat",
+      "name": "Concat",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.Create",
+      "name": "Create",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "csharp:System.String.Split",
+      "name": "Split",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    }
+  ]
+}

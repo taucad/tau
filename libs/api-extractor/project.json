@@ -120,6 +120,14 @@
       ],
       "outputs": ["{projectRoot}/src/generated/picovoxel"]
     },
+    "collect-usage": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/usage/collect-usage.ts",
+        "cwd": "libs/api-extractor"
+      },
+      "cache": false
+    },
     "extract-tscircuit": {
       "executor": "nx:run-commands",
       "options": {

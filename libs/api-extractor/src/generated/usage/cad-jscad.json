@@ -1,0 +1,922 @@
+{
+  "slug": "cad-jscad",
+  "sources": {
+    "workspaceFiles": 20,
+    "exampleFiles": 12,
+    "transcriptRuns": 4
+  },
+  "symbols": [
+    {
+      "id": "typescript:primitives",
+      "name": "primitives",
+      "score": 19,
+      "workspace": 7,
+      "examples": 12,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries",
+      "name": "geometries",
+      "score": 17,
+      "workspace": 5,
+      "examples": 12,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom3",
+      "name": "geom3",
+      "score": 16,
+      "workspace": 5,
+      "examples": 11,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom3.Geom3",
+      "name": "Geom3",
+      "score": 15,
+      "workspace": 4,
+      "examples": 11,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:transforms.center",
+      "name": "center",
+      "score": 15,
+      "workspace": 6,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:colors.colorize",
+      "name": "colorize",
+      "score": 13,
+      "workspace": 4,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:colors",
+      "name": "colors",
+      "score": 12,
+      "workspace": 3,
+      "examples": 9,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:transforms",
+      "name": "transforms",
+      "score": 12,
+      "workspace": 5,
+      "examples": 7,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.angle",
+      "name": "angle",
+      "score": 11,
+      "workspace": 7,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.cylinder",
+      "name": "cylinder",
+      "score": 11,
+      "workspace": 5,
+      "examples": 6,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:transforms.translate",
+      "name": "translate",
+      "score": 11,
+      "workspace": 4,
+      "examples": 7,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:booleans.subtract",
+      "name": "subtract",
+      "score": 10,
+      "workspace": 7,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions.extrudeLinear",
+      "name": "extrudeLinear",
+      "score": 10,
+      "workspace": 8,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.cuboid",
+      "name": "cuboid",
+      "score": 10,
+      "workspace": 1,
+      "examples": 8,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:transforms.rotateZ",
+      "name": "rotateZ",
+      "score": 10,
+      "workspace": 7,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:booleans",
+      "name": "booleans",
+      "score": 9,
+      "workspace": 5,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.utils.cos",
+      "name": "cos",
+      "score": 9,
+      "workspace": 7,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.polygon",
+      "name": "polygon",
+      "score": 9,
+      "workspace": 7,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:booleans.union",
+      "name": "union",
+      "score": 8,
+      "workspace": 6,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions",
+      "name": "extrusions",
+      "score": 8,
+      "workspace": 6,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec3.angle",
+      "name": "angle",
+      "score": 7,
+      "workspace": 4,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.circle",
+      "name": "circle",
+      "score": 7,
+      "workspace": 5,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2",
+      "name": "vec2",
+      "score": 6,
+      "workspace": 5,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.subtract",
+      "name": "subtract",
+      "score": 6,
+      "workspace": 5,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom2",
+      "name": "geom2",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom2.Geom2",
+      "name": "Geom2",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom3.create",
+      "name": "create",
+      "score": 5,
+      "workspace": 3,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.utils",
+      "name": "utils",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.utils.sin",
+      "name": "sin",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.create",
+      "name": "create",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.fromAngleRadians",
+      "name": "fromAngleRadians",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.max",
+      "name": "max",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.normal",
+      "name": "normal",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.scale",
+      "name": "scale",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:utils.degToRad",
+      "name": "degToRad",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths",
+      "name": "maths",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.Vec2",
+      "name": "Vec2",
+      "score": 4,
+      "workspace": 3,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:transforms.scale",
+      "name": "scale",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:colors.cssColors.tan",
+      "name": "tan",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom2.create",
+      "name": "create",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.length",
+      "name": "length",
+      "score": 3,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec3.max",
+      "name": "max",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.cube",
+      "name": "cube",
+      "score": 3,
+      "workspace": 1,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:utils",
+      "name": "utils",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:curves.bezier.length",
+      "name": "length",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions.ExtrudeHelicalOptions.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions.ExtrudeLinearOptions.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions.ExtrudeRectangularOptions.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom2.Geom2.transforms",
+      "name": "transforms",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom3.Geom3.transforms",
+      "name": "transforms",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom3.toPolygons",
+      "name": "toPolygons",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.rotate",
+      "name": "rotate",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec3.length",
+      "name": "length",
+      "score": 2,
+      "workspace": 0,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.CylinderEllipticOptions.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.CylinderOptions.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.RoundedCylinderOptions.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:text.VectorChar.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:text.VectorCharOptions.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:text.VectorTextOptions.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:curves.bezier.Bezier.points",
+      "name": "points",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:expansions.offset",
+      "name": "offset",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions.ExtrudeRectangularOptions.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions.slice",
+      "name": "slice",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions.slice.create",
+      "name": "create",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions.slice.reverse",
+      "name": "reverse",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:extrusions.slice.toPolygons",
+      "name": "toPolygons",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom2.fromPoints",
+      "name": "fromPoints",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom2.reverse",
+      "name": "reverse",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom3.fromPoints",
+      "name": "fromPoints",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.geom3.invert",
+      "name": "invert",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.path2.AppendArcOptions.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.path2.Path2.points",
+      "name": "points",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:geometries.path2.reverse",
+      "name": "reverse",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.line2.direction",
+      "name": "direction",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.line2.reverse",
+      "name": "reverse",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.line3.direction",
+      "name": "direction",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.line3.reverse",
+      "name": "reverse",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.add",
+      "name": "add",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec2.min",
+      "name": "min",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec3",
+      "name": "vec3",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec3.Vec3",
+      "name": "Vec3",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec3.create",
+      "name": "create",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec3.rotateZ",
+      "name": "rotateZ",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec3.scale",
+      "name": "scale",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:maths.vec3.subtract",
+      "name": "subtract",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:measurements",
+      "name": "measurements",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:measurements.measureBoundingBox",
+      "name": "measureBoundingBox",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.ArcOptions.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.CircleOptions.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.CubeOptions.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.CuboidOptions.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.CylinderOptions.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.EllipseOptions.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.EllipsoidOptions.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.GeodesicSphereOptions.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.PolygonOptions.points",
+      "name": "points",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.PolyhedronOptions.colors",
+      "name": "colors",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.PolyhedronOptions.points",
+      "name": "points",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.RectangleOptions.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.RoundedCuboidOptions.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.RoundedCylinderOptions.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.RoundedRectangleOptions.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.SphereOptions.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.SquareOptions.size",
+      "name": "size",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.StarOptions.outerRadius",
+      "name": "outerRadius",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.TorusOptions.outerRadius",
+      "name": "outerRadius",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.rectangle",
+      "name": "rectangle",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:primitives.torus",
+      "name": "torus",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:text",
+      "name": "text",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:text.VectorChar.width",
+      "name": "width",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:transforms.mirrorZ",
+      "name": "mirrorZ",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:transforms.rotate",
+      "name": "rotate",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:transforms.rotateX",
+      "name": "rotateX",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:transforms.rotateY",
+      "name": "rotateY",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    }
+  ]
+}

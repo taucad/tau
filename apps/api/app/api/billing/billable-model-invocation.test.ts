@@ -98,7 +98,7 @@ const exhaustedProviderBody = {
 /* The real 200 stream OpenAI sent on 2026-09-19 with an exhausted organisation balance. */
 const exhaustedCapture = readFileSync(new URL('../llm/provider-account-stream.fixture.sse', import.meta.url), 'utf8');
 
-/** One admitted operation whose supplier answers a provider-account refusal. */
+/** One admitted operation whose supplier answer each test sets (a refusal, a stream or a success). */
 const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {
   const metrics = {
     ...genAiMetrics(),
@@ -1398,8 +1398,15 @@ describe('BillableModelInvocationService', () => {
   describe('gen_ai telemetry at the funded terminal', () => {
     const labels = { 'gen_ai.request.model': 'model', 'gen_ai.provider.name': 'openai', 'tau.surface': 'gateway' };
 
-    const settle = async (meterItems: Extract<TerminalEvidence, { kind: 'final_usage' }>['meterItems']) => {
+    const settle = async (
+      meterItems: Extract<TerminalEvidence, { kind: 'final_usage' }>['meterItems'],
+      stream?: boolean,
+    ) => {
       const qualified = qualification();
+      qualified.normalizedRequest = {
+        body: { model: 'model', ...(stream === undefined ? {} : { stream }) },
+        headers: {},
+      };
       qualified.adapter.createEvidenceCollector = () => ({
         accept: vi.fn(),
         complete: () => ({ kind: 'final_usage', usageOccurredAt: new Date(), meterItems }),
@@ -1437,6 +1444,38 @@ describe('BillableModelInvocationService', () => {
         ...labels,
         'error.type': '',
       });
+    });
+
+    it('records time to first token once for a streaming request and never for a non-streaming one', async () => {
+      const usage = [{ dimension: 'uncached_input', tier: null, quantity: 1n }];
+      const streamed = await settle(usage, true);
+      const buffered = await settle(usage);
+
+      expect(streamed.genAiTimeToFirstToken.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), labels);
+      expect(buffered.genAiTimeToFirstToken.record).not.toHaveBeenCalled();
+    });
+
+    it('records neither tokens nor cost for an operation left pending for recovery', async () => {
+      const qualified = qualification();
+      qualified.adapter.createEvidenceCollector = () => ({
+        accept: vi.fn(),
+        complete: () => ({
+          kind: 'absorbed_unknown',
+          meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 9n }],
+        }),
+        failed: () => ({ kind: 'absorbed_unknown' }),
+      });
+      const { ledger, metrics, service } = exhaustionHarness(qualified);
+      const result = await service.invoke(intent());
+      if (result.state !== 'streaming') {
+        throw new Error('Invocation did not stream');
+      }
+      await result.response.text();
+      await result.completion;
+
+      expect(ledger.terminalizeOperation).not.toHaveBeenCalled();
+      expect(metrics.genAiTokenUsage.record).not.toHaveBeenCalled();
+      expect(metrics.genAiCost.add).not.toHaveBeenCalled();
     });
 
     it('records cache reads and writes as their own token types', async () => {

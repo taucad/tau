@@ -138,15 +138,12 @@ const streamErrorType = (reason: string | undefined): string =>
       : reason === 'authorized_exhausted' || reason === 'malformed_response' || reason === 'service_restart'
         ? reason
         : 'incomplete';
-const genAiTokenTypes: Readonly<Record<string, string>> = {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- meter dimension names
-  uncached_input: 'input',
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- meter dimension names
-  cache_read: 'cache_read',
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- meter dimension names
-  cache_write: 'cache_write',
-  output: 'output',
-};
+const genAiTokenTypes = new Map([
+  ['uncached_input', 'input'],
+  ['cache_read', 'cache_read'],
+  ['cache_write', 'cache_write'],
+  ['output', 'output'],
+]);
 const genAiAttributes = (qualification: QualifiedBillableInvocation): Record<string, string> => ({
   'gen_ai.request.model': qualification.modelId,
   'gen_ai.provider.name': qualification.providerId,
@@ -450,6 +447,7 @@ export class BillableModelInvocationService {
     };
     intent.signal.addEventListener('abort', recordCancellation, { once: true });
     let response: Response;
+    const dispatchedAt = performance.now();
     try {
       response = await qualification.adapter.executeOnce({
         qualification,
@@ -532,7 +530,7 @@ export class BillableModelInvocationService {
       intent,
       recordCancellation,
       signal,
-      startedAt,
+      { startedAt, dispatchedAt },
     );
     const relayed = isGatewayProviderId(qualification.providerId)
       ? observed.body.pipeThrough(
@@ -570,7 +568,7 @@ export class BillableModelInvocationService {
     intent: BillableInvocationIntent,
     recordCancellation: () => void,
     signal: AbortSignal,
-    startedAt: number,
+    { startedAt, dispatchedAt }: { readonly startedAt: number; readonly dispatchedAt: number },
   ): {
     body: ReadableStream<Uint8Array<ArrayBuffer>>;
     completion: Promise<void>;
@@ -633,7 +631,8 @@ export class BillableModelInvocationService {
       }
       if (bytes === 0 && part.value.byteLength > 0 && streaming) {
         this.metrics?.genAiTimeToFirstToken.record(
-          (performance.now() - startedAt) / 1000,
+          // From the supplier request, not invocation entry: admission is not model responsiveness.
+          (performance.now() - dispatchedAt) / 1000,
           genAiAttributes(qualification),
         );
       }
@@ -757,7 +756,6 @@ export class BillableModelInvocationService {
             ? 'none'
             : 'other',
     });
-    this.recordTokenUsage(qualification, row, evidence);
     const finality = qualification.adapter.classifyFinality({
       qualification,
       evidence,
@@ -786,20 +784,26 @@ export class BillableModelInvocationService {
       // Recovery's own reason for expiring an absorbed hold: no supplier evidence is coming.
       ...(cutByStop ? { expireSpendHold: true } : {}),
     });
-    this.metrics?.genAiCost.add(Number(receipt.chargedAtoms) / creditAtomsPerUsd, {
-      ...genAiAttributes(qualification),
-      'tau.activity': row.activity,
-    });
+    this.recordSettledUsage(qualification, row, evidence, receipt.chargedAtoms);
   }
 
-  /** Records the settled usage of one funded call, one histogram point per meter. */
-  private recordTokenUsage(
+  /**
+   * Records the tokens and charged USD of one operation this service settled, written together so
+   * the two series reconcile. An operation left pending for recovery records neither here.
+   */
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one settled operation
+  private recordSettledUsage(
     qualification: QualifiedBillableInvocation,
     row: InvocationRow,
     evidence: TerminalEvidence,
+    chargedAtoms: bigint,
   ): void {
+    this.metrics?.genAiCost.add(Number(chargedAtoms) / creditAtomsPerUsd, {
+      ...genAiAttributes(qualification),
+      'tau.activity': row.activity,
+    });
     for (const item of evidence.kind === 'provider_rejected' ? [] : (evidence.meterItems ?? [])) {
-      const tokenType = genAiTokenTypes[item.dimension];
+      const tokenType = genAiTokenTypes.get(item.dimension);
       if (tokenType !== undefined) {
         this.metrics?.genAiTokenUsage.record(Number(item.quantity), {
           ...genAiAttributes(qualification),
@@ -810,7 +814,11 @@ export class BillableModelInvocationService {
     }
   }
 
-  /** Records one funded call's end-to-end latency; `errorType` is empty on success. */
+  /**
+   * Records one funded call's end-to-end latency from invocation entry, so it includes billing
+   * admission (unlike time to first token, which starts at the supplier request). `errorType` is
+   * empty on success: W36's error-rate queries select `error_type!=""`.
+   */
   private recordOperationDuration(
     qualification: QualifiedBillableInvocation,
     startedAt: number,

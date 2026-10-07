@@ -2,14 +2,14 @@
   "metadata": {
     "language": "openscad",
     "packageName": "openrscad",
-    "packageVersion": "0.10.1",
-    "extractor": "openrscad-lsp BUILTINS table",
-    "extractionDate": "2026-09-10T11:03:54.099Z",
-    "totalEntries": 78,
+    "packageVersion": "0.11.0-beta.4",
+    "extractor": "openrscad-lsp BUILTINS table + evaluator-verified signatures",
+    "extractionDate": "2026-10-07T20:49:14.768Z",
+    "totalEntries": 88,
     "breakdown": {
-      "module": 33,
-      "function": 35,
-      "constant": 10
+      "module": 40,
+      "function": 37,
+      "constant": 11
     }
   },
   "entries": [
@@ -22,7 +22,8 @@
           "parameters": [
             {
               "name": "size",
-              "optional": false
+              "optional": true,
+              "defaultValue": "[1, 1, 1]"
             },
             {
               "name": "center",
@@ -30,11 +31,12 @@
               "defaultValue": "false"
             }
           ],
-          "text": "cube(size, center=false)"
+          "text": "cube(size = [1, 1, 1], center = false)"
         }
       ],
       "docs": {
-        "summary": "Axis-aligned box. `size` is a scalar or `[x,y,z]`."
+        "summary": "Axis-aligned box. `size` is a scalar or `[x,y,z]`.",
+        "remarks": "`size` may be a scalar for a cube."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -54,7 +56,29 @@
         {
           "parameters": [
             {
-              "name": "r | d",
+              "name": "r",
+              "optional": true,
+              "defaultValue": "1"
+            },
+            {
+              "name": "$fn",
+              "optional": true
+            },
+            {
+              "name": "$fa",
+              "optional": true
+            },
+            {
+              "name": "$fs",
+              "optional": true
+            }
+          ],
+          "text": "sphere(r = 1, $fn, $fa, $fs)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "d",
               "optional": false
             },
             {
@@ -70,7 +94,7 @@
               "optional": true
             }
           ],
-          "text": "sphere(r | d, $fn, $fa, $fs)"
+          "text": "sphere(d, $fn, $fa, $fs)"
         }
       ],
       "docs": {
@@ -95,27 +119,141 @@
           "parameters": [
             {
               "name": "h",
-              "optional": false
+              "optional": true,
+              "defaultValue": "1"
             },
             {
-              "name": "r | r1",
-              "optional": false
+              "name": "r",
+              "optional": true,
+              "defaultValue": "1"
             },
             {
-              "name": "r2 | d",
+              "name": "center",
+              "optional": true,
+              "defaultValue": "false"
+            },
+            {
+              "name": "$fn",
+              "optional": true
+            },
+            {
+              "name": "$fa",
+              "optional": true
+            },
+            {
+              "name": "$fs",
+              "optional": true
+            }
+          ],
+          "text": "cylinder(h = 1, r = 1, center = false, $fn, $fa, $fs)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "h",
+              "optional": true,
+              "defaultValue": "1"
+            },
+            {
+              "name": "r1",
+              "optional": true,
+              "defaultValue": "1"
+            },
+            {
+              "name": "r2",
+              "optional": true,
+              "defaultValue": "1"
+            },
+            {
+              "name": "center",
+              "optional": true,
+              "defaultValue": "false"
+            },
+            {
+              "name": "$fn",
+              "optional": true
+            },
+            {
+              "name": "$fa",
+              "optional": true
+            },
+            {
+              "name": "$fs",
+              "optional": true
+            }
+          ],
+          "text": "cylinder(h = 1, r1 = 1, r2 = 1, center = false, $fn, $fa, $fs)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "h",
+              "optional": true,
+              "defaultValue": "1"
+            },
+            {
+              "name": "d",
               "optional": false
             },
             {
               "name": "center",
               "optional": true,
               "defaultValue": "false"
+            },
+            {
+              "name": "$fn",
+              "optional": true
+            },
+            {
+              "name": "$fa",
+              "optional": true
+            },
+            {
+              "name": "$fs",
+              "optional": true
             }
           ],
-          "text": "cylinder(h, r | r1,r2 | d, center=false)"
+          "text": "cylinder(h = 1, d, center = false, $fn, $fa, $fs)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "h",
+              "optional": true,
+              "defaultValue": "1"
+            },
+            {
+              "name": "d1",
+              "optional": false
+            },
+            {
+              "name": "d2",
+              "optional": false
+            },
+            {
+              "name": "center",
+              "optional": true,
+              "defaultValue": "false"
+            },
+            {
+              "name": "$fn",
+              "optional": true
+            },
+            {
+              "name": "$fa",
+              "optional": true
+            },
+            {
+              "name": "$fs",
+              "optional": true
+            }
+          ],
+          "text": "cylinder(h = 1, d1, d2, center = false, $fn, $fa, $fs)"
         }
       ],
       "docs": {
-        "summary": "Cylinder or cone of height `h`."
+        "summary": "Cylinder or cone of height `h`.",
+        "remarks": "Positional order is h, r1, r2, center; pass r, d, d1 and d2 by name."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -144,10 +282,11 @@
             },
             {
               "name": "convexity",
-              "optional": false
+              "optional": true,
+              "defaultValue": "1"
             }
           ],
-          "text": "polyhedron(points, faces, convexity)"
+          "text": "polyhedron(points, faces, convexity = 1)"
         }
       ],
       "docs": {
@@ -172,7 +311,8 @@
           "parameters": [
             {
               "name": "size",
-              "optional": false
+              "optional": true,
+              "defaultValue": "[1, 1]"
             },
             {
               "name": "center",
@@ -180,11 +320,12 @@
               "defaultValue": "false"
             }
           ],
-          "text": "square(size, center=false)"
+          "text": "square(size = [1, 1], center = false)"
         }
       ],
       "docs": {
-        "summary": "Axis-aligned 2D rectangle."
+        "summary": "Axis-aligned 2D rectangle.",
+        "remarks": "`size` may be a scalar for a square."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -204,15 +345,45 @@
         {
           "parameters": [
             {
-              "name": "r | d",
+              "name": "r",
+              "optional": true,
+              "defaultValue": "1"
+            },
+            {
+              "name": "$fn",
+              "optional": true
+            },
+            {
+              "name": "$fa",
+              "optional": true
+            },
+            {
+              "name": "$fs",
+              "optional": true
+            }
+          ],
+          "text": "circle(r = 1, $fn, $fa, $fs)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "d",
               "optional": false
             },
             {
               "name": "$fn",
               "optional": true
+            },
+            {
+              "name": "$fa",
+              "optional": true
+            },
+            {
+              "name": "$fs",
+              "optional": true
             }
           ],
-          "text": "circle(r | d, $fn)"
+          "text": "circle(d, $fn, $fa, $fs)"
         }
       ],
       "docs": {
@@ -242,13 +413,9 @@
             {
               "name": "paths",
               "optional": false
-            },
-            {
-              "name": "convexity",
-              "optional": false
             }
           ],
-          "text": "polygon(points, paths, convexity)"
+          "text": "polygon(points, paths)"
         }
       ],
       "docs": {
@@ -272,47 +439,56 @@
         {
           "parameters": [
             {
-              "name": "t",
+              "name": "text",
               "optional": false
             },
             {
               "name": "size",
-              "optional": false
+              "optional": true,
+              "defaultValue": "10"
             },
             {
               "name": "font",
-              "optional": false
-            },
-            {
-              "name": "halign",
-              "optional": false
-            },
-            {
-              "name": "valign",
-              "optional": false
-            },
-            {
-              "name": "spacing",
-              "optional": false
+              "optional": true,
+              "defaultValue": "\"Liberation Sans\""
             },
             {
               "name": "direction",
-              "optional": false
+              "optional": true,
+              "defaultValue": "\"ltr\""
             },
             {
               "name": "language",
-              "optional": false
+              "optional": true,
+              "defaultValue": "\"en\""
             },
             {
               "name": "script",
-              "optional": false
+              "optional": true,
+              "defaultValue": "\"latin\""
+            },
+            {
+              "name": "halign",
+              "optional": true,
+              "defaultValue": "\"left\""
+            },
+            {
+              "name": "valign",
+              "optional": true,
+              "defaultValue": "\"baseline\""
+            },
+            {
+              "name": "spacing",
+              "optional": true,
+              "defaultValue": "1"
             }
           ],
-          "text": "text(t, size, font, halign, valign, spacing, direction, language, script)"
+          "text": "text(text, size = 10, font = \"Liberation Sans\", direction = \"ltr\", language = \"en\", script = \"latin\", halign = \"left\", valign = \"baseline\", spacing = 1)"
         }
       ],
       "docs": {
-        "summary": "2D text outlines."
+        "summary": "2D text outlines.",
+        "remarks": "Curve resolution follows the ambient $fn, not a per-call one."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -334,18 +510,9 @@
             {
               "name": "file",
               "optional": false
-            },
-            {
-              "name": "convexity",
-              "optional": false
-            },
-            {
-              "name": "...",
-              "optional": true,
-              "variadic": true
             }
           ],
-          "text": "import(file, convexity, ...)"
+          "text": "import(file)"
         }
       ],
       "docs": {
@@ -369,11 +536,12 @@
         {
           "parameters": [
             {
-              "name": "[x,y,z]",
-              "optional": false
+              "name": "v",
+              "optional": true,
+              "defaultValue": "[0, 0, 0]"
             }
           ],
-          "text": "translate([x,y,z])"
+          "text": "translate(v = [0, 0, 0])"
         }
       ],
       "docs": {
@@ -397,19 +565,42 @@
         {
           "parameters": [
             {
-              "name": "a | [x,y,z] | a",
-              "optional": false
+              "name": "a",
+              "optional": true,
+              "defaultValue": "[0, 0, 0]"
+            }
+          ],
+          "text": "rotate(a = [0, 0, 0])"
+        },
+        {
+          "parameters": [
+            {
+              "name": "a",
+              "optional": true,
+              "defaultValue": "0"
+            }
+          ],
+          "text": "rotate(a = 0)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "a",
+              "optional": true,
+              "defaultValue": "0"
             },
             {
               "name": "v",
-              "optional": false
+              "optional": true,
+              "defaultValue": "[0, 0, 1]"
             }
           ],
-          "text": "rotate(a | [x,y,z] | a, v)"
+          "text": "rotate(a = 0, v = [0, 0, 1])"
         }
       ],
       "docs": {
-        "summary": "Rotate children (degrees)."
+        "summary": "Rotate children (degrees).",
+        "remarks": "A vector rotates about X, then Y, then Z; a scalar about Z; with v, about axis v."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -429,11 +620,22 @@
         {
           "parameters": [
             {
-              "name": "[x,y,z]",
-              "optional": false
+              "name": "v",
+              "optional": true,
+              "defaultValue": "[1, 1, 1]"
             }
           ],
-          "text": "scale([x,y,z])"
+          "text": "scale(v = [1, 1, 1])"
+        },
+        {
+          "parameters": [
+            {
+              "name": "v",
+              "optional": true,
+              "defaultValue": "1"
+            }
+          ],
+          "text": "scale(v = 1)"
         }
       ],
       "docs": {
@@ -457,19 +659,22 @@
         {
           "parameters": [
             {
-              "name": "[x,y,z]",
-              "optional": false
+              "name": "newsize",
+              "optional": true,
+              "defaultValue": "[0, 0, 0]"
             },
             {
               "name": "auto",
-              "optional": false
+              "optional": true,
+              "defaultValue": "false"
             }
           ],
-          "text": "resize([x,y,z], auto)"
+          "text": "resize(newsize = [0, 0, 0], auto = false)"
         }
       ],
       "docs": {
-        "summary": "Resize children to absolute dimensions."
+        "summary": "Resize children to absolute dimensions.",
+        "remarks": "`auto` may be per axis."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -489,11 +694,12 @@
         {
           "parameters": [
             {
-              "name": "[x,y,z]",
-              "optional": false
+              "name": "v",
+              "optional": true,
+              "defaultValue": "[1, 0, 0]"
             }
           ],
-          "text": "mirror([x,y,z])"
+          "text": "mirror(v = [1, 0, 0])"
         }
       ],
       "docs": {
@@ -545,8 +751,9 @@
         {
           "parameters": [
             {
-              "name": "c | \"name\"",
-              "optional": false
+              "name": "c",
+              "optional": true,
+              "defaultValue": "\"name\""
             },
             {
               "name": "alpha",
@@ -554,11 +761,37 @@
               "defaultValue": "1"
             }
           ],
-          "text": "color(c | \"name\", alpha=1)"
+          "text": "color(c = \"name\", alpha = 1)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "c",
+              "optional": true,
+              "defaultValue": "\"#rrggbb\""
+            },
+            {
+              "name": "alpha",
+              "optional": true,
+              "defaultValue": "1"
+            }
+          ],
+          "text": "color(c = \"#rrggbb\", alpha = 1)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "c",
+              "optional": true,
+              "defaultValue": "[r, g, b, a]"
+            }
+          ],
+          "text": "color(c = [r, g, b, a])"
         }
       ],
       "docs": {
-        "summary": "Recolor children for preview."
+        "summary": "Recolor children for preview.",
+        "remarks": "Vector channels run 0 to 1."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -578,15 +811,38 @@
         {
           "parameters": [
             {
-              "name": "r | delta",
+              "name": "r",
+              "optional": true,
+              "defaultValue": "1"
+            },
+            {
+              "name": "$fn",
+              "optional": true
+            },
+            {
+              "name": "$fa",
+              "optional": true
+            },
+            {
+              "name": "$fs",
+              "optional": true
+            }
+          ],
+          "text": "offset(r = 1, $fn, $fa, $fs)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "delta",
               "optional": false
             },
             {
               "name": "chamfer",
-              "optional": false
+              "optional": true,
+              "defaultValue": "false"
             }
           ],
-          "text": "offset(r | delta, chamfer)"
+          "text": "offset(delta, chamfer = false)"
         }
       ],
       "docs": {
@@ -726,15 +982,18 @@
           "parameters": [
             {
               "name": "height",
-              "optional": false
+              "optional": true,
+              "defaultValue": "100"
             },
             {
               "name": "center",
-              "optional": false
+              "optional": true,
+              "defaultValue": "false"
             },
             {
               "name": "twist",
-              "optional": false
+              "optional": true,
+              "defaultValue": "0"
             },
             {
               "name": "slices",
@@ -742,18 +1001,21 @@
             },
             {
               "name": "scale",
-              "optional": false
+              "optional": true,
+              "defaultValue": "1"
             },
             {
-              "name": "$fn",
-              "optional": true
+              "name": "v",
+              "optional": true,
+              "defaultValue": "[0, 0, 1]"
             }
           ],
-          "text": "linear_extrude(height, center, twist, slices, scale, $fn)"
+          "text": "linear_extrude(height = 100, center = false, twist = 0, slices, scale = 1, v = [0, 0, 1])"
         }
       ],
       "docs": {
-        "summary": "Extrude a 2D shape along Z."
+        "summary": "Extrude a 2D shape along Z.",
+        "remarks": "Only height is positional. slices defaults to 1, or ceil(|twist| / 15) when twisted."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -778,11 +1040,24 @@
               "defaultValue": "360"
             },
             {
+              "name": "start",
+              "optional": true,
+              "defaultValue": "0"
+            },
+            {
               "name": "$fn",
+              "optional": true
+            },
+            {
+              "name": "$fa",
+              "optional": true
+            },
+            {
+              "name": "$fs",
               "optional": true
             }
           ],
-          "text": "rotate_extrude(angle=360, $fn)"
+          "text": "rotate_extrude(angle = 360, start = 0, $fn, $fa, $fs)"
         }
       ],
       "docs": {
@@ -833,18 +1108,33 @@
       "category": "Control-flow modules",
       "signatures": [
         {
-          "parameters": [
-            {
-              "name": "var",
-              "optional": true,
-              "defaultValue": "range"
-            }
-          ],
-          "text": "for (var = range) ..."
+          "parameters": [],
+          "text": "for (i = [start : end]) children"
+        },
+        {
+          "parameters": [],
+          "text": "for (i = [start : step : end]) children"
+        },
+        {
+          "parameters": [],
+          "text": "for (item = [a, b, c]) children"
+        },
+        {
+          "parameters": [],
+          "text": "for (i = [0 : 2], j = [0 : 2]) children"
+        },
+        {
+          "parameters": [],
+          "text": "[for (i = [start : end]) expression]"
+        },
+        {
+          "parameters": [],
+          "text": "[for (i = 0; i < n; i = i + 1) expression]"
         }
       ],
       "docs": {
-        "summary": "Iterate, instantiating children per value."
+        "summary": "Iterate, instantiating children per value.",
+        "remarks": "Ranges include their end. In a list comprehension, for yields one element per value."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -862,14 +1152,8 @@
       "category": "Control-flow modules",
       "signatures": [
         {
-          "parameters": [
-            {
-              "name": "var",
-              "optional": true,
-              "defaultValue": "range"
-            }
-          ],
-          "text": "intersection_for (var = range) ..."
+          "parameters": [],
+          "text": "intersection_for (i = [start : end]) children"
         }
       ],
       "docs": {
@@ -891,13 +1175,16 @@
       "category": "Control-flow modules",
       "signatures": [
         {
-          "parameters": [
-            {
-              "name": "cond",
-              "optional": false
-            }
-          ],
-          "text": "if (cond) ... else ..."
+          "parameters": [],
+          "text": "if (condition) children"
+        },
+        {
+          "parameters": [],
+          "text": "if (condition) children else children"
+        },
+        {
+          "parameters": [],
+          "text": "[for (x = list) if (condition) x]"
         }
       ],
       "docs": {
@@ -919,14 +1206,16 @@
       "category": "Control-flow modules",
       "signatures": [
         {
-          "parameters": [
-            {
-              "name": "var",
-              "optional": true,
-              "defaultValue": "value"
-            }
-          ],
-          "text": "let (var = value) ..."
+          "parameters": [],
+          "text": "let (name = value) children"
+        },
+        {
+          "parameters": [],
+          "text": "y = let (name = value) expression;"
+        },
+        {
+          "parameters": [],
+          "text": "[for (i = [start : end]) let (name = value) expression]"
         }
       ],
       "docs": {
@@ -948,17 +1237,40 @@
       "category": "Control-flow modules",
       "signatures": [
         {
+          "parameters": [],
+          "text": "children()"
+        },
+        {
           "parameters": [
             {
-              "name": "idx?",
+              "name": "index",
               "optional": false
             }
           ],
-          "text": "children(idx?)"
+          "text": "children(index)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "[i, j]",
+              "optional": false
+            }
+          ],
+          "text": "children([i, j])"
+        },
+        {
+          "parameters": [
+            {
+              "name": "[start : end]",
+              "optional": false
+            }
+          ],
+          "text": "children([start : end])"
         }
       ],
       "docs": {
-        "summary": "Instantiate the children passed to a module."
+        "summary": "Instantiate the children passed to a module.",
+        "remarks": "$children counts the children passed in."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -978,15 +1290,25 @@
         {
           "parameters": [
             {
-              "name": "values...",
+              "name": "value",
               "optional": false
+            },
+            {
+              "name": "...",
+              "optional": true,
+              "variadic": true
             }
           ],
-          "text": "echo(values...)"
+          "text": "echo(value, ...)"
+        },
+        {
+          "parameters": [],
+          "text": "y = echo(value) expression;"
         }
       ],
       "docs": {
-        "summary": "Print values to the console."
+        "summary": "Print values to the console.",
+        "remarks": "A named argument prints as name = value."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -1006,15 +1328,19 @@
         {
           "parameters": [
             {
-              "name": "cond",
+              "name": "condition",
               "optional": false
             },
             {
-              "name": "message?",
+              "name": "message",
               "optional": false
             }
           ],
-          "text": "assert(cond, message?)"
+          "text": "assert(condition, message)"
+        },
+        {
+          "parameters": [],
+          "text": "y = assert(condition, message) expression;"
         }
       ],
       "docs": {
@@ -1036,17 +1362,13 @@
       "category": "Control-flow modules",
       "signatures": [
         {
-          "parameters": [
-            {
-              "name": "convexity",
-              "optional": false
-            }
-          ],
-          "text": "render(convexity)"
+          "parameters": [],
+          "text": "render()"
         }
       ],
       "docs": {
-        "summary": "Force a full CSG render of children."
+        "summary": "Force a full CSG render of children.",
+        "remarks": "A passthrough in OpenRSCAD."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -1558,11 +1880,21 @@
               "optional": false
             },
             {
-              "name": "...) | min(vector",
+              "name": "...",
+              "optional": true,
+              "variadic": true
+            }
+          ],
+          "text": "min(a, b, ...)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "values",
               "optional": false
             }
           ],
-          "text": "min(a, b, ...) | min(vector)"
+          "text": "min(values)"
         }
       ],
       "docs": {
@@ -1594,11 +1926,21 @@
               "optional": false
             },
             {
-              "name": "...) | max(vector",
+              "name": "...",
+              "optional": true,
+              "variadic": true
+            }
+          ],
+          "text": "max(a, b, ...)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "values",
               "optional": false
             }
           ],
-          "text": "max(a, b, ...) | max(vector)"
+          "text": "max(values)"
         }
       ],
       "docs": {
@@ -1779,11 +2121,16 @@
         {
           "parameters": [
             {
-              "name": "values...",
+              "name": "value",
               "optional": false
+            },
+            {
+              "name": "...",
+              "optional": true,
+              "variadic": true
             }
           ],
-          "text": "str(values...)"
+          "text": "str(value, ...)"
         }
       ],
       "docs": {
@@ -1807,11 +2154,25 @@
         {
           "parameters": [
             {
-              "name": "codes...",
+              "name": "code",
+              "optional": false
+            },
+            {
+              "name": "...",
+              "optional": true,
+              "variadic": true
+            }
+          ],
+          "text": "chr(code, ...)"
+        },
+        {
+          "parameters": [
+            {
+              "name": "codes",
               "optional": false
             }
           ],
-          "text": "chr(codes...)"
+          "text": "chr(codes)"
         }
       ],
       "docs": {
@@ -1863,23 +2224,28 @@
         {
           "parameters": [
             {
-              "name": "match",
+              "name": "match_value",
               "optional": false
             },
             {
-              "name": "table",
+              "name": "string_or_vector",
               "optional": false
             },
             {
-              "name": "num?",
+              "name": "num_returns_per_match",
+              "optional": false
+            },
+            {
+              "name": "index_col_num",
               "optional": false
             }
           ],
-          "text": "search(match, table, num?)"
+          "text": "search(match_value, string_or_vector, num_returns_per_match, index_col_num)"
         }
       ],
       "docs": {
-        "summary": "Find matches in a list/string."
+        "summary": "Find matches in a list/string.",
+        "remarks": "num_returns_per_match defaults to 1 (0 returns all); index_col_num to 0."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -1899,16 +2265,16 @@
         {
           "parameters": [
             {
-              "name": "i",
-              "optional": true,
-              "defaultValue": "1"
+              "name": "index",
+              "optional": false
             }
           ],
-          "text": "parent_module(i=1)"
+          "text": "parent_module(index)"
         }
       ],
       "docs": {
-        "summary": "Name of a user module on the active instantiation stack."
+        "summary": "Name of a user module on the active instantiation stack.",
+        "remarks": "index defaults to 1."
       },
       "source": {
         "file": "crates/openrscad-lsp/src/builtins.rs",
@@ -2257,6 +2623,229 @@
         "isModule": false
       },
       "id": "openscad:$vpf"
+    },
+    {
+      "name": "module",
+      "kind": "module",
+      "category": "Language",
+      "signatures": [
+        {
+          "parameters": [],
+          "text": "module name(param, option = default) { children(); }"
+        }
+      ],
+      "docs": {
+        "summary": "Declare a module, instantiated as a statement with optional children."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": true
+      },
+      "id": "openscad:module"
+    },
+    {
+      "name": "function",
+      "kind": "function",
+      "category": "Language",
+      "signatures": [
+        {
+          "parameters": [],
+          "text": "function name(param, option = default) = expression;"
+        },
+        {
+          "parameters": [],
+          "text": "f = function (x) expression;"
+        }
+      ],
+      "docs": {
+        "summary": "Declare a function, or bind a function literal to a variable.",
+        "remarks": "Call either form as name(...) or f(...)."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": false
+      },
+      "id": "openscad:function"
+    },
+    {
+      "name": "include",
+      "kind": "module",
+      "category": "Language",
+      "signatures": [
+        {
+          "parameters": [],
+          "text": "include <path/file.scad>"
+        }
+      ],
+      "docs": {
+        "summary": "Splice a file in place, running its top-level statements and assignments."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": true
+      },
+      "id": "openscad:include"
+    },
+    {
+      "name": "use",
+      "kind": "module",
+      "category": "Language",
+      "signatures": [
+        {
+          "parameters": [],
+          "text": "use <path/file.scad>"
+        }
+      ],
+      "docs": {
+        "summary": "Import only the modules and functions a file declares; its top-level statements do not run."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": true
+      },
+      "id": "openscad:use"
+    },
+    {
+      "name": "each",
+      "kind": "function",
+      "category": "Language",
+      "signatures": [
+        {
+          "parameters": [],
+          "text": "[each list, item]"
+        },
+        {
+          "parameters": [],
+          "text": "[for (list = lists) each list]"
+        }
+      ],
+      "docs": {
+        "summary": "Splice a list or range into the enclosing list."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": false
+      },
+      "id": "openscad:each"
+    },
+    {
+      "name": "$children",
+      "kind": "constant",
+      "category": "Language",
+      "docs": {
+        "summary": "Number of children passed to the current module."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": false
+      },
+      "id": "openscad:$children"
+    },
+    {
+      "name": "#",
+      "kind": "module",
+      "category": "Language",
+      "signatures": [
+        {
+          "parameters": [],
+          "text": "#cube(10);"
+        }
+      ],
+      "docs": {
+        "summary": "Highlight a subtree in the preview; it still renders."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": true
+      },
+      "id": "openscad:#"
+    },
+    {
+      "name": "%",
+      "kind": "module",
+      "category": "Language",
+      "signatures": [
+        {
+          "parameters": [],
+          "text": "%cube(10);"
+        }
+      ],
+      "docs": {
+        "summary": "Show a subtree as a transparent background, excluded from the result."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": true
+      },
+      "id": "openscad:%"
+    },
+    {
+      "name": "!",
+      "kind": "module",
+      "category": "Language",
+      "signatures": [
+        {
+          "parameters": [],
+          "text": "!cube(10);"
+        }
+      ],
+      "docs": {
+        "summary": "Render only this subtree."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": true
+      },
+      "id": "openscad:!"
+    },
+    {
+      "name": "*",
+      "kind": "module",
+      "category": "Language",
+      "signatures": [
+        {
+          "parameters": [],
+          "text": "*cube(10);"
+        }
+      ],
+      "docs": {
+        "summary": "Disable a subtree."
+      },
+      "source": {
+        "file": "crates/openrscad-syntax/src/ast.rs"
+      },
+      "languageSpecific": {
+        "language": "openscad",
+        "isModule": true
+      },
+      "id": "openscad:*"
     }
   ]
 }

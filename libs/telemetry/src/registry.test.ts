@@ -63,6 +63,10 @@ describe('TauMetrics', () => {
     expect(
       TauMetrics.wsUpgradeRejections.attributes.safeParse({ 'ws.gateway': 'hosts', reason: 'user-123' }).success,
     ).toBe(false);
+    expect(
+      TauMetrics.wsDisconnections.attributes.safeParse({ 'ws.gateway': 'hosts', 'ws.close.reason': 'transport close' })
+        .success,
+    ).toBe(false);
   });
 
   it('should expose the tool-result offload counter with the canonical OTEL name', () => {

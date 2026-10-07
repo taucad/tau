@@ -45,8 +45,17 @@ describe('UpgradeRouter rejections', () => {
 
     upgrade('/socket');
 
-    expect(rejections).toHaveBeenCalledExactlyOnceWith(1, { 'ws.gateway': 'none', reason: 'server_shutdown' });
+    expect(rejections).toHaveBeenCalledExactlyOnceWith(1, { 'ws.gateway': 'hosts', reason: 'server_shutdown' });
     expect(handle).not.toHaveBeenCalled();
+  });
+
+  it('should label a shutdown refusal on an unclaimed path with no gateway', () => {
+    const { shutdown, rejections, upgrade } = setup();
+    shutdown.stop();
+
+    upgrade('/nowhere');
+
+    expect(rejections).toHaveBeenCalledExactlyOnceWith(1, { 'ws.gateway': 'none', reason: 'server_shutdown' });
   });
 
   it('should record nothing for a routed upgrade', () => {

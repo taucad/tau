@@ -40,7 +40,7 @@ export const TauMetrics = {
     unit: '{connection}',
     description: 'Active WebSocket connections',
     attributes: z.object({
-      'ws.gateway': z.string().optional(),
+      'ws.gateway': z.enum(['hosts', 'kernels']).optional(),
     }),
   }),
 
@@ -49,8 +49,20 @@ export const TauMetrics = {
     unit: '{connection}',
     description: 'Total WebSocket disconnections by reason',
     attributes: z.object({
-      'ws.gateway': z.string().optional(),
-      'ws.close.reason': z.string().optional(),
+      'ws.gateway': z.enum(['hosts', 'kernels']).optional(),
+      'ws.close.reason': z
+        .enum([
+          'normal',
+          'going_away',
+          'server_shutdown',
+          'auth_failed',
+          'policy_violation',
+          'unavailable',
+          'replaced',
+          'error',
+          'other',
+        ])
+        .optional(),
     }),
   }),
 
@@ -60,9 +72,8 @@ export const TauMetrics = {
     description: 'WebSocket frame payload sizes for capacity planning',
     buckets: [64, 256, 1024, 4096, 16_384, 65_536, 262_144, 1_048_576, 4_194_304],
     attributes: z.object({
-      'ws.gateway': z.string().optional(),
-      'ws.direction': z.string().optional(),
-      'rpc.method': z.string().optional(),
+      'ws.gateway': z.enum(['hosts', 'kernels']).optional(),
+      'ws.direction': z.enum(['inbound', 'outbound']).optional(),
     }),
   }),
 
@@ -70,17 +81,10 @@ export const TauMetrics = {
     name: 'ws.upgrade.rejections',
     unit: '{connection}',
     description:
-      'WebSocket upgrades refused by the upgrade router or the gateway admission checks (session, device credential, route). Service-level refusals after admission appear as ws.disconnections policy_violation.',
+      'WebSocket upgrades refused by the upgrade router or the gateway admission checks (session, device credential, route). Service-level refusals after admission appear under ws.disconnections policy_violation (1008), which also counts invalid-frame closes.',
     attributes: z.object({
       'ws.gateway': z.enum(['hosts', 'kernels', 'none']),
-      reason: z.enum([
-        'unauthenticated',
-        'forbidden',
-        'insufficient_credit',
-        'auth_error',
-        'unknown_route',
-        'server_shutdown',
-      ]),
+      reason: z.enum(['unauthenticated', 'forbidden', 'auth_error', 'unknown_route', 'server_shutdown']),
     }),
   }),
 

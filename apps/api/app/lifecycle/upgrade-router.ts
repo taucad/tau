@@ -11,6 +11,9 @@ export type UpgradeHandler = (request: IncomingMessage, socket: Duplex, head: Bu
 /** One value per upgrade route; the `ws.gateway` label on every `ws.*` series. */
 export type WsGateway = 'hosts' | 'kernels';
 
+/** `ws.gateway` on `ws.upgrade.rejections`: a path no route claims has no gateway. */
+export type WsGatewayLabel = WsGateway | 'none';
+
 export type UpgradeRoute = {
   /** The `ws.gateway` label for refusals on this route. */
   readonly gateway: WsGateway;
@@ -76,22 +79,35 @@ export class UpgradeRouter {
     return count;
   }
 
+  /** A URL `new URL` cannot parse is claimed by no route, so it still reaches a clean refusal. */
+  #find(request: IncomingMessage): UpgradeRoute | undefined {
+    let pathname: string;
+    try {
+      ({ pathname } = new URL(request.url ?? '/', 'http://localhost'));
+    } catch {
+      return undefined;
+    }
+    return this.#routes.find((candidate) => candidate.matches(pathname));
+  }
+
+  #reject(gateway: WsGatewayLabel, reason: 'server_shutdown' | 'unknown_route'): void {
+    this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': gateway, reason });
+  }
+
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
   readonly #dispatch = (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
     this.#sockets.add(socket);
     socket.once('close', () => {
       this.#sockets.delete(socket);
     });
+    const route = this.#find(request);
     if (this.shutdown.signal.aborted) {
-      // Refusals before routing carry ws.gateway="none".
-      this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': 'none', reason: 'server_shutdown' });
+      this.#reject(route?.gateway ?? 'none', 'server_shutdown');
       refuse(socket, '503 Service Unavailable');
       return;
     }
-    const { pathname } = new URL(request.url ?? '/', 'http://localhost');
-    const route = this.#routes.find((candidate) => candidate.matches(pathname));
     if (route === undefined) {
-      this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': 'none', reason: 'unknown_route' });
+      this.#reject('none', 'unknown_route');
       refuse(socket, '404 Not Found');
       return;
     }

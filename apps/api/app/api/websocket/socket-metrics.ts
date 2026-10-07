@@ -1,7 +1,20 @@
-import type { RawData, WebSocket } from 'ws';
+import { WebSocket } from 'ws';
+import type { RawData } from 'ws';
 
 import type { WsGateway } from '#lifecycle/upgrade-router.js';
 import type { MetricsService } from '#telemetry/metrics.js';
+
+/** `ws.close.reason`; mirrored by the `z.enum` on `TauMetrics.wsDisconnections`. */
+export type WsCloseReason =
+  | 'normal'
+  | 'going_away'
+  | 'server_shutdown'
+  | 'auth_failed'
+  | 'policy_violation'
+  | 'unavailable'
+  | 'replaced'
+  | 'error'
+  | 'other';
 
 /**
  * Bounded `ws.close.reason` for a close code, so the label never carries the
@@ -11,7 +24,7 @@ import type { MetricsService } from '#telemetry/metrics.js';
  * @returns One of normal, going_away, server_shutdown, auth_failed, policy_violation, unavailable,
  * replaced, error, other.
  */
-export const wsCloseReason = (code: number): string => {
+export const wsCloseReason = (code: number): WsCloseReason => {
   switch (code) {
     case 1000:
     case 1005: {
@@ -82,7 +95,7 @@ export const trackSocket = (metrics: MetricsService, gateway: WsGateway, socket:
   });
   const send = socket.send.bind(socket) as (...arguments_: unknown[]) => void;
   socket.send = ((data: unknown, ...rest: unknown[]) => {
-    if (socket.readyState === socket.OPEN) {
+    if (socket.readyState === WebSocket.OPEN) {
       metrics.wsMessageSize.record(byteLength(data), { ...labels, 'ws.direction': 'outbound' });
     }
     send(data, ...rest);

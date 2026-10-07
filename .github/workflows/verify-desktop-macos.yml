@@ -106,7 +106,8 @@ jobs:
           options=()
           if [ "$HARDENED" = true ]; then options=(--options runtime); fi
           for appex in "$app"/Contents/PlugIns/*.appex; do
-            codesign --force --sign - "${options[@]}" --entitlements "$ENTITLEMENTS" "$appex"
+            # macOS bash 3.2 treats an empty array as unset under `set -u`.
+            codesign --force --sign - ${options[@]+"${options[@]}"} --entitlements "$ENTITLEMENTS" "$appex"
             codesign -d --entitlements - "$appex"
             pluginkit -a "$appex"
           done

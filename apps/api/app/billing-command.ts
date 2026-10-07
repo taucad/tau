@@ -735,9 +735,17 @@ async function main(): Promise<void> {
                     maximumGrants: 100,
                     maximumSubscriptions: 100,
                   });
-                } finally {
-                  await recordOpenCases();
+                } catch (error) {
+                  // The gauge still records when the scan fails, but its own failure must not replace the
+                  // scan's error, which is the diagnosis the operator needs.
+                  await recordOpenCases().catch((gaugeError: unknown) => {
+                    console.error(
+                      JSON.stringify({ event: 'billing.case_gauge_failed', environment, error: String(gaugeError) }),
+                    );
+                  });
+                  throw error;
                 }
+                await recordOpenCases();
                 if (cash !== 'complete' && cash !== 'incomplete') {
                   throw new Error(`cash scan ${cash}; purchases ${purchase.status}`);
                 }

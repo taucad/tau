@@ -12,20 +12,10 @@ import { TauMetrics } from '#registry.js';
 const grafanaRoot = path.resolve(import.meta.dirname, '../../../infra/grafana');
 
 /**
- * Names the dashboards query ahead of the PR that declares them (taucad/tau#382). Each entry goes
- * when that PR merges; the tests fail until it does, and when no dashboard queries it any more.
+ * Names a dashboard may query ahead of the PR that declares them, as `name: 'owner/repo#PR'`. Each
+ * entry goes when that PR merges; the tests fail until it does, and when no dashboard queries it.
  */
-/* eslint-disable @typescript-eslint/naming-convention -- keys are Prometheus metric names */
-const pendingDeclaration: Readonly<Record<string, string>> = {
-  tau_agent_sessions_total: 'taucad/tau#382',
-  tau_agent_turns_total: 'taucad/tau#382',
-  tau_agent_turn_duration: 'taucad/tau#382',
-  tau_agent_time_to_first_update: 'taucad/tau#382',
-  tau_agent_tool_calls_total: 'taucad/tau#382',
-  tau_agent_tokens_total: 'taucad/tau#382',
-  tau_agent_errors_total: 'taucad/tau#382',
-};
-/* eslint-enable @typescript-eslint/naming-convention -- end of the metric-name map */
+const pendingDeclaration: Readonly<Record<string, string>> = {};
 
 const declared = new Set(Object.values(TauMetrics).map((metric) => toPrometheusName(metric.name, metric.type)));
 

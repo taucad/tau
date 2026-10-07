@@ -464,6 +464,31 @@ export const TauMetrics = {
 
   // --- Client-reported (ingested via TelemetryController) ---
 
+  // Object storage (R2 in the cloud, MinIO locally), measured at the API's one S3 client
+  storageOperationDuration: defineHistogram({
+    name: 'tau.storage.operation.duration',
+    unit: 's',
+    description: 'Object storage request time by S3 operation, bucket tier and outcome',
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    attributes: z.object({
+      'tau.storage.operation': z.string().optional(),
+      'tau.storage.tier': z.enum(['public', 'private', 'account']).optional(),
+      outcome: z.enum(['ok', 'error']).optional(),
+      'error.type': z.string().optional(),
+    }),
+  }),
+
+  storageTransferBytes: defineCounter({
+    name: 'tau.storage.transferred_bytes',
+    unit: 'By',
+    description: 'Object storage payload bytes moved by the API, by direction',
+    attributes: z.object({
+      'tau.storage.operation': z.string().optional(),
+      'tau.storage.tier': z.enum(['public', 'private', 'account']).optional(),
+      direction: z.enum(['upload', 'download']).optional(),
+    }),
+  }),
+
   kernelExecutionDuration: defineHistogram({
     name: 'kernel.execution.duration',
     unit: 's',
@@ -558,40 +583,6 @@ export const TauMetrics = {
     }),
   }),
 
-  billingReservationFailures: defineCounter({
-    name: 'tau.billing.credit_reservation_failures',
-    unit: '{failure}',
-    description: 'Pre-flight credit reservations rejected for insufficient balance',
-    attributes: z.object({
-      'gen_ai.request.model': z.string().optional(),
-    }),
-  }),
-
-  billingCreditCommitted: defineCounter({
-    name: 'tau.billing.credit_committed_microusd',
-    unit: 'microusd',
-    description: 'User-facing charged cost committed to the credit ledger',
-    attributes: z.object({
-      'tau.billing.category': z.string().optional(),
-    }),
-  }),
-
-  billingCommitFailures: defineCounter({
-    name: 'tau.billing.credit_commit_failures',
-    unit: '{failure}',
-    description: 'Post-response ledger commit/release failures (floor-swept later)',
-    attributes: z.object({
-      'tau.billing.category': z.string().optional(),
-    }),
-  }),
-
-  billingReservationSweeps: defineCounter({
-    name: 'tau.billing.reservation_sweeps',
-    unit: '{reservation}',
-    description: 'Expired credit reservations settled at their input floor by the sweeper',
-    attributes: z.object({}),
-  }),
-
   billingLedgerDrift: defineGauge({
     name: 'tau.billing.ledger_drift',
     unit: 'microusd',
@@ -613,20 +604,6 @@ export const TauMetrics = {
     description:
       'Open or attention financial cases by kind after each hourly reconciliation (alert on unfulfilled_purchase_obligation > 0)',
     attributes: z.object({ kind: z.string() }),
-  }),
-
-  billingNegativeBalanceAccounts: defineGauge({
-    name: 'tau.billing.negative_balance_accounts',
-    unit: '{account}',
-    description: 'Accounts currently in debt (spend blocked, Q37)',
-    attributes: z.object({}),
-  }),
-
-  billingAccountsFlagged: defineCounter({
-    name: 'tau.billing.accounts_flagged',
-    unit: '{account}',
-    description: 'Accounts left negative by a refund clawback of already-spent credits (Q37 dispute-abuse signal)',
-    attributes: z.object({}),
   }),
 
   billingFundedOperationRecoveries: defineCounter({

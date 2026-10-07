@@ -45,6 +45,7 @@ services:
       - '9090:9090' # Prometheus
       - '3100:3100' # Loki
       - '3200:3200' # Tempo
+      - '4040:4040' # Pyroscope
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     volumes:

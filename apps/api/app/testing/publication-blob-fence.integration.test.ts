@@ -70,11 +70,22 @@ const meetingPoint = (parties: number): (() => Promise<void>) => {
   };
 };
 
+// A developer's global git config (e.g. `commit.gpgsign`) must not reach fixture commits: signing
+// through a busy gpg-agent fails intermittently under parallel test load.
+/* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+const isolatedGit = {
+  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
+} as unknown as NodeJS.ProcessEnv;
+/* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+
 const git = (cwd: string, ...args: readonly string[]): string =>
   execFileSync('git', ['-c', 'user.name=Tau', '-c', 'user.email=tau@test.invalid', ...args], {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: isolatedGit,
   });
 
 describe.skipIf(!reachable)('publication reference counting on a real PostgreSQL', () => {

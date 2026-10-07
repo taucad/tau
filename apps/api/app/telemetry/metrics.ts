@@ -213,6 +213,18 @@ export class MetricsService {
     },
   );
 
+  // Object storage
+  public readonly storageOperationDuration = this.apiMeter.createHistogram(TauMetrics.storageOperationDuration.name, {
+    description: TauMetrics.storageOperationDuration.description,
+    unit: TauMetrics.storageOperationDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.storageOperationDuration.buckets] },
+  });
+
+  public readonly storageTransferBytes = this.apiMeter.createCounter(TauMetrics.storageTransferBytes.name, {
+    description: TauMetrics.storageTransferBytes.description,
+    unit: TauMetrics.storageTransferBytes.unit,
+  });
+
   // Client-reported metrics (ingested via TelemetryController)
   public readonly kernelExecutionDuration = this.clientMeter.createHistogram(TauMetrics.kernelExecutionDuration.name, {
     description: TauMetrics.kernelExecutionDuration.description,
@@ -271,26 +283,6 @@ export class MetricsService {
     unit: TauMetrics.billingVoidedAdmissions.unit,
   });
 
-  public readonly billingReservationFailures = this.apiMeter.createCounter(TauMetrics.billingReservationFailures.name, {
-    description: TauMetrics.billingReservationFailures.description,
-    unit: TauMetrics.billingReservationFailures.unit,
-  });
-
-  public readonly billingCreditCommitted = this.apiMeter.createCounter(TauMetrics.billingCreditCommitted.name, {
-    description: TauMetrics.billingCreditCommitted.description,
-    unit: TauMetrics.billingCreditCommitted.unit,
-  });
-
-  public readonly billingCommitFailures = this.apiMeter.createCounter(TauMetrics.billingCommitFailures.name, {
-    description: TauMetrics.billingCommitFailures.description,
-    unit: TauMetrics.billingCommitFailures.unit,
-  });
-
-  public readonly billingReservationSweeps = this.apiMeter.createCounter(TauMetrics.billingReservationSweeps.name, {
-    description: TauMetrics.billingReservationSweeps.description,
-    unit: TauMetrics.billingReservationSweeps.unit,
-  });
-
   public readonly billingLedgerDrift = this.apiMeter.createGauge(TauMetrics.billingLedgerDrift.name, {
     description: TauMetrics.billingLedgerDrift.description,
     unit: TauMetrics.billingLedgerDrift.unit,
@@ -304,19 +296,6 @@ export class MetricsService {
   public readonly billingOpenFinancialCases = this.apiMeter.createGauge(TauMetrics.billingOpenFinancialCases.name, {
     description: TauMetrics.billingOpenFinancialCases.description,
     unit: TauMetrics.billingOpenFinancialCases.unit,
-  });
-
-  public readonly billingNegativeBalanceAccounts = this.apiMeter.createGauge(
-    TauMetrics.billingNegativeBalanceAccounts.name,
-    {
-      description: TauMetrics.billingNegativeBalanceAccounts.description,
-      unit: TauMetrics.billingNegativeBalanceAccounts.unit,
-    },
-  );
-
-  public readonly billingAccountsFlagged = this.apiMeter.createCounter(TauMetrics.billingAccountsFlagged.name, {
-    description: TauMetrics.billingAccountsFlagged.description,
-    unit: TauMetrics.billingAccountsFlagged.unit,
   });
 
   public readonly billingFundedOperationRecoveries = this.apiMeter.createCounter(

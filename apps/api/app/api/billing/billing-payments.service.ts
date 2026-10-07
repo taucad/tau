@@ -1574,7 +1574,7 @@ export class BillingPaymentsService {
             throw new ConflictException({ code: 'stripe_event_conflict' });
           return;
         }
-        await this.markStripeSourcePending(event.sourceType, event.sourceId, tx);
+        await this.markStripeSourcePending(event.sourceType, event.sourceId, { database: tx });
       });
     } catch (error) {
       if (error instanceof ConflictException) throw error;
@@ -2090,19 +2090,13 @@ export class BillingPaymentsService {
     const remoteSubscriptionId =
       typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
     if (leg.subscriptionId !== null && remoteSubscriptionId !== null && remoteSubscriptionId !== undefined) {
-      const [current] = await this.databaseService.database
-        .select({ stripeSubscriptionId: subscription.stripeSubscriptionId })
-        .from(subscription)
-        .where(and(eq(subscription.id, leg.subscriptionId), eq(subscription.accountId, leg.accountId)))
-        .limit(1);
-      // A linked subscription had its first invoice queued with the link; a repeated recover must not force that
-      // source back to pending under the worker.
-      if (current !== undefined && current.stripeSubscriptionId !== null) return;
       // The first invoice grants the plan; queue it as its `invoice.paid` webhook would. The link below ends
-      // this leg's sweep, so the invoice is queued first: a failed write leaves both to the next pass.
+      // this leg's sweep, so the invoice is queued first: a failed write leaves both to the next pass. A source
+      // the worker already settled stays settled, so a repeated recover re-does nothing; a subscription that
+      // `checkout.session.completed` linked without its invoice (never delivered) still gets it queued here.
       const invoiceId = stripeObjectId(session.invoice);
       if (session.mode === 'subscription' && session.status === 'complete' && invoiceId !== undefined)
-        await this.markStripeSourcePending('invoice', invoiceId);
+        await this.markStripeSourcePending('invoice', invoiceId, { reviveDone: false });
       const leaseToken = leaseUntil.toISOString();
       await this.databaseService.database
         .update(subscription)
@@ -3885,11 +3879,17 @@ export class BillingPaymentsService {
    * Queues one Stripe object for reconciliation, as a delivered webhook does and as hosted-session recovery
    * does when no webhook arrived. Due on the database clock, so a caller's own claim right after sees it due.
    */
+  /**
+   * Queues a Stripe object for the source reconciler. A delivered event revives even a `done` source (a later
+   * event for the same object, a refund say, must be reconciled again); `reviveDone: false` queues only a source
+   * the reconciler has not settled, for a caller that merely wants to be sure it was queued once.
+   */
   private async markStripeSourcePending(
     sourceType: string,
     sourceId: string,
-    database: Database | Transaction = this.databaseService.database,
+    options: { readonly database?: Database | Transaction; readonly reviveDone?: boolean } = {},
   ): Promise<void> {
+    const database = options.database ?? this.databaseService.database;
     await database
       .insert(billingStripeSource)
       .values({
@@ -3915,6 +3915,7 @@ export class BillingPaymentsService {
           eq(billingStripeSource.livemode, this.config.livemode),
           eq(billingStripeSource.sourceType, sourceType),
           eq(billingStripeSource.sourceId, sourceId),
+          ...(options.reviveDone === false ? [ne(billingStripeSource.state, 'done')] : []),
         ),
       );
   }

@@ -1,6 +1,6 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
 import { Body, Controller, Post, HttpCode, UseGuards } from '@nestjs/common';
-import { IngestEntryName, AttributeKey } from '@taucad/telemetry';
+import { IngestEntryName, AttributeKey, knownAgentIds } from '@taucad/telemetry';
 import type { ClientMetricEntry } from '@taucad/telemetry';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { MetricsService } from '#telemetry/metrics.js';
@@ -122,28 +122,34 @@ export class TelemetryController {
     });
   }
 
-  /* eslint-disable @typescript-eslint/naming-convention -- keys are the `tau_agent_*` Prometheus label contract */
   private recordAgentSession(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_SESSION }>): void {
     const { agentId, placement, outcome } = entry.detail;
-    this.metrics.agentSessions.add(1, { agent_id: agentId, agent_placement: placement, outcome });
+    this.metrics.agentSessions.add(1, {
+      [AttributeKey.AGENT_ID]: recordedAgentId(agentId),
+      [AttributeKey.AGENT_PLACEMENT]: placement,
+      [AttributeKey.AGENT_OUTCOME]: outcome,
+    });
   }
 
   private recordAgentTurn(
     entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_TURN }>,
     durationSeconds: number,
   ): void {
-    const { agentId, placement, outcome, errorCode, timeToFirstUpdate, toolCalls, tokens } = entry.detail;
-    const turn = { agent_id: agentId, agent_placement: placement, outcome };
+    const { placement, outcome, errorCode, timeToFirstUpdate, toolCalls, tokens } = entry.detail;
+    const agent = { [AttributeKey.AGENT_ID]: recordedAgentId(entry.detail.agentId) };
+    const placed = { ...agent, [AttributeKey.AGENT_PLACEMENT]: placement };
+    const turn = { ...placed, [AttributeKey.AGENT_OUTCOME]: outcome };
     this.metrics.agentTurns.add(1, turn);
     this.metrics.agentTurnDuration.record(durationSeconds, turn);
     if (timeToFirstUpdate !== undefined) {
-      this.metrics.agentTimeToFirstUpdate.record(timeToFirstUpdate / 1000, {
-        agent_id: agentId,
-        agent_placement: placement,
-      });
+      this.metrics.agentTimeToFirstUpdate.record(timeToFirstUpdate / 1000, placed);
     }
     for (const call of toolCalls ?? []) {
-      this.metrics.agentToolCalls.add(call.count, { agent_id: agentId, tool_kind: call.kind, status: call.status });
+      this.metrics.agentToolCalls.add(call.count, {
+        ...agent,
+        [AttributeKey.AGENT_TOOL_KIND]: call.kind,
+        [AttributeKey.AGENT_TOOL_STATUS]: call.status,
+      });
     }
     if (tokens !== undefined) {
       const byType = [
@@ -153,12 +159,17 @@ export class TelemetryController {
         ['cache_write', tokens.cacheWrite],
       ] as const;
       for (const [tokenType, count] of byType) {
-        this.metrics.agentTokens.add(count, { agent_id: agentId, token_type: tokenType });
+        /* A type the agent never uses (Codex reports no cache writes) mints no series. */
+        if (count > 0) {
+          this.metrics.agentTokens.add(count, { ...agent, [AttributeKey.AGENT_TOKEN_TYPE]: tokenType });
+        }
       }
     }
     if (errorCode !== undefined && (outcome === 'error' || outcome === 'refused')) {
-      this.metrics.agentErrors.add(1, { agent_id: agentId, error_code: errorCode });
+      this.metrics.agentErrors.add(1, { ...agent, [AttributeKey.AGENT_ERROR_CODE]: errorCode });
     }
   }
-  /* eslint-enable @typescript-eslint/naming-convention -- end label contract */
 }
+
+/** The ingest validates an id's shape; only known agents are recorded as themselves (bounded cardinality). */
+const recordedAgentId = (agentId: string): string => (knownAgentIds.has(agentId) ? agentId : 'other');

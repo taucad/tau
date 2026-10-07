@@ -21,6 +21,8 @@ export {
   clientMetricEntrySchema,
   ingestPayloadSchema,
   agentIdSchema,
+  agentErrorCodeSchema,
+  knownAgentIds,
   agentPlacements,
   agentToolKinds,
 } from '#ingest.js';

@@ -7,7 +7,7 @@
  * never counts a turn twice. The tracker reads the same projection the run
  * watch reads, so every placement and agent goes through one code path.
  */
-import { IngestEntryName, agentIdSchema, agentToolKinds } from '@taucad/telemetry';
+import { IngestEntryName, agentErrorCodeSchema, agentIdSchema, agentToolKinds } from '@taucad/telemetry';
 import type { ClientMetricEntry } from '@taucad/telemetry';
 import { tauToolKinds } from '@taucad/agent-host';
 import type { CadAgentExecution } from '@taucad/chat';
@@ -74,7 +74,6 @@ const structuralChunks = new Set([
   'data-acp-session',
 ]);
 const knownKinds: ReadonlySet<string> = new Set(agentToolKinds);
-const errorCodePattern = /^[A-Z][A-Z0-9_]{0,63}$/u;
 /**
  * Milliseconds after which a turn that never settled (a dispatch the host never logged) is dropped unreported.
  * ponytail: a fixed ceiling; report these as `abandoned` if they turn out to matter.
@@ -127,6 +126,7 @@ const foldChunk = (facts: TurnFacts, chunk: Readonly<Record<string, unknown>>): 
   }
 };
 
+/** Calls that reached a terminal chunk; one a Stop interrupted has neither status, so a cancelled turn counts none. */
 const toolCallsOf = (facts: TurnFacts): Pick<AgentTurnDetail, 'toolCalls'> => {
   const counts = new Map<string, { kind: ToolKind; status: ToolResult['status']; count: number }>();
   for (const { kind, status } of facts.toolResults.values()) {
@@ -167,7 +167,10 @@ const outcomeOf = (lifecycle: unknown, code: string | undefined): Pick<AgentTurn
     return { outcome: 'cancelled' };
   }
   if (lifecycle === 'failed') {
-    return { outcome: 'error', errorCode: code !== undefined && errorCodePattern.test(code) ? code : 'RUN_FAILED' };
+    return {
+      outcome: 'error',
+      errorCode: code !== undefined && agentErrorCodeSchema.safeParse(code).success ? code : 'RUN_FAILED',
+    };
   }
   return { outcome: 'completed' };
 };
@@ -178,8 +181,13 @@ const outcomeOf = (lifecycle: unknown, code: string | undefined): Pick<AgentTurn
  * Tool calls are counted by call id from their terminal chunk; tokens are the
  * sum of the run's `data-usage` parts (the ACP session delta is taken
  * host-side). Usage the agent never reported is omitted, never estimated. A
- * paused run (an approval) keeps its clock running. A resumed run that was
- * already terminal is reported at its *next* terminal row.
+ * paused run (an approval) keeps its clock running. A resumed run keeps its
+ * earlier attempts' chunks, so only chunks that arrive after admission count,
+ * and one that was already terminal is reported at its *next* terminal row.
+ *
+ * A tracker outlives the surface that started it, so a run that settles after
+ * the person leaves the chat is still reported; one whose chat is released
+ * before it settles is dropped at the abandon ceiling.
  *
  * @param options - The run, who runs it, and where to read and report.
  * @public
@@ -192,9 +200,11 @@ export const trackAgentTurn = (
     admittedAt?: number;
     now?: () => number;
     report?: AgentTelemetryReport;
+    /** Called once, when the host has logged the run: the turn was accepted, not just composed. */
+    onAccepted?: () => void;
   }>,
 ): void => {
-  const { runId, identity, source } = options;
+  const { runId, identity, source, onAccepted } = options;
   if (tracked.has(runId)) {
     return;
   }
@@ -203,11 +213,14 @@ export const trackAgentTurn = (
   const report = options.report ?? defaultReport;
   const admittedAt = options.admittedAt ?? now();
   const facts: TurnFacts = { toolKinds: new Map(), toolResults: new Map(), usage: new Map() };
-  const initialRun = source.getProjection()?.ledger.runs[runId];
+  const initial = source.getProjection();
+  const initialRun = initial?.ledger.runs[runId];
   let reopened = !terminalLifecycles.has(initialRun?.lifecycle);
+  let accepted = false;
   let timeToFirstUpdate: number | undefined;
-  let durableSeen = 0;
-  let liveSeen = 0;
+  /* A resume re-admits the same run, whose earlier attempts' chunks stay in the projection: none of them is this turn's. */
+  let durableSeen = initial?.views[runId]?.chunks.length ?? 0;
+  let liveSeen = initial?.live?.runId === runId ? initial.live.chunks.length : 0;
   let done = false;
 
   const markFirstUpdate = (type: string): void => {
@@ -238,11 +251,16 @@ export const trackAgentTurn = (
     }
     fold(projection);
     const run = projection.ledger.runs[runId];
-    if (!terminalLifecycles.has(run?.lifecycle)) {
-      reopened = true;
+    const settled = terminalLifecycles.has(run?.lifecycle);
+    if (settled && !reopened && run?.attempt === initialRun?.attempt) {
       return;
     }
-    if (!reopened && run?.attempt === initialRun?.attempt) {
+    if (!accepted && run?.lifecycle !== undefined) {
+      accepted = true;
+      onAccepted?.();
+    }
+    if (!settled) {
+      reopened = true;
       return;
     }
     finish();
@@ -292,7 +310,7 @@ export const reportRefusedAgentTurn = ({
     detail: {
       ...identity,
       outcome: 'refused',
-      errorCode: code !== undefined && errorCodePattern.test(code) ? code : 'ADMISSION_FAILED',
+      errorCode: code !== undefined && agentErrorCodeSchema.safeParse(code).success ? code : 'ADMISSION_FAILED',
     },
   });
 };
@@ -373,8 +391,19 @@ export const createAgentUsageTelemetry = (
         admitted(runId) {
           quietly(() => {
             if (identity !== undefined) {
-              session.admitted(identity);
-              trackAgentTurn({ runId, identity, admittedAt, source, report });
+              const admittedAs = identity;
+              trackAgentTurn({
+                runId,
+                identity,
+                admittedAt,
+                source,
+                report,
+                onAccepted: () => {
+                  quietly(() => {
+                    session.admitted(admittedAs);
+                  });
+                },
+              });
             }
           });
         },

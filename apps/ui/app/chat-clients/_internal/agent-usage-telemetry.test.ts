@@ -12,7 +12,7 @@ import {
 
 const external = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } };
 
-const harness = (runId: string, prior: ReadonlyArray<Record<string, unknown>> = []) => {
+const harness = (runId: string, prior: ReadonlyArray<Record<string, unknown>> = [], onAccepted?: () => void) => {
   let projection: ChatProjection = initialChatProjection;
   let cursor = 0;
   const listeners = new Set<() => void>();
@@ -37,6 +37,7 @@ const harness = (runId: string, prior: ReadonlyArray<Record<string, unknown>> = 
     admittedAt: clock,
     now: () => clock,
     report,
+    ...(onAccepted === undefined ? {} : { onAccepted }),
     source: {
       getProjection: () => projection,
       subscribe: (listener) => {
@@ -75,6 +76,28 @@ const toolRows = (callId: string, kind: string, isError: boolean) => [
     },
   }),
 ];
+
+const usageRow = (id: string, input: number) =>
+  logRow(0, {
+    type: 'message.appended',
+    message: {
+      id,
+      role: 'assistant',
+      content: 'Done.',
+      metadata: {
+        model: 'gpt-5',
+        usage: {
+          input,
+          output: 1,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: input + 1,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        ...external,
+      },
+    },
+  });
 
 describe('trackAgentTurn', () => {
   it('reports one completed turn with time to first update, tool kinds and reported tokens', () => {
@@ -151,24 +174,47 @@ describe('trackAgentTurn', () => {
     });
   });
 
-  it('waits for a resumed failed run to settle again instead of reporting its old failure', () => {
+  it('reports a resumed run at its next terminal row, counting only what the new attempt did', () => {
     const failed = {
       type: 'run.lifecycle',
       state: 'failed',
       attempt: 1,
       detail: { message: 'stalled', code: 'MODEL_STREAM_STALLED', resumable: true },
     };
-    const { publish, report } = harness('run_resume', [lifecycleRow(0, 'admitted', 'run_resume'), logRow(0, failed)]);
+    const attemptOne = [
+      lifecycleRow(0, 'admitted', 'run_resume'),
+      lifecycleRow(0, 'running', 'run_resume'),
+      ...toolRows('old', 'edit', false),
+      usageRow('old-usage', 1000),
+      logRow(0, failed),
+    ];
+    const onAccepted = vi.fn();
+    const { publish, report } = harness('run_resume', attemptOne, onAccepted);
     expect(report).not.toHaveBeenCalled();
+    expect(onAccepted).not.toHaveBeenCalled();
+    publish([logRow(0, { type: 'run.lifecycle', state: 'running', attempt: 2 })], 1300);
+    expect(onAccepted).toHaveBeenCalledOnce();
     publish(
       [
-        logRow(0, { type: 'run.lifecycle', state: 'running', attempt: 2 }),
+        ...toolRows('new', 'read', false),
+        usageRow('new-usage', 10),
         logRow(0, { type: 'run.lifecycle', state: 'completed', attempt: 2 }),
       ],
       1800,
     );
     expect(report).toHaveBeenCalledOnce();
-    expect(report.mock.calls[0]![0]).toMatchObject({ duration: 800, detail: { outcome: 'completed' } });
+    expect(report.mock.calls[0]![0]).toEqual({
+      name: 'agent.turn',
+      duration: 800,
+      detail: {
+        agentId: 'codex',
+        placement: 'daemon',
+        outcome: 'completed',
+        timeToFirstUpdate: 800,
+        toolCalls: [{ kind: 'read', status: 'completed', count: 1 }],
+        tokens: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0 },
+      },
+    });
   });
 
   it('counts a cancelled run as cancelled', () => {

@@ -90,6 +90,13 @@ const indexeddbOperationEntrySchema = z.object({
 /** A descriptor's agent id: `tau`, `claude`, `codex`, … @public */
 export const agentIdSchema = z.string().regex(/^[a-z][\d_a-z-]{0,31}$/);
 
+/**
+ * The agent ids recorded as themselves: Tau's own and the ACP registry's pinned adapters
+ * (`packages/host/src/acp/registry.ts`). Any other id is recorded as `other`, so a custom agent never mints a series.
+ * @public
+ */
+export const knownAgentIds: ReadonlySet<string> = new Set(['tau', 'claude', 'codex', 'grok']);
+
 /** Where an agent turn ran. @public */
 export const agentPlacements = ['browser', 'desktop', 'daemon', 'cloud'] as const;
 
@@ -107,15 +114,30 @@ export const agentToolKinds = [
   'other',
 ] as const;
 
-/** A refusal or failure code, e.g. `CLI_NOT_FOUND`, `MODEL_STREAM_STALLED`. */
-const agentErrorCodeSchema = z.string().regex(/^[A-Z][\dA-Z_]{0,63}$/);
+/** A refusal or failure code, e.g. `CLI_NOT_FOUND`, `MODEL_STREAM_STALLED`. @public */
+export const agentErrorCodeSchema = z.string().regex(/^[A-Z][\dA-Z_]{0,63}$/);
+
+/**
+ * A non-negative number clamped to `max`: an outlier degrades to the ceiling instead of dropping the whole entry.
+ *
+ * @param max - The ceiling.
+ * @returns The clamping schema.
+ */
+const clamped = (max: number) =>
+  z
+    .number()
+    .nonnegative()
+    .transform((value) => Math.min(value, max));
+
+/** Milliseconds; a day bounds any one turn. */
+const agentDurationSchema = clamped(86_400_000);
 
 /** Token counts are per turn; one turn never legitimately reports more than this. */
-const tokenCountSchema = z.number().int().nonnegative().max(100_000_000);
+const tokenCountSchema = clamped(100_000_000);
 
 const agentSessionEntrySchema = z.object({
   name: z.literal(IngestEntryName.AGENT_SESSION),
-  duration: z.number().nonnegative().max(86_400_000),
+  duration: agentDurationSchema,
   detail: z.object({
     agentId: agentIdSchema,
     placement: z.enum(agentPlacements),
@@ -127,20 +149,24 @@ const agentSessionEntrySchema = z.object({
 /** One settled turn: `duration` is admission to terminal, in milliseconds. */
 const agentTurnEntrySchema = z.object({
   name: z.literal(IngestEntryName.AGENT_TURN),
-  duration: z.number().nonnegative().max(86_400_000),
+  duration: agentDurationSchema,
   detail: z.object({
     agentId: agentIdSchema,
     placement: z.enum(agentPlacements),
     outcome: z.enum(['completed', 'cancelled', 'error', 'refused']),
     errorCode: agentErrorCodeSchema.optional(),
     /** Admission to the first content update, in milliseconds. */
-    timeToFirstUpdate: z.number().nonnegative().max(86_400_000).optional(),
+    timeToFirstUpdate: agentDurationSchema.optional(),
     toolCalls: z
       .array(
         z.object({
           kind: z.enum(agentToolKinds),
           status: z.enum(['completed', 'failed']),
-          count: z.number().int().positive().max(10_000),
+          count: z
+            .number()
+            .int()
+            .positive()
+            .transform((value) => Math.min(value, 10_000)),
         }),
       )
       .max(agentToolKinds.length * 2)

@@ -123,6 +123,15 @@ describe('useCloudPaymentActionReturn', () => {
     await expectResumeOffer();
   });
 
+  it('should not recover a reload-setup Checkout, which has nothing to settle', async () => {
+    getPaymentAction.mockResolvedValue({ ...checkoutAction('redirect_required'), purpose: 'reload_setup' });
+    returnFromCheckout();
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith('Checkout is ready to continue.', expect.anything());
+    });
+    expect(recoverPaymentAction).not.toHaveBeenCalled();
+  });
+
   it('should not recover an action that already settled', async () => {
     getPaymentAction.mockResolvedValue(checkoutAction('fulfilled', { grantedCreditAtoms: '5370000' }));
     returnFromCheckout();

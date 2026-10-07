@@ -89,6 +89,29 @@ groups:
           service: tau-api
           component: billing
 
+      - uid: billing-worker-stalled
+        title: 'P0: Billing Worker Stalled'
+        condition: worker_stalled
+        data:
+          - refId: worker_stalled
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                sum by (app, tau_worker) (max_over_time(tau_billing_worker_passes_total{service_name="tau-api"}[24h])) unless sum by (app, tau_worker) (increase(tau_billing_worker_passes_total{service_name="tau-api",outcome="ok"}[15m]) > 0)
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 5m
+        annotations:
+          summary: 'A billing worker seen in the last 24 h has completed no successful pass in 15 min: hung, dead or failing every pass (F-10). operations stalled means paid purchases are not credited; recovery stalled means funded operations stay held (see chat-llm-failing.md). Grouped by Fly `app` and `tau_worker`. A worker scaled to 0 on purpose also fires until 24 h pass, so silence it.'
+          runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
+        labels:
+          severity: critical
+          service: tau-api
+          component: billing
+
   - orgId: 1
     name: tau-warning
     folder: Tau Alerts
@@ -271,3 +294,26 @@ groups:
           severity: warning
           service: tau-api
           component: billing
+
+      - uid: tau-process-restarting
+        title: 'P1: Tau Process Crash-Looping'
+        condition: process_restarting
+        data:
+          - refId: process_restarting
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                sum by (app, instance, tau_process) (resets(process_uptime{service_name="tau-api"}[30m])) > 2
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: 'A Tau process (app or billing worker) restarted more than twice in 30 min: it is crash-looping (F-10: billing-operations OOM-kills on a 256 MB Machine, before its first pass completes). Reads process_uptime, which exists from the first scrape. A deploy restarts it once.'
+          runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
+        labels:
+          severity: warning
+          service: tau-api
+          component: runtime

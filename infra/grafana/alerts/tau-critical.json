@@ -235,6 +235,40 @@
         "service": "tau-api",
         "component": "billing"
       }
+    },
+    {
+      "uid": "billing-worker-stalled",
+      "title": "P0: Billing Worker Stalled",
+      "condition": "worker_stalled",
+      "data": [
+        {
+          "refId": "worker_stalled",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app, tau_worker) (max_over_time(tau_billing_worker_passes_total{service_name=\"tau-api\"}[24h])) unless sum by (app, tau_worker) (increase(tau_billing_worker_passes_total{service_name=\"tau-api\",outcome=\"ok\"}[15m]) > 0)",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "worker_stalled"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "5m",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/paid-not-credited.md",
+        "summary": "A billing worker seen in the last 24 h has completed no successful pass in 15 min: hung, dead or failing every pass (F-10). operations stalled means paid purchases are not credited; recovery stalled means funded operations stay held (see chat-llm-failing.md). Grouped by Fly `app` and `tau_worker`. A worker scaled to 0 on purpose also fires until 24 h pass, so silence it."
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "billing"
+      }
     }
   ]
 }

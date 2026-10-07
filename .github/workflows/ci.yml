@@ -1019,7 +1019,7 @@ jobs:
   # The staging UI: built in Actions with this run's GeoSpec products (Netlify
   # cannot produce them), from the producer's artifact or, when the native source
   # matched an earlier build, from the products cache, and published by the Netlify CLI. It waits for the same
-  # gates as a merge.
+  # gates as a merge. `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
   deploy-ui-staging:
     name: Deploy UI (Staging)
     needs: [workspace, affected, plan, geospec-producer]

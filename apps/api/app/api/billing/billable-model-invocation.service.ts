@@ -120,8 +120,15 @@ const classified = <E extends Error>(error: E, errorType: string): E => {
   failureTypes.set(error, errorType);
   return error;
 };
+/** Bounded `error.type` of a supplier refusal; `upstream_4xx` stays caller-side, a key refusal is `upstream_auth`. */
 const upstreamErrorType = (status: number): string =>
-  status === 429 ? 'upstream_429' : status >= 500 ? 'upstream_5xx' : 'upstream_4xx';
+  status === 401 || status === 403
+    ? 'upstream_auth'
+    : status === 429
+      ? 'upstream_429'
+      : status >= 500
+        ? 'upstream_5xx'
+        : 'upstream_4xx';
 /** Bounded `error.type` of a stream that ended without final usage. */
 const streamErrorType = (reason: string | undefined): string =>
   reason === 'client_abort'

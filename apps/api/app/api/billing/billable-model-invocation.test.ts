@@ -1474,5 +1474,29 @@ describe('BillableModelInvocationService', () => {
       expect(metrics.genAiCost.add).not.toHaveBeenCalled();
       expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
     });
+
+    it.each([
+      [401, 'upstream_auth'],
+      [403, 'upstream_auth'],
+      [429, 'upstream_429'],
+      [400, 'upstream_4xx'],
+      [502, 'upstream_5xx'],
+    ])('records a supplier %i refusal as error.type %s', async (status, errorType) => {
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+        // Test-local logger sink.
+      });
+      const qualified = qualification();
+      qualified.adapter.executeOnce = vi.fn(
+        async () => new Response(JSON.stringify({ error: { type: 'refused' } }), { status }),
+      );
+      const { metrics, service } = exhaustionHarness(qualified);
+
+      await expect(service.invoke(intent())).rejects.toBeInstanceOf(LlmGatewayError);
+
+      expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        ...labels,
+        'error.type': errorType,
+      });
+    });
   });
 });

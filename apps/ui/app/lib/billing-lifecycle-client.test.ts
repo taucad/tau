@@ -52,15 +52,40 @@ describe('billing lifecycle client', () => {
     );
     vi.stubGlobal('fetch', refuse('payment_action_pending'));
     await expect(prepareAccountClosure(binding, 'request-a')).rejects.toBeInstanceOf(AccountClosurePaymentPending);
+    const pendingAction = {
+      version: 'payment-action-v1',
+      actionId: 'action-a',
+      environment: 'development',
+      ownerId: 'user-a',
+      subjectId: 'account-a',
+      purpose: 'manual_topup',
+      state: 'redirect_required',
+      frozen: {
+        offerId: 'offer-a',
+        currency: 'usd',
+        principalMinor: '500',
+        taxMinor: '0',
+        grossMinor: '500',
+        maximumGrossMinor: '500',
+        creditAtoms: '5000000',
+        paymentMethod: null,
+      },
+      redirectUrl: 'https://checkout.stripe.com/owned',
+      attention: null,
+      receipt: null,
+      updatedAt: '2026-09-06T00:00:00.000Z',
+    };
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ code: 'payment_action_pending', state: 'attention', statusCode: 409 }), {
+        new Response(JSON.stringify({ code: 'payment_action_pending', action: pendingAction, statusCode: 409 }), {
           status: 409,
         }),
       ),
     );
-    await expect(prepareAccountClosure(binding, 'request-a')).rejects.toMatchObject({ state: 'attention' });
+    await expect(prepareAccountClosure(binding, 'request-a')).rejects.toMatchObject({
+      action: { actionId: 'action-a', state: 'redirect_required' },
+    });
     vi.stubGlobal('fetch', refuse('automatic_reload_unavailable'));
     await expect(prepareReloadConsent(binding, { requestId: 'request-a', returnPath: '/' })).rejects.toThrow(
       'Billing lifecycle request failed with 409',

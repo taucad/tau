@@ -276,12 +276,16 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
         return;
       }
       startNew();
-    } catch {
+    } catch (error) {
       if (scopeRef.current.value === startedGeneration) {
+        // The Checkout already closed on Stripe's side, so retrying the cancel cannot help.
+        const stale = error instanceof BillingPaymentConflict && error.code === 'action_not_cancelable';
         toast.warning(
-          visibleAction.state === 'prepared'
-            ? 'Could not discard the quote. Try again.'
-            : 'Could not cancel the payment. Try again.',
+          stale
+            ? 'This payment can no longer be cancelled. Reopen this window to see where it stands.'
+            : visibleAction.state === 'prepared'
+              ? 'Could not discard the quote. Try again.'
+              : 'Could not cancel the payment. Try again.',
         );
       }
     } finally {
@@ -459,7 +463,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
             <div className='flex flex-col gap-2 text-sm'>
               <p>Checkout is ready. Continue when you are ready.</p>
               <div className='flex gap-2'>
-                <Button className='flex-1' onClick={() => followPaymentRedirect(visibleAction)}>
+                <Button className='flex-1' disabled={visibleBusy} onClick={() => followPaymentRedirect(visibleAction)}>
                   Resume Checkout
                 </Button>
                 <Button variant='outline' disabled={visibleBusy} onClick={discardQuote}>

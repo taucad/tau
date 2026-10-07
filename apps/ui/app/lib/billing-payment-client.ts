@@ -19,6 +19,8 @@ const paymentConflictCodes = [
   // A saved-card purchase needs a card and a billing address, which only Checkout collects; retrying cannot help.
   'saved_card_not_found',
   'customer_tax_location_invalid',
+  // The Checkout is no longer open (paid, expired or already ended); retrying the cancel cannot help.
+  'action_not_cancelable',
 ] as const;
 type PaymentConflictCode = (typeof paymentConflictCodes)[number];
 

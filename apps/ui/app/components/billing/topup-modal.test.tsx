@@ -338,6 +338,23 @@ describe('TopupModal', () => {
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
 
+  it('explains a cancel the server refuses because the Checkout already closed', async () => {
+    const { toast } = await import('#components/ui/sonner.js');
+    const redirect = { ...wireAction('redirect_required'), redirectUrl: 'https://checkout.example/resume' };
+    client.getUnresolvedPaymentActions.mockResolvedValue([redirect]);
+    client.cancelPaymentAction.mockRejectedValue(
+      Object.assign(new PaymentConflict(undefined), { code: 'action_not_cancelable' }),
+    );
+    renderModal();
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel payment' }));
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(
+        'This payment can no longer be cancelled. Reopen this window to see where it stands.',
+      );
+    });
+    expect(client.followPaymentRedirect).not.toHaveBeenCalled();
+  });
+
   it('resumes an owned Checkout only after the user clicks', async () => {
     const redirect = {
       ...wireAction('redirect_required'),

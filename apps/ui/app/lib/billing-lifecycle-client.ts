@@ -14,13 +14,13 @@ export class BillingAddressRequired extends Error {
 
 /** Account closure waits until no payment action can still settle; the customer finishes or cancels it first. */
 export class AccountClosurePaymentPending extends Error {
-  /** The pending purchase's state when the API reported one: `prepared`/`pending` can be ended; `attention` waits. */
-  public readonly state: string | undefined;
+  /** The pending payment as the customer sees it; its wire state says whether they can end it or must wait. */
+  public readonly action: WirePaymentAction | undefined;
 
-  public constructor(state?: string) {
+  public constructor(action?: WirePaymentAction) {
     super('payment_action_pending');
     this.name = 'AccountClosurePaymentPending';
-    this.state = state;
+    this.action = action;
   }
 }
 
@@ -34,12 +34,13 @@ const parseConflictRefusal = async (
     .clone()
     .json()
     .catch(() => undefined);
-  const refusal = body && typeof body === 'object' ? (body as { code?: unknown; state?: unknown }) : undefined;
+  const refusal = body && typeof body === 'object' ? (body as { code?: unknown; action?: unknown }) : undefined;
   const code = refusal?.code;
+  const action = wirePaymentActionSchema.safeParse(refusal?.action);
   return code === 'customer_tax_location_invalid'
     ? new BillingAddressRequired()
     : code === 'payment_action_pending'
-      ? new AccountClosurePaymentPending(typeof refusal?.state === 'string' ? refusal.state : undefined)
+      ? new AccountClosurePaymentPending(action.success ? action.data : undefined)
       : undefined;
 };
 

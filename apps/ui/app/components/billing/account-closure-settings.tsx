@@ -16,14 +16,24 @@ import { useFinancialSession } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
-/** Purchase states the customer can end from Billing; anything else is processing or under review. */
-const endablePurchaseStates = new Set(['prepared', 'creating', 'pending']);
-const pendingPaymentCopy = (state: string | undefined): string =>
-  state === 'prepared'
-    ? 'Discard or finish your pending top-up first.'
-    : endablePurchaseStates.has(state ?? '')
-      ? 'Finish or cancel your pending payment first.'
-      : 'A payment is still in progress or under review. Closing waits for it; contact support if it does not clear.';
+const waitCopy = 'A payment is still being processed. Closing waits for it; try again in a minute.';
+/** Copy per wire state of the pending payment; a state outside this map needs attention, and support. */
+const pendingPaymentCopy = new Map<string, string>([
+  ['prepared', 'Discard or finish your pending top-up quote first.'],
+  ['redirect_required', 'Finish or cancel your pending payment first.'],
+  ['creating', waitCopy],
+  ['processing', waitCopy],
+  ['funds_received', waitCopy],
+]);
+const heldCopy = 'A payment needs attention before this account can close. Contact support if you cannot finish it.';
+
+function SupportLink(): React.JSX.Element {
+  return (
+    <a className='underline' href='mailto:support@tau.new'>
+      Contact support
+    </a>
+  );
+}
 
 /** Prepares the durable financial tombstone before invoking Better Auth deletion. */
 export function AccountClosureSettings({
@@ -78,8 +88,9 @@ export function AccountClosureSettings({
     } catch (error_) {
       if (guard.isCurrent()) {
         const pending = error_ instanceof AccountClosurePaymentPending ? error_ : undefined;
-        setError(pending ? pendingPaymentCopy(pending.state) : 'Could not continue account closure. Try again.');
-        setHeldPayment(pending !== undefined && !endablePurchaseStates.has(pending.state ?? ''));
+        const copy = pending ? pendingPaymentCopy.get(pending.action?.state ?? '') : undefined;
+        setError(pending ? (copy ?? heldCopy) : 'Could not continue account closure. Try again.');
+        setHeldPayment(pending !== undefined && copy === undefined);
       }
     } finally {
       if (guard.isCurrent()) {
@@ -154,11 +165,7 @@ export function AccountClosureSettings({
             Refresh closure status
           </Button>
         ) : undefined}
-        {closure?.attention?.action === 'contact_support' ? (
-          <a className='underline' href='mailto:support@tau.new'>
-            Contact support
-          </a>
-        ) : undefined}
+        {closure?.attention?.action === 'contact_support' ? <SupportLink /> : undefined}
         {closure?.state === 'ready_for_auth_deletion' ? (
           <Button
             variant='destructive'
@@ -178,14 +185,10 @@ export function AccountClosureSettings({
           </Button>
         ) : undefined}
         {error ? (
-          <p className='text-warning' role='alert'>
-            {error}
-          </p>
-        ) : undefined}
-        {heldPayment ? (
-          <a className='underline' href='mailto:support@tau.new'>
-            Contact support
-          </a>
+          <div className='flex flex-col gap-1 text-warning' role='alert'>
+            <p>{error}</p>
+            {heldPayment ? <SupportLink /> : undefined}
+          </div>
         ) : undefined}
       </CardContent>
     </SettingsSectionCard>

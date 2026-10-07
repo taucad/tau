@@ -17,9 +17,23 @@ const grafanaRoot = path.resolve(import.meta.dirname, '../../../infra/grafana');
  */
 const pendingDeclaration: Readonly<Record<string, string>> = {};
 
-const declared = new Set(Object.values(TauMetrics).map((metric) => toPrometheusName(metric.name, metric.type)));
+/**
+ * The API's per-process instruments live in its OTel bootstrap rather than the registry (they observe
+ * `process.*` and need no reporter), so their names are read from that source.
+ */
+const processInstruments = [
+  ...readFileSync(path.resolve(import.meta.dirname, '../../../apps/api/app/telemetry/otel.ts'), 'utf8').matchAll(
+    /createObservable(?<kind>Counter|Gauge)\(\s*'(?<name>process\.[\w.]+)'/gu,
+  ),
+].map(({ groups }) => toPrometheusName(groups!['name']!, groups!['kind'] === 'Counter' ? 'counter' : 'gauge'));
 
-type Panel = { targets?: Array<{ expr?: unknown }>; panels?: Panel[] };
+const declared = new Set([
+  ...Object.values(TauMetrics).map((metric) => toPrometheusName(metric.name, metric.type)),
+  ...processInstruments,
+]);
+
+type Target = { expr?: unknown; datasource?: { type?: string } };
+type Panel = { targets?: Target[]; datasource?: { type?: string }; panels?: Panel[] };
 type Dashboard = { panels?: Panel[]; templating?: { list?: Array<{ query?: unknown }> } };
 type RuleGroup = { rules?: Array<{ data?: Array<{ model?: { expr?: unknown } }> }> };
 
@@ -46,7 +60,11 @@ const promqlSources = (): Array<[query: string, file: string]> => {
   for (const file of jsonFiles('dashboards')) {
     const dashboard = read<Dashboard>(file);
     const panels = (dashboard.panels ?? []).flatMap((panel) => [panel, ...(panel.panels ?? [])]);
-    add(file, strings(panels.flatMap((panel) => (panel.targets ?? []).map((target) => target.expr))));
+    // Loki targets also use `expr`; LogQL label filters sit outside braces and would read as metric names.
+    const promql = panels.flatMap((panel) =>
+      (panel.targets ?? []).filter((target) => (target.datasource ?? panel.datasource)?.type !== 'loki'),
+    );
+    add(file, strings(promql.map((target) => target.expr)));
     add(file, strings((dashboard.templating?.list ?? []).map((variable) => variable.query)));
   }
   for (const file of jsonFiles('alerts')) {
@@ -86,8 +104,8 @@ const metricNames = (query: string): string[] => {
     .replaceAll(/\{[^}]*\}/gu, '{}')
     .replaceAll(/\b(?:by|without|on|ignoring|group_left|group_right)\s*\([^)]*\)/gu, '')
     .replaceAll(/(label_values\([^,()]*),[^)]*\)/gu, '$1)');
-  return [...stripped.matchAll(/\b((?:tau|ws|gen_ai|sse|rpc|kernel|publication)_\w+)/gu)].map(([, name]) =>
-    name!.replace(/_(?:bucket|sum|count)$/u, ''),
+  return [...stripped.matchAll(/\b((?:tau|ws|gen_ai|sse|rpc|kernel|publication|process|redis_connection)_\w+)/gu)].map(
+    ([, name]) => name!.replace(/_(?:bucket|sum|count)$/u, ''),
   );
 };
 

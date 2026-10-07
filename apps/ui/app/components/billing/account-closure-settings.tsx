@@ -16,16 +16,38 @@ import { useFinancialSession } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
-const waitCopy = 'A payment is still being processed. Closing waits for it; try again in a minute.';
-/** Copy per wire state of the pending payment; a state outside this map needs attention, and support. */
-const pendingPaymentCopy = new Map<string, string>([
-  ['prepared', 'Discard or finish your pending top-up quote first.'],
-  ['redirect_required', 'Finish or cancel your pending payment first.'],
+type PendingPaymentCopy = { readonly copy: string; readonly held: boolean };
+const waitCopy: PendingPaymentCopy = {
+  copy: 'A payment is still being processed. Closing waits for it; try again in a minute.',
+  held: false,
+};
+const settledCopy: PendingPaymentCopy = { copy: 'That payment has just finished. Try again.', held: false };
+/** Copy per wire state of the pending payment; `held` adds the support link where only support can clear it. */
+const pendingPaymentCopy = new Map<string, PendingPaymentCopy>([
+  ['prepared', { copy: 'Discard or finish your pending top-up quote first.', held: false }],
+  ['redirect_required', { copy: 'Finish or cancel your pending payment first.', held: false }],
   ['creating', waitCopy],
   ['processing', waitCopy],
-  ['funds_received', waitCopy],
+  // Captured cash awaiting its grant: the sweep normally lands it, and only support can when it does not.
+  [
+    'funds_received',
+    {
+      copy: 'Your payment was received and its credits are still being added. Closing waits for them; contact support if they do not arrive.',
+      held: true,
+    },
+  ],
+  // The refusal raced a payment that settled or was cancelled meanwhile; the next attempt goes through.
+  ['fulfilled', settledCopy],
+  ['completed', settledCopy],
+  ['canceled', settledCopy],
+  ['failed', settledCopy],
 ]);
-const heldCopy = 'A payment needs attention before this account can close. Contact support if you cannot finish it.';
+// Not only `attention_required`: also a refusal that carried no action (an adapter without `describeAction`, or a
+// projection that failed), so the map is not exhaustive and this is the safe reading of anything else.
+const heldCopy: PendingPaymentCopy = {
+  copy: 'A payment needs attention before this account can close. Contact support if you cannot finish it.',
+  held: true,
+};
 
 function SupportLink(): React.JSX.Element {
   return (
@@ -88,9 +110,9 @@ export function AccountClosureSettings({
     } catch (error_) {
       if (guard.isCurrent()) {
         const pending = error_ instanceof AccountClosurePaymentPending ? error_ : undefined;
-        const copy = pending ? pendingPaymentCopy.get(pending.action?.state ?? '') : undefined;
-        setError(pending ? (copy ?? heldCopy) : 'Could not continue account closure. Try again.');
-        setHeldPayment(pending !== undefined && copy === undefined);
+        const refusal = pending ? (pendingPaymentCopy.get(pending.action?.state ?? '') ?? heldCopy) : undefined;
+        setError(refusal ? refusal.copy : 'Could not continue account closure. Try again.');
+        setHeldPayment(refusal?.held ?? false);
       }
     } finally {
       if (guard.isCurrent()) {

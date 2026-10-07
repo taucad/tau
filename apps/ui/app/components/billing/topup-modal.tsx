@@ -278,15 +278,21 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
       startNew();
     } catch (error) {
       if (scopeRef.current.value === startedGeneration) {
-        // The Checkout already closed on Stripe's side, so retrying the cancel cannot help.
-        const stale = error instanceof BillingPaymentConflict && error.code === 'action_not_cancelable';
-        toast.warning(
-          stale
-            ? 'This payment can no longer be cancelled. Reopen this window to see where it stands.'
-            : visibleAction.state === 'prepared'
+        if (error instanceof BillingPaymentConflict && error.code === 'action_not_cancelable') {
+          // The Checkout already closed on Stripe's side, so retrying cannot help; show where the payment stands.
+          toast.warning('This payment can no longer be cancelled.');
+          const current = await getPaymentAction(visibleBinding!, visibleAction.actionId).catch(() => undefined);
+          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the modal may have moved on during the GET
+          if (current !== undefined && scopeRef.current.value === startedGeneration) {
+            setAction(current);
+          }
+        } else {
+          toast.warning(
+            visibleAction.state === 'prepared'
               ? 'Could not discard the quote. Try again.'
               : 'Could not cancel the payment. Try again.',
-        );
+          );
+        }
       }
     } finally {
       if (scopeRef.current.value === startedGeneration) {

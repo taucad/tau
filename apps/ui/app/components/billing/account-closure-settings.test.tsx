@@ -96,6 +96,25 @@ describe('AccountClosureSettings', () => {
     expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
   });
 
+  it('should hold closure for received funds whose credits have not landed and offer support', async () => {
+    prepare.mockRejectedValue(Object.assign(new PaymentPending(), { action: { state: 'funds_received' } }));
+    renderClosure();
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: 'Prepare account closure' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Your payment was received and its credits are still being added.');
+    expect(within(alert).getByRole('link', { name: 'Contact support' })).toBeInTheDocument();
+  });
+
+  it('should ask for a plain retry when the refusal raced a payment that just finished', async () => {
+    prepare.mockRejectedValue(Object.assign(new PaymentPending(), { action: { state: 'fulfilled' } }));
+    renderClosure();
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: 'Prepare account closure' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('That payment has just finished. Try again.');
+    expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
+  });
+
   it('invokes Better Auth only for a deletion-ready closure', async () => {
     current.mockResolvedValue({ state: 'ready_for_auth_deletion', closureId: 'closure-a' });
     renderClosure();

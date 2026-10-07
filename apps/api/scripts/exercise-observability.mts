@@ -312,13 +312,17 @@ await run('telemetry', async () => {
           {
             name: 'observability.syncAttempt',
             duration: random(100, 2000),
-            detail: {
-              direction: ['push', 'pull'][round % 2],
-              outcome: failed ? 'retry' : 'ok',
-              placement: 'browser',
-              lagMilliseconds: random(500, 4000),
-              pending: round % 3,
-            },
+            // `pending` is the queue depth when a push starts; `lagMilliseconds` belongs to an acknowledged push.
+            detail:
+              round % 2 === 0
+                ? {
+                    direction: 'push',
+                    outcome: failed ? 'retry' : 'ok',
+                    placement: 'browser',
+                    pending: round % 3,
+                    ...(failed ? {} : { lagMilliseconds: random(500, 4000) }),
+                  }
+                : { direction: 'pull', outcome: failed ? 'retry' : 'ok', placement: 'browser' },
           },
         ],
       },

@@ -165,7 +165,8 @@ export const useCloudPaymentActionReturn = (): void => {
           binding.financialSession.isCurrent()
         ) {
           // A paid Checkout whose webhook has not arrived settles from Stripe's own session on recovery;
-          // an open one comes back unchanged, still offering Resume Checkout.
+          // an open one comes back unchanged, still offering Resume Checkout. The read above stays ungated: a
+          // session that changed owner mid-flight still announces what it fetched, it just recovers nothing.
           try {
             action = await recoverPaymentAction({ ...binding, subjectId: action.subjectId }, actionId);
           } catch {

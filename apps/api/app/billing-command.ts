@@ -695,33 +695,48 @@ async function main(): Promise<void> {
                 } catch (error) {
                   cash = error instanceof Error ? `failed:${error.message}` : 'failed';
                 }
-                const purchase = await purchaseScans.runScan({
-                  scanId,
-                  maximumObligations: 100,
-                  maximumGrants: 100,
-                  maximumSubscriptions: 100,
-                });
                 // A paid obligation with no grant (for example a lost success webhook) holds the customer's
-                // money without credit; the per-kind gauge is what the alert watches.
-                const openCases = await client<Array<{ kind: string; open: number }>>`
-                  SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
-                  WHERE environment = ${billingEnvironment} AND state IN ('open', 'attention')
-                  GROUP BY kind`;
-                for (const kind of new Set([...cashBlockingFinancialCaseKinds, ...openCases.map((row) => row.kind)])) {
-                  caseMetrics.billingOpenFinancialCases.record(openCases.find((row) => row.kind === kind)?.open ?? 0, {
-                    kind,
+                // money without credit; the per-kind gauge is what the alert watches. It reports the case
+                // table, so it is recorded even when a Stripe scan fails: that is when the alert matters most.
+                const recordOpenCases = async (): Promise<void> => {
+                  const openCases = await client<Array<{ kind: string; open: number }>>`
+                    SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
+                    WHERE environment = ${billingEnvironment} AND state IN ('open', 'attention')
+                    GROUP BY kind`;
+                  for (const kind of new Set([
+                    ...cashBlockingFinancialCaseKinds,
+                    ...openCases.map((row) => row.kind),
+                  ])) {
+                    caseMetrics.billingOpenFinancialCases.record(
+                      openCases.find((row) => row.kind === kind)?.open ?? 0,
+                      {
+                        kind,
+                      },
+                    );
+                  }
+                  const unfulfilled =
+                    openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
+                  if (unfulfilled > 0) {
+                    console.error(
+                      JSON.stringify({
+                        event: 'billing.alert',
+                        environment,
+                        kind: 'unfulfilled_purchase_obligation',
+                        open: unfulfilled,
+                      }),
+                    );
+                  }
+                };
+                let purchase: Awaited<ReturnType<typeof purchaseScans.runScan>>;
+                try {
+                  purchase = await purchaseScans.runScan({
+                    scanId,
+                    maximumObligations: 100,
+                    maximumGrants: 100,
+                    maximumSubscriptions: 100,
                   });
-                }
-                const unfulfilled = openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
-                if (unfulfilled > 0) {
-                  console.error(
-                    JSON.stringify({
-                      event: 'billing.alert',
-                      environment,
-                      kind: 'unfulfilled_purchase_obligation',
-                      open: unfulfilled,
-                    }),
-                  );
+                } finally {
+                  await recordOpenCases();
                 }
                 if (cash !== 'complete' && cash !== 'incomplete') {
                   throw new Error(`cash scan ${cash}; purchases ${purchase.status}`);

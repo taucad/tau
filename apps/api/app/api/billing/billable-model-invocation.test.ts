@@ -1407,6 +1407,19 @@ describe('BillableModelInvocationService', () => {
         body: { model: 'model', ...(stream === undefined ? {} : { stream }) },
         headers: {},
       };
+      // Two supplier chunks, so a second chunk must not record time to first token again.
+      qualified.adapter.executeOnce = vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array<ArrayBuffer>>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('first'));
+                controller.enqueue(new TextEncoder().encode('second'));
+                controller.close();
+              },
+            }),
+          ),
+      );
       qualified.adapter.createEvidenceCollector = () => ({
         accept: vi.fn(),
         complete: () => ({ kind: 'final_usage', usageOccurredAt: new Date(), meterItems }),

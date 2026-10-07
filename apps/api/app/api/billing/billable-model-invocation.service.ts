@@ -789,7 +789,8 @@ export class BillableModelInvocationService {
 
   /**
    * Records the tokens and charged USD of one operation this service settled, written together so
-   * the two series reconcile. An operation left pending for recovery records neither here.
+   * the two series reconcile. An operation left pending for recovery records neither here, and
+   * recovery's own settlement is not recorded either (a known gap in both series).
    */
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one settled operation
   private recordSettledUsage(
@@ -802,7 +803,10 @@ export class BillableModelInvocationService {
       ...genAiAttributes(qualification),
       'tau.activity': row.activity,
     });
-    for (const item of evidence.kind === 'provider_rejected' ? [] : (evidence.meterItems ?? [])) {
+    // A stop-cut absorbed turn settles at zero; its partial meters are not usage it was charged for.
+    const meterItems =
+      evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
+    for (const item of meterItems) {
       const tokenType = genAiTokenTypes.get(item.dimension);
       if (tokenType !== undefined) {
         this.metrics?.genAiTokenUsage.record(Number(item.quantity), {
@@ -817,7 +821,7 @@ export class BillableModelInvocationService {
   /**
    * Records one funded call's end-to-end latency from invocation entry, so it includes billing
    * admission (unlike time to first token, which starts at the supplier request). `errorType` is
-   * empty on success: W36's error-rate queries select `error_type!=""`.
+   * empty on success, which the `llm-error-rate` alert excludes with `error_type!=""`.
    */
   private recordOperationDuration(
     qualification: QualifiedBillableInvocation,

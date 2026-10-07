@@ -2,10 +2,11 @@
 /**
  * Drive every instrumented part of a LOCAL Tau API so each Grafana dashboard has real data.
  *
- * Covers auth, REST, client telemetry ingest (CAD kernel, editor, WASM, IndexedDB, agent turns, client
- * sync attempts), Tau Sync (git smart HTTP + LFS into MinIO), publications, Claude Haiku 4.5 through the
- * LLM gateway, billing attempt lookups, and the hosts/kernels WebSockets. Codex/ACP and the billing
- * workers run beside it (see the observability handbook); this script does not start them.
+ * Covers auth, REST, client telemetry ingest (CAD kernel, editor, WASM, IndexedDB, and synthetic agent
+ * turns and client sync attempts that validate the ingest path, not agent execution), Tau Sync (git smart
+ * HTTP + LFS into MinIO), publications, Claude Haiku 4.5 through the LLM gateway, billing attempt lookups,
+ * and the hosts/kernels WebSockets. Codex/ACP and the billing workers run beside it (see the observability
+ * handbook); this script does not start them.
  *
  * Local only: refuses a non-loopback API and writes fixtures (a verified harness user, a Pro
  * subscription, promotional credits) to this worktree's dev database via `docker exec tau-postgres`.
@@ -247,7 +248,8 @@ await run('telemetry', async () => {
   for (let round = 0; round < total; round += 1) {
     if (round === Math.ceil(total / 2)) {
       // A counter's first scrape is its baseline, so increments sent before it never show in rate().
-      // Pausing past two 5 s scrapes lets the second half register as an increase.
+      // Pausing past two scrapes (tau-api scrape_interval is 5 s in infra/grafana/otelcol-config.yaml;
+      // raise this with it) lets the second half register as an increase.
       await delay(12_000);
     }
     const failed = round % 4 === 3;
@@ -284,7 +286,7 @@ await run('telemetry', async () => {
             duration: random(1, 40),
             detail: { operation: ['get', 'put'][round % 2], store: 'files' },
           },
-          // The UI and daemon report agent turns and Tau Sync attempts the same way; no real agent runs here.
+          // Synthetic fixtures in the shape the UI and daemon send: they validate ingest to metrics, not agents.
           {
             name: 'agent.session',
             duration: random(1000, 60_000),
@@ -296,11 +298,15 @@ await run('telemetry', async () => {
             detail: {
               agentId: ['tau', 'codex'][round % 2],
               placement: ['browser', 'daemon'][round % 2],
-              outcome: failed ? 'refused' : 'completed',
-              ...(failed ? { errorCode: 'CLI_NOT_FOUND' } : {}),
-              timeToFirstUpdate: random(300, 3000),
-              toolCalls: [{ kind: 'edit', status: 'completed', count: 1 + (round % 3) }],
-              tokens: { input: 1200, output: 300, cacheRead: 800, cacheWrite: 0 },
+              // A turn refused before admission reports no first update, tools or usage.
+              ...(failed
+                ? { outcome: 'refused', errorCode: 'CLI_NOT_FOUND' }
+                : {
+                    outcome: 'completed',
+                    timeToFirstUpdate: random(300, 3000),
+                    toolCalls: [{ kind: 'edit', status: 'completed', count: 1 + (round % 3) }],
+                    tokens: { input: 1200, output: 300, cacheRead: 800, cacheWrite: 0 },
+                  }),
             },
           },
           {

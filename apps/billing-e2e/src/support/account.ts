@@ -5,7 +5,7 @@ import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { baseUrl, createApi, ok } from '#support/api.js';
 import type { Api } from '#support/api.js';
-import { createMailbox, waitForMail } from '#support/mailbox.js';
+import { createMailbox, deleteMailbox, waitForMail } from '#support/mailbox.js';
 import type { Mailbox } from '#support/mailbox.js';
 import { runId } from '#support/results.js';
 
@@ -50,12 +50,23 @@ export const verifyAccount = async (account: Account): Promise<void> => {
   }
 };
 
-/** Signs up `tau-e2e-<runId>-<caseId>@<mail.tm domain>`; verified (signed in) unless asked otherwise. */
+/** Deletes the Tau user when a session can, and the inbox always; a failure here must not mask the row's own. */
+const discardAccount = async (account: Account): Promise<void> => {
+  if (hasSession(account)) {
+    await account.api.request('POST', '/v1/auth/delete-user', { body: {} }).catch(() => undefined);
+  }
+  await deleteMailbox(account.mailbox).catch(() => undefined);
+};
+
+/**
+ * Signs up `tau-e2e-<runId>-<caseId>-<nonce>@<mail.tm domain>`; verified (signed in) unless asked otherwise. The
+ * nonce keeps a re-run with the same BILLING_E2E_RUN_ID off an address mail.tm already knows.
+ */
 export const createAccount = async (
   caseId: string,
   options: { readonly verified?: boolean } = {},
 ): Promise<Account> => {
-  const mailbox = await createMailbox(`tau-e2e-${runId}-${caseId}`);
+  const mailbox = await createMailbox(`tau-e2e-${runId}-${caseId}-${randomBytes(2).toString('hex')}`);
   // ponytail: throwaway password, never written to evidence.
   const password = `${randomBytes(18).toString('base64url')}-Aa1`;
   const api = createApi();
@@ -67,7 +78,13 @@ export const createAccount = async (
   );
   const account = { caseId, email: mailbox.address, password, userId: signUp.user.id, mailbox, api };
   if (options.verified !== false) {
-    await verifyAccount(account);
+    try {
+      await verifyAccount(account);
+    } catch (error) {
+      // A half-made account must not outlive its row; callers only register teardown once this resolves.
+      await discardAccount(account);
+      throw error;
+    }
   }
   return account;
 };
@@ -87,4 +104,5 @@ export const closeAccount = async (account: Account): Promise<void> => {
     open.map(async ({ actionId }) => account.api.request('POST', `/v1/billing/payment-actions/${actionId}/cancel`)),
   );
   ok(await account.api.request('POST', '/v1/auth/delete-user', { body: {} }), z.object({ success: z.literal(true) }));
+  await deleteMailbox(account.mailbox);
 };

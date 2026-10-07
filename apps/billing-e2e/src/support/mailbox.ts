@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 const mailTm = 'https://api.mail.tm';
 
-export type Mailbox = { readonly address: string; readonly token: string };
+export type Mailbox = { readonly id: string; readonly address: string; readonly token: string };
 
 const summarySchema = z.object({
   id: z.string(),
@@ -36,6 +36,9 @@ const call = async (path: string, options: CallOptions = {}, attempt = 0): Promi
   if (!response.ok) {
     throw new Error(`mail.tm ${options.method ?? 'GET'} ${path} answered ${response.status}`);
   }
+  if (response.status === 204) {
+    return undefined;
+  }
   return (await response.json()) as unknown;
 };
 
@@ -48,11 +51,18 @@ export const createMailbox = async (localPart: string): Promise<Mailbox> => {
   }
   const address = `${localPart}@${domain}`;
   const password = randomBytes(18).toString('base64url');
-  await call('/accounts', { method: 'POST', body: { address, password } });
+  const { id } = z
+    .object({ id: z.string() })
+    .parse(await call('/accounts', { method: 'POST', body: { address, password } }));
   const { token } = z
     .object({ token: z.string() })
     .parse(await call('/token', { method: 'POST', body: { address, password } }));
-  return { address, token };
+  return { id, address, token };
+};
+
+/** Deletes the inbox; mail.tm expires unused ones, but a nightly cadence should not lean on that. */
+export const deleteMailbox = async (mailbox: Mailbox): Promise<void> => {
+  await call(`/accounts/${mailbox.id}`, { method: 'DELETE', token: mailbox.token });
 };
 
 /** The inbox, newest first. */

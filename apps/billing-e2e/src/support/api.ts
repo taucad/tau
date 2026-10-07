@@ -3,14 +3,43 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { wirePaymentActionSchema } from '@taucad/billing';
 
+// The harness creates and deletes accounts and drives Checkout, so the guard is an allowlist: production accounts
+// and money live under tau.new, and a hostname production gains later must not pass by default.
+const extraHost = process.env['TAU_E2E_ALLOW_HOST'];
+const allowedHosts = new Set(['taucad.dev', 'localhost', '127.0.0.1', ...(extraHost === undefined ? [] : [extraHost])]);
 const refuseProduction = (value: string): string => {
   const url = new URL(value);
-  // Staging and local stacks only: production accounts and money live under tau.new.
-  if (url.hostname.includes('tau.new')) {
-    throw new Error(`Refusing ${url.origin}: the billing harness never runs against tau.new`);
+  if (!allowedHosts.has(url.hostname) && !url.hostname.endsWith('.taucad.dev')) {
+    throw new Error(
+      `Refusing ${url.origin}: the billing harness drives taucad.dev stacks or localhost; TAU_E2E_ALLOW_HOST names one other`,
+    );
   }
   return url.origin;
 };
+
+/** Seconds a 429 asks us to wait: a numeric `x-retry-after` or `Retry-After`, else 10; never more than 60. */
+export const retryAfterSeconds = (headers: Headers): number => {
+  const raw = (headers.get('x-retry-after') ?? headers.get('retry-after') ?? '').trim();
+  const seconds = raw === '' ? Number.NaN : Number(raw);
+  return Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), 60) : 10;
+};
+
+/** A `Set-Cookie` that deletes: a non-positive `Max-Age` (so not `Max-Age=01`) or an `Expires` already past. */
+const cookieExpired = (cookie: string): boolean =>
+  cookie
+    .split(';')
+    .slice(1)
+    .map((attribute) => attribute.trim().toLowerCase())
+    .some((attribute) => {
+      if (attribute.startsWith('max-age=')) {
+        return Number(attribute.slice('max-age='.length)) <= 0;
+      }
+      if (attribute.startsWith('expires=')) {
+        const expires = Date.parse(attribute.slice('expires='.length));
+        return Number.isFinite(expires) && expires <= Date.now();
+      }
+      return false;
+    });
 
 /** The app and API under test: staging unless the environment names another stack. */
 export const baseUrl = refuseProduction(process.env['TAU_E2E_BASE_URL'] ?? 'https://taucad.dev');
@@ -55,7 +84,11 @@ const parseBody = (text: string): unknown => {
 /** A cookie-jar client for one account; it never logs cookies or verification tokens. */
 export const createApi = (): Api => {
   const jar = new Map<string, string>();
-  const request = async (method: string, path: string, options: RequestOptions = {}): Promise<ApiResponse> => {
+  const request = async (
+    method: string,
+    path: string,
+    options: RequestOptions & { readonly attempt?: number } = {},
+  ): Promise<ApiResponse> => {
     const origin = options.origin ?? (method === 'GET' ? false : baseUrl);
     const response = await fetch(`${apiUrl}${path}`, {
       method,
@@ -70,12 +103,15 @@ export const createApi = (): Api => {
     });
     for (const cookie of response.headers.getSetCookie()) {
       const [pair = ''] = cookie.split(';');
-      const name = pair.slice(0, pair.indexOf('=')).trim();
-      const value = pair.slice(pair.indexOf('=') + 1).trim();
-      if (value === '' || /max-age=0/iu.test(cookie)) {
-        jar.delete(name);
-      } else {
-        jar.set(name, value);
+      const separator = pair.indexOf('=');
+      if (separator !== -1) {
+        const name = pair.slice(0, separator).trim();
+        const value = pair.slice(separator + 1).trim();
+        if (value === '' || cookieExpired(cookie)) {
+          jar.delete(name);
+        } else {
+          jar.set(name, value);
+        }
       }
     }
     const call: ApiCall = {
@@ -87,10 +123,11 @@ export const createApi = (): Api => {
     };
     apiCalls.push(call);
     const body = parseBody(await response.text());
-    // ponytail: waits out every 429 until the row's own timeout; a bounded retry count if a limit ever sticks.
-    if (response.status === 429 && options.retryRateLimit !== false) {
-      await delay((Number(response.headers.get('x-retry-after') ?? '10') + 1) * 1000);
-      return request(method, path, options);
+    // Bounded like the mail.tm client: five waits, each as long as the server asks (capped), then the 429 is the answer.
+    const attempt = options.attempt ?? 0;
+    if (response.status === 429 && options.retryRateLimit !== false && attempt < 5) {
+      await delay((retryAfterSeconds(response.headers) + 1) * 1000);
+      return request(method, path, { ...options, attempt: attempt + 1 });
     }
     return { ...call, body, headers: response.headers };
   };

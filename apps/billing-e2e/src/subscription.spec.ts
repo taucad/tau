@@ -11,7 +11,7 @@ import { matrixRow } from '#support/results.js';
 
 describe('Pro subscription', () => {
   let account: Account;
-  let pending: WirePaymentAction;
+  let pending: WirePaymentAction | undefined;
 
   // Closing the account cancels the pending Pro action, which expires its Checkout session.
   beforeAll(async () => {
@@ -49,6 +49,10 @@ describe('Pro subscription', () => {
   it(
     'should refuse a second subscription [PR-02 P0]',
     matrixRow('PR-02', 'P0', async () => {
+      const first = pending;
+      if (first === undefined) {
+        return { outcome: 'blocked', defect: 'H-03', evidence: ['PR-01 left no pending Pro action to collide with'] };
+      }
       const second = await subscribe();
       const refusal = failure(second);
       expect(second.status).toBe(409);
@@ -56,12 +60,12 @@ describe('Pro subscription', () => {
         return { outcome: 'pass', evidence: ['409 subscription_already_exists'] };
       }
       expect(refusal.code).toBe('action_already_pending');
-      expect(refusal.action?.actionId).toBe(pending.actionId);
+      expect(refusal.action?.actionId).toBe(first.actionId);
       return {
         outcome: 'blocked',
         defect: 'F-01',
         evidence: [
-          `409 action_already_pending carrying the pending Pro action ${pending.actionId}`,
+          `409 action_already_pending carrying the pending Pro action ${first.actionId}`,
           'subscription_already_exists needs an active subscription, which needs the webhook',
         ],
       };

@@ -18,7 +18,7 @@ const topup = (): Readonly<Record<string, string>> => ({
 describe('security', () => {
   let owner: Account;
   let intruder: Account;
-  let ownerAction: WirePaymentAction;
+  let ownerAction: WirePaymentAction | undefined;
 
   beforeAll(async () => {
     owner = await createAccount('se-a');
@@ -95,8 +95,12 @@ describe('security', () => {
   it(
     "should not reveal another account's payment on a tampered Checkout return [SE-04 P0]",
     matrixRow('SE-04', 'P0', async () => {
+      const target = ownerAction;
+      if (target === undefined) {
+        return { outcome: 'blocked', defect: 'H-03', evidence: ['SE-01 left no owner action to tamper with'] };
+      }
       const evidence = await withBrowser(intruder, async ({ page }) => {
-        await page.goto(`${baseUrl}/?settings=billing&payment_action=${ownerAction.actionId}`);
+        await page.goto(`${baseUrl}/?settings=billing&payment_action=${target.actionId}`);
         const toast = await waitForToast(page, /Could not check the returned payment/u);
         const shown = await toasts(page);
         expect(

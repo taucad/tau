@@ -4,7 +4,7 @@
   "projectType": "application",
   "sourceRoot": "apps/billing-e2e/src",
   "tags": ["scope:api", "type:e2e"],
-  "implicitDependencies": ["api"],
+  "implicitDependencies": ["api", "ui"],
   "targets": {
     "test:staging": {
       "executor": "nx:run-commands",

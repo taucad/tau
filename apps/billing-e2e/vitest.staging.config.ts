@@ -8,7 +8,7 @@ const runId =
 /** `BILLING_E2E_SUITE` picks rows by the tags in their test names. */
 const suites: Readonly<Record<string, RegExp | undefined>> = { smoke: /\bsmoke\]/u, p0: /\bP0\b/u, all: undefined };
 const suite = process.env['BILLING_E2E_SUITE'] ?? 'all';
-if (!(suite in suites)) {
+if (!Object.hasOwn(suites, suite)) {
   throw new Error(`BILLING_E2E_SUITE must be one of ${Object.keys(suites).join(', ')}`);
 }
 

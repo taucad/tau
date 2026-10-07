@@ -7,7 +7,11 @@ import type { ApiCall } from '#support/api.js';
 export type Outcome = 'pass' | 'fail' | 'blocked' | 'skipped';
 export type Priority = 'P0' | 'P1' | 'P2';
 
-/** What a row observed. `defect` names the finding (F-nn) or harness issue (H-nn) behind a fail or block. */
+/**
+ * What a row observed. `defect` names the finding (F-nn) or harness issue behind a fail or block. Harness issues:
+ * H-01 the Pay click never submits from this host; H-02 the Stripe read key cannot see the staging endpoint;
+ * H-03 an earlier row left no state for this one.
+ */
 export type Verdict = { readonly outcome: Outcome; readonly defect?: string; readonly evidence: readonly string[] };
 
 export type Row = Verdict & {

@@ -58,11 +58,15 @@ describe('webhooks', () => {
           : `${endpoint.id} ${endpoint.status}, ${endpoint.enabled_events.length} events`,
         ...strays.map((stray) => `stray enabled * endpoint ${stray.id} ${stray.url}`),
       ];
-      if (endpoint?.status === 'enabled' && strays.length === 0) {
+      if (endpoint === undefined) {
+        // A key that cannot see the endpoint is a harness condition (another Stripe account), not a product defect.
+        return { outcome: 'blocked', defect: 'H-02', evidence };
+      }
+      if (endpoint.status === 'enabled' && strays.length === 0) {
         return { outcome: 'pass', evidence };
       }
-      const defect = endpoint?.status === 'enabled' ? 'F-08' : 'F-01';
-      return { outcome: 'fail', defect: endpoint === undefined ? 'unclassified' : defect, evidence };
+      // A disabled endpoint is F-01 whatever else is enabled; the strays stay in the evidence either way.
+      return { outcome: 'fail', defect: endpoint.status === 'enabled' ? 'F-08' : 'F-01', evidence };
     }),
   );
 });

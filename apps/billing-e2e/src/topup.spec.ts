@@ -22,6 +22,8 @@ import { matrixRow } from '#support/results.js';
 import type { Verdict } from '#support/results.js';
 
 const returnPath = '/?settings=billing';
+/** States a just-paid action passes through before the webhook or the sweep settles it. */
+const settlingStates = new Set<string>(['redirect_required', 'processing']);
 
 /** Settings → Billing → Add credits → amount → Review: the prepared quote and its request id. */
 const reviewTopup = async (
@@ -46,7 +48,7 @@ const reviewTopup = async (
 describe('top-up in the browser', () => {
   let account: Account;
   let browsing: Browsing;
-  let quoted: WirePaymentAction;
+  let quoted: WirePaymentAction | undefined;
 
   beforeAll(async () => {
     account = await createAccount('tu07');
@@ -90,6 +92,10 @@ describe('top-up in the browser', () => {
   it(
     'should come back from Checkout with a resumable action and cancel it [TU-07 P0]',
     matrixRow('TU-07', 'P0', async () => {
+      const quote = quoted;
+      if (quote === undefined) {
+        return { outcome: 'blocked', defect: 'H-03', evidence: ['TU-02 left no quote to return from Checkout with'] };
+      }
       const { page } = browsing;
       await page.getByRole('button', { name: 'Continue to secure Checkout' }).click();
       await page.waitForURL(/checkout\.stripe\.com/u);
@@ -99,7 +105,7 @@ describe('top-up in the browser', () => {
       await page.waitForURL((url) => url.origin === baseUrl);
       const toast = await waitForToast(page, /Checkout is ready to continue/u);
       const shot = await screenshot(page, 'tu-07-return');
-      const path = `/v1/billing/payment-actions/${quoted.actionId}`;
+      const path = `/v1/billing/payment-actions/${quote.actionId}`;
       const returned = ok(await account.api.request('GET', path), wirePaymentActionSchema);
       const canceled = ok(await account.api.request('POST', `${path}/cancel`), wirePaymentActionSchema);
       expect(toast).toContain('Resume Checkout');
@@ -111,7 +117,7 @@ describe('top-up in the browser', () => {
           session,
           `toast "${toast}"`,
           shot,
-          `action ${quoted.actionId} redirect_required after Back; cancel → canceled (Checkout session expired)`,
+          `action ${quote.actionId} redirect_required after Back; cancel → canceled (Checkout session expired)`,
         ],
       };
     }),
@@ -146,17 +152,27 @@ describe('paid top-up', () => {
           };
         }
         const toast = await waitForToast(page, /credits added|Checkout is ready|Payment received|still processing/u);
-        // The return page re-checks the action 10 × 2 s; read the outcome after it has.
-        await delay(25_000);
-        const settled = ok(
-          await account.api.request('GET', `/v1/billing/payment-actions/${action.actionId}`),
-          wirePaymentActionSchema,
-        );
+        // Poll the action every 2 s until it leaves the settling states or 60 s pass: a slow but healthy webhook
+        // then shows as its settle time instead of being misread as F-01.
+        const returned = Date.now();
+        const readAction = async (): Promise<WirePaymentAction> =>
+          ok(
+            await account.api.request('GET', `/v1/billing/payment-actions/${action.actionId}`),
+            wirePaymentActionSchema,
+          );
+        let settled = await readAction();
+        while (settlingStates.has(settled.state) && Date.now() - returned < 60_000) {
+          // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one action
+          await delay(2000);
+          // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one action
+          settled = await readAction();
+        }
+        const settleSeconds = Math.round((Date.now() - returned) / 1000);
         const credits = ok(await account.api.request('GET', '/v1/billing/credits'), wireBalanceExplanationSchema);
         paid = { actionId: action.actionId, state: settled.state };
         const evidence = [
           `${payment.sessionId} paid with 4242`,
-          `action ${action.actionId} ${settled.state} 25 s after return`,
+          `action ${action.actionId} ${settled.state} ${settleSeconds} s after return`,
           `toasts ${JSON.stringify(await toasts(page))}`,
           `available ${credits.balance?.eligibleAvailableCreditAtoms ?? 'unavailable'} atoms`,
           await screenshot(page, 'tu-01-return'),

@@ -3,7 +3,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { wireBalanceExplanationSchema, wireEntitlementsSchema } from '@taucad/billing';
 import { closeAccount, createAccount, verificationMail } from '#support/account.js';
 import type { Account } from '#support/account.js';
-import { apiUrl, baseUrl, ok } from '#support/api.js';
+import { apiUrl, baseUrl, ok, retryAfterSeconds } from '#support/api.js';
 import { screenshot, toasts, waitForToast, withBrowser } from '#support/checkout.js';
 import { listMail, waitForMail } from '#support/mailbox.js';
 import { matrixRow } from '#support/results.js';
@@ -84,7 +84,8 @@ describe('auth and onboarding', () => {
     }),
   );
 
-  // Last in this file: the burst fills the sign-in window, which later rows wait out.
+  // Last in this file, which Vitest runs first: the burst fills the sign-in window, and the wait below drains it
+  // before any later file signs in.
   it(
     'should rate limit a sign-in burst without locking the account out [AU-09 P1]',
     matrixRow('AU-09', 'P1', async () => {
@@ -102,7 +103,7 @@ describe('auth and onboarding', () => {
       const refused = burst.filter(({ status }) => status === 401);
       expect(limited.length).toBeGreaterThan(0);
       expect(limited.length + refused.length).toBe(101);
-      const retryAfter = Math.max(...limited.map(({ headers }) => Number(headers.get('x-retry-after') ?? '10')));
+      const retryAfter = Math.max(...limited.map(({ headers }) => retryAfterSeconds(headers)));
       await delay((retryAfter + 1) * 1000);
       const signIn = await account.api.request('POST', '/v1/auth/sign-in/email', {
         body: { email: account.email, password: account.password },

@@ -1,5 +1,7 @@
 import React, { useEffect } from 'react';
 import * as THREE from 'three';
+import { renderLoopObservers } from '#components/geometry/graphics/three/render-loop-observer.js';
+import type { RenderLoopCapture } from '#components/geometry/graphics/three/render-loop-observer.js';
 import { createRenderFrameTimer } from '#components/geometry/graphics/three/render-frame-timing.js';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { RendererInstance } from '#components/geometry/graphics/three/renderer.js';
@@ -219,6 +221,8 @@ export type SectionViewTestBridgeApi = Readonly<{
       pixelRatio: number;
     }>
   >;
+  startRenderLoopCapture(): void;
+  finishRenderLoopCapture(): RenderLoopCapture;
   getViewportCanvas(): HTMLCanvasElement;
   /** The durable record this view persists, for revisit-equals-reload assertions (Law 4). */
   getViewSettings(): GraphicsViewSettings | undefined;
@@ -687,6 +691,20 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
           height: renderer.domElement.height,
           pixelRatio: renderer.getPixelRatio(),
         };
+      },
+      startRenderLoopCapture() {
+        const observer = renderLoopObservers.get(get().gl.domElement);
+        if (!observer) {
+          throw new Error('Render-loop observer is not mounted');
+        }
+        observer.startCapture(performance.now());
+      },
+      finishRenderLoopCapture() {
+        const observer = renderLoopObservers.get(get().gl.domElement);
+        if (!observer) {
+          throw new Error('Render-loop observer is not mounted');
+        }
+        return observer.finishCapture(performance.now());
       },
       getViewportCanvas() {
         return get().gl.domElement;

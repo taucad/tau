@@ -3,6 +3,8 @@ import { Canvas, flushSync as flushThreeSync } from '@react-three/fiber';
 import { flushSync } from 'react-dom';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { WebGPURenderer } from 'three/webgpu';
+import { RenderFpsOverlay } from '#components/geometry/graphics/three/render-fps-overlay.js';
+import { renderLoopObservers } from '#components/geometry/graphics/three/render-loop-observer.js';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
 import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
 import { GraphicsContextLostFallback } from '#components/geometry/graphics/three/graphics-context-lost-fallback.js';
@@ -94,7 +96,15 @@ export function ThreeCanvasInstance({
                   });
                   const state = rootRef.current?.get();
                   if (state && state.size !== previousSize && state.size.width > 0 && state.size.height > 0) {
-                    state.advance(performance.now(), false);
+                    const render = (): void => {
+                      state.advance(performance.now(), false);
+                    };
+                    const observer = renderLoopObservers.get(state.gl.domElement);
+                    if (observer) {
+                      observer.withResizeSubmission(render);
+                    } else {
+                      render();
+                    }
                     // Advance runs outside R3F's demand loop. Retain its normal followup
                     // so controls damping/useFrame invalidations cannot be consumed here.
                     state.invalidate();
@@ -203,6 +213,7 @@ export function ThreeCanvasInstance({
           </SceneOverlay>
         </OverlayDepthProvider>
         {isCanvasReady ? <ActorBridge /> : null}
+        <RenderFpsOverlay hasTopRightGizmo={enableGizmo && Boolean(gizmoContainer)} />
       </ThreeGraphicsBackendProvider>
     </Canvas>
   );

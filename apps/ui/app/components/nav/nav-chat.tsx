@@ -1,5 +1,5 @@
 import { PackagePlus } from 'lucide-react';
-import { NavLink, useMatch, useNavigate } from 'react-router';
+import { NavLink, useNavigate } from 'react-router';
 import { SidebarGroup, SidebarMenuButton } from '#components/ui/sidebar.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
@@ -7,21 +7,19 @@ import { Loader } from '#components/ui/loader.js';
 
 export function NavChat(): React.JSX.Element {
   const navigate = useNavigate();
-  const isMatch = useMatch('/');
   const { formattedKeyCombination } = useKeybinding(
     {
       key: 'n',
       ctrlKey: true,
     },
     () => {
-      // Already home: replace, so the shortcut only refocuses the composer.
-      void navigate('/', { replace: Boolean(isMatch), state: { focusChatComposer: true } });
+      void navigate('/projects/new');
     },
   );
   return (
     // Elevate the sidebar group above the other items to ensure the new project button is always clickable
     <SidebarGroup className='z-10 px-0'>
-      <NavLink to='/' state={{ focusChatComposer: true }}>
+      <NavLink to='/projects/new'>
         {({ isActive, isPending }) => (
           <SidebarMenuButton
             asChild

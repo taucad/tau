@@ -431,22 +431,7 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
         atoms: 100n,
         prepared: true,
       });
-      const service = new BillingAccountClosureService({ database }, { recoverAndCancel: vi.fn() }, 'development');
-
-      await expect(service.prepare({ authUserId: userId, requestId })).rejects.toMatchObject({
-        status: 409,
-        response: { code: 'payment_action_pending', state: 'prepared' },
-      });
-      const closures = await client`select id from billing.billing_account_closure where account_id=${accountId}`;
-      expect(closures).toHaveLength(0);
-      // The refusal left no tombstone either: the account stays open and the owner binding stays bound.
-      const [account] = await client`select status from billing.credit_account where id=${accountId}`;
-      expect(account).toMatchObject({ status: 'open' });
-      const [binding] =
-        await client`select revoked_at from billing.billing_owner_binding where account_id=${accountId}`;
-      expect(binding).toMatchObject({ revoked_at: null });
-      // The refusal changed nothing, so the still-bound owner cancels the action and retries the same request. The
-      // seeded purchase has no provider leg, so cancelAction never reaches Stripe and the key below is a placeholder.
+      // The seeded purchase has no provider leg, so cancelAction never reaches Stripe and the key is a placeholder.
       const stripe = createBillingStripeClient({ secretKey: 'sk_test_closure_pending' });
       const payments = new BillingPaymentsService(
         { database },
@@ -464,6 +449,29 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
         mockDeep<CreditLedgerService>(),
         mockDeep<BillingCashQualification>(),
       );
+      const service = new BillingAccountClosureService(
+        { database },
+        {
+          recoverAndCancel: vi.fn(),
+          describeAction: async (input) => payments.getAction(input.authUserId, input.actionId),
+        },
+        'development',
+      );
+
+      // The refusal carries the pending payment as its owner sees it; the HTTP filter forwards it as `action`.
+      await expect(service.prepare({ authUserId: userId, requestId })).rejects.toMatchObject({
+        status: 409,
+        response: { code: 'payment_action_pending', action: { actionId: purchaseId, state: 'prepared' } },
+      });
+      const closures = await client`select id from billing.billing_account_closure where account_id=${accountId}`;
+      expect(closures).toHaveLength(0);
+      // The refusal left no tombstone either: the account stays open and the owner binding stays bound.
+      const [account] = await client`select status from billing.credit_account where id=${accountId}`;
+      expect(account).toMatchObject({ status: 'open' });
+      const [binding] = await client`select revoked_at as "revokedAt" from billing.billing_owner_binding
+        where account_id=${accountId}`;
+      expect(binding).toMatchObject({ revokedAt: null });
+      // The refusal changed nothing, so the still-bound owner cancels the action and retries the same request.
       await expect(payments.cancelAction(userId, purchaseId)).resolves.toMatchObject({ state: 'canceled' });
       await expect(service.prepare({ authUserId: userId, requestId })).resolves.toMatchObject({
         state: 'ready_for_auth_deletion',

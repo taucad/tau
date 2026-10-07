@@ -91,19 +91,21 @@ const providerUpstreamFetch =
     },
     {
       provide: BillingAccountClosureService,
-      inject: [DatabaseService, stripeReadClientKey, stripeClientKey, ConfigService],
-      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves four distinct provider tokens.
+      inject: [DatabaseService, stripeReadClientKey, stripeClientKey, ConfigService, BillingPaymentsService],
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves five distinct provider tokens.
       useFactory(
         database: DatabaseService,
         sourceStripe: Stripe,
         protectedStripe: Stripe,
         config: ConfigService<Environment, true>,
+        payments: BillingPaymentsService,
       ): BillingAccountClosureService {
         const parsed = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         const environment = parsed.success ? parsed.data : 'development';
         return new BillingAccountClosureService(
           database,
           {
+            describeAction: async (input) => payments.getAction(input.authUserId, input.actionId),
             recoverAndCancel: async (input) =>
               recoverAndCancelStripeClosure(
                 {

@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
-import type { WireAccountClosure } from '@taucad/billing';
+import type { WireAccountClosure, WirePaymentAction } from '@taucad/billing';
 import { activePurchaseStates } from '#api/billing/billing-payment-contract.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { DatabaseService } from '#database/database.service.js';
@@ -26,6 +26,11 @@ export type ClosureCancellationResult =
   | { readonly status: 'attention'; readonly code: string };
 
 export type ClosureCancellationAdapter = {
+  /** The pending payment as its owner sees it, for the closure refusal; absent where no customer reads it. */
+  readonly describeAction?: (input: {
+    readonly authUserId: string;
+    readonly actionId: string;
+  }) => Promise<WirePaymentAction>;
   recoverAndCancel(input: {
     readonly closureId: string;
     readonly accountId: string;
@@ -37,6 +42,17 @@ export type ClosureCancellationAdapter = {
     readonly closureLeaseUntil: Date;
   }): Promise<ClosureCancellationResult>;
 };
+
+/** Raised inside the closure transaction; `prepare` turns it into the wire refusal once the account lock is gone. */
+class PendingPurchaseRefusal extends Error {
+  public readonly purchaseId: string;
+
+  public constructor(purchaseId: string) {
+    super('payment_action_pending');
+    this.name = 'PendingPurchaseRefusal';
+    this.purchaseId = purchaseId;
+  }
+}
 
 /** Persists the financial tombstone before auth deletion and reconciles its external obligations. */
 @Injectable()
@@ -54,80 +70,91 @@ export class BillingAccountClosureService {
     const discovered = await this.findRetainedBinding(input.authUserId);
     if (discovered === undefined) throw new NotFoundException('billing_owner_not_found');
     const requestHash = digest({ accountId: discovered.accountId, requestId: input.requestId });
-    return this.databaseService.database.transaction(async (tx) => {
-      // The unlocked discovery prevents a binding-first deadlock. The account is always the first lock.
-      await tx.execute(sql`select id from billing.credit_account where id = ${discovered.accountId} for update`);
-      await tx.execute(sql`select id from billing.billing_owner_binding where id = ${discovered.id} for update`);
-      const lockedBinding = await tx.query.billingOwnerBinding.findFirst({
-        where: and(
-          eq(billingOwnerBinding.id, discovered.id),
-          eq(billingOwnerBinding.accountId, discovered.accountId),
-          eq(billingOwnerBinding.environment, this.environment),
-          eq(billingOwnerBinding.authUserId, input.authUserId),
-        ),
-      });
-      if (lockedBinding === undefined) throw new ConflictException('billing_owner_changed');
-      const existing = await tx.query.billingAccountClosure.findFirst({
-        where: and(
-          eq(billingAccountClosure.accountId, discovered.accountId),
-          eq(billingAccountClosure.bindingId, discovered.id),
-        ),
-      });
-      if (existing !== undefined) {
-        if (existing.requestId !== input.requestId || existing.requestHash !== requestHash)
-          throw new ConflictException('account_closure_request_conflict');
-        return project(existing, input.authUserId);
-      }
-      // Money may still move or await its grant, so closure waits for the payments service's active purchases.
-      const [pendingPurchase] = await tx
-        .select({ id: billingPurchase.id, state: billingPurchase.state })
-        .from(billingPurchase)
-        .where(
-          and(
-            eq(billingPurchase.accountId, discovered.accountId),
-            inArray(billingPurchase.state, activePurchaseStates),
+    try {
+      return await this.databaseService.database.transaction(async (tx) => {
+        // The unlocked discovery prevents a binding-first deadlock. The account is always the first lock.
+        await tx.execute(sql`select id from billing.credit_account where id = ${discovered.accountId} for update`);
+        await tx.execute(sql`select id from billing.billing_owner_binding where id = ${discovered.id} for update`);
+        const lockedBinding = await tx.query.billingOwnerBinding.findFirst({
+          where: and(
+            eq(billingOwnerBinding.id, discovered.id),
+            eq(billingOwnerBinding.accountId, discovered.accountId),
+            eq(billingOwnerBinding.environment, this.environment),
+            eq(billingOwnerBinding.authUserId, input.authUserId),
           ),
-        )
-        .limit(1);
-      // Object form, like the payments service's `action_already_pending`: the UI reads the code and the purchase
-      // state to tell a payment the customer can cancel from one that is processing or under review.
-      if (pendingPurchase !== undefined)
-        throw new ConflictException({ code: 'payment_action_pending', state: pendingPurchase.state });
-      const now = new Date();
-      const closureId = randomUUID();
-      await tx.update(billingOwnerBinding).set({ revokedAt: now }).where(eq(billingOwnerBinding.id, discovered.id));
-      await tx.update(creditAccount).set({ status: 'closing' }).where(eq(creditAccount.id, discovered.accountId));
-      await tx
-        .update(billingReloadConsent)
-        .set({ state: 'revoked', updatedAt: now })
-        .where(
-          and(
-            eq(billingReloadConsent.accountId, discovered.accountId),
-            inArray(billingReloadConsent.state, ['pending_setup', 'enabled', 'paused_terms', 'disabled_failures']),
+        });
+        if (lockedBinding === undefined) throw new ConflictException('billing_owner_changed');
+        const existing = await tx.query.billingAccountClosure.findFirst({
+          where: and(
+            eq(billingAccountClosure.accountId, discovered.accountId),
+            eq(billingAccountClosure.bindingId, discovered.id),
           ),
-        );
-      await tx.insert(billingAccountClosure).values({
-        id: closureId,
-        accountId: discovered.accountId,
-        bindingId: discovered.id,
-        environment: this.environment,
-        requestId: input.requestId,
-        requestHash,
-        state: 'closing',
-        requestedAt: now,
-        bindingRevokedAt: now,
-        obligationsFrozenAt: now,
-        updatedAt: now,
+        });
+        if (existing !== undefined) {
+          if (existing.requestId !== input.requestId || existing.requestHash !== requestHash)
+            throw new ConflictException('account_closure_request_conflict');
+          return project(existing, input.authUserId);
+        }
+        // Money may still move or await its grant, so closure waits for the payments service's active purchases.
+        const [pendingPurchase] = await tx
+          .select({ id: billingPurchase.id })
+          .from(billingPurchase)
+          .where(
+            and(
+              eq(billingPurchase.accountId, discovered.accountId),
+              inArray(billingPurchase.state, activePurchaseStates),
+            ),
+          )
+          .limit(1);
+        if (pendingPurchase !== undefined) throw new PendingPurchaseRefusal(pendingPurchase.id);
+        const now = new Date();
+        const closureId = randomUUID();
+        await tx.update(billingOwnerBinding).set({ revokedAt: now }).where(eq(billingOwnerBinding.id, discovered.id));
+        await tx.update(creditAccount).set({ status: 'closing' }).where(eq(creditAccount.id, discovered.accountId));
+        await tx
+          .update(billingReloadConsent)
+          .set({ state: 'revoked', updatedAt: now })
+          .where(
+            and(
+              eq(billingReloadConsent.accountId, discovered.accountId),
+              inArray(billingReloadConsent.state, ['pending_setup', 'enabled', 'paused_terms', 'disabled_failures']),
+            ),
+          );
+        await tx.insert(billingAccountClosure).values({
+          id: closureId,
+          accountId: discovered.accountId,
+          bindingId: discovered.id,
+          environment: this.environment,
+          requestId: input.requestId,
+          requestHash,
+          state: 'closing',
+          requestedAt: now,
+          bindingRevokedAt: now,
+          obligationsFrozenAt: now,
+          updatedAt: now,
+        });
+        await this.freezeSubscriptionObligations(tx, closureId, discovered.accountId, now);
+        const [ready] = await tx
+          .update(billingAccountClosure)
+          .set({ state: 'ready_for_auth_deletion', updatedAt: now })
+          .where(
+            and(eq(billingAccountClosure.id, closureId), eq(billingAccountClosure.accountId, discovered.accountId)),
+          )
+          .returning();
+        if (ready === undefined) throw new Error('account_closure_insert_failed');
+        return project(ready, input.authUserId);
       });
-      await this.freezeSubscriptionObligations(tx, closureId, discovered.accountId, now);
-      const [ready] = await tx
-        .update(billingAccountClosure)
-        .set({ state: 'ready_for_auth_deletion', updatedAt: now })
-        .where(and(eq(billingAccountClosure.id, closureId), eq(billingAccountClosure.accountId, discovered.accountId)))
-        .returning();
-      if (ready === undefined) throw new Error('account_closure_insert_failed');
-      return project(ready, input.authUserId);
-    });
+    } catch (error) {
+      if (!(error instanceof PendingPurchaseRefusal)) throw error;
+      // Object form, like the payments service's `action_already_pending`: the HTTP filter forwards only `code`
+      // and a valid `action` of a structured 409, and the wire action is what the customer sees and can act on.
+      // Projected after the transaction: the owner-scoped read needs nothing the account lock protects.
+      const action = await this.cancellation.describeAction?.({
+        authUserId: input.authUserId,
+        actionId: error.purchaseId,
+      });
+      throw new ConflictException({ code: 'payment_action_pending', ...(action === undefined ? {} : { action }) });
+    }
   }
 
   /** Better Auth `user.deleteUser.beforeDelete(user, request?)` calls this and must await it. */

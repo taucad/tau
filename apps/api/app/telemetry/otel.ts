@@ -17,6 +17,7 @@
  */
 /* oxlint-disable typescript-eslint/dot-notation, typescript-eslint/no-unnecessary-condition -- process.env index access required by TS4111 (verbatimModuleSyntax) */
 import process from 'node:process';
+import { metrics } from '@opentelemetry/api';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
@@ -66,7 +67,9 @@ const sdk = new NodeSDK({
 
   traceExporter: hasOtlpEndpoint ? new OTLPTraceExporter() : undefined,
 
-  metricReader: new PrometheusExporter({ port: metricsPort }),
+  // Every series carries `service_name`: a scraper that does not add it (Fly's managed Prometheus) would
+  // otherwise hand dashboards and alerts series their `service_name` selectors cannot see (OBS-13).
+  metricReader: new PrometheusExporter({ port: metricsPort, withResourceConstantLabels: /^service\.name$/u }),
 
   logRecordProcessor: hasOtlpEndpoint ? new BatchLogRecordProcessor(new OTLPLogExporter()) : undefined,
 
@@ -98,6 +101,27 @@ const sdk = new NodeSDK({
 
 sdk.start();
 
+// Fly reports CPU and memory per Machine; these are the same signals per process, so the API and each
+// billing worker can be told apart and they also exist off Fly. OTel process semantic conventions.
+const processMeter = metrics.getMeter('tau-process');
+processMeter
+  .createObservableCounter('process.cpu.time', { description: 'CPU seconds used by this process', unit: 's' })
+  .addCallback((result) => {
+    const usage = process.cpuUsage();
+    result.observe(usage.user / 1e6, { 'cpu.mode': 'user' });
+    result.observe(usage.system / 1e6, { 'cpu.mode': 'system' });
+  });
+processMeter
+  .createObservableGauge('process.memory.usage', { description: 'Resident set size of this process', unit: 'By' })
+  .addCallback((result) => {
+    result.observe(process.memoryUsage.rss());
+  });
+processMeter
+  .createObservableGauge('process.uptime', { description: 'Seconds since this process started', unit: 's' })
+  .addCallback((result) => {
+    result.observe(process.uptime());
+  });
+
 if (process.env['PYROSCOPE_SERVER_ADDRESS']) {
   try {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Module default export name
@@ -111,8 +135,9 @@ if (process.env['PYROSCOPE_SERVER_ADDRESS']) {
       },
     });
     Pyroscope.start();
-  } catch {
-    // Pyroscope is optional; silently skip if unavailable
+  } catch (error) {
+    // Profiling is optional, but an address that was set and does nothing is a misconfiguration worth seeing.
+    console.warn('Pyroscope profiling disabled:', error);
   }
 }
 

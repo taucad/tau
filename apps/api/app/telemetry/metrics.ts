@@ -10,6 +10,7 @@
 import { Injectable } from '@nestjs/common';
 import { metrics } from '@opentelemetry/api';
 import { TauMetrics } from '@taucad/telemetry';
+import type { z } from 'zod';
 
 @Injectable()
 export class MetricsService {
@@ -42,6 +43,11 @@ export class MetricsService {
     description: TauMetrics.wsMessageSize.description,
     unit: TauMetrics.wsMessageSize.unit,
     advice: { explicitBucketBoundaries: [...TauMetrics.wsMessageSize.buckets] },
+  });
+
+  public readonly wsUpgradeRejections = this.apiMeter.createCounter(TauMetrics.wsUpgradeRejections.name, {
+    description: TauMetrics.wsUpgradeRejections.description,
+    unit: TauMetrics.wsUpgradeRejections.unit,
   });
 
   public readonly rpcDeliveryEvents = this.apiMeter.createCounter(TauMetrics.rpcDeliveryEvents.name, {
@@ -378,3 +384,12 @@ export class MetricsService {
     },
   );
 }
+
+/** `ws.gateway` on the `ws.*` connection series: one value per upgrade route. */
+export type WsGateway = NonNullable<z.infer<typeof TauMetrics.wsActiveConnections.attributes>['ws.gateway']>;
+
+/** Bounded `ws.close.reason`, bound to the registry's enum so a new reason must be declared there. */
+export type WsCloseReason = NonNullable<z.infer<typeof TauMetrics.wsDisconnections.attributes>['ws.close.reason']>;
+
+/** Attributes of one `ws.upgrade.rejections` increment. */
+export type WsUpgradeRejection = z.infer<typeof TauMetrics.wsUpgradeRejections.attributes>;

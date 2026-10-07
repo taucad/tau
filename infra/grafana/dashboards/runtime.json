@@ -11,7 +11,7 @@
         "name": "service",
         "type": "query",
         "datasource": "Prometheus",
-        "query": "label_values(up, service_name)",
+        "query": "label_values(process_uptime, service_name)",
         "current": { "text": "tau-api", "value": "tau-api" },
         "includeAll": false,
         "refresh": 1
@@ -39,7 +39,7 @@
       "title": "Processes Up",
       "type": "stat",
       "description": "Scrape health of each Tau process: the local stand-in for Fly's health checks. Expected 3 (app, billing-recovery, billing-operations).",
-      "targets": [{ "expr": "sum(up{job=\"tau-api\"}) or vector(0)" }],
+      "targets": [{ "expr": "count(process_uptime{service_name=~\"$service\"}) or vector(0)" }],
       "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 }
     },
     {

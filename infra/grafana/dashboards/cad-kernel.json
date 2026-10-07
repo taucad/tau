@@ -11,7 +11,7 @@
         "name": "service",
         "type": "query",
         "datasource": "Prometheus",
-        "query": "label_values(up, service_name)",
+        "query": "label_values(process_uptime, service_name)",
         "current": { "text": "tau-api", "value": "tau-api" },
         "includeAll": false,
         "refresh": 1
@@ -20,7 +20,7 @@
         "name": "instance",
         "type": "query",
         "datasource": "Prometheus",
-        "query": "label_values(up{service_name=\"$service\"}, instance)",
+        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",

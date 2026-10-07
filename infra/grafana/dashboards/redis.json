@@ -10,7 +10,7 @@
         "name": "service",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(up, service_name)",
+        "query": "label_values(process_uptime, service_name)",
         "multi": true,
         "includeAll": true,
         "current": { "text": "All", "value": "$__all" }
@@ -19,7 +19,7 @@
         "name": "instance",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(up{service_name=~\"$service\"}, instance)",
+        "query": "label_values(process_uptime{service_name=~\"$service\"}, instance)",
         "multi": true,
         "includeAll": true,
         "current": { "text": "All", "value": "$__all" }

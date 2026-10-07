@@ -612,6 +612,26 @@ describe('serializeMessage', () => {
       );
     });
 
+    it('serializes tool-grep context lines with ripgrep-style separators', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-grep',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { pattern: 'fn', context: 1 },
+          output: {
+            matches: [{ file: 'a.kcl', line: 2, content: 'fn box(', before: ['// Box.'], after: ['  w: number,'] }],
+            totalMatches: 1,
+            appliedHeadLimit: 50,
+            appliedOffset: 0,
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="grep">\npattern: fn\ncontext: 1\n</tool_call>\n<tool_result>\nTotal: 1\na.kcl-1- // Box.\na.kcl:2: fn box(\na.kcl-3-   w: number,\n</tool_result>',
+      );
+    });
+
     it('serializes tool-test_model output-available with [targetFile] prefix on each failure', () => {
       const message = baseMessage([
         {

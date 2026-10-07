@@ -191,6 +191,23 @@ describe('handleGlobSearch', () => {
     });
   });
 
+  it('should let a recursive pattern match files under dot-directories such as .agents/skills', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.readdir.mockImplementation(async (path) => {
+      if (path === '.agents/skills') {
+        return [{ name: 'cad-picogk', type: 'dir', size: 0 }];
+      }
+      if (path === '.agents/skills/cad-picogk') {
+        return [textEntry('api-index.md', 20), textEntry('SKILL.ts', 20)];
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+
+    const result = await handleGlobSearch({ pattern: '**/*.md', path: '.agents/skills' }, fileSystem);
+
+    expect(result.success && result.files).toEqual(['.agents/skills/cad-picogk/api-index.md']);
+  });
+
   it('should return IO_ERROR on readdir failure', async () => {
     const fileSystem = mock<RpcFileSystem>();
     fileSystem.readdir.mockRejectedValue(new Error('disk error'));

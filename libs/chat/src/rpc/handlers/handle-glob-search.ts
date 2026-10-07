@@ -63,7 +63,7 @@ export async function handleGlobSearch(
     const allEntries = await collectFileEntries(fileSystem, basePath, explicitlyScopedToSkills);
 
     const { minimatch } = await import('minimatch');
-    const matched = allEntries.filter((entry) => minimatch(entry.path, input.pattern, { matchBase: true }));
+    const matched = allEntries.filter((entry) => minimatch(entry.path, input.pattern, { matchBase: true, dot: true }));
 
     const files = matched.map((entry) => entry.path);
     const entries: GlobSearchEntry[] = matched.map((entry) =>

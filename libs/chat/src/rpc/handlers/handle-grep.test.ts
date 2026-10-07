@@ -288,6 +288,84 @@ describe('handleGrep', () => {
     });
   });
 
+  it('should let a recursive glob match files under dot-directories such as .agents/skills', async () => {
+    const fileSystem = mock<RpcFileSystem>();
+    fileSystem.stat.mockResolvedValue({
+      size: 0,
+      isDirectory: true,
+      createdAt: '1970-01-01T00:00:00.000Z',
+      modifiedAt: '1970-01-01T00:00:00.000Z',
+    });
+    fileSystem.readdir.mockImplementation(async (path) => {
+      if (path === '.agents/skills/cad-picogk') {
+        return [textEntry('api-index.md', 20), textEntry('SKILL.ts', 20)];
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    });
+    fileSystem.readFile.mockResolvedValue('Voxels needle');
+
+    const result = await handleGrep(
+      { pattern: 'needle', path: '.agents/skills/cad-picogk', glob: '**/*.md' },
+      fileSystem,
+    );
+
+    expect(result.success && result.matches.map(({ file }) => file)).toEqual([
+      '.agents/skills/cad-picogk/api-index.md',
+    ]);
+  });
+
+  describe('context lines', () => {
+    const kcl = '// Leading doc.\nfn box(\n  width: number,\n\n  depth: number,\n)\n';
+
+    it('should omit before/after when context is not requested', async () => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.stat.mockResolvedValue(textStat(kcl.length, 6));
+      fileSystem.readFile.mockResolvedValue(kcl);
+
+      const result = await handleGrep({ pattern: '^fn box', path: 'box.kcl' }, fileSystem);
+
+      expect(result.success && result.matches).toEqual([{ file: 'box.kcl', line: 2, content: 'fn box(' }]);
+    });
+
+    it('should return surrounding lines, including blank ones, clipped at file edges', async () => {
+      const fileSystem = mock<RpcFileSystem>();
+      fileSystem.stat.mockResolvedValue(textStat(kcl.length, 6));
+      fileSystem.readFile.mockResolvedValue(kcl);
+
+      const result = await handleGrep({ pattern: '^fn box', path: 'box.kcl', context: 4 }, fileSystem);
+
+      expect(result.success && result.matches).toEqual([
+        {
+          file: 'box.kcl',
+          line: 2,
+          content: 'fn box(',
+          before: ['// Leading doc.'],
+          // The trailing newline does not add a phantom empty line.
+          after: ['  width: number,', '', '  depth: number,', ')'],
+        },
+      ]);
+    });
+
+    it('should cap context lines at 500 characters', async () => {
+      const fileSystem = mock<RpcFileSystem>();
+      const longLine = 'x'.repeat(2000);
+      fileSystem.stat.mockResolvedValue(textStat(3000, 2));
+      fileSystem.readFile.mockResolvedValue(`needle\n${longLine}`);
+
+      const result = await handleGrep({ pattern: 'needle', path: 'big.ts', context: 1 }, fileSystem);
+
+      expect(result.success && result.matches[0]?.after).toEqual([longLine.slice(0, 500)]);
+    });
+
+    it('should bound context to 0-20 lines at the schema layer', async () => {
+      const { grepInputSchema } = await import('#schemas/tools/grep.tool.schema.js');
+
+      expect(grepInputSchema.safeParse({ pattern: 'foo', context: 20 }).success).toBe(true);
+      expect(grepInputSchema.safeParse({ pattern: 'foo', context: 21 }).success).toBe(false);
+      expect(grepInputSchema.safeParse({ pattern: 'foo', context: -1 }).success).toBe(false);
+    });
+  });
+
   it('should reject headLimit > 1000 via schema validation', async () => {
     const { grepInputSchema } = await import('#schemas/tools/grep.tool.schema.js');
 

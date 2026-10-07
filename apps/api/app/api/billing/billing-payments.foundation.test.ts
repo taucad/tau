@@ -1915,8 +1915,11 @@ describe('billing payments PostgreSQL foundation', () => {
         state: 'fulfilled',
         receipt: { grantedCreditAtoms: '5370000' },
       });
+      // A terminal action is answered from the database: no Stripe read, no new lease.
+      const stripeRequests = requests.length;
       const second = await payments.recoverAction(topup.userId, topup.actionId);
       expect(second).toMatchObject({ state: 'fulfilled', receipt: first.receipt });
+      expect(requests.length).toBe(stripeRequests);
       const grants = await database
         .select()
         .from(creditTransaction)
@@ -1932,11 +1935,60 @@ describe('billing payments PostgreSQL foundation', () => {
       });
     });
 
-    it('should grant Pro from a paid subscription Checkout through the sweep and keep it idempotent', async () => {
+    // A payment_intent leg carries no Checkout session, so the charge-time fallback never applies to it: this
+    // pins that a settled saved-card charge still waits for its event. The extra conjunct on the fallback (a
+    // Checkout leg whose request names a payment method) is forward defence that no fixture can build today.
+    it('should keep a saved-card charge waiting for its event although its charge has settled', async () => {
       const userId = randomUUID();
       await database
         .insert(user)
-        .values({ id: userId, name: 'Hosted Pro', email: `${userId}@test.invalid`, emailVerified: true });
+        .values({ id: userId, name: 'Saved Card Waits', email: `${userId}@test.invalid`, emailVerified: true });
+      const prepared = await payments.prepareTopup(userId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+        amountMinor: '537',
+        method: 'saved_card',
+      });
+      const [leg] = await database
+        .select()
+        .from(billingProviderLeg)
+        .where(eq(billingProviderLeg.purchaseId, prepared.actionId));
+      const [binding] = await database
+        .select()
+        .from(billingStripeCustomer)
+        .where(eq(billingStripeCustomer.id, leg?.customerBindingId ?? ''));
+      if (leg === undefined || binding?.stripeCustomerId === null || binding?.stripeCustomerId === undefined) {
+        throw new Error('Saved-card fixture is incomplete');
+      }
+      const suffix = randomUUID().replaceAll('-', '');
+      paymentFixture = {
+        purchaseId: prepared.actionId,
+        providerLegId: leg.id,
+        customerBindingId: leg.customerBindingId,
+        customerId: binding.stripeCustomerId,
+      };
+      paymentIntentFixtureId = `pi_saved_${suffix}`;
+      paymentChargeFixtureId = `ch_saved_${suffix}`;
+      await payments.confirmAction(userId, prepared.actionId);
+      // Stripe has settled the charge, but a saved-card leg takes no charge-time acceptance: only the event does.
+      await onlyDue(leg.id);
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(swept.failed, (await legError(leg.id)) ?? '').toEqual([]);
+      const waiting = await payments.getAction(userId, prepared.actionId);
+      expect(waiting.state).toMatch(/^(?:processing|funds_received)$/u);
+      await deliverLater('payment_intent.succeeded', { id: paymentIntentFixtureId, object: 'payment_intent' });
+      const delivered = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(delivered.failed, JSON.stringify(requests.slice(-20))).toEqual([]);
+      await expect(payments.getAction(userId, prepared.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+        receipt: { grantedCreditAtoms: '5370000' },
+      });
+    });
+
+    /** A dispatched hosted Pro Checkout, still open. */
+    const openHostedPro = async (name: string) => {
+      const userId = randomUUID();
+      await database.insert(user).values({ id: userId, name, email: `${userId}@test.invalid`, emailVerified: true });
       const action = await payments.prepareSubscription(userId, {
         requestId: randomUUID(),
         returnPath: '/settings/billing',
@@ -1958,25 +2010,84 @@ describe('billing payments PostgreSQL foundation', () => {
       ) {
         throw new Error('Hosted Pro fixture is incomplete');
       }
+      return { userId, action, leg, customerId: binding.stripeCustomerId, session };
+    };
+
+    /** Stripe completes the Pro Session with its subscription and paid first invoice; no event is delivered. */
+    const payHostedPro = (pro: Awaited<ReturnType<typeof openHostedPro>>) => {
       const suffix = randomUUID().replaceAll('-', '');
       const remoteSubscriptionId = `sub_hosted_${suffix}`;
       const invoiceId = `in_hosted_${suffix}`;
       invoiceFixture = {
         invoiceId,
         subscriptionId: remoteSubscriptionId,
-        customerId: binding.stripeCustomerId,
+        customerId: pro.customerId,
         paid: true,
         // The fixture's invoice payment settles inside this period, which runs past today.
         periodStart: 1_788_600_000,
         periodEnd: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
       };
-      Object.assign(session, {
+      Object.assign(pro.session, {
         status: 'complete',
         payment_status: 'paid',
         subscription: remoteSubscriptionId,
         invoice: invoiceId,
         url: null,
       });
+      return { remoteSubscriptionId, invoiceId };
+    };
+
+    it('should queue the first invoice on recover when checkout.session.completed linked Pro without it', async () => {
+      const pro = await openHostedPro('Hosted Pro Linked');
+      const { remoteSubscriptionId, invoiceId } = payHostedPro(pro);
+      // Only the delivered session event is due: the leg sweep must not be the one that queues the invoice.
+      await onlyDue(pro.leg.id);
+      await database
+        .update(billingProviderLeg)
+        .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+        .where(eq(billingProviderLeg.id, pro.leg.id));
+      await deliverLater('checkout.session.completed', {
+        id: pro.leg.providerObjectId ?? '',
+        object: 'checkout.session',
+      });
+      const linkedBySession = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(linkedBySession, JSON.stringify(requests.slice(-20))).toMatchObject({ failed: [] });
+      const [linked] = await database.select().from(subscription).where(eq(subscription.id, pro.action.actionId));
+      expect(linked?.stripeSubscriptionId).toBe(remoteSubscriptionId);
+      const [queued] = await database
+        .select()
+        .from(billingStripeSource)
+        .where(and(eq(billingStripeSource.sourceType, 'invoice'), eq(billingStripeSource.sourceId, invoiceId)));
+      expect(queued).toBeUndefined();
+      // The customer returns: recover queues the invoice the session event never did and settles it inline.
+      const recovered = await payments.recoverAction(pro.userId, pro.action.actionId);
+      expect(recovered, JSON.stringify(requests.slice(-20))).toMatchObject({
+        state: 'fulfilled',
+        receipt: { grantedCreditAtoms: '20000000' },
+      });
+      const [settled] = await database
+        .select()
+        .from(billingStripeSource)
+        .where(and(eq(billingStripeSource.sourceType, 'invoice'), eq(billingStripeSource.sourceId, invoiceId)));
+      // Inserted at 0, queued to 1 by markStripeSourcePending, claimed inline to 2; the claim's finish never resets it.
+      expect(settled).toMatchObject({ state: 'done', generation: 2n });
+      // A second recover answers the terminal action without touching the settled source.
+      const stripeRequests = requests.length;
+      await expect(payments.recoverAction(pro.userId, pro.action.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+      });
+      expect(requests.length).toBe(stripeRequests);
+      const [unchanged] = await database
+        .select()
+        .from(billingStripeSource)
+        .where(and(eq(billingStripeSource.sourceType, 'invoice'), eq(billingStripeSource.sourceId, invoiceId)));
+      expect(unchanged).toMatchObject({ state: 'done', generation: 2n });
+    });
+
+    it('should grant Pro from a paid subscription Checkout through the sweep and keep it idempotent', async () => {
+      const pro = await openHostedPro('Hosted Pro');
+      const { remoteSubscriptionId, invoiceId } = payHostedPro(pro);
+      const { userId, action, leg } = pro;
       await onlyDue(leg.id);
       // The sweep links the Stripe subscription and queues its first invoice, as `invoice.paid` would.
       const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });

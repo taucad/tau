@@ -60,6 +60,7 @@ import {
   watchRevisionStream,
 } from '@taucad/revisions';
 import { selectBranchNeedsConfirmation } from '@taucad/revisions/branch-machine';
+import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
 import type { branchMachine } from '@taucad/revisions/branch-machine';
 import { isAmbientCut } from '@taucad/revisions/checkout-machine';
@@ -215,6 +216,12 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   readonly apiBaseUrl?: string | undefined;
   /** Read per remote request; never persisted under the project. */
   readonly tauCredential?: (() => TauApiCredential | undefined) | undefined;
+  /**
+   * Where this host runs, for Tau Sync telemetry (W36 D1). Set, each settled
+   * push or pull is reported to the API's telemetry ingest with the session
+   * bearer; absent, nothing is reported.
+   */
+  readonly syncTelemetryPlacement?: 'desktop' | 'daemon' | undefined;
   /** Read per third-party Git request; the renderer may replace it in memory. */
   readonly remoteCredential?: (() => NativeGitRemoteCredential | undefined) | undefined;
   /** Called once per host revision fact. Reporting only; never fails a turn. */
@@ -671,6 +678,44 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
     },
   });
   const { actor, settled, recordEditorConflict } = tree;
+
+  /* W36 D1: one bounded entry per settled push or pull, on the API's existing ingest. */
+  const placement = options.syncTelemetryPlacement;
+  if (placement !== undefined && apiBaseUrl !== undefined) {
+    actor.getSnapshot().children.sync?.on('syncAttempt', (attempt: SyncMachineEmitted & { type: 'syncAttempt' }) => {
+      const credential = options.tauCredential?.();
+      if (credential === undefined) {
+        return;
+      }
+      const { direction, outcome, durationMilliseconds, lagMilliseconds, pending } = attempt;
+      /* async-iife: bootstrap -- telemetry is best effort and never fails a sync. */
+      void (async (): Promise<void> => {
+        try {
+          await fetch(`${apiBaseUrl}/v1/telemetry/ingest`, {
+            method: 'POST',
+            headers: { authorization: credential.authorization, 'content-type': 'application/json' },
+            body: JSON.stringify({
+              entries: [
+                {
+                  name: 'observability.syncAttempt',
+                  duration: durationMilliseconds,
+                  detail: {
+                    direction,
+                    outcome,
+                    placement,
+                    ...(lagMilliseconds === undefined ? {} : { lagMilliseconds }),
+                    ...(pending === undefined ? {} : { pending }),
+                  },
+                },
+              ],
+            }),
+          });
+        } catch {
+          // Telemetry is best effort.
+        }
+      })();
+    });
+  }
 
   /**
    * Report one settled turn, with the two graph facts it does not carry.

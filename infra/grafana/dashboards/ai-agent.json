@@ -9,18 +9,19 @@
     "list": [
       {
         "name": "service",
-        "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(up, service_name)",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
         "current": { "text": "tau-api", "value": "tau-api" },
-        "includeAll": false,
-        "refresh": 1
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
       },
       {
         "name": "instance",
         "type": "query",
         "datasource": "Prometheus",
-        "query": "label_values(up{service_name=\"$service\"}, instance)",
+        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -44,11 +45,11 @@
     {
       "title": "Prompt cache hit rate",
       "type": "timeseries",
-      "description": "Provider-agnostic prompt-cache hit rate computed as cache_read / (input + cache_read). Input tokens are recorded normalized (cache reads excluded) by `usage-tracking.middleware.ts`, so the denominator is the prompt prefix the provider had to bill in full plus the prefix it served from cache. Tracks the goal in docs/research/gemini-prompt-cache-busting.md (target: >=80% steady-state on multi-turn chats).",
+      "description": "Provider-agnostic prompt-cache hit rate computed as cache_read / (input + cache_read + cache_write). The funded invocation records `input` as uncached input only, so the denominator is the whole prompt: billed in full, written to cache, or served from it. Tracks the goal in docs/research/gemini-prompt-cache-busting.md (target: >=80% steady-state on multi-turn chats).",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "targets": [
         {
-          "expr": "sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n/\n(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n  +\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"input\", service_name=~\"$service\"}[5m]))\n)",
+          "expr": "sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n/\n(\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=\"cache_read\", service_name=~\"$service\"}[5m]))\n  +\n  sum by (gen_ai_request_model, gen_ai_provider_name) (rate(gen_ai_client_token_usage_sum{gen_ai_token_type=~\"input|cache_write\", service_name=~\"$service\"}[5m]))\n)",
           "legendFormat": "{{gen_ai_provider_name}}/{{gen_ai_request_model}}"
         }
       ],
@@ -69,7 +70,8 @@
       }
     },
     {
-      "title": "Estimated Cost ($/hr)",
+      "title": "User-Charged LLM Spend (USD/h)",
+      "description": "User-charged: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
       "type": "stat",
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
       "targets": [
@@ -124,8 +126,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "targets": [
         {
-          "expr": "sum(rate(gen_ai_tool_invocations_total{service_name=~\"$service\"}[5m])) by (gen_ai_tool_name)",
-          "legendFormat": "{{gen_ai_tool_name}}"
+          "expr": "sum by (agent_id, tool_kind) (rate(tau_agent_tool_calls_total{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{tool_kind}}"
         }
       ]
     },
@@ -146,13 +148,13 @@
       "fieldConfig": { "defaults": { "unit": "s" } }
     },
     {
-      "title": "Agent Iterations by Model",
+      "title": "Agent Turns by Agent and Outcome",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
       "targets": [
         {
-          "expr": "sum(rate(gen_ai_agent_iterations_sum{service_name=~\"$service\"}[5m])) by (gen_ai_request_model)",
-          "legendFormat": "{{gen_ai_request_model}}"
+          "expr": "sum by (agent_id, outcome) (rate(tau_agent_turns_total{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{outcome}}"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } }
@@ -162,7 +164,7 @@
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} |= \"level\" | json | level = \"error\"", "refId": "A" }],
+      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
       "options": {
         "showTime": true,
         "showLabels": true,

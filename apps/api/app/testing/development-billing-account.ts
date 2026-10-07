@@ -1,6 +1,7 @@
 import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import -- Nest decorators require metadata before service imports
 import { parseArgs } from 'node:util';
 import process from 'node:process';
+import { HttpException } from '@nestjs/common';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { and, eq, isNull } from 'drizzle-orm';
@@ -138,6 +139,13 @@ const main = async (): Promise<void> => {
 try {
   await main();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : 'Development billing account command failed');
+  // A structured refusal (closure's 409 `payment_action_pending`) carries its reason in the response, not the message.
+  console.error(
+    error instanceof HttpException
+      ? JSON.stringify(error.getResponse())
+      : error instanceof Error
+        ? error.message
+        : 'Development billing account command failed',
+  );
   process.exitCode = 1;
 }

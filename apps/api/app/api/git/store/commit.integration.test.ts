@@ -51,8 +51,18 @@ const admitted = (value: string): NodeJS.ProcessEnv => {
 };
 /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
 
+// A developer's global git config (e.g. `commit.gpgsign`) must not reach fixture commits: signing
+// through a busy gpg-agent fails intermittently under parallel test load.
+/* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+const isolatedGit = {
+  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
+} as unknown as NodeJS.ProcessEnv;
+/* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+
 const git = (cwd: string, ...args: readonly string[]): string =>
-  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: isolatedGit });
 
 /**
  * A stock `git push` over the local transport, which runs the same

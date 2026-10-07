@@ -8,18 +8,19 @@
     "list": [
       {
         "name": "service",
-        "type": "query",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(up, service_name)",
-        "multi": true,
-        "includeAll": true,
-        "current": { "text": "All", "value": "$__all" }
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "current": { "text": "tau-api", "value": "tau-api" },
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
       },
       {
         "name": "instance",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(up{service_name=~\"$service\"}, instance)",
+        "query": "label_values(process_uptime{service_name=~\"$service\"}, instance)",
         "multi": true,
         "includeAll": true,
         "current": { "text": "All", "value": "$__all" }
@@ -86,11 +87,15 @@
       }
     },
     {
-      "title": "Stream Length (tau:socketio)",
+      "title": "Keyspace Hit Rate",
       "type": "stat",
       "gridPos": { "h": 4, "w": 12, "x": 0, "y": 12 },
-      "datasource": { "type": "redis-datasource", "uid": "redis" },
-      "targets": [{ "command": "xlen", "keyName": "tau:socketio", "refId": "A", "type": "command" }]
+      "targets": [
+        {
+          "expr": "sum(rate(redis_keyspace_hits_total[5m])) / clamp_min(sum(rate(redis_keyspace_hits_total[5m])) + sum(rate(redis_keyspace_misses_total[5m])), 1e-10)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit" } }
     },
     {
       "title": "Redis Connection State",
@@ -113,7 +118,7 @@
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} |= \"level\" | json | level = \"error\"", "refId": "A" }],
+      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
       "options": {
         "showTime": true,
         "showLabels": true,

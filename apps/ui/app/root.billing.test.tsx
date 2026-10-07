@@ -101,6 +101,7 @@ describe('billing payment return', () => {
       ownerId: 'user-a',
       subjectId: 'account-a',
       environment: 'development',
+      purpose: 'manual_topup',
       state: 'redirect_required',
       redirectUrl: 'https://checkout.example/resume',
     };
@@ -123,6 +124,24 @@ describe('billing payment return', () => {
     expect(options.action.label).toBe('Resume Checkout');
     options.action.onClick();
     expect(payment.followPaymentRedirect).toHaveBeenCalledWith(action);
+  });
+
+  it('leaves a redirect that is not a purchase Checkout unrecovered on return', async () => {
+    const portal = {
+      actionId: 'portal_1',
+      ownerId: 'user-a',
+      subjectId: 'account-a',
+      environment: 'development',
+      purpose: 'billing_portal',
+      state: 'redirect_required',
+      redirectUrl: 'https://billing.example/portal',
+    };
+    payment.getPaymentAction.mockResolvedValue(portal);
+    render(returnAt('?payment_action=portal_1'));
+    await waitFor(() => {
+      expect(warning).toHaveBeenCalledOnce();
+    });
+    expect(payment.recoverPaymentAction).not.toHaveBeenCalled();
   });
 
   it('ignores a rejected return GET after the owner changes', async () => {

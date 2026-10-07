@@ -151,10 +151,10 @@
     {
       "title": "Storage Error Rate",
       "type": "stat",
-      "description": "Excludes HeadObject/GetObject misses, which are normal existence checks.",
+      "description": "Errors over requests, both excluding HeadObject and GetObject, whose misses are normal existence checks.",
       "targets": [
         {
-          "expr": "(sum(rate(tau_storage_operation_duration_count{service_name=~\"$service\",outcome=\"error\",tau_storage_operation!~\"HeadObject|GetObject\"}[15m])) or vector(0)) / clamp_min(sum(rate(tau_storage_operation_duration_count{service_name=~\"$service\"}[15m])), 1e-10)"
+          "expr": "(sum(rate(tau_storage_operation_duration_count{service_name=~\"$service\",outcome=\"error\",tau_storage_operation!~\"HeadObject|GetObject\"}[15m])) or vector(0)) / clamp_min(sum(rate(tau_storage_operation_duration_count{service_name=~\"$service\",tau_storage_operation!~\"HeadObject|GetObject\"}[15m])), 1e-10)"
         }
       ],
       "fieldConfig": {

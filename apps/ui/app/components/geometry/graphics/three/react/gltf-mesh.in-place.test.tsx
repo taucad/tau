@@ -1,6 +1,6 @@
 import { useLayoutEffect } from 'react';
 import type { RenderFrame } from '@taucad/spatial';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial } from '@taucad/geometry-core';
@@ -187,13 +187,20 @@ describe('GltfMesh in-place updates', () => {
   it('should update edge resolution before the resized frame without parsing or scheduling a later frame', async () => {
     const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
     const updateResolution = vi.spyOn(gltfEdges, 'updateLineMaterialResolution');
+    const committed = Promise.withResolvers<void>();
+    vi.spyOn(mocks.graphicsActor, 'send').mockImplementation((event) => {
+      if (event.type === 'gltfPresentationCommitted') {
+        committed.resolve();
+      }
+    });
     const source = buildGlb();
     const view = render(
       <GltfMesh gltfFile={source} geometryHash='resize' presentationRevision={1} enableMatcap={false} />,
     );
-    await waitFor(() => {
-      expect(committedRevisions()).toEqual([1]);
-    });
+    await committed.promise;
+    // A layout commit can precede passive edge-theme invalidation. Settle the initial render before measuring resize.
+    await act(async () => undefined);
+    expect(committedRevisions()).toEqual([1]);
     const requestFrame = vi.spyOn(globalThis, 'requestAnimationFrame');
     updateResolution.mockClear();
     mocks.invalidate.mockClear();

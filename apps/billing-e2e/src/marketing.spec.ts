@@ -13,8 +13,9 @@ describe('marketing funnel', () => {
         `${response.status} location ${location}`,
         `Netlify request ${response.headers.get('x-nf-request-id') ?? 'unknown'}`,
       ];
+      // No redirect at all breaks the same contract: the query cannot be carried into /?settings=billing.
       if (response.status < 300 || response.status > 399) {
-        throw new Error(`Expected a redirect: ${evidence.join('; ')}`);
+        return { outcome: 'fail', defect: 'F-04', evidence: [...evidence, 'no redirect from /settings/billing'] };
       }
       const isPreserved = new URL(location, baseUrl).searchParams.get('payment_action') === probe;
       return isPreserved ? { outcome: 'pass', evidence } : { outcome: 'fail', defect: 'F-04', evidence };

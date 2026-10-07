@@ -63,12 +63,12 @@ export const withBrowser = async <Result>(
 export const toasts = async (page: Page): Promise<string[]> =>
   z.array(z.string()).parse(await page.evaluate('window.tauToasts ?? []'));
 
-/** Waits up to 30 s for a toast whose text matches `pattern`, including one already dismissed. */
-export const waitForToast = async (page: Page, pattern: RegExp): Promise<string> => {
+/** Waits (30 s unless told otherwise) for a toast whose text matches `pattern`, including one already dismissed. */
+export const waitForToast = async (page: Page, pattern: RegExp, toastTimeout = 30_000): Promise<string> => {
   const found = await page.waitForFunction(
     `(window.tauToasts ?? []).find((text) => new RegExp(${JSON.stringify(pattern.source)}, 'u').test(text))`,
     undefined,
-    { timeout: 30_000 },
+    { timeout: toastTimeout },
   );
   return z.string().parse(await found.jsonValue());
 };

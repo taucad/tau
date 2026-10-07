@@ -104,6 +104,8 @@ describe('auth and onboarding', () => {
       expect(limited.length).toBeGreaterThan(0);
       expect(limited.length + refused.length).toBe(101);
       const retryAfter = Math.max(...limited.map(({ headers }) => retryAfterSeconds(headers)));
+      const observedRetryAfter =
+        limited[0]?.headers.get('x-retry-after') ?? limited[0]?.headers.get('retry-after') ?? 'absent';
       await delay((retryAfter + 1) * 1000);
       const signIn = await account.api.request('POST', '/v1/auth/sign-in/email', {
         body: { email: account.email, password: account.password },
@@ -112,7 +114,7 @@ describe('auth and onboarding', () => {
       return {
         outcome: 'pass',
         evidence: [
-          `101 wrong-password sign-ins: ${refused.length} × 401, ${limited.length} × 429 (X-Retry-After ${retryAfter} s)`,
+          `101 wrong-password sign-ins: ${refused.length} × 401, ${limited.length} × 429 (X-Retry-After ${observedRetryAfter}; waited ${retryAfter + 1} s)`,
           `right password after the window: ${signIn.status}`,
         ],
       };

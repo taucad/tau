@@ -103,21 +103,28 @@ export const createAccount = async (
   return account;
 };
 
-/** Cancels the account's open payment actions and deletes it, unless KEEP_ACCOUNTS=1 keeps it for inspection. */
+/**
+ * Cancels the account's open payment actions and deletes it, unless KEEP_ACCOUNTS=1 keeps it for inspection. It
+ * never rejects: it runs from afterAll hooks and a row's finally, where a throw would overrule verdicts already
+ * recorded; whatever it could not delete is named in the run's orphan ledger instead.
+ */
 export const closeAccount = async (account: Account): Promise<void> => {
   if (process.env['KEEP_ACCOUNTS'] === '1') {
     return;
   }
-  if (!hasSession(account)) {
-    await verifyAccount(account);
+  try {
+    if (!hasSession(account)) {
+      await verifyAccount(account);
+    }
+    const listed = await account.api.request('GET', '/v1/billing/payment-actions');
+    const actions: WirePaymentAction[] =
+      listed.status === 200 ? z.array(wirePaymentActionSchema).parse(listed.body) : [];
+    const open = actions.filter(({ state }) => state === 'prepared' || state === 'redirect_required');
+    await Promise.all(
+      open.map(async ({ actionId }) => account.api.request('POST', `/v1/billing/payment-actions/${actionId}/cancel`)),
+    );
+  } catch {
+    // No session or no cancel: the deletion below still tries, and records the orphan when it cannot.
   }
-  const listed = await account.api.request('GET', '/v1/billing/payment-actions');
-  const actions: WirePaymentAction[] = listed.status === 200 ? z.array(wirePaymentActionSchema).parse(listed.body) : [];
-  const open = actions.filter(({ state }) => state === 'prepared' || state === 'redirect_required');
-  await Promise.all(
-    open.map(async ({ actionId }) => account.api.request('POST', `/v1/billing/payment-actions/${actionId}/cancel`)),
-  );
-  ok(await account.api.request('POST', '/v1/auth/delete-user', { body: {} }), z.object({ success: z.literal(true) }));
-  // Inbox housekeeping never overrules a verdict: this runs from afterAll hooks and a row's finally.
-  await deleteMailbox(account.mailbox).catch(() => undefined);
+  await discardAccount(account);
 };

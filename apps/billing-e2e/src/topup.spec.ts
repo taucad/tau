@@ -22,8 +22,8 @@ import { matrixRow } from '#support/results.js';
 import type { Verdict } from '#support/results.js';
 
 const returnPath = '/?settings=billing';
-/** States a just-paid action passes through before the webhook or the sweep settles it. */
-const settlingStates = new Set<string>(['redirect_required', 'processing']);
+/** States a just-paid action passes through before the grant lands: the UI's own set (root-billing.cloud.tsx). */
+const settlingStates = new Set<string>(['redirect_required', 'processing', 'funds_received']);
 
 /** Settings → Billing → Add credits → amount → Review: the prepared quote and its request id. */
 const reviewTopup = async (
@@ -127,6 +127,8 @@ describe('top-up in the browser', () => {
 describe('paid top-up', () => {
   let account: Account;
   let paid: { readonly actionId: string; readonly state: WirePaymentAction['state'] } | undefined;
+  /** Set only when TU-01's Pay click never submitted (H-01); any other unfinished TU-01 leaves `paid` unset. */
+  let unsubmitted = false;
 
   beforeAll(async () => {
     account = await createAccount('tu01');
@@ -141,6 +143,7 @@ describe('paid top-up', () => {
         await page.getByRole('button', { name: 'Continue to secure Checkout' }).click();
         const payment = await payWithTestCard(page, account.email);
         if (!payment.isPaid) {
+          unsubmitted = true;
           return {
             outcome: 'blocked',
             defect: 'H-01',
@@ -151,7 +154,6 @@ describe('paid top-up', () => {
             ],
           };
         }
-        const toast = await waitForToast(page, /credits added|Checkout is ready|Payment received|still processing/u);
         // Poll the action every 2 s until it leaves the settling states or 60 s pass: a slow but healthy webhook
         // then shows as its settle time instead of being misread as F-01.
         const returned = Date.now();
@@ -168,6 +170,12 @@ describe('paid top-up', () => {
           settled = await readAction();
         }
         const settleSeconds = Math.round((Date.now() - returned) / 1000);
+        // The verdict waits for the credits toast itself: the return-time recover may announce "Checkout is ready"
+        // first and replace it, so the first matching toast is not the verdict; every toast shown stays in evidence.
+        const creditsToast =
+          settled.state === 'fulfilled'
+            ? await waitForToast(page, /credits added/u, 10_000).catch(() => undefined)
+            : undefined;
         const credits = ok(await account.api.request('GET', '/v1/billing/credits'), wireBalanceExplanationSchema);
         paid = { actionId: action.actionId, state: settled.state };
         const evidence = [
@@ -183,7 +191,7 @@ describe('paid top-up', () => {
         expect(settled.state).toBe('fulfilled');
         expect(settled.receipt?.grantedCreditAtoms).toBe('5000000');
         expect(credits.balance?.eligibleAvailableCreditAtoms).toBe('5000000');
-        expect(toast).toContain('500 credits added.');
+        expect(creditsToast).toContain('500 credits added.');
         return { outcome: 'pass', evidence };
       }),
     ),
@@ -192,8 +200,15 @@ describe('paid top-up', () => {
   it(
     'should let the customer recover a paid Checkout the webhook has not settled [TU-08 P0]',
     matrixRow('TU-08', 'P0', async () => {
-      if (paid === undefined) {
+      if (unsubmitted) {
         return { outcome: 'blocked', defect: 'H-01', evidence: ['no paid action: the TU-01 payment did not submit'] };
+      }
+      if (paid === undefined) {
+        return {
+          outcome: 'blocked',
+          defect: 'H-03',
+          evidence: ['TU-01 did not finish, so there is no paid action to recover'],
+        };
       }
       if (paid.state === 'fulfilled') {
         return {

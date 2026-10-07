@@ -79,11 +79,11 @@ export function PublicationTopbar({
         // overlaps the desktop drag band (see `Page`). Its controls subtract
         // themselves; the gaps between them stay draggable.
         desktopTarget &&
-          'py-0 pl-(--desktop-titlebar-inset) sm:h-9 sm:pl-(--desktop-titlebar-inset) [&_:is(a,button,input)]:[app-region:no-drag]',
+          'pl-(--desktop-titlebar-inset) sm:pl-(--desktop-titlebar-inset) [&_:is(a,button,input)]:[app-region:no-drag]',
         className,
       )}
     >
-      <div className={cn('flex shrink-0 items-center gap-1 sm:gap-2', desktopTarget && 'h-9')}>
+      <div className='flex shrink-0 items-center gap-1 sm:gap-2'>
         <Tooltip>
           <TooltipTrigger asChild className='flex items-center gap-2 font-medium'>
             <Link to='/' aria-label='Go home' className={cn(desktopTarget && 'h-7')}>

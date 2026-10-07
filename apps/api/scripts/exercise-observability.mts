@@ -4,8 +4,8 @@
  *
  * Covers auth, REST, client telemetry ingest (CAD kernel, editor, WASM, IndexedDB, agent turns, client
  * sync attempts), Tau Sync (git smart HTTP + LFS into MinIO), publications, Claude Haiku 4.5 through the
- * LLM gateway, billing attempt lookups, and the hosts/kernels WebSockets. Codex/ACP and the billing workers run beside it (see the
- * observability handbook); this script does not start them.
+ * LLM gateway, billing attempt lookups, and the hosts/kernels WebSockets. Codex/ACP and the billing
+ * workers run beside it (see the observability handbook); this script does not start them.
  *
  * Local only: refuses a non-loopback API and writes fixtures (a verified harness user, a Pro
  * subscription, promotional credits) to this worktree's dev database via `docker exec tau-postgres`.

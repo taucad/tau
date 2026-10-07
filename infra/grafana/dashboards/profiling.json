@@ -6,26 +6,28 @@
   "links": [],
   "panels": [
     {
-      "title": "CPU Profile",
+      "title": "Wall-Clock Profile (Node samples on-CPU and waiting time)",
       "type": "flamegraph",
       "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
       "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
       "targets": [
         {
-          "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+          "queryType": "profile",
+          "profileTypeId": "wall:wall:nanoseconds:wall:nanoseconds",
           "labelSelector": "{service_name=\"tau-api\"}",
           "refId": "A"
         }
       ]
     },
     {
-      "title": "Heap Allocations",
+      "title": "Heap In Use",
       "type": "flamegraph",
       "gridPos": { "h": 12, "w": 24, "x": 0, "y": 12 },
       "datasource": { "type": "grafana-pyroscope-datasource", "uid": "pyroscope" },
       "targets": [
         {
-          "profileTypeId": "memory:alloc_objects:count:space:bytes",
+          "queryType": "profile",
+          "profileTypeId": "memory:inuse_space:bytes:inuse_space:bytes",
           "labelSelector": "{service_name=\"tau-api\"}",
           "refId": "A"
         }
@@ -36,7 +38,7 @@
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} |= \"level\" | json | level = \"error\"", "refId": "A" }],
+      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
       "options": {
         "showTime": true,
         "showLabels": true,
@@ -61,12 +63,13 @@
     "list": [
       {
         "name": "service",
-        "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(up, service_name)",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
         "current": { "text": "tau-api", "value": "tau-api" },
-        "includeAll": false,
-        "refresh": 1
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
       }
     ]
   },

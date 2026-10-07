@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { Eye } from 'lucide-react';
 import type { To } from 'react-router';
 import { Link } from 'react-router';
@@ -33,6 +33,12 @@ const projectCardGraphicsOptions = {
   enableLines: true,
   viewerClassName: 'bg-muted',
 } satisfies CadPreviewGraphicsOptions;
+
+/**
+ * A card preview hands no larger model to three.js: a 31-38 MB Planetary Gear GLB crashed the
+ * desktop renderer (SIGTRAP). Bigger models are viewed by opening the project.
+ */
+export const projectCardPreviewByteLimit = 16 * 1024 * 1024;
 
 const CadPreviewViewer = lazy(async () => {
   const module = await import('#components/cad-preview.js');
@@ -75,8 +81,29 @@ export function ProjectCardMedia({
   shouldFill = false,
   children,
 }: ProjectCardMediaProps): React.JSX.Element {
+  const mediaRef = useRef<HTMLDivElement>(null);
+
+  /* A live preview is torn down once its card scrolls out of view, releasing its kernel and GPU memory. */
+  useEffect(() => {
+    const media = mediaRef.current;
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- absent in jsdom and old engines
+    if (!isPreviewVisible || !media || globalThis.IntersectionObserver === undefined) {
+      return undefined;
+    }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry && !entry.isIntersecting) {
+        onPreviewVisibilityChange(false);
+      }
+    });
+    observer.observe(media);
+    return () => {
+      observer.disconnect();
+    };
+  }, [isPreviewVisible, onPreviewVisibilityChange]);
+
   return (
     <div
+      ref={mediaRef}
       className={cn('overflow-hidden bg-muted', shouldFill ? 'absolute inset-0' : 'relative aspect-4/3 h-fit w-full')}
     >
       {/* The card link names the card, so the thumbnail is decorative. A hidden preview is
@@ -116,6 +143,7 @@ export function ProjectCardCadPreview(): React.JSX.Element {
         enablePan={false}
         initialVerticalFieldOfView={45}
         graphicsOptions={projectCardGraphicsOptions}
+        maxArtifactBytes={projectCardPreviewByteLimit}
       />
     </Suspense>
   );

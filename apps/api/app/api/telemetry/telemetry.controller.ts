@@ -1,6 +1,6 @@
 /* oxlint-disable new-cap -- NestJS decorators use PascalCase */
 import { Body, Controller, Post, HttpCode, UseGuards } from '@nestjs/common';
-import { IngestEntryName, AttributeKey } from '@taucad/telemetry';
+import { IngestEntryName, AttributeKey, knownAgentIds } from '@taucad/telemetry';
 import type { ClientMetricEntry } from '@taucad/telemetry';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { MetricsService } from '#telemetry/metrics.js';
@@ -47,6 +47,14 @@ export class TelemetryController {
       }
       case IngestEntryName.INDEXEDDB_OPERATION: {
         this.recordIndexedDbOperation(entry, durationSeconds);
+        return;
+      }
+      case IngestEntryName.AGENT_SESSION: {
+        this.recordAgentSession(entry);
+        return;
+      }
+      case IngestEntryName.AGENT_TURN: {
+        this.recordAgentTurn(entry, durationSeconds);
         return;
       }
       default: {
@@ -113,4 +121,55 @@ export class TelemetryController {
       [AttributeKey.INDEXEDDB_STORE]: entry.detail?.store ?? 'unknown',
     });
   }
+
+  private recordAgentSession(entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_SESSION }>): void {
+    const { agentId, placement, outcome } = entry.detail;
+    this.metrics.agentSessions.add(1, {
+      [AttributeKey.AGENT_ID]: recordedAgentId(agentId),
+      [AttributeKey.AGENT_PLACEMENT]: placement,
+      [AttributeKey.AGENT_OUTCOME]: outcome,
+    });
+  }
+
+  private recordAgentTurn(
+    entry: Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_TURN }>,
+    durationSeconds: number,
+  ): void {
+    const { placement, outcome, errorCode, timeToFirstUpdate, toolCalls, tokens } = entry.detail;
+    const agent = { [AttributeKey.AGENT_ID]: recordedAgentId(entry.detail.agentId) };
+    const placed = { ...agent, [AttributeKey.AGENT_PLACEMENT]: placement };
+    const turn = { ...placed, [AttributeKey.AGENT_OUTCOME]: outcome };
+    this.metrics.agentTurns.add(1, turn);
+    this.metrics.agentTurnDuration.record(durationSeconds, turn);
+    if (timeToFirstUpdate !== undefined) {
+      this.metrics.agentTimeToFirstUpdate.record(timeToFirstUpdate / 1000, placed);
+    }
+    for (const call of toolCalls ?? []) {
+      this.metrics.agentToolCalls.add(call.count, {
+        ...agent,
+        [AttributeKey.AGENT_TOOL_KIND]: call.kind,
+        [AttributeKey.AGENT_TOOL_STATUS]: call.status,
+      });
+    }
+    if (tokens !== undefined) {
+      const byType = [
+        ['input', tokens.input],
+        ['output', tokens.output],
+        ['cache_read', tokens.cacheRead],
+        ['cache_write', tokens.cacheWrite],
+      ] as const;
+      for (const [tokenType, count] of byType) {
+        /* A type the agent never uses (Codex reports no cache writes) mints no series. */
+        if (count > 0) {
+          this.metrics.agentTokens.add(count, { ...agent, [AttributeKey.AGENT_TOKEN_TYPE]: tokenType });
+        }
+      }
+    }
+    if (errorCode !== undefined && (outcome === 'error' || outcome === 'refused')) {
+      this.metrics.agentErrors.add(1, { ...agent, [AttributeKey.AGENT_ERROR_CODE]: errorCode });
+    }
+  }
 }
+
+/** The ingest validates an id's shape; only known agents are recorded as themselves (bounded cardinality). */
+const recordedAgentId = (agentId: string): string => (knownAgentIds.has(agentId) ? agentId : 'other');

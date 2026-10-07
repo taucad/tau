@@ -3,45 +3,20 @@ import type { InstrumentType, MetricDefinition } from '#define-metric.js';
 import { TauMetrics } from '#registry.js';
 
 /**
- * Convert an OTEL metric name + instrument type + unit to its Prometheus-compatible name.
+ * Convert an OTEL metric name + instrument type to the name Tau's Prometheus exporter emits.
  *
- * Follows the OTEL-to-Prometheus mapping specification.
+ * Mirrors `@opentelemetry/exporter-prometheus`'s serializer, not the OTEL compatibility spec: invalid
+ * characters (the dots) become `_`, repeated `_` collapse, and monotonic counters gain `_total`. The
+ * exporter appends no unit suffix, so a histogram in seconds stays `<name>_bucket`, not `<name>_seconds_bucket`.
  *
  * @param name - The OTEL metric name (dot-delimited)
  * @param type - The OTEL instrument type
- * @param unit - The OTEL unit string (UCUM format)
- * @returns The Prometheus-compatible metric name
+ * @returns The Prometheus metric name (histograms add `_bucket`, `_sum` and `_count` per series)
  * @public
- * @see https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/compatibility/prometheus_and_openmetrics.md
  */
-export const toPrometheusName = (name: string, type: InstrumentType, unit: string): string => {
-  let result = name.replaceAll('.', '_');
-
-  const normalizedUnit = normalizeUnit(unit);
-  if (normalizedUnit && !result.endsWith(`_${normalizedUnit}`)) {
-    result = `${result}_${normalizedUnit}`;
-  }
-
-  if (type === 'counter') {
-    result = `${result}_total`;
-  }
-
-  return result;
-};
-
-const normalizeUnit = (unit: string): string => {
-  if (!unit || unit.startsWith('{')) {
-    return '';
-  }
-
-  const unitMap: Record<string, string> = {
-    s: 'seconds',
-    ms: 'milliseconds',
-    By: 'bytes',
-    '1': 'ratio',
-  };
-
-  return unitMap[unit] ?? unit;
+export const toPrometheusName = (name: string, type: InstrumentType): string => {
+  const result = name.replaceAll(/[^\w:]/gu, '_').replaceAll(/_{2,}/gu, '_');
+  return type === 'counter' && !result.endsWith('_total') ? `${result}_total` : result;
 };
 
 /**
@@ -49,7 +24,7 @@ const normalizeUnit = (unit: string): string => {
  * @public
  */
 export const PrometheusNames = Object.fromEntries(
-  Object.entries(TauMetrics).map(([key, metric]) => [key, toPrometheusName(metric.name, metric.type, metric.unit)]),
+  Object.entries(TauMetrics).map(([key, metric]) => [key, toPrometheusName(metric.name, metric.type)]),
 ) as { readonly [K in keyof typeof TauMetrics]: string };
 
 /**
@@ -59,5 +34,4 @@ export const PrometheusNames = Object.fromEntries(
  * @returns The Prometheus-compatible metric name
  * @public
  */
-export const prometheusNameOf = (metric: MetricDefinition): string =>
-  toPrometheusName(metric.name, metric.type, metric.unit);
+export const prometheusNameOf = (metric: MetricDefinition): string => toPrometheusName(metric.name, metric.type);

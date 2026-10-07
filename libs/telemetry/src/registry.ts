@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- OTEL attribute names use dot-notation */
 import { z } from 'zod';
 import { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from '#define-metric.js';
+import { agentPlacements, agentToolKinds } from '#ingest.js';
 
 /**
  * Canonical metric registry for Tau.
@@ -469,6 +470,31 @@ export const TauMetrics = {
 
   // --- Client-reported (ingested via TelemetryController) ---
 
+  // Object storage (R2 in the cloud, MinIO locally), measured at the API's one S3 client
+  storageOperationDuration: defineHistogram({
+    name: 'tau.storage.operation.duration',
+    unit: 's',
+    description: 'Object storage request time by S3 operation, bucket tier and outcome',
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    attributes: z.object({
+      'tau.storage.operation': z.string().optional(),
+      'tau.storage.tier': z.enum(['public', 'private', 'account']).optional(),
+      outcome: z.enum(['ok', 'error']).optional(),
+      'error.type': z.string().optional(),
+    }),
+  }),
+
+  storageTransferBytes: defineCounter({
+    name: 'tau.storage.transferred_bytes',
+    unit: 'By',
+    description: 'Object storage payload bytes moved by the API, by direction',
+    attributes: z.object({
+      'tau.storage.operation': z.string().optional(),
+      'tau.storage.tier': z.enum(['public', 'private', 'account']).optional(),
+      direction: z.enum(['upload', 'download']).optional(),
+    }),
+  }),
+
   kernelExecutionDuration: defineHistogram({
     name: 'kernel.execution.duration',
     unit: 's',
@@ -563,40 +589,6 @@ export const TauMetrics = {
     }),
   }),
 
-  billingReservationFailures: defineCounter({
-    name: 'tau.billing.credit_reservation_failures',
-    unit: '{failure}',
-    description: 'Pre-flight credit reservations rejected for insufficient balance',
-    attributes: z.object({
-      'gen_ai.request.model': z.string().optional(),
-    }),
-  }),
-
-  billingCreditCommitted: defineCounter({
-    name: 'tau.billing.credit_committed_microusd',
-    unit: 'microusd',
-    description: 'User-facing charged cost committed to the credit ledger',
-    attributes: z.object({
-      'tau.billing.category': z.string().optional(),
-    }),
-  }),
-
-  billingCommitFailures: defineCounter({
-    name: 'tau.billing.credit_commit_failures',
-    unit: '{failure}',
-    description: 'Post-response ledger commit/release failures (floor-swept later)',
-    attributes: z.object({
-      'tau.billing.category': z.string().optional(),
-    }),
-  }),
-
-  billingReservationSweeps: defineCounter({
-    name: 'tau.billing.reservation_sweeps',
-    unit: '{reservation}',
-    description: 'Expired credit reservations settled at their input floor by the sweeper',
-    attributes: z.object({}),
-  }),
-
   billingLedgerDrift: defineGauge({
     name: 'tau.billing.ledger_drift',
     unit: 'microusd',
@@ -618,20 +610,6 @@ export const TauMetrics = {
     description:
       'Open or attention financial cases by kind after each hourly reconciliation (alert on unfulfilled_purchase_obligation > 0)',
     attributes: z.object({ kind: z.string() }),
-  }),
-
-  billingNegativeBalanceAccounts: defineGauge({
-    name: 'tau.billing.negative_balance_accounts',
-    unit: '{account}',
-    description: 'Accounts currently in debt (spend blocked, Q37)',
-    attributes: z.object({}),
-  }),
-
-  billingAccountsFlagged: defineCounter({
-    name: 'tau.billing.accounts_flagged',
-    unit: '{account}',
-    description: 'Accounts left negative by a refund clawback of already-spent credits (Q37 dispute-abuse signal)',
-    attributes: z.object({}),
   }),
 
   billingFundedOperationRecoveries: defineCounter({
@@ -734,6 +712,85 @@ export const TauMetrics = {
     attributes: z.object({
       'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
       'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
+    }),
+  }),
+
+  // --- Client-reported: agent usage for every agent (Tau, Claude Code, Codex over ACP) — W36-C ---
+  // Each key maps to the Prometheus label W36's dashboards query (`agent.id` → `agent_id`); see `AttributeKey`.
+
+  agentSessions: defineCounter({
+    name: 'tau.agent.sessions',
+    unit: '{session}',
+    description: 'Agent sessions a client started, ended or was refused, by agent and placement (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+      outcome: z.enum(['started', 'ended', 'refused']),
+    }),
+  }),
+
+  agentTurns: defineCounter({
+    name: 'tau.agent.turns',
+    unit: '{turn}',
+    description: 'Settled agent turns by agent, placement and outcome (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+      outcome: z.enum(['completed', 'cancelled', 'error', 'refused']),
+    }),
+  }),
+
+  agentTurnDuration: defineHistogram({
+    name: 'tau.agent.turn.duration',
+    unit: 's',
+    description: 'Agent turn wall time from admission to its terminal row (reported by client)',
+    buckets: [1, 2.5, 5, 10, 20, 30, 60, 120, 300, 600, 1800, 3600],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+      outcome: z.enum(['completed', 'cancelled', 'error', 'refused']),
+    }),
+  }),
+
+  agentTimeToFirstUpdate: defineHistogram({
+    name: 'tau.agent.time_to_first_update',
+    unit: 's',
+    description: 'Agent turn admission to its first content update (reported by client)',
+    buckets: [0.25, 0.5, 1, 2, 3, 5, 10, 20, 30, 60, 120],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+    }),
+  }),
+
+  agentToolCalls: defineCounter({
+    name: 'tau.agent.tool_calls',
+    unit: '{call}',
+    description: 'Agent tool calls by ACP tool kind and terminal status (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'tool.kind': z.enum(agentToolKinds),
+      status: z.enum(['completed', 'failed']),
+    }),
+  }),
+
+  agentTokens: defineCounter({
+    name: 'tau.agent.tokens',
+    unit: '{token}',
+    description: 'Tokens an agent reported for its turns; absent when the agent reports no usage (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'token.type': z.enum(['input', 'output', 'cache_read', 'cache_write']),
+    }),
+  }),
+
+  agentErrors: defineCounter({
+    name: 'tau.agent.errors',
+    unit: '{error}',
+    description: 'Agent refusals and failed turns by bounded error code (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'error.code': z.string(),
     }),
   }),
 } as const;

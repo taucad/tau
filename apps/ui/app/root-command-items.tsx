@@ -23,7 +23,6 @@ export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }):
         group: 'Projects',
         icon: <MessageCircle />,
         link: '/',
-        shortcut: '⌃N',
       },
       {
         id: 'new-project-from-code',
@@ -31,6 +30,7 @@ export function RootCommandPaletteItems({ match }: { readonly match: UIMatch }):
         group: 'Projects',
         icon: <Code2 />,
         link: '/projects/new',
+        shortcut: '⌃N',
       },
       {
         id: 'all-projects',

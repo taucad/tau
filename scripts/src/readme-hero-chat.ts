@@ -45,6 +45,7 @@ import {
   useSkillOutputSchema,
 } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat';
+import { toolName } from '@taucad/chat/constants';
 import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
 import type { ZodType } from 'zod';
 
@@ -395,15 +396,23 @@ const steps: readonly ScriptedStep[] = [
 // ---------------------------------------------------------------------------
 
 const contracts: Record<string, { readonly input: ZodType; readonly output: ZodType; readonly description: string }> = {
-  use_skill: { input: useSkillInputSchema, output: useSkillOutputSchema, description: 'Activate a skill.' },
-  create_file: { input: createFileInputSchema, output: createFileOutputSchema, description: 'Create a file.' },
-  edit_file: { input: editFileInputSchema, output: editFileOutputSchema, description: 'Edit a file.' },
-  evaluate_model: {
+  [toolName.useSkill]: { input: useSkillInputSchema, output: useSkillOutputSchema, description: 'Activate a skill.' },
+  [toolName.createFile]: {
+    input: createFileInputSchema,
+    output: createFileOutputSchema,
+    description: 'Create a file.',
+  },
+  [toolName.editFile]: { input: editFileInputSchema, output: editFileOutputSchema, description: 'Edit a file.' },
+  [toolName.evaluateModel]: {
     input: evaluateModelInputSchema,
     output: evaluateModelOutputSchema,
     description: 'Evaluate a CAD source.',
   },
-  test_model: { input: testModelInputSchema, output: testModelOutputSchema, description: 'Run GeoSpec tests.' },
+  [toolName.testModel]: {
+    input: testModelInputSchema,
+    output: testModelOutputSchema,
+    description: 'Run GeoSpec tests.',
+  },
   screenshot: { input: screenshotInputSchema, output: screenshotOutputSchema, description: 'Capture the model.' },
 };
 

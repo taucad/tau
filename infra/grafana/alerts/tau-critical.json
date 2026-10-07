@@ -182,7 +182,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum by (gen_ai_provider_name) (increase(gen_ai_client_operation_duration_count{service_name=\"tau-api\",error_type=\"upstream_auth\"}[5m])) > 0",
+            "expr": "sum by (app, gen_ai_provider_name) (increase(gen_ai_client_operation_duration_count{service_name=\"tau-api\",error_type=\"upstream_auth\"}[5m])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_auth"
@@ -194,7 +194,7 @@
       "for": "0s",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/playbooks/supplier-outage.md",
-        "summary": "A supplier answered a funded call with 401/403 (F-11). The key is Tau's, so every funded call to that supplier fails as PROVIDER_UNAVAILABLE until the key is replaced. A new process fires from its second rejection: increase() cannot see a series' first sample. Same event as tau_billing_provider_account_refusals_total{reason=\"credential_rejected\"}."
+        "summary": "A supplier answered a funded call with 401/403 (F-11). The key is Tau's, so every funded call to that supplier fails as PROVIDER_UNAVAILABLE until the key is replaced. A new process fires from its second rejection: increase() cannot see a series' first sample. Grouped by Fly `app`, so staging (tau-api-staging) and prod (tau-api) fire separately. Same event as tau_billing_provider_account_refusals_total{reason=\"credential_rejected\"}."
       },
       "labels": {
         "severity": "critical",
@@ -216,7 +216,7 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum by (providerId) (increase(tau_billing_provider_account_refusals_total{service_name=\"tau-api\",reason!=\"credential_rejected\"}[5m])) > 0",
+            "expr": "sum by (app, providerId) (increase(tau_billing_provider_account_refusals_total{service_name=\"tau-api\",reason!=\"credential_rejected\"}[5m])) > 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "supplier_credit"

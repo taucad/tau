@@ -1,5 +1,5 @@
 import { PackagePlus } from 'lucide-react';
-import { NavLink, useNavigate } from 'react-router';
+import { NavLink, useMatch, useNavigate } from 'react-router';
 import { SidebarGroup, SidebarMenuButton } from '#components/ui/sidebar.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
@@ -7,13 +7,15 @@ import { Loader } from '#components/ui/loader.js';
 
 export function NavChat(): React.JSX.Element {
   const navigate = useNavigate();
+  const isMatch = useMatch('/projects/new');
   const { formattedKeyCombination } = useKeybinding(
     {
       key: 'n',
       ctrlKey: true,
     },
     () => {
-      void navigate('/projects/new');
+      // Already there: replace, so repeated presses do not stack history entries.
+      void navigate('/projects/new', { replace: Boolean(isMatch) });
     },
   );
   return (

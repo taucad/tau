@@ -157,9 +157,8 @@ export class BillingAccountClosureService {
         // Reached only by a purchase row the service can no longer read (a malformed offer snapshot) or a binding that
         // vanished meanwhile; a purchase settled or cancelled in the window still projects. Logged to keep the signal.
         this.#logger.warn(
-          `Closure refused for pending purchase ${error.purchaseId} without its projection: ${
-            projectionError instanceof Error ? projectionError.message : String(projectionError)
-          }`,
+          { event: 'billing.closure_projection_failed', purchaseId: error.purchaseId, err: projectionError },
+          'Closure refusal kept its code without the pending payment projection',
         );
       }
       throw new ConflictException({ code: 'payment_action_pending', ...(action === undefined ? {} : { action }) });

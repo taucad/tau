@@ -16,7 +16,7 @@ import { readdir, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { createTauAgentHost, parseEventLog, reduceEventLog } from '../../packages/agent-host/src/index.ts';
+import { createTauAgentHost, parseEventLog, reduceEventLog } from '@taucad/agent-host';
 import type {
   HostToolDefinition,
   JsonObject,
@@ -27,34 +27,31 @@ import type {
   ToolRegistry,
   TurnPlacementFact,
   TurnPlacementPort,
-} from '../../packages/agent-host/src/index.ts';
-import { createNodeEventLog } from '../../packages/agent-host/src/node.ts';
-import { serializeChatRecord } from '../../libs/chat/src/schemas/chat-record.schema.ts';
-import { toProviderToolJsonSchema } from '../../libs/chat/src/schemas/provider-tool-schemas.ts';
+} from '@taucad/agent-host';
+import { createNodeEventLog } from '@taucad/agent-host/node';
 import {
   createFileInputSchema,
   createFileOutputSchema,
-} from '../../libs/chat/src/schemas/tools/create-file.tool.schema.ts';
-import { editFileInputSchema, editFileOutputSchema } from '../../libs/chat/src/schemas/tools/edit-file.tool.schema.ts';
-import {
+  editFileInputSchema,
+  editFileOutputSchema,
   evaluateModelInputSchema,
   evaluateModelOutputSchema,
-} from '../../libs/chat/src/schemas/tools/evaluate-model.tool.schema.ts';
-import {
   screenshotInputSchema,
   screenshotOutputSchema,
-} from '../../libs/chat/src/schemas/tools/screenshot.tool.schema.ts';
-import {
+  serializeChatRecord,
   testModelInputSchema,
   testModelOutputSchema,
-} from '../../libs/chat/src/schemas/tools/test-model.tool.schema.ts';
-import { useSkillInputSchema, useSkillOutputSchema } from '../../libs/chat/src/schemas/tools/use-skill.tool.schema.ts';
+  useSkillInputSchema,
+  useSkillOutputSchema,
+} from '@taucad/chat';
+import type { ChatRecord } from '@taucad/chat';
+import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
 import type { ZodType } from 'zod';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../..');
-const exampleDir = join(repoRoot, 'libs/tau-examples/src/kernels/replicad/planetary-gear-system');
-const skillDir = join(repoRoot, '.agents/skills/brep-design');
+const exampleDirectory = join(repoRoot, 'libs/tau-examples/src/kernels/replicad/planetary-gear-system');
+const skillDirectory = join(repoRoot, '.agents/skills/brep-design');
 
 const { values } = parseArgs({
   options: {
@@ -70,7 +67,7 @@ if (values.project === undefined) {
   throw new Error('Pass --project <the project directory whose tau.json the chat belongs to>.');
 }
 
-const projectDir = resolve(values.project);
+const projectDirectory = resolve(values.project);
 const chatId = values['chat-id'];
 const checkoutId = values.checkout;
 const modelId = 'anthropic-claude-fable-5.1';
@@ -79,13 +76,14 @@ const modelId = 'anthropic-claude-fable-5.1';
 // Sources: the example's own files, the skill the agent loads, the capture.
 // ---------------------------------------------------------------------------
 
-const mainTs = await readFile(join(exampleDir, 'main.ts'), 'utf8');
-const geospecTs = await readFile(join(exampleDir, 'main.geospec.ts'), 'utf8');
-const designMd = await readFile(join(exampleDir, 'DESIGN.md'), 'utf8');
-const manifest = JSON.parse(await readFile(join(projectDir, 'tau.json'), 'utf8')) as { id: string; name: string };
-const thumbnail = await readFile(join(exampleDir, 'thumbnail.webp'));
-const skillMd = await readFile(join(skillDir, 'SKILL.md'), 'utf8');
-const skillFiles = (await readdir(skillDir)).filter((name) => name !== 'SKILL.md').sort();
+const mainTs = await readFile(join(exampleDirectory, 'main.ts'), 'utf8');
+const geospecTs = await readFile(join(exampleDirectory, 'main.geospec.ts'), 'utf8');
+const designMd = await readFile(join(exampleDirectory, 'DESIGN.md'), 'utf8');
+const manifest = JSON.parse(await readFile(join(projectDirectory, 'tau.json'), 'utf8')) as { id: string; name: string };
+const thumbnail = await readFile(join(exampleDirectory, 'thumbnail.webp'));
+const skillMd = await readFile(join(skillDirectory, 'SKILL.md'), 'utf8');
+const skillEntries = await readdir(skillDirectory);
+const skillFiles = skillEntries.filter((name) => name !== 'SKILL.md').sort();
 const skillDescription =
   /^description:\s*>-\n((?:\s{2}.*\n)+)/mu
     .exec(skillMd)?.[1]
@@ -113,15 +111,16 @@ const dataUrl = `data:image/webp;base64,${thumbnail.toString('base64')}`;
 // The clock the run is recorded on: every row and reasoning timing reads it.
 // ---------------------------------------------------------------------------
 
-let nowMs = values.at === undefined ? Date.now() : Date.parse(values.at);
-if (Number.isNaN(nowMs)) {
-  throw new Error(`--at must be an ISO time, got ${values.at ?? ''}.`);
+/** Milliseconds since the epoch on the recorded clock. */
+let clock = values.at === undefined ? Date.now() : Date.parse(values.at);
+if (Number.isNaN(clock)) {
+  throw new TypeError(`--at must be an ISO time, got ${values.at ?? ''}.`);
 }
-const startedAtMs = nowMs;
+const startedAtMs = clock;
 const realNow = Date.now;
-Date.now = () => nowMs;
+Date.now = () => clock;
 const advance = (ms: number): void => {
-  nowMs += ms;
+  clock += ms;
 };
 
 // ---------------------------------------------------------------------------
@@ -143,7 +142,7 @@ const geospecRun = (failedOrdinals: readonly number[]) => {
       id: `${geospecFile}:${String(ordinal)}`,
       requirement: `${suite} > ${name}`,
       targetFile: geospecFile,
-      status: failedOrdinals.includes(ordinal) ? ('failed' as const) : ('passed' as const),
+      status: failedOrdinals.includes(ordinal) ? 'failed' : 'passed',
       ordinal,
     };
   });
@@ -163,7 +162,7 @@ const geospecRun = (failedOrdinals: readonly number[]) => {
       diagnostics: [
         {
           code: 'component-interference',
-          severity: 'error' as const,
+          severity: 'error',
           message: 'Planet Gear 2 intersects Internal Ring Gear (overlap 0.21 mm, tolerance 0.015 mm).',
           suggestion: 'Rotate the internal tooth profile by 2.5° before cutting the ring.',
           spatial: { center: [-24, 41.569, 7] as [number, number, number] },
@@ -175,7 +174,7 @@ const geospecRun = (failedOrdinals: readonly number[]) => {
     passes,
     passed: passes.length,
     total: tests.length,
-    runStatus: failures.length === 0 ? ('passed' as const) : ('failed' as const),
+    runStatus: failures.length === 0 ? 'passed' : 'failed',
     tests,
     accounting: {
       discovered: tests.length,
@@ -194,7 +193,7 @@ const geospecRun = (failedOrdinals: readonly number[]) => {
       cancelled: false,
       bailed: false,
     },
-    lineageStatus: 'complete' as const,
+    lineageStatus: 'complete',
   };
 };
 
@@ -213,13 +212,14 @@ type ScriptedCall = {
 
 type ScriptedStep = {
   readonly thinking?: string;
-  readonly thinkingMs?: number;
+  /** Milliseconds the reasoning runs on the recorded clock. */
+  readonly thinkingDuration?: number;
   readonly text?: string;
   readonly calls?: readonly ScriptedCall[];
   readonly usage: readonly [input: number, output: number];
 };
 
-const evaluated = { status: 'ready' as const, views: ['model'], exports: { stl: 'stl', step: 'step', glb: 'glb' } };
+const evaluated = { status: 'ready', views: ['model'], exports: { stl: 'stl', step: 'step', glb: 'glb' } };
 
 const steps: readonly ScriptedStep[] = [
   {
@@ -229,7 +229,7 @@ const steps: readonly ScriptedStep[] = [
       'Carrier: two relieved three-arm spiders on hardened stepped pins, SAE 660 bronze flanged bushings and thrust washers, ISO 4762 M5 socket screws. Keyed Ø16 input shaft with a retaining-screw bore, keyed Ø12 output bore in the front hub.',
       'Mechanism: sun drives; carrier follows at θs/4; planets at −3θs/4 relative to the carrier. Verify envelope, the 22 named parts, the planet pitch circle, interference at the nominal and an advanced pose, and exact millimetre BRep validity. Load the brep-design skill for the feature-tree and DFM checklist first.',
     ].join('\n\n'),
-    thinkingMs: 38_000,
+    thinkingDuration: 38_000,
     text: [
       '**Design brief — Planetary Gear System**',
       '',
@@ -257,7 +257,7 @@ const steps: readonly ScriptedStep[] = [
         ms: 800,
       },
     ],
-    usage: [18_400, 1_310],
+    usage: [18_400, 1310],
   },
   {
     calls: [
@@ -273,7 +273,7 @@ const steps: readonly ScriptedStep[] = [
             modifiedContent: draftMainTs,
           },
         },
-        ms: 1_200,
+        ms: 1200,
       },
       {
         id: 'call_create_geospec',
@@ -290,7 +290,7 @@ const steps: readonly ScriptedStep[] = [
         ms: 600,
       },
     ],
-    usage: [31_900, 9_840],
+    usage: [31_900, 9840],
   },
   {
     calls: [
@@ -319,7 +319,7 @@ const steps: readonly ScriptedStep[] = [
   {
     thinking:
       'One failure: Planet Gear 2 overlaps the ring by 0.21 mm at the as-built pose. The ring tooth spaces are cut at phase 0 while the planets sit at 7.5° − θs/2, so the planet teeth meet ring teeth instead of spaces. Half a ring tooth pitch is 360/72/2 = 2.5°: rotating the internal profile by 2.5° before the cut phases every mesh. The 0.10 mm space widening stays.',
-    thinkingMs: 6_000,
+    thinkingDuration: 6000,
     text: 'GeoSpec caught tooth contact between Planet Gear 2 and the ring at the as-built pose. Phased the ring tooth space by 2.5° so all three meshes engage clear, then re-rendered and re-ran the suite.',
     calls: [
       {
@@ -360,7 +360,7 @@ const steps: readonly ScriptedStep[] = [
         name: 'screenshot',
         input: { mode: 'single', targetFile: 'main.ts' },
         result: { images: [{ view: 'model', angle: 'isometric', dataUrl }] },
-        ms: 2_600,
+        ms: 2600,
       },
     ],
     usage: [46_200, 50],
@@ -382,7 +382,7 @@ const steps: readonly ScriptedStep[] = [
         ms: 500,
       },
     ],
-    usage: [48_000, 1_960],
+    usage: [48_000, 1960],
   },
   {
     text: 'All 10 requirements pass. `mechanism()` declares the joints, so the sun drives the carrier at $\\theta_c = \\theta_s/4$ and each planet at $-3\\theta_s/4$; the *Four sun turns* clip runs one carrier revolution in 8 s. Module, face width and input angle are live parameters, and the brief is in DESIGN.md.',
@@ -457,7 +457,7 @@ class ScriptedTransport implements ModelTransport {
     if (step.thinking !== undefined) {
       yield { type: 'thinking-start', contentIndex };
       yield { type: 'thinking-delta', contentIndex, text: step.thinking };
-      advance(step.thinkingMs ?? 3_000);
+      advance(step.thinkingDuration ?? 3000);
       yield { type: 'thinking-end', contentIndex, content: step.thinking };
       contentIndex++;
     }
@@ -511,7 +511,7 @@ const placement: TurnPlacementPort = {
     return {
       requestId,
       status: 'applied',
-      placement: { checkoutId, mode: 'direct', root: projectDir, tools: registry },
+      placement: { checkoutId, mode: 'direct', root: projectDirectory, tools: registry },
     };
   },
   complete: async ({ requestId, key }) => {
@@ -540,10 +540,10 @@ const placement: TurnPlacementPort = {
   async *settlements({ signal }) {
     let next = 0;
     const nextFact = async (): Promise<void> =>
-      new Promise<void>((resolveWait) => {
-        wake = resolveWait;
+      new Promise<void>((resolve) => {
+        wake = resolve;
         signal.addEventListener('abort', () => {
-          resolveWait();
+          resolve();
         });
       });
     while (!signal.aborted) {
@@ -565,9 +565,9 @@ const placement: TurnPlacementPort = {
 // Run the turn into `.tau/chats/<chatId>/events.jsonl`, then write chat.json.
 // ---------------------------------------------------------------------------
 
-const chatDir = join(projectDir, '.tau', 'chats', chatId);
-await mkdir(chatDir, { recursive: true });
-const logPath = join(chatDir, 'events.jsonl');
+const chatDirectory = join(projectDirectory, '.tau', 'chats', chatId);
+await mkdir(chatDirectory, { recursive: true });
+const logPath = join(chatDirectory, 'events.jsonl');
 
 let messageSerial = 0;
 let epochSerial = 0;
@@ -579,7 +579,7 @@ const host = createTauAgentHost({
   openEventLog: async () => createNodeEventLog({ filePath: logPath, access: 'write' }),
   createId: () => `msg_hero_${String(++messageSerial).padStart(3, '0')}`,
   createLeaderEpoch: () => `epoch_hero_${String(++epochSerial)}`,
-  now: () => new Date(nowMs),
+  now: () => new Date(clock),
   placement,
 });
 
@@ -589,7 +589,7 @@ try {
     chatId,
     runId: 'run_hero_1',
     trigger: 'submit',
-    message: { id: 'msg_hero_user_1', role: 'user', content: prompt, metadata: { timestamp: nowMs } },
+    message: { id: 'msg_hero_user_1', role: 'user', content: prompt, metadata: { timestamp: clock } },
     config: {
       systemPrompt: '',
       toolChoice: 'auto',
@@ -601,26 +601,26 @@ try {
   Date.now = realNow;
 }
 
-const endedAtMs = nowMs;
-const record = {
+const endedAtMs = clock;
+const record: ChatRecord = {
   id: chatId,
   resourceId: projectId,
   name: 'Initial design',
   createdAt: startedAtMs,
   updatedAt: endedAtMs,
   recencyAt: endedAtMs,
-  activeExecution: { kind: 'tau' as const, model: modelId, effort: 'xhigh' as const },
-  activeKernel: 'replicad' as const,
+  activeExecution: { kind: 'tau', model: modelId, effort: 'xhigh' },
+  activeKernel: 'replicad',
   ...(checkoutId === 'checkout-live' ? {} : { checkoutId }),
 };
-await writeFile(join(chatDir, 'chat.json'), serializeChatRecord(record));
+await writeFile(join(chatDirectory, 'chat.json'), serializeChatRecord(record));
 
 // ---------------------------------------------------------------------------
 // Report what the log holds, folded the way a reader folds it.
 // ---------------------------------------------------------------------------
 
-const bytes = await readFile(logPath);
-const events = parseEventLog(bytes);
+const text = await readFile(logPath, 'utf8');
+const events = parseEventLog(text);
 const messages = reduceEventLog(events);
 const describe = (content: JsonValue): string => {
   if (typeof content === 'string') {

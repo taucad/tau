@@ -1,13 +1,15 @@
 import { join } from 'node:path';
 import process from 'node:process';
 import { chromium } from 'playwright';
-import type { Browser, BrowserContext, Page } from 'playwright';
+import type { Browser, BrowserContext, Page as DriverPage } from 'playwright';
 import { z } from 'zod';
 import type { Account } from '#support/account.js';
 import { apiUrl } from '#support/api.js';
 import { runDirectory } from '#support/results.js';
 
 export type Browsing = { readonly browser: Browser; readonly context: BrowserContext; readonly page: Page };
+/** The driver's page handle, named here so this module stays the harness's only direct driver import. */
+export type Page = DriverPage;
 type Cookie = Parameters<BrowserContext['addCookies']>[0][number];
 
 /** Sonner drops a toast after a few seconds; this keeps the text of every toast the page showed. */

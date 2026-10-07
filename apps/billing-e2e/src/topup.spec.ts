@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { Page } from 'playwright';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { formatCreditAtoms, wireBalanceExplanationSchema, wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
@@ -17,7 +16,7 @@ import {
   waitForToast,
   withBrowser,
 } from '#support/checkout.js';
-import type { Browsing } from '#support/checkout.js';
+import type { Browsing, Page } from '#support/checkout.js';
 import { matrixRow } from '#support/results.js';
 import type { Verdict } from '#support/results.js';
 

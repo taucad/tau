@@ -131,6 +131,8 @@ export const TauMetrics = {
       'gen_ai.response.model': z.string().optional(),
       'gen_ai.token.type': z.string().optional(),
       'gen_ai.provider.name': z.string().optional(),
+      'tau.surface': z.string().optional(),
+      'tau.activity': z.string().optional(),
     }),
   }),
 
@@ -152,6 +154,7 @@ export const TauMetrics = {
       'gen_ai.response.model': z.string().optional(),
       'gen_ai.provider.name': z.string().optional(),
       'error.type': z.string().optional(),
+      'tau.surface': z.string().optional(),
     }),
   }),
 
@@ -164,17 +167,20 @@ export const TauMetrics = {
       'gen_ai.operation.name': z.string().optional(),
       'gen_ai.request.model': z.string().optional(),
       'gen_ai.provider.name': z.string().optional(),
+      'tau.surface': z.string().optional(),
     }),
   }),
 
   genAiCost: defineCounter({
     name: 'gen_ai.client.cost',
     unit: 'USD',
-    description: 'Estimated cost per LLM call',
+    description: 'Customer-charged USD per funded LLM call (the settled credit charge, not supplier cost)',
     attributes: z.object({
       'gen_ai.operation.name': z.string().optional(),
       'gen_ai.request.model': z.string().optional(),
       'gen_ai.provider.name': z.string().optional(),
+      'tau.surface': z.string().optional(),
+      'tau.activity': z.string().optional(),
     }),
   }),
 

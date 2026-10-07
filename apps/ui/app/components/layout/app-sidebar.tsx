@@ -51,7 +51,8 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           'flex flex-row items-center gap-1',
           isMobile && 'p-1',
           !isMobile && !desktopTarget && 'h-9 p-0',
-          desktopTarget && 'p-1 pt-9',
+          !isMobile && desktopTarget && 'p-1 pt-9',
+          isMobile && desktopTarget && 'h-9 pl-(--desktop-titlebar-inset) [&_:is(a,button)]:[app-region:no-drag]',
         )}
       >
         {isMobile || desktopTarget ? (

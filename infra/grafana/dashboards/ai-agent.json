@@ -69,7 +69,8 @@
       }
     },
     {
-      "title": "Estimated Cost ($/hr)",
+      "title": "User-Charged LLM Spend (USD/h)",
+      "description": "User-charged: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
       "type": "stat",
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
       "targets": [

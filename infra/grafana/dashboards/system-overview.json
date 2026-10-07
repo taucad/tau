@@ -116,13 +116,8 @@
       "description": "Active WebSocket connections",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
-      "targets": [{ "expr": "ws_connections_active{service_name=~\"$service\"}" }],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "thresholds": { "steps": [{ "value": 0, "color": "blue" }] }
-        }
-      }
+      "targets": [{ "expr": "sum(ws_connections_active{service_name=~\"$service\"}) or vector(0)" }],
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "steps": [{ "value": 0, "color": "blue" }] } } }
     },
     {
       "title": "Redis",
@@ -143,8 +138,8 @@
       }
     },
     {
-      "title": "AI Cost",
-      "description": "Estimated LLM spend in the selected time range",
+      "title": "User-Charged LLM Spend",
+      "description": "User-charged LLM spend in the selected time range: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
       "targets": [
@@ -200,19 +195,17 @@
       }
     },
     {
-      "title": "RPC Call Rate",
-      "description": "Socket.IO RPC calls per second",
+      "title": "WebSocket Frame Rate",
+      "description": "Frames per second across the hosts and kernels gateways, both directions",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 8, "x": 8, "y": 6 },
       "targets": [
         {
-          "expr": "sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[5m])) or vector(0)",
-          "legendFormat": "calls/s"
+          "expr": "sum(rate(ws_message_size_count{service_name=~\"$service\"}[5m])) or vector(0)",
+          "legendFormat": "frames/s"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2 } }
-      }
+      "fieldConfig": { "defaults": { "unit": "cps", "custom": { "fillOpacity": 15, "lineWidth": 2 } } }
     },
     {
       "title": "Active Connections",
@@ -221,17 +214,12 @@
       "gridPos": { "h": 7, "w": 8, "x": 16, "y": 6 },
       "targets": [
         {
-          "expr": "ws_connections_active{service_name=~\"$service\"}",
-          "legendFormat": "WebSocket"
+          "expr": "sum by (ws_gateway) (ws_connections_active{service_name=~\"$service\"})",
+          "legendFormat": "WebSocket {{ws_gateway}}"
         },
-        {
-          "expr": "sse_connections_active{service_name=~\"$service\"}",
-          "legendFormat": "SSE"
-        }
+        { "expr": "sse_connections_active{service_name=~\"$service\"}", "legendFormat": "SSE" }
       ],
-      "fieldConfig": {
-        "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2 } }
-      }
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2 } } }
     },
 
     {
@@ -254,14 +242,14 @@
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
     },
     {
-      "title": "RPC p95",
-      "description": "Socket.IO RPC call latency (95th percentile)",
+      "title": "Tau Sync p95",
+      "description": "Hosted git and project sync request latency (95th percentile)",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 6, "x": 6, "y": 14 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(rpc_server_call_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
-          "legendFormat": "RPC p95"
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_bucket{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[5m])))",
+          "legendFormat": "Sync p95"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
@@ -299,7 +287,7 @@
     },
     {
       "title": "Error Rates by Subsystem",
-      "description": "Errors/sec across HTTP, RPC, and kernel execution",
+      "description": "Errors/sec across HTTP, WebSocket and kernel execution",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 12, "x": 0, "y": 22 },
       "targets": [
@@ -308,17 +296,15 @@
           "legendFormat": "HTTP 5xx"
         },
         {
-          "expr": "sum(rate(rpc_server_call_duration_count{service_name=~\"$service\",rpc_status=\"error\"}[5m])) or vector(0)",
-          "legendFormat": "RPC errors"
+          "expr": "sum(rate(ws_disconnections_total{service_name=~\"$service\",ws_close_reason=~\"error|other\"}[5m])) or vector(0)",
+          "legendFormat": "WS abnormal closes"
         },
         {
           "expr": "sum(rate(kernel_executions_total{service_name=~\"$service\",kernel_status=\"error\"}[5m])) or vector(0)",
           "legendFormat": "Kernel errors"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2, "drawStyle": "bars" } }
-      }
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2, "drawStyle": "bars" } } }
     },
     {
       "title": "WS Disconnections",
@@ -327,13 +313,11 @@
       "gridPos": { "h": 7, "w": 12, "x": 12, "y": 22 },
       "targets": [
         {
-          "expr": "sum(rate(ws_disconnections_total{service_name=~\"$service\",ws_close_reason!=\"\"}[5m])) by (ws_close_reason)",
-          "legendFormat": "{{ws_close_reason}}"
+          "expr": "sum by (ws_gateway, ws_close_reason) (rate(ws_disconnections_total{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{ws_gateway}} {{ws_close_reason}}"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2 } }
-      }
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2 } } }
     },
 
     {

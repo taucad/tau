@@ -55,12 +55,12 @@
       }
     },
     {
-      "title": "RPC Success Rate (24h)",
+      "title": "Tau Sync Availability (24h)",
       "type": "gauge",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
       "targets": [
         {
-          "expr": "(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\",rpc_status=\"ok\"}[24h])) / clamp_min(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[24h])), 1e-10)) * 100"
+          "expr": "(1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10))) * 100"
         }
       ],
       "fieldConfig": {
@@ -110,8 +110,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "targets": [
         {
-          "expr": "ws_connections_active{service_name=~\"$service\"}",
-          "legendFormat": "WebSocket"
+          "expr": "sum by (ws_gateway) (ws_connections_active{service_name=~\"$service\"})",
+          "legendFormat": "WebSocket {{ws_gateway}}"
         },
         {
           "expr": "sse_connections_active{service_name=~\"$service\"}",
@@ -120,7 +120,8 @@
       ]
     },
     {
-      "title": "Total LLM Cost (24h)",
+      "title": "User-Charged LLM Spend (24h)",
+      "description": "User-charged: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
       "type": "stat",
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
       "targets": [
@@ -175,12 +176,12 @@
       }
     },
     {
-      "title": "RPC Error Budget Remaining",
+      "title": "Tau Sync Error Budget Remaining",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
       "targets": [
         {
-          "expr": "1 - (sum(rate(rpc_server_call_duration_count{service_name=~\"$service\",rpc_status=\"error\"}[$__range])) / clamp_min(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[$__range])), 1e-10) / 0.001)",
+          "expr": "1 - ((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[$__range])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[$__range])), 1e-10)) / 0.001",
           "legendFormat": "Error Budget Remaining",
           "refId": "A"
         }
@@ -277,13 +278,13 @@
       }
     },
     {
-      "title": "RPC Burn Rate (6h)",
-      "description": "6-hour RPC error budget consumption rate.",
+      "title": "Tau Sync Burn Rate (6h)",
+      "description": "6h Tau Sync (hosted git and project sync) error budget consumption rate. >1 means burning faster than sustainable.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 18 },
       "targets": [
         {
-          "expr": "(sum(rate(rpc_server_call_duration_count{rpc_status=\"error\",service_name=~\"$service\"}[6h])) / clamp_min(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[6h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[6h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[6h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],
@@ -302,13 +303,13 @@
       }
     },
     {
-      "title": "RPC Burn Rate (24h)",
-      "description": "24-hour RPC error budget consumption rate.",
+      "title": "Tau Sync Burn Rate (24h)",
+      "description": "24h Tau Sync (hosted git and project sync) error budget consumption rate. >1 means burning faster than sustainable.",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 18 },
       "targets": [
         {
-          "expr": "(sum(rate(rpc_server_call_duration_count{rpc_status=\"error\",service_name=~\"$service\"}[24h])) / clamp_min(sum(rate(rpc_server_call_duration_count{service_name=~\"$service\"}[24h])), 1e-10)) / 0.001",
+          "expr": "((sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\",http_response_status_code=~\"5..\"}[24h])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_route=~\"/v1/git/.*|/v1/projects/:projectId\"}[24h])), 1e-10)) / 0.001",
           "refId": "A"
         }
       ],

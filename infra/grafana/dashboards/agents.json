@@ -210,7 +210,8 @@
       "panels": []
     },
     {
-      "title": "LLM Cost by Surface (USD/h)",
+      "title": "User-Charged LLM Spend by Surface (USD/h)",
+      "description": "User-charged: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
       "type": "timeseries",
       "targets": [
         {

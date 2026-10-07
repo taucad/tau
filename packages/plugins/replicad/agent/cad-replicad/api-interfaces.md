@@ -1,10 +1,10 @@
 # replicad — Interfaces
 
-14 top-level symbols. Signatures are verbatim typescript.
+21 top-level symbols. Signatures are verbatim typescript.
 
 BooleanOperationOptions: export declare interface BooleanOperationOptions
 
-  optimisation: BooleanOptimisation
+  optimisation: "none" | "commonFace" | "sameFace"
 
 BSplineApproximationConfig: export declare interface BSplineApproximationConfig
 
@@ -106,6 +106,16 @@ FaceTriangulation: export declare interface FaceTriangulation
   trianglesIndexes: number[]
 
   verticesNormals: number[]
+
+FaceUVBounds: export declare interface FaceUVBounds
+
+  uMin: number
+
+  uMax: number
+
+  vMin: number
+
+  vMax: number
 
 // Sketchers allow the user to draw a two dimentional shape using segment of curve
 GenericSketcher: export declare interface GenericSketcher<ReturnType>
@@ -278,6 +288,12 @@ LoftConfig: export declare interface LoftConfig
 
   endPoint: Point
 
+MeshOptions: export declare interface MeshOptions
+
+  tolerance: number
+
+  angularTolerance: number
+
 MeshShapeMesh: export declare interface MeshShapeMesh
 
   vertices: number[]
@@ -289,6 +305,23 @@ MeshShapeMesh: export declare interface MeshShapeMesh
   vertProperties: number[]
 
   numProp: number
+
+PlaneFace: export declare interface PlaneFace
+
+  // PlaneFace.pointOnSurface (method)
+  pointOnSurface(u: number, v: number): Vector;
+
+  // PlaneFace.normalAt (method)
+  normalAt(point: Point): Vector;
+
+// Pieces grouped by their position relative to an oriented plane
+PlaneSplitResult: export declare interface PlaneSplitResult<T>
+
+  positive: T | null
+
+  negative: T | null
+
+  on: T | null
 
 Shape3DLike: export declare interface Shape3DLike<ShapeT, MeshT, OtherT = ShapeT, MeshOptionsT = any>
 
@@ -315,7 +348,7 @@ Shape3DLike: export declare interface Shape3DLike<ShapeT, MeshT, OtherT = ShapeT
   translateZ(distance: number): ShapeT;
 
   // Shape3DLike.rotate (method)
-  rotate(angle: number, position?: Point, direction?: Point): ShapeT;
+  rotate(angle: number, position?: Point, direction?: Direction): ShapeT;
 
   // Shape3DLike.scale (method)
   scale(scale: number, center?: Point): ShapeT;
@@ -327,6 +360,16 @@ Shape3DLike: export declare interface Shape3DLike<ShapeT, MeshT, OtherT = ShapeT
   mesh(options?: MeshOptionsT): MeshT;
 
   boundingBox: BoundingBox
+
+ShapeEdgeMesh: export declare interface ShapeEdgeMesh
+
+  lines: number[]
+
+  edgeGroups: {
+          start: number;
+          count: number;
+          edgeId: number;
+      }[]
 
 ShapeMesh: export declare interface ShapeMesh
 
@@ -369,3 +412,27 @@ SketchInterface: export declare interface SketchInterface
   // Remarks: You can also define a `startPoint` for the loft (that will be placed before this sketch) and an `endPoint` after the last one. You can also define if you want the loft to result in a ruled surface. Note that all sketches will be deleted by this operation
   // SketchInterface.loftWith (method)
   loftWith(otherSketches: this | this[], loftConfig: LoftConfig, returnShell?: boolean): Shape3D;
+
+STLExportOptions: export declare interface STLExportOptions extends MeshOptions
+
+  binary: boolean
+
+TopologyMap: export declare interface TopologyMap
+
+  vertex: TopoDS_Vertex
+
+  edge: TopoDS_Edge
+
+  wire: TopoDS_Wire
+
+  face: TopoDS_Face
+
+  shell: TopoDS_Shell
+
+  solid: TopoDS_Solid
+
+  solidCompound: TopoDS_CompSolid
+
+  compound: TopoDS_Compound
+
+  shape: TopoDS_Shape

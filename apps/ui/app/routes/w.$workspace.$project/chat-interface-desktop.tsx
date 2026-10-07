@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { DockviewApi } from 'dockview-react';
 import { LayoutPriority } from 'allotment';
 import { Allotment } from '#components/panes/allotment.js';
@@ -14,7 +15,6 @@ import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skele
 import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
 import { useSidebar } from '#components/ui/sidebar.js';
 import { useProject } from '#hooks/use-project.js';
-import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import {
   resolveCompactAuxiliary,
   useProjectWorkspace,
@@ -48,21 +48,44 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const { open: sidebarOpen } = useSidebar();
   const { setChatOpen, setWorkbenchOpen } = useProjectWorkspace();
   const containerRef = useRef<HTMLDivElement>(null);
-  const { width } = useResizeObserver({ ref: containerRef });
-  const [isClient, setIsClient] = useState(false);
+  const [isCompact, setIsCompact] = useState<boolean>();
+  const isClient = isCompact !== undefined;
   const [workbenchApi, setWorkbenchApi] = useState<DockviewApi>();
   const isEditorReady = useSelector(editorRef, (state) => state.matches('ready'));
   const desktopLayout = useSelector(editorRef, (state) => state.context.panelState.desktopLayout);
-  const isCompact = width !== undefined && width < compactWorkspaceWidth;
   const compactAuxiliary = isCompact ? resolveCompactAuxiliary(desktopLayout) : undefined;
   const chatVisible = desktopLayout.chatOpen && (!isCompact || compactAuxiliary === 'chat');
   const workbenchVisible = desktopLayout.workbenchOpen && (!isCompact || compactAuxiliary === 'workbench');
   const lanes = useMemo(() => ({ chat: chatVisible, workbench: workbenchVisible }), [chatVisible, workbenchVisible]);
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      setIsClient(true);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    // Resolve the initial lanes before mounting their layout engines. Pixel
+    // changes within the same mode must not rerender the workspace subtree.
+    let compact = container.getBoundingClientRect().width < compactWorkspaceWidth;
+    setIsCompact(compact);
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) {
+        return;
+      }
+      const nextCompact = entry.contentRect.width < compactWorkspaceWidth;
+      if (nextCompact === compact) {
+        return;
+      }
+      compact = nextCompact;
+      // ResizeObserver runs before paint; commit the lane change in that same
+      // delivery instead of letting concurrent React show an intermediate mode.
+      flushSync(() => {
+        setIsCompact(nextCompact);
+      });
     });
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+    };
   }, []);
 
   const persistWidths = useCallback(

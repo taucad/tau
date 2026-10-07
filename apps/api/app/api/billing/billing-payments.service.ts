@@ -20,6 +20,7 @@ import type { BillingPolicyService } from '#api/billing/billing-policy.service.j
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
 import type { QualifiedCashTaxCorrection } from '#api/billing/billing-tax.service.js';
 import {
+  activePurchaseStates,
   cashOccurredAt,
   checkoutExpiryEvidenceSchema,
   exactPaymentOfferTotals,
@@ -232,6 +233,9 @@ export type BillingRecoveryNoticeTransport = {
     readonly dedupeKey: string;
   }): Promise<{ readonly receipt: string }>;
 };
+
+/** Wire states with nothing left to recover; a repeated recover answers them without reading Stripe. */
+const terminalActionStates = new Set<WirePaymentAction['state']>(['fulfilled', 'completed', 'canceled', 'failed']);
 
 @Injectable()
 export class BillingPaymentsService {
@@ -497,16 +501,7 @@ export class BillingPaymentsService {
         .select({ id: billingPurchase.id })
         .from(billingPurchase)
         .where(
-          and(
-            eq(billingPurchase.accountId, owner.accountId),
-            or(
-              eq(billingPurchase.state, 'prepared'),
-              eq(billingPurchase.state, 'creating'),
-              eq(billingPurchase.state, 'pending'),
-              eq(billingPurchase.state, 'attention'),
-              eq(billingPurchase.state, 'paid_unfulfilled'),
-            ),
-          ),
+          and(eq(billingPurchase.accountId, owner.accountId), inArray(billingPurchase.state, activePurchaseStates)),
         )
         .limit(1);
       if (active[0] !== undefined) return;
@@ -952,6 +947,9 @@ export class BillingPaymentsService {
             eq(billingPurchase.id, actionId),
             eq(billingPurchase.accountId, owner.accountId),
             eq(billingPurchase.state, 'prepared'),
+            // An automatic reload purchase belongs to its worker: cancelled by hand it would stay immutable without a
+            // terminal outcome, holding the account's one pending slot (billing_purchase_automatic_pending) forever.
+            or(isNull(billingPurchase.purpose), ne(billingPurchase.purpose, 'automatic')),
           ),
         )
         .returning({ id: billingPurchase.id });
@@ -968,6 +966,32 @@ export class BillingPaymentsService {
   public async recoverAction(userId: string, actionId: string): Promise<WirePaymentAction> {
     this.assertCollectionEnabled();
     const owner = await this.resolveOwner(userId);
+    // A hosted Checkout settles from its own session, so a payment whose webhook never arrived is not stranded.
+    const [hosted] = await this.databaseService.database
+      .select()
+      .from(billingProviderLeg)
+      .where(
+        and(
+          eq(billingProviderLeg.accountId, owner.accountId),
+          or(eq(billingProviderLeg.purchaseId, actionId), eq(billingProviderLeg.subscriptionId, actionId)),
+          ne(billingProviderLeg.state, 'no_charge'),
+        ),
+      )
+      .orderBy(desc(billingProviderLeg.createdAt))
+      .limit(1);
+    if (
+      (hosted?.kind === 'checkout_payment' || hosted?.kind === 'checkout_subscription') &&
+      hosted.providerObjectId !== null
+    ) {
+      // A terminal action has nothing left to recover: answering it here keeps a repeated recover from reading
+      // Stripe and taking the provider leg's lease on every call.
+      const current = await this.getAction(userId, actionId);
+      if (terminalActionStates.has(current.state)) return current;
+      const session = await this.sourceStripe.checkout.sessions.retrieve(hosted.providerObjectId);
+      if (session.status === 'expired') await this.closeExpiredCheckout(hosted, session, 'canceled');
+      if (session.status === 'complete') await this.settleHostedCheckout(hosted, session);
+      return this.getAction(userId, actionId);
+    }
     const purchase = await this.ownedPurchase(owner.accountId, actionId);
     if (purchase.state !== 'attention') throw new ConflictException({ code: 'action_not_recoverable' });
     const legs = await this.databaseService.database
@@ -1545,30 +1569,7 @@ export class BillingPaymentsService {
             throw new ConflictException({ code: 'stripe_event_conflict' });
           return;
         }
-        await tx
-          .insert(billingStripeSource)
-          .values({
-            id: randomUUID(),
-            environment: this.config.environment,
-            stripeAccountId: this.config.stripeAccountId,
-            livemode: this.config.livemode,
-            sourceType: event.sourceType,
-            sourceId: event.sourceId,
-            nextAttemptAt: new Date(),
-          })
-          .onConflictDoNothing();
-        await tx
-          .update(billingStripeSource)
-          .set({ state: 'pending', nextAttemptAt: new Date(), generation: sql`${billingStripeSource.generation} + 1` })
-          .where(
-            and(
-              eq(billingStripeSource.environment, this.config.environment),
-              eq(billingStripeSource.stripeAccountId, this.config.stripeAccountId),
-              eq(billingStripeSource.livemode, this.config.livemode),
-              eq(billingStripeSource.sourceType, event.sourceType),
-              eq(billingStripeSource.sourceId, event.sourceId),
-            ),
-          );
+        await this.markStripeSourcePending(event.sourceType, event.sourceId, { database: tx });
       });
     } catch (error) {
       if (error instanceof ConflictException) throw error;
@@ -1591,22 +1592,7 @@ export class BillingPaymentsService {
     // Sources take at most half of a pass, so provider-leg recovery (unfulfilled payments, reload
     // charges) always progresses however many webhook sources are waiting.
     const claims = await this.claimSources(Math.ceil(input.limit / 2));
-    for (const claim of claims) {
-      try {
-        // Refund, dispute, charge and invoice-payment events have no fulfilment action here; the
-        // independent cash scan owns them. Finishing them keeps the source queue bounded.
-        if (!reconciledSourceTypes.has(claim.sourceType) || (await this.reconcileClaimedSource(claim))) {
-          await this.finishSourceClaim(claim);
-          result.processed.push(claim.id);
-        } else {
-          await this.releaseSourceClaim(claim, 'source_pending');
-          result.pending.push(claim.id);
-        }
-      } catch (error) {
-        await this.releaseSourceClaim(claim, paymentRecoveryErrorCode(error));
-        result.failed.push(claim.id);
-      }
-    }
+    for (const claim of claims) result[await this.settleSourceClaim(claim)].push(claim.id);
     const remaining = input.limit - claims.length;
     if (remaining === 0) return result;
     const due = await this.claimProviderLegs(remaining);
@@ -1721,14 +1707,20 @@ export class BillingPaymentsService {
         }
         if (leg.providerObjectId !== null && leg.providerObjectId !== recovered.object.object.id)
           throw new ConflictException({ code: 'provider_object_mismatch' });
+        // A leg that already carries its provider object keeps that dispatch identity: the database forbids
+        // rewriting it, and a completed or expired Checkout reads `url: null`, which must not replace the link.
         const linked = await this.databaseService.database
           .update(billingProviderLeg)
-          .set({
-            providerObjectId: recovered.object.object.id,
-            redirectUrl: recovered.object.kind === 'checkout' ? recovered.object.object.url : null,
-            state: 'known',
-            errorCode: null,
-          })
+          .set(
+            leg.providerObjectId === null
+              ? {
+                  providerObjectId: recovered.object.object.id,
+                  redirectUrl: recovered.object.kind === 'checkout' ? recovered.object.object.url : null,
+                  state: 'known',
+                  errorCode: null,
+                }
+              : { state: 'known', errorCode: null },
+          )
           .where(
             and(
               eq(billingProviderLeg.id, leg.id),
@@ -2093,6 +2085,13 @@ export class BillingPaymentsService {
     const remoteSubscriptionId =
       typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
     if (leg.subscriptionId !== null && remoteSubscriptionId !== null && remoteSubscriptionId !== undefined) {
+      // The first invoice grants the plan; queue it as its `invoice.paid` webhook would. The link below ends
+      // this leg's sweep, so the invoice is queued first: a failed write leaves both to the next pass. A source
+      // the worker already settled stays settled, so a repeated recover re-does nothing; a subscription that
+      // `checkout.session.completed` linked without its invoice (never delivered) still gets it queued here.
+      const invoiceId = stripeObjectId(session.invoice);
+      if (session.mode === 'subscription' && session.status === 'complete' && invoiceId !== undefined)
+        await this.markStripeSourcePending('invoice', invoiceId, { reviveDone: false });
       const leaseToken = leaseUntil.toISOString();
       await this.databaseService.database
         .update(subscription)
@@ -2106,6 +2105,39 @@ export class BillingPaymentsService {
           ),
         );
     }
+  }
+
+  /**
+   * Settles a returning customer's completed Checkout the way the provider-leg sweep would: it takes the leg's
+   * 30 s lease outright (a sweep pass leaves its lease on every hosted leg it re-reads), links the session,
+   * reconciles the purchase or queues the first invoice, and claims that invoice inline. The lease fences
+   * (`assertProviderLegClaim`, the lease-token link) let the newest holder win and a concurrent pass fail closed;
+   * two recovers in the same millisecond mint the same token, and it is the account lock inside
+   * `reconcilePurchase`, not the token, that serialises them. A failed link releases the claim with its error
+   * code and returns normally: the customer sees the unchanged action and the next sweep pass retries it.
+   */
+  private async settleHostedCheckout(
+    leg: typeof billingProviderLeg.$inferSelect,
+    session: Stripe.Checkout.Session,
+  ): Promise<void> {
+    const [lease] = await this.databaseService.database
+      .update(billingProviderLeg)
+      .set({
+        errorCode: null,
+        nextAttemptAt: sql`date_trunc('milliseconds', clock_timestamp()) + interval '30 seconds'`,
+      })
+      .where(and(eq(billingProviderLeg.id, leg.id), eq(billingProviderLeg.state, leg.state)))
+      .returning({ leaseUntil: billingProviderLeg.nextAttemptAt });
+    if (lease === undefined) return;
+    try {
+      await this.linkRecoveredCheckout(leg, lease.leaseUntil, session);
+    } catch (error) {
+      await this.releaseProviderLegClaim(leg.id, lease.leaseUntil, paymentRecoveryErrorCode(error));
+      return;
+    }
+    const invoiceId = stripeObjectId(session.invoice);
+    if (leg.subscriptionId === null || invoiceId === undefined) return;
+    for (const claim of await this.claimSources(1, invoiceId)) await this.settleSourceClaim(claim);
   }
 
   private async claimProviderLegs(limit: number): Promise<ProviderLegClaim[]> {
@@ -3121,7 +3153,7 @@ export class BillingPaymentsService {
       );
   }
 
-  private async claimSources(limit: number): Promise<SourceClaim[]> {
+  private async claimSources(limit: number, sourceId?: string): Promise<SourceClaim[]> {
     return this.databaseService.database.transaction(async (tx) => {
       const rows = await tx
         .select()
@@ -3132,6 +3164,7 @@ export class BillingPaymentsService {
             eq(billingStripeSource.stripeAccountId, this.config.stripeAccountId),
             eq(billingStripeSource.livemode, this.config.livemode),
             ne(billingStripeSource.sourceType, 'cash_charge'),
+            sourceId === undefined ? undefined : eq(billingStripeSource.sourceId, sourceId),
             or(
               and(
                 eq(billingStripeSource.state, 'pending'),
@@ -3820,6 +3853,65 @@ export class BillingPaymentsService {
     return true;
   }
 
+  /** Reconciles one claimed source and finishes it, or releases it to retry when it cannot settle yet. */
+  private async settleSourceClaim(claim: SourceClaim): Promise<'processed' | 'pending' | 'failed'> {
+    try {
+      // Refund, dispute, charge and invoice-payment events have no fulfilment action here; the
+      // independent cash scan owns them. Finishing them keeps the source queue bounded.
+      if (!reconciledSourceTypes.has(claim.sourceType) || (await this.reconcileClaimedSource(claim))) {
+        await this.finishSourceClaim(claim);
+        return 'processed';
+      }
+      await this.releaseSourceClaim(claim, 'source_pending');
+      return 'pending';
+    } catch (error) {
+      await this.releaseSourceClaim(claim, paymentRecoveryErrorCode(error));
+      return 'failed';
+    }
+  }
+
+  /**
+   * Queues a Stripe object for the source reconciler, due on the database clock so a caller's own claim right
+   * after sees it due. A delivered event revives even a `done` source (a later event for the same object, a refund
+   * say, must be reconciled again); `reviveDone: false` never re-queues a settled source, while a `pending` or
+   * `processing` one is still rewritten as due (the claim fences make a displaced worker's writes no-ops).
+   */
+  private async markStripeSourcePending(
+    sourceType: string,
+    sourceId: string,
+    options: { readonly database?: Database | Transaction; readonly reviveDone?: boolean } = {},
+  ): Promise<void> {
+    const database = options.database ?? this.databaseService.database;
+    await database
+      .insert(billingStripeSource)
+      .values({
+        id: randomUUID(),
+        environment: this.config.environment,
+        stripeAccountId: this.config.stripeAccountId,
+        livemode: this.config.livemode,
+        sourceType,
+        sourceId,
+      })
+      .onConflictDoNothing();
+    await database
+      .update(billingStripeSource)
+      .set({
+        state: 'pending',
+        nextAttemptAt: sql`clock_timestamp()`,
+        generation: sql`${billingStripeSource.generation} + 1`,
+      })
+      .where(
+        and(
+          eq(billingStripeSource.environment, this.config.environment),
+          eq(billingStripeSource.stripeAccountId, this.config.stripeAccountId),
+          eq(billingStripeSource.livemode, this.config.livemode),
+          eq(billingStripeSource.sourceType, sourceType),
+          eq(billingStripeSource.sourceId, sourceId),
+          ...(options.reviveDone === false ? [ne(billingStripeSource.state, 'done')] : []),
+        ),
+      );
+  }
+
   private async finishSourceClaim(claim: SourceClaim): Promise<void> {
     await this.databaseService.database.transaction(async (tx) => {
       const source = await tx
@@ -4273,6 +4365,9 @@ export class BillingPaymentsService {
       await this.cash.assertNewCollectionScope(accountId, tx);
       const purchase = await this.ownedPurchase(accountId, actionId, tx);
       if (purchase.state !== 'prepared') return undefined;
+      // An automatic reload purchase is confirmed by its worker from the consent; its leg holds the worker's envelope,
+      // not a bare request, and the customer's dialog has nothing to confirm.
+      if (purchase.purpose === 'automatic') throw new ConflictException({ code: 'action_not_confirmable' });
       const rows = await tx
         .select()
         .from(billingProviderLeg)
@@ -4476,6 +4571,8 @@ export class BillingPaymentsService {
       throw new ConflictException({ code: 'payment_proof_scope_mismatch' });
     }
     const paymentSource = await retrieveStripePaymentEvidence(this.sourceStripe, paymentIntentId);
+    // Without a delivered success event, a hosted Checkout is accepted at its settled charge's own time.
+    // Saved-card and automatic charges (a leg whose request names a payment method) keep waiting for the event.
     const qualification = qualifyManualPayment({
       offer,
       customerId: binding.stripeCustomerId,
@@ -4486,7 +4583,11 @@ export class BillingPaymentsService {
       checkout,
       sourceAcceptance:
         claim?.sourceAcceptedAt === undefined
-          ? undefined
+          ? checkout !== undefined &&
+            expected.expectedPaymentMethodId === undefined &&
+            paymentSource.latestCharge !== undefined
+            ? { type: 'charge', createdAt: new Date(paymentSource.latestCharge.created * 1000) }
+            : undefined
           : { type: 'payment_intent.succeeded', createdAt: claim.sourceAcceptedAt },
       source: paymentSource,
     });
@@ -5151,18 +5252,7 @@ export class BillingPaymentsService {
     const rows = await this.databaseService.database
       .select()
       .from(billingPurchase)
-      .where(
-        and(
-          eq(billingPurchase.accountId, accountId),
-          or(
-            eq(billingPurchase.state, 'prepared'),
-            eq(billingPurchase.state, 'creating'),
-            eq(billingPurchase.state, 'pending'),
-            eq(billingPurchase.state, 'attention'),
-            eq(billingPurchase.state, 'paid_unfulfilled'),
-          ),
-        ),
-      )
+      .where(and(eq(billingPurchase.accountId, accountId), inArray(billingPurchase.state, activePurchaseStates)))
       .limit(1);
     return rows[0];
   }

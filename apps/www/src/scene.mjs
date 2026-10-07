@@ -3,6 +3,8 @@ import { parseStoryManifest, parseVariantManifest } from '#www/story-geometry.js
 import { partPose } from '#www/story-kinematics.js';
 import { ease, storyFrame, storyPart } from '#www/story-timeline.js';
 import * as THREE from 'three';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 /** @typedef {import('#www/story-timeline.js').FrameState} FrameState */
 /** @typedef {{kind: 'hero', sunAngle: number, narrow: boolean} | {kind: 'story', progress: number, narrow: boolean}} View */
@@ -148,6 +150,43 @@ const contactShadow = () => {
 };
 
 /**
+ * Final pass: the scene, rendered linear and premultiplied into a multisampled target, darkened by the
+ * ambient occlusion and then tone mapped and encoded exactly as a direct render would be. Where the
+ * floor is transparent the occlusion is printed as black coverage, so the gearbox stays seated on the
+ * drafting beneath the canvas.
+ * @type {(beauty: THREE.Texture, occlusion: THREE.Texture) => THREE.ShaderMaterial}
+ */
+const compositeMaterial = (beauty, occlusion) =>
+  new THREE.ShaderMaterial({
+    uniforms: {
+      tBeauty: { value: beauty },
+      tOcclusion: { value: occlusion },
+      floorShade: { value: 0.8 },
+    },
+    vertexShader: `varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`,
+    fragmentShader: `uniform sampler2D tBeauty;
+uniform sampler2D tOcclusion;
+uniform float floorShade;
+varying vec2 vUv;
+void main() {
+  vec4 beauty = texture2D(tBeauty, vUv);
+  float ao = texture2D(tOcclusion, vUv).r;
+  float alpha = beauty.a + (1.0 - beauty.a) * (1.0 - ao) * floorShade;
+  gl_FragColor = vec4(beauty.rgb / max(beauty.a, 1e-4) * ao, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+  gl_FragColor = vec4(gl_FragColor.rgb * beauty.a, alpha);
+}`,
+    blending: THREE.NoBlending,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+/**
  * One WebGL context for the whole site. The canvas moves between the hero and story stages,
  * which are never on screen together, so geometry is uploaded once and nothing renders while idle.
  * @param assembly - Validated geometry from {@link loadAssembly}.
@@ -163,7 +202,11 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
   renderer.localClippingEnabled = true;
   // The floor shadow is redrawn only on frames that show the floor.
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.VSMShadowMap;
+  // Variance shadows and the occlusion pass both render to half-float targets; without them the
+  // shadow falls back to filtered PCF and the occlusion is skipped.
+  const halfFloat =
+    renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float');
+  renderer.shadowMap.type = halfFloat ? THREE.VSMShadowMap : THREE.PCFShadowMap;
   renderer.shadowMap.autoUpdate = false;
   const canvas = renderer.domElement;
   canvas.setAttribute('aria-hidden', 'true');
@@ -177,19 +220,88 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
   const scene = new THREE.Scene();
   const environment = own(studio(renderer));
   scene.environment = environment.texture;
-  // A soft key almost overhead: specular sparkle on the teeth and a soft shadow on the floor.
+  // A high key from the back left: specular sparkle on the teeth, and a shadow that falls across the
+  // planets, into the ring and onto the floor towards the viewer, the way a product shot is lit.
   const key = new THREE.DirectionalLight(0xff_ff_ff, 1.5);
-  key.position.set(-40, 400, 60);
+  key.position.set(-200, 330, -60);
   key.castShadow = true;
-  key.shadow.mapSize.set(512, 512);
+  key.shadow.mapSize.set(2048, 2048);
   Object.assign(key.shadow.camera, { left: -130, right: 130, top: 130, bottom: -130, near: 10, far: 900 });
-  key.shadow.radius = 20;
-  key.shadow.blurSamples = 24;
-  key.shadow.bias = -0.0005;
-  key.shadow.normalBias = 0.6;
+  key.shadow.radius = 4;
+  key.shadow.blurSamples = 12;
+  key.shadow.bias = -0.0003;
+  key.shadow.normalBias = 0.15;
   scene.add(key);
   const camera = new THREE.PerspectiveCamera(heroCamera.fov, 1, 1, 3000);
+  // Ambient occlusion darkens the roots between teeth, the planets under the carrier and the floor
+  // around the base. The scene renders into a multisampled linear target, the occlusion is computed
+  // from its own depth and normals, and one pass composites, tone maps and encodes the result.
+  const beauty = own(new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
+  const occlusion = new GTAOPass(scene, camera, 1, 1);
+  own(occlusion);
+  occlusion.output = GTAOPass.OUTPUT.Off;
+  const composite = own(compositeMaterial(beauty.texture, occlusion.pdRenderTarget.texture));
+  const quad = new FullScreenQuad(composite);
+  own(quad);
+  // Quality tiers: full occlusion, half the samples, then a direct render with shadows only. A device
+  // that cannot render to half-float targets starts on the last tier; a slow one steps down (pace).
+  const tiers = [
+    { samples: 16, denoise: 24 },
+    { samples: 8, denoise: 12 },
+  ];
+  let tier = halfFloat ? 0 : tiers.length;
+  const applyTier = () => {
+    const settings = tiers[tier];
+    if (settings) {
+      occlusion.updateGtaoMaterial({
+        radius: 12,
+        distanceExponent: 1.2,
+        thickness: 20,
+        scale: 1.3,
+        samples: settings.samples,
+      });
+      occlusion.updatePdMaterial({
+        lumaPhi: 10,
+        depthPhi: 2,
+        normalPhi: 3,
+        radius: 10,
+        rings: 3,
+        samples: settings.denoise,
+      });
+    }
+  };
+  applyTier();
+  // Frames arrive only while the input, scroll or size changes, so back-to-back draws are an
+  // interaction; when those settle below 25 fps the next tier takes over for the rest of the visit.
+  let lastDraw = 0;
+  let pacedFrames = 0;
+  let pacedTime = 0;
+  /** @type {(now: number) => void} */
+  const pace = (now) => {
+    const gap = now - lastDraw;
+    lastDraw = now;
+    if (gap > 120 || tier >= tiers.length) {
+      return;
+    }
+    pacedFrames += 1;
+    pacedTime += gap;
+    if (pacedFrames >= 12) {
+      if (pacedTime / pacedFrames > 40) {
+        tier += 1;
+        applyTier();
+        if (tier >= tiers.length) {
+          // The direct render needs none of the occlusion buffers.
+          beauty.dispose();
+          occlusion.dispose();
+        }
+      }
+      pacedFrames = 0;
+      pacedTime = 0;
+    }
+  };
   const layerPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e4);
+  // Printed layers are clipped in the occlusion buffer too, so nothing above the cut casts occlusion.
+  occlusion.normalMaterial.clippingPlanes = [layerPlane];
   const root = new THREE.Group();
   root.rotation.x = -Math.PI / 2;
   scene.add(root);
@@ -250,6 +362,7 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.morphTargetInfluences = range ? [0] : [];
     mesh.castShadow = true;
+    mesh.receiveShadow = true;
     const positions = geometry.getAttribute('position');
     const samples = [];
     for (let i = 0; i < positions.count; i += 6) {
@@ -313,6 +426,9 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
     renderer.getSize(size);
     if (size.x !== w || size.y !== h) {
       renderer.setSize(w, h, false);
+      beauty.setSize(w, h);
+      // Full resolution: at half, the upsampled occlusion grains the floor and haloes the teeth.
+      occlusion.setSize(w, h);
     }
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
@@ -390,7 +506,16 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
       camera.clearViewOffset();
       aim(frame);
     }
+    pace(performance.now());
+    if (tier >= tiers.length) {
+      renderer.render(scene, camera);
+      return;
+    }
+    renderer.setRenderTarget(beauty);
     renderer.render(scene, camera);
+    occlusion.render(renderer, beauty, beauty);
+    renderer.setRenderTarget(null);
+    quad.render(renderer);
   };
   return {
     canvas,

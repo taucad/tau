@@ -10,8 +10,9 @@
 #     `deploy-production.yml` requires before it promotes the release.
 #   - `desktop@*`: package the desktop app for macOS (Developer ID signed and
 #     notarized), Linux and Windows (unsigned), attach the archives to the
-#     release, then publish the update feeds and mark the release "latest", so
-#     installed apps only see a release whose every asset is in place.
+#     release, mark the release "latest", then publish the update feeds to the
+#     fixed `desktop-feed` prerelease, so installed apps only see a release
+#     whose every asset is in place.
 #   - `desktop-staging@<version>-staging.<n>`: the same desktop build, packaged
 #     for the staging channel (taucad.dev endpoints, no update checks) as a
 #     prerelease. `release-desktop-staging.yml` creates these. It signs from the
@@ -201,9 +202,14 @@ jobs:
       - name: Check the kit against its receipt
         run: |
           set -euo pipefail
-          receipt=packages/geospec-engine-native/licenses/SOURCE-RELINK.json
+          # The build writes the receipt and notices into the package it ships, so
+          # take them from there: committed copies describe an earlier build.
+          tarballs=out/artifacts/geospec-native-engine/ci/assembly/tarballs
+          tar -xzf "$tarballs/root.tgz" -C "$RUNNER_TEMP" package/licenses
+          licenses="$RUNNER_TEMP/package/licenses"
+          receipt="$licenses/SOURCE-RELINK.json"
           name=$(jq -r .artifact.fileName "$receipt")
-          kit="out/artifacts/geospec-native-engine/ci/assembly/tarballs/$name"
+          kit="$tarballs/$name"
           expected=$(jq -r .artifact.sha256 "$receipt")
           actual=$(sha256sum "$kit" | cut -d' ' -f1)
           if [ "$actual" != "$expected" ]; then
@@ -211,7 +217,6 @@ jobs:
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/source-kit"
-          licenses=packages/geospec-engine-native/licenses
           cp "$kit" "$RUNNER_TEMP/source-kit/"
           cp "$licenses/OCCT-LGPL-2.1.txt" "$licenses/OCCT-LGPL-exception.txt" "$RUNNER_TEMP/source-kit/"
           cp "$licenses/NOTICE.txt" "$RUNNER_TEMP/source-kit/GeoSpec-NOTICE.txt"
@@ -264,7 +269,7 @@ jobs:
       - name: Setup producer Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: '3.12.14'
+          python-version: '3.13.14'
 
       - name: Setup selected CPython 3.13 tooling
         id: python313
@@ -315,6 +320,13 @@ jobs:
         run: |
           rustup toolchain install 1.88 --profile minimal
           rustup run 1.88 rustc --version
+
+      # prepare-build123d-python resolves its wheels with uv, as on the
+      # portable hosts.
+      - name: Install uv
+        run: |
+          command -v uv || pipx install uv
+          uv --version
 
       # A throwaway keychain holds the Developer ID identity and the notary
       # profile for this job only; it is deleted in the last step.
@@ -375,9 +387,8 @@ jobs:
       - name: Package, sign and notarize
         run: pnpm nx run desktop:package-macos-release --parallel=1
 
-      - name: Verify the signed package
-        run: pnpm nx run desktop:verify-macos-release
-
+      # Uploaded before verification so a failed verify leaves the signed app
+      # for verify-desktop-macos.yml. Publishing still needs this whole job.
       - name: Upload the macOS archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -385,6 +396,9 @@ jobs:
           path: ${{ env.TAU_MACOS_PACKAGE_OUTPUT_ROOT }}/Tau-macos-arm64.zip
           if-no-files-found: error
           retention-days: 7
+
+      - name: Verify the signed package
+        run: pnpm nx run desktop:verify-macos-release
 
       - name: Delete the signing keychain
         if: always()
@@ -418,6 +432,11 @@ jobs:
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}
     steps:
+      # Windows checkouts default to CRLF, which changes the GeoSpec product key
+      # main CI computed and breaks its lockfile parse; keep the committed bytes.
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+
       - name: Checkout the release
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -521,7 +540,7 @@ jobs:
           encoded_tag=$(jq -rn --arg tag "$TAG" '$tag | @uri')
           base="https://github.com/${GH_REPO}/releases/download/${encoded_tag}"
           # One feed per platform, in the Squirrel.Mac JSON shape the desktop
-          # updater reads from the latest release (apps/desktop/src/main/updater.ts).
+          # updater reads (apps/desktop/src/main/updater.ts), attached to this release.
           for pair in darwin-arm64:Tau-macos-arm64.zip linux-x64:Tau-linux-x64.tar.gz win32-x64:Tau-win32-x64.zip; do
             platform=${pair%%:*}
             archive=${pair#*:}
@@ -533,8 +552,8 @@ jobs:
           done
           gh release upload "$TAG" Tau-* SHA256SUMS.txt desktop-update-*.json --clobber
 
-      # Installed apps poll /releases/latest/download/desktop-update-<platform>.json,
-      # so marking this release latest is the moment the update goes out.
+      # Builds before the fixed feed poll /releases/latest/download/desktop-update-<platform>.json,
+      # so a desktop release still becomes latest once its assets are in place.
       - name: Mark the release latest
         if: needs.resolve.outputs.channel != 'staging'
         env:
@@ -542,3 +561,34 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: gh release edit "$TAG" --latest
+
+      # Installed apps read their feed from the fixed `desktop-feed` prerelease
+      # (apps/desktop/src/main/updater.ts), so the repository's "Latest" badge is
+      # not a production control and a UI or API release can never hide an
+      # update. Replacing these files is the moment the update goes out. A
+      # rebuild of an older tag leaves a newer feed alone.
+      - name: Publish the fixed update feed
+        if: needs.resolve.outputs.channel != 'staging'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          FEED_TAG: desktop-feed
+        working-directory: assets
+        run: |
+          set -euo pipefail
+          if ! gh release view "$FEED_TAG" >/dev/null 2>&1; then
+            commit=$(gh api "repos/$GH_REPO/commits/$(jq -rn --arg t "$TAG" '$t | @uri')" --jq .sha)
+            gh release create "$FEED_TAG" --target "$commit" --prerelease --latest=false \
+              --title "Desktop update feed" \
+              --notes "Installed Tau desktop apps read their update feed from this prerelease's assets. Each desktop release replaces them; download the app from that release, not from here."
+          fi
+          current=$(gh release download "$FEED_TAG" --pattern desktop-update-darwin-arm64.json --output - 2>/dev/null \
+            | jq -r '.currentRelease // empty' || true)
+          if [ -n "$current" ] && [ "$current" != "$VERSION" ] \
+            && [ "$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -1)" = "$current" ]; then
+            echo "::notice::The fixed feed already offers $current, newer than $VERSION; leaving it."
+            exit 0
+          fi
+          gh release upload "$FEED_TAG" desktop-update-*.json --clobber

@@ -1,4 +1,5 @@
 import { admitJsonSchema } from '#schema-admission.js';
+import { jsonSchemaBudget } from '#json-schema-budget.js';
 import { admitParameterDeclaration } from '#manifest.js';
 import type { ParameterDeclaration } from '#manifest.js';
 import type { JSONSchema7 } from '@taucad/json-schema';
@@ -85,7 +86,7 @@ const withoutStringPatterns = (root: Record<string, unknown>): Record<string, un
   while (stack.length > 0) {
     const { source, target, depth, role } = stack.pop()!;
     nodes += 1;
-    if (nodes > 2048 || depth > 20) {
+    if (nodes > jsonSchemaBudget.maximumNodes || depth > jsonSchemaBudget.maximumDepth) {
       throw new TypeError('SCHEMA_LIMIT: depth or node budget exceeded');
     }
     for (const [key, value] of Object.entries(source)) {
@@ -132,7 +133,23 @@ const createProjection = (
   const semanticDefinitions = new Set<Record<string, unknown>>();
   const referencedDefinitions = new Set<Record<string, unknown>>();
   const traversedReferences = new Set<string>();
+  const nullableQuantities: Record<string, Record<string, unknown>> = {};
   const formatWidths = root['$schema'] === draft202012;
+
+  /* JSON Structure takes no unit on a union, so `number | null` with a unit becomes the qualified
+   * form the compiler admits: a referenced quantity definition, or null. Annotations stay outside. */
+  const nullableQuantity = (projected: Record<string, unknown>): Record<string, unknown> => {
+    const { title, description, default: fallback, examples, type, ...quantity } = projected;
+    const name = `tauNullableQuantity${String(Object.keys(nullableQuantities).length)}`;
+    nullableQuantities[name] = { ...quantity, type: (type as unknown[]).find((candidate) => candidate !== 'null') };
+    return {
+      ...(title === undefined ? {} : { title }),
+      ...(description === undefined ? {} : { description }),
+      ...(fallback === undefined ? {} : { default: fallback }),
+      ...(examples === undefined ? {} : { examples }),
+      type: [{ $ref: `#/definitions/${name}` }, 'null'],
+    };
+  };
 
   const resolveReference = (reference: string): unknown => {
     let value: unknown = root;
@@ -283,7 +300,14 @@ const createProjection = (
     if (isRecord(symbols)) {
       projected['symbols'] = structuredClone(symbols);
     }
-    return emit ? projected : undefined;
+    if (!emit) {
+      return undefined;
+    }
+    const { type } = projected;
+    // ponytail: one non-null type only; a unit on `number | string | null` still fails admission.
+    return typeof unit === 'string' && Array.isArray(type) && type.length === 2 && type.includes('null')
+      ? nullableQuantity(projected)
+      : projected;
   };
 
   const schema = visit({
@@ -292,6 +316,13 @@ const createProjection = (
     instancePointer: '',
     emit: true,
   });
+  if (isRecord(schema) && Object.keys(nullableQuantities).length > 0) {
+    const definitions = isRecord(schema['definitions']) ? schema['definitions'] : {};
+    if (Object.keys(nullableQuantities).some((name) => name in definitions)) {
+      throw new TypeError('NATIVE_PROJECTION_UNSUPPORTED: reserved definition name');
+    }
+    schema['definitions'] = { ...definitions, ...nullableQuantities };
+  }
   if (
     isRecord(schema) &&
     schema['type'] === undefined &&

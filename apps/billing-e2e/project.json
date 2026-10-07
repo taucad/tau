@@ -1,0 +1,20 @@
+{
+  "name": "billing-e2e",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "apps/billing-e2e/src",
+  "tags": ["scope:api", "type:e2e"],
+  "implicitDependencies": ["api", "ui"],
+  "targets": {
+    "test:staging": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "The billing go-live matrix against a deployed stack (staging unless TAU_E2E_BASE_URL/TAU_E2E_API_URL say otherwise; tau.new is refused): fresh mail.tm accounts, the real API and Stripe hosted Checkout in test mode. BILLING_E2E_SUITE=smoke|p0|all selects rows. Writes results.json and results-matrix.md under out/test-results/billing-e2e/<runId>. The config is not named vitest.config.ts, so no inferred `test` target runs it in affected CI."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "vitest run --config apps/billing-e2e/vitest.staging.config.ts"
+      }
+    }
+  }
+}

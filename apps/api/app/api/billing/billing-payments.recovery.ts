@@ -230,7 +230,8 @@ export function qualifyManualPayment(input: {
   readonly purchaseId: string;
   readonly paymentMethod: PaymentOfferSnapshot['paymentMethod'];
   readonly checkout?: StripeCheckoutEvidence;
-  readonly sourceAcceptance?: { readonly type: 'payment_intent.succeeded'; readonly createdAt: Date };
+  /** When Stripe accepted the payment: its delivered success event, or the settled charge of a hosted Checkout. */
+  readonly sourceAcceptance?: { readonly type: 'payment_intent.succeeded' | 'charge'; readonly createdAt: Date };
   readonly source: StripePaymentEvidence;
 }): PaymentQualification {
   const { paymentIntent, latestCharge } = input.source;

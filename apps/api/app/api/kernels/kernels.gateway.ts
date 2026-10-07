@@ -14,6 +14,9 @@ import type { CommercialEntitlementsService } from '#api/entitlements/commercial
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
 import { absorbSocketErrors } from '#api/websocket/socket-error.js';
+import { trackSocket } from '#api/websocket/socket-metrics.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import type { WsUpgradeRejection } from '#telemetry/metrics.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
@@ -47,6 +50,8 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly upgradeRouter: UpgradeRouter = new UpgradeRouter(),
     // oxlint-disable-next-line new-cap -- NestJS decorator
     @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
+    // oxlint-disable-next-line new-cap -- NestJS decorator
+    @Optional() private readonly metrics: MetricsService = new MetricsService(),
   ) {}
 
   /**
@@ -60,8 +65,13 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
     queryParameters: URLSearchParams,
     request: IncomingMessage,
   ): Promise<void> {
+    trackSocket(this.metrics, 'kernels', socket);
     const verdict = await this.authorizeZooConnection(request);
     if (!verdict.ok) {
+      this.metrics.wsUpgradeRejections.add(1, {
+        'ws.gateway': 'kernels',
+        reason: verdict.rejection,
+      } satisfies WsUpgradeRejection);
       this.logger.warn(`Zoo proxy connection rejected (${verdict.code}): ${verdict.reason}`);
       socket.close(verdict.code, verdict.reason);
       return;
@@ -101,23 +111,35 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
    * Session and commercial-entitlement gate. Self-host composition grants the
    * operator-owned capability without creating a billing account.
    */
-  private async authorizeZooConnection(
-    request: IncomingMessage,
-  ): Promise<{ ok: true; userId: string } | { ok: false; code: number; reason: string }> {
+  private async authorizeZooConnection(request: IncomingMessage): Promise<
+    | { ok: true; userId: string }
+    | {
+        ok: false;
+        code: number;
+        reason: string;
+        /** `ws.upgrade.rejections` reason; kept apart from the client-facing `reason` text. */
+        rejection: WsUpgradeRejection['reason'];
+      }
+  > {
     try {
       const session = await this.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
       if (!session) {
-        return { ok: false, code: zooCloseCodes.unauthenticated, reason: 'UNAUTHENTICATED' };
+        return {
+          ok: false,
+          code: zooCloseCodes.unauthenticated,
+          reason: 'UNAUTHENTICATED',
+          rejection: 'unauthenticated',
+        };
       }
       const entitlements = await this.entitlements.getEntitlements(session.user.id);
       if (!entitlements.canUseProKernels) {
-        return { ok: false, code: zooCloseCodes.proRequired, reason: 'PRO_REQUIRED' };
+        return { ok: false, code: zooCloseCodes.proRequired, reason: 'PRO_REQUIRED', rejection: 'forbidden' };
       }
       return { ok: true, userId: session.user.id };
     } catch (error) {
       // Fail closed: an auth/entitlement outage must not open an unmetered proxy.
       this.logger.error(`Zoo proxy authorization failed: ${String(error)}`);
-      return { ok: false, code: zooCloseCodes.unauthenticated, reason: 'AUTH_ERROR' };
+      return { ok: false, code: zooCloseCodes.unauthenticated, reason: 'AUTH_ERROR', rejection: 'auth_error' };
     }
   }
 
@@ -146,17 +168,17 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
     // `ws` otherwise accepts 100 MiB per message; the HTTP body limit is the API's bound for one client payload.
     const wss = new WebSocketServer({ noServer: true, maxPayload: httpBodyLimit });
 
-    this.upgradeRouter.route(
-      fastify.server,
-      (pathname) => pathname === zooWebSocketPath,
-      (request, socket, head) => {
+    this.upgradeRouter.route(fastify.server, {
+      gateway: 'kernels',
+      matches: (pathname) => pathname === zooWebSocketPath,
+      handle: (request, socket, head) => {
         wss.handleUpgrade(request, socket, head, (ws) => {
           absorbSocketErrors(ws);
           const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
           void this.handleZooProxy(ws, url.searchParams, request);
         });
       },
-    );
+    });
     this.shutdown.signal.addEventListener(
       'abort',
       () => {

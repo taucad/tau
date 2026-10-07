@@ -863,7 +863,7 @@ overrides:
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
   '@types/express': ^5.0.0
   fastify: ^5.12.5
-  replicad: npm:@taulabs/replicad@0.23.4-beta.2
+  replicad: npm:@taulabs/replicad@1.1.0-taulabs.0
   replicad-opencascadejs: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
   vitest: 4.1.11
 
@@ -873,7 +873,6 @@ patchedDependencies:
   '@agentclientprotocol/codex-acp@1.7.0': a4663c1a80c0c9a670a2f897d5629ca9974aad6e18696b7fc0df667793e8ac53
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
-  '@taulabs/replicad@0.23.4-beta.2': 4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b
   n8ao@1.10.2: 7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887
   three@0.184.0: 81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993
   vaul@1.1.2: 4d7c126bc95e7c5da45a5950038e40ad0e127dbf041cd91a85fd7d8fe64380a4
@@ -1308,8 +1307,8 @@ importers:
         specifier: ^2.0.4
         version: 2.0.4(react-router@7.18.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
       replicad:
-        specifier: npm:@taulabs/replicad@0.23.4-beta.2
-        version: '@taulabs/replicad@0.23.4-beta.2(patch_hash=4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b)'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
+        version: '@taulabs/replicad@1.1.0-taulabs.0'
       replicad-opencascadejs:
         specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
         version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
@@ -1771,6 +1770,12 @@ importers:
       pino-pretty:
         specifier: 'catalog:'
         version: 13.1.3
+
+  apps/billing-e2e:
+    devDependencies:
+      '@taucad/billing':
+        specifier: workspace:*
+        version: link:../libs/billing
 
   apps/desktop:
     dependencies:
@@ -3147,8 +3152,8 @@ importers:
         specifier: 'catalog:'
         version: 0.1.0(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
       replicad:
-        specifier: npm:@taulabs/replicad@0.23.4-beta.2
-        version: '@taulabs/replicad@0.23.4-beta.2(patch_hash=4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b)'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
+        version: '@taulabs/replicad@1.1.0-taulabs.0'
       replicad-opencascadejs:
         specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
         version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
@@ -4280,8 +4285,8 @@ importers:
         specifier: 'catalog:'
         version: 4.0.2
       replicad:
-        specifier: npm:@taulabs/replicad@0.23.4-beta.2
-        version: '@taulabs/replicad@0.23.4-beta.2(patch_hash=4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b)'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
+        version: '@taulabs/replicad@1.1.0-taulabs.0'
       replicad-opencascadejs:
         specifier: npm:@taulabs/replicad-opencascadejs@0.23.0-beta.0
         version: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
@@ -4361,8 +4366,8 @@ importers:
         specifier: 'catalog:'
         version: 4.1.11(playwright@1.62.1)(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))(vitest@4.1.11)
       replicad:
-        specifier: npm:@taulabs/replicad@0.23.4-beta.2
-        version: '@taulabs/replicad@0.23.4-beta.2(patch_hash=4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b)'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
+        version: '@taulabs/replicad@1.1.0-taulabs.0'
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.3.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
@@ -4953,8 +4958,8 @@ importers:
         specifier: workspace:*
         version: link:../geospec
       replicad:
-        specifier: npm:@taulabs/replicad@0.23.4-beta.2
-        version: '@taulabs/replicad@0.23.4-beta.2(patch_hash=4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b)'
+        specifier: npm:@taulabs/replicad@1.1.0-taulabs.0
+        version: '@taulabs/replicad@1.1.0-taulabs.0'
 
   packages/workbench:
     devDependencies:
@@ -4973,6 +4978,12 @@ importers:
       '@inkjs/ui':
         specifier: 'catalog:'
         version: 2.0.0(ink@6.8.0(@types/react@19.0.12)(react@19.2.7))
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../packages/agent-host
+      '@taucad/chat':
+        specifier: workspace:*
+        version: link:../libs/chat
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../packages/plugins/esbuild
@@ -14432,8 +14443,8 @@ packages:
   '@taulabs/replicad-opencascadejs@0.23.0-beta.0':
     resolution: {integrity: sha512-f1odv1vpJNAsgYFzxaoF12fOzbGHsYA0J0tio/GrqVYoc/Pt+hx0l1o25aEZv0JTx+01WJIhyvVYAmG6hE9ZKg==}
 
-  '@taulabs/replicad@0.23.4-beta.2':
-    resolution: {integrity: sha512-qYOc74h8YnBhzqGyGIT0LX6iM98szBi9lq7GNPoXjUjIkY1jJVSraB62uXVNPWZB7xL8fKs+NbOSoAkWVg7mdQ==}
+  '@taulabs/replicad@1.1.0-taulabs.0':
+    resolution: {integrity: sha512-HuaPu2gpo5kmDHGFwG97He0pTAnlSeGy40dQU0GaRiLI3CrINXP06lEvFFrFvGi05gjTJlVotz+vifnR5uXtlQ==}
 
   '@taulabs/three-viewport-gizmo@2.2.4':
     resolution: {integrity: sha512-vqvgsi4oTyaKf19useCAZBSV929cZWum/pVny5xHTUDOV8GwrP89OpKeF18Ui4rJ7/b5cLMKmoAZRBvAMDKf9w==}
@@ -15014,8 +15025,8 @@ packages:
   '@types/offscreencanvas@2019.7.3':
     resolution: {integrity: sha512-ieXiYmgSRXUDeOntE1InxjWyvEelZGP63M+cGuquuRLuIKKT1osnkXjxev9B7d1nXSug5vpunx+gNlbVxMlC9A==}
 
-  '@types/opentype.js@1.3.4':
-    resolution: {integrity: sha512-6fbXi67I07ugNM+FExwJnfuui2hD7hraD6nqjr3UnqsbBpxSkrtmO6tBubPdNAjqRT9TVkquVkNS9IkgTtq6/w==}
+  '@types/opentype.js@1.3.10':
+    resolution: {integrity: sha512-F67EFyk6j02okHz5JCgata3ZRAcZi9GLnzmkHw/rzJq3OCc8/ZVdoKrxMTYjcQP6IYHGBz2cav1cpzkOkPiPCQ==}
 
   '@types/oracledb@6.5.2':
     resolution: {integrity: sha512-kK1eBS/Adeyis+3OlBDMeQQuasIDLUYXsi2T15ccNJ0iyUpQ4xDF7svFu3+bGVrI0CMBUclPciz+lsQR3JX3TQ==}
@@ -22578,6 +22589,7 @@ packages:
   opentype.js@1.3.4:
     resolution: {integrity: sha512-d2JE9RP/6uagpQAVtJoF0pJJA/fgai89Cc50Yp0EJHk+eLp6QQ7gBoblsnubRULNY132I0J1QKMJ+JTbMqz4sw==}
     engines: {node: '>= 8.0.0'}
+    hasBin: true
 
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
@@ -37081,12 +37093,11 @@ snapshots:
 
   '@taulabs/replicad-opencascadejs@0.23.0-beta.0': {}
 
-  '@taulabs/replicad@0.23.4-beta.2(patch_hash=4d55bfdc8696f36ff5efc30607071d0337d46d49c57920c275b9dd15aa4ef07b)':
+  '@taulabs/replicad@1.1.0-taulabs.0':
     dependencies:
-      '@types/opentype.js': 1.3.4
+      '@types/opentype.js': 1.3.10
       flatbush: 4.6.2
       opentype.js: 1.3.4
-      replicad-opencascadejs: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
 
   '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))':
     dependencies:
@@ -37789,7 +37800,7 @@ snapshots:
 
   '@types/offscreencanvas@2019.7.3': {}
 
-  '@types/opentype.js@1.3.4': {}
+  '@types/opentype.js@1.3.10': {}
 
   '@types/oracledb@6.5.2':
     dependencies:

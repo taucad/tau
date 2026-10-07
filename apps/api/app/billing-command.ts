@@ -350,6 +350,7 @@ async function main(): Promise<void> {
         try {
           while (!shutdown.signal.aborted) {
             let failed = 0;
+            let batchThrew = false;
             let fullBatch = false;
             for (const pool of ['primary', 'helper'] as const) {
               const startedAt = Date.now();
@@ -420,6 +421,7 @@ async function main(): Promise<void> {
                 );
               } catch (error) {
                 failed += 1;
+                batchThrew = true;
                 metrics.billingFundedOperationRecoveries.add(1, {
                   ...attributes,
                   'tau.billing.recovery.outcome': 'failed',
@@ -441,6 +443,10 @@ async function main(): Promise<void> {
               }
             }
             consecutiveFailures = failed === 0 ? 0 : consecutiveFailures + 1;
+            /* F-10: the per-pass gauges keep exporting their last value, so a stalled worker is only visible here.
+               A pass is `error` only when a batch threw: one operation that keeps failing recovery is counted
+               by `recoveries{failed}`, and must not make a live worker read as stalled. */
+            metrics.billingWorkerPasses.add(1, { 'tau.worker': 'recovery', outcome: batchThrew ? 'error' : 'ok' });
             if (fullBatch && failed === 0) {
               continue;
             }
@@ -553,6 +559,7 @@ async function main(): Promise<void> {
         const purchaseScans = new BillingPurchaseReconciliationService(database, sourceStripe, sourceConfig);
         const supplier = new BillingSupplierReconciliationService(database, sourceConfig);
         // Each scheduled job owns its failure: one provider or data fault must not stop the others.
+        let passFailed = false;
         const runJob = async (event: string, run: () => Promise<unknown>): Promise<void> => {
           const jobStartedAt = Date.now();
           try {
@@ -564,6 +571,7 @@ async function main(): Promise<void> {
               ),
             );
           } catch (error) {
+            passFailed = true;
             console.error(
               JSON.stringify({
                 event,
@@ -593,6 +601,7 @@ async function main(): Promise<void> {
         try {
           while (!shutdown.signal.aborted) {
             const startedAt = Date.now();
+            passFailed = false;
             try {
               // oxlint-disable-next-line no-await-in-loop -- one worker serializes provider recovery on one DB connection
               const recovered = await payments.recoverPayments({ environment: billingEnvironment, limit });
@@ -607,6 +616,7 @@ async function main(): Promise<void> {
                 }),
               );
             } catch (error) {
+              passFailed = true;
               console.error(
                 JSON.stringify({
                   event: 'billing.payment_recovery_batch',
@@ -632,6 +642,7 @@ async function main(): Promise<void> {
                   }),
                 );
               } catch (error) {
+                passFailed = true;
                 console.error(
                   JSON.stringify({
                     event: 'billing.journal_reconciliation',
@@ -695,40 +706,68 @@ async function main(): Promise<void> {
                 } catch (error) {
                   cash = error instanceof Error ? `failed:${error.message}` : 'failed';
                 }
-                const purchase = await purchaseScans.runScan({
-                  scanId,
-                  maximumObligations: 100,
-                  maximumGrants: 100,
-                  maximumSubscriptions: 100,
-                });
                 // A paid obligation with no grant (for example a lost success webhook) holds the customer's
-                // money without credit; the per-kind gauge is what the alert watches.
-                const openCases = await client<Array<{ kind: string; open: number }>>`
-                  SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
-                  WHERE environment = ${billingEnvironment} AND state IN ('open', 'attention')
-                  GROUP BY kind`;
-                for (const kind of new Set([...cashBlockingFinancialCaseKinds, ...openCases.map((row) => row.kind)])) {
-                  caseMetrics.billingOpenFinancialCases.record(openCases.find((row) => row.kind === kind)?.open ?? 0, {
-                    kind,
+                // money without credit; the per-kind gauge is what the alert watches. It reports the case
+                // table, so it is recorded even when a Stripe scan fails: that is when the alert matters most.
+                const recordOpenCases = async (): Promise<void> => {
+                  const openCases = await client<Array<{ kind: string; open: number }>>`
+                    SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
+                    WHERE environment = ${billingEnvironment} AND state IN ('open', 'attention')
+                    GROUP BY kind`;
+                  for (const kind of new Set([
+                    ...cashBlockingFinancialCaseKinds,
+                    ...openCases.map((row) => row.kind),
+                  ])) {
+                    caseMetrics.billingOpenFinancialCases.record(
+                      openCases.find((row) => row.kind === kind)?.open ?? 0,
+                      {
+                        kind,
+                      },
+                    );
+                  }
+                  const unfulfilled =
+                    openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
+                  if (unfulfilled > 0) {
+                    console.error(
+                      JSON.stringify({
+                        event: 'billing.alert',
+                        environment,
+                        kind: 'unfulfilled_purchase_obligation',
+                        open: unfulfilled,
+                      }),
+                    );
+                  }
+                };
+                let purchase: Awaited<ReturnType<typeof purchaseScans.runScan>>;
+                try {
+                  purchase = await purchaseScans.runScan({
+                    scanId,
+                    maximumObligations: 100,
+                    maximumGrants: 100,
+                    maximumSubscriptions: 100,
                   });
+                } catch (error) {
+                  // The gauge still records when the scan fails, but its own failure must not replace the
+                  // scan's error, which is the diagnosis the operator needs.
+                  await recordOpenCases().catch((gaugeError: unknown) => {
+                    console.error(
+                      JSON.stringify({ event: 'billing.case_gauge_failed', environment, error: String(gaugeError) }),
+                    );
+                  });
+                  throw error;
                 }
-                const unfulfilled = openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
-                if (unfulfilled > 0) {
-                  console.error(
-                    JSON.stringify({
-                      event: 'billing.alert',
-                      environment,
-                      kind: 'unfulfilled_purchase_obligation',
-                      open: unfulfilled,
-                    }),
-                  );
-                }
+                await recordOpenCases();
                 if (cash !== 'complete' && cash !== 'incomplete') {
                   throw new Error(`cash scan ${cash}; purchases ${purchase.status}`);
                 }
                 return { scanId, cash, purchases: purchase.status };
               });
             }
+            // F-10: one count per completed pass is the heartbeat a stalled or thrashing worker stops sending.
+            caseMetrics.billingWorkerPasses.add(1, {
+              'tau.worker': 'operations',
+              outcome: passFailed ? 'error' : 'ok',
+            });
             try {
               // oxlint-disable-next-line no-await-in-loop -- the continuous worker deliberately sleeps between polls
               await wait(pollMilliseconds, undefined, { signal: shutdown.signal });

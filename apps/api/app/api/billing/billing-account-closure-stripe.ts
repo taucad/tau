@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Stripe } from 'stripe';
 import type { DatabaseService } from '#database/database.service.js';
+import type { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import type {
   ClosureCancellationAdapter,
   ClosureCancellationResult,
@@ -402,3 +403,12 @@ async function lockLiveClosure(tx: Tx, context: Context, input: Input): Promise<
     .for('update');
   return closure !== undefined;
 }
+
+/** The production adapter: Stripe-backed cancellation, and the payments service's own projection of a pending action. */
+export const createStripeClosureAdapter = (
+  context: Context,
+  payments: Pick<BillingPaymentsService, 'getAction'>,
+): ClosureCancellationAdapter => ({
+  describeAction: async (input) => payments.getAction(input.authUserId, input.actionId),
+  recoverAndCancel: async (input) => recoverAndCancelStripeClosure(context, input),
+});

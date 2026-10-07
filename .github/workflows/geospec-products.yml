@@ -5,8 +5,10 @@ name: GeoSpec products
 # branch can restore entries saved here (`ci.yml` `plan`), and only a pull request that
 # changes the closure itself queues for a Mac. `main` gets the same entries from CI's own
 # push runs, which keep the producer job.
-# `workflow_dispatch` rebuilds the preparation after a runner-image update changed its
-# toolchain generation while the product closure stayed the same.
+# `workflow_dispatch` rebuilds the preparation, skipping Nx Cloud, after a runner-image
+# update changed its toolchain generation or the cache evicted it while the product closure
+# stayed the same. CI's own runs cannot refill it: their prepare task is a remote cache hit,
+# so no preparation exists to retain.
 on:
   push:
     branches: [geospec]
@@ -62,6 +64,8 @@ jobs:
       - name: Prepare GeoSpec engine products
         id: prepare
         uses: ./.github/actions/geospec-producer
+        with:
+          rebuild: ${{ github.event_name == 'workflow_dispatch' }}
 
       - name: Keep the products for runs of this closure
         uses: ./.github/actions/geospec-transport

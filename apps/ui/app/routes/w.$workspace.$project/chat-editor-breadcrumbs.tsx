@@ -1,6 +1,6 @@
 import type { ReactNode, RefCallback } from 'react';
 import { Fragment, useCallback, useId, useMemo } from 'react';
-import { ChevronRight, Lock } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Lock } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -11,6 +11,8 @@ import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { PaneButton } from '#components/ui/pane-button.js';
+import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { paneTitle } from '#workbench-records/pane-titles.js';
 
 type ChatEditorBreadcrumbsProperties = {
   readonly filePath: string;
@@ -19,6 +21,9 @@ type ChatEditorBreadcrumbsProperties = {
 
 export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcrumbsProperties): ReactNode {
   const { editorRef } = useProject();
+  const fileReturn = useFileReturn();
+  // Only the file a pane opened, and only until it is used or another file opens.
+  const returnTo = fileReturn?.returnTo?.path === filePath ? fileReturn.returnTo : undefined;
   const entry = useFileTreeEntry(filePath);
   const provenance = entry?.provenance;
   const label = fileProvenanceLabel(provenance, filePath);
@@ -76,10 +81,21 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
     <div className='min-w-0'>
       <div className='flex min-h-9 items-center justify-between border-b border-border bg-background px-1 py-1 text-muted-foreground'>
         <nav aria-label='File breadcrumbs' className='flex min-w-0 flex-1 items-center gap-1'>
+          {returnTo ? (
+            <PaneButton
+              size='icon'
+              className='shrink-0'
+              aria-label={`Back to ${paneTitle(returnTo.panel)}`}
+              tooltip={`Back to ${paneTitle(returnTo.panel)}`}
+              onClick={fileReturn?.back}
+            >
+              <ArrowLeft aria-hidden />
+            </PaneButton>
+          ) : null}
           <OmniScroller
             key={filePath}
             ref={attachScroller}
-            className='flex min-w-0 flex-1 [scrollbar-width:none] flex-row items-center gap-0 overscroll-x-none [&::-webkit-scrollbar]:hidden'
+            className='flex min-w-0 flex-1 scroll-shadows-x [scrollbar-width:none] flex-row items-center gap-0 overscroll-x-none [&::-webkit-scrollbar]:hidden'
           >
             {breadcrumbs.length > 0 ? (
               breadcrumbs.map((crumb) => (

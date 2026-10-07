@@ -328,6 +328,53 @@ describe('TopupModal', () => {
     }
   });
 
+  it('cancels an owned Checkout from the modal without following its redirect', async () => {
+    const redirect = { ...wireAction('redirect_required'), redirectUrl: 'https://checkout.example/resume' };
+    client.getUnresolvedPaymentActions.mockResolvedValue([redirect]);
+    client.cancelPaymentAction.mockResolvedValue(wireAction('canceled'));
+    renderModal();
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel payment' }));
+    expect(client.cancelPaymentAction).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'user-a' }), 'topup_1');
+    expect(client.followPaymentRedirect).not.toHaveBeenCalled();
+  });
+
+  it('shows where a payment stands when the server refuses to cancel its closed Checkout', async () => {
+    const { toast } = await import('#components/ui/sonner.js');
+    const redirect = { ...wireAction('redirect_required'), redirectUrl: 'https://checkout.example/resume' };
+    client.getUnresolvedPaymentActions.mockResolvedValue([redirect]);
+    client.cancelPaymentAction.mockRejectedValue(
+      Object.assign(new PaymentConflict(undefined), { code: 'action_not_cancelable' }),
+    );
+    client.getPaymentAction.mockResolvedValue({
+      ...wireAction('fulfilled'),
+      receipt: { revision: '1', grantedCreditAtoms: '25000000', chargedPaymentMethod: null },
+    });
+    renderModal();
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel payment' }));
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith('This payment can no longer be cancelled.');
+    });
+    expect(await screen.findByText('Credits added')).toBeInTheDocument();
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing'] });
+    expect(client.followPaymentRedirect).not.toHaveBeenCalled();
+  });
+
+  it('should show an automatic reload purchase that refused a top-up without quote controls', async () => {
+    client.prepareTopup.mockRejectedValue(
+      new PaymentConflict({ ...wireAction('prepared'), purpose: 'automatic_topup' }),
+    );
+    renderModal();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeEnabled();
+    });
+    await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Automatic reload is handling this purchase.');
+    expect(screen.queryByRole('button', { name: 'Confirm quote' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Discard quote' })).not.toBeInTheDocument();
+    // The dialog's own bootstrap reads only manual top-ups; a reload surfaces through the refusal it causes.
+    expect(client.getUnresolvedPaymentActions).not.toHaveBeenCalledWith(expect.anything(), 'automatic_topup');
+  });
+
   it('resumes an owned Checkout only after the user clicks', async () => {
     const redirect = {
       ...wireAction('redirect_required'),

@@ -48,6 +48,7 @@ const codeCards = {
   PEER_UNRESPONSIVE: { category: 'peerUnresponsive' },
   WIRE_VERSION_UNSUPPORTED: { category: 'updateHost' },
   INVALID_REQUEST: { category: 'switchModel' },
+  EXTERNAL_AGENT_MODEL_UNAVAILABLE: { category: 'switchModel' },
   RESUME_UNAVAILABLE: { category: 'nothingToResume' },
   LEADERSHIP_LOST: { category: 'otherTab' },
   LEADER_VERSION_MISMATCH: { category: 'otherBuild' },

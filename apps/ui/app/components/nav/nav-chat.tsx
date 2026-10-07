@@ -7,21 +7,21 @@ import { Loader } from '#components/ui/loader.js';
 
 export function NavChat(): React.JSX.Element {
   const navigate = useNavigate();
-  const isMatch = useMatch('/');
+  const isMatch = useMatch('/projects/new');
   const { formattedKeyCombination } = useKeybinding(
     {
       key: 'n',
       ctrlKey: true,
     },
     () => {
-      // Already home: replace, so the shortcut only refocuses the composer.
-      void navigate('/', { replace: Boolean(isMatch), state: { focusChatComposer: true } });
+      // Already there: replace, so repeated presses do not stack history entries.
+      void navigate('/projects/new', { replace: Boolean(isMatch) });
     },
   );
   return (
     // Elevate the sidebar group above the other items to ensure the new project button is always clickable
     <SidebarGroup className='z-10 px-0'>
-      <NavLink to='/' state={{ focusChatComposer: true }}>
+      <NavLink to='/projects/new'>
         {({ isActive, isPending }) => (
           <SidebarMenuButton
             asChild

@@ -37,6 +37,14 @@ publish = "build/client"
 # Temporary: current Netlify plan cannot create Builds-scoped secrets.
 NX_NO_CLOUD = "true"
 
+# The React Router plugin writes the SSR function to `.netlify/v1/functions`
+# under this base. Naming that directory makes Netlify bundle the function from
+# its real path, where its import of `build/server/server.js` resolves, as a
+# user function that outranks the copy `deploy-ui.yml` exposes as a framework
+# function through its `.netlify` link (which ships without the server build).
+[functions]
+directory = ".netlify/v1/functions"
+
 [context.production]
 command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 

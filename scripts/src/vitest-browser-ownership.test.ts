@@ -102,6 +102,9 @@ describe('Vitest Browser test-runner ownership', () => {
   it('confines the direct browser driver and install command to privileged boundaries', () => {
     const allowedDriverFiles = new Set([
       '.agents/skills/audit-ui/scripts/axe-audit.mjs',
+      // The staging billing harness pays a hosted Stripe Checkout in headless Chromium, which Browser Mode cannot
+      // host; its specs reach the driver only through this module.
+      'apps/billing-e2e/src/support/checkout.ts',
       'apps/desktop-e2e/src/desktop-assimp.spec.ts',
       'apps/desktop-e2e/src/desktop-build123d.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-acp.spec.ts',
@@ -146,9 +149,11 @@ describe('Vitest Browser test-runner ownership', () => {
     expect(driverFiles).toEqual([...allowedDriverFiles].sort());
     // The create-repo template is CI for generated repositories, not a Tau browser-driver site.
     // The docs deployment gate installs Chromium on the Netlify builder unless one is supplied.
+    // The staging billing harness workflow installs Chromium for the hosted Checkout its rows pay.
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
+        '.github/workflows/billing-staging-e2e.yml',
         '.github/workflows/e2e-nightly.yml',
         'apps/docs/project.json',
       ].sort(),
@@ -205,6 +210,8 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/code/code-editor.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/graphics/svg/svg-viewer.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts',
+        'apps/ui/app/components/geometry/graphics/three/viewer-resize.vitest.browser.config.ts',
+        'apps/ui/app/components/panes/editor-layout.vitest.browser.config.ts',
         'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',

@@ -45,81 +45,89 @@
       ]
     },
     {
-      "title": "Negative-Balance Accounts (Q37 debt)",
+      "title": "Open Financial Cases",
       "type": "stat",
       "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
-      "targets": [
-        {
-          "expr": "max(tau_billing_negative_balance_accounts{service_name=\"tau-api\"})",
-          "legendFormat": "accounts"
+      "targets": [{ "expr": "sum(max by (kind) (tau_billing_open_financial_cases{service_name=\"tau-api\"}))" }],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 1, "color": "red" }
+            ]
+          }
         }
-      ]
+      }
     },
     {
-      "title": "Accounts Flagged by Refund Clawback (1h)",
+      "title": "Voided Admissions (1h)",
       "type": "stat",
       "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
       "targets": [
         {
-          "expr": "sum(increase(tau_billing_accounts_flagged_total{service_name=\"tau-api\"}[1h]))",
-          "legendFormat": "flagged"
+          "expr": "sum(increase(tau_billing_voided_admissions_total{service_name=\"tau-api\"}[1h])) or vector(0)"
         }
       ]
     },
     {
-      "title": "Committed Spend by Category (µ$/s → user-charged)",
+      "title": "User-Charged LLM Spend by Model (USD/h)",
+      "description": "User-charged: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "targets": [
         {
-          "expr": "sum by (tau_billing_category) (rate(tau_billing_credit_committed_microusd_total{service_name=\"tau-api\"}[10m]))",
-          "legendFormat": "{{tau_billing_category}}"
+          "expr": "sum by (gen_ai_request_model) (increase(gen_ai_client_cost_total{service_name=\"tau-api\"}[1h]))",
+          "legendFormat": "{{gen_ai_request_model}}"
         }
-      ]
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
     },
     {
-      "title": "Reservation Failures (insufficient balance)",
+      "title": "Open Financial Cases by Kind",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "targets": [
         {
-          "expr": "sum(rate(tau_billing_credit_reservation_failures_total{service_name=\"tau-api\"}[10m]))",
-          "legendFormat": "failures/s"
+          "expr": "max by (kind) (tau_billing_open_financial_cases{service_name=\"tau-api\"})",
+          "legendFormat": "{{kind}}"
         }
       ]
     },
     {
-      "title": "Post-Response Commit/Release Failures",
+      "title": "Attempt Resolutions (1h)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
       "targets": [
         {
-          "expr": "sum by (tau_billing_category) (rate(tau_billing_credit_commit_failures_total{service_name=\"tau-api\"}[10m]))",
-          "legendFormat": "{{tau_billing_category}}"
+          "expr": "sum by (tau_billing_attempt_resolution_outcome) (increase(tau_billing_attempt_resolutions_total{service_name=\"tau-api\"}[1h]))",
+          "legendFormat": "{{tau_billing_attempt_resolution_outcome}}"
         }
       ]
     },
     {
-      "title": "Reservation Sweeps (expired holds settled at floor)",
+      "title": "Provider Account Refusals (1h)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
       "targets": [
         {
-          "expr": "sum(increase(tau_billing_reservation_sweeps_total{service_name=\"tau-api\"}[1h]))",
-          "legendFormat": "swept/h"
+          "expr": "sum by (providerId) (increase(tau_billing_provider_account_refusals_total{service_name=\"tau-api\"}[1h])) or vector(0)",
+          "legendFormat": "{{providerId}}"
         }
       ]
     },
     {
-      "title": "Daily User-Charged Spend by Category (USD)",
+      "title": "Daily User-Charged LLM Spend by Activity (USD)",
+      "description": "User-charged: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
       "targets": [
         {
-          "expr": "sum by (tau_billing_category) (increase(tau_billing_credit_committed_microusd_total{service_name=\"tau-api\"}[24h])) / 1e6",
-          "legendFormat": "{{tau_billing_category}} USD/24h"
+          "expr": "sum by (tau_activity) (increase(gen_ai_client_cost_total{service_name=\"tau-api\"}[24h]))",
+          "legendFormat": "{{tau_activity}}"
         }
-      ]
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" } }
     },
     {
       "title": "Funded LLM Recovery Outcomes (1h)",

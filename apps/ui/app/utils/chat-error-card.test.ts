@@ -23,6 +23,7 @@ describe('cardOf', () => {
     ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', 'externalRestart'],
     ['RESUME_UNAVAILABLE', 'nothingToResume'],
     ['RUN_ABANDONED', 'pausedTurn'],
+    ['EXTERNAL_AGENT_MODEL_UNAVAILABLE', 'switchModel'],
   ] as const)('routes %s to the approved %s card', (code, category) => {
     expect(cardOf(code, errorCategory.generic).category).toBe(category);
   });

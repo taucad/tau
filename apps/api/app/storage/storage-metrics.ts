@@ -25,6 +25,9 @@ const byteLength = (value: unknown): number | undefined => {
  * Byte counts are approximate in two ways: an upload whose `Body` is a stream with no
  * `ContentLength` is not counted, and a `GetObject` counts the response's `ContentLength` before the
  * body is read, so a caller that abandons the stream is counted in full.
+ *
+ * The middleware runs at the `initialize` step, before the SDK's retry loop, so a duration covers every
+ * attempt of one command: what the caller waited, not per-request network time.
  */
 export const instrumentStorageClient = (
   client: S3Client,

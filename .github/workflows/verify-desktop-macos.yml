@@ -12,10 +12,18 @@
 # manifest), so pass `source-ref` (for example the release tag) when those have
 # moved on since the archive was built. It defaults to the dispatched ref.
 #
+# `runner` picks the macOS image, to tell an OS-version behaviour from a VM
+# one. `extension-entitlements` switches to a Quick Look experiment instead of
+# the full verifier: it ad-hoc re-signs only the Quick Look extensions with
+# that entitlements file (a path in the checkout), registers them and runs the
+# thumbnail probe on cube.step, printing the unified log either way. The outer
+# app's seal no longer matches after that, so this mode proves nothing about
+# the shipped signature; it only isolates the extension's sandbox.
+#
 # It needs no signing secrets and publishes nothing: it only reads the
 # artifact and the checked-out sources.
 name: Verify desktop macOS archive
-run-name: Verify desktop macOS archive from run ${{ inputs.run-id }}
+run-name: Verify desktop macOS archive from run ${{ inputs.run-id }} on ${{ inputs.runner }}${{ inputs.extension-entitlements && format(' with {0}', inputs.extension-entitlements) || '' }}
 
 on:
   workflow_dispatch:
@@ -28,6 +36,20 @@ on:
         description: 'Ref whose verifier and fixtures to check the archive against (default: the dispatched ref)'
         required: false
         type: string
+      runner:
+        description: 'macOS runner image'
+        required: false
+        type: string
+        default: macos-15
+      extension-entitlements:
+        description: 'Quick Look experiment: entitlements file to ad-hoc re-sign the extensions with (default: run the full verifier)'
+        required: false
+        type: string
+      hardened-runtime:
+        description: 'Quick Look experiment: sign the extensions with the hardened runtime'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   actions: read
@@ -36,7 +58,7 @@ permissions:
 jobs:
   verify:
     name: Verify the signed package
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 30
     env:
       TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos
@@ -48,6 +70,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Nx Environment
+        if: inputs.extension-entitlements == ''
         uses: ./.github/actions/setup-nx
         with:
           node-version: '24.10.0'
@@ -68,4 +91,36 @@ jobs:
           test -d "$TAU_MACOS_PACKAGE_OUTPUT_ROOT/Tau-darwin-arm64/Tau.app"
 
       - name: Verify the signed package
+        if: inputs.extension-entitlements == ''
         run: pnpm nx run desktop:verify-macos-release
+
+      - name: Quick Look thumbnail experiment
+        if: inputs.extension-entitlements != ''
+        env:
+          ENTITLEMENTS: ${{ inputs.extension-entitlements }}
+          HARDENED: ${{ inputs.hardened-runtime }}
+        run: |
+          set -uo pipefail
+          sw_vers
+          app="$TAU_MACOS_PACKAGE_OUTPUT_ROOT/Tau-darwin-arm64/Tau.app"
+          options=()
+          if [ "$HARDENED" = true ]; then options=(--options runtime); fi
+          for appex in "$app"/Contents/PlugIns/*.appex; do
+            codesign --force --sign - "${options[@]}" --entitlements "$ENTITLEMENTS" "$appex"
+            codesign -d --entitlements - "$appex"
+            pluginkit -a "$appex"
+          done
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
+          pluginkit -m -A -D -i com.taucad.tau.desktop.quicklook-thumbnail
+          xcrun swiftc -O apps/desktop/scripts/quick-look-thumbnail-probe.swift -o "$RUNNER_TEMP/thumbnail-probe"
+          work=$(mktemp -d)
+          cp packages/plugins/brep/src/fixtures/cube.step "$work/cube-$RANDOM.step"
+          status=1
+          for _ in 1 2; do
+            if "$RUNNER_TEMP/thumbnail-probe" "$work"/cube-*.step "$work/thumbnail.png" 128 1; then status=0; break; fi
+            sleep 2
+          done
+          /usr/bin/log show --last 3m --info --style compact --predicate 'subsystem == "com.taucad.tau.desktop" OR process BEGINSWITH "TauQuickLook" OR process == "pkd" OR (process == "kernel" AND eventMessage CONTAINS "Sandbox") OR eventMessage CONTAINS[c] "TauQuickLook"' \
+            | grep -E 'Sandbox|com.taucad.tau.desktop:|TauQuickLookError|terminated' | tail -100
+          if [ "$status" = 0 ]; then echo "THUMBNAIL OK"; sips -g pixelWidth -g pixelHeight "$work/thumbnail.png"; else echo "THUMBNAIL FAILED"; fi
+          exit "$status"

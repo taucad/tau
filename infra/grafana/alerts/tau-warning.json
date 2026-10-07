@@ -308,6 +308,40 @@
         "service": "tau-api",
         "component": "billing"
       }
+    },
+    {
+      "uid": "billing-worker-restarting",
+      "title": "P1: Billing Worker Restarting",
+      "condition": "worker_restarting",
+      "data": [
+        {
+          "refId": "worker_restarting",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum by (app, tau_worker) (resets(tau_billing_worker_passes_total{service_name=\"tau-api\"}[30m])) > 2",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "worker_restarting"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "0s",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/paid-not-credited.md",
+        "summary": "A billing worker's pass counter reset more than twice in 30 min: the process is crash-looping (F-10: billing-operations OOM-kills on a 256 MB Machine). A deploy resets it once."
+      },
+      "labels": {
+        "severity": "warning",
+        "service": "tau-api",
+        "component": "billing"
+      }
     }
   ]
 }

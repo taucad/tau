@@ -89,6 +89,29 @@ groups:
           service: tau-api
           component: billing
 
+      - uid: billing-worker-stalled
+        title: 'P0: Billing Worker Stalled'
+        condition: worker_stalled
+        data:
+          - refId: worker_stalled
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                sum by (app, tau_worker) (max_over_time(tau_billing_worker_passes_total{service_name="tau-api"}[6h])) unless sum by (app, tau_worker) (increase(tau_billing_worker_passes_total{service_name="tau-api",outcome="ok"}[15m]) > 0)
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 5m
+        annotations:
+          summary: 'A billing worker seen in the last 6 h completed no successful pass in 15 min: hung, dead or failing every pass (F-10). operations stalled means paid purchases are not credited; recovery stalled means funded operations stay held (see chat-llm-failing.md). Grouped by Fly `app` and `tau_worker`. Clears 6 h after a worker vanishes for good.'
+          runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
+        labels:
+          severity: critical
+          service: tau-api
+          component: billing
+
   - orgId: 1
     name: tau-warning
     folder: Tau Alerts
@@ -267,6 +290,29 @@ groups:
         for: 0s
         annotations:
           summary: DB-only funded LLM recovery observed a provider execution; the invariant is zero.
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+
+      - uid: billing-worker-restarting
+        title: 'P1: Billing Worker Restarting'
+        condition: worker_restarting
+        data:
+          - refId: worker_restarting
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                sum by (app, tau_worker) (resets(tau_billing_worker_passes_total{service_name="tau-api"}[30m])) > 2
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: "A billing worker's pass counter reset more than twice in 30 min: the process is crash-looping (F-10: billing-operations OOM-kills on a 256 MB Machine). A deploy resets it once."
+          runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
         labels:
           severity: warning
           service: tau-api

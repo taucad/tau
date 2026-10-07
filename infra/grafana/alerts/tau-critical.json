@@ -262,7 +262,7 @@
       "for": "5m",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/playbooks/paid-not-credited.md",
-        "summary": "A billing worker seen in the last 24 h has completed no successful pass in 15 min: hung, dead or failing every pass (F-10). operations stalled means paid purchases are not credited; recovery stalled means funded operations stay held (see chat-llm-failing.md). Grouped by Fly `app` and `tau_worker`. A worker scaled to 0 on purpose also fires until 24 h pass, so silence it."
+        "summary": "A billing worker seen in the last 24 h has completed no successful pass in 15 min: hung, dead or failing every pass (F-10). operations stalled means paid purchases are not credited; recovery stalled means no API replica is completing its in-process recovery pass, so funded operations stay held (see chat-llm-failing.md). Grouped by Fly `app` and `tau_worker`. A worker scaled to 0 on purpose also fires until 24 h pass, so silence it."
       },
       "labels": {
         "severity": "critical",

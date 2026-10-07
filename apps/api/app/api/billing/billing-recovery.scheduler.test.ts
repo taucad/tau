@@ -78,7 +78,12 @@ describe('BillingRecoveryScheduler', () => {
 
     expect(recover).toHaveBeenCalledTimes(2);
     expect(pass).toMatchObject({ failed: 1, fullBatch: true });
-    expect(pass.batches[0]).toMatchObject({ pool: 'primary', outcome: 'failed', failureKind: 'Error' });
+    expect(pass.batches[0]).toMatchObject({
+      pool: 'primary',
+      outcome: 'failed',
+      failureKind: 'Error',
+      failureMessage: 'Controlled unavailable storage',
+    });
     expect(metrics.billingWorkerPasses.add).toHaveBeenCalledExactlyOnceWith(1, {
       'tau.worker': 'recovery',
       outcome: 'error',

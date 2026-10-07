@@ -166,6 +166,9 @@ export class BillingRecoveryScheduler implements OnModuleInit, OnModuleDestroy {
           pool,
           outcome: 'failed',
           failureKind: error instanceof Error ? error.name : 'UnknownError',
+          // Ledger and driver messages name the invariant or constraint, not customer content; without it a
+          // P1 Recovery Failed alert has nothing to diagnose from.
+          failureMessage: error instanceof Error ? error.message : String(error),
           durationMilliseconds: Date.now() - startedAt,
         });
       }

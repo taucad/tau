@@ -435,11 +435,18 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
 
       await expect(service.prepare({ authUserId: userId, requestId })).rejects.toMatchObject({
         status: 409,
-        response: { code: 'payment_action_pending' },
+        response: { code: 'payment_action_pending', state: 'prepared' },
       });
       const closures = await client`select id from billing.billing_account_closure where account_id=${accountId}`;
       expect(closures).toHaveLength(0);
-      // The refusal changed nothing, so the still-bound owner cancels the action and retries the same request.
+      // The refusal left no tombstone either: the account stays open and the owner binding stays bound.
+      const [account] = await client`select status from billing.credit_account where id=${accountId}`;
+      expect(account).toMatchObject({ status: 'open' });
+      const [binding] =
+        await client`select revoked_at from billing.billing_owner_binding where account_id=${accountId}`;
+      expect(binding).toMatchObject({ revoked_at: null });
+      // The refusal changed nothing, so the still-bound owner cancels the action and retries the same request. The
+      // seeded purchase has no provider leg, so cancelAction never reaches Stripe and the key below is a placeholder.
       const stripe = createBillingStripeClient({ secretKey: 'sk_test_closure_pending' });
       const payments = new BillingPaymentsService(
         { database },
@@ -458,6 +465,12 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
         mockDeep<BillingCashQualification>(),
       );
       await expect(payments.cancelAction(userId, purchaseId)).resolves.toMatchObject({ state: 'canceled' });
+      await expect(service.prepare({ authUserId: userId, requestId })).resolves.toMatchObject({
+        state: 'ready_for_auth_deletion',
+      });
+      // Idempotent replay is decided before the purchase probe: the same request answers the same closure even if a
+      // purchase row appeared after the closure started.
+      await seedPaidPurchase({ database, accountId, environment: 'development', atoms: 100n, prepared: true });
       await expect(service.prepare({ authUserId: userId, requestId })).resolves.toMatchObject({
         state: 'ready_for_auth_deletion',
       });

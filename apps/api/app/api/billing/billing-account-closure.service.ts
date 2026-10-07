@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { WireAccountClosure } from '@taucad/billing';
+import { activePurchaseStates } from '#api/billing/billing-payment-contract.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { DatabaseService } from '#database/database.service.js';
 import {
@@ -78,18 +79,20 @@ export class BillingAccountClosureService {
         return project(existing, input.authUserId);
       }
       // Money may still move or await its grant, so closure waits for the payments service's active purchases.
-      // ponytail: a copy of findActivePurchase's states; share one constant if the purchase lifecycle grows.
       const [pendingPurchase] = await tx
-        .select({ id: billingPurchase.id })
+        .select({ id: billingPurchase.id, state: billingPurchase.state })
         .from(billingPurchase)
         .where(
           and(
             eq(billingPurchase.accountId, discovered.accountId),
-            inArray(billingPurchase.state, ['prepared', 'creating', 'pending', 'attention', 'paid_unfulfilled']),
+            inArray(billingPurchase.state, activePurchaseStates),
           ),
         )
         .limit(1);
-      if (pendingPurchase !== undefined) throw new ConflictException({ code: 'payment_action_pending' });
+      // Object form, like the payments service's `action_already_pending`: the UI reads the code and the purchase
+      // state to tell a payment the customer can cancel from one that is processing or under review.
+      if (pendingPurchase !== undefined)
+        throw new ConflictException({ code: 'payment_action_pending', state: pendingPurchase.state });
       const now = new Date();
       const closureId = randomUUID();
       await tx.update(billingOwnerBinding).set({ revokedAt: now }).where(eq(billingOwnerBinding.id, discovered.id));

@@ -20,6 +20,7 @@ import type { BillingPolicyService } from '#api/billing/billing-policy.service.j
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
 import type { QualifiedCashTaxCorrection } from '#api/billing/billing-tax.service.js';
 import {
+  activePurchaseStates,
   cashOccurredAt,
   checkoutExpiryEvidenceSchema,
   exactPaymentOfferTotals,
@@ -497,16 +498,7 @@ export class BillingPaymentsService {
         .select({ id: billingPurchase.id })
         .from(billingPurchase)
         .where(
-          and(
-            eq(billingPurchase.accountId, owner.accountId),
-            or(
-              eq(billingPurchase.state, 'prepared'),
-              eq(billingPurchase.state, 'creating'),
-              eq(billingPurchase.state, 'pending'),
-              eq(billingPurchase.state, 'attention'),
-              eq(billingPurchase.state, 'paid_unfulfilled'),
-            ),
-          ),
+          and(eq(billingPurchase.accountId, owner.accountId), inArray(billingPurchase.state, activePurchaseStates)),
         )
         .limit(1);
       if (active[0] !== undefined) return;
@@ -5151,18 +5143,7 @@ export class BillingPaymentsService {
     const rows = await this.databaseService.database
       .select()
       .from(billingPurchase)
-      .where(
-        and(
-          eq(billingPurchase.accountId, accountId),
-          or(
-            eq(billingPurchase.state, 'prepared'),
-            eq(billingPurchase.state, 'creating'),
-            eq(billingPurchase.state, 'pending'),
-            eq(billingPurchase.state, 'attention'),
-            eq(billingPurchase.state, 'paid_unfulfilled'),
-          ),
-        ),
-      )
+      .where(and(eq(billingPurchase.accountId, accountId), inArray(billingPurchase.state, activePurchaseStates)))
       .limit(1);
     return rows[0];
   }

@@ -2,12 +2,14 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { Injectable, Optional } from '@nestjs/common';
-import type { WsGateway } from '#api/websocket/socket-metrics.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
 
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
 export type UpgradeHandler = (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
+
+/** One value per upgrade route; the `ws.gateway` label on every `ws.*` series. */
+export type WsGateway = 'hosts' | 'kernels';
 
 export type UpgradeRoute = {
   /** The `ws.gateway` label for refusals on this route. */
@@ -80,13 +82,14 @@ export class UpgradeRouter {
     socket.once('close', () => {
       this.#sockets.delete(socket);
     });
-    const { pathname } = new URL(request.url ?? '/', 'http://localhost');
-    const route = this.#routes.find((candidate) => candidate.matches(pathname));
     if (this.shutdown.signal.aborted) {
-      this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': route?.gateway ?? 'none', reason: 'server_shutdown' });
+      // Refusals before routing carry ws.gateway="none".
+      this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': 'none', reason: 'server_shutdown' });
       refuse(socket, '503 Service Unavailable');
       return;
     }
+    const { pathname } = new URL(request.url ?? '/', 'http://localhost');
+    const route = this.#routes.find((candidate) => candidate.matches(pathname));
     if (route === undefined) {
       this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': 'none', reason: 'unknown_route' });
       refuse(socket, '404 Not Found');

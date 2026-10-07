@@ -1,20 +1,20 @@
 import type { RawData, WebSocket } from 'ws';
 
+import type { WsGateway } from '#lifecycle/upgrade-router.js';
 import type { MetricsService } from '#telemetry/metrics.js';
-
-/** One value per upgrade route; the `ws.gateway` label on every `ws.*` series. */
-export type WsGateway = 'hosts' | 'kernels';
 
 /**
  * Bounded `ws.close.reason` for a close code, so the label never carries the
  * peer's free-text reason.
  *
  * @param code - The close code `ws` reports on `'close'` (1006 when the transport dropped).
- * @returns One of normal, going_away, server_shutdown, auth_failed, error, other.
+ * @returns One of normal, going_away, server_shutdown, auth_failed, policy_violation, unavailable,
+ * replaced, error, other.
  */
 export const wsCloseReason = (code: number): string => {
   switch (code) {
-    case 1000: {
+    case 1000:
+    case 1005: {
       return 'normal';
     }
     case 1001: {
@@ -27,6 +27,15 @@ export const wsCloseReason = (code: number): string => {
     case 4401:
     case 4403: {
       return 'auth_failed';
+    }
+    case 1008: {
+      return 'policy_violation';
+    }
+    case 1013: {
+      return 'unavailable';
+    }
+    case 4001: {
+      return 'replaced';
     }
     case 1002:
     case 1003:
@@ -49,7 +58,8 @@ const byteLength = (data: unknown): number => {
   if (Array.isArray(data)) {
     return (data as Array<{ byteLength: number }>).reduce((total, chunk) => total + chunk.byteLength, 0);
   }
-  return (data as { byteLength?: number } | undefined)?.byteLength ?? 0;
+  const sized = data as { byteLength?: number; size?: number } | undefined;
+  return sized?.byteLength ?? sized?.size ?? 0;
 };
 
 /**
@@ -58,6 +68,7 @@ const byteLength = (data: unknown): number => {
  *
  * Outbound frames leave from several owners (the host frame relay, control
  * fan-out, the Zoo proxy), so `send` is wrapped once here instead of at each.
+ * A frame sent once the socket has left OPEN is dropped by `ws`, so it is not counted.
  *
  * @param metrics - The API's instruments.
  * @param gateway - The upgrade route that accepted the socket.
@@ -71,7 +82,9 @@ export const trackSocket = (metrics: MetricsService, gateway: WsGateway, socket:
   });
   const send = socket.send.bind(socket) as (...arguments_: unknown[]) => void;
   socket.send = ((data: unknown, ...rest: unknown[]) => {
-    metrics.wsMessageSize.record(byteLength(data), { ...labels, 'ws.direction': 'outbound' });
+    if (socket.readyState === socket.OPEN) {
+      metrics.wsMessageSize.record(byteLength(data), { ...labels, 'ws.direction': 'outbound' });
+    }
     send(data, ...rest);
   }) as WebSocket['send'];
   socket.once('close', (code: number) => {

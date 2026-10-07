@@ -22,6 +22,24 @@ import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
 
 const zooWebSocketPath = '/v1/kernels/zoo';
 
+/** Bounded `reason` for `ws.upgrade.rejections`; a fail-closed auth outage is not a signed-out user. */
+const rejectionReason = (verdict: { code: number; reason: string }): string => {
+  if (verdict.reason === 'AUTH_ERROR') {
+    return 'auth_error';
+  }
+  switch (verdict.code) {
+    case zooCloseCodes.proRequired: {
+      return 'forbidden';
+    }
+    case zooCloseCodes.insufficientCredit: {
+      return 'insufficient_credit';
+    }
+    default: {
+      return 'unauthenticated';
+    }
+  }
+};
+
 /**
  * WebSocket Gateway for Zoo API proxy.
  *
@@ -67,10 +85,7 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
     trackSocket(this.metrics, 'kernels', socket);
     const verdict = await this.authorizeZooConnection(request);
     if (!verdict.ok) {
-      this.metrics.wsUpgradeRejections.add(1, {
-        'ws.gateway': 'kernels',
-        reason: verdict.code === zooCloseCodes.proRequired ? 'forbidden' : 'unauthenticated',
-      });
+      this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': 'kernels', reason: rejectionReason(verdict) });
       this.logger.warn(`Zoo proxy connection rejected (${verdict.code}): ${verdict.reason}`);
       socket.close(verdict.code, verdict.reason);
       return;

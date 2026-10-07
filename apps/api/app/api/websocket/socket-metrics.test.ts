@@ -41,7 +41,9 @@ describe('trackSocket', () => {
       client.close(1000);
       await closed.promise;
     } finally {
-      server.close();
+      await new Promise((resolve) => {
+        server.close(resolve);
+      });
     }
 
     const labels = { 'ws.gateway': 'hosts' };
@@ -58,11 +60,15 @@ describe('trackSocket', () => {
 describe('wsCloseReason', () => {
   it.each([
     [1000, 'normal'],
+    [1005, 'normal'],
     [1001, 'going_away'],
     [1012, 'server_shutdown'],
     [4401, 'auth_failed'],
     [1006, 'error'],
-    [1008, 'other'],
+    [1008, 'policy_violation'],
+    [1013, 'unavailable'],
+    [4001, 'replaced'],
+    [3000, 'other'],
   ])('should map %i to %s', (code, reason) => {
     expect(wsCloseReason(code)).toBe(reason);
   });

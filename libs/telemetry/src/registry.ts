@@ -57,7 +57,7 @@ export const TauMetrics = {
   wsMessageSize: defineHistogram({
     name: 'ws.message.size',
     unit: 'By',
-    description: 'WebSocket RPC payload sizes for capacity planning',
+    description: 'WebSocket frame payload sizes for capacity planning',
     buckets: [64, 256, 1024, 4096, 16_384, 65_536, 262_144, 1_048_576, 4_194_304],
     attributes: z.object({
       'ws.gateway': z.string().optional(),
@@ -69,10 +69,18 @@ export const TauMetrics = {
   wsUpgradeRejections: defineCounter({
     name: 'ws.upgrade.rejections',
     unit: '{connection}',
-    description: 'WebSocket upgrades refused before or at admission, by gateway and reason',
+    description:
+      'WebSocket upgrades refused by the upgrade router or the gateway admission checks (session, device credential, route). Service-level refusals after admission appear as ws.disconnections policy_violation.',
     attributes: z.object({
-      'ws.gateway': z.string(),
-      reason: z.string(),
+      'ws.gateway': z.enum(['hosts', 'kernels', 'none']),
+      reason: z.enum([
+        'unauthenticated',
+        'forbidden',
+        'insufficient_credit',
+        'auth_error',
+        'unknown_route',
+        'server_shutdown',
+      ]),
     }),
   }),
 

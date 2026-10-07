@@ -56,6 +56,15 @@ describe('TauMetrics', () => {
     ).toBe(false);
   });
 
+  it('should expose the WebSocket upgrade-rejection counter with a bounded label set', () => {
+    expect(TauMetrics.wsUpgradeRejections.name).toBe('ws.upgrade.rejections');
+    expect(TauMetrics.wsUpgradeRejections.type).toBe('counter');
+    expect(TauMetrics.wsUpgradeRejections.unit).toBe('{connection}');
+    expect(
+      TauMetrics.wsUpgradeRejections.attributes.safeParse({ 'ws.gateway': 'hosts', reason: 'user-123' }).success,
+    ).toBe(false);
+  });
+
   it('should expose the tool-result offload counter with the canonical OTEL name', () => {
     expect(TauMetrics.chatToolResultOffloaded.name).toBe('chat.tool_result.offloads');
     expect(TauMetrics.chatToolResultOffloaded.type).toBe('counter');

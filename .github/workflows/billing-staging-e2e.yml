@@ -61,6 +61,16 @@ jobs:
       - name: Run the billing matrix
         run: pnpm nx run billing-e2e:test:staging
 
+      # Blocked rows do not fail the job, so the counts and evidence must be visible without the artifact.
+      - name: Publish the matrix to the run summary
+        if: always()
+        run: |
+          for matrix in out/test-results/billing-e2e/*/results-matrix.md; do
+            if [ -f "$matrix" ]; then
+              cat "$matrix" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
       - name: Upload results, screenshots and traces
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

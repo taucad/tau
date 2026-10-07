@@ -59,7 +59,7 @@ units, UV0 and exports.
 
 The symbols real Tau models use most, as verbatim declarations. Anything not shown is in the API reference below.
 
-### import from 'picovoxel'
+### `picovoxel`
 
 ```ts
 interface Pico
@@ -289,7 +289,7 @@ declare class PicoError extends Error
   constructor(code: PicoErrorCode, message: string, options?: ErrorOptions);
 ```
 
-### import from 'picovoxel/shapekernel'
+### `picovoxel/shapekernel`
 
 ```ts
 // Box along a straight frame or spine with width/depth line modulations (C# `BaseBox`)
@@ -438,7 +438,7 @@ declare class Frames implements Spline
 FrameType: 'cylindrical' | 'spherical' | 'z' | 'minRotation'
 ```
 
-### import from 'picovoxel/numerics'
+### `picovoxel/numerics`
 
 ```ts
 // `Vector3` operations

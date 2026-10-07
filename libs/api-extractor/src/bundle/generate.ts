@@ -263,7 +263,8 @@ const usageRanking = (slug: string): UsageRanking | undefined => {
 /** The import specifier a PicoVoxel declaration file belongs to, from its path in the package. */
 const picovoxelImportPath = (entry: ApiEntry, packageName: string): string => {
   const directory = entry.source?.file.split('/').slice(0, -1).join('/');
-  return `import from '${directory === undefined || directory === '' ? packageName : `${packageName}/${directory}`}'`;
+  // A bare path: electron-vite's esm-shim regex reads "import from '…'" inside a string as an import.
+  return `\`${directory === undefined || directory === '' ? packageName : `${packageName}/${directory}`}\``;
 };
 
 const occtCorePins = [

@@ -180,6 +180,16 @@ describe('every committed bundle', () => {
   );
 
   it.each(declarations.map((entry) => [entry.owner.slug, entry] as const))(
+    '%s contains no text that electron-vite reads as a static import',
+    (_slug, entry) => {
+      // Electron-vite 6 `vite:esm-shim` (ESMStaticImportRe) splices a shim after the last match, strings included.
+      const esmStaticImport =
+        /(?<=\s|^|;)import\s*([\s"']*(?<imports>[\p{L}\p{M}\w\t\n\r $*,/{}@.]+)from\s*)?["']\s*(?<specifier>(?<="\s*)[^"]*[^\s"](?=\s*")|(?<='\s*)[^']*[^\s'](?=\s*'))\s*["'][\s;]*/mu;
+      expect(readFileSync(join(entry.agentDirectory, 'resources.js'), 'utf8')).not.toMatch(esmStaticImport);
+    },
+  );
+
+  it.each(declarations.map((entry) => [entry.owner.slug, entry] as const))(
     '%s describes every declared file with exact immutable resource metadata',
     async (_slug, entry) => {
       const module = (await import(pathToFileURL(join(entry.agentDirectory, 'resources.js')).href)) as ResourceModule;

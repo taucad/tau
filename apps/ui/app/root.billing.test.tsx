@@ -95,7 +95,7 @@ describe('billing payment return', () => {
     expect(payment.followPaymentRedirect).toHaveBeenCalledOnce();
   });
 
-  it('GETs a redirect and resumes it only after the explicit action is clicked', async () => {
+  it('GETs a redirect, recovers it once and resumes it only after the explicit action is clicked', async () => {
     const action = {
       actionId: 'topup_1',
       ownerId: 'user-a',
@@ -105,10 +105,17 @@ describe('billing payment return', () => {
       redirectUrl: 'https://checkout.example/resume',
     };
     payment.getPaymentAction.mockResolvedValue(action);
+    // An open Checkout comes back unchanged from recovery; a paid one would settle here instead.
+    payment.recoverPaymentAction.mockResolvedValue(action);
     render(returnAt('?payment_action=topup_1'));
     await waitFor(() => {
       expect(warning).toHaveBeenCalledOnce();
     });
+    expect(payment.recoverPaymentAction).toHaveBeenCalledOnce();
+    expect(payment.recoverPaymentAction).toHaveBeenCalledWith(
+      expect.objectContaining({ subjectId: 'account-a' }),
+      'topup_1',
+    );
     expect(payment.followPaymentRedirect).not.toHaveBeenCalled();
     const options = warning.mock.calls[0]?.[1] as {
       action: { label: string; onClick: () => void };
@@ -116,7 +123,6 @@ describe('billing payment return', () => {
     expect(options.action.label).toBe('Resume Checkout');
     options.action.onClick();
     expect(payment.followPaymentRedirect).toHaveBeenCalledWith(action);
-    expect(payment.recoverPaymentAction).not.toHaveBeenCalled();
   });
 
   it('ignores a rejected return GET after the owner changes', async () => {

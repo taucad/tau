@@ -13,9 +13,18 @@ import type { Route } from './+types/route.js';
  * drifted, so `/settings/models`, `/settings/agents`, `/settings/filesystem`
  * and `/settings/experimental` all landed on General while `/settings/api-keys`
  * redirected to a section that no longer exists.
+ *
+ * The rest of the query survives, so a Checkout return to `/settings/billing?payment_action=…`
+ * still reaches the dialog with its payment context.
  */
-export function loader({ params }: Route.LoaderArgs): Response {
+export function loader({ params, request }: Route.LoaderArgs): Response {
   const splatPath = (params as { '*'?: string })['*'] ?? '';
   const parsed = settingsSectionSchema.safeParse(splatPath);
-  return redirect(`/?settings=${parsed.success ? parsed.data : 'general'}`);
+  const search = new URLSearchParams({ settings: parsed.success ? parsed.data : 'general' });
+  for (const [key, value] of new URL(request.url).searchParams) {
+    if (key !== 'settings') {
+      search.append(key, value);
+    }
+  }
+  return redirect(`/?${search.toString()}`);
 }

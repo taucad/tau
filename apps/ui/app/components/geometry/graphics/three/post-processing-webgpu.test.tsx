@@ -1,6 +1,7 @@
 import { act, render } from '@testing-library/react';
 import { useLayoutEffect } from 'react';
 import { NeutralToneMapping } from 'three';
+import type { PostProcessingSettings } from '#components/geometry/graphics/three/post-processing-settings.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type MockCameraSnapshot = { view: { target: [number, number, number] } };
@@ -322,30 +323,14 @@ vi.mock('three/webgpu', () => {
 
 const endpointProperties = { aoAllowed: true, toneMapping: NeutralToneMapping } as const;
 
-const mount = async () => {
+const mount = async (properties: { aoAllowed?: boolean; settings?: Partial<PostProcessingSettings> } = {}) => {
   const { PostProcessingWebGPU: PostProcessingWebGpu } =
     await import('#components/geometry/graphics/three/post-processing-webgpu.js');
-  return render(<PostProcessingWebGpu {...endpointProperties} />);
+  return render(<PostProcessingWebGpu {...endpointProperties} {...properties} />);
 };
 
 const isBeautyOnly = ({ material }: { material: { fragmentNode?: unknown } }): boolean =>
   (material.fragmentNode as { color?: unknown }).color === mocks.colorNode;
-
-/** Forget the warm-up's output-quad renders, so a test counts only frame renders. */
-const clearWarmRenders = (): void => {
-  for (const quad of mocks.outputQuads) {
-    quad.render.mockClear();
-  }
-};
-
-const settleBothCompiles = async (): Promise<void> => {
-  await act(async () => {
-    for (const settler of mocks.compileSettlers) {
-      settler.resolve();
-    }
-    await Promise.resolve();
-  });
-};
 
 describe('PostProcessingWebGPU retained endpoint pipelines', () => {
   beforeEach(() => {
@@ -359,7 +344,8 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
     mocks.createGtaoCameraAdapter.mockClear();
     mocks.compileSettlers.length = 0;
     mocks.displayUniforms.length = 0;
-    mocks.glRender.mockClear();
+    mocks.glRender.mockReset();
+    mocks.gl.isWebGPURenderer = true;
     mocks.getCurrentViewport.mockClear();
     mocks.invalidate.mockClear();
     mocks.normalNode.sample.mockClear();
@@ -382,323 +368,144 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
     mocks.setRenderTarget.mockClear();
   });
 
-  it('builds and warms both native camera graphs before publishing post-processing', async () => {
-    await mount();
+  it('should prepare only the active beauty endpoint when AO is disabled', async () => {
+    await mount({ aoAllowed: false });
+    expect(mocks.pass).toHaveBeenCalledTimes(1);
+    expect(mocks.pass).toHaveBeenCalledWith(mocks.scene, mocks.perspectiveCamera);
+    expect(mocks.ao).not.toHaveBeenCalled();
+    expect(mocks.scenePasses[0]!.setMRT).not.toHaveBeenCalled();
+    expect(mocks.compileAsync).not.toHaveBeenCalled();
+    expect(mocks.glRender).not.toHaveBeenCalled();
+    mocks.getFrame()?.(mocks.state, 0);
+    expect(mocks.outputQuads[0]!.render).toHaveBeenCalledOnce();
+    expect(isBeautyOnly(mocks.outputQuads[0]!)).toBe(true);
+  });
 
+  it('should create the other projection only on demand and reuse it on return', async () => {
+    await mount({ aoAllowed: false });
+    act(() => mocks.getRetarget()?.(mocks.orthographicCamera, mocks.snapshot));
+    expect(mocks.pass).toHaveBeenCalledTimes(1);
+    mocks.getFrame()?.(mocks.state, 0);
     expect(mocks.pass).toHaveBeenCalledTimes(2);
-    expect(mocks.pass).toHaveBeenNthCalledWith(1, mocks.scene, mocks.perspectiveCamera);
-    expect(mocks.pass).toHaveBeenNthCalledWith(2, mocks.scene, mocks.orthographicCamera);
-    expect(mocks.outputQuads.map(({ endpointCamera }) => endpointCamera)).toEqual([
-      mocks.perspectiveCamera,
-      mocks.perspectiveCamera,
-      mocks.orthographicCamera,
-      mocks.orthographicCamera,
-    ]);
-    // Each scene pass warms nested in its output quad, as in a live frame, into a throwaway target.
-    expect(mocks.scenePasses.map(({ updateBefore }) => updateBefore.mock.calls.length)).toEqual([1, 1]);
-    const { RenderTarget } = await import('three/webgpu');
-    expect(mocks.setRenderTarget).toHaveBeenCalledWith(expect.any(RenderTarget));
-    expect(mocks.gl.getRenderTarget()).toEqual({ kind: 'prior-target' });
-    expect(mocks.scenePasses.every(({ compileAsync }) => compileAsync.mock.calls.length === 0)).toBe(true);
-    // Depth restore and both output quads, per endpoint.
-    expect(mocks.compileAsync).toHaveBeenCalledTimes(6);
-    expect(mocks.invalidate).not.toHaveBeenCalled();
-
-    await settleBothCompiles();
-    expect(mocks.invalidate).toHaveBeenCalledOnce();
-    // Publishing warms the inactive orthographic endpoint again, now that content may have mounted.
-    expect(mocks.scenePasses.map(({ updateBefore }) => updateBefore.mock.calls.length)).toEqual([1, 2]);
-  });
-
-  it('warms the inactive endpoint again when the stage publishes a new render frame', async () => {
-    const mounted = await mount();
-    await settleBothCompiles();
-    const before = mocks.scenePasses.map(({ updateBefore }) => updateBefore.mock.calls.length);
-    const previousRenderFrame = mocks.rig.renderFrame;
-    mocks.rig.renderFrame = { ...previousRenderFrame, originMeters: [1, 2, 3] };
-    try {
-      const { PostProcessingWebGPU: PostProcessingWebGpu } =
-        await import('#components/geometry/graphics/three/post-processing-webgpu.js');
-      mounted.rerender(<PostProcessingWebGpu {...endpointProperties} />);
-      expect(mocks.scenePasses.map(({ updateBefore }) => updateBefore.mock.calls.length)).toEqual([
-        before[0],
-        before[1]! + 1,
-      ]);
-    } finally {
-      mocks.rig.renderFrame = previousRenderFrame;
-    }
-  });
-
-  it('restores MRT and target before asynchronous compile work or a fallback frame can observe them', async () => {
-    await mount();
-    expect(mocks.gl.getMRT()).toBeNull();
-    expect(mocks.gl.getRenderTarget()).toEqual({ kind: 'prior-target' });
-    expect(mocks.compileSettlers).toHaveLength(6);
+    expect(mocks.outputQuads[1]!.endpointCamera).toBe(mocks.orthographicCamera);
+    expect(mocks.outputQuads[1]!.render).toHaveBeenCalledOnce();
+    act(() => mocks.getRetarget()?.(mocks.perspectiveCamera, mocks.snapshot));
     mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.gl.getMRT()).toBeNull();
-    await settleBothCompiles();
-    expect(mocks.gl.getMRT()).toBeNull();
-    expect(mocks.gl.getRenderTarget()).toEqual({ kind: 'prior-target' });
-  });
-
-  it('restores MRT and target when synchronous scene prewarm throws', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    mocks.prewarm.mockImplementationOnce(() => {
-      throw new Error('scene prewarm failed');
-    });
-    await mount();
-    expect(mocks.gl.getMRT()).toBeNull();
-    expect(mocks.gl.getRenderTarget()).toEqual({ kind: 'prior-target' });
-    expect(mocks.compileSettlers).toHaveLength(0);
-    mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.glRender).toHaveBeenCalledWith(mocks.scene, mocks.perspectiveCamera);
-    expect(mocks.invalidate).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalledOnce();
-    error.mockRestore();
+    expect(mocks.pass).toHaveBeenCalledTimes(2);
+    expect(mocks.outputQuads[0]!.render).toHaveBeenCalledOnce();
   });
 
   it('restores the selected scene-pass depth with one direct fullscreen draw', async () => {
-    await mount();
-    await settleBothCompiles();
+    await mount({ aoAllowed: false });
+    mocks.getFrame()?.(mocks.state, 0);
     mocks.glRender.mockClear();
-    mocks.setRenderTarget.mockClear();
-
     mocks.getRestoreDepth()?.();
-
-    expect(mocks.setRenderTarget).toHaveBeenNthCalledWith(1, null);
-    // The untested fullscreen draw overwrites every depth texel; a clear would add an output pass.
-    expect(mocks.clearDepth).not.toHaveBeenCalled();
     expect(mocks.glRender).toHaveBeenCalledOnce();
-    const { QuadMesh } = await import('three/webgpu');
-    expect(mocks.glRender.mock.calls[0]![0]).toBeInstanceOf(QuadMesh);
-    expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' });
-
-    // The emphasis coverage mask depth-tests inside its own target and asks the same owner for it.
-    const maskTarget = { kind: 'mask-target' };
-    mocks.setRenderTarget.mockClear();
-    mocks.getRestoreDepth()?.(maskTarget);
-    expect(mocks.setRenderTarget).toHaveBeenNthCalledWith(1, maskTarget);
-    expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' });
+    expect(mocks.clearDepth).not.toHaveBeenCalled();
+    expect(mocks.gl.getRenderTarget()).toEqual({ kind: 'prior-target' });
+    expect(mocks.gl.getMRT()).toBeNull();
   });
 
-  it('restores the previous render target when the depth draw fails', async () => {
-    await mount();
-    await settleBothCompiles();
+  it('should restore the target when depth submission throws', async () => {
+    await mount({ aoAllowed: false });
     mocks.glRender.mockImplementationOnce(() => {
-      throw new Error('depth draw failed');
+      throw new Error('draw failed');
     });
-
-    expect(() => mocks.getRestoreDepth()?.()).toThrow('depth draw failed');
-    expect(mocks.setRenderTarget).toHaveBeenLastCalledWith({ kind: 'prior-target' });
-  });
-
-  it('keeps one priority-1 direct render alive while both graphs warm', async () => {
-    await mount();
-    clearWarmRenders();
-
-    mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.glRender).toHaveBeenCalledWith(mocks.scene, mocks.perspectiveCamera);
-    expect(mocks.outputQuads.every(({ render }) => render.mock.calls.length === 0)).toBe(true);
-  });
-
-  it('switches endpoint pipelines without teardown or a blank frame', async () => {
-    await mount();
-    await settleBothCompiles();
-    clearWarmRenders();
-
-    mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.outputQuads[0]!.render).toHaveBeenCalledWith(mocks.gl);
-
-    act(() => {
-      mocks.getRetarget()?.(mocks.orthographicCamera, mocks.snapshot);
-      mocks.state.camera = mocks.orthographicCamera;
-    });
-    mocks.getFrame()?.(mocks.state, 0);
-
-    expect(mocks.outputQuads[2]!.render).toHaveBeenCalledOnce();
-    expect(mocks.pass).toHaveBeenCalledTimes(2);
-    expect(mocks.postDispose).not.toHaveBeenCalled();
-    // Only the output quads reach the renderer; the scene is never drawn directly.
-    expect(mocks.glRender).not.toHaveBeenCalledWith(mocks.scene, expect.anything());
-  });
-
-  it('keeps direct rendering after warm-up failure', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    await mount();
-    await act(async () => {
-      mocks.compileSettlers[0]!.reject(new Error('compile failed'));
-      mocks.compileSettlers[1]!.resolve();
-      await Promise.resolve();
-    });
-
-    mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.glRender).toHaveBeenCalledWith(mocks.scene, mocks.perspectiveCamera);
-    expect(mocks.invalidate).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalledOnce();
-    error.mockRestore();
-  });
-
-  it('releases the first endpoint when construction of the second endpoint fails', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const createAo = mocks.ao.getMockImplementation()!;
-    mocks.ao.mockImplementationOnce(createAo).mockImplementationOnce(() => {
-      throw new Error('AO construction failed');
-    });
-    await mount();
-    expect(mocks.scenePasses).toHaveLength(2);
-    expect(mocks.scenePasses.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
-    expect(mocks.postDispose).toHaveBeenCalledTimes(2);
-    expect(mocks.aoDispose).toHaveBeenCalledOnce();
-    mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.glRender).toHaveBeenCalledWith(mocks.scene, mocks.perspectiveCamera);
-    expect(error).toHaveBeenCalledOnce();
-    error.mockRestore();
-  });
-
-  it('retains the single-MRT GTAO configuration for both graphs', async () => {
-    await mount();
-
-    expect(mocks.ao).toHaveBeenCalledTimes(2);
-    // Beauty must be the material's lit output: an undefined MRT member renders the scene blank.
-    for (const scenePass of mocks.scenePasses) {
-      expect(scenePass.setMRT).toHaveBeenCalledWith({ output: { kind: 'output' }, normal: { kind: 'normal-view' } });
-    }
-    expect(mocks.normalTexture.type).toBe(1009);
-    for (const aoNode of mocks.aoNodes) {
-      expect(aoNode.resolutionScale).toBe(0.5);
-      expect(aoNode.useTemporalFiltering).toBe(false);
-      expect(aoNode.samples.value).toBe(8);
-      expect(aoNode.scale.value).toBe(1);
-    }
-    // 1% of a 1500×1000 CSS viewport is 18.027756… CSS pixels.
-    expect(mocks.aoNodes[0]!.radius.value).toBeCloseTo(0.3605551275, 9);
-    expect(mocks.aoNodes[1]!.radius.value).toBeCloseTo(0.7211102551, 9);
-    expect(mocks.aoNodes[0]!.thickness.value).toBeCloseTo(4.006168084, 8);
-    expect(mocks.aoNodes[1]!.thickness.value).toBeCloseTo(8.012336168, 8);
-    expect(mocks.displayUniforms.map(({ value }) => value)).toEqual([0, 1, 0, 1]);
+    expect(() => mocks.getRestoreDepth()?.()).toThrow('draw failed');
+    expect(mocks.gl.getRenderTarget()).toEqual({ kind: 'prior-target' });
   });
 
   it('keeps beauty ahead of AO dependencies and preserves its alpha in the AO visualization', async () => {
     await mount();
-    await settleBothCompiles();
-    const composed = mocks.outputQuads.filter((quad) => !isBeautyOnly(quad));
-    expect(composed).toHaveLength(2);
-    for (const quad of composed) {
-      expect(quad.material.fragmentNode).toMatchObject({
-        beauty: { kind: 'display-composed-color', color: { kind: 'composed-color' } },
-        aoOnly: [{ kind: 'ao-r' }, { kind: 'scene-alpha' }],
-      });
-    }
-    expect(mocks.createGtaoCameraAdapter).toHaveBeenCalledWith(mocks.perspectiveCamera, true);
-    expect(mocks.createGtaoCameraAdapter).toHaveBeenCalledWith(mocks.orthographicCamera, true);
-    mocks.getFrame()?.(mocks.state, 0);
     expect(mocks.updateAoCamera).toHaveBeenCalledOnce();
-  });
-
-  it('updates both retained endpoint uniforms after viewport and camera retargeting without reconstruction', async () => {
-    await mount();
-    await settleBothCompiles();
-    const { aoNodes } = mocks;
-
-    mocks.state.size.height = 500;
-    act(() => {
-      mocks.getRetarget()?.(mocks.orthographicCamera, mocks.snapshot);
+    mocks.getFrame()?.(mocks.state, 0);
+    expect(mocks.aoNodes).toHaveLength(1);
+    const composed = mocks.outputQuads.find((quad) => !isBeautyOnly(quad));
+    expect(composed?.material.fragmentNode).toMatchObject({
+      beauty: { kind: 'display-composed-color', color: { kind: 'composed-color' } },
+      aoOnly: [{ kind: 'ao-r' }, { kind: 'scene-alpha' }],
     });
-
-    expect(aoNodes[0]!.radius.value).toBeCloseTo(0.632455532, 9);
-    expect(aoNodes[1]!.radius.value).toBeCloseTo(1.264911064, 9);
-    expect(mocks.pass).toHaveBeenCalledTimes(2);
+    expect(mocks.scenePasses[0]!.setMRT).toHaveBeenCalledWith({
+      output: { kind: 'output' },
+      normal: { kind: 'normal-view' },
+    });
+    expect(mocks.normalTexture.type).toBe(1009);
+    expect(mocks.aoNodes[0]).toMatchObject({
+      resolutionScale: 0.5,
+      useTemporalFiltering: false,
+      samples: { value: 8 },
+    });
+    expect(mocks.aoNodes[0]!.radius.value).toBeCloseTo(0.3605551275, 9);
+    expect(mocks.updateAoCamera).toHaveBeenCalledTimes(2);
   });
 
   it('updates AO output and estimator uniforms without rebuilding the production graph', async () => {
     const mounted = await mount();
-    await settleBothCompiles();
     const { PostProcessingWebGPU: PostProcessingWebGpu } =
       await import('#components/geometry/graphics/three/post-processing-webgpu.js');
-    mocks.invalidate.mockClear();
+    const invalidationsBeforeSettings = mocks.invalidate.mock.calls.length;
     mounted.rerender(
       <PostProcessingWebGpu
         {...endpointProperties}
-        settings={{
-          radiusCssPixels: 10,
-          intensity: 0.5,
-          gtaoIntensity: 1.5,
-          gtaoDistanceFalloff: 0.4,
-          displayMode: 'ao',
-        }}
+        settings={{ gtaoIntensity: 2, gtaoDistanceFalloff: 0.4, displayMode: 'ao', aoCompositeStage: 'display' }}
       />,
     );
-    expect(mocks.pass).toHaveBeenCalledTimes(2);
-    expect(mocks.aoNodes.map(({ radius }) => radius.value)).toEqual([0.2, 0.4]);
-    for (const aoNode of mocks.aoNodes) {
-      expect(aoNode.scale.value).toBe(1.5);
-      expect(aoNode.distanceFallOff.value).toBe(0.4);
-    }
-    expect(mocks.displayUniforms.map(({ value }) => value)).toEqual([1, 1, 1, 1]);
-    expect(mocks.invalidate).toHaveBeenCalled();
+    // Demand rendering must receive current uniforms before the next frame is submitted.
+    expect(mocks.aoNodes[0]!.scale.value).toBe(2);
+    expect(mocks.aoNodes[0]!.distanceFallOff.value).toBe(0.4);
+    expect(mocks.displayUniforms.map(({ value }) => value)).toEqual([1, 1]);
+    expect(mocks.invalidate.mock.calls.length).toBeGreaterThan(invalidationsBeforeSettings);
+    mocks.getFrame()?.(mocks.state, 0);
+    expect(mocks.pass).toHaveBeenCalledTimes(1);
+    expect(mocks.aoNodes[0]!.scale.value).toBe(2);
+    expect(mocks.aoNodes[0]!.distanceFallOff.value).toBe(0.4);
+    expect(mocks.displayUniforms.map(({ value }) => value)).toEqual([1, 1]);
+  });
+
+  it('should replace and dispose AO resources on toggles while beauty-only owns no AO graph', async () => {
+    const mounted = await mount({ aoAllowed: false });
+    const { PostProcessingWebGPU: PostProcessingWebGpu } =
+      await import('#components/geometry/graphics/three/post-processing-webgpu.js');
+    mounted.rerender(<PostProcessingWebGpu {...endpointProperties} />);
+    expect(mocks.scenePasses[0]!.dispose).toHaveBeenCalledOnce();
+    expect(mocks.aoNodes).toHaveLength(1);
     mounted.rerender(<PostProcessingWebGpu {...endpointProperties} settings={{ displayMode: 'no-ao' }} />);
-    expect(mocks.displayUniforms.map(({ value }) => value)).toEqual([2, 1, 2, 1]);
-    expect(mocks.aoNodes.map(({ scale }) => scale.value)).toEqual([1, 1]);
-    expect(mocks.pass).toHaveBeenCalledTimes(2);
+    expect(mocks.aoDispose).toHaveBeenCalledOnce();
+    expect(mocks.aoNodes).toHaveLength(1);
+    expect(mocks.scenePasses[2]!.setMRT).not.toHaveBeenCalled();
+    mocks.getFrame()?.(mocks.state, 0);
+    expect(mocks.outputQuads.at(-1)!.render).toHaveBeenCalledOnce();
   });
 
   it('should tone-map the scene once in linear light and leave the sRGB encode to the output pass', async () => {
-    const mounted = await mount();
-    const { PostProcessingWebGPU: PostProcessingWebGpu } =
-      await import('#components/geometry/graphics/three/post-processing-webgpu.js');
-    mounted.rerender(
-      <PostProcessingWebGpu {...endpointProperties} settings={{ aoCompositeStage: 'display', displayMode: 'ao' }} />,
-    );
-    // Beauty with AO and beauty alone, per endpoint: each tone-maps once and stays linear.
-    expect(mocks.renderOutput.mock.calls).toHaveLength(4);
-    expect(
-      mocks.renderOutput.mock.calls.every(
-        ([, toneMapping, colorSpace]) => toneMapping === NeutralToneMapping && colorSpace === 'srgb-linear',
-      ),
-    ).toBe(true);
-    expect(mocks.displayUniforms.map(({ value }) => value)).toEqual([1, 1, 1, 1]);
-    mounted.rerender(
-      <PostProcessingWebGpu {...endpointProperties} settings={{ aoCompositeStage: 'scene', displayMode: 'ao' }} />,
-    );
-    expect(mocks.displayUniforms.map(({ value }) => value)).toEqual([1, 0, 1, 0]);
-    expect(mocks.outputQuads).toHaveLength(4);
+    await mount({ aoAllowed: false });
+    expect(mocks.renderOutput).toHaveBeenCalledOnce();
+    expect(mocks.renderOutput).toHaveBeenCalledWith(mocks.colorNode, NeutralToneMapping, 'srgb-linear');
   });
 
-  it('bypasses GTAO through a retained beauty-only graph sharing the same scene pass', async () => {
+  it('should dispose every demanded endpoint once on unmount', async () => {
     const mounted = await mount();
-    await settleBothCompiles();
-    clearWarmRenders();
-    const { PostProcessingWebGPU: PostProcessingWebGpu } =
-      await import('#components/geometry/graphics/three/post-processing-webgpu.js');
-    const aoPipelines = mocks.outputQuads.filter((quad) => !isBeautyOnly(quad));
-    const beautyPipelines = mocks.outputQuads.filter((quad) => isBeautyOnly(quad));
-    expect(beautyPipelines).toHaveLength(2);
-    mounted.rerender(<PostProcessingWebGpu {...endpointProperties} settings={{ aoEnabled: false }} />);
+    act(() => mocks.getRetarget()?.(mocks.orthographicCamera, mocks.snapshot));
     mocks.getFrame()?.(mocks.state, 0);
-    expect(beautyPipelines[0]!.render).toHaveBeenCalledOnce();
-    expect(aoPipelines.every(({ render }) => render.mock.calls.length === 0)).toBe(true);
-    // The viewer's post-processing toggle drops AO whatever the AO setting says.
-    mounted.rerender(<PostProcessingWebGpu {...endpointProperties} aoAllowed={false} settings={{ aoEnabled: true }} />);
-    mocks.getFrame()?.(mocks.state, 0);
-    expect(beautyPipelines[0]!.render).toHaveBeenCalledTimes(2);
-    expect(aoPipelines.every(({ render }) => render.mock.calls.length === 0)).toBe(true);
-    mounted.rerender(<PostProcessingWebGpu {...endpointProperties} settings={{ aoEnabled: true }} />);
-    mocks.getFrame()?.(mocks.state, 0);
-    expect(aoPipelines[0]!.render).toHaveBeenCalledOnce();
-    expect(mocks.pass).toHaveBeenCalledTimes(2);
-    expect(mocks.outputQuads).toHaveLength(4);
-    expect(mocks.postDispose).not.toHaveBeenCalled();
-  });
-
-  it('disposes both endpoint resources once on unmount, including pending warm-up', async () => {
-    const { unmount } = await mount();
-    unmount();
-
-    expect(mocks.postDispose).toHaveBeenCalledTimes(4);
+    mounted.unmount();
+    for (const pass of mocks.scenePasses) {
+      expect(pass.dispose).toHaveBeenCalledOnce();
+    }
     expect(mocks.aoDispose).toHaveBeenCalledTimes(2);
-    expect(mocks.scenePasses.every(({ dispose }) => dispose.mock.calls.length === 1)).toBe(true);
-    await settleBothCompiles();
-    expect(mocks.invalidate).not.toHaveBeenCalled();
+    expect(mocks.postDispose).toHaveBeenCalledTimes(4);
+  });
+
+  it('should release partial resources when graph construction fails', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.ao.mockImplementationOnce(() => {
+      throw new Error('AO failed');
+    });
+    const mounted = await mount();
+    expect(mocks.scenePasses[0]!.dispose).toHaveBeenCalledOnce();
+    expect(mocks.postDispose).toHaveBeenCalledOnce();
+    mounted.unmount();
+    expect(mocks.scenePasses[0]!.dispose).toHaveBeenCalledOnce();
+    error.mockRestore();
   });
 
   it('does not construct resources for a non-WebGPU renderer', async () => {

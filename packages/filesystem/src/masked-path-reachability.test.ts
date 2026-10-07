@@ -197,7 +197,7 @@ describe('masked path reachability through the authority-global surface', () => 
     vi.useFakeTimers();
     const received: WatchEvent[] = [];
     const view = projectView('agent');
-    const unsubscribe = view.watch!({ paths: [''], recursive: true }, (event) => {
+    const unsubscribe = await view.watch!({ paths: [''], recursive: true }, (event) => {
       received.push(event);
     });
 
@@ -212,9 +212,9 @@ describe('masked path reachability through the authority-global surface', () => 
     }
 
     expect(received).toEqual([{ type: 'change', path: 'src/main.ts' }]);
-    expect(() => view.watch!({ paths: ['.git'] }, () => undefined)).toThrow(
-      expect.objectContaining({ code: 'EPERM', reason: maskedPathCode }),
-    );
+    expect(() => {
+      void view.watch!({ paths: ['.git'] }, () => undefined);
+    }).toThrow(expect.objectContaining({ code: 'EPERM', reason: maskedPathCode }));
   });
 
   /* Flipped by W4: the search a consumer reaches is `search` on the rooted
@@ -334,12 +334,10 @@ describe('masked path reachability through the authority-global surface', () => 
 describe('what project duplication reads from a disk-backed project', () => {
   const diskProjectId = 'proj_ddddddddddddddddddddd';
   const physicalDirectory = 'gear-system';
-  const diskCleanups: Array<() => void> = [];
+  const diskCleanups: Array<() => Promise<void>> = [];
 
-  afterEach(() => {
-    for (const cleanup of diskCleanups.splice(0).reverse()) {
-      cleanup();
-    }
+  afterEach(async () => {
+    await Promise.all(diskCleanups.splice(0).map(async (cleanup) => cleanup()));
   });
 
   const seedDiskProject = async (): Promise<WorkspaceFileService> => {
@@ -371,9 +369,10 @@ describe('what project duplication reads from a disk-backed project', () => {
       eventBus: new ChangeEventBus(),
       mountTable: new MountTable(),
     });
-    diskCleanups.push(() => {
+    diskCleanups.push(async () => {
       service.dispose();
-      void stopHost();
+      // The host unsubscribes its watcher here; deleting the tree first fails that with EINVAL.
+      await stopHost();
       port2.close();
       rmSync(root, { recursive: true, force: true });
     });

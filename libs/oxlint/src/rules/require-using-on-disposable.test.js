@@ -15,6 +15,8 @@ const ruleTester = new RuleTester({
     parserOptions: {
       project: './tsconfig.json',
       tsconfigRootDir: fixtureDirectory,
+      // CI=true would switch typescript-eslint to single-run mode, which reuses one program across cases.
+      disallowAutomaticSingleRunInference: true,
       ecmaVersion: 'latest',
       sourceType: 'module',
     },
@@ -100,5 +102,5 @@ describe('require-using-on-disposable', () => {
         },
       ],
     });
-  });
+  }, 15_000);
 });

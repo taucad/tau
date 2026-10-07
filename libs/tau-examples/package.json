@@ -31,10 +31,12 @@
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*"
   },
   "devDependencies": {
     "@jscad/modeling": "catalog:",
+    "@taucad/build123d": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kinematics": "workspace:*",
     "geospec": "workspace:*",

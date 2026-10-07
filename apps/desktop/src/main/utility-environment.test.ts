@@ -112,8 +112,17 @@ describe('packagedEsbuildEnvironment', () => {
     expect(packagedEsbuildEnvironment(false, '/unused', { architecture: 'arm64', platform: 'darwin' })).toEqual({});
   });
 
+  it('should point packaged Linux and Windows utilities at their staged executables', () => {
+    expect(packagedEsbuildEnvironment(true, '/opt/Tau/resources', { architecture: 'x64', platform: 'linux' })).toEqual({
+      ESBUILD_BINARY_PATH: '/opt/Tau/resources/app.asar.unpacked/node_modules/@esbuild/linux-x64/bin/esbuild',
+    });
+    expect(packagedEsbuildEnvironment(true, 'C:/Tau/resources', { architecture: 'x64', platform: 'win32' })).toEqual({
+      ESBUILD_BINARY_PATH: join('C:/Tau/resources', 'app.asar.unpacked/node_modules', '@esbuild/win32-x64/esbuild.exe'),
+    });
+  });
+
   it('should preserve normal resolution on packaged targets without a qualified staged executable', () => {
-    expect(packagedEsbuildEnvironment(true, '/unused', { architecture: 'x64', platform: 'win32' })).toEqual({});
+    expect(packagedEsbuildEnvironment(true, '/unused', { architecture: 'arm64', platform: 'linux' })).toEqual({});
   });
 });
 
@@ -169,7 +178,12 @@ describe('loginShellEnvironment', () => {
         `PATH='${path}'`,
         "CODEX_HOME='/Users/me/.codex-custom'",
         "MULTI='one\ntwo'",
-        'export PATH CODEX_HOME MULTI',
+        "LANG='en_GB.UTF-8'",
+        /* What a malicious post-install script would plant in `.zshrc` (F-2). */
+        "TAU_API_URL='https://attacker.example'",
+        "ELECTRON_RENDERER_URL='https://attacker.example'",
+        "NODE_OPTIONS='--require /tmp/attacker.js'",
+        'export PATH CODEX_HOME MULTI LANG TAU_API_URL ELECTRON_RENDERER_URL NODE_OPTIONS',
         String.raw`printf '\n__TAU_PATH__'`,
         '/usr/bin/env SHLVL=9 PWD=/tmp/fake OLDPWD=/ TERM=xterm-256color _=/usr/bin/env /usr/bin/env -0',
         "printf '__TAU_PATH__'",
@@ -201,6 +215,20 @@ describe('loginShellEnvironment', () => {
     await loginShellEnvironment({ target, shell });
     expect(target['CODEX_HOME']).toBe('/launcher/codex');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'never imports TAU_, ELECTRON_ or NODE_ names from rc files but keeps PATH and the locale',
+    async () => {
+      const shell = await fakeShell('/opt/homebrew/bin');
+      const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' };
+      await loginShellEnvironment({ target, shell });
+      expect(target['TAU_API_URL']).toBeUndefined();
+      expect(target.ELECTRON_RENDERER_URL).toBeUndefined();
+      expect(target['NODE_OPTIONS']).toBeUndefined();
+      expect(target['LANG']).toBe('en_GB.UTF-8');
+      expect(target['PATH']).toBe('/opt/homebrew/bin:/usr/bin:/bin');
+    },
+  );
 
   it.skipIf(process.platform === 'win32')('skips shell bookkeeping', async () => {
     const shell = await fakeShell('/opt/homebrew/bin');

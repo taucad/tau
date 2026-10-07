@@ -53,6 +53,12 @@ type Outcomes = Record<
   string
 >;
 const denied = ['EPERM', 'EACCES'];
+// On Linux the sandbox hides each read-denied root (user homes, /tmp) behind an empty tmpfs, so a
+// hidden file reads as ENOENT rather than a permission error. A write there lands in that
+// throwaway tmpfs, and a write to the read-only root fails with EROFS. Neither reaches the host,
+// which the existsSync checks below prove. macOS denies all of these with EPERM.
+const hiddenRead = process.platform === 'linux' ? [...denied, 'ENOENT'] : denied;
+const containedWrite = process.platform === 'linux' ? [...denied, 'ENOENT', 'EROFS', 'allowed'] : denied;
 
 const hostileSource = (paths: {
   readonly homeCanary: string;
@@ -122,26 +128,27 @@ describe('Build123d native sandbox', () => {
     writeFileSync(paths.homeCanary, 'secret');
     writeFileSync(paths.tempCanary, 'secret');
     const client = createTestRuntimeClient({ runtime, files: { 'main.py': hostileSource(paths) } });
+    const document = client.open({ source: { path: 'main.py' }, watch: false });
     try {
-      const rendered = await client.render({ source: { path: 'main.py' } });
+      const rendered = await document.evaluation();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Hostile Build123d render was unexpectedly superseded.');
       }
-      expect(rendered.geometry.success).toBe(false);
-      if (rendered.geometry.success) {
+      expect(rendered.evaluation.success).toBe(false);
+      if (rendered.evaluation.success) {
         throw new Error('Hostile Build123d project produced geometry.');
       }
-      const report = rendered.geometry.issues.map(({ message }) => message).join('\n');
+      const report = rendered.evaluation.issues.map(({ message }) => message).join('\n');
       const probe = /TAU_SANDBOX_PROBE (?<json>\{.*\})/u.exec(report)?.groups?.['json'];
       expect(probe, report).toBeDefined();
       const outcomes = JSON.parse(probe!) as { readonly import: Outcomes; readonly main: Outcomes };
       for (const phase of ['import', 'main'] as const) {
         const outcome = outcomes[phase];
-        expect(denied, `${phase} home_read ${outcome.home_read}`).toContain(outcome.home_read);
-        expect(denied, `${phase} temp_read ${outcome.temp_read}`).toContain(outcome.temp_read);
-        expect(denied, `${phase} outside_write ${outcome.outside_write}`).toContain(outcome.outside_write);
-        expect(denied, `${phase} home_write ${outcome.home_write}`).toContain(outcome.home_write);
+        expect(hiddenRead, `${phase} home_read ${outcome.home_read}`).toContain(outcome.home_read);
+        expect(hiddenRead, `${phase} temp_read ${outcome.temp_read}`).toContain(outcome.temp_read);
+        expect(containedWrite, `${phase} outside_write ${outcome.outside_write}`).toContain(outcome.outside_write);
+        expect(containedWrite, `${phase} home_write ${outcome.home_write}`).toContain(outcome.home_write);
         expect(outcome.socket, `${phase} socket`).not.toBe('allowed');
         expect(outcome.dns, `${phase} dns`).not.toBe('allowed');
         expect(outcome.subprocess, `${phase} subprocess`).not.toBe('exit:0');
@@ -150,6 +157,7 @@ describe('Build123d native sandbox', () => {
       expect(existsSync(paths.outsideEscape)).toBe(false);
       expect(existsSync(paths.homeEscape)).toBe(false);
     } finally {
+      document.close();
       await client.shutdown();
       for (const path of Object.values(paths)) {
         rmSync(path, { force: true });

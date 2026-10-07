@@ -20,18 +20,18 @@
 
 import { toGeoSpecProtocolJson } from 'geospec/engine';
 import { GeoSpecModelLoadError, resolveRuntimeExportIntent } from 'geospec/model';
-import type { KernelIssue } from '@taucad/runtime/types';
+import type { ExportFile, KernelIssue } from '@taucad/runtime/types';
+import type { GeometrySubject as PublicGeometrySubject } from 'geospec/mesh';
 import type {
   CreateModelLoaderOptions,
   GeoSpecModelFormat,
-  GeoSpecModelLoader,
-  ManagedGeoSpecModelLoader,
   GeoSpecRuntimeClient,
   GeoSpecRuntimeSourceAdapter,
   LoadModelOptions,
   RuntimeBackedModelFormat,
   RuntimeExportIntent,
 } from 'geospec/model';
+import { createDefaultRuntimeClient } from '#model/default-runtime-client.js';
 import { loadMeshObserved } from '#mesh/load-mesh.js';
 import type { GeometryDiagnostic, GeometrySubject, GeoSpecUnit, MeshFileFormat } from '#mesh/types.js';
 import { loadStepObserved } from '#step/load-step.js';
@@ -45,6 +45,11 @@ export const invalidLoadModelOptionsCode = 'GEOSPEC_INVALID_LOAD_MODEL_OPTIONS';
 export const forbiddenRuntimeOptionKeys = ['sourceUnit', 'unit', 'scale', 'coordinateSystem'] as const;
 
 const stepFormats = new Set<GeoSpecModelFormat>(['step', 'stp']);
+
+type ReferenceModelLoader = <Code extends Record<string, string> = Record<string, string>>(
+  options: LoadModelOptions<Code>,
+) => Promise<PublicGeometrySubject>;
+type ManagedReferenceModelLoader = ReferenceModelLoader & { dispose(): Promise<void> };
 
 type SourceOptions = Extract<LoadModelOptions, { source: unknown }>;
 type RuntimeOptions = Exclude<LoadModelOptions, SourceOptions>;
@@ -161,14 +166,6 @@ const loadDirectSource = async (
 const resolveAdapter = (options: RuntimeOptions): GeoSpecRuntimeSourceAdapter | undefined =>
   options.sourceAdapters?.find((adapter) => adapter.extensions.some((extension) => options.file.endsWith(extension)));
 
-const createDefaultRuntimeClient = async (projectPath: string | undefined): Promise<GeoSpecRuntimeClient> => {
-  const [{ createNodeClient }, { defaultRuntime }] = await Promise.all([
-    import('@taucad/runtime/node'),
-    import('#model/default-runtime.js'),
-  ]);
-  return (await createNodeClient({ runtime: defaultRuntime, projectPath })) as unknown as GeoSpecRuntimeClient;
-};
-
 /**
  * Obtain the runtime client for a runtime-branch load.
  *
@@ -196,17 +193,6 @@ const resolveRuntime = async (options: RuntimeOptions): Promise<{ runtime: GeoSp
   }
   return { runtime: await createDefaultRuntimeClient(options.projectPath), owned: true };
 };
-
-type RuntimeSourceInput = { files: Record<string, string>; entry: string } | { path: string };
-
-type RuntimeExport = (
-  format: string,
-  options: {
-    source?: RuntimeSourceInput;
-    parameters?: Record<string, unknown>;
-    exportOptions: Record<string, unknown>;
-  },
-) => ReturnType<GeoSpecRuntimeClient['export']>;
 
 const runtimeSource = (options: RuntimeOptions): { files: Record<string, string>; entry: string } | { path: string } =>
   'code' in options ? { files: options.code, entry: options.file } : { path: options.file };
@@ -242,18 +228,22 @@ const loadFromRuntime = async (options: RuntimeOptions, forensic?: ForensicSink)
     if ('success' in requestedIntent) {
       throw failure(requestedIntent.diagnostics);
     }
-    // The client's `export` is generic over the runtime's registered formats;
-    // GeoSpec speaks the protocol's own five, so the call is made through the
-    // protocol shape rather than the runtime's inferred format union.
-    const exported = await (runtime.export as unknown as RuntimeExport)(format, {
+    const document = runtime.open({
       source: runtimeSource(options),
       ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
-      exportOptions: requestedIntent.options,
     });
+    const exported = await (async () => {
+      try {
+        return await document.export(format, { options: requestedIntent.options });
+      } finally {
+        document.close();
+      }
+    })();
     if (!exported.success) {
       throw failure(exported.issues.map((issue) => runtimeIssueDiagnostic(issue, 'GEOSPEC_MODEL_EXPORT_FAILED')));
     }
-    const file = exported.data[0];
+    const files: ExportFile[] = [...exported.files];
+    const file = files[0];
     if (!file) {
       throw failure([
         {
@@ -337,11 +327,11 @@ export const loadModel = async <Code extends Record<string, string> = Record<str
 ): Promise<GeometrySubject> =>
   isSourceOptions(options) ? loadDirectSource(options) : loadFromRuntime(options as RuntimeOptions);
 
-const configureForensics = new WeakMap<GeoSpecModelLoader, (sink?: ForensicSink) => void>();
+const configureForensics = new WeakMap<ReferenceModelLoader, (sink?: ForensicSink) => void>();
 
 /** Attach a run-scoped forensic sink to an engine-owned model loader. */
 export const setModelLoaderForensicSink = (
-  loader: GeoSpecModelLoader | undefined,
+  loader: ReferenceModelLoader | undefined,
   sink?: ForensicSink,
 ): (() => void) => {
   const configure = loader === undefined ? undefined : configureForensics.get(loader);
@@ -356,7 +346,7 @@ export const setModelLoaderForensicSink = (
  * @returns The configured loader.
  * @public
  */
-export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): ManagedGeoSpecModelLoader => {
+export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): ManagedReferenceModelLoader => {
   let sharedRuntime: Promise<GeoSpecRuntimeClient> | undefined;
   let disposed = false;
   let forensicSink: ForensicSink | undefined;
@@ -391,7 +381,7 @@ export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): Mana
     return runtime;
   };
 
-  const loader: GeoSpecModelLoader = async (options) => {
+  const loader: ReferenceModelLoader = async (options) => {
     if (isSourceOptions(options)) {
       const merged: SourceOptions = { ...defaults, ...options };
       return exposeEngineSubject(await loadDirectSource(merged, undefined, forensicSink));

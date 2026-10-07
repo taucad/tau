@@ -1,7 +1,8 @@
 import { createAsyncLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import { eventSchemas } from '#lib/xstate.lib.js';
-import type { GeometryComponentManifest, GridSizes, Geometry } from '@taucad/types';
+import type { GeometryComponentManifest, GridSizes } from '@taucad/types';
+import type { KnownArtifact } from '@taucad/runtime';
 import { idPrefix } from '@taucad/types/constants';
 import { getLengthUnit, metersPerLengthUnit } from '#constants/length-units.js';
 import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
@@ -43,6 +44,20 @@ export type ModelPointerClickSuppressionReason = 'measureTool';
 
 export type GltfPresentationBarrier = 'display-ready' | 'analysis-ready';
 
+const markMeasurementsOutOfDate = (
+  measurements: MeasurementRecord[],
+  matches: (measurement: MeasurementRecord) => boolean,
+): MeasurementRecord[] => {
+  if (!measurements.some((measurement) => measurement.status !== 'out-of-date' && matches(measurement))) {
+    return measurements;
+  }
+  return measurements.map((measurement) =>
+    measurement.status !== 'out-of-date' && matches(measurement)
+      ? { ...measurement, status: 'out-of-date' }
+      : measurement,
+  );
+};
+
 export type GltfPresentationTelemetry = Readonly<{
   revision: number;
   key: string;
@@ -50,6 +65,8 @@ export type GltfPresentationTelemetry = Readonly<{
   barrier: GltfPresentationBarrier;
   outcome: 'presented' | 'failed' | 'cancelled' | 'stale';
   glbBytes: number;
+  /** Submission is a CPU boundary; pixels require browser or GPU evidence. */
+  renderBoundary?: 'submitted';
   meshCount: number;
   triangleCount: number;
   sourceLineCount: number;
@@ -57,6 +74,7 @@ export type GltfPresentationTelemetry = Readonly<{
   durations: Readonly<
     Partial<
       Record<
+        | 'receiptToPreparation'
         | 'parse'
         /** Present only when the result was written into the presented buffers in place (D22). */
         | 'inPlace'
@@ -64,7 +82,9 @@ export type GltfPresentationTelemetry = Readonly<{
         | 'annotation'
         | 'topologySubmit'
         | 'topologyWorker'
+        | 'topologyPack'
         | 'topologyHydrate'
+        | 'topologyResolve'
         | 'fatLines'
         | 'materials'
         | 'pipelineWarmup'
@@ -77,6 +97,11 @@ export type GltfPresentationTelemetry = Readonly<{
   modelEmptyFrames: number;
   committedBundleHighWaterMark: number;
   candidateBundleHighWaterMark: number;
+  /** Observed loader concurrency and work; cumulative for this viewer owner. */
+  activeParses?: number;
+  activeParseHighWaterMark?: number;
+  parsesStarted?: number;
+  parsesDiscarded?: number;
   topologyJobsStarted: number;
   topologyJobsDiscarded: number;
 }>;
@@ -228,9 +253,11 @@ export type GraphicsContext = {
   kinematicsRef: KinematicsRef;
 
   // Geometry data from CAD
-  geometry: Geometry | undefined;
-  /** Deterministic key derived from the geometry content hash. Used for skip-when-unchanged optimizations. */
-  geometryKey: string;
+  artifact: KnownArtifact | undefined;
+  /** Runtime-stamped projection hash, used for skip-when-unchanged optimizations. */
+  artifactKey: string;
+  /** Source identity travels with the artifact through the renderer handoff. */
+  artifactSourceFile?: string;
   /** Requested-versus-presented GLTF identity and bounded renderer handoff measurements. */
   gltfPresentation: GltfPresentationProjection;
 };
@@ -332,13 +359,14 @@ export type GraphicsEvent =
     }
   | { type: 'markModelPointerGestureMoved' }
   | { type: 'clearModelPointerClickGuard' }
-  // Geometry updates from CAD
+  // Artifact updates from CAD
   | {
-      type: 'updateGeometry';
-      geometry: Geometry;
-      units: { length: LengthSymbol };
+      type: 'updateArtifact';
+      artifact: KnownArtifact;
+      hash: string;
       sourceFile?: string;
     }
+  | { type: 'clearArtifact' }
   | { type: 'gltfPreparationStarted'; revision: number; key: string }
   | {
       type: 'gltfDisplayReady';
@@ -832,8 +860,8 @@ export const graphicsMachine = setup({
       kinematicsRef: spawn(actors.kinematics, { id: 'kinematics', input: {} }),
 
       // Shapes
-      geometry: undefined,
-      geometryKey: '',
+      artifact: undefined,
+      artifactKey: '',
       gltfPresentation: {
         requestedRevision: 0,
         presentedRevision: 0,
@@ -928,7 +956,12 @@ export const graphicsMachine = setup({
             pickableMeshesVersion: context.pickableMeshesVersion + 1,
           }),
         },
-        setLinesVisibility: { context: ({ event }) => ({ enableLines: event.payload }) },
+        setLinesVisibility: {
+          context: ({ context, event }) => ({
+            enableLines: event.payload,
+            pickableMeshesVersion: context.pickableMeshesVersion + 1,
+          }),
+        },
         setGizmoVisibility: { context: ({ event }) => ({ enableGizmo: event.payload }) },
         setGridVisibility: { context: ({ event }) => ({ enableGrid: event.payload }) },
         setAxesVisibility: { context: ({ event }) => ({ enableAxes: event.payload }) },
@@ -999,24 +1032,66 @@ export const graphicsMachine = setup({
           context.suppressNextModelPointerClick ? {} : { context: { suppressNextModelPointerClick: true } },
         clearModelPointerClickGuard: { context: { suppressNextModelPointerClick: false } },
 
-        // Geometry updates
-        updateGeometry: ({ context, event }, enq) => {
-          const requestedRevision = context.gltfPresentation.requestedRevision + 1;
-          if (event.geometry.format !== 'gltf' && event.sourceFile) {
+        // Artifact updates
+        clearArtifact: ({ context }, enq) => {
+          if (!context.artifact && !context.modelInteractionUnitId && context.artifactKey === '') {
+            return {};
+          }
+          if (context.ownsModelInteractionRef && context.modelInteractionUnitId) {
             forwardToModelInteraction(context, enq, {
               type: 'clearManifest',
-              unitId: deriveModelInteractionUnitId({ sourceFile: event.sourceFile }),
+              unitId: context.modelInteractionUnitId,
+              source: 'viewer',
+            });
+            forwardToModelInteraction(context, enq, {
+              type: 'clearSelection',
+              unitId: context.modelInteractionUnitId,
+              source: 'viewer',
+            });
+            forwardToModelInteraction(context, enq, {
+              type: 'clearFocus',
+              unitId: context.modelInteractionUnitId,
               source: 'viewer',
             });
           }
+          const revision = context.gltfPresentation.requestedRevision + 1;
           return {
             context: {
-              geometry: event.geometry,
-              geometryKey: event.geometry.hash,
+              artifact: undefined,
+              artifactKey: '',
+              artifactSourceFile: undefined,
+              gltfPresentation: { requestedRevision: revision, presentedRevision: revision, phase: 'idle' },
+              modelInteractionUnitId: undefined,
+              pickableMeshesVersion: context.pickableMeshesVersion + 1,
+              geometryRadius: 0,
+              geometryCenter: [0, 0, 0] as [number, number, number],
+            },
+          };
+        },
+        updateArtifact: ({ context, event }, enq) => {
+          if (context.ownsModelInteractionRef && event.artifact.mimeType !== 'model/gltf-binary') {
+            const incomingUnitId = event.sourceFile
+              ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile })
+              : undefined;
+            for (const unitId of new Set([context.modelInteractionUnitId, incomingUnitId])) {
+              if (!unitId) {
+                continue;
+              }
+              forwardToModelInteraction(context, enq, { type: 'clearManifest', unitId, source: 'viewer' });
+              forwardToModelInteraction(context, enq, { type: 'clearSelection', unitId, source: 'viewer' });
+              forwardToModelInteraction(context, enq, { type: 'clearFocus', unitId, source: 'viewer' });
+            }
+          }
+          const requestedRevision = context.gltfPresentation.requestedRevision + 1;
+          return {
+            context: {
+              artifact: event.artifact,
+              artifactKey: event.hash,
+              artifactSourceFile: event.sourceFile,
               gltfPresentation:
-                event.geometry.format === 'gltf'
+                event.artifact.mimeType === 'model/gltf-binary'
                   ? withGltfPresentationPhase(
-                      { ...context.gltfPresentation, requestedRevision, requestedKey: event.geometry.hash },
+                      { ...context.gltfPresentation, requestedRevision, requestedKey: event.hash },
                       'preparing',
                     )
                   : withGltfPresentationPhase(
@@ -1030,14 +1105,16 @@ export const graphicsMachine = setup({
                       'idle',
                     ),
               modelInteractionUnitId:
-                event.geometry.format === 'gltf'
+                event.artifact.mimeType === 'model/gltf-binary'
                   ? context.modelInteractionUnitId
                   : event.sourceFile
                     ? deriveModelInteractionUnitId({ sourceFile: event.sourceFile })
                     : undefined,
               pickableMeshesVersion:
-                event.geometry.format === 'gltf' ? context.pickableMeshesVersion : context.pickableMeshesVersion + 1,
-              cadUnits: { length: { symbol: event.units.length } },
+                event.artifact.mimeType === 'model/gltf-binary'
+                  ? context.pickableMeshesVersion
+                  : context.pickableMeshesVersion + 1,
+              cadUnits: { length: { symbol: event.artifact.units?.length ?? 'mm' } },
             },
           };
         },
@@ -1414,10 +1491,8 @@ export const graphicsMachine = setup({
               context.currentMeasurementAnchor?.geometryKey === event.geometryKey
                 ? context.currentMeasurementAnchor
                 : undefined,
-            measurements: context.measurements.map((measurement) =>
-              measurement.geometryKey && measurement.geometryKey !== event.geometryKey
-                ? { ...measurement, status: 'out-of-date' }
-                : measurement,
+            measurements: markMeasurementsOutOfDate(context.measurements, (measurement) =>
+              Boolean(measurement.geometryKey && measurement.geometryKey !== event.geometryKey),
             ),
           }),
         },
@@ -1425,10 +1500,9 @@ export const graphicsMachine = setup({
           context: ({ context, event }) => ({
             currentMeasurementStart: undefined,
             currentMeasurementAnchor: undefined,
-            measurements: context.measurements.map((measurement) =>
-              measurement.poseRevision !== undefined && measurement.poseRevision !== event.revision
-                ? { ...measurement, status: 'out-of-date' }
-                : measurement,
+            measurements: markMeasurementsOutOfDate(
+              context.measurements,
+              (measurement) => measurement.poseRevision !== undefined && measurement.poseRevision !== event.revision,
             ),
           }),
         },
@@ -1436,10 +1510,8 @@ export const graphicsMachine = setup({
           context: ({ context }) => ({
             currentMeasurementStart: undefined,
             currentMeasurementAnchor: undefined,
-            measurements: context.measurements.map((measurement) =>
-              measurement.anchors?.length && measurement.status !== 'snapshot'
-                ? { ...measurement, status: 'out-of-date' }
-                : measurement,
+            measurements: markMeasurementsOutOfDate(context.measurements, (measurement) =>
+              Boolean(measurement.anchors?.length && measurement.status !== 'snapshot'),
             ),
           }),
         },
@@ -1637,4 +1709,4 @@ export const graphicsMachine = setup({
 });
 
 export const selectPresentedGeometryKey = (snapshot: GraphicsSnapshot): string =>
-  snapshot.context.gltfPresentation.presentedKey ?? snapshot.context.geometryKey;
+  snapshot.context.gltfPresentation.presentedKey ?? snapshot.context.artifactKey;

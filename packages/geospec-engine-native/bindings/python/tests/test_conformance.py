@@ -11,13 +11,31 @@ CORPUS_PATH = Path(__file__).parents[3] / "conformance" / "early-corpus.json"
 CORPUS_BYTES = CORPUS_PATH.read_bytes()
 PROFILE_PATH = Path(__file__).parents[3] / "rust/tests/fixtures/current-profile-01/plan-corpus.json"
 PROFILE_BYTES = PROFILE_PATH.read_bytes()
-NUMERIC_PROFILE_PATH = Path(__file__).parents[3] / "rust/tests/fixtures/current-profile-v5/numeric-profile.txt"
+NUMERIC_PROFILE_PATH = Path(__file__).parents[3] / "rust/tests/fixtures/current-profile-v6/numeric-profile.txt"
 V3_NUMERIC_PROFILE_FIELD = '"numericProfile":"geospec-st-logical-requests-v3"'
 STRING_AXIS_IDS = {
     "a2/invalid-claim/string-axis",
     "plan/invalid-claim/string-axis/canonical",
     "plan/invalid-claim/string-axis/evaluate",
 }
+BBOX_REPAIR_IDS = {
+    f"{prefix}{case}{suffix}"
+    for prefix, suffix in (("a2/raw/", ""), ("plan/a2/", "/evaluate"))
+    for case in ("all-axis-failure-order", "tolerance-outside", "default-tolerance-outside", "zero-tolerance")
+}
+
+
+def project_material_repair(record_id, text):
+    if record_id not in BBOX_REPAIR_IDS:
+        return text
+    old = "Correct the model dimensions, or widen the declared bounding-box tolerance."
+    approved = "Correct the model dimensions to match the declared bounds; preserve the authored tolerance."
+    parsed = json.loads(text)
+    results = parsed["results"] if record_id.startswith("plan/") else parsed["result"]["results"]
+    diagnostics = [d for r in results for d in r["diagnostics"]]
+    assert sum(d["code"] == "GEOSPEC_BOUNDING_BOX_MISMATCH" and d.get("suggestion") == old for d in diagnostics) == 1
+    assert text.count(json.dumps(old)) == 1
+    return text.replace(json.dumps(old), json.dumps(approved))
 
 
 def project_numeric_profile(text, successor):
@@ -34,8 +52,10 @@ def load_current_corpus(binding_profile="core-only"):
     assert binding_profile in ("core-only", "full-backend")
     assert digest(CORPUS_BYTES) == original_hash
     assert digest(PROFILE_BYTES) == profile_hash
-    successor = NUMERIC_PROFILE_PATH.read_text()
-    assert successor == "geospec-demand-v5"
+    successor_bytes = NUMERIC_PROFILE_PATH.read_bytes()
+    assert digest(successor_bytes) == "c36f2296878e3daa57cc0cdfe8c86dac3b77ed80d6ddbd60de68b31a64bba5f7"
+    successor = successor_bytes.decode("utf-8").removesuffix("\n")
+    assert successor == "geospec-demand-v6"
     original, profile = json.loads(CORPUS_BYTES), json.loads(PROFILE_BYTES)
     assert original["schemaVersion"] == profile["schemaVersion"] == 1
     assert profile["authority"]["adoptedRuling"] == "W2.C-CURRENT-PROFILE-CONFORMANCE-01"
@@ -73,7 +93,7 @@ def load_current_corpus(binding_profile="core-only"):
         if "inputUtf8" in joined:
             joined["inputUtf8"] = project_numeric_profile(joined["inputUtf8"], successor)
         if "expectedUtf8" in joined:
-            joined["expectedUtf8"] = project_numeric_profile(joined["expectedUtf8"], successor)
+            joined["expectedUtf8"] = project_numeric_profile(project_material_repair(joined["id"], joined["expectedUtf8"]), successor)
         if record["id"] in STRING_AXIS_IDS:
             assert joined["expectedMessage"] == "bounding-box axes must be a finite number."
             joined["expectedMessage"] = "GeoSpec numeric expectation must be an object."
@@ -83,6 +103,15 @@ def load_current_corpus(binding_profile="core-only"):
             assert joined["expectedUtf8"].count(core_backends) == 1
             joined["expectedUtf8"] = joined["expectedUtf8"].replace(
                 core_backends, '"backends":{"brep":true,"csg":true}'
+            )
+            capability_end = '],"configuration":'
+            minimum_capability = '{"implementation":"implemented","name":"minimumDistance","profile":"geospec-minimum-distance-v1","qualification":"unqualified","registryVersion":5,"scope":"declared-subject-profile"}'
+            capabilities = json.loads(joined["expectedUtf8"])["result"]["capabilities"]
+            assert joined["expectedUtf8"].count(capability_end) == 1
+            assert capabilities[-1]["name"] == "queryPmi"
+            assert all(capability["name"] != "minimumDistance" for capability in capabilities)
+            joined["expectedUtf8"] = joined["expectedUtf8"].replace(
+                capability_end, ',' + minimum_capability + capability_end
             )
         # Same fresh-admission rule as rust/tests/plan_conformance.rs.
         if not record["ingest"] and record["operation"] in ("evaluatePlan", "processRequest") and (
@@ -95,6 +124,64 @@ def load_current_corpus(binding_profile="core-only"):
 
 CORPUS = load_current_corpus("full-backend")
 MESHES = {mesh["id"]: mesh for mesh in CORPUS["meshes"]}
+MATERIAL_PATH = Path(__file__).parents[3] / "conformance" / "material-v6.json"
+MATERIAL_BYTES = MATERIAL_PATH.read_bytes()
+MATERIAL_SHA256 = "45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975"
+
+
+def load_material_corpus():
+    assert hashlib.sha256(MATERIAL_BYTES).hexdigest() == MATERIAL_SHA256
+    corpus = json.loads(MATERIAL_BYTES)
+    assert corpus["schemaVersion"] == 1
+    assert corpus["authority"]["id"] == "material-v6-01"
+    assert corpus["authority"]["numericProfile"] == "geospec-demand-v6"
+    assert len(corpus["records"]) == len({r["id"] for r in corpus["records"]}) == 46
+    assert len(corpus["meshes"]) == len({m["id"] for m in corpus["meshes"]}) == 20
+    for mesh in corpus["meshes"]:
+        assert mesh["admission"] == "subject" and "meshHex" not in mesh
+        primary = bytes.fromhex(mesh["primaryHex"])
+        assert len(primary) == mesh["primaryByteLength"]
+        assert hashlib.sha256(primary).hexdigest() == mesh["primarySha256"] == mesh["contentHash"]
+        assert hashlib.sha256(mesh["requestUtf8"].encode()).hexdigest() == mesh["requestSha256"]
+        for resource in mesh["resources"]:
+            raw = bytes.fromhex(resource["hex"])
+            assert len(raw) == resource["byteLength"]
+            assert hashlib.sha256(raw).hexdigest() == resource["sha256"]
+    return corpus
+
+
+MATERIAL = load_material_corpus()
+MATERIAL_MESHES = {mesh["id"]: mesh for mesh in MATERIAL["meshes"]}
+
+
+def test_full_backend_binding_preserves_every_other_frozen_expectation():
+    core = load_current_corpus("core-only")
+    full = load_current_corpus("full-backend")
+    assert full["meshes"] == core["meshes"]
+    assert full["equivalentCanonicalGroups"] == core["equivalentCanonicalGroups"]
+    assert len(full["records"]) == len(core["records"]) == 320
+    changed = 0
+    for baseline, row in zip(core["records"], full["records"], strict=True):
+        if row["id"] != "a1/raw/initialize":
+            assert row == baseline
+            continue
+        changed += 1
+        expected = json.loads(row["expectedUtf8"])
+        capability = expected["result"]["capabilities"][-1]
+        assert capability == {
+            "implementation": "implemented", "name": "minimumDistance",
+            "profile": "geospec-minimum-distance-v1", "qualification": "unqualified",
+            "registryVersion": 5, "scope": "declared-subject-profile",
+        }
+        assert sum(item["name"] == "minimumDistance" for item in expected["result"]["capabilities"]) == 1
+        restored = row["expectedUtf8"].replace(
+            ',' + json.dumps(capability, separators=(',', ':')), ''
+        ).replace('"backends":{"brep":true,"csg":true}', '"backends":{"brep":false,"csg":false}')
+        assert restored == baseline["expectedUtf8"]
+        assert {**row, "expectedUtf8": restored} == baseline
+    assert changed == 1
+    assert hashlib.sha256(CORPUS_BYTES).hexdigest() == "3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476"
+    assert hashlib.sha256(PROFILE_BYTES).hexdigest() == "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d"
 
 
 def input_bytes(record):
@@ -103,18 +190,26 @@ def input_bytes(record):
     return bytes.fromhex(record["inputHex"])
 
 
-def setup(record):
+def setup(record, meshes=MESHES):
     engine = geospec_engine_native.Engine()
     admissions = []
-    for mesh_id in record["ingest"]:
-        mesh = MESHES[mesh_id]
-        actual = engine.ingest_mesh(
-            mesh["requestUtf8"].encode(), bytes.fromhex(mesh["meshHex"])
-        )
-        expected = mesh["expectedUtf8"].encode()
-        assert actual == expected, f"{record['id']}: admission {mesh_id} bytes"
-        assert json.loads(actual) == json.loads(expected)
-        admissions.append(actual.decode())
+    try:
+        for mesh_id in record["ingest"]:
+            mesh = meshes[mesh_id]
+            if mesh.get("admission") == "subject":
+                actual = engine.ingest_subject(mesh["requestUtf8"].encode(), bytes.fromhex(mesh["primaryHex"]),
+                                               [bytes.fromhex(r["hex"]) for r in mesh["resources"]])
+            else:
+                actual = engine.ingest_mesh(
+                    mesh["requestUtf8"].encode(), bytes.fromhex(mesh["meshHex"])
+                )
+            expected = mesh["expectedUtf8"].encode()
+            assert actual == expected, f"{record['id']}: admission {mesh_id} bytes"
+            assert json.loads(actual) == json.loads(expected)
+            admissions.append(actual.decode())
+    except BaseException:
+        engine.close()
+        raise
     return engine, admissions
 
 
@@ -173,17 +268,32 @@ def test_early_byte_facade(record):
     assert json.loads(actual) == json.loads(expected)
 
 
+@pytest.mark.parametrize("record", MATERIAL["records"], ids=lambda record: record["id"])
+def test_material_v6_byte_facade(record):
+    engine, _ = setup(record, MATERIAL_MESHES)
+    try:
+        actual = execute(engine, record)
+        expected = record["expectedUtf8"].encode()
+        assert actual == expected
+        assert json.loads(actual) == json.loads(expected)
+    finally:
+        engine.close()
+
+
 if __name__ == "__main__":
+    material = "--material" in sys.argv
+    selected_corpus = MATERIAL if material else CORPUS
+    selected_meshes = MATERIAL_MESHES if material else MESHES
     observations = []
     matched = True
-    for record in CORPUS["records"]:
+    for record in selected_corpus["records"]:
         observation = {
             "id": record["id"],
             "operation": record["operation"],
             "expectedUtf8": record.get("expectedUtf8"),
             "expectedCode": record.get("expectedCode"),
         }
-        engine, admissions = setup(record)
+        engine, admissions = setup(record, selected_meshes)
         try:
             actual = execute(engine, record)
             observation.update(
@@ -199,6 +309,8 @@ if __name__ == "__main__":
                 actualCode=error.code,
                 actualMessage=str(error),
             )
+        finally:
+            engine.close()
         observation["matched"] = (
             observation["actualUtf8"] == observation["expectedUtf8"]
             and observation["actualCode"] == observation["expectedCode"]
@@ -210,16 +322,18 @@ if __name__ == "__main__":
 
     output = json.dumps(
         {
-            "corpusSha256": hashlib.sha256(CORPUS_BYTES).hexdigest(),
-            "currentProfileSha256": hashlib.sha256(PROFILE_BYTES).hexdigest(),
-            "bindingProfile": CORPUS["bindingProfile"],
+            "corpusSha256": MATERIAL_SHA256 if material else hashlib.sha256(CORPUS_BYTES).hexdigest(),
+            "currentProfileSha256": None if material else hashlib.sha256(PROFILE_BYTES).hexdigest(),
+            "bindingProfile": "full-backend",
+            "suite": "material" if material else "early",
             "records": observations,
         },
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    if len(sys.argv) == 2:
-        Path(sys.argv[1]).write_text(output + "\n")
+    output_paths = [arg for arg in sys.argv[1:] if arg != "--material"]
+    if len(output_paths) == 1:
+        Path(output_paths[0]).write_text(output + "\n")
     else:
         print(output)
     raise SystemExit(not matched)

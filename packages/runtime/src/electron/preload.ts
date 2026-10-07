@@ -48,10 +48,10 @@ export type ElectronRuntimePreloadBridge = {
    * Release exactly one opaque utility host lease.
    *
    * @param hostId - Opaque lease received with the relayed runtime port.
-   * @param reason - Requested shutdown or hard render-timeout recovery.
+   * @param reason - Requested shutdown or hard operation-timeout recovery.
    * @returns Nothing.
    */
-  releaseRuntimeHost(hostId: string, reason: 'requested' | 'render-timeout'): void;
+  releaseRuntimeHost(hostId: string, reason: 'requested' | 'operation-timeout'): void;
 };
 
 /**

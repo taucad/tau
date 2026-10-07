@@ -5,7 +5,10 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ConflictException } from '@nestjs/common';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ConfigService } from '@nestjs/config';
+import type Stripe from 'stripe';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { mock, mockDeep } from 'vitest-mock-extended';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
@@ -24,6 +27,9 @@ import {
   user,
 } from '#database/schema.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
+import { BillingService } from '#api/billing/billing.service.js';
+import type { Environment } from '#config/environment.config.js';
+import type { DatabaseService } from '#database/database.service.js';
 import type { PaidPaymentEvidence, PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
@@ -31,6 +37,7 @@ import {
   createBillingStripeClient,
   fetchStripeInvoiceEvidence,
   retrieveStripePaymentEvidence,
+  stripeApiVersion,
 } from '#api/billing/billing-stripe.js';
 import { qualifySubscriptionInvoice } from '#api/billing/billing-payments.recovery.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
@@ -150,6 +157,27 @@ const server = createServer((request, response) => {
   const sessionId = /^\/v1\/checkout\/sessions\/(?<id>cs_foundation_\w+)$/u.exec(url.pathname)?.groups?.['id'];
   if (request.method === 'GET' && sessionId !== undefined && checkoutSessions.has(sessionId)) {
     sessionReply(checkoutSessions.get(sessionId));
+    return;
+  }
+  const lineItems = /^\/v1\/checkout\/sessions\/(?<id>cs_foundation_\w+)\/line_items$/u.exec(url.pathname)?.groups;
+  const lineSession = checkoutSessions.get(lineItems?.['id'] ?? '');
+  if (request.method === 'GET' && lineSession !== undefined) {
+    sessionReply({
+      object: 'list',
+      data: [
+        {
+          id: 'li_foundation',
+          object: 'item',
+          amount_subtotal: lineSession['amount_subtotal'],
+          amount_total: lineSession['amount_total'],
+          currency: 'usd',
+          price: { id: 'price_topup', object: 'price', product: 'prod_topup' },
+          quantity: 1,
+        },
+      ],
+      has_more: false,
+      url: url.pathname,
+    });
     return;
   }
   if (request.method === 'GET' && ['/v1/refunds', '/v1/disputes'].includes(url.pathname)) {
@@ -1722,5 +1750,394 @@ describe('billing payments PostgreSQL foundation', () => {
     const [afterCurrent] = await database.select().from(subscription).where(eq(subscription.id, subscriptionId));
     expect(afterCurrent?.dunningStartedAt).toEqual(currentBoundary);
     expect(afterCurrent?.graceEndsAt).toEqual(new Date('2026-12-08T00:00:00.000Z'));
+  });
+
+  describe('hosted Checkout without its webhook', () => {
+    afterEach(() => {
+      paymentIntentFixtureId = 'pi_foundation_paid';
+      paymentChargeFixtureId = 'ch_foundation_paid';
+      paymentStatus = 'succeeded';
+      invoiceFixture = undefined;
+    });
+
+    /** A dispatched hosted top-up whose Stripe Session is still open. */
+    const openHostedTopup = async (name: string) => {
+      const userId = randomUUID();
+      await database.insert(user).values({ id: userId, name, email: `${userId}@test.invalid`, emailVerified: true });
+      const prepared = await payments.prepareTopup(userId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+        amountMinor: '537',
+        method: 'checkout',
+      });
+      await expect(payments.confirmAction(userId, prepared.actionId)).resolves.toMatchObject({
+        state: 'redirect_required',
+      });
+      const [leg] = await database
+        .select()
+        .from(billingProviderLeg)
+        .where(eq(billingProviderLeg.purchaseId, prepared.actionId));
+      const [binding] = await database
+        .select()
+        .from(billingStripeCustomer)
+        .where(eq(billingStripeCustomer.id, leg?.customerBindingId ?? ''));
+      const session = checkoutSessions.get(leg?.providerObjectId ?? '');
+      if (
+        leg === undefined ||
+        session === undefined ||
+        binding?.stripeCustomerId === null ||
+        binding?.stripeCustomerId === undefined
+      ) {
+        throw new Error('Hosted top-up fixture is incomplete');
+      }
+      return { userId, actionId: prepared.actionId, leg, customerId: binding.stripeCustomerId, session };
+    };
+
+    /** Stripe completes the Session and settles its charge; the webhook endpoint never receives the events. */
+    const payHostedTopup = (topup: Awaited<ReturnType<typeof openHostedTopup>>): void => {
+      const suffix = randomUUID().replaceAll('-', '');
+      paymentIntentFixtureId = `pi_hosted_${suffix}`;
+      paymentChargeFixtureId = `ch_hosted_${suffix}`;
+      paymentFixture = {
+        purchaseId: topup.actionId,
+        providerLegId: topup.leg.id,
+        customerBindingId: topup.leg.customerBindingId,
+        customerId: topup.customerId,
+      };
+      Object.assign(topup.session, {
+        status: 'complete',
+        payment_status: 'paid',
+        payment_intent: paymentIntentFixtureId,
+        url: null,
+        currency: 'usd',
+        amount_subtotal: 537,
+        amount_total: 537,
+        total_details: { amount_tax: 0 },
+        automatic_tax: { status: 'complete' },
+        customer_details: { address: latestCustomerAddress },
+        metadata: {
+          tau_purchase_id: topup.actionId,
+          tau_customer_binding_id: topup.leg.customerBindingId,
+          tau_provider_leg_id: topup.leg.id,
+        },
+      });
+    };
+
+    /** Leaves one provider leg due, so a bounded pass works on it alone. */
+    const onlyDue = async (legId: string): Promise<void> => {
+      await database
+        .update(billingStripeSource)
+        .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+        .where(eq(billingStripeSource.stripeAccountId, stripeAccountId));
+      await database
+        .update(billingProviderLeg)
+        .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+        .where(eq(billingProviderLeg.environment, 'development'));
+      await database
+        .update(billingProviderLeg)
+        .set({ nextAttemptAt: sql`transaction_timestamp() - interval '1 second'` })
+        .where(eq(billingProviderLeg.id, legId));
+    };
+
+    /** The error code the sweep left on a leg, for a failing assertion's message. */
+    const legError = async (legId: string): Promise<string | undefined> => {
+      const [row] = await database
+        .select({ errorCode: billingProviderLeg.errorCode })
+        .from(billingProviderLeg)
+        .where(eq(billingProviderLeg.id, legId));
+      return row?.errorCode ?? undefined;
+    };
+
+    /** Delivers one signed event the way Stripe's endpoint would, once it is re-enabled. */
+    const deliverLater = async (type: string, object: { readonly id: string; readonly object: string }) => {
+      const body = JSON.stringify({
+        id: `evt_${randomUUID().replaceAll('-', '')}`,
+        object: 'event',
+        api_version: stripeApiVersion,
+        type,
+        created: Math.floor(Date.now() / 1000),
+        livemode: false,
+        data: { object },
+      });
+      await payments.receiveWebhook(
+        new TextEncoder().encode(body),
+        fixtureStripe.webhooks.generateTestHeaderString({ payload: body, secret: 'whsec_fixture_1234567890' }),
+      );
+    };
+
+    it('should fulfil a paid hosted top-up once from the provider-leg sweep', async () => {
+      const topup = await openHostedTopup('Hosted Sweep');
+      payHostedTopup(topup);
+      await onlyDue(topup.leg.id);
+      const recovery = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(
+        recovery,
+        JSON.stringify({ errorCode: await legError(topup.leg.id), requests: requests.slice(-20) }),
+      ).toEqual({
+        processed: [topup.leg.id],
+        pending: [],
+        failed: [],
+      });
+      await expect(payments.getAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+        receipt: { grantedCreditAtoms: '5370000' },
+      });
+      const [purchase] = await database.select().from(billingPurchase).where(eq(billingPurchase.id, topup.actionId));
+      // Stripe's settled charge dates the acceptance, not the pass that read it.
+      expect(purchase?.paidAt).toEqual(new Date(1_788_650_001_000));
+
+      // A later real delivery of the success event finds the purchase already fulfilled.
+      await deliverLater('payment_intent.succeeded', { id: paymentIntentFixtureId, object: 'payment_intent' });
+      const replay = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(replay).toMatchObject({ processed: [expect.any(String)], pending: [], failed: [] });
+      const [delivered] = await database
+        .select()
+        .from(billingStripeSource)
+        .where(
+          and(
+            eq(billingStripeSource.sourceType, 'payment_intent'),
+            eq(billingStripeSource.sourceId, paymentIntentFixtureId),
+          ),
+        );
+      expect(delivered).toMatchObject({ state: 'done', errorCode: null });
+      const grants = await database
+        .select()
+        .from(creditTransaction)
+        .where(eq(creditTransaction.purchaseId, topup.actionId));
+      expect(grants).toHaveLength(1);
+    });
+
+    it('should fulfil a paid hosted top-up once when its customer returns and recovers it', async () => {
+      const topup = await openHostedTopup('Hosted Recover');
+      payHostedTopup(topup);
+      const first = await payments.recoverAction(topup.userId, topup.actionId);
+      expect(first, JSON.stringify(requests.slice(-20))).toMatchObject({
+        state: 'fulfilled',
+        receipt: { grantedCreditAtoms: '5370000' },
+      });
+      // A terminal action is answered from the database: no Stripe read, no new lease.
+      const stripeRequests = requests.length;
+      const second = await payments.recoverAction(topup.userId, topup.actionId);
+      expect(second).toMatchObject({ state: 'fulfilled', receipt: first.receipt });
+      expect(requests.length).toBe(stripeRequests);
+      const grants = await database
+        .select()
+        .from(creditTransaction)
+        .where(eq(creditTransaction.purchaseId, topup.actionId));
+      expect(grants).toHaveLength(1);
+    });
+
+    it('should keep an open hosted Checkout resumable when its customer recovers it', async () => {
+      const topup = await openHostedTopup('Hosted Open');
+      await expect(payments.recoverAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'redirect_required',
+        redirectUrl: topup.session['url'],
+      });
+    });
+
+    // A payment_intent leg carries no Checkout session, so the charge-time fallback never applies to it: this
+    // pins that a settled saved-card charge still waits for its event. The extra conjunct on the fallback (a
+    // Checkout leg whose request names a payment method) is forward defence that no fixture can build today.
+    it('should keep a saved-card charge waiting for its event although its charge has settled', async () => {
+      const userId = randomUUID();
+      await database
+        .insert(user)
+        .values({ id: userId, name: 'Saved Card Waits', email: `${userId}@test.invalid`, emailVerified: true });
+      const prepared = await payments.prepareTopup(userId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+        amountMinor: '537',
+        method: 'saved_card',
+      });
+      const [leg] = await database
+        .select()
+        .from(billingProviderLeg)
+        .where(eq(billingProviderLeg.purchaseId, prepared.actionId));
+      const [binding] = await database
+        .select()
+        .from(billingStripeCustomer)
+        .where(eq(billingStripeCustomer.id, leg?.customerBindingId ?? ''));
+      if (leg === undefined || binding?.stripeCustomerId === null || binding?.stripeCustomerId === undefined) {
+        throw new Error('Saved-card fixture is incomplete');
+      }
+      const suffix = randomUUID().replaceAll('-', '');
+      paymentFixture = {
+        purchaseId: prepared.actionId,
+        providerLegId: leg.id,
+        customerBindingId: leg.customerBindingId,
+        customerId: binding.stripeCustomerId,
+      };
+      paymentIntentFixtureId = `pi_saved_${suffix}`;
+      paymentChargeFixtureId = `ch_saved_${suffix}`;
+      await payments.confirmAction(userId, prepared.actionId);
+      // Stripe has settled the charge, but a saved-card leg takes no charge-time acceptance: only the event does.
+      await onlyDue(leg.id);
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(swept.failed, (await legError(leg.id)) ?? '').toEqual([]);
+      const waiting = await payments.getAction(userId, prepared.actionId);
+      expect(waiting.state).toMatch(/^(?:processing|funds_received)$/u);
+      await deliverLater('payment_intent.succeeded', { id: paymentIntentFixtureId, object: 'payment_intent' });
+      const delivered = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(delivered.failed, JSON.stringify(requests.slice(-20))).toEqual([]);
+      await expect(payments.getAction(userId, prepared.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+        receipt: { grantedCreditAtoms: '5370000' },
+      });
+    });
+
+    /** A dispatched hosted Pro Checkout, still open. */
+    const openHostedPro = async (name: string) => {
+      const userId = randomUUID();
+      await database.insert(user).values({ id: userId, name, email: `${userId}@test.invalid`, emailVerified: true });
+      const action = await payments.prepareSubscription(userId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+      });
+      const [leg] = await database
+        .select()
+        .from(billingProviderLeg)
+        .where(eq(billingProviderLeg.subscriptionId, action.actionId));
+      const [binding] = await database
+        .select()
+        .from(billingStripeCustomer)
+        .where(eq(billingStripeCustomer.id, leg?.customerBindingId ?? ''));
+      const session = checkoutSessions.get(leg?.providerObjectId ?? '');
+      if (
+        leg === undefined ||
+        session === undefined ||
+        binding?.stripeCustomerId === null ||
+        binding?.stripeCustomerId === undefined
+      ) {
+        throw new Error('Hosted Pro fixture is incomplete');
+      }
+      return { userId, action, leg, customerId: binding.stripeCustomerId, session };
+    };
+
+    /** Stripe completes the Pro Session with its subscription and paid first invoice; no event is delivered. */
+    const payHostedPro = (pro: Awaited<ReturnType<typeof openHostedPro>>) => {
+      const suffix = randomUUID().replaceAll('-', '');
+      const remoteSubscriptionId = `sub_hosted_${suffix}`;
+      const invoiceId = `in_hosted_${suffix}`;
+      invoiceFixture = {
+        invoiceId,
+        subscriptionId: remoteSubscriptionId,
+        customerId: pro.customerId,
+        paid: true,
+        // The fixture's invoice payment settles inside this period, which runs past today.
+        periodStart: 1_788_600_000,
+        periodEnd: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+      };
+      Object.assign(pro.session, {
+        status: 'complete',
+        payment_status: 'paid',
+        subscription: remoteSubscriptionId,
+        invoice: invoiceId,
+        url: null,
+      });
+      return { remoteSubscriptionId, invoiceId };
+    };
+
+    it('should queue the first invoice on recover when checkout.session.completed linked Pro without it', async () => {
+      const pro = await openHostedPro('Hosted Pro Linked');
+      const { remoteSubscriptionId, invoiceId } = payHostedPro(pro);
+      // Only the delivered session event is due: the leg sweep must not be the one that queues the invoice.
+      await onlyDue(pro.leg.id);
+      await database
+        .update(billingProviderLeg)
+        .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+        .where(eq(billingProviderLeg.id, pro.leg.id));
+      await deliverLater('checkout.session.completed', {
+        id: pro.leg.providerObjectId ?? '',
+        object: 'checkout.session',
+      });
+      const linkedBySession = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(linkedBySession, JSON.stringify(requests.slice(-20))).toMatchObject({ failed: [] });
+      const [linked] = await database.select().from(subscription).where(eq(subscription.id, pro.action.actionId));
+      expect(linked?.stripeSubscriptionId).toBe(remoteSubscriptionId);
+      const [queued] = await database
+        .select()
+        .from(billingStripeSource)
+        .where(and(eq(billingStripeSource.sourceType, 'invoice'), eq(billingStripeSource.sourceId, invoiceId)));
+      expect(queued).toBeUndefined();
+      // The customer returns: recover queues the invoice the session event never did and settles it inline.
+      const recovered = await payments.recoverAction(pro.userId, pro.action.actionId);
+      expect(recovered, JSON.stringify(requests.slice(-20))).toMatchObject({
+        state: 'fulfilled',
+        receipt: { grantedCreditAtoms: '20000000' },
+      });
+      const [settled] = await database
+        .select()
+        .from(billingStripeSource)
+        .where(and(eq(billingStripeSource.sourceType, 'invoice'), eq(billingStripeSource.sourceId, invoiceId)));
+      // Inserted at 0, queued to 1 by markStripeSourcePending, claimed inline to 2; the claim's finish never resets it.
+      expect(settled).toMatchObject({ state: 'done', generation: 2n });
+      // A second recover answers the terminal action without touching the settled source.
+      const stripeRequests = requests.length;
+      await expect(payments.recoverAction(pro.userId, pro.action.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+      });
+      expect(requests.length).toBe(stripeRequests);
+      const [unchanged] = await database
+        .select()
+        .from(billingStripeSource)
+        .where(and(eq(billingStripeSource.sourceType, 'invoice'), eq(billingStripeSource.sourceId, invoiceId)));
+      expect(unchanged).toMatchObject({ state: 'done', generation: 2n });
+    });
+
+    it('should grant Pro from a paid subscription Checkout through the sweep and keep it idempotent', async () => {
+      const pro = await openHostedPro('Hosted Pro');
+      const { remoteSubscriptionId, invoiceId } = payHostedPro(pro);
+      const { userId, action, leg } = pro;
+      await onlyDue(leg.id);
+      // The sweep links the Stripe subscription and queues its first invoice, as `invoice.paid` would.
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(swept, JSON.stringify({ errorCode: await legError(leg.id), requests: requests.slice(-20) })).toEqual({
+        processed: [leg.id],
+        pending: [],
+        failed: [],
+      });
+      const [linked] = await database.select().from(subscription).where(eq(subscription.id, action.actionId));
+      expect(linked?.stripeSubscriptionId).toBe(remoteSubscriptionId);
+      const granted = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(granted, JSON.stringify(requests.slice(-20))).toMatchObject({
+        processed: [expect.any(String)],
+        pending: [],
+        failed: [],
+      });
+      const databaseService = mock<DatabaseService>();
+      // Assigned rather than passed to `mock`, which would wrap the live client in proxies.
+      Object.assign(databaseService, { database });
+      const billing = new BillingService(
+        databaseService,
+        new ConfigService<Environment, true>({
+          BILLING_ENVIRONMENT: 'development',
+          STRIPE_ACCOUNT_ID: stripeAccountId,
+          STRIPE_LIVEMODE: false,
+        }),
+        mockDeep<Stripe>(),
+      );
+      await expect(billing.getEntitlements(userId)).resolves.toMatchObject({ tier: 'pro' });
+      const fulfilled = await payments.getAction(userId, action.actionId);
+      expect(fulfilled).toMatchObject({ state: 'fulfilled', receipt: { grantedCreditAtoms: '20000000' } });
+
+      // Recovering again and a later real `invoice.paid` delivery both re-read the same paid period.
+      await expect(payments.recoverAction(userId, action.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+        receipt: fulfilled.receipt,
+      });
+      await deliverLater('invoice.paid', { id: invoiceId, object: 'invoice' });
+      expect(await payments.recoverPayments({ environment: 'development', limit: 1 })).toMatchObject({
+        processed: [expect.any(String)],
+        pending: [],
+        failed: [],
+      });
+      const [period] = await database.select().from(billingPeriod).where(eq(billingPeriod.invoiceId, invoiceId));
+      const grants = await database
+        .select()
+        .from(creditTransaction)
+        .where(eq(creditTransaction.periodId, period?.id ?? ''));
+      expect(grants).toHaveLength(1);
+      await expect(billing.getEntitlements(userId)).resolves.toMatchObject({ tier: 'pro' });
+    });
   });
 });

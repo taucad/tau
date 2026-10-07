@@ -6,6 +6,8 @@
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
+import { createRecordHealth, isPotentiallyApplied } from '#workbench-records/record-health.js';
+import type { RecordHealth } from '#workbench-records/record-health.js';
 
 type Files = Readonly<{
   exists: (path: string) => Promise<boolean>;
@@ -53,11 +55,40 @@ const fields = [
   'grid',
   'section',
   'measurements',
+  'selectedKernelView',
 ] as const;
 type ViewField = (typeof fields)[number];
+type KernelView = NonNullable<WorkbenchView['kernelViews']>[number];
+type KernelViewOption = NonNullable<KernelView['options']>[string];
+type KernelViewChange = Partial<Omit<KernelView, 'id' | 'options'>> & {
+  replace?: true;
+  options?: Record<string, KernelViewOption | undefined>;
+};
 type Patch = Partial<Pick<WorkbenchView, Exclude<ViewField, 'display' | 'grid'>>> & {
   display?: Partial<WorkbenchView['display']>;
   grid?: Partial<WorkbenchView['grid']>;
+  kernelViews?: Record<string, KernelViewChange | null>;
+};
+
+const combineKernelViews = (earlier: Patch['kernelViews'], later: Patch['kernelViews']): Patch['kernelViews'] => {
+  if (!earlier && !later) {
+    return undefined;
+  }
+  const combined = new Map<string, KernelViewChange | null>();
+  for (const id of new Set([...Object.keys(earlier ?? {}), ...Object.keys(later ?? {})])) {
+    const before = earlier && Object.hasOwn(earlier, id) ? earlier[id] : undefined;
+    const after = later && Object.hasOwn(later, id) ? later[id] : undefined;
+    if (after === undefined) {
+      if (before !== undefined) {
+        combined.set(id, before);
+      }
+    } else if (after === null || after.replace === true || before === null) {
+      combined.set(id, after);
+    } else {
+      combined.set(id, { ...before, ...after, options: { ...before?.options, ...after.options } });
+    }
+  }
+  return Object.fromEntries(combined);
 };
 export type ViewRecordPatch = Patch;
 
@@ -73,17 +104,24 @@ export function createWorkbenchViewStore(
     files: Files;
     onChange: (state: ViewRecordState, source: 'read' | 'write', locallyAuthored: ViewRecordPatch | undefined) => void;
     onError: (error: unknown) => void;
+    onHealth?: (health: RecordHealth) => void;
     /** Milliseconds. */
     editDebounce?: number;
   }>,
 ): Readonly<{
   read: (notify?: boolean) => Promise<boolean>;
+  /** Fence a pending read as soon as its source changes. */
+  invalidateRead: () => void;
+  /** *Try again* after reads stopped: a fresh set of attempts. */
+  retryRead: () => Promise<boolean>;
   edit: (next: WorkbenchView) => Promise<boolean>;
   ensure: (seed: WorkbenchView, eligible: () => boolean) => Promise<boolean>;
-  reset: (next: WorkbenchView) => Promise<boolean>;
+  /** Replace a refused record; `reviewed` is the exact refused bytes the person saw, and a newer file refuses the reset. */
+  reset: (next: WorkbenchView, reviewed?: Uint8Array<ArrayBuffer> | null) => Promise<boolean>;
   flush: () => Promise<boolean>;
   dispose: () => void;
   snapshot: () => ViewRecordState;
+  health: () => RecordHealth;
   ready: () => boolean;
 }> {
   const path = `${input.root}/${workbenchPaths.view(input.viewId)}`;
@@ -121,6 +159,14 @@ export function createWorkbenchViewStore(
     bytes: Uint8Array<ArrayBuffer>;
     patch: ViewRecordPatch | undefined;
   }>();
+  /** A write whose reply was lost: it may be on disk, so the next write reads first and keeps it for attribution. */
+  let unresolved: { bytes: Uint8Array<ArrayBuffer>; patch: ViewRecordPatch | undefined } | undefined;
+  const health = createRecordHealth({
+    onHealth: input.onHealth,
+    readAgain: () => {
+      void read();
+    },
+  });
   let queuedEdit:
     | {
         next: WorkbenchView;
@@ -134,7 +180,43 @@ export function createWorkbenchViewStore(
     ...later,
     ...((earlier?.display ?? later.display) ? { display: { ...earlier?.display, ...later.display } } : {}),
     ...((earlier?.grid ?? later.grid) ? { grid: { ...earlier?.grid, ...later.grid } } : {}),
+    ...((earlier?.kernelViews ?? later.kernelViews)
+      ? { kernelViews: combineKernelViews(earlier?.kernelViews, later.kernelViews) }
+      : {}),
   });
+
+  const mergeKernelViews = (
+    current: WorkbenchView['kernelViews'],
+    changes: Patch['kernelViews'],
+  ): WorkbenchView['kernelViews'] => {
+    if (!changes) {
+      return current;
+    }
+    const byId = new Map((current ?? []).map((view) => [view.id, view]));
+    for (const [id, change] of Object.entries(changes)) {
+      if (change === null) {
+        byId.delete(id);
+        continue;
+      }
+      const prior = change.replace ? undefined : byId.get(id);
+      const { replace: _replace, options: optionChanges, ...fields } = change;
+      const options = new Map<string, KernelViewOption>(Object.entries(prior?.options ?? {}));
+      for (const [key, value] of Object.entries(optionChanges ?? {})) {
+        if (value === undefined) {
+          options.delete(key);
+        } else {
+          options.set(key, value);
+        }
+      }
+      byId.set(id, {
+        ...prior,
+        id,
+        ...fields,
+        ...(optionChanges ? { options: options.size > 0 ? Object.fromEntries(options) : undefined } : {}),
+      });
+    }
+    return [...byId.values()];
+  };
 
   const publish = (
     bytes: Uint8Array<ArrayBuffer> | null,
@@ -147,7 +229,7 @@ export function createWorkbenchViewStore(
     }
     observed = true;
     if (bytes === null) {
-      state = { ...state, bytes: null, refusal: undefined };
+      state = { record: undefined, bytes: null, refusal: undefined };
     } else {
       const result = workbenchRecords.view.read(bytes);
       state =
@@ -160,7 +242,7 @@ export function createWorkbenchViewStore(
             };
     }
     input.onChange(state, source, locallyAuthored);
-    if (source === 'read' && state.record && editSequence === settledSequence && !deferred) {
+    if (source === 'read' && !state.refusal && editSequence === settledSequence && !deferred) {
       intended = state.record;
     }
   };
@@ -174,14 +256,20 @@ export function createWorkbenchViewStore(
       if (current === generation && !closed()) {
         const recovered = readError;
         readError = false;
-        const ownWrite = bytes && [...inFlightWriteBytes].find((written) => sameBytes(written.bytes, bytes));
+        const ownWrite =
+          bytes &&
+          [...inFlightWriteBytes, ...(unresolved ? [unresolved] : [])].find((written) =>
+            sameBytes(written.bytes, bytes),
+          );
         publish(bytes, ownWrite ? 'write' : 'read', notify || recovered, ownWrite?.patch);
+        health.readSucceeded();
       }
       return observed;
     } catch (error) {
       if (current === generation && !closed()) {
         readError = true;
         input.onError(error);
+        health.readFailed(error);
       }
       return false;
     }
@@ -210,6 +298,48 @@ export function createWorkbenchViewStore(
     if (Object.keys(grid).length > 0) {
       patch.grid = grid;
     }
+    const baseViews = new Map((base?.kernelViews ?? []).map((view) => [view.id, view]));
+    const nextViews = new Map((next.kernelViews ?? []).map((view) => [view.id, view]));
+    const kernelViews = new Map<string, KernelViewChange | null>();
+    for (const id of new Set([...baseViews.keys(), ...nextViews.keys()])) {
+      const before = baseViews.get(id);
+      const after = nextViews.get(id);
+      if (!after) {
+        kernelViews.set(id, null);
+        continue;
+      }
+      const change: KernelViewChange = {};
+      if (!before) {
+        change.replace = true;
+      }
+      for (const field of ['authoredInstance', 'camera'] as const) {
+        if (!same(before?.[field], after[field])) {
+          Object.assign(change, { [field]: after[field] });
+        }
+      }
+      const beforeOptions = before?.options;
+      const afterOptions = after.options;
+      const options = Object.fromEntries(
+        [...new Set([...Object.keys(beforeOptions ?? {}), ...Object.keys(afterOptions ?? {})])]
+          .filter(
+            (key) =>
+              !same(
+                beforeOptions && Object.hasOwn(beforeOptions, key) ? beforeOptions[key] : undefined,
+                afterOptions && Object.hasOwn(afterOptions, key) ? afterOptions[key] : undefined,
+              ),
+          )
+          .map((key) => [key, afterOptions && Object.hasOwn(afterOptions, key) ? afterOptions[key] : undefined]),
+      );
+      if (Object.keys(options).length > 0) {
+        change.options = options;
+      }
+      if (!before || Object.keys(change).length > 0) {
+        kernelViews.set(id, change);
+      }
+    }
+    if (kernelViews.size > 0) {
+      patch.kernelViews = Object.fromEntries(kernelViews);
+    }
     return patch;
   };
   const write = async (
@@ -221,9 +351,10 @@ export function createWorkbenchViewStore(
     if (closed()) {
       return 'blocked';
     }
-    if (!observed && !(await read())) {
+    if ((!observed || unresolved) && !(await read())) {
       return 'retry';
     }
+    unresolved = undefined;
     const reset = resetBytes !== undefined;
     if (state.refusal && (!reset || state.refusal.code === 'NEWER_RECORD')) {
       return 'blocked';
@@ -259,10 +390,19 @@ export function createWorkbenchViewStore(
                 ...editPatch.display,
               },
               grid: { ...next.grid, ...state.record?.grid, ...editPatch.grid },
+              kernelViews: mergeKernelViews(state.record?.kernelViews, editPatch.kernelViews),
               version: 1,
               entryPath: editPatch.entryPath === undefined ? (state.record?.entryPath ?? null) : editPatch.entryPath,
               camera: editPatch.camera ?? state.record?.camera ?? next.camera,
             };
+      if (
+        !reset &&
+        !ensure &&
+        state.record &&
+        workbenchRecords.view.serialize(merged) === workbenchRecords.view.serialize(state.record)
+      ) {
+        return 'saved';
+      }
       const expected = reset ? (resetBytes ?? null) : state.bytes;
       const generationAtWrite = generation;
       try {
@@ -283,9 +423,16 @@ export function createWorkbenchViewStore(
         writes.add(operation);
         activeWrites.set(path, writes);
         let result: CheckedFileWriteResult;
+        health.writeStarted();
         try {
           result = await operation;
+        } catch (error) {
+          if (isPotentiallyApplied(error)) {
+            unresolved = attempted;
+          }
+          throw error;
         } finally {
+          health.writeSettled();
           inFlightWriteBytes.delete(attempted);
           writes.delete(operation);
           if (writes.size === 0) {
@@ -323,11 +470,19 @@ export function createWorkbenchViewStore(
         }
       } catch (error) {
         input.onError(error);
+        health.writeFailed(error);
         return 'retry';
       }
     }
-    input.onError(new Error(`The view ${input.viewId} changed while it was being saved. Try again.`));
+    const conflicted = new Error(`The view ${input.viewId} changed while it was being saved. Try again.`);
+    input.onError(conflicted);
+    health.writeFailed(conflicted);
     return 'retry';
+  };
+  const settleIntent = (): void => {
+    if (!deferred && !queuedEdit) {
+      health.intentSettled();
+    }
   };
   const retry = (): void => {
     if (closed() || !deferred || retryTimer) {
@@ -344,6 +499,7 @@ export function createWorkbenchViewStore(
           if (status === 'saved') {
             deferred = undefined;
             retryDelay = 250;
+            settleIntent();
           } else if (status === 'retry') {
             retryDelay = Math.min(retryDelay * 2, 8000);
             retry();
@@ -361,9 +517,13 @@ export function createWorkbenchViewStore(
         if (saved) {
           deferred = undefined;
           retryDelay = 250;
-        } else if (status === 'retry') {
-          deferred = combine(deferred, patch);
-          retry();
+          settleIntent();
+        } else {
+          const remaining = combine(deferred, patch);
+          deferred = status === 'retry' || Object.keys(remaining).length > 0 ? remaining : undefined;
+          if (status === 'retry') {
+            retry();
+          }
         }
         if (sequence === editSequence) {
           intended = saved ? state.record : next;
@@ -391,6 +551,9 @@ export function createWorkbenchViewStore(
   };
   return {
     read,
+    invalidateRead: () => {
+      generation++;
+    },
     edit: async (next) => {
       if (closed()) {
         return false;
@@ -425,12 +588,27 @@ export function createWorkbenchViewStore(
       pending = result;
       return result;
     },
-    reset: async (next) => {
-      if (state.refusal?.code !== 'INVALID_RECORD') {
+    reset: async (next, reviewedBytes) => {
+      if (closed() || state.refusal?.code !== 'INVALID_RECORD') {
         return false;
       }
-      const reviewed = state.bytes;
-      const result = pending.then(async () => write(next, undefined, reviewed)).then((status) => status === 'saved');
+      const reviewed = reviewedBytes === undefined ? state.bytes : reviewedBytes;
+      await drainEdit();
+      const sequence = ++editSequence;
+      const result = pending
+        .then(async () => write(next, undefined, reviewed))
+        .then((status) => {
+          if (status !== 'saved') {
+            return false;
+          }
+          deferred = undefined;
+          settledSequence = sequence;
+          settleIntent();
+          if (sequence === editSequence) {
+            intended = state.record;
+          }
+          return true;
+        });
       pending = result;
       return result;
     },
@@ -442,12 +620,18 @@ export function createWorkbenchViewStore(
       }
       await pending;
       if (!deferred) {
+        if (unresolved && !(await read())) {
+          return false;
+        }
+        unresolved = undefined;
+        settleIntent();
         return true;
       }
       const status = await write(intended ?? state.record!, deferred);
       if (status === 'saved') {
         deferred = undefined;
         retryDelay = 250;
+        settleIntent();
         return true;
       }
       if (status === 'retry') {
@@ -461,6 +645,7 @@ export function createWorkbenchViewStore(
       }
       disposed = true;
       generation++;
+      health.dispose();
       if (registered) {
         const remaining = (lifetimeOwners.get(viewEpoch) ?? 1) - 1;
         if (remaining === 0 && viewLifetimes.get(path) === viewEpoch) {
@@ -478,6 +663,11 @@ export function createWorkbenchViewStore(
       }
     },
     snapshot: () => state,
+    health: () => health.health(),
+    retryRead: async () => {
+      health.restartReads();
+      return read(true);
+    },
     ready: () => observed,
   };
 }

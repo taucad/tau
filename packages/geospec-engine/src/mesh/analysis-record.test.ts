@@ -128,6 +128,40 @@ describe('buildMeshAnalysisRecord', () => {
     expect(record.trianglePrimitives.length).toBe(24);
   });
 
+  it('should retain each shared-mesh occurrence name and nested world placement', () => {
+    const document = documentOf([boxSpec('prototype')]);
+    const scene = document.getRoot().listScenes()[0]!;
+    const mesh = document.getRoot().listMeshes()[0]!;
+    const left = document.getRoot().listNodes()[0]!.setName('Left bolt').setTranslation([1, 2, 3]);
+    const right = document
+      .createNode('Right bolt')
+      .setMesh(mesh)
+      .setMatrix([0, 2, 0, 0, -3, 0, 0, 0, 0, 0, 4, 0, -5, 0, 0, 1]);
+    scene.addChild(document.createNode('Assembly').setTranslation([10, 20, 30]).addChild(left).addChild(right));
+
+    const record = buildMeshAnalysisRecord(document);
+
+    expect(record.primitives.map((primitive) => primitive.name)).toEqual(['Left bolt#0', 'Right bolt#0']);
+    expect([...record.positions.subarray(0, 6)]).toEqual([11, 22, 33, 12, 22, 33]);
+    expect([...record.positions.subarray(24, 30)]).toEqual([5, 20, 30, 5, 22, 30]);
+    expect([...record.triangles.subarray(36)]).toEqual(boxIndices.map((index) => index + 8));
+    expect([...buildMeshNodeNameMap(document).values()]).toEqual(['Left bolt']);
+  });
+
+  it.each([
+    { meshName: 'prototype', expected: 'prototype#0' },
+    { meshName: '', expected: 'Shape 2#0' },
+  ])('should label an unnamed occurrence independently with $expected', ({ meshName, expected }) => {
+    const document = documentOf([boxSpec('prototype')]);
+    document.getRoot().listNodes()[0]!.setName('Authored');
+    const mesh = document.getRoot().listMeshes()[0]!.setName(meshName);
+    document.getRoot().listScenes()[0]!.addChild(document.createNode('').setMesh(mesh));
+    expect(buildMeshAnalysisRecord(document).primitives.map((primitive) => primitive.name)).toEqual([
+      'Authored#0',
+      expected,
+    ]);
+  });
+
   it('should place a translated node in world space', () => {
     const record = buildMeshAnalysisRecord(documentOf([boxSpec('shifted', [5, 0, 0])]));
 

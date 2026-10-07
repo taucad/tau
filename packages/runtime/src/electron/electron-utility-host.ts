@@ -7,20 +7,18 @@
 import type { ChannelServerHandle, MessagePortMainLike } from '@taucad/rpc';
 import { wrapMessagePortMain } from '@taucad/rpc';
 import type {
-  EncodedGeometry,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
   RuntimeTransportHost,
   TransportHostReady,
 } from '#transport/index.js';
-import type { Geometry } from '@taucad/types';
-import type { RuntimeProtocol } from '#index.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
-import { createWorkerDispatcher } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
-import { encodeBinaryAsOwnedCopy, encodeGeometryAsOwnedCopy } from '#transport/_internal/owned-transfer-bytes.js';
+import { encodeBinaryAsOwnedCopy } from '#transport/_internal/owned-transfer-bytes.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 
 import type { ElectronUtilityHostOptions } from '#electron/electron-utility-transport.schemas.js';
@@ -47,13 +45,13 @@ const debugLog = (origin: string, message: string, data?: Record<string, unknown
  */
 export const electronUtilityHost = (
   hostOptions: ElectronUtilityHostOptions,
-): RuntimeTransportHost<RuntimeProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
+): RuntimeTransportHost<RuntimeDocumentProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
   const utilityFsBase = extractInlineFileSystem(hostOptions.fileSystem);
 
   debugLog('utility:host', 'constructed');
 
   let openPromise: Promise<TransportHostReady> | undefined;
-  let dispatcherHandle: ChannelServerHandle<RuntimeProtocol> | undefined;
+  let dispatcherHandle: ChannelServerHandle<RuntimeDocumentProtocol> | undefined;
   let transferredFileSystem: WorkerFileSystemProxy | undefined;
   let receivedPortHandles: Array<{ close(): void }> = [];
   let fileSystemDisposed = false;
@@ -92,10 +90,6 @@ export const electronUtilityHost = (
 
   /* Encoders are inline-only — Electron `MessagePortMain` cannot
    * carry SAB or non-port transferables */
-  const encodeGeometry = (geometry: Geometry): EncodedGeometry => {
-    return encodeGeometryAsOwnedCopy(geometry);
-  };
-
   const open = async (): Promise<TransportHostReady> => {
     if (openPromise) {
       return openPromise;
@@ -209,11 +203,10 @@ export const electronUtilityHost = (
               }
               const { worker } = hostOptions;
               debugLog('utility:host', 'kernel-runtime-worker-instantiated');
-              const dispatcher = createWorkerDispatcher(worker, wireport, {
+              const dispatcher = createDocumentWorkerDispatcher(worker, wireport, {
                 inlineFileSystem: transferredFileSystem ?? utilityFsBase!,
                 computeBindingMode: event.data?.computeBindingMode === 'off' ? 'off' : 'memory',
                 ...(wrappedComputeStorePort ? { computeStorePort: wrappedComputeStorePort } : {}),
-                encodeGeometry,
                 encodeBinary: encodeBinaryAsOwnedCopy,
               });
               dispatcherHandle = dispatcher;
@@ -243,10 +236,7 @@ export const electronUtilityHost = (
     open,
     adoptInitialize(_handle: RuntimeInitializeMemoryHandle): HostInitializeBindings {
       return {
-        geometryDelivery: {
-          publish(geometry): EncodedGeometry {
-            return encodeGeometry(geometry);
-          },
+        binaryDelivery: {
           publishBytes(_key, source) {
             return encodeBinaryAsOwnedCopy(_key, source);
           },
@@ -255,7 +245,6 @@ export const electronUtilityHost = (
         },
       };
     },
-    encodeGeometry,
     async close(reason?: string): Promise<void> {
       if (isClosed) {
         return;

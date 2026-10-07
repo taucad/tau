@@ -7,7 +7,7 @@ export type ExampleKind = 'model' | 'test-fixture' | 'spec-fixture' | 'reference
 
 /** Map of kernel names to their available example fixture names. */
 export type ExampleManifest = {
-  build123d: 'v8-engine-brep';
+  build123d: 'planetary-gear-system' | 'v8-engine-brep';
   jscad: 'cube' | 'cube-cylinder-section-fixture' | 'cylinder' | 'edge-occlusion-fixture' | 'gear' | 'non-manifold-section-fixture' | 'planetary-gear-system' | 'section-cap-fixture' | 'section-overlap-fixture' | 'section-overlap-heavy-planetary-fixture' | 'section-overlap-heavy-v8-fixture' | 'section-picking-fixture';
   manifold: 'manifold-logo';
   occt: 'v8-engine-brep';
@@ -16,6 +16,7 @@ export type ExampleManifest = {
   picogk: 'boolean-shell' | 'multifile-asset' | 'parameterized-sphere' | 'turbofan';
   picovoxel: 'base-box' | 'base-cylinder' | 'base-lens' | 'base-pipe' | 'base-pipe-segment' | 'base-ring' | 'base-sphere' | 'basic-lattices' | 'boolean-showcase' | 'gear' | 'gyroid-sdf' | 'helix-heat-x' | 'hello-world' | 'implicit-gyroid-genus' | 'implicit-gyroid-sphere' | 'implicit-logic-split' | 'implicit-modular' | 'implicit-radial' | 'implicit-random' | 'implicit-regular' | 'implicit-super-ellipsoid' | 'lattice-conformal' | 'lattice-manifold' | 'lattice-pipe' | 'lattice-regular' | 'lead-screw-stage' | 'material-sensor' | 'mesh-painter' | 'mesh-trafo' | 'over-offset' | 'quasicrystal' | 'rover-wheel' | 'simple-fluid-simulation' | 'sphere-minus-beams' | 'torus-knot-round-trip';
   replicad: 'bambu-plate' | 'bench-vise' | 'birdhouse' | 'bottle' | 'bundler-feature-matrix' | 'card-holder' | 'chair' | 'copper-lampshade' | 'cycloidal-gear' | 'decorated-box' | 'drinking-glass' | 'flower-attachment-section-outline-fixture' | 'gridfinity-box' | 'heat-exchanger' | 'helical-gear' | 'hex-screwdriver' | 'hollow-box' | 'ibeam' | 'jscad-logo' | 'kestrel-240-quadcopter' | 'lego' | 'libassimp-format-prism' | 'logo' | 'logo-keychain' | 'nanoraster-logo' | 'picovoxel-logo' | 'planetary-gear-system' | 'pot-plant' | 'projection-test' | 'rao-nozzle' | 'replicad-logo' | 'simple-tray' | 'six-axis-arm' | 'spur-gearbox' | 'staircase' | 'standing-fan' | 'stress-test' | 't-slot-rail' | 'table' | 'tau-wordmark' | 'tray' | 'turbofan' | 'v8-engine' | 'v8-engine-rev2' | 'vase' | 'wavy-vase' | 'wedge-door-stopper' | 'wheelbarrow' | 'worm-gear-system';
+  tscircuit: 'led-board';
 };
 
 /** Available kernel names. */

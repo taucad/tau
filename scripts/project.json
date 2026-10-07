@@ -94,13 +94,34 @@
         "{workspaceRoot}/packages/plugins/*/README.md",
         "{workspaceRoot}/packages/core/*/README.md",
         "{workspaceRoot}/packages/plugins/*/src/index.ts",
-        "{workspaceRoot}/packages/core/*/src/index.ts"
+        "{workspaceRoot}/packages/core/*/src/index.ts",
+        "{workspaceRoot}/**/*"
       ]
+    },
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Suites that launch Playwright Chromium or run Pandoc (canvas Vite config, HTML reference capture). Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium and Pandoc."
+      },
+      "inputs": ["default", "^production"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../node_modules/.bin/vitest run",
+        "env": {
+          "TAU_SCRIPTS_BROWSER_TESTS": "true"
+        }
+      }
     },
     "validate-license-deps": {
       "executor": "nx:run-commands",
       "options": {
         "command": "node --import tsx scripts/src/update-license-deps.mts --check"
+      }
+    },
+    "validate-open-source-notices": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import tsx scripts/src/update-open-source-notices.mts --check"
       }
     },
     "prepare-geospec-test-consumer": {
@@ -117,7 +138,32 @@
             "runtime",
             "bundler-core",
             "esbuild",
-            "geospec"
+            "geospec",
+            "geospec-engine",
+            "camera",
+            "spatial",
+            "geometry-core",
+            "occt-core",
+            "openrscad",
+            "assimp",
+            "brep",
+            "gltf",
+            "image",
+            "jscad",
+            "manifold",
+            "middleware",
+            "opencascade",
+            "picovoxel",
+            "replicad",
+            "tscircuit",
+            "rhino",
+            "tscircuit",
+            "rpc",
+            "kinematics",
+            "filesystem",
+            "revisions",
+            "picogk",
+            "native-process-core"
           ]
         }
       ],
@@ -139,6 +185,13 @@
       "cache": false,
       "options": {
         "command": "node scripts/src/plan-geospec-ci.ts"
+      }
+    },
+    "validate-grafana": {
+      "executor": "nx:run-commands",
+      "inputs": ["{projectRoot}/src/validate-grafana.ts", "{workspaceRoot}/infra/grafana/**/*"],
+      "options": {
+        "command": "node scripts/src/validate-grafana.ts"
       }
     },
     "validate-workflows": {

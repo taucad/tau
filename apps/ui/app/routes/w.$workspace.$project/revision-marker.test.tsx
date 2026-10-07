@@ -134,7 +134,13 @@ describe('RevisionRow', () => {
 
   it('opens to its files, each row opening the shared comparison in its path’s language (S38)', async () => {
     const user = userEvent.setup();
-    revisionStatusHarness.comparison = { original: 'cube(1);', modified: 'cube(2);' };
+    revisionStatusHarness.comparison = {
+      original: 'cube(1);',
+      modified: 'cube(2);',
+      kind: 'text',
+      change: 'modified',
+      notices: [],
+    };
     renderRow();
     await openRow(user);
 
@@ -143,6 +149,27 @@ describe('RevisionRow', () => {
     await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
     expect(await screen.findByTestId('diff')).toHaveAttribute('data-language', 'openscad');
     expect(screen.getByTestId('diff')).toHaveTextContent('cube(1);|cube(2);');
+  });
+
+  it('should keep dirty history on its parent comparison and offer live comparison explicitly', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.comparison = {
+      original: 'parent',
+      modified: 'saved',
+      kind: 'text',
+      change: 'modified',
+      notices: [],
+    };
+    renderRow({ isCurrent: true, isDirty: true });
+    await openRow(user);
+    expect(screen.getByRole('button', { name: 'Compare bracket.scad' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+    expect(await screen.findByTestId('diff')).toHaveTextContent('parent|saved');
+    expect(revisionStatusHarness.comparisonRequests).toContain('rev-2:bracket.scad:parent');
+    expect(screen.queryByText('Original bytes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Current bytes')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
+    expect(screen.getByRole('menuitem', { name: 'Compare with current' })).toBeInTheDocument();
   });
 
   it('should show three files first and toggle the complete file list', async () => {
@@ -201,7 +228,13 @@ describe('RevisionRow', () => {
       'Could not compare main.geospec.ts. Tree is unavailable',
     );
     revisionStatusHarness.comparisonError = undefined;
-    revisionStatusHarness.comparison = { original: 'a', modified: 'b' };
+    revisionStatusHarness.comparison = {
+      original: 'a',
+      modified: 'b',
+      kind: 'text',
+      change: 'modified',
+      notices: [],
+    };
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
   });
@@ -311,14 +344,20 @@ describe('RevisionRow', () => {
   it('compares the whole revision with the current files from More, and returns to its own changes', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
-    revisionStatusHarness.comparison = { original: 'cube(1);', modified: 'cube(5);' };
+    revisionStatusHarness.comparison = {
+      original: 'cube(1);',
+      modified: 'cube(5);',
+      kind: 'text',
+      change: 'modified',
+      notices: [],
+    };
     renderRow();
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
     await user.click(screen.getByRole('menuitem', { name: 'Compare with current' }));
 
     const since = await screen.findByRole('list', { name: 'Changed since Rev 2' });
-    expect(revisionStatusHarness.diffRequests).toContain('rev-2..rev-5');
+    expect(revisionStatusHarness.diffRequests).toContain('rev-2..checkout');
     await user.click(within(since).getByRole('button', { name: 'Compare bracket.scad with the current file' }));
     expect(await screen.findByTestId('diff')).toHaveTextContent('cube(1);|cube(5);');
 
@@ -338,12 +377,12 @@ describe('RevisionRow', () => {
     expect(await screen.findByRole('note')).toHaveTextContent('No changes since Rev 2.');
   });
 
-  it('offers no Compare with current on the revision you are on, which already compares with your edits', async () => {
+  it('should offer Compare with current on the current revision', async () => {
     const user = userEvent.setup();
     renderRow({ isCurrent: true, isDirty: true });
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));
-    expect(screen.queryByRole('menuitem', { name: 'Compare with current' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Compare with current' })).toBeInTheDocument();
   });
 
   it('gives every target at least 24 × 24 CSS px', async () => {

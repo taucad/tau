@@ -21,7 +21,7 @@ if (backend === 'mixed') {
 }
 const { canonicalize, Engine, ProtocolError } = nativeModule;
 
-const PROFILE = 'geospec-demand-v5';
+const PROFILE = 'geospec-demand-v6';
 const CANONICAL_PROFILE = 'geospec-jcs-v1';
 const CONTINUOUS_INPUT_SHA256 = '6ccb5bd597728f65748244334c16a663c6469d18887545b7c173060e657187a6';
 const CONTINUOUS_BUDGET_SHA256 = '4709e8dda424943db7f202f2e40bbdb8e394b4ee86ef4998efdf00a955ee98c4';

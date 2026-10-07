@@ -28,7 +28,19 @@ const saveRequest = vi.fn(async () => undefined);
 const toastFailures: unknown[] = [];
 
 const cadActor = {
-  getSnapshot: () => ({ context: { geometry: geometryFormat ? { format: geometryFormat } : undefined } }),
+  getSnapshot: () => ({
+    context: {
+      rendering: geometryFormat
+        ? {
+            success: true,
+            artifact: {
+              mimeType: geometryFormat === 'svg' ? 'image/svg+xml' : 'model/gltf-binary',
+              content: geometryFormat === 'svg' ? '<svg xmlns="http://www.w3.org/2000/svg" />' : new Uint8Array([1]),
+            },
+          }
+        : undefined,
+    },
+  }),
   on: () => ({ unsubscribe: vi.fn() }),
 };
 const graphicsActor = {

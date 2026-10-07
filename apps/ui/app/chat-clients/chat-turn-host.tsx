@@ -1,10 +1,10 @@
 /** Compose one focused chat's explicit Start/Resume command from its live selection and transcript. */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { isResumableRunFailure } from '@taucad/agent-host';
+import { isResumableRun } from '@taucad/agent-host';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
-import { useActiveChatSession } from '#hooks/active-chat-provider.js';
+import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useModels } from '#hooks/use-models.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
@@ -17,6 +17,7 @@ import { commandOf, turnIntentOf, turnTriggerOf } from '#chat-clients/turn-inten
 import { externalAdmissionConfig, wireAdmissionConfig } from '#services/agent-host-client.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
+import { createAgentUsageTelemetry } from '#chat-clients/_internal/agent-usage-telemetry.js';
 
 /** The route publishes command composition; project-scoped host observation lives in ProjectSessionBinding. */
 export function ChatTurnHost(): ReactNode {
@@ -25,13 +26,27 @@ export function ChatTurnHost(): ReactNode {
   const chat = useActiveChatInstance();
   const store = useChatSessionStore();
   const { resolveModel } = useModels();
+  const {
+    execution: { setActiveExecution },
+  } = useChatComposer();
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   const agentRef = useRef(agent);
   const resolveModelRef = useRef(resolveModel);
+  const setActiveExecutionRef = useRef(setActiveExecution);
+  /* Every agent's turn is admitted here once, in the tab that admits it (W36-C). */
+  const telemetry = useMemo(
+    () =>
+      createAgentUsageTelemetry({
+        getProjection: () => store.getProjection(activeChatId),
+        subscribe: (listener) => store.subscribeProjection(activeChatId, listener),
+      }),
+    [activeChatId, store],
+  );
   useEffect(() => {
     agentRef.current = agent;
     resolveModelRef.current = resolveModel;
-  }, [agent, resolveModel]);
+    setActiveExecutionRef.current = setActiveExecution;
+  }, [agent, resolveModel, setActiveExecution]);
 
   const admit = useCallback(
     async (gesture: ChatTurnGesture): Promise<ChatTurn> => {
@@ -42,11 +57,14 @@ export function ChatTurnHost(): ReactNode {
       const projectedRun =
         projection !== undefined && selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
+      const turnTelemetry = telemetry.begin(execution);
+      const track = (turn: ChatTurn & { runId: string }): ChatTurn => {
+        turnTelemetry.admitted(turn.runId);
+        return turn;
+      };
       try {
-        if (
-          gesture.kind === 'continue' &&
-          !(projectedRun?.lifecycle === 'failed' && isResumableRunFailure(projectedRun.failure))
-        ) {
+        /* The same runs the composer offers Resume for: a deliberate Stop that kept committed work, or a resumable failure. */
+        if (gesture.kind === 'continue' && !isResumableRun(projectedRun)) {
           throw new Error('This turn cannot be resumed. Choose Try again to replay it.');
         }
         const intent = turnIntentOf(
@@ -60,9 +78,14 @@ export function ChatTurnHost(): ReactNode {
                 : { kind: 'regenerate' },
         );
         await admitExecution(execution);
+        /* The chat owns what it ran on from its first turn, so a later default
+         * cannot move it — and that choice becomes the next new chat's. */
+        if (execution === liveAgent.execution) {
+          setActiveExecutionRef.current(execution);
+        }
         if (intent.trigger === 'resume') {
           const { runId } = projectedRun!;
-          return {
+          return track({
             runId,
             leaseTurnId: intent.leaseTurnId,
             request: {
@@ -73,7 +96,7 @@ export function ChatTurnHost(): ReactNode {
                 runId,
               }),
             },
-          };
+          });
         }
         const runId =
           gesture.kind === 'regenerate' && gesture.requestId !== undefined
@@ -130,13 +153,14 @@ export function ChatTurnHost(): ReactNode {
                   command,
                 }
               : { kind: 'regenerate', command };
-        return { runId, leaseTurnId: intent.leaseTurnId, request };
+        return track({ runId, leaseTurnId: intent.leaseTurnId, request });
       } catch (error) {
+        turnTelemetry.refused(error);
         surfaceDispatchFailure(error);
         throw error;
       }
     },
-    [activeChatId, admitExecution, chat, store, surfaceDispatchFailure],
+    [activeChatId, admitExecution, chat, store, surfaceDispatchFailure, telemetry],
   );
 
   /* The admitted turn retains its callback; future seeds need a live focused publisher. */
@@ -145,6 +169,14 @@ export function ChatTurnHost(): ReactNode {
     store.startPendingSeed(activeChatId);
     return unpublish;
   }, [activeChatId, admit, store]);
+
+  /* Leaving the chat ends its agent session. */
+  useEffect(
+    () => () => {
+      telemetry.end();
+    },
+    [telemetry],
+  );
 
   return null;
 }

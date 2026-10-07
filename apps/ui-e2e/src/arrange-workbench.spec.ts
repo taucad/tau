@@ -169,9 +169,10 @@ test('arranges review views and a report from the live root, then restores', asy
   expect(await target.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe(
     'Ask Tau to build anything...',
   );
-  const card = selectors.getByText(/Arranged:/u).last();
+  const card = selectors.getByRole('button', { name: /Arranged/u }).last();
   await target.expectVisible(card, 60_000);
-  await target.expectVisible(selectors.getByRole('button', { name: 'Restore' }).last(), 60_000);
+  await target.click(card);
+  await target.expectVisible(selectors.getByRole('button', { name: 'Restore previous layout' }).last(), 60_000);
 
   const beforeClose = await readWorkbenchTree();
   const close = await call({ close: [{ kind: 'view', view: 'left' }] }, 'Close the left view.');
@@ -180,7 +181,10 @@ test('arranges review views and a report from the live root, then restores', asy
   expect(beforeClose['/.tau/workbench/views/left.json']).toBeDefined();
   expect(files['/.tau/workbench/views/left.json']).toBeUndefined();
   await target.expectCount(viewTab('left'), 0, 60_000);
-  await target.click(selectors.getByRole('button', { name: 'Restore' }).last());
+  const closeCard = selectors.getByRole('button', { name: /Arranged/u }).last();
+  await target.expectVisible(closeCard, 60_000);
+  await target.click(closeCard);
+  await target.click(selectors.getByRole('button', { name: 'Restore previous layout' }).last());
   await expectViewTab('left');
   expect(await readFile('/.tau/workbench/views/left.json')).toBeDefined();
 });

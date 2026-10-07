@@ -56,6 +56,28 @@ export const daemonPlacementOf = (execution: CadAgentExecution): TauAgentHostId 
 /** Descriptors by agent id, as of the last discovery pass. */
 const discoveredAgents = new Map<string, ExternalAgentDescriptor>();
 
+/** Paired hosts that are cloud hosts, as of the last discovery pass. */
+const cloudHostIds = new Set<string>();
+
+/**
+ * The telemetry placement one execution runs on: this page's worker, the
+ * desktop launcher, a cloud host, or any other daemon.
+ *
+ * @param execution - The turn's execution.
+ * @returns A bounded `agent_placement` label.
+ * @public
+ */
+export const agentPlacementOf = (execution: CadAgentExecution): 'browser' | 'desktop' | 'daemon' | 'cloud' => {
+  const hostId = daemonPlacementOf(execution);
+  if (hostId === undefined) {
+    return 'browser';
+  }
+  if (hostId === 'desktop') {
+    return 'desktop';
+  }
+  return cloudHostIds.has(hostId) ? 'cloud' : 'daemon';
+};
+
 /**
  * The product name one external agent goes by (V14).
  *
@@ -383,7 +405,11 @@ export const listAgentHostPlacements = async (
   );
   const targets = [...desktopTarget, ...originTarget, ...pairedTargets];
   discoveredAgents.clear();
+  cloudHostIds.clear();
   for (const target of targets) {
+    if (target.cloudProjectId !== undefined) {
+      cloudHostIds.add(target.hostId);
+    }
     for (const agent of target.externalAgents ?? []) {
       discoveredAgents.set(agent.id, agent);
     }
@@ -465,8 +491,6 @@ type OpenAgentHostChannelOptions = {
   readonly workspaceRoot?: string | undefined;
   /** Canonical manifest project id for a `desktop` placement. */
   readonly projectId?: string | undefined;
-  /** Desktop launcher choice; changing it requires reloading the project host. */
-  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
   /** Bridge override, for tests. */
   readonly bridge?: (() => { readonly agentHost: Pick<DesktopBridge['agentHost'], 'connect'> } | undefined) | undefined;
 };
@@ -504,7 +528,6 @@ const desktopAgentPort = async (options: OpenAgentHostChannelOptions): Promise<M
       workspaceRoot,
       projectId,
       computeMode: getComputeReuseMode(),
-      geoSpecEngine: options.geoSpecEngine,
     }),
     refusal(),
   ]);

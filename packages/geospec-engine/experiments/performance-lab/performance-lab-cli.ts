@@ -13,10 +13,10 @@ import { dirname, isAbsolute, resolve as resolvePath } from 'node:path';
 import { availableParallelism, freemem, loadavg } from 'node:os';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import { parseArgs } from 'node:util';
+import { isDeepStrictEqual, parseArgs } from 'node:util';
 /* oxlint-disable no-restricted-imports -- Private lab reads the frozen native catalog and source receipts without publishing them. */
 import manifest from '../../../geospec-engine-native/bench/fixtures/performance-lab/manifest.json' with { type: 'json' };
-import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
+import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v6.json' with { type: 'json' };
 import {
   classifyPerformanceLabDifference,
   performanceLabCases,
@@ -81,6 +81,22 @@ type ChildReport = {
     peakBytes: number;
     observed: string;
   };
+};
+type EvidenceArtifact = Artifact & { bytes: number; encoding: 'utf8' | 'json'; pointer?: string };
+type CaseReceipt = Omit<
+  PerformanceLabRunResult['perCase'][number],
+  'canonicalClaimUtf8' | 'canonicalResultUtf8' | 'result' | 'diagnostics'
+> & {
+  evidence: {
+    canonicalClaim: EvidenceArtifact | WireNull;
+    canonicalResult: EvidenceArtifact | WireNull;
+    result: EvidenceArtifact;
+    diagnostics: EvidenceArtifact;
+  };
+};
+type ChildReceipt = Omit<ChildReport, 'result'> & {
+  evidenceTransport: 'artifacts-v1';
+  result?: Omit<PerformanceLabRunResult, 'perCase'> & { perCase: CaseReceipt[] };
 };
 // oxlint-disable-next-line typescript/no-restricted-types -- Node exit receipts preserve explicit null for an absent exit code/signal.
 type WireNull = null;
@@ -337,10 +353,44 @@ const hashPath = async (path: string): Promise<Artifact> => ({
     .update(await readFile(path))
     .digest('hex'),
 });
+const approvedPublicContract = {
+  id: 'public-contract',
+  path: 'packages/geospec/src/runner/types.ts',
+  frozenSha256: '20303ca36a5ae9531cdd035c10e108e92b70aec76bba1aca849306dbe3eed82d',
+  currentSha256: '2fbb333f95044d45bf63b6fbab86e94018eb2455fba05fffda73459edc6e7e15',
+} as const;
 export const verifySourceAuthority = async (observe: typeof hashPath = hashPath): Promise<void> => {
+  const overlayPath = resolvePath(
+    root,
+    'packages/geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v6.json',
+  );
+  const predecessorPath = resolvePath(
+    root,
+    'packages/geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json',
+  );
+  const overlay = await observe(overlayPath);
+  const predecessor = await observe(predecessorPath);
+  if (
+    overlay.sha256 !== 'bc258a7989947e1abce12b62dd1a79919c06a104c52312e41b7797a99fdffa8a' ||
+    predecessor.sha256 !== currentAuthority.predecessorSha256 ||
+    currentAuthority.predecessorSha256 !== 'd44d66f6f921727ac2c91645ec9c04d18c13cc14ac806d9aad50903b96b8fbcd'
+  ) {
+    throw new Error('Performance-lab successor authority differs from its immutable predecessor.');
+  }
   const manifestPath = resolvePath(root, 'packages/geospec-engine-native/bench/fixtures/performance-lab/manifest.json');
   const manifestHash = await observe(manifestPath);
   const native = manifest.analyticAuthority.sources.filter(({ id }) => id === 'native-contract');
+  const publicContract = manifest.analyticAuthority.sources.filter(
+    ({ id, path }) => id === approvedPublicContract.id || path === approvedPublicContract.path,
+  );
+  if (
+    publicContract.length !== 1 ||
+    publicContract[0]!.id !== approvedPublicContract.id ||
+    publicContract[0]!.path !== approvedPublicContract.path ||
+    publicContract[0]!.sha256 !== approvedPublicContract.frozenSha256
+  ) {
+    throw new Error('Performance-lab public-contract transition differs from its frozen authority.');
+  }
   const affected = performanceLabCases
     .filter(({ matcher }) =>
       ['toHaveStepUnits', 'toHaveProductStructure', 'toHaveAssemblyOccurrences'].includes(matcher),
@@ -349,6 +399,9 @@ export const verifySourceAuthority = async (observe: typeof hashPath = hashPath)
     .sort();
   if (
     currentAuthority.schemaVersion !== 1 ||
+    currentAuthority.id !== 'n8-current-source-v6-a1' ||
+    currentAuthority.nativeContract.currentSha256 !==
+      '5c0cc1737815c2295e2801d991d20891db53a1caa213630ea2671da6523c696b' ||
     currentAuthority.frozenManifestSha256 !== manifestHash.sha256 ||
     currentAuthority.nativeContract.sourceId !== 'native-contract' ||
     native.length !== 1 ||
@@ -360,11 +413,17 @@ export const verifySourceAuthority = async (observe: typeof hashPath = hashPath)
   ) {
     throw new Error('Performance-lab current-source overlay does not match its frozen authority.');
   }
-  const numericProfile = await readFile(
-    resolvePath(root, 'packages/geospec-engine-native/rust/tests/fixtures/current-profile-v5/numeric-profile.txt'),
-    'utf8',
-  );
-  if (numericProfile !== currentAuthority.approvedNumericProfile) {
+  const numericProfilePath =
+    'packages/geospec-engine-native/rust/tests/fixtures/current-profile-v6/numeric-profile.txt';
+  const numericProfile = await readFile(resolvePath(root, numericProfilePath));
+  if (
+    currentAuthority.approvedNumericProfile !== 'geospec-demand-v6' ||
+    currentAuthority.numericProfileSource.path !== numericProfilePath ||
+    currentAuthority.numericProfileSource.sha256 !==
+      'c36f2296878e3daa57cc0cdfe8c86dac3b77ed80d6ddbd60de68b31a64bba5f7' ||
+    createHash('sha256').update(numericProfile).digest('hex') !== currentAuthority.numericProfileSource.sha256 ||
+    numericProfile.toString('utf8') !== `${currentAuthority.approvedNumericProfile}\n`
+  ) {
     throw new Error('Performance-lab current-source numeric profile changed.');
   }
   const sources = [
@@ -384,7 +443,9 @@ export const verifySourceAuthority = async (observe: typeof hashPath = hashPath)
     const expected =
       source.path === currentAuthority.nativeContract.path
         ? currentAuthority.nativeContract.currentSha256
-        : source.sha256;
+        : source.path === approvedPublicContract.path
+          ? approvedPublicContract.currentSha256
+          : source.sha256;
     if (observed.sha256 !== expected) {
       throw new Error(`Performance-lab source authority changed: ${source.path}`);
     }
@@ -394,6 +455,211 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
   await writeFile(path, JSON.stringify(value, undefined, 2) + '\n', {
     flag: 'wx',
   });
+};
+// Bound individual output chunks, not geometry, evidence size or work budgets.
+const evidenceChunkSize = 64 * 1024;
+const textChunks = function* (text: string): Generator<string> {
+  for (let start = 0; start < text.length; ) {
+    let end = Math.min(start + evidenceChunkSize, text.length);
+    if (end < text.length && (text.codePointAt(end - 1) ?? 0) > 65_535) {
+      end += 1;
+    }
+    yield text.slice(start, end);
+    start = end;
+  }
+};
+// Only private decoded evidence uses JSON sidecars; canonical UTF8 never passes through this writer.
+const evidenceJsonChunks = function* (value: unknown): Generator<string> {
+  if (typeof value === 'string') {
+    yield '"';
+    for (const chunk of textChunks(value)) {
+      yield JSON.stringify(chunk).slice(1, -1);
+    }
+    yield '"';
+    return;
+  }
+  if (Array.isArray(value)) {
+    yield '[';
+    let separator = '';
+    for (const entry of value) {
+      yield separator;
+      yield* evidenceJsonChunks(entry);
+      separator = ',';
+    }
+    yield ']';
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    yield '{';
+    let separator = '';
+    for (const [key, entry] of Object.entries(value)) {
+      yield separator;
+      yield* evidenceJsonChunks(key);
+      yield ':';
+      yield* evidenceJsonChunks(entry);
+      separator = ',';
+    }
+    yield '}';
+    return;
+  }
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    yield JSON.stringify(value);
+    return;
+  }
+  throw new TypeError('Performance evidence must be a JSON value.');
+};
+const writeEvidence = async (
+  path: string,
+  chunks: Iterable<string>,
+  encoding: EvidenceArtifact['encoding'],
+): Promise<EvidenceArtifact> => {
+  const file = await open(path, 'wx');
+  const hash = createHash('sha256');
+  let bytes = 0;
+  let pending = '';
+  const flush = async (): Promise<void> => {
+    const buffer = Buffer.from(pending, 'utf8');
+    hash.update(buffer);
+    bytes += buffer.byteLength;
+    await file.writeFile(buffer);
+    pending = '';
+  };
+  try {
+    for (const chunk of chunks) {
+      pending += chunk;
+      if (pending.length >= evidenceChunkSize) {
+        // oxlint-disable-next-line no-await-in-loop -- Sequential chunks preserve exact evidence byte order.
+        await flush();
+      }
+    }
+    await flush();
+  } finally {
+    await file.close();
+  }
+  return { path, bytes, sha256: hash.digest('hex'), encoding };
+};
+/**
+ * Persist full evidence once, retaining compact private child accounting.
+ * @internal
+ * @param path - Create-once child receipt path.
+ * @param report - Complete child result and accounting.
+ * @returns Completion after artifacts and receipt are persisted.
+ */
+export const writeLabChildReport = async (path: string, report: ChildReport): Promise<void> => {
+  const { result: runResult, ...childMetadata } = report;
+  const perCase: CaseReceipt[] = [];
+  for (const [index, entry] of (report.result?.perCase ?? []).entries()) {
+    const { canonicalClaimUtf8, canonicalResultUtf8, result, diagnostics, ...metadata } = entry;
+    const prefix = resolvePath(dirname(path), `case-${index}`);
+    /* oxlint-disable no-await-in-loop -- Sequential create-once artifacts precede this case's compact receipt. */
+    const canonicalClaim =
+      canonicalClaimUtf8 === null
+        ? null
+        : await writeEvidence(`${prefix}-claim.utf8`, textChunks(canonicalClaimUtf8), 'utf8');
+    const canonicalResult =
+      canonicalResultUtf8 === null
+        ? null
+        : await writeEvidence(`${prefix}-result.utf8`, textChunks(canonicalResultUtf8), 'utf8');
+    if (canonicalResult !== null && canonicalResult.sha256 !== entry.canonicalResultSha256) {
+      throw new Error('Performance canonical result hash differs from its recorded bytes.');
+    }
+    const decoded: unknown = canonicalResultUtf8 === null ? undefined : JSON.parse(canonicalResultUtf8);
+    const candidate: unknown =
+      decoded !== null &&
+      typeof decoded === 'object' &&
+      'results' in decoded &&
+      Array.isArray(decoded.results) &&
+      decoded.results.length === 1
+        ? decoded.results[0]
+        : decoded;
+    const recoverable = canonicalResult !== null && isDeepStrictEqual(candidate, result);
+    const resultArtifact = recoverable
+      ? { ...canonicalResult, pointer: candidate === decoded ? '' : '/results/0' }
+      : await writeEvidence(`${prefix}-decoded.json`, evidenceJsonChunks(result), 'json');
+    const canonicalDiagnostics: unknown =
+      candidate !== null && typeof candidate === 'object' && 'diagnostics' in candidate
+        ? candidate.diagnostics
+        : undefined;
+    const diagnosticsArtifact =
+      recoverable && isDeepStrictEqual(canonicalDiagnostics, diagnostics)
+        ? { ...resultArtifact, pointer: `${resultArtifact.pointer}/diagnostics` }
+        : await writeEvidence(`${prefix}-diagnostics.json`, evidenceJsonChunks(diagnostics), 'json');
+    perCase.push({
+      ...metadata,
+      evidence: { canonicalClaim, canonicalResult, result: resultArtifact, diagnostics: diagnosticsArtifact },
+    });
+    /* oxlint-enable no-await-in-loop */
+  }
+  await writeJson(path, {
+    ...childMetadata,
+    evidenceTransport: 'artifacts-v1',
+    ...(runResult === undefined ? {} : { result: { ...runResult, perCase } }),
+  } satisfies ChildReceipt);
+};
+/**
+ * Verify full artifacts incrementally without reassembling large evidence in parent rows.
+ * @internal
+ * @param path - Compact child receipt path.
+ * @returns Verified compact accounting and artifact references.
+ */
+export const readLabChildReport = async (path: string): Promise<ChildReceipt> => {
+  const decoded: unknown = JSON.parse(await readFile(path, 'utf8'));
+  if (
+    decoded === null ||
+    typeof decoded !== 'object' ||
+    !('evidenceTransport' in decoded) ||
+    decoded.evidenceTransport !== 'artifacts-v1'
+  ) {
+    throw new Error('Performance child receipt requires artifact evidence transport.');
+  }
+  const receipt = decoded as ChildReceipt;
+  const seen = new Map<string, EvidenceArtifact>();
+  for (const entry of receipt.result?.perCase ?? []) {
+    for (const artifact of Object.values(entry.evidence)) {
+      if (artifact === null) {
+        continue;
+      }
+      if (
+        dirname(artifact.path) !== dirname(path) ||
+        !Number.isSafeInteger(artifact.bytes) ||
+        artifact.bytes < 0 ||
+        !/^[0-9a-f]{64}$/u.test(artifact.sha256)
+      ) {
+        throw new Error('Performance evidence artifact descriptor is invalid.');
+      }
+      const prior = seen.get(artifact.path);
+      if (prior !== undefined) {
+        if (prior.sha256 !== artifact.sha256 || prior.bytes !== artifact.bytes) {
+          throw new Error('Performance evidence references disagree.');
+        }
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Each full artifact is verified once before any receipt is accepted.
+      const file = await open(artifact.path, 'r');
+      const buffer = Buffer.alloc(evidenceChunkSize);
+      const hash = createHash('sha256');
+      let bytes = 0;
+      try {
+        for (;;) {
+          // oxlint-disable-next-line no-await-in-loop -- Incremental reads avoid the whole-evidence JavaScript string ceiling.
+          const { bytesRead } = await file.read(buffer, 0, buffer.byteLength, null);
+          if (bytesRead === 0) {
+            break;
+          }
+          bytes += bytesRead;
+          hash.update(buffer.subarray(0, bytesRead));
+        }
+      } finally {
+        // oxlint-disable-next-line no-await-in-loop -- Close the exact verified artifact even when reading fails.
+        await file.close();
+      }
+      if (bytes !== artifact.bytes || hash.digest('hex') !== artifact.sha256) {
+        throw new Error(`Performance evidence artifact changed: ${artifact.path}`);
+      }
+      seen.set(artifact.path, artifact);
+    }
+  }
+  return receipt;
 };
 const errorRecord = (error: unknown): NonNullable<ChildReport['error']> =>
   error instanceof Error ? { message: error.message, stack: error.stack } : { message: String(error) };
@@ -542,7 +808,7 @@ const runChild = async (options: Options): Promise<void> => {
     };
     const { runPerformanceLabCell } = await import('#experiments/performance-lab/performance-lab-runner.js');
     if (options.condition === 'warm') {
-      await runPerformanceLabCell({ ...input, cache: 'cold' }, modules);
+      await runPerformanceLabCell({ ...input, cache: 'cold' }, modules, 'discard');
     }
     result = await runPerformanceLabCell(input, modules);
   } catch (error) {
@@ -559,7 +825,7 @@ const runChild = async (options: Options): Promise<void> => {
       observed: 'after runner cleanup or thrown error, before result serialization; includes hashing and host setup',
     },
   };
-  await writeJson(resolvePath(options.outputDir, 'result.json'), report);
+  await writeLabChildReport(resolvePath(options.outputDir, 'result.json'), report);
 };
 
 const invokeCell = async (cell: Cell, options: Options) => {
@@ -601,9 +867,9 @@ const invokeCell = async (cell: Cell, options: Options) => {
   }
   const processWall = performance.now() - started;
   await Promise.all([stdout.close(), stderr.close()]);
-  let report: ChildReport | undefined;
+  let report: ChildReceipt | undefined;
   try {
-    report = JSON.parse(await readFile(resolvePath(outputDirectory, 'result.json'), 'utf8')) as ChildReport;
+    report = await readLabChildReport(resolvePath(outputDirectory, 'result.json'));
   } catch (error) {
     failure ??= errorRecord(error);
   }
@@ -652,6 +918,7 @@ const runParent = async (options: Options): Promise<void> => {
     '../../../geospec-engine-native/bench/fixtures/performance-lab/authority-queries.json',
     '../../../geospec-engine-native/bench/fixtures/performance-lab/analytic-cases.json',
     '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json',
+    '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v6.json',
   ];
   const sources = await Promise.all(sourcePaths.map(async (path) => hashPath(resolvePath(import.meta.dirname, path))));
   await mkdir(dirname(options.outputDir), { recursive: true });

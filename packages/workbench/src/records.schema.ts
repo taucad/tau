@@ -319,13 +319,34 @@ export const viewFieldsSchema = z.strictObject({
   measurements: z.array(pinnedMeasurementSchema).max(64).default([]),
 });
 
+/** One authored kernel projection's durable choices. Evaluation-local instance ids never enter this record. */
+const kernelViewStateSchema = z.strictObject({
+  id: z.string().min(1).max(128),
+  options: z.record(z.string().min(1).max(128), z.json()).optional(),
+  authoredInstance: z.string().min(1).max(256).optional(),
+  camera: viewCameraSchema.optional(),
+});
+
 /**
  * `.tau/workbench/views/<id>.json`. Excluded on purpose: `graphicsBackend` (device capability), grid size lock
  * (zoom-derived pixels), measure mode (interaction), selection, focus and hover (transient), the kinematics pose
  * (not persisted today; first addition after this cut, blueprint BQ8) and every code-only tunable (V1 Table 8).
  */
 /** @public */
-export const workbenchViewSchema = viewFieldsSchema.extend({ version: z.literal(1) });
+export const workbenchViewSchema = viewFieldsSchema.extend({
+  version: z.literal(1),
+  /** Absent follows the build's first offered view; a saved id is never silently retargeted. */
+  selectedKernelView: z.string().min(1).max(128).optional(),
+  /** Options, authored instance and camera are independent for each kernel view id. */
+  kernelViews: z
+    .array(kernelViewStateSchema)
+    .max(32)
+    .refine(
+      (views) => new Set(views.map((view) => view.id)).size === views.length,
+      'Each kernel view id may appear only once.',
+    )
+    .optional(),
+});
 
 // ---------------------------------------------------------------------------------------------------------------
 // Per-entry settings (entries.json), named layouts (layouts/<name>.json), the device record (Home)
@@ -352,7 +373,7 @@ export const componentDisplaySchema = z.strictObject({
 
 /** @public */
 export const entrySettingsSchema = z.strictObject({
-  /** Render timeout. Milliseconds; `0` disables it. The menu offers 0, 15 s … 10 min; default 180 000 (V1 Table 6). */
+  /** Rendering timeout in milliseconds; `0` disables it. */
   renderTimeout: z.number().int().min(0).max(600_000).optional(),
   components: componentDisplaySchema.optional(),
 });

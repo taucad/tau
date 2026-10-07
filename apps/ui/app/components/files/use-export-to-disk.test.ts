@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
+import type { ExportResult } from '@taucad/runtime/client';
+import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type * as FileUtilsModuleType from '@taucad/utils/file';
 import type { FileExtension } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -32,14 +34,6 @@ vi.mock('#components/ui/sonner.js', () => ({
 
 const { useExportToDisk } = await import('./use-export-to-disk.js');
 
-type ExportResult =
-  | {
-      success: true;
-      data: Array<{ bytes: Uint8Array<ArrayBuffer>; name: string; mimeType: string }>;
-      issues: never[];
-    }
-  | { success: false; issues: Array<{ message: string }> };
-
 function createCapabilities(): CapabilitiesManifest {
   return {
     routes: [
@@ -69,30 +63,32 @@ function createCapabilities(): CapabilitiesManifest {
 function createCadActor(options: {
   capabilities?: CapabilitiesManifest | undefined;
   activeKernelId?: string | undefined;
-  exportImplementation?: (format: FileExtension, options: Record<string, unknown>) => Promise<ExportResult>;
+  exportImplementation?: () => Promise<ExportResult>;
 }): { actor: ActorRefFrom<typeof cadMachine>; mockExport: ReturnType<typeof vi.fn> } {
   const capabilities = options.capabilities ?? createCapabilities();
   const activeKernelId = options.activeKernelId ?? 'replicad';
-  const defaultExport = vi.fn(
-    async (): Promise<ExportResult> => ({
-      success: true,
-      data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
-      issues: [],
-    }),
-  );
-  const mockExport = options.exportImplementation ? vi.fn(options.exportImplementation) : defaultExport;
+  const defaultExport = async (): Promise<ExportResult> => ({
+    success: true,
+    exportId: 'glb',
+    evaluationId: 'mock-evaluation',
+    files: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
+    issues: [],
+  });
+  const fixture = createMockRuntimeDocument();
+  const mockExport = vi
+    .mocked(fixture.document.export)
+    .mockImplementation(options.exportImplementation ?? defaultExport);
 
   const kernelClient = {
     capabilities,
     bestRouteFor(format: FileExtension): ExportRoute | undefined {
       return capabilities.routes.find((route) => route.targetFormat === format);
     },
-    export: mockExport,
   };
 
   const actor = {
     getSnapshot: () => ({
-      context: { kernelClient, activeKernelId, capabilities },
+      context: { kernelClient, activeKernelId, capabilities, document: fixture.document },
     }),
   } as unknown as ActorRefFrom<typeof cadMachine>;
 
@@ -104,7 +100,7 @@ beforeEach(() => {
 });
 
 describe('useExportToDisk', () => {
-  it('should call kernelClient.export with the route defaults for the active kernel', async () => {
+  it('should call document.export with the route defaults for the active kernel', async () => {
     const { actor, mockExport } = createCadActor({});
     const { result } = renderHook(() => useExportToDisk('test-project'));
 
@@ -112,7 +108,7 @@ describe('useExportToDisk', () => {
       await result.current.exportToDisk(actor, 'stl');
     });
 
-    expect(mockExport).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
+    expect(mockExport).toHaveBeenCalledWith('stl', { options: { binary: true } });
   });
 
   // oxlint-disable-next-line no-template-curly-in-string -- documenting the produced filename pattern in a sentence
@@ -133,7 +129,10 @@ describe('useExportToDisk', () => {
 
   it('should surface a toast error and skip download when the export result is not successful', async () => {
     const { actor } = createCadActor({
-      exportImplementation: async () => ({ success: false, issues: [{ message: 'kernel exploded' }] }),
+      exportImplementation: async () => ({
+        success: false,
+        issues: [{ code: 'RUNTIME', message: 'kernel exploded', severity: 'error', type: 'kernel' }],
+      }),
     });
     const { result } = renderHook(() => useExportToDisk('test-project'));
 
@@ -145,7 +144,7 @@ describe('useExportToDisk', () => {
     expect(mockDownloadBlob).not.toHaveBeenCalled();
   });
 
-  it('should surface a toast error and skip download when kernelClient.export rejects', async () => {
+  it('should surface a toast error and skip download when document.export rejects', async () => {
     const { actor } = createCadActor({
       exportImplementation: async () => {
         throw new Error('worker died');
@@ -170,7 +169,9 @@ describe('useExportToDisk', () => {
         });
         return {
           success: true,
-          data: [{ bytes: new Uint8Array([1]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
+          exportId: 'glb',
+          evaluationId: 'mock-evaluation',
+          files: [{ bytes: new Uint8Array([1]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
           issues: [],
         };
       },

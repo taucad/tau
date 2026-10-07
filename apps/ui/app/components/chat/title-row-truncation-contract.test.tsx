@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { ChatToolCard, ChatToolCardHeader, ChatToolCardTitle } from '#components/chat/chat-tool-card.js';
+import userEvent from '@testing-library/user-event';
+import {
+  ChatToolCard,
+  ChatToolCardContent,
+  ChatToolCardHeader,
+  ChatToolCardTitle,
+} from '#components/chat/chat-tool-card.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { FileLink } from '#components/files/file-link.js';
@@ -58,18 +64,26 @@ afterEach(() => {
  * click stops reaching the inner handler. These assertions pin every layer.
  */
 describe('chat-tool title-row truncation cascade', () => {
-  it('progressively discloses collapsible row chevrons', () => {
+  it('should keep the minimal row disclosure available at rest and open its details', async () => {
+    const user = userEvent.setup();
     render(
       <ChatToolCard variant='minimal' status='ready'>
         <ChatToolCardHeader>
           <ChatToolCardTitle>Ran command</ChatToolCardTitle>
         </ChatToolCardHeader>
+        <ChatToolCardContent>Command output</ChatToolCardContent>
       </ChatToolCard>,
     );
 
-    expect(screen.getByRole('button', { name: 'Ran command' }).querySelector('.lucide-chevron-right')).toHaveClass(
-      'opacity-0',
-    );
+    const trigger = screen.getByRole('button', { name: 'Ran command' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger.querySelector('.lucide-chevron-right')).toBeInTheDocument();
+    expect(screen.queryByText('Command output')).not.toBeInTheDocument();
+
+    await user.click(trigger);
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Command output')).toBeVisible();
   });
 
   it('keeps ChatToolCardTitle as the single block-level truncation owner', () => {

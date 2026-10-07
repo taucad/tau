@@ -213,6 +213,12 @@ export const cashProjectionEvidenceSchema = z
   });
 export type CashProjectionEvidence = z.infer<typeof cashProjectionEvidenceSchema>;
 
+/**
+ * Purchase states that can still move money or await their grant. A second purchase, and account closure, wait for
+ * them; keep this the only copy so a new settleable state cannot let closure succeed around live money.
+ */
+export const activePurchaseStates = ['prepared', 'creating', 'pending', 'attention', 'paid_unfulfilled'] as const;
+
 /** Schema parsing fixes key order as well as rejecting extra or inconsistent cash fields. */
 export function cashProjectionDigest(evidence: unknown): string {
   return createHash('sha256')

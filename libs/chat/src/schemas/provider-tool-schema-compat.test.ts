@@ -104,8 +104,8 @@ describe('provider-facing tool schema compatibility', () => {
 
     expect(entries.map((entry) => entry.toolName)).toEqual([
       toolName.testModel,
-      toolName.getKernelResult,
-      toolName.exportGeometry,
+      toolName.evaluateModel,
+      toolName.exportModel,
       toolName.getParameters,
       toolName.applyParameterOperation,
       toolName.screenshot,
@@ -122,6 +122,7 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.webBrowser,
       toolName.revisions,
       toolName.updateTodos,
+      toolName.askQuestions,
       toolName.getMachine,
       toolName.getPrintProfiles,
       toolName.requestPrint,
@@ -171,8 +172,8 @@ describe('provider-facing tool schema compatibility', () => {
 
     expect(names).not.toContain(toolName.screenshot);
     expect(names).toContain(toolName.testModel);
-    expect(names).toContain(toolName.getKernelResult);
-    expect(names).toContain(toolName.exportGeometry);
+    expect(names).toContain(toolName.evaluateModel);
+    expect(names).toContain(toolName.exportModel);
     expect(names).toContain(toolName.editFile);
   });
 
@@ -264,6 +265,7 @@ describe('provider-facing tool schema compatibility', () => {
       'options',
       'plate',
       'preset',
+      'profileId',
       'profiles',
       'settings',
       'targetFile',
@@ -290,7 +292,7 @@ describe('provider-facing tool schema compatibility', () => {
   it('should offer get_print_profiles a machine, profiles and a bounded key filter', () => {
     const schema = providerSchemaFor(toolName.getPrintProfiles);
 
-    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['keys', 'machineId', 'profiles']);
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['keys', 'machineId', 'profileId', 'profiles']);
     expect(schema.required ?? []).toEqual([]);
     expect(getPrintProfilesInputSchema.safeParse({ keys: Array.from({ length: 65 }, (_, i) => `k${i}`) }).success).toBe(
       false,
@@ -298,7 +300,13 @@ describe('provider-facing tool schema compatibility', () => {
   });
 
   it('should keep screenshot and use_skill provider inputs pruned to implemented fields', () => {
-    expect(Object.keys(providerSchemaFor(toolName.screenshot).properties ?? {}).sort()).toEqual(['mode', 'targetFile']);
+    expect(Object.keys(providerSchemaFor(toolName.screenshot).properties ?? {}).sort()).toEqual([
+      'instance',
+      'mode',
+      'options',
+      'targetFile',
+      'view',
+    ]);
     expect(Object.keys(providerSchemaFor(toolName.useSkill).properties ?? {}).sort()).toEqual(['reason', 'skillName']);
   });
 

@@ -9,6 +9,7 @@ import {
   HttpException,
   HttpStatus,
   NotFoundException,
+  Optional,
   Param,
   Post,
   Query,
@@ -19,11 +20,14 @@ import {
   UseFilters,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { pipeline, Transform } from 'node:stream';
+import type { Readable } from 'node:stream';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Environment } from '#config/environment.config.js';
 import { hostDeviceOf } from '#auth/auth.guard.js';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import {
+  ceilingRefusalMarker,
   gitRequestWindowSeconds,
   gitRequestsPerUserPerWindow,
   gitRequestsPerWindow,
@@ -32,6 +36,7 @@ import {
   noCacheHeaders,
   projectIdFromRepository,
   quotaOverrunSlackBytes,
+  quotaRefusalMarker,
   serviceAdvertisementPrefix,
 } from '#api/git/git.constants.js';
 import { LfsBatchDto, LfsVerifyDto } from '#api/git/git.dto.js';
@@ -41,6 +46,60 @@ import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filt
 import { GitRepositoryService, gitRetryAfterSeconds } from '#api/git/git.service.js';
 import type { AffectedPublication } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import type { SyncOperationAttributes } from '#telemetry/metrics.js';
+
+type SyncOperation = SyncOperationAttributes['tau.sync.operation'];
+type SyncOutcome = SyncOperationAttributes['outcome'];
+
+/**
+ * How a push ended, read from git's report-status (`ok`/`ng` pkt-lines, possibly
+ * inside side-band 1). Git answers a refused ref with HTTP 200, so this, not the
+ * status code, is what tells a failed push from a good one.
+ *
+ * @param report - The receive-pack response body, verbatim.
+ * @returns The bounded outcome label, or `undefined` for a body with no report-status:
+ *   the flush-only probe git sends before a large push, which is not a push of its own.
+ */
+export const receivePackOutcome = (report: Uint8Array<ArrayBuffer>): SyncOutcome | undefined => {
+  const text = Buffer.from(report).toString('latin1');
+  if (!/[\da-f]{4}unpack /u.test(text)) {
+    return undefined;
+  }
+  /* The pre-receive hook's sentences, relayed on side-band 2, name the refusal the `ng` line does not. */
+  if (text.includes(quotaRefusalMarker) || text.includes(ceilingRefusalMarker)) {
+    return 'quota_refused';
+  }
+  if (/[\da-f]{4}unpack (?!ok\n)/u.test(text)) {
+    return 'error';
+  }
+  return /[\da-f]{4}ng /u.test(text) ? 'ref_rejected' : 'ok';
+};
+
+/**
+ * The bounded outcome of a sync request that threw.
+ *
+ * @param error - What the route raised.
+ * @returns The outcome label.
+ */
+export const syncOutcomeOf = (error: unknown): SyncOutcome => {
+  if (!(error instanceof HttpException)) {
+    return 'error';
+  }
+  const status: HttpStatus = error.getStatus();
+  const { code } = error.getResponse() as { code?: unknown };
+  if (status === HttpStatus.PAYLOAD_TOO_LARGE) {
+    return 'quota_refused';
+  }
+  if (
+    status === HttpStatus.UNAUTHORIZED ||
+    status === HttpStatus.FORBIDDEN ||
+    (status === HttpStatus.NOT_FOUND && code === 'PROJECT_NOT_FOUND')
+  ) {
+    return 'unauthorized';
+  }
+  return code === 'GIT_PUSH_RACE_LOST' ? 'conflict' : 'error';
+};
 
 const applyHeaders = (reply: FastifyReply, headers: Readonly<Record<string, string>>): void => {
   for (const [name, value] of Object.entries(headers)) {
@@ -81,6 +140,7 @@ export class GitController {
     private readonly repositories: GitRepositoryService,
     private readonly lfs: GitLfsService,
     private readonly rateLimiter: PublicationRateLimiterService,
+    @Optional() private readonly metrics: MetricsService = new MetricsService(),
   ) {
     this.#apiUrl = configService.get('TAU_API_URL', { infer: true }).replace(/\/+$/u, '');
   }
@@ -110,15 +170,22 @@ export class GitController {
       });
     }
 
-    const access = await this.repositories.authorize({
-      projectId,
-      userId,
-      mode: service === 'git-receive-pack' ? 'write' : 'read',
-      viaDevice,
+    /* Only a refusal counts here: the advertisement is the first leg of a push or fetch,
+       whose POST counts the attempt. A push refused for quota is refused here first. */
+    const startedAt = performance.now();
+    const operation: SyncOperation = service === 'git-receive-pack' ? 'push' : 'fetch';
+    const advertisement = await this.withRetryAfter(reply, async () => {
+      const access = await this.repositories.authorize({
+        projectId,
+        userId,
+        mode: service === 'git-receive-pack' ? 'write' : 'read',
+        viaDevice,
+      });
+      return this.repositories.advertiseRefs(access, service);
+    }).catch((error: unknown) => {
+      this.recordSync(operation, syncOutcomeOf(error), startedAt);
+      throw error;
     });
-    const advertisement = await this.withRetryAfter(reply, async () =>
-      this.repositories.advertiseRefs(access, service),
-    );
     return new StreamableFile(
       Buffer.concat([Buffer.from(serviceAdvertisementPrefix(service), 'utf8'), advertisement]),
       { type: `application/x-${service}-advertisement` },
@@ -138,23 +205,45 @@ export class GitController {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
     await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc' });
-    const access = await this.repositories.authorize({ projectId, userId, mode: 'read', viaDevice });
-    applyHeaders(reply, noCacheHeaders);
-
-    const output = await this.withRetryAfter(reply, async () =>
-      this.repositories.uploadPack({
-        access,
-        body: request.raw,
-        gzipped: request.headers['content-encoding'] === 'gzip',
-        /* A fetch's body is `want`/`have` negotiation rather than a pack, so it
-           gets the flat negotiation ceiling — but it gets one: neither
-           Fastify's `bodyLimit` (the git parser streams past it) nor git itself
-           bounded `upload-pack`'s stdin (review C32). */
-        maximumInputBytes: negotiationInputLimitBytes,
-        abort: this.abortWhenClientLeaves(reply),
-      }),
-    );
-    return new StreamableFile(output, { type: 'application/x-git-upload-pack-result' });
+    const startedAt = performance.now();
+    let output: Readable;
+    try {
+      const access = await this.repositories.authorize({ projectId, userId, mode: 'read', viaDevice });
+      applyHeaders(reply, noCacheHeaders);
+      output = await this.withRetryAfter(reply, async () =>
+        this.repositories.uploadPack({
+          access,
+          body: request.raw,
+          gzipped: request.headers['content-encoding'] === 'gzip',
+          /* A fetch's body is `want`/`have` negotiation rather than a pack, so it
+             gets the flat negotiation ceiling — but it gets one: neither
+             Fastify's `bodyLimit` (the git parser streams past it) nor git itself
+             bounded `upload-pack`'s stdin (review C32). */
+          maximumInputBytes: negotiationInputLimitBytes,
+          abort: this.abortWhenClientLeaves(reply),
+        }),
+      );
+    } catch (error) {
+      this.recordSync('fetch', syncOutcomeOf(error), startedAt);
+      throw error;
+    }
+    /* A fetch's outcome and size are known once the pack has streamed out, not when it starts. */
+    let bytes = 0;
+    const counted = new Transform({
+      transform(chunk: Uint8Array<ArrayBuffer>, _encoding, done) {
+        bytes += chunk.byteLength;
+        done(null, chunk);
+      },
+    });
+    pipeline(output, counted, (error) => {
+      if (error) {
+        this.recordSync('fetch', 'error', startedAt);
+        return;
+      }
+      this.metrics.syncPackBytes.record(bytes, { 'tau.sync.operation': 'fetch' });
+      this.recordSync('fetch', 'ok', startedAt);
+    });
+    return new StreamableFile(counted, { type: 'application/x-git-upload-pack-result' });
   }
 
   /**
@@ -176,21 +265,31 @@ export class GitController {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
     await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc' });
-    /* D21/EQ11: a cloud host's push is the owner's, via that device. */
-    const access = await this.repositories.authorize({ projectId, userId, mode: 'write', viaDevice });
-    applyHeaders(reply, noCacheHeaders);
-
-    const output = await this.withRetryAfter(reply, async () =>
-      this.repositories.receivePack({
-        access,
-        // D28/NI16: the pusher is the authenticated session, never the body.
-        committedBy: userId,
-        body: request.raw,
-        gzipped: request.headers['content-encoding'] === 'gzip',
-        maximumInputBytes: access.remainingBytes + quotaOverrunSlackBytes,
-        abort: this.abortWhenClientLeaves(reply),
-      }),
-    );
+    const startedAt = performance.now();
+    let output: Uint8Array<ArrayBuffer>;
+    try {
+      /* D21/EQ11: a cloud host's push is the owner's, via that device. */
+      const access = await this.repositories.authorize({ projectId, userId, mode: 'write', viaDevice });
+      applyHeaders(reply, noCacheHeaders);
+      output = await this.withRetryAfter(reply, async () =>
+        this.repositories.receivePack({
+          access,
+          // D28/NI16: the pusher is the authenticated session, never the body.
+          committedBy: userId,
+          body: request.raw,
+          gzipped: request.headers['content-encoding'] === 'gzip',
+          maximumInputBytes: access.remainingBytes + quotaOverrunSlackBytes,
+          abort: this.abortWhenClientLeaves(reply),
+        }),
+      );
+    } catch (error) {
+      this.recordSync('push', syncOutcomeOf(error), startedAt);
+      throw error;
+    }
+    const outcome = receivePackOutcome(output);
+    if (outcome !== undefined) {
+      this.recordSync('push', outcome, startedAt);
+    }
     return new StreamableFile(Buffer.from(output), { type: 'application/x-git-receive-pack-result' });
   }
 
@@ -211,19 +310,28 @@ export class GitController {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
     await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'lfs' });
-    const access = await this.repositories.authorize({
-      projectId,
-      userId,
-      mode: body.operation === 'upload' ? 'write' : 'read',
-      viaDevice,
-    });
-    const outcome = await this.lfs.batch({
-      access,
-      operation: body.operation,
-      objects: body.objects,
-      authorization: request.headers.authorization,
-      endpoint: `${this.#apiUrl}/v1/git/${repository}/info/lfs/objects`,
-    });
+    const operation: SyncOperation = body.operation === 'upload' ? 'lfs_upload' : 'lfs_download';
+    const startedAt = performance.now();
+    let outcome: Awaited<ReturnType<GitLfsService['batch']>>;
+    try {
+      const access = await this.repositories.authorize({
+        projectId,
+        userId,
+        mode: body.operation === 'upload' ? 'write' : 'read',
+        viaDevice,
+      });
+      outcome = await this.lfs.batch({
+        access,
+        operation: body.operation,
+        objects: body.objects,
+        authorization: request.headers.authorization,
+        endpoint: `${this.#apiUrl}/v1/git/${repository}/info/lfs/objects`,
+      });
+    } catch (error) {
+      this.recordSync(operation, syncOutcomeOf(error), startedAt);
+      throw error;
+    }
+    this.recordSync(operation, outcome.status === 413 ? 'quota_refused' : 'ok', startedAt);
     void reply.header('content-type', 'application/vnd.git-lfs+json');
     void reply.status(outcome.status);
     return outcome.body;
@@ -388,6 +496,13 @@ export class GitController {
       }
     });
     return abort.signal;
+  }
+
+  /** One sync request's count and latency, recorded once where its answer is decided. */
+  private recordSync(operation: SyncOperation, outcome: SyncOutcome, startedAt: number): void {
+    const attributes = { 'tau.sync.operation': operation, outcome } satisfies SyncOperationAttributes;
+    this.metrics.syncOperations.add(1, attributes);
+    this.metrics.syncOperationDuration.record((performance.now() - startedAt) / 1000, attributes);
   }
 
   /**

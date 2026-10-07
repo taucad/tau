@@ -55,11 +55,13 @@ test('keeps the task list above the composer in step with update_todos', async (
   await target.setViewport({ width: 1440, height: 900 });
   await target.navigate(seedRoute);
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
-  /* The seed opens with the chat lane closed. */
-  if (!(await target.isVisible(selectors.getByCss(composer)))) {
+  /* Give hydration a moment to restore an open lane: toggling an open, not-yet-rendered lane closes it. */
+  try {
+    await target.expectVisible(selectors.getByCss(composer), 10_000);
+  } catch {
     await target.click(selectors.getByCss('[aria-label="Toggle Chat lane"]'));
+    await target.expectVisible(selectors.getByCss(composer), 60_000);
   }
-  await target.expectVisible(selectors.getByCss(composer), 60_000);
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
 
   /* One plain turn first, so the chat id the tool writes under is on the route. */
@@ -103,6 +105,10 @@ test('keeps the task list above the composer in step with update_todos', async (
   const summary = selectors.getByRole('button', { name: 'Tasks: 1 of 3 done · Slice for the X1C' });
   await target.expectVisible(summary, 60_000);
   await target.expectCount(firstSummary, 0);
+  /* The list starts folded to its one line; Enter discloses it. */
+  expect(await target.getAttribute(summary, 'aria-expanded')).toBe('false');
+  await target.focus(summary);
+  await target.keyboardPress('Enter');
   expect(await target.getAttribute(summary, 'aria-expanded')).toBe('true');
   const rows = selectors.getByRole('list', { name: 'Tasks', exact: true }).getByRole('listitem');
   await target.expectCount(rows, 3);
@@ -111,7 +117,6 @@ test('keeps the task list above the composer in step with update_todos', async (
   expect(await target.textContent(rows.nth(2))).toBe('pending: Request the print');
 
   /* Keyboard: Enter folds the list, Space opens it again. */
-  await target.focus(summary);
   await target.keyboardPress('Enter');
   expect(await target.getAttribute(summary, 'aria-expanded')).toBe('false');
   await target.expectCount(rows, 0);

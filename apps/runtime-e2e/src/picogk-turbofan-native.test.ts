@@ -226,43 +226,35 @@ it.skipIf(process.env['GEOSPEC_TURBOFAN_NATIVE'] !== '1')(
     const engineModule = await import('@taucad/geospec-engine-native/node');
     const engine = new engineModule.Engine();
     const loader = createGeoSpecNativeModelLoader({ engine });
+    let document: ReturnType<typeof runtime.open> | undefined;
     try {
       await runtime.connect();
       const connected = performance.now();
       // eslint-disable-next-line @typescript-eslint/naming-convention -- C# parameter uses this exact case.
-      const first = await runtime.export('glb', {
-        source: { path: 'main.cs' },
-        parameters: { Cutaway: false },
-        exportOptions: {},
-      });
+      document = runtime.open({ source: { path: 'main.cs' }, parameters: { Cutaway: false }, watch: false });
+      const first = await document.export('glb');
       const cold = performance.now();
       expect(first.success).toBe(true);
       if (!first.success) {
         throw new Error(JSON.stringify(first.issues));
       }
-      const glb = first.data[0]?.bytes;
-      expect(glb).toBeDefined();
-      if (!glb) {
-        throw new Error('The PicoGK export had no GLB payload.');
-      }
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- C# parameter uses this exact case.
-      const second = await runtime.export('glb', {
-        source: { path: 'main.cs' },
-        parameters: { Cutaway: false },
-        exportOptions: {},
-      });
+      const glb = first.files[0].bytes;
+      expect(glb.byteLength).toBeGreaterThan(0);
+      const second = await document.export('glb');
       const warm = performance.now();
       expect(second.success).toBe(true);
-      const cutaway = await runtime.export('glb', { source: { path: 'main.cs' }, parameters: {}, exportOptions: {} });
+      const updated = await document.update({ parameters: {} });
+      expect(updated.superseded).toBe(false);
+      if (updated.superseded || !updated.evaluation.success) {
+        throw new Error('The default cutaway did not evaluate.');
+      }
+      const cutaway = await document.export('glb');
       expect(cutaway.success).toBe(true);
       if (!cutaway.success) {
         throw new Error(JSON.stringify(cutaway.issues));
       }
-      const cutawayGlb = cutaway.data[0]?.bytes;
-      expect(cutawayGlb).toBeDefined();
-      if (!cutawayGlb) {
-        throw new Error('The default cutaway had no GLB payload.');
-      }
+      const cutawayGlb = cutaway.files[0].bytes;
+      expect(cutawayGlb.byteLength).toBeGreaterThan(0);
       const cutawayExported = performance.now();
       const { topology, triangles, gltf, binaryStart } = readTopology(glb);
       // oxlint-disable-next-line no-console -- Native admission limit diagnosis.
@@ -358,27 +350,27 @@ it.skipIf(process.env['GEOSPEC_TURBOFAN_NATIVE'] !== '1')(
       const admitted = await loader({ source: glb, format: 'glb' });
       const admission = performance.now();
       const assertions = createGeoSpecAssertionClient({ engine });
-      await assertions.expectGeo(admitted).toHaveBoundingBox({
+      assertions.expectGeo(admitted).toHaveBoundingBox({
         min: { x: 0, y: -1000, z: -1000 },
         max: { x: 3600, y: 1000, z: 1000 },
         tolerance: 0.1,
       });
-      await assertions.expectGeo(admitted).toHaveMeshIntegrity({
+      assertions.expectGeo(admitted).toHaveMeshIntegrity({
         finitePositions: true,
         degenerateTriangles: { maxCount: 0 },
         duplicateFaces: { maxCount: 0 },
       });
-      await assertions.expectGeo(admitted).toBeWatertight();
-      await assertions.expectGeo(admitted).toHaveVolume({ value: { greaterThan: 1e8, lessThan: 3e9 } });
+      assertions.expectGeo(admitted).toBeWatertight();
+      assertions.expectGeo(admitted).toHaveVolume({ value: { greaterThan: 1e8, lessThan: 3e9 } });
       const cutawayTopology = readTopology(cutawayGlb);
       expect(cutawayTopology.topology.components).toHaveLength(2173);
       const cutawaySubject = await loader({ source: cutawayGlb, format: 'glb' });
-      await assertions.expectGeo(cutawaySubject).toHaveMeshIntegrity({
+      assertions.expectGeo(cutawaySubject).toHaveMeshIntegrity({
         finitePositions: true,
         degenerateTriangles: { maxCount: 0 },
         duplicateFaces: { maxCount: 0 },
       });
-      await assertions.expectGeo(cutawaySubject).toBeWatertight();
+      assertions.expectGeo(cutawaySubject).toBeWatertight();
       const asserted = performance.now();
       await loader.releaseAll();
 
@@ -522,6 +514,7 @@ it.skipIf(process.env['GEOSPEC_TURBOFAN_NATIVE'] !== '1')(
         }),
       );
     } finally {
+      document?.close();
       await loader.releaseAll();
       engine.close();
       runtime.terminate();

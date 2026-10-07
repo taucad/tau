@@ -11,7 +11,8 @@
 
 import { onTestFinished, vi } from 'vitest';
 import type { RevisionDiffEntry, RevisionLogRequest, RevisionRow, RevisionStatusProjection } from '@taucad/revisions';
-import type { BranchCreated, RevisionToast, RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
+import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
+import type { BranchCreated, RevisionToast, WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
 const emptyStatus = (): RevisionStatusProjection => ({
@@ -62,7 +63,13 @@ const emptyStatus = (): RevisionStatusProjection => ({
   conflicts: [],
 });
 
-const emptyComparison = (): RevisionFileComparison => ({ original: '', modified: '' });
+const emptyComparison = (): RevisionFileComparison => ({
+  original: '',
+  modified: '',
+  kind: 'text',
+  change: 'unchanged',
+  notices: [],
+});
 
 /** What the scripted client answers, and what the surface under test sent it. */
 export const revisionStatusHarness = {
@@ -75,12 +82,15 @@ export const revisionStatusHarness = {
   diff: [] as readonly RevisionDiffEntry[],
   /** Every revision a surface asked for a diff of, in order (C52). */
   diffRequests: [] as string[],
+  comparisonRequests: [] as string[],
+  events: new Set<(event: WorkerRevisionEvent) => void>(),
   /** Every branch a surface re-walked the graph for, in order (rule 20's log cost). */
   logRequests: [] as string[],
   /** Every revision a surface asked for on its own, by id (B4). */
   rowRequests: [] as string[],
   comparison: emptyComparison(),
   comparisonError: undefined as Error | undefined,
+  comparisonRead: undefined as (() => Promise<RevisionFileComparison>) | undefined,
   /** D27: which role the account holds on this project, or none at all. */
   role: undefined as ProjectAccessRole | undefined,
   toasts: new Set<(toast: RevisionToast) => void>(),
@@ -129,10 +139,13 @@ export const revisionStatusHarness = {
     this.rowsByBranch.clear();
     this.diff = [];
     this.diffRequests.length = 0;
+    this.comparisonRequests.length = 0;
+    this.events.clear();
     this.logRequests.length = 0;
     this.rowRequests.length = 0;
     this.comparison = emptyComparison();
     this.comparisonError = undefined;
+    this.comparisonRead = undefined;
     this.role = undefined;
     this.toasts.clear();
     for (const command of Object.values(this.commands)) {
@@ -202,7 +215,10 @@ export const revisionStatusMock = (): Record<string, unknown> => {
   const client = {
     status: () => revisionStatusHarness.status,
     subscribe: () => () => undefined,
-    subscribeEvents: () => () => undefined,
+    subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => {
+      revisionStatusHarness.events.add(listener);
+      return () => revisionStatusHarness.events.delete(listener);
+    },
     subscribeToasts: (listener: (toast: RevisionToast) => void) => {
       revisionStatusHarness.toasts.add(listener);
       return () => revisionStatusHarness.toasts.delete(listener);
@@ -233,15 +249,24 @@ export const revisionStatusMock = (): Record<string, unknown> => {
         behind: [...behind].filter((id) => !ahead.has(id)).length,
       };
     },
-    diff: async (revisionId: string, from?: string) => {
-      revisionStatusHarness.diffRequests.push(from === undefined ? revisionId : `${from}..${revisionId}`);
+    diff: async (revisionId: string, from?: string, options?: { against?: 'checkout' }) => {
+      revisionStatusHarness.diffRequests.push(
+        options?.against === 'checkout'
+          ? `${revisionId}..checkout`
+          : from === undefined
+            ? revisionId
+            : `${from}..${revisionId}`,
+      );
       return revisionStatusHarness.diff;
     },
-    compare: async () => {
+    compare: async (revisionId: string, path: string, options?: { against?: 'checkout' }) => {
+      revisionStatusHarness.comparisonRequests.push(`${revisionId}:${path}:${options?.against ?? 'parent'}`);
       if (revisionStatusHarness.comparisonError !== undefined) {
         throw revisionStatusHarness.comparisonError;
       }
-      return revisionStatusHarness.comparison;
+      return revisionStatusHarness.comparisonRead === undefined
+        ? revisionStatusHarness.comparison
+        : revisionStatusHarness.comparisonRead();
     },
     send: () => undefined,
     saveRevision: async () => undefined,

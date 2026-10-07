@@ -9,7 +9,7 @@ import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { appearanceLabel, statusOf, volumeLabel, weightLabel } from '#components/geometry/cad/part-quantities.js';
 import type { PartQuantity } from '#components/geometry/cad/part-quantities.js';
 import { DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
-import { PartPreviewImage } from '#components/geometry/cad/part-preview-image.js';
+import { PartPreviewFrame } from '#components/geometry/cad/part-preview-image.js';
 import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
 
 type PartPropertiesPanelProps = {
@@ -20,6 +20,10 @@ type PartPropertiesPanelProps = {
   readonly onRetryPreview?: () => void;
   readonly onPreviewDecodeError?: () => void;
   readonly onPreviewDecoded?: () => void;
+  /** Opens the part gallery from the identity frame. */
+  readonly onOpenPreview?: (origin: HTMLElement) => void;
+  /** Hide the identity row where a surrounding header already names the part. */
+  readonly isIdentityHidden?: boolean;
 };
 
 function Fact({ label, value }: { readonly label: string; readonly value: string }): React.JSX.Element {
@@ -57,6 +61,8 @@ export function PartPropertiesPanel({
   onRetryPreview,
   onPreviewDecodeError,
   onPreviewDecoded,
+  onOpenPreview,
+  isIdentityHidden = false,
 }: PartPropertiesPanelProps): React.JSX.Element {
   if (!node) {
     return <PanelEmptyState icon={Box} title='No part selected' className='min-h-40' />;
@@ -66,31 +72,31 @@ export function PartPropertiesPanel({
   const status = statusOf(quantity);
   return (
     <div data-slot='part-properties' className='@container/properties space-y-3 p-3 text-sm'>
-      <div className='flex items-center gap-3'>
-        <div className='flex size-10 shrink-0 items-center justify-center rounded-sm bg-muted ring-1 ring-border'>
-          {preview?.bytes ? (
-            <PartPreviewImage
-              bytes={preview.bytes}
-              alt={`Rendered ${node.name}`}
-              className='size-10 rounded-sm object-contain'
-              onError={onPreviewDecodeError}
-              onLoad={onPreviewDecoded}
-            />
-          ) : materials.length > 0 ? (
-            <span aria-hidden='true'>
-              <MaterialSwatch materials={materials} />
-            </span>
-          ) : (
-            <Box aria-hidden='true' className='size-4' />
-          )}
-        </div>
-        <div className='min-w-0'>
-          <div className='truncate font-medium'>{node.name}</div>
-          <div className='truncate text-xs text-muted-foreground'>
-            {node.kind} · {entryPath ?? 'Current model'}
+      {isIdentityHidden ? undefined : (
+        <div className='flex items-center gap-3'>
+          <PartPreviewFrame
+            name={node.name}
+            preview={preview}
+            className='size-20'
+            fallback={
+              materials.length > 0 ? (
+                <MaterialSwatch materials={materials} />
+              ) : (
+                <Box aria-hidden='true' className='size-4' />
+              )
+            }
+            onOpen={onOpenPreview}
+            onDecodeError={onPreviewDecodeError}
+            onDecoded={onPreviewDecoded}
+          />
+          <div className='min-w-0'>
+            <div className='truncate font-medium'>{node.name}</div>
+            <div className='truncate text-xs text-muted-foreground'>
+              {node.kind} · {entryPath ?? 'Current model'}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {preview?.status === 'pending' || preview?.status === 'failed' ? (
         <div
@@ -139,10 +145,7 @@ export function PartPropertiesPanel({
           <p
             role={status.kind === 'failed' ? 'alert' : 'status'}
             aria-label='Measurement status'
-            className={cn(
-              'min-w-0 truncate text-xs text-muted-foreground',
-              status.kind === 'failed' && 'text-destructive',
-            )}
+            className={cn('min-w-0 truncate text-xs text-muted-foreground', status.kind === 'failed' && 'text-feature')}
           >
             <CircleHelp aria-hidden='true' className='mr-1 inline size-3.5' />
             {status.sentence}

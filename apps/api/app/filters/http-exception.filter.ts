@@ -9,7 +9,9 @@ import type { HttpErrorResponse } from '@taucad/types';
 import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { httpHeader } from '#constants/http-header.constant.js';
+import { resolveRequestId } from '#middlewares/request-id.middleware.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import { reportServerError } from '#telemetry/sentry.js';
 
 /**
  * Bounded retry estimates for the funded-admission refusals (B9 `:292`).
@@ -50,14 +52,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = context.getResponse<FastifyReply>();
     const request = context.getRequest<FastifyRequest>();
 
-    // Extract request ID: prefer header if present, otherwise use Fastify's generated ID
-    const headerRequestId = request.headers[httpHeader.requestId] as string | undefined;
-    const requestId = headerRequestId ?? (request.id as string | undefined);
+    // Extract request ID: prefer a well-formed header, otherwise use Fastify's generated ID
+    const requestId = resolveRequestId(request.headers[httpHeader.requestId], request.id as string | undefined);
 
     // A streamed route (the model gateway) can fail after its response has left:
     // a second reply only produces `FST_ERR_REP_ALREADY_SENT` and hides the cause.
     if (response.sent) {
       this.logger.error({ err: exception, requestId }, 'Request failed after its response was already sent');
+      reportServerError(exception, requestId);
       return;
     }
 
@@ -148,6 +150,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // Log error details
     if (statusCode >= 500) {
       this.logger.error(exception, `Unhandled exception: ${errorResponse.error}`);
+      reportServerError(exception, requestId);
 
       const span = trace.getSpan(otelContext.active());
       if (span) {

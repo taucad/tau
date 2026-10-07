@@ -15,12 +15,25 @@ import { createActor, setup, types } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, SnapshotFrom } from 'xstate';
 import type { DockviewPanelApi } from 'dockview-react';
 import type { Geometry } from '@taucad/types';
+import type { Artifact, Rendering } from '@taucad/runtime';
 import { eventSchemas } from '#lib/xstate.lib.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 const entryPath = 'main.scad';
 
-const gltf = (hash: string): Geometry => ({ format: 'gltf', content: new Uint8Array([1, 2, 3, 4]), hash });
+type GltfGeometry = Extract<Geometry, { format: 'gltf' }>;
+
+const gltf = (hash: string): GltfGeometry => ({ format: 'gltf', content: new Uint8Array([1, 2, 3, 4]), hash });
+const renderingFrom = (geometry: GltfGeometry): Rendering => ({
+  success: true,
+  requestId: geometry.hash,
+  evaluationId: 'evaluation',
+  transient: false,
+  view: 'model',
+  issues: [],
+  hash: geometry.hash,
+  artifact: { mimeType: 'model/gltf-binary', content: geometry.content },
+});
 
 /** Renders of the viewer body (counted through a child it always renders) and of the canvas. */
 const renders = vi.hoisted(() => ({
@@ -33,18 +46,18 @@ const cadLikeMachine = setup({
   schemas: {
     context: types<{
       entryPath: string;
-      geometry: Geometry | undefined;
+      rendering: Rendering | undefined;
       units: { length: 'mm' };
       kernelIssues: Map<string, never[]>;
       kernelClient: undefined;
       latestGeometryOutcome: 'success';
     }>(),
-    events: eventSchemas<{ type: 'scrub' } | { type: 'settle' } | { type: 'present'; geometry: Geometry }>(),
+    events: eventSchemas<{ type: 'scrub' } | { type: 'settle' } | { type: 'present'; geometry: GltfGeometry }>(),
   },
 }).createMachine({
   context: {
     entryPath,
-    geometry: gltf('first'),
+    rendering: renderingFrom(gltf('first')),
     units: { length: 'mm' },
     kernelIssues: new Map(),
     kernelClient: undefined,
@@ -57,7 +70,7 @@ const cadLikeMachine = setup({
       tags: ['cad-loading'],
       on: {
         settle: { target: 'idle' },
-        present: { target: 'idle', context: ({ event }) => ({ geometry: event.geometry }) },
+        present: { target: 'idle', context: ({ event }) => ({ rendering: renderingFrom(event.geometry) }) },
       },
     },
   },
@@ -67,7 +80,9 @@ const cadLikeMachine = setup({
 const graphicsLikeMachine = setup({
   schemas: {
     context: types<{
-      geometry: Geometry | undefined;
+      artifact: Artifact | undefined;
+      artifactKey: string | undefined;
+      artifactSourceFile?: string;
       gltfPresentation: { requestedRevision: number };
       enableSurfaces: boolean;
       enableLines: boolean;
@@ -77,11 +92,12 @@ const graphicsLikeMachine = setup({
       enableMatcap: boolean;
       upDirection: 'z';
     }>(),
-    events: eventSchemas<{ type: 'updateGeometry'; geometry: Geometry }>(),
+    events: eventSchemas<{ type: 'updateArtifact'; artifact: Artifact; hash: string; sourceFile: string }>(),
   },
 }).createMachine({
   context: {
-    geometry: undefined,
+    artifact: undefined,
+    artifactKey: undefined,
     gltfPresentation: { requestedRevision: 0 },
     enableSurfaces: true,
     enableLines: true,
@@ -92,9 +108,11 @@ const graphicsLikeMachine = setup({
     upDirection: 'z',
   },
   on: {
-    updateGeometry: {
+    updateArtifact: {
       context: ({ context, event }) => ({
-        geometry: event.geometry,
+        artifact: event.artifact,
+        artifactKey: event.hash,
+        artifactSourceFile: event.sourceFile,
         gltfPresentation: { requestedRevision: context.gltfPresentation.requestedRevision + 1 },
       }),
     },
@@ -155,15 +173,16 @@ vi.mock('#hooks/use-graphics.js', async () => {
 });
 vi.mock('#components/geometry/cad/cad-viewer.js', async () => {
   const { useGraphicsSelector } = await import('#hooks/use-graphics.js');
+  const { memo } = await import('react');
   return {
-    CadViewer: ({ geometry }: { readonly geometry?: Geometry }) => {
+    CadViewer: memo(({ artifactHash }: { readonly artifactHash?: string }) => {
       const revision = useGraphicsSelector(
         (state: { context: { gltfPresentation: { requestedRevision: number } } }) =>
           state.context.gltfPresentation.requestedRevision,
       );
-      renders.canvas.push({ hash: geometry?.hash, revision });
+      renders.canvas.push({ hash: artifactHash, revision });
       return <div data-testid='cad-viewer-canvas' />;
-    },
+    }),
   };
 });
 vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
@@ -172,7 +191,13 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
     return null;
   },
 }));
-vi.mock('#routes/w.$workspace.$project/chat-stack-trace.js', () => ({ ChatStackTrace: () => null }));
+vi.mock('#routes/w.$workspace.$project/chat-stack-trace.js', () => ({
+  ViewerIssues: ({
+    children,
+  }: {
+    readonly children: (parts: { segment: React.ReactNode; list: React.ReactNode }) => React.ReactNode;
+  }): React.ReactNode => children({ segment: null, list: null }),
+}));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-status.js', () => ({ ChatViewerStatus: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-interface-graphics.js', () => ({ ChatInterfaceGraphics: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-interface-status.js', () => ({ ChatInterfaceStatus: () => null }));
@@ -188,6 +213,7 @@ function renderViewer(): { readonly cad: ActorRefFrom<typeof cadLikeMachine> } {
   actors.graphics = createActor(graphicsLikeMachine).start();
   render(<ChatViewer viewId='view-1' entryPath={entryPath} panelApi={panelApi} />);
   expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
+  expect(renders.canvas).toEqual([{ hash: 'first', revision: 1 }]);
   renders.viewer = 0;
   renders.canvas = [];
   return { cad };
@@ -230,6 +256,6 @@ describe('ChatViewer renders per cad transition', () => {
 
     expect(revision()).toBe(before + 1);
     expect(renders.canvas).toEqual([{ hash: 'second', revision: before + 1 }]);
-    expect(renders.viewer).toBe(1);
+    expect(renders.viewer).toBe(2);
   });
 });

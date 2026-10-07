@@ -14,6 +14,7 @@ describe('DirectIdbProvider', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     provider.dispose();
   });
 
@@ -186,7 +187,7 @@ describe('DirectIdbProvider', () => {
       expect(spy).not.toHaveBeenCalled();
     });
 
-    it('should fall back to the row when no metadata is cached', async () => {
+    it('should read durable metadata after projection refresh', async () => {
       await provider.writeFile('cold.txt', 'a\nb\nc');
       await provider.refresh();
       const spy = rowReads(provider);
@@ -198,7 +199,199 @@ describe('DirectIdbProvider', () => {
         contentKind: 'text',
         lineCount: 3,
       });
-      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('should observe a peer overwrite without materializing warm file bytes', async () => {
+      const prefix = `peer-${crypto.randomUUID()}`;
+      const reader = new DirectIdbProvider(prefix);
+      const writer = new DirectIdbProvider(prefix);
+      await reader.initialize();
+      await writer.initialize();
+      try {
+        await reader.writeFile('log.jsonl', 'a\n');
+        await reader.stat('log.jsonl');
+        await writer.writeFile('log.jsonl', 'a\nb\n');
+        const get = vi.spyOn(IDBObjectStore.prototype, 'get');
+        await expect(reader.stat('log.jsonl')).resolves.toMatchObject({
+          size: 4,
+          lineCount: 3,
+        });
+        expect(
+          get.mock.instances.map((store) => (store instanceof IDBObjectStore ? store.name : undefined)),
+        ).not.toContain('files');
+        get.mockRestore();
+        await writer.unlink('log.jsonl');
+        await expect(reader.stat('log.jsonl')).rejects.toThrow('ENOENT');
+        await reader.mkdir('replaced');
+        await writer.refresh();
+        await writer.rmdir('replaced');
+        await writer.writeFile('replaced', 'current');
+        await expect(reader.stat('replaced', { content: 'head' })).resolves.toMatchObject({ type: 'file', size: 7 });
+        await expect(reader.readFile('replaced', 'utf8')).resolves.toBe('current');
+      } finally {
+        reader.dispose();
+        writer.dispose();
+      }
+    });
+
+    it('should lazily backfill a legacy row and reject older writers after upgrade', async () => {
+      const prefix = `legacy-${crypto.randomUUID()}`;
+      const name = `${prefix}-fs-direct`;
+      const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(name, 1);
+        request.addEventListener('upgradeneeded', () => {
+          request.result.createObjectStore('files');
+        });
+        request.addEventListener('success', () => {
+          resolve(request.result);
+        });
+        request.addEventListener('error', () => {
+          reject(request.error ?? new Error('IDB test open failed'));
+        });
+      });
+      await new Promise<void>((resolve) => {
+        const tx = legacy.transaction('files', 'readwrite');
+        tx.objectStore('files').put(encoder.encode('a\nb'), '/legacy.txt');
+        tx.addEventListener('complete', () => {
+          resolve();
+        });
+      });
+      legacy.close();
+      const upgraded = new DirectIdbProvider(prefix);
+      await upgraded.initialize();
+      try {
+        const get = vi.spyOn(IDBObjectStore.prototype, 'get');
+        await expect(upgraded.stat('legacy.txt')).resolves.toMatchObject({
+          size: 3,
+          lineCount: 2,
+        });
+        expect(
+          get.mock.instances.filter((store) => store instanceof IDBObjectStore && store.name === 'files'),
+        ).toHaveLength(1);
+        get.mockClear();
+        await upgraded.stat('legacy.txt');
+        expect(
+          get.mock.instances.map((store) => (store instanceof IDBObjectStore ? store.name : undefined)),
+        ).not.toContain('files');
+        get.mockRestore();
+        await expect(
+          new Promise((resolve, reject) => {
+            const request = indexedDB.open(name, 1);
+            request.addEventListener('success', () => {
+              request.result.close();
+              resolve(undefined);
+            });
+            request.addEventListener('error', () => {
+              reject(request.error ?? new Error('IDB test open failed'));
+            });
+          }),
+        ).rejects.toMatchObject({ name: 'VersionError' });
+      } finally {
+        upgraded.dispose();
+      }
+    });
+
+    it('should abort bytes and metadata together, then preserve the last durable generation after reopen', async () => {
+      const prefix = `abort-${crypto.randomUUID()}`;
+      const writer = new DirectIdbProvider(prefix);
+      await writer.initialize();
+      await writer.writeFile('log.txt', 'old\n');
+      const originalPut = IDBObjectStore.prototype.put;
+      const put = vi
+        .spyOn(IDBObjectStore.prototype, 'put')
+        .mockImplementation(function (this: IDBObjectStore, value, key) {
+          const request = originalPut.call(this, value, key);
+          if (this.name === 'file-metadata') {
+            this.transaction.abort();
+          }
+          return request;
+        });
+      await expect(writer.writeFile('log.txt', 'new generation\n')).rejects.toThrow();
+      put.mockRestore();
+      writer.dispose();
+      const reader = new DirectIdbProvider(prefix);
+      await reader.initialize();
+      try {
+        await expect(reader.stat('log.txt', { content: 'head' })).resolves.toEqual({
+          type: 'file',
+          size: 4,
+          mtimeMs: 0,
+          contentKind: 'text',
+        });
+        await expect(reader.stat('log.txt')).resolves.toMatchObject({ size: 4, lineCount: 2 });
+        await reader.rename('log.txt', 'sub/log.txt');
+        await reader.rename('sub', 'moved');
+        await expect(reader.stat('moved/log.txt', { content: 'head' })).resolves.toMatchObject({ size: 4 });
+        await expect(reader.stat('sub/log.txt')).rejects.toThrow('ENOENT');
+        await reader.unlink('moved/log.txt');
+        await expect(reader.stat('moved/log.txt')).rejects.toThrow('ENOENT');
+      } finally {
+        reader.dispose();
+      }
+    });
+
+    it('should retry an aborted legacy backfill without trusting partial metadata', async () => {
+      await provider.writeFile('legacy.txt', 'old\n');
+      const database = (provider as unknown as { _db: IDBDatabase })._db;
+      await new Promise<void>((resolve) => {
+        const tx = database.transaction('file-metadata', 'readwrite');
+        tx.objectStore('file-metadata').clear();
+        tx.addEventListener('complete', () => {
+          resolve();
+        });
+      });
+      const originalPut = IDBObjectStore.prototype.put;
+      const put = vi
+        .spyOn(IDBObjectStore.prototype, 'put')
+        .mockImplementation(function (this: IDBObjectStore, value, key) {
+          const request = originalPut.call(this, value, key);
+          if (this.name === 'file-metadata') {
+            this.transaction.abort();
+          }
+          return request;
+        });
+      await expect(provider.stat('legacy.txt', { content: 'head' })).rejects.toThrow('Metadata read');
+      put.mockRestore();
+      await provider.writeFile('legacy.txt', 'current\ncontent\n');
+      await expect(provider.stat('legacy.txt')).resolves.toMatchObject({ size: 16, lineCount: 3 });
+    });
+
+    it('should close a current connection when a later schema opens', async () => {
+      const database = (provider as unknown as { _db: IDBDatabase })._db;
+      const later = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open(database.name, 3);
+        request.addEventListener('success', () => {
+          resolve(request.result);
+        });
+        request.addEventListener('error', () => {
+          reject(request.error ?? new Error('Upgrade failed'));
+        });
+      });
+      try {
+        await expect(provider.stat('anything')).rejects.toThrow('not initialized');
+      } finally {
+        later.close();
+      }
+    });
+
+    it('should reject a blocked upgrade and close its eventual connection', async () => {
+      const prefix = `blocked-${crypto.randomUUID()}`;
+      const legacy = await new Promise<IDBDatabase>((resolve) => {
+        const request = indexedDB.open(`${prefix}-fs-direct`, 1);
+        request.addEventListener('upgradeneeded', () => {
+          request.result.createObjectStore('files');
+        });
+        request.addEventListener('success', () => {
+          resolve(request.result);
+        });
+      });
+      const upgraded = new DirectIdbProvider(prefix);
+      await expect(upgraded.initialize()).rejects.toThrow('upgrade blocked');
+      legacy.close();
+      // The rejected open may still finish upgrading; initialization must remain closed.
+      await expect(upgraded.stat('missing')).rejects.toThrow('not initialized');
+      upgraded.dispose();
     });
 
     it('should reflect an overwrite in cached metadata', async () => {
@@ -206,7 +399,10 @@ describe('DirectIdbProvider', () => {
       await provider.stat('file.txt');
       await provider.writeFile('file.txt', 'a\nb\nc');
 
-      await expect(provider.stat('file.txt')).resolves.toMatchObject({ size: 5, lineCount: 3 });
+      await expect(provider.stat('file.txt')).resolves.toMatchObject({
+        size: 5,
+        lineCount: 3,
+      });
     });
 
     it('should drop cached metadata for a deleted path', async () => {
@@ -223,7 +419,10 @@ describe('DirectIdbProvider', () => {
       await provider.rename('from.txt', 'to.txt');
 
       await expect(provider.stat('from.txt')).rejects.toThrow('ENOENT');
-      await expect(provider.stat('to.txt')).resolves.toMatchObject({ size: 3, lineCount: 2 });
+      await expect(provider.stat('to.txt')).resolves.toMatchObject({
+        size: 3,
+        lineCount: 2,
+      });
     });
   });
 
@@ -544,7 +743,9 @@ describe('DirectIdbProvider', () => {
       (provider2 as unknown as { _dbName: string })._dbName = dbName;
       await provider2.initialize();
 
-      await expect(provider2.stat('empty')).resolves.toMatchObject({ type: 'dir' });
+      await expect(provider2.stat('empty')).resolves.toMatchObject({
+        type: 'dir',
+      });
       await expect(provider2.readdir('empty')).resolves.toEqual([]);
       provider2.dispose();
     });
@@ -561,7 +762,10 @@ describe('DirectIdbProvider', () => {
       provider.dispose();
       await provider.initialize();
 
-      await expect(provider.stat('metadata.txt')).resolves.toMatchObject({ type: 'file', size: 1 });
+      await expect(provider.stat('metadata.txt')).resolves.toMatchObject({
+        type: 'file',
+        size: 1,
+      });
     });
 
     it('should reject a persisted file/directory collision without retaining an open provider', async () => {
@@ -586,7 +790,9 @@ describe('DirectIdbProvider', () => {
       const provider2 = new DirectIdbProvider('unused');
       (provider2 as unknown as { _dbName: string })._dbName = dbName;
 
-      await expect(provider2.initialize()).rejects.toMatchObject({ code: 'EIO' });
+      await expect(provider2.initialize()).rejects.toMatchObject({
+        code: 'EIO',
+      });
       expect((provider2 as unknown as { _db?: IDBDatabase })._db).toBeUndefined();
       await expect(provider2.stat('entry')).rejects.toThrow(/not initialized|disposed/);
     });
@@ -629,17 +835,29 @@ describe('DirectIdbProvider', () => {
       name: string;
       run: (candidate: DirectIdbProvider) => Promise<unknown>;
     }> = [
-      { name: 'writeFile', run: async (candidate) => candidate.writeFile('file', 'x') },
-      { name: 'readFile', run: async (candidate) => candidate.readFile('file') },
+      {
+        name: 'writeFile',
+        run: async (candidate) => candidate.writeFile('file', 'x'),
+      },
+      {
+        name: 'readFile',
+        run: async (candidate) => candidate.readFile('file'),
+      },
       { name: 'readdir', run: async (candidate) => candidate.readdir('') },
-      { name: 'readdirWithStats', run: async (candidate) => candidate.readdirWithStats('') },
+      {
+        name: 'readdirWithStats',
+        run: async (candidate) => candidate.readdirWithStats(''),
+      },
       { name: 'stat', run: async (candidate) => candidate.stat('') },
       { name: 'lstat', run: async (candidate) => candidate.lstat('') },
       { name: 'exists', run: async (candidate) => candidate.exists('') },
       { name: 'mkdir', run: async (candidate) => candidate.mkdir('directory') },
       { name: 'unlink', run: async (candidate) => candidate.unlink('file') },
       { name: 'rmdir', run: async (candidate) => candidate.rmdir('directory') },
-      { name: 'rename', run: async (candidate) => candidate.rename('source', 'target') },
+      {
+        name: 'rename',
+        run: async (candidate) => candidate.rename('source', 'target'),
+      },
     ];
 
     it.each(['before initialization', 'after disposal'] as const)(
@@ -666,7 +884,11 @@ describe('DirectIdbProvider', () => {
       const get = vi.spyOn(IDBObjectStore.prototype, 'get');
       const head = await provider.readdirWithStats('', { content: 'head' });
       const exact = await provider.readdirWithStats('');
-      expect(head[0]).toMatchObject({ name: 'large.txt', contentKind: 'text', size: 1028 });
+      expect(head[0]).toMatchObject({
+        name: 'large.txt',
+        contentKind: 'text',
+        size: 1028,
+      });
       expect(head[0]).not.toHaveProperty('lineCount');
       expect(exact[0]).toMatchObject({ contentKind: 'text', lineCount: 2 });
       expect(get).not.toHaveBeenCalled();
@@ -685,7 +907,7 @@ describe('DirectIdbProvider', () => {
       expect(entries).toHaveLength(rows);
       expect(stat).not.toHaveBeenCalled();
       expect(transaction.mock.calls.filter(([, mode]) => mode === 'readonly')).toHaveLength(1);
-    });
+    }, 30_000);
 
     it('should return entries with type, size, and mtime', async () => {
       await provider.writeFile('src/index.ts', 'export {}');

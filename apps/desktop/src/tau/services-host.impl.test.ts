@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,6 +20,10 @@ import { requireRevisionToolchain } from '@taucad/host';
 import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
 import type * as RuntimeClient from '@taucad/runtime/client';
+import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
+import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/utility';
+import { wrapMessagePort } from '@taucad/rpc';
+import type { WatchEvent } from '@taucad/filesystem';
 
 import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-host.impl.js';
 import type { AgentHostConfig, ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/services-host.impl.js';
@@ -267,6 +272,130 @@ describe('createServicesHost — concern ports', () => {
     await host.quiesce();
     expect(bridge.dispose).toHaveBeenCalledOnce();
     host.dispose();
+  });
+
+  it('should deliver changed PicoGK source during watch admission and after watch readiness', async () => {
+    const starter = `using System.ComponentModel.DataAnnotations;
+using PicoGK;
+
+Library.Go(Params.VoxelSizeMm, () => { });
+
+public static class Params
+{
+    [Range(0.05, 5.0)]
+    [Display(Name = "Voxel size", Description = "OpenVDB voxel size in millimetres", Order = 0)]
+    public static float VoxelSizeMm { get; set; } = 0.5f;
+}
+`;
+    const fixture = `using System.ComponentModel.DataAnnotations;
+using System.Numerics;
+using PicoGK;
+Library.Go(Params.VoxelSizeMm, () =>
+{
+    var radius = Params.RadiusMm;
+    Library.oViewer().SetGroupMaterial(0, "3159cf", 0f, 0.7f);
+    Library.oViewer().SetGroupMaterial(1, "f2b134", 0f, 0.7f);
+    Library.oViewer().Add(Utils.mshCreateCube(new Vector3(radius, radius * 0.5f, radius * 0.25f)), 0);
+    Library.oViewer().Add(Voxels.voxSphere(new Vector3(radius * 2f, 0, 0), radius * 0.5f), 1);
+});
+
+public static class Params
+{
+    [Range(0.05, 5.0)]
+    [Display(Name = "Voxel size", Order = 0)]
+    public static float VoxelSizeMm { get; set; } = 1f;
+
+    [Range(1.0, 100.0)]
+    [Display(Name = "Radius", Order = 1)]
+    public static float RadiusMm { get; set; } = 12f;
+}
+`;
+    expect(Buffer.byteLength(starter)).toBe(313);
+    expect(Buffer.byteLength(fixture)).toBe(761);
+    expect(createHash('sha256').update(starter).digest('hex')).toBe(
+      '76af0745e78534f33045a8ba17f071d02a578e185405c129f1679cfae2e02ea2',
+    );
+    expect(createHash('sha256').update(fixture).digest('hex')).toBe(
+      '7ff51d066da3d5abf7401ab0451d768daebaef0827a3e41c3ed9a4d3db8d1068',
+    );
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-picogk-watch-'));
+    const root = join(sandbox, 'project');
+    const authorityDirectory = join(sandbox, 'authority');
+    await Promise.all([mkdir(root), mkdir(authorityDirectory)]);
+    await writeFile(join(root, 'main.cs'), starter);
+    const armed = Promise.withResolvers<void>();
+    const acknowledge = Promise.withResolvers<void>();
+    const ports = new MessageChannel();
+    const host = createServicesHost({
+      authorityDirectory,
+      log: vi.fn(),
+      serveRuntimeFileSystem: (served, port) => {
+        const { watch } = served;
+        if (watch === undefined) {
+          throw new Error('The admitted filesystem has no watch.');
+        }
+
+        return serveElectronFileSystemBridgePort(
+          {
+            ...served,
+            async watch(request, handler) {
+              const dispose = await watch.call(served, request, handler);
+              armed.resolve();
+              await acknowledge.promise;
+              return dispose;
+            },
+          },
+          port,
+        );
+      },
+    });
+    const proxy = createFileSystemBridgeProxy({
+      port: wrapMessagePort(ports.port2),
+      dispose: () => {
+        ports.port2.close();
+      },
+    });
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+      host.handleMessage(
+        frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: root } }, [
+          ports.port1 as unknown as UtilityPort,
+        ]),
+      );
+      await proxy.ready;
+      await expect(proxy.readFile('main.cs', 'utf8')).resolves.toBe(starter);
+      const events: WatchEvent[] = [];
+      const subscription = proxy.watchReady({ paths: ['main.cs'] }, (event) => events.push(event));
+      await armed.promise;
+      await writeFile(join(root, 'main.cs'), fixture);
+      acknowledge.resolve();
+      await subscription.ready;
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: 'main.cs', kind: 'file' });
+      });
+      await expect(proxy.readFile('main.cs', 'utf8')).resolves.toBe(fixture);
+      events.length = 0;
+      await writeFile(join(root, 'main.cs'), starter);
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: 'main.cs', kind: 'file' });
+      });
+      await expect(proxy.readFile('main.cs', 'utf8')).resolves.toBe(starter);
+      events.length = 0;
+      await writeFile(join(root, 'main.cs'), fixture);
+      await vi.waitFor(() => {
+        expect(events).toContainEqual({ type: 'change', path: 'main.cs', kind: 'file' });
+      });
+      await expect(proxy.readFile('main.cs', 'utf8')).resolves.toBe(fixture);
+      subscription.unsubscribe();
+    } finally {
+      acknowledge.resolve();
+      proxy.dispose();
+      await host.quiesce();
+      host.dispose();
+      ports.port1.close();
+      ports.port2.close();
+      await rm(sandbox, { recursive: true, force: true });
+    }
   });
 
   it('should refuse the control plane through the runtime filesystem it serves', async () => {
@@ -972,7 +1101,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     await vi.waitFor(() => {
       expect(runtimeClientCalls[0]!.lifecycleState).toBe('terminated');
     });
-    await expect(client.evaluate({ source: { files: { 'main.ts': 'model' } } })).rejects.toMatchObject({
+    await expect(client.describe({ source: { files: { 'main.ts': 'model' } } })).rejects.toMatchObject({
       code: 'RUNTIME_TERMINATED',
       causeKind: 'transport-closed',
     });
@@ -1332,10 +1461,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
 
     const served = log.mock.calls.filter(([event]) => event === 'agent-host-served');
     expect(served).toEqual([
-      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false, geoSpecEngine: 'legacy' }],
+      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false }],
       /* A second window on the same project attaches to the run already
          executing; a second launcher would fork the durable log. */
-      ['agent-host-served', { workspaceRoot: physicalRoot, reused: true, geoSpecEngine: 'legacy' }],
+      ['agent-host-served', { workspaceRoot: physicalRoot, reused: true }],
     ]);
   });
 
@@ -1346,12 +1475,12 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       const client = connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
       await expect(attachUnwritten(client, 'chat-guidance')).resolves.toMatchObject(unwrittenAttach);
       expect(toolRegistryCalls).toHaveLength(1);
-      expect(toolRegistryCalls[0]?.geospecAuthoringMode).toBe(geoSpecEngine ?? 'legacy');
+      expect(projectHostCalls[0]!.host()).not.toHaveProperty('geospecAuthoringMode');
+      expect(toolRegistryCalls[0]).not.toHaveProperty('geospecAuthoringMode');
       const description = toolRegistries[0]?.list().find((tool) => tool.name === 'test_model')?.description;
-      const native = geoSpecEngine === 'native';
-      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
-      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
-      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
+      expect(description).toContain('expectGeo');
+      expect(description).toContain('loadModel');
+      expect(description).not.toContain('expectNativeGeo');
     },
   );
 
@@ -1380,11 +1509,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
         geometryChannel.port2.postMessage({
           type: 'result',
           result: { success: true, passed: 1, failed: 0, selectedTests: 1, files: [] },
-          sourceRevisions: [],
         });
       });
       try {
-        expect(requestGeometryPort).toHaveBeenCalledWith(physicalRoot, geoSpecEngine);
+        expect(requestGeometryPort).toHaveBeenCalledExactlyOnceWith(physicalRoot);
         expect(requestRuntimePort).not.toHaveBeenCalled();
         expect(runtimeClientCalls).toHaveLength(0);
         await expect(runner.run({ files: ['model.test.ts'] })).resolves.toMatchObject({ success: true });
@@ -1396,7 +1524,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     },
   );
 
-  it('should refuse an invalid GeoSpec engine before opening a project host', async () => {
+  it('should ignore obsolete GeoSpec engine hints before opening a project host', async () => {
     const { host, log, workspaceRoot } = await configuredHost();
     const port = stubPort();
     host.handleMessage(
@@ -1411,39 +1539,29 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     );
 
     await vi.waitFor(() => {
-      expect(port.close).toHaveBeenCalledOnce();
+      expect(projectHostCalls).toHaveLength(1);
     });
-    expect(log).toHaveBeenCalledWith('agent-host.invalid-geospec-engine', { geoSpecEngine: 'unknown' });
-    expect(projectHostCalls).toHaveLength(0);
+    expect(log).not.toHaveBeenCalledWith('agent-host.invalid-geospec-engine', { geoSpecEngine: 'unknown' });
+    expect(port.close).not.toHaveBeenCalled();
   });
 
   it.each(['legacy', 'native'] as const)(
-    'should snapshot the GeoSpec engine %s per root and require reload for an explicit change',
+    'should reuse the root host across obsolete %s hints and an observer with no hint',
     async (geoSpecEngine) => {
       const { host, log, physicalRoot, workspaceRoot } = await configuredHost();
       const first = connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
       await expect(attachUnwritten(first, 'chat-choice')).resolves.toMatchObject(unwrittenAttach);
       connect(host, workspaceRoot, 'proj_test', geoSpecEngine);
-      // Omission always means legacy, including a reconnect.
-      if (geoSpecEngine === 'legacy') {
-        connect(host, workspaceRoot);
-      }
+      connect(host, workspaceRoot);
       connect(host, workspaceRoot, 'proj_test', geoSpecEngine === 'native' ? 'legacy' : 'native');
 
       expect(toolRegistryCalls).toHaveLength(1);
       expect(log.mock.calls.filter(([event]) => event === 'agent-host-served')).toEqual([
-        ['agent-host-served', { workspaceRoot: physicalRoot, reused: false, geoSpecEngine }],
-        ['agent-host-served', { workspaceRoot: physicalRoot, reused: true, geoSpecEngine }],
-        ...(geoSpecEngine === 'legacy'
-          ? [['agent-host-served', { workspaceRoot: physicalRoot, reused: true, geoSpecEngine }]]
-          : []),
+        ['agent-host-served', { workspaceRoot: physicalRoot, reused: false }],
+        ['agent-host-served', { workspaceRoot: physicalRoot, reused: true }],
+        ['agent-host-served', { workspaceRoot: physicalRoot, reused: true }],
+        ['agent-host-served', { workspaceRoot: physicalRoot, reused: true }],
       ]);
-      expect(log).toHaveBeenCalledWith('agent-host.geospec-engine-mismatch', {
-        workspaceRoot: physicalRoot,
-        current: geoSpecEngine,
-        requested: geoSpecEngine === 'native' ? 'legacy' : 'native',
-        reason: 'Reload the project host to change the GeoSpec engine.',
-      });
       // The original launcher still serves its existing channel.
       await expect(attachUnwritten(first, 'chat-choice-still-served')).resolves.toMatchObject(unwrittenAttach);
     },
@@ -1477,8 +1595,8 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     connect(host, otherRoot, 'project-b');
     connect(host, workspaceRoot, 'project-a');
     expect(log.mock.calls.filter(([event]) => event === 'agent-host-served').slice(-2)).toEqual([
-      ['agent-host-served', { workspaceRoot: realpathSync.native(otherRoot), reused: true, geoSpecEngine: 'legacy' }],
-      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false, geoSpecEngine: 'legacy' }],
+      ['agent-host-served', { workspaceRoot: realpathSync.native(otherRoot), reused: true }],
+      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false }],
     ]);
   });
 

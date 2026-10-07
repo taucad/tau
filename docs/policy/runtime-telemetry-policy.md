@@ -3,7 +3,7 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-09-18'
+updated: '2026-09-30'
 related:
   - docs/policy/runtime-api-policy.md
   - docs/research/realtime-cad-performance-charter.md
@@ -206,7 +206,7 @@ The Replicad kernel supports automatic OpenCASCADE API call tracing via a JavaSc
 
 ### Proxy Architecture
 
-The tracing proxy (`packages/runtime/src/kernels/occt/oc-tracing.ts`, shared between the Replicad and OpenCascade kernels) intercepts at two levels:
+The tracing proxy (`packages/core/occt/src/oc-tracing.ts`, shared between the Replicad and OpenCascade kernels) intercepts at two levels:
 
 1. **Class resolution** (`get` trap): When `oc.BRepPrimAPI_MakeBox` is accessed, returns a wrapped function proxy for that class. No WASM calls during property access.
 2. **Function invocation** (`apply`/`construct` trap): When a constructor or method is called, wraps the call with timing instrumentation.
@@ -281,18 +281,18 @@ Kernel-owned JavaScript libraries registered through Tau's built-in module regis
 
 ## Implementation References
 
-| Component                   | File                                                                    | Role                                                         |
-| --------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `RuntimeTracer`             | `packages/runtime/src/framework/runtime-tracer.ts`                      | Span creation with parent-child hierarchy                    |
-| `createKernelLibraryTracer` | `packages/runtime/src/framework/kernel-library-tracing.ts`              | First-party kernel library attribution proxy                 |
-| `WorkerTelemetryCollector`  | `packages/runtime/src/framework/worker-telemetry.ts`                    | Direct-entry batching                                        |
-| `KernelWorkerDispatcher`    | `packages/runtime/src/transport/_internal/runtime-worker-dispatcher.ts` | Telemetry wiring and flush on render completion              |
-| `KernelWorker`              | `packages/runtime/src/framework/kernel-worker.ts`                       | Framework span instrumentation                               |
-| `KernelRuntimeWorker`       | `packages/runtime/src/framework/kernel-runtime-worker.ts`               | Kernel selection spans                                       |
-| `wrapOcWithTracing`         | `packages/runtime/src/kernels/occt/oc-tracing.ts`                       | OC API call tracing proxy (shared by Replicad + OpenCascade) |
-| `buildSpanTree`             | `apps/ui/app/routes/projects_.$id/chat-kernel.tsx`                      | UI tree reconstruction                                       |
-| `createTelemetryAggregator` | `apps/ui/app/machines/kernel.machine.ts`                                | Main-thread forwarding                                       |
-| `openTelemetryFileSink`     | `packages/runtime/src/framework/telemetry-file-sink.ts`                 | Rotating per-producer JSONL, enqueue-and-return              |
-| `toOtlpJson`                | `packages/runtime/src/framework/telemetry-otlp.ts`                      | OTLP JSON shape, at the sink only                            |
-| `recordRendererSpan`        | `apps/ui/app/lib/renderer-telemetry.ts`                                 | Renderer producer, bounded buffer and manual export          |
-| `mergeRuntimeTrace`         | `apps/runtime-e2e/src/benchmarks/runtime-trace.ts`                      | One run's trace from every producer's file                   |
+| Component                        | File                                                                      | Role                                                         |
+| -------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `RuntimeTracer`                  | `packages/runtime/src/framework/runtime-tracer.ts`                        | Span creation with parent-child hierarchy                    |
+| `createKernelLibraryTracer`      | `packages/runtime/src/framework/kernel-library-tracing.ts`                | First-party kernel library attribution proxy                 |
+| `WorkerTelemetryCollector`       | `packages/runtime/src/framework/worker-telemetry.ts`                      | Direct-entry batching                                        |
+| `createDocumentWorkerDispatcher` | `packages/runtime/src/transport/_internal/runtime-document-dispatcher.ts` | Telemetry wiring and flush before operation completion       |
+| `KernelWorker`                   | `packages/runtime/src/framework/kernel-worker.ts`                         | Framework span instrumentation                               |
+| `KernelRuntimeWorker`            | `packages/runtime/src/framework/kernel-runtime-worker.ts`                 | Kernel selection spans                                       |
+| `wrapOcWithTracing`              | `packages/core/occt/src/oc-tracing.ts`                                    | OC API call tracing proxy (shared by Replicad + OpenCascade) |
+| `buildSpanTree`                  | `apps/ui/app/routes/w.$workspace.$project/chat-kernel-utils.ts`           | UI tree reconstruction                                       |
+| `kernelTelemetry`                | `apps/ui/app/machines/cad.machine.ts`                                     | Main-thread batch retention                                  |
+| `openTelemetryFileSink`          | `packages/runtime/src/framework/telemetry-file-sink.ts`                   | Rotating per-producer JSONL, enqueue-and-return              |
+| `toOtlpJson`                     | `packages/runtime/src/framework/telemetry-otlp.ts`                        | OTLP JSON shape, at the sink only                            |
+| `recordRendererSpan`             | `apps/ui/app/lib/renderer-telemetry.ts`                                   | Renderer producer, bounded buffer and manual export          |
+| `mergeRuntimeTrace`              | `apps/runtime-e2e/src/benchmarks/runtime-trace.ts`                        | One run's trace from every producer's file                   |

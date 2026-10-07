@@ -1,6 +1,7 @@
 import type { CanvasProps, RootState } from '@react-three/fiber';
-import { Canvas } from '@react-three/fiber';
-import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import { Canvas, flushSync as flushThreeSync } from '@react-three/fiber';
+import { flushSync } from 'react-dom';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { WebGPURenderer } from 'three/webgpu';
 import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js';
 import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
@@ -67,13 +68,51 @@ export function ThreeCanvasInstance({
   ...canvasProperties
 }: ThreeCanvasInstanceProps): React.JSX.Element {
   const dpr = Math.min(globalThis.devicePixelRatio, 2);
-  const isTauDebugEnabled = useFeature('tauDebug');
+  const isInspectorEnabled = useFeature('webGpuInspector');
   const [isCanvasReady, setIsCanvasReady] = useState(false);
   const [isContextLost, setIsContextLost] = useState(false);
+  const [rendererError, setRendererError] = useState<Error>();
   const cameraRig = useCameraRig();
+  const rootRef = useRef<RootState | undefined>(undefined);
+  const resize = useMemo(
+    () => ({
+      // React-use-measure uses the scroll debounce for native element resizes too.
+      debounce: 0,
+      polyfill:
+        typeof ResizeObserver === 'undefined'
+          ? undefined
+          : class extends ResizeObserver {
+              public constructor(callback: ResizeObserverCallback) {
+                super((entries, observer) => {
+                  const previousSize = rootRef.current?.get().size;
+                  // Commit both React roots before drawing: the camera, composer and gizmo
+                  // must see the new viewport in this same prepaint ResizeObserver delivery.
+                  flushThreeSync(() => {
+                    flushSync(() => {
+                      callback(entries, observer);
+                    });
+                  });
+                  const state = rootRef.current?.get();
+                  if (state && state.size !== previousSize && state.size.width > 0 && state.size.height > 0) {
+                    state.advance(performance.now(), false);
+                    // Advance runs outside R3F's demand loop. Retain its normal followup
+                    // so controls damping/useFrame invalidations cannot be consumed here.
+                    state.invalidate();
+                  }
+                });
+              }
+            },
+    }),
+    [],
+  );
 
   const glProperty: CanvasProps['gl'] = useMemo(
-    () => createTauR3fGlProp(graphicsBackend, [cameraRig.perspectiveCamera, cameraRig.orthographicCamera]),
+    () =>
+      createTauR3fGlProp(
+        graphicsBackend,
+        [cameraRig.perspectiveCamera, cameraRig.orthographicCamera],
+        setRendererError,
+      ),
     [cameraRig, graphicsBackend],
   );
 
@@ -96,6 +135,7 @@ export function ThreeCanvasInstance({
   );
 
   const onCanvasCreated = useCallback((state: RootState): void => {
+    rootRef.current = state;
     installTauPointerRays(state);
     const renderer = state.gl;
 
@@ -118,6 +158,11 @@ export function ThreeCanvasInstance({
     setIsCanvasReady(true);
   }, []);
 
+  if (rendererError) {
+    // The renderer never existed: hand the failure to the viewer's `WebglErrorBoundary` fallback.
+    throw rendererError;
+  }
+
   if (isContextLost) {
     return <GraphicsContextLostFallback onRetry={onRetry} />;
   }
@@ -130,6 +175,7 @@ export function ThreeCanvasInstance({
       gl={glProperty}
       dpr={dpr}
       frameloop='demand'
+      resize={resize}
       className={cn('bg-background', className)}
       onCreated={onCanvasCreated}
     >
@@ -149,7 +195,7 @@ export function ThreeCanvasInstance({
         </Scene>
         <OverlayDepthProvider>
           <PostProcessing settings={postProcessingSettings} />
-          {isTauDebugEnabled ? <WebGpuInspectorOverlay /> : null}
+          {isInspectorEnabled ? <WebGpuInspectorOverlay /> : null}
           <ModelEmphasisOverlay />
           <SceneOverlay overlayActive={enableAxes || enableGrid}>
             {enableAxes ? <AxesHelper /> : null}

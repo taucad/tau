@@ -12,9 +12,12 @@ import type { z } from 'zod';
 import { Topic } from '@taucad/events';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
+import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import type {
   ExternalChangeFact,
   FileMode,
+  FileReadStreamOptions,
+  FileStatOptions,
   FileStat,
   HeadFileStat,
   ProviderCapabilities,
@@ -384,9 +387,13 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
       : this._channel.request({ root: this._root, op: 'readdirHeadWithStats', path });
   }
 
-  public async stat(path: string): Promise<FileStat> {
+  public async stat(path: string): Promise<FileStat>;
+  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
+  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
     this._assertRootedPath(path);
-    return this._channel.request({ root: this._root, op: 'stat', path });
+    return options?.content === 'head'
+      ? this._channel.request({ root: this._root, op: 'headStat', path })
+      : this._channel.request({ root: this._root, op: 'stat', path });
   }
 
   public async getFileMode(path: string): Promise<FileMode> {
@@ -440,6 +447,52 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
   public async observe(listener: (facts: readonly ExternalChangeFact[]) => void): Promise<() => void> {
     return this.watch({ paths: [''], recursive: true, excludes: hostWatchExcludes }, (event) => {
       listener([toExternalChangeFact(event)]);
+    });
+  }
+
+  /**
+   * Stream a file from the host one bounded chunk at a time, as `NodeFsProvider.readFileStream` does locally. Each
+   * pull asks the host for the next chunk of the range; a short or empty chunk is the end of the file, and a
+   * cancelled or aborted stream asks for nothing more.
+   *
+   * @param path - Rooted path of the file.
+   * @param options - Byte range and abort signal.
+   * @returns The file's bytes in chunks of at most `streamChunkSize`.
+   */
+  public readFileStream(path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> {
+    this._assertRootedPath(path);
+    validateFileReadStreamOptions(options);
+    const start = options?.position ?? 0;
+    const { length } = options ?? {};
+    if (length !== undefined && start > Number.MAX_SAFE_INTEGER - length) {
+      throw new RangeError('position plus length must not exceed the safe integer range.');
+    }
+    const end = length === undefined ? Number.MAX_SAFE_INTEGER : start + length;
+    let offset = start;
+    return new ReadableStream({
+      pull: async (controller) => {
+        options?.signal?.throwIfAborted();
+        const wanted = Math.min(streamChunkSize, end - offset);
+        if (wanted <= 0) {
+          controller.close();
+          return;
+        }
+        const chunk = await this._channel.request({
+          root: this._root,
+          op: 'readFileRange',
+          path,
+          position: offset,
+          length: wanted,
+        });
+        options?.signal?.throwIfAborted();
+        if (chunk.byteLength > 0) {
+          controller.enqueue(chunk);
+          offset += chunk.byteLength;
+        }
+        if (chunk.byteLength < wanted) {
+          controller.close();
+        }
+      },
     });
   }
 

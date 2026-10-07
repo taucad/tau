@@ -24,8 +24,9 @@ apps/api-e2e
 docs
 
 # -- CI / tooling / editor config ---------------------------------------------
+# `scripts` stays in the context: it is an Nx project that `runtime-e2e` lists
+# as an implicit dependency, and the project graph fails without it.
 .github
-scripts
 .claude/worktrees
 .cursor
 .vscode

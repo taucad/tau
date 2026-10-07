@@ -31,6 +31,7 @@ import type {
   TurnFailedEvent,
   TurnFinalizedEvent,
 } from '@taucad/revisions/revision-effects';
+import type { SyncMachineEmitted } from '@taucad/revisions/sync-machine';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
 import {
   sameRevisionStatus,
@@ -68,9 +69,9 @@ import {
   watchRevisionStream,
 } from '@taucad/revisions';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
-import { revisionId } from '@taucad/revisions/algorithms';
-import type { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
-import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
+import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
+import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
+import type { FileMode, MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
@@ -81,6 +82,7 @@ import { createTurnPlacementPort } from '@taucad/revisions/turn-placement';
 import type { TurnPlacementAdapter } from '@taucad/revisions/turn-placement';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { fetchGeoSpecCandidates, publishGeoSpecCandidate } from '#lib/geospec-candidate-git.js';
 
 /**
@@ -252,7 +254,7 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'deleteTag'; name: string }>
   | Readonly<{ command: 'log'; branch?: string; limit?: number; from?: string }>
   | Readonly<{ command: 'divergence'; head: string; base: string }>
-  | Readonly<{ command: 'diff'; revisionId: string; from?: string }>
+  | Readonly<{ command: 'diff'; revisionId: string; from?: string; against?: 'checkout' }>
   | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>;
 
 /**
@@ -269,10 +271,8 @@ export type WorkerRevisionEvent =
   | TurnConflictedEvent
   | TurnFailedEvent
   | TurnFinalizedEvent
-  | Readonly<{ type: 'chats.projected'; projectId: string; chatIds: readonly string[] }>;
-
-/** One file's text on both sides of a revision. @public */
-export type RevisionFileComparison = Readonly<{ original: string; modified: string }>;
+  | Readonly<{ type: 'chats.projected'; projectId: string; chatIds: readonly string[] }>
+  | Readonly<{ type: 'checkout.changed'; checkoutId: string; paths: readonly string[] }>;
 
 /**
  * What a child of the tree asked the page to say.
@@ -342,7 +342,10 @@ export type RevisionToast =
   | Readonly<{ type: 'notice'; subject: 'remote' | 'resolution'; tone: 'info' | 'error'; message: string }>
   | Readonly<{
       type: 'error';
-      subject: 'restore' | 'branch' | 'save';
+      subject: 'restore' | 'branch' | 'save' | 'connection';
+      /** Which attachment attempt and initialization step failed. */
+      generation?: number;
+      connectionOperation?: 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
       /* Which branch verb refused, so a caller correlating one *New branch*
        * does not take another verb's refusal for its own (finding 1). */
       operation?: BranchOperation;
@@ -438,7 +441,11 @@ export type WorkerProjectRevisions = Readonly<{
   /** How far two heads have gone apart, counted by the port rather than by listing both histories. */
   divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
-  diff: (revision: string, from?: string) => Promise<readonly RevisionDiffEntry[]>;
+  diff: (
+    revision: string,
+    from?: string,
+    options?: Readonly<{ against?: 'checkout' }>,
+  ) => Promise<readonly RevisionDiffEntry[]>;
   /** One file's text before and after a revision, for *Compare* (S38). */
   compare: (
     revision: string,
@@ -832,6 +839,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     const generation = (generations.get(checkoutId) ?? 0) + 1;
     generations.set(checkoutId, generation);
     actor.send({ type: 'changed', checkoutId, paths, generation });
+    events.emit({ type: 'checkout.changed', checkoutId, paths });
   };
   /*
    * L2-F4: one observation per checkout, each raising against its own id.
@@ -878,6 +886,20 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   };
   actor.start();
   published = selectRevisionStatus(actor.getSnapshot());
+  /* W36 D1: each settled push or pull, on the existing telemetry ingest. The desktop's disk host reports its own. */
+  actor.getSnapshot().children.sync?.on('syncAttempt', (attempt: SyncMachineEmitted & { type: 'syncAttempt' }) => {
+    const apiBaseUrl = options.apiBaseUrl?.();
+    if (apiBaseUrl === undefined || isDesktopTarget()) {
+      return;
+    }
+    const { type: _type, durationMilliseconds, ...detail } = attempt;
+    reportToApi({
+      reportUrl: `${apiBaseUrl}/v1/telemetry/ingest`,
+      name: 'observability.syncAttempt',
+      duration: durationMilliseconds,
+      detail: { ...detail, placement: 'browser' },
+    });
+  });
   /* After `start`, because the invoked children exist only once the root runs.
    * Restore's toasts are the one thing in this tree that needs a person to see
    * them, so they cross the port rather than being re-derived on the page. */
@@ -1155,13 +1177,30 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
   };
 
+  const comparisonCheckout = async () => {
+    const snapshot = actor.getSnapshot();
+    const status = selectRevisionStatus(snapshot);
+    const checkout = snapshot.context.checkouts.find((entry) => entry.id === status.checkoutId);
+    if (checkout === undefined) {
+      throw new Error('The selected checkout is unavailable.');
+    }
+    const [filesystem, basis] = await Promise.all([
+      options.filesystem(checkout.root),
+      status.headRevisionId === undefined ? undefined : options.port.readTree(revisionId(status.headRevisionId)),
+    ]);
+    if (status.headRevisionId !== undefined && basis === undefined) {
+      throw new Error('The checkout head tree is unavailable.');
+    }
+    return { filesystem, mode: (path: string): FileMode => basis?.mode(path) ?? '100644' };
+  };
+
   return {
     fetchGeoSpecCandidates: async () => {
       if (options.candidatePort === undefined) {
         throw new Error('This host has no bounded candidate transport.');
       }
       const controller = new AbortController();
-      const candidateTimeout = setTimeout(() => {
+      const candidateFetchTimeout = setTimeout(() => {
         controller.abort();
       }, 15_000);
       try {
@@ -1177,7 +1216,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           },
         });
       } finally {
-        clearTimeout(candidateTimeout);
+        clearTimeout(candidateFetchTimeout);
       }
     },
     publishGeoSpecCandidate: async (candidate) => {
@@ -1185,7 +1224,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         throw new Error('This host has no bounded candidate transport.');
       }
       const controller = new AbortController();
-      const candidateTimeout = setTimeout(() => {
+      const candidatePublishTimeout = setTimeout(() => {
         controller.abort();
       }, 15_000);
       try {
@@ -1202,7 +1241,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           },
         });
       } finally {
-        clearTimeout(candidateTimeout);
+        clearTimeout(candidatePublishTimeout);
       }
     },
     send: (command) => {
@@ -1427,7 +1466,20 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     deleteTag: async (name) => options.port.deleteTag(name),
     log: async (request) => readRevisionLog(options.port, request),
     divergence: async (head, base) => options.port.divergence({ head: revisionId(head), base: revisionId(base) }),
-    diff: async (revision, from) => {
+    diff: async (revision, from, compareOptions) => {
+      if (compareOptions?.against === 'checkout') {
+        const original = await options.port.readTree(revisionId(revision));
+        if (original === undefined) {
+          throw new Error('The selected revision is unavailable.');
+        }
+        const checkout = await comparisonCheckout();
+        // ponytail: one bounded capture per live list refresh; reuse the checkout capture memo if large projects make this hot.
+        const modified = await captureRevisionTree(checkout.filesystem, {
+          exclude: (path) => !tauPathPolicy.classify(path).versioned,
+          inheritedMode: checkout.mode,
+        });
+        return diffRevisionTrees({ original, modified });
+      }
       /* Against the revision's own first parent by default, which the store
        * knows: a caller that remembered a base would diff the wrong tree when a
        * dirty checkout was minted between placement and settlement. */
@@ -1439,37 +1491,54 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
        * another revision, so a reader can see what they have changed since the
        * revision they are looking at. One round trip, same viewer. */
       if (compareOptions?.against === 'checkout') {
-        const { checkoutId } = published;
-        const checkout = actor.getSnapshot().context.checkouts.find((entry) => entry.id === checkoutId);
-        const [tree, filesystem] = await Promise.all([
-          options.port.readTree(revisionId(revision)),
-          checkout === undefined ? undefined : options.filesystem(checkout.root),
-        ]);
-        const decoder = new TextDecoder();
-        const recorded = tree?.get(path);
-        let working = '';
-        try {
-          working = filesystem === undefined ? '' : decoder.decode(await filesystem.readFile(path));
-        } catch {
-          /* The file is not in the checkout any more: an empty right-hand side
-           * is exactly "deleted since this revision". */
+        const tree = await options.port.readTree(revisionId(revision));
+        if (tree === undefined) {
+          throw new Error('The selected revision is unavailable.');
         }
-        return { original: recorded === undefined ? '' : decoder.decode(recorded), modified: working };
+        const checkout = await comparisonCheckout();
+        const { filesystem } = checkout;
+        const recorded = tree.get(path);
+        let working: Uint8Array<ArrayBuffer> | undefined;
+        let mode = checkout.mode(path);
+        try {
+          working = await filesystem.readFile(path);
+          mode = (await filesystem.getFileMode?.(path)) ?? mode;
+        } catch (error) {
+          if (
+            !(
+              typeof error === 'object' &&
+              error !== null &&
+              (('code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR' || error.code === 'EISDIR')) ||
+                ('name' in error && error.name === 'NotFoundError'))
+            )
+          ) {
+            throw error;
+          }
+          working = undefined;
+        }
+        return compareRevisionFile({
+          original: recorded === undefined ? undefined : { content: recorded, mode: tree.mode(path) ?? '100644' },
+          modified: working === undefined ? undefined : { content: working, mode },
+        });
       }
       const record = await options.port.readRevision(revisionId(revision));
-      const base = compareOptions?.from ?? record?.parents[0];
+      if (record === undefined) {
+        throw new Error('The selected revision is unavailable.');
+      }
+      const base = compareOptions?.from ?? record.parents[0];
       const [before, after] = await Promise.all([
         base === undefined ? undefined : options.port.readTree(revisionId(base)),
         options.port.readTree(revisionId(revision)),
       ]);
-      const decoder = new TextDecoder();
-      const read = (tree: ImmutableRevisionTree | undefined): string => {
-        const content = tree?.get(path);
-        /* An added path has no `before` and a deleted one has no `after`; the
-         * viewer reads an empty side as exactly that. */
-        return content === undefined ? '' : decoder.decode(content);
-      };
-      return { original: read(before), modified: read(after) };
+      if (after === undefined || (base !== undefined && before === undefined)) {
+        throw new Error('The selected revision tree is unavailable.');
+      }
+      const original = before?.get(path);
+      const modified = after.get(path);
+      return compareRevisionFile({
+        original: original === undefined ? undefined : { content: original, mode: before?.mode(path) ?? '100644' },
+        modified: modified === undefined ? undefined : { content: modified, mode: after.mode(path) ?? '100644' },
+      });
     },
     status: () => published,
     subscribe: (listener) => listeners.subscribe(listener),
@@ -1783,7 +1852,9 @@ const answerOf = (
         .then((divergence) => ({ kind: 'divergence', divergence }) as const);
     }
     case 'diff': {
-      return tree.diff(request.revisionId, request.from).then((entries) => ({ kind: 'diff', entries }) as const);
+      return tree
+        .diff(request.revisionId, request.from, { against: request.against })
+        .then((entries) => ({ kind: 'diff', entries }) as const);
     }
     case 'tag': {
       const { command: _verb, id: _id, ...input } = request;

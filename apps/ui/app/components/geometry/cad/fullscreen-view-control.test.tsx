@@ -93,7 +93,7 @@ describe('FullscreenViewControl', () => {
 
     await user.click(screen.getByRole('button', { name: 'Enter fullscreen' }));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Fullscreen is unavailable in this browser.');
+    expect(screen.getByRole('alert')).toHaveTextContent('Fullscreen is unavailable here.');
     expect(requestFullscreen).not.toHaveBeenCalled();
   });
 

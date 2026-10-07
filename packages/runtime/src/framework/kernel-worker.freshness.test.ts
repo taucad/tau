@@ -1,76 +1,31 @@
-/* eslint-disable @typescript-eslint/naming-convention -- file-system path keys are not camelCase identifiers. */
-/**
- * Freshness of request-scoped kernel operations (I1–I4).
- *
- * Every test here drives a filesystem that *can* watch and then edits a file
- * without delivering the watch event, which is the shape of the reported
- * desktop failure: the agent's kernel holds a watchable filesystem, never arms
- * a subscription for `evaluateModel`/`getParameters`/`snapshotSource`, and so
- * answers every later tool call from the first read.
- *
- * See `docs/research/agent-stale-kernel-result-elimination-blueprint.md`.
- */
-
-import { describe, it, expect, vi } from 'vitest';
-import type { OnWorkerLog } from '@taucad/types';
+/** Silent-edit freshness through document operations (I1–I4). */
+import { randomUUID } from 'node:crypto';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import type { WatchEvent } from '@taucad/filesystem';
-import type { GetParameterDeclarationsResult } from '#types/runtime.types.js';
-import type { GetDependenciesInput, GetParametersInput, KernelRuntime } from '#types/runtime-kernel.types.js';
-import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
-/* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
+import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
+import { defineRuntime } from '#worker/runtime-definition.js';
+import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
+import { createKernelSuccess } from '#kernels/kernel-helpers.js';
+/* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture. */
 import {
-  MockKernelWorker,
   createMockFileSystem,
   createGeometryFile,
   createParameterDeclaration,
 } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
 
-const noopLog: OnWorkerLog = () => {
-  /* No-op */
-};
+const workers: KernelRuntimeWorker[] = [];
+afterEach(async () => {
+  await Promise.all(workers.splice(0).map(async (worker) => worker.cleanup()));
+});
 
-const notFound = (path: string): NodeJS.ErrnoException => {
-  const error = new Error(`ENOENT: no such file or directory, open '${path}'`) as NodeJS.ErrnoException;
-  error.code = 'ENOENT';
-  return error;
-};
+const notFound = (path: string): NodeJS.ErrnoException =>
+  Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' });
 
-/** A kernel whose parameter defaults are the entry's current bytes, so a stale parameter cache is visible. */
-class SourceLabelWorker extends MockKernelWorker {
-  public getDependencyCalls = 0;
-
-  protected override async onGetParameters(
-    { entryPath }: GetParametersInput,
-    runtime: KernelRuntime,
-  ): Promise<GetParameterDeclarationsResult> {
-    const source = await runtime.filesystem.readFile(entryPath, 'utf8');
-    return createParameterDeclaration({ label: source });
-  }
-
-  protected override async onGetDependencies(
-    input: GetDependenciesInput,
-    runtime: KernelRuntime,
-  ): Promise<GetDependenciesResult> {
-    this.getDependencyCalls++;
-    return super.onGetDependencies(input, runtime);
-  }
-}
-
-type FreshnessHarness = {
-  readonly worker: SourceLabelWorker;
-  /** The bytes on the filesystem. Mutating this map is an edit nothing announced. */
-  readonly files: Map<string, string>;
-  /** Deliver a watch event to every armed subscription, as a real filesystem would. */
-  readonly deliver: (event: WatchEvent) => void;
-  readonly watch: ReturnType<typeof vi.fn>;
-  readonly unsubscribe: ReturnType<typeof vi.fn>;
-};
-
-const createHarness = (
+const createHarness = async (
   initial: Record<string, string>,
-  options?: { readonly watchable?: boolean },
-): FreshnessHarness => {
+  options?: { readonly watchable?: boolean; readonly dependency?: string },
+) => {
   const files = new Map(Object.entries(initial));
   const filesystem = createMockFileSystem({
     existsResult: (path) => files.has(path),
@@ -93,24 +48,62 @@ const createHarness = (
       }),
     ),
   );
-
+  const counts = { dependencies: 0, evaluations: 0 };
+  const svg = (label: string): string => `<svg xmlns="http://www.w3.org/2000/svg"><text>${label}</text></svg>`;
+  const kernel = defineKernelV2({
+    id: 'source-label',
+    name: 'Source label',
+    version: '1.0.0',
+    extensions: ['ts'],
+    views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
+    exports: { svg: { title: 'SVG', mimeType: 'image/svg+xml', extension: 'svg' } },
+    async initialize() {
+      return {};
+    },
+    async resolve({ entryPath }) {
+      counts.dependencies++;
+      return { resolved: [entryPath, ...(options?.dependency ? [options.dependency] : [])], unresolved: [] };
+    },
+    async describe({ entryPath }, runtime) {
+      const source = await runtime.filesystem.readFile(entryPath, 'utf8');
+      const declaration = createParameterDeclaration({ label: source }, { properties: { label: { type: 'string' } } });
+      if (!declaration.success) {
+        throw new Error('Invalid parameter fixture');
+      }
+      return createKernelSuccess({ parameters: declaration.data });
+    },
+    async evaluate({ parameters }) {
+      counts.evaluations++;
+      return { handle: { label: String(parameters['label']) } };
+    },
+    async render({ handle }) {
+      return { content: svg(handle.label) };
+    },
+    async export({ handle }) {
+      return {
+        files: [{ name: 'model.svg', mimeType: 'image/svg+xml', bytes: new TextEncoder().encode(svg(handle.label)) }],
+      };
+    },
+  })();
   const handlers: Array<(event: WatchEvent) => void> = [];
   const unsubscribe = vi.fn();
   const watch = vi.fn((_request: { paths: readonly string[] }, handler: (event: WatchEvent) => void) => {
     handlers.push(handler);
     return unsubscribe;
   });
-
-  const worker = new SourceLabelWorker({ middleware: [], onLog: noopLog, filesystem });
-  // @ts-expect-error - the private bridge filesystem is the watch capability under test.
-  worker.fileSystem = options?.watchable === false ? { ...filesystem } : { ...filesystem, watch };
-
+  const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+  workers.push(worker);
+  await worker.initialize({
+    callbacks: { onLog: () => undefined },
+    transferables: { inlineFileSystem: options?.watchable === false ? filesystem : { ...filesystem, watch } },
+  });
   return {
     worker,
     files,
+    counts,
     watch,
     unsubscribe,
-    deliver: (event) => {
+    deliver: (event: WatchEvent) => {
       for (const handler of handlers) {
         handler(event);
       }
@@ -118,60 +111,114 @@ const createHarness = (
   };
 };
 
-const evaluationHash = async (worker: SourceLabelWorker, filename: string): Promise<string> => {
-  const result = await worker.evaluateModel({ file: createGeometryFile(filename), parameters: {} });
-  if (!result.success) {
-    throw new Error(`Evaluation failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
+const evaluationHash = async (
+  worker: KernelRuntimeWorker,
+  filename: string,
+  options?: { request?: { documentId: string; intent: number }; watch?: boolean },
+): Promise<string> => {
+  const request = options?.request;
+  const documentId = request?.documentId ?? randomUUID();
+  let result: Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0] | undefined;
+  worker.onEvaluated = (event) => {
+    if (event.documentId === documentId) {
+      result = event;
+    }
+  };
+  if (request && request.intent > 0) {
+    worker.handleUpdateDocument({ documentId, intent: request.intent });
+  } else {
+    worker.handleOpenDocument({
+      documentId,
+      intent: 0,
+      file: createGeometryFile(filename),
+      parameters: {},
+      watch: options?.watch ?? false,
+    });
   }
-  return result.data.hash;
+  try {
+    await vi.waitFor(() => {
+      expect(result).toBeDefined();
+    });
+    if (!result?.success || !result.sourceRevision?.files[filename]) {
+      throw new Error(`Missing fresh source revision: ${JSON.stringify(result)}`);
+    }
+    return result.sourceRevision.files[filename];
+  } finally {
+    if (!request) {
+      worker.handleCloseDocument({ documentId });
+    }
+  }
 };
 
 describe('request-scoped freshness on a watchable filesystem', () => {
-  it('(a) evaluateModel answers for the bytes written after the previous evaluation', async () => {
-    const { worker, files } = createHarness({ 'main.ts': 'v1' });
+  it('reuses an unchanged watcherless evaluation and rebuilds after bytes change', async () => {
+    const { worker, files, counts } = await createHarness({ 'main.ts': 'v1' }, { watchable: false });
+
+    const request = { documentId: 'retained', intent: 0 };
+    const first = await evaluationHash(worker, 'main.ts', { request });
+    request.intent++;
+    const second = await evaluationHash(worker, 'main.ts', { request });
+    expect(second).toBe(first);
+    expect(counts.evaluations).toBe(1);
+
+    files.set('main.ts', 'v2');
+    request.intent++;
+    const changed = await evaluationHash(worker, 'main.ts', { request });
+    expect(changed).not.toBe(first);
+    expect(counts.evaluations).toBe(2);
+  });
+
+  it('(a) a fresh document evaluation answers for the bytes written after the previous evaluation', async () => {
+    const { worker, files } = await createHarness({ 'main.ts': 'v1' });
 
     const first = await evaluationHash(worker, 'main.ts');
     files.set('main.ts', 'v2');
     const second = await evaluationHash(worker, 'main.ts');
 
     expect(second).not.toBe(first);
-    await worker.cleanup();
   });
 
-  it('(b) exportModel answers for bytes written after an evaluation, and drops the stale hash', async () => {
-    const { worker, files } = createHarness({ 'main.ts': 'v1' });
+  it('(b) a fresh document export answers for bytes written after an evaluation, and drops the stale hash', async () => {
+    const { worker, files } = await createHarness({ 'main.ts': 'v1' });
 
-    await evaluationHash(worker, 'main.ts');
+    const first = await evaluationHash(worker, 'main.ts');
     files.set('main.ts', 'v2');
-    const exported = await worker.exportModel({
+    const documentId = randomUUID();
+    worker.handleOpenDocument({
+      documentId,
+      intent: 0,
       file: createGeometryFile('main.ts'),
       parameters: {},
-      format: 'gltf',
+      watch: false,
     });
-
-    expect(exported.success).toBe(true);
-    // @ts-expect-error - the retained hash is the private evidence the export lane reused.
-    const retained = worker.fileHashCache.get('main.ts');
-    // @ts-expect-error - hashing through the worker keeps the digest definition in one place.
-    const expected = await worker.hashContent(new TextEncoder().encode('v2'));
-    expect(retained).toBe(expected);
-    await worker.cleanup();
+    try {
+      const exported = await worker.exportDocument({ documentId, operationId: 'export', target: 'svg' });
+      expect(exported).toMatchObject({ success: true, files: [{ name: 'model.svg', mimeType: 'image/svg+xml' }] });
+      if (!exported.success) {
+        throw new Error('Expected fresh document export');
+      }
+      expect(new TextDecoder().decode(exported.files[0].bytes)).toBe(
+        '<svg xmlns="http://www.w3.org/2000/svg"><text>v2</text></svg>',
+      );
+      expect(exported.sourceRevision?.files['main.ts']).not.toBe(first);
+    } finally {
+      worker.handleCloseDocument({ documentId });
+    }
   });
 
-  it('(c1) getParameters re-extracts after an unannounced edit', async () => {
-    const { worker, files } = createHarness({ 'main.ts': 'v1' });
+  it('(c1) describe re-extracts after an unannounced edit', async () => {
+    const { worker, files } = await createHarness({ 'main.ts': 'v1' });
 
-    const first = await worker.getParameters(createGeometryFile('main.ts'));
+    const first = await worker.describe({ file: createGeometryFile('main.ts') });
     files.set('main.ts', 'v2');
-    const second = await worker.getParameters(createGeometryFile('main.ts'));
+    const second = await worker.describe({ file: createGeometryFile('main.ts') });
 
-    expect(first.success && first.data.defaults['label']).toBe('v1');
-    expect(second.success && second.data.defaults['label']).toBe('v2');
-    await worker.cleanup();
+    expect(first.success && first.parameters.defaults['label']).toBe('v1');
+    expect(second.success && second.parameters.defaults['label']).toBe('v2');
   });
 
   it('(c2) snapshotSource reports the bytes written after an evaluation', async () => {
-    const { worker, files } = createHarness({ 'main.ts': 'v1' });
+    const { worker, files } = await createHarness({ 'main.ts': 'v1' });
 
     await evaluationHash(worker, 'main.ts');
     files.set('main.ts', 'v2');
@@ -179,7 +226,7 @@ describe('request-scoped freshness on a watchable filesystem', () => {
 
     expect(snapshot.success).toBe(true);
     if (!snapshot.success) {
-      return;
+      throw new Error('Expected a source snapshot');
     }
     const entry = snapshot.data.files.find(({ path }) => path === 'main.ts');
     expect(new TextDecoder().decode(entry?.content)).toBe('v2');
@@ -189,11 +236,10 @@ describe('request-scoped freshness on a watchable filesystem', () => {
      * snapshot just contradicted. */
     // @ts-expect-error - the retained hash is private evidence about what the lane kept.
     expect(worker.fileHashCache.get('main.ts')).not.toBe(stale);
-    await worker.cleanup();
   });
 
   it('(d) an edit to one entry does not leave the other entry stale, and vice versa', async () => {
-    const { worker, files } = createHarness({ 'main.ts': 'main-v1', 'parts/a.ts': 'a-v1' });
+    const { worker, files } = await createHarness({ 'main.ts': 'main-v1', 'parts/a.ts': 'a-v1' });
 
     const mainFirst = await evaluationHash(worker, 'main.ts');
     const partFirst = await evaluationHash(worker, 'parts/a.ts');
@@ -203,125 +249,99 @@ describe('request-scoped freshness on a watchable filesystem', () => {
 
     expect(partSecond).not.toBe(partFirst);
     expect(mainSecond).toBe(mainFirst);
-    await worker.cleanup();
   });
 
   it('(e) arming after an unannounced edit commits with fresh hashes and still routes later events', async () => {
-    const { worker, files, deliver, watch } = createHarness({ 'main.ts': 'v1' });
+    const { worker, files, deliver, watch } = await createHarness({ 'main.ts': 'v1' });
 
-    await evaluationHash(worker, 'main.ts');
+    await evaluationHash(worker, 'main.ts', { watch: true });
     files.set('main.ts', 'v2');
-    const second = await evaluationHash(worker, 'main.ts');
+    const second = await evaluationHash(worker, 'main.ts', { watch: true });
 
     expect(worker.getWatchedPaths()).toContain('main.ts');
     expect(watch).toHaveBeenCalled();
 
     files.set('main.ts', 'v3');
     deliver({ type: 'change', path: 'main.ts' });
-    const third = await evaluationHash(worker, 'main.ts');
+    const third = await evaluationHash(worker, 'main.ts', { watch: true });
     expect(third).not.toBe(second);
-    await worker.cleanup();
   });
 
   it('(f) a watcherless filesystem keeps answering for the current bytes', async () => {
-    const { worker, files } = createHarness({ 'main.ts': 'v1' }, { watchable: false });
+    const { worker, files } = await createHarness({ 'main.ts': 'v1' }, { watchable: false });
 
     const first = await evaluationHash(worker, 'main.ts');
     files.set('main.ts', 'v2');
     const second = await evaluationHash(worker, 'main.ts');
 
     expect(second).not.toBe(first);
-    await worker.cleanup();
   });
 
   it('(g) an unchanged watched closure is not resolved again on the second evaluation', async () => {
-    const { worker } = createHarness({ 'main.ts': 'v1' });
+    const { worker, counts } = await createHarness({ 'main.ts': 'v1' });
 
-    const first = await evaluationHash(worker, 'main.ts');
-    const callsAfterFirst = worker.getDependencyCalls;
-    const second = await evaluationHash(worker, 'main.ts');
+    const first = await evaluationHash(worker, 'main.ts', { watch: true });
+    const callsAfterFirst = counts.dependencies;
+    const second = await evaluationHash(worker, 'main.ts', { watch: true });
 
     expect(second).toBe(first);
-    expect(worker.getDependencyCalls).toBe(callsAfterFirst);
-    await worker.cleanup();
+    expect(counts.dependencies).toBe(callsAfterFirst);
   });
 });
 
 describe('request-scoped freshness on a watcherless filesystem', () => {
   it('(h) resolves an unchanged closure once and resolves again after an edit', async () => {
-    const { worker, files } = createHarness({ 'main.ts': 'v1' }, { watchable: false });
+    const { worker, files, counts } = await createHarness({ 'main.ts': 'v1' }, { watchable: false });
 
     const first = await evaluationHash(worker, 'main.ts');
-    expect(worker.getDependencyCalls).toBe(1);
+    expect(counts.dependencies).toBe(1);
 
     /* Q5/EQ7: revalidation is the freshness evidence on every adapter, so a watcherless
      * adapter no longer pays a re-bundle per call for bytes that did not move. */
     const second = await evaluationHash(worker, 'main.ts');
     expect(second).toBe(first);
-    expect(worker.getDependencyCalls).toBe(1);
+    expect(counts.dependencies).toBe(1);
 
     files.set('main.ts', 'v2');
     const third = await evaluationHash(worker, 'main.ts');
     expect(third).not.toBe(first);
-    expect(worker.getDependencyCalls).toBe(2);
-    await worker.cleanup();
+    expect(counts.dependencies).toBe(2);
   });
 });
 
-describe('a refused arm leaves nothing reusable (I2, R2)', () => {
-  it('(i) does not reuse volatile caches when the arm was refused', async () => {
-    /* The watcher resyncs while the subscription is being installed, so events may have been
-     * missed and the arm is refused — with nothing to invalidate, because no path moved.
-     * `createGeometry` is the observer here: it publishes an artifact without revalidating,
-     * so its reuse has to be justified by a committed subscription, and "the filesystem can
-     * watch" is not evidence that it is watching. */
-    const harness = createHarness({ 'main.ts': 'v1' });
-    harness.watch.mockImplementation((_request, handler: (event: WatchEvent) => void) => {
+describe('a refused arm leaves nothing stale reusable (I2, R2)', () => {
+  it('(i) retries a reset during watch installation before publishing', async () => {
+    const harness = await createHarness({ 'main.ts': 'v1' });
+    harness.watch.mockImplementationOnce((_request, handler: (event: WatchEvent) => void) => {
       handler({ type: 'reset' });
       return harness.unsubscribe;
     });
-
-    await evaluationHash(harness.worker, 'main.ts');
-    expect(harness.watch).toHaveBeenCalled();
-    expect(harness.worker.getWatchedPaths().has('main.ts')).toBe(false);
-    const callsAfterFirst = harness.worker.getDependencyCalls;
-
+    const first = await evaluationHash(harness.worker, 'main.ts', { watch: true });
+    expect(harness.watch).toHaveBeenCalledTimes(2);
+    expect(harness.unsubscribe).toHaveBeenCalled();
     harness.files.set('main.ts', 'v2');
-    const published = await harness.worker.createGeometry({ file: createGeometryFile('main.ts'), parameters: {} });
-
-    expect(published.success).toBe(true);
-    expect(harness.worker.getDependencyCalls).toBe(callsAfterFirst + 1);
-    // @ts-expect-error - hashing through the worker keeps the digest definition in one place.
-    const rewritten = await harness.worker.hashContent(new TextEncoder().encode('v2'));
-    // @ts-expect-error - the retained hash is the private evidence the published render resolved from.
-    expect(harness.worker.fileHashCache.get('main.ts')).toBe(rewritten);
-    await harness.worker.cleanup();
+    const fresh = await evaluationHash(harness.worker, 'main.ts', { watch: true });
+    expect(fresh).not.toBe(first);
+    expect(harness.counts.dependencies).toBeGreaterThan(1);
   });
 
-  it('(j) drops what a path that moved under a refused arm was resolved into (R2)', async () => {
-    /* The entry is rewritten while the subscription is being installed. The arm is refused
-     * because the render it would cover is already stale; what must not survive the refusal
-     * is anything resolved from the bytes it disagreed with. The retained *hash* does
-     * survive, on purpose: it is the last revision this worker observed, and the queued
-     * change event is reported as a change only by comparison against it. */
-    const harness = createHarness({ 'main.ts': 'v1' });
-    harness.watch.mockImplementation(() => {
-      harness.files.set('main.ts', 'v2');
+  it('(j) rejects products resolved from bytes changed during watch installation', async () => {
+    const harness = await createHarness({ 'main.ts': 'v1', 'dep.ts': 'old' }, { dependency: 'dep.ts' });
+    harness.watch.mockImplementation((request) => {
+      if (request.paths.includes('dep.ts')) {
+        harness.files.set('main.ts', 'v2');
+        harness.files.set('dep.ts', 'new');
+      }
       return harness.unsubscribe;
     });
-
-    await evaluationHash(harness.worker, 'main.ts');
-
-    expect(harness.worker.getWatchedPaths().has('main.ts')).toBe(false);
-    // @ts-expect-error - the bundle is what a later operation could otherwise have been answered from.
-    expect(harness.worker.bundleResultCache.has('main.ts')).toBe(false);
-    // @ts-expect-error - the parameter cache is the other reusable product of those bytes.
-    expect(harness.worker.parameterResultCache).toBeUndefined();
-    // @ts-expect-error - hashing through the worker keeps the digest definition in one place.
-    const observed = await harness.worker.hashContent(new TextEncoder().encode('v1'));
-    // @ts-expect-error - the ledger keeps the last observed revision so the queued event still reads as a change.
-    expect(harness.worker.fileHashCache.get('main.ts')).toBe(observed);
-    await harness.worker.cleanup();
+    const observed = await evaluationHash(harness.worker, 'main.ts', { watch: true });
+    const description = await harness.worker.describe({ file: createGeometryFile('main.ts') });
+    expect(description.success && description.parameters.defaults['label']).toBe('v2');
+    expect(harness.counts.dependencies).toBeGreaterThan(1);
+    // The entry is armed before discovery; the discovered closure still refuses then retries once.
+    expect(harness.watch.mock.calls.filter(([request]) => request.paths.includes('dep.ts'))).toHaveLength(2);
+    expect(harness.watch).toHaveBeenCalledTimes(3);
+    expect(await evaluationHash(harness.worker, 'main.ts', { watch: true })).toBe(observed);
   });
 });
 
@@ -334,28 +354,30 @@ describe('revalidation keeps the observation ledger coherent', () => {
      * *deleted* the entry made the preview spend its next change event re-establishing a
      * baseline, and that edit never reached the screen. The ledger has to keep saying which
      * revision this worker last observed. */
-    const harness = createHarness({ 'main.ts': 'v1', 'other.ts': 'o1' });
-    const published: string[] = [];
-    harness.worker.onGeometryComputed = ({ renderId }) => {
-      published.push(renderId);
+    const harness = await createHarness({ 'main.ts': 'v1', 'other.ts': 'o1' });
+    const published: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    harness.worker.onRendered = (event) => {
+      published.push(event);
     };
-    const settled = Promise.withResolvers<void>();
-    harness.worker.onStateChanged = ({ state }) => {
-      if (state === 'idle' || state === 'error') {
-        settled.resolve();
-      }
-    };
-
-    harness.worker.handleOpenFile({
-      renderId: '550e8400-e29b-41d4-a716-000000000401',
+    harness.worker.handleOpenDocument({
+      documentId: 'live',
+      intent: 0,
       file: createGeometryFile('main.ts'),
       parameters: {},
+      watch: true,
     });
-    await settled.promise;
-    expect(published).toHaveLength(1);
+    harness.worker.handleOpenView({
+      documentId: 'live',
+      subscriptionId: 'live-view',
+      requestId: 'initial',
+      view: 'model',
+    });
+    await vi.waitFor(() => {
+      expect(published).toHaveLength(1);
+    });
     expect(harness.worker.getWatchedPaths().has('main.ts')).toBe(true);
 
-    /* The preview's entry moves without an event — a staged agent write, or one the watcher
+    /* The preview's entry moves without an event — a staged agent export, or one the watcher
      * coalesced — and the agent's next tool call is about a different entry. */
     harness.files.set('main.ts', 'v2');
     await evaluationHash(harness.worker, 'other.ts');
@@ -365,8 +387,13 @@ describe('revalidation keeps the observation ledger coherent', () => {
     harness.deliver({ type: 'change', path: 'main.ts' });
 
     await vi.waitFor(() => {
-      expect(published.length).toBeGreaterThan(1);
+      expect(published.at(-1)).toMatchObject({
+        success: true,
+        artifact: {
+          mimeType: 'image/svg+xml',
+          content: '<svg xmlns="http://www.w3.org/2000/svg"><text>v3</text></svg>',
+        },
+      });
     });
-    await harness.worker.cleanup();
   });
 });

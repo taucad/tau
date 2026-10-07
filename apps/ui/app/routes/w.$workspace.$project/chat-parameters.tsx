@@ -15,7 +15,7 @@ import { useCallback, memo, useState, useMemo, useRef, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
-import { PaneviewReact } from 'dockview-react';
+import { Paneview } from '#components/panes/paneview.js';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { toast } from '#components/ui/sonner.js';
@@ -168,7 +168,7 @@ function ParameterAuthorityFailure({
   const unreadable = failure.code === unreadableRecordCode;
   return (
     <div role='alert' className='flex flex-col items-start gap-2 p-3 text-sm'>
-      <p className='text-destructive'>
+      <p className='text-feature'>
         {unreadable ? 'Saved parameter values for this model cannot be read.' : 'Parameters could not be loaded.'}
       </p>
       <p className='text-muted-foreground'>{failure.message}</p>
@@ -521,33 +521,61 @@ const liveDragRenderBudget = 250;
 /**
  * Whether this unit's last settled render took at most {@link liveDragRenderBudget}.
  *
- * Timed from entering `rendering` to reaching `idle` for one request, so a render another request
- * replaced, one that failed, and one already running at mount are never counted. `false` until the
- * first render is timed.
+ * Timed from the default subscription entering `rendering` to reaching `ready`.
+ * Repeated rendering status for the same CAD attempt is ignored; a replaced attempt starts fresh.
+ * A failed projection or one already running at mount is never counted.
  */
 function useLastRenderWithinBudget(cadRef: ActorRefFrom<typeof cadMachine>): boolean {
   const [isWithinBudget, setIsWithinBudget] = useState(false);
 
   useEffect(() => {
-    const initial: SnapshotFrom<typeof cadMachine> = cadRef.getSnapshot();
-    let timed: { requestId: number; startedAt: number | undefined } | undefined = initial.matches('rendering')
-      ? { requestId: initial.context.lastRequestedRenderId, startedAt: undefined }
-      : undefined;
-    const subscription = cadRef.subscribe((snapshot: SnapshotFrom<typeof cadMachine>) => {
-      const { lastRequestedRenderId: requestId } = snapshot.context;
-      if (snapshot.matches('rendering')) {
-        if (timed?.requestId !== requestId) {
-          timed = { requestId, startedAt: performance.now() };
+    let selectedView = cadRef.getSnapshot().context.defaultView;
+    let startedAt: number | undefined;
+    let previousStatus: 'rendering' | 'ready' | 'error' | 'closed' | undefined;
+    let startedAttempt: number | undefined;
+    let startedEvaluationId: string | undefined;
+    const listen = (view: typeof selectedView): (() => void) | undefined =>
+      view?.on('status', (status) => {
+        const { openAttempt, evaluation } = cadRef.getSnapshot().context;
+        if (status === 'rendering') {
+          if (
+            previousStatus !== 'rendering' ||
+            startedAttempt !== openAttempt ||
+            startedEvaluationId !== evaluation?.id
+          ) {
+            startedAt = previousStatus === undefined ? undefined : performance.now();
+            startedAttempt = openAttempt;
+            startedEvaluationId = evaluation?.id;
+          }
+        } else {
+          if (
+            status === 'ready' &&
+            startedAt !== undefined &&
+            startedAttempt === openAttempt &&
+            startedEvaluationId === evaluation?.id
+          ) {
+            setIsWithinBudget(performance.now() - startedAt <= liveDragRenderBudget);
+          }
+          startedAt = undefined;
         }
+        previousStatus = status;
+      });
+    let unlisten = listen(selectedView);
+    const subscription = cadRef.subscribe((snapshot: SnapshotFrom<typeof cadMachine>) => {
+      if (snapshot.context.defaultView === selectedView) {
         return;
       }
-      if (timed?.startedAt !== undefined && timed.requestId === requestId && snapshot.matches('idle')) {
-        setIsWithinBudget(performance.now() - timed.startedAt <= liveDragRenderBudget);
-      }
-      timed = undefined;
+      unlisten?.();
+      selectedView = snapshot.context.defaultView;
+      startedAt = undefined;
+      previousStatus = undefined;
+      startedAttempt = undefined;
+      startedEvaluationId = undefined;
+      unlisten = listen(selectedView);
     });
     return () => {
       subscription.unsubscribe();
+      unlisten?.();
     };
   }, [cadRef]);
 
@@ -1051,7 +1079,7 @@ function ParametersPaneview({
   }, [filterTerm]);
 
   return (
-    <PaneviewReact
+    <Paneview
       key={paneviewKey}
       className={paneviewAttachedSurfaceStyleOverrides}
       components={paneviewComponents}

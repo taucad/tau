@@ -1,0 +1,124 @@
+name: 'Prepare GeoSpec engine products'
+description: 'Darwin ARM64, after setup-nx with Node 24.10.0: provision the pinned toolchains, restore retained preparation and run prepare-geospec-ci-artifacts'
+
+# `prepare-geospec-ci-artifacts` reuses a verified transport already in the checkout,
+# reassembles its delivery for the current source, or builds everything. Building means
+# compiling OCCT twice (native and WASM) unless the retained preparation for this exact
+# toolchain generation was restored first; only the products are then compiled.
+
+inputs:
+  rebuild:
+    description: '`true` builds the products even when Nx Cloud holds them, so the OCCT and toolchain preparation exists to be retained'
+    default: 'false'
+
+outputs:
+  generation:
+    description: 'The delivery generation (selected toolchains and OCCT recipe) this host resolved'
+    value: ${{ steps.generation.outputs.generation }}
+  preparation-hit:
+    description: '`true` when the retained OCCT and toolchain preparation was restored'
+    value: ${{ steps.preparation.outputs.cache-hit }}
+  cargo-hit:
+    description: '`true` when the Cargo registry for the locked crate graphs was restored'
+    value: ${{ steps.cargo.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup producer Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      with:
+        python-version: '3.13.14'
+
+    # The hosted label is not a capacity qualification. Fail before source/SDK
+    # downloads if the existing sources/tools/prefixes reserve (19 GiB) is unavailable.
+    - name: Check producer host, capacity and installed tools
+      shell: bash
+      run: |
+        test "$(uname -s)" = Darwin
+        test "$(uname -m)" = arm64
+        node --input-type=module -e 'import {statfsSync} from "node:fs"; const s=statfsSync("."); const available=s.bavail*s.bsize; const required=19*1024**3; console.log({available,required}); if(available<required) throw new Error("GeoSpec producer capacity unavailable");'
+        python3 -c 'import sys; assert sys.version_info >= (3, 12); print(sys.version)'
+        cmake --version
+        ninja --version
+        xcrun --find clang++
+
+    - name: Setup selected CPython 3.13 tooling
+      id: python313
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      with:
+        python-version: '3.13.14'
+        update-environment: false
+
+    - name: Setup selected CPython 3.14 tooling
+      id: python314
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      with:
+        python-version: '3.14.7'
+        update-environment: false
+
+    - name: Provision pinned Python wrapper tooling
+      shell: bash
+      env:
+        GEOSPEC_PYTHON313: ${{ steps.python313.outputs.python-path }}
+        GEOSPEC_PYTHON314: ${{ steps.python314.outputs.python-path }}
+      run: |
+        python3 - <<'PYTHON'
+        import os
+        from pathlib import Path
+        import re
+        import subprocess
+        import tomllib
+
+        project = Path('packages/geospec-engine-native/bindings/python/pyproject.toml')
+        requirements = tomllib.loads(project.read_text())['build-system']['requires']
+        assert len(requirements) == 1 and re.fullmatch(r'maturin==[0-9]+\.[0-9]+\.[0-9]+', requirements[0])
+        for selector, name in [('GEOSPEC_PYTHON313', 'python-venv'), ('GEOSPEC_PYTHON314', 'python314-venv')]:
+            environment = Path('node_modules/.cache/geospec-engine-native') / name
+            subprocess.run([os.environ[selector], '-m', 'venv', str(environment)], check=True)
+            subprocess.run([str(environment / 'bin/python'), '-m', 'pip', 'install',
+                            '--disable-pip-version-check', '--only-binary=:all:', '--no-deps', requirements[0]], check=True)
+            subprocess.run([str(environment / 'bin/python'), '--version'], check=True)
+            subprocess.run([str(environment / 'bin/maturin'), '--version'], check=True)
+        PYTHON
+
+    - name: Install the selected native Rust toolchain
+      shell: bash
+      run: |
+        rustup toolchain install 1.88 --profile minimal
+        rustup run 1.88 rustc --version
+
+    # The generation digests the OCCT recipe and every selected host tool, compiler and SDK,
+    # so a runner-image update selects a new, empty preparation rather than a stale one.
+    - name: Select the delivery generation
+      id: generation
+      shell: bash
+      run: echo "generation=$(python3 -B packages/geospec-engine-native/scripts/prepare-delivery.py generation)" >> "$GITHUB_OUTPUT"
+
+    # Saved only from runs on `main` and the integration branch (geospec-preparation-save),
+    # so pull requests restore the shared entry instead of each storing gigabytes.
+    - name: Restore retained OCCT and toolchain preparation
+      id: preparation
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        key: geospec-preparation-v1-${{ steps.generation.outputs.generation }}
+        path: node_modules/.cache/geospec-engine-native/delivery-wasm-eh/generations
+
+    # Source-kit assembly reads the locked crates' licence material offline from this registry.
+    - name: Restore the Cargo registry for the locked crate graphs
+      id: cargo
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        key: geospec-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/geospec-engine-native/rust/Cargo.lock', 'packages/geospec-engine-native/bindings/*/Cargo.lock', 'packages/geospec-engine-native/native/**/Cargo.lock') }}
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/registry/src
+          ~/.cargo/git/db
+
+    # A remote cache hit restores the products without building, which leaves no preparation
+    # to retain; `rebuild` refills a preparation entry that was evicted while the products
+    # stayed in Nx Cloud.
+    - name: Prepare complete current-source transport
+      shell: bash
+      run: pnpm nx run-many -t prepare-geospec-ci-artifacts --parallel=1 ${{ inputs.rebuild == 'true' && '--skip-nx-cache' || '' }}

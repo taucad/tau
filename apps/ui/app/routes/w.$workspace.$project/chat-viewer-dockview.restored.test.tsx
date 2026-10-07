@@ -120,6 +120,19 @@ vi.mock('#components/panes/dockview.js', () => ({
       return {
         panels,
         groups: [{}],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview's public API spells this method fromJSON.
+        fromJSON: () => {
+          panels.splice(0, panels.length, main, secondary);
+          refresh((value) => value + 1);
+        },
+        addPanel: ({ id, params }: { id: string; params: { viewId: string; entryPath: string } }) => {
+          panels.push({ id, params, api: main.api });
+          refresh((value) => value + 1);
+        },
+        clear: () => {
+          panels.length = 0;
+          refresh((value) => value + 1);
+        },
         onDidLayoutChange: subscribe,
         onDidActivePanelChange: subscribe,
         onDidAddPanel: subscribe,
@@ -169,6 +182,34 @@ describe('restored viewer layout admission', () => {
     expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', 'main.ts');
   });
 
+  it('admits hidden editor view settings without geometry or canvas demand', () => {
+    render(<ViewerDockview profile='editor' />);
+    expect(screen.queryByTestId('content:other.ts')).not.toBeInTheDocument();
+    expect(fixture.projectSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'createViewGraphics', viewId: 'secondary-view' }),
+    );
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'createGeometryUnit', entryPath: 'other.ts' }),
+    );
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'setViewerGeometryDemand', viewId: 'secondary-view', entryPath: 'other.ts' }),
+    );
+  });
+
+  it('defers hidden shared-profile view settings and geometry until reveal', () => {
+    render(<ViewerDockview profile='shared' />);
+    expect(screen.queryByTestId('content:other.ts')).not.toBeInTheDocument();
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'createViewGraphics', viewId: 'secondary-view' }),
+    );
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'createGeometryUnit', entryPath: 'other.ts' }),
+    );
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'setViewerGeometryDemand', viewId: 'secondary-view', entryPath: 'other.ts' }),
+    );
+  });
+
   it('admits main immediately and defers a distinct hidden entry until reveal', () => {
     render(<ViewerDockview />);
 
@@ -177,7 +218,7 @@ describe('restored viewer layout admission', () => {
     expect(fixture.projectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: 'main.ts',
-      renderTimeout: undefined,
+      operationTimeout: undefined,
     });
     expect(fixture.projectSend).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'createGeometryUnit', entryPath: 'other.ts' }),
@@ -190,7 +231,7 @@ describe('restored viewer layout admission', () => {
     expect(fixture.projectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: 'other.ts',
-      renderTimeout: undefined,
+      operationTimeout: undefined,
     });
 
     act(() => {
@@ -216,7 +257,7 @@ describe('restored viewer layout admission', () => {
     expect(fixture.nextProjectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: 'main.ts',
-      renderTimeout: undefined,
+      operationTimeout: undefined,
     });
     expect(fixture.nextProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ entryPath: 'other.ts' }));
   });

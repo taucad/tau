@@ -37,7 +37,7 @@ export const expectCount = async (locator: Locator, count: number, timeout = 30_
 export const composerOf = (page: Page): Locator => page.locator(composerSelector).first();
 
 /** The chat's stop button — present exactly while a run is in flight. */
-export const stopButtonOf = (page: Page): Locator => page.locator('button:has(svg.lucide-square)').last();
+export const stopButtonOf = (page: Page): Locator => page.getByRole('button', { name: 'Stop', exact: true }).last();
 
 const filesPaneOf = (page: Page): Locator => page.getByRole('region', { name: /^Files for /u }).first();
 
@@ -154,7 +154,7 @@ export const openAgentList = async (page: Page): Promise<readonly string[]> => {
  * @param page - The desktop page.
  * @param agentName - The agent's row name, e.g. `Codex`.
  * @param modelName - The agent's own model name; absent takes the agent's first row.
- * @returns The sheet's *Runs on* note for the placed agent, read before the sheet closes.
+ * @returns The trigger's accessible name once the agent is placed — `Agent and model: Codex, <model>…`.
  */
 export const selectAgent = async (page: Page, agentName: string, modelName?: string): Promise<string> => {
   const row = agentList(page).getByRole('option', { name: new RegExp(`^${agentName}`, 'u') });
@@ -164,11 +164,12 @@ export const selectAgent = async (page: Page, agentName: string, modelName?: str
   await row.click();
   const options = page.getByRole('option');
   await (modelName === undefined ? options : options.filter({ hasText: modelName })).first().click();
-  const runsOn = page.locator('[data-slot="runs-on"]');
-  await expectVisible(runsOn);
-  const note = (await runsOn.textContent()) ?? '';
+  /* Choosing a model returns to the sheet; the trigger then names the placed agent and model. */
+  await expectVisible(page.getByRole('button', { name: /^Model: .*\. Change$/u }));
   await page.keyboard.press('Escape');
-  return note;
+  const trigger = page.getByRole('button', { name: new RegExp(`^Agent and model: ${agentName}\\b`, 'u') }).first();
+  await expectVisible(trigger);
+  return (await trigger.getAttribute('aria-label')) ?? '';
 };
 
 /**

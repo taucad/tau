@@ -1,23 +1,28 @@
-import type { RuntimeClient, RuntimeExportOptions } from '@taucad/runtime/client';
-import type { TelemetryEntry } from '@taucad/runtime';
+import type { RuntimeClient } from '@taucad/runtime/client';
+import type { TelemetryBatch, TelemetryEntry } from '@taucad/runtime';
 import type { ExportFile } from '@taucad/types';
 import type { SvgPngOptions, SvgWebpOptions } from '@taucad/image/svg';
 import { canonicalJson } from '@taucad/utils/hash';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
-import type { RuntimeKernels, RuntimeMiddleware, RuntimeTranscoders } from '@taucad/runtime/worker';
 import type { imageRuntime } from '#runtime/image-runtime.definition.js';
+import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import { headlessImageBackend } from '#services/headless-image-backend.js';
-import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
-type ImageFormat = Extract<Parameters<RuntimeClient<typeof imageRuntime>['export']>[0], 'jpeg' | 'png' | 'webp'>;
-type ImageExportOptions<Format extends ImageFormat> = RuntimeExportOptions<
-  RuntimeKernels<typeof imageRuntime>,
-  RuntimeMiddleware<typeof imageRuntime>,
-  RuntimeTranscoders<typeof imageRuntime>,
-  Format
->;
+type GlbTranscodeInput = Parameters<RuntimeClient<typeof imageRuntime>['transcode']>[0];
+type SvgTranscodeInput = Extract<Parameters<RuntimeClient<typeof runtime>['transcode']>[0], { readonly from: 'svg' }>;
+type ImageTranscodeInput = GlbTranscodeInput | SvgTranscodeInput;
+type ImageFormat = GlbTranscodeInput['to'];
+type ImageExportOptions<Format extends ImageFormat> = Extract<
+  GlbTranscodeInput,
+  { readonly from: 'glb'; readonly to: Format }
+>['options'];
+type ImageClient = Pick<RuntimeClient, 'connect' | 'terminate'> & {
+  transcode(input: ImageTranscodeInput): ReturnType<RuntimeClient<typeof imageRuntime>['transcode']>;
+  on(event: 'telemetry', handler: (batch: TelemetryBatch) => void): () => void;
+};
 
 type HeadlessImageJobBase = {
   readonly kind: 'automatic-thumbnail' | 'manual-thumbnail' | 'capture';
@@ -34,7 +39,7 @@ type HeadlessGlbImageJob = {
     readonly geometryHash: string;
     readonly content: Uint8Array<ArrayBuffer>;
     readonly format: Format;
-    readonly exportOptions: NonNullable<ImageExportOptions<Format>['exportOptions']>;
+    readonly exportOptions: ImageExportOptions<Format>;
   };
 }[ImageFormat];
 
@@ -52,7 +57,7 @@ export type HeadlessImageJob = HeadlessGlbImageJob | HeadlessSvgImageJob;
 
 /** Host-selected execution, separate from the shared image queue and lifecycle. */
 export type HeadlessImageBackend = {
-  readonly createImageClient: () => Promise<AppRuntimeClient>;
+  readonly createImageClient: () => Promise<ImageClient>;
   readonly isGpuAvailable?: () => boolean | Promise<boolean>;
   /** Automatic previews may be deferred on a software adapter that stalls the viewport. */
   readonly isAutomaticGpuAvailable?: () => boolean | Promise<boolean>;
@@ -197,7 +202,7 @@ export class HeadlessImageService {
   // oxlint-disable-next-line typescript/parameter-properties -- UI uses erasableSyntaxOnly, which forbids TypeScript parameter properties.
   private readonly dependencies: HeadlessImageServiceDependencies;
   private readonly backend: HeadlessImageBackend;
-  private imageClient: AppRuntimeClient | undefined;
+  private imageClient: ImageClient | undefined;
   private successfulGlbRender = false;
   private queue: QueuedJob[] = [];
   private activeJob: QueuedJob | undefined;
@@ -247,7 +252,7 @@ export class HeadlessImageService {
     if (
       job.kind === 'automatic-thumbnail' &&
       job.sourceFormat === 'glb' &&
-      job.exportOptions['mode'] === 'batch' &&
+      job.exportOptions.mode === 'batch' &&
       !this.successfulGlbRender
     ) {
       throw new HeadlessImageError(
@@ -478,13 +483,22 @@ export class HeadlessImageService {
         ? { name: 'render.svg', bytes: new TextEncoder().encode(job.content), mimeType: 'image/svg+xml' }
         : { name: 'render.glb', bytes: job.content, mimeType: 'model/gltf-binary' };
     const inputBytes = source.bytes.byteLength;
-    const result = await client.transcode({
-      from: job.sourceFormat,
-      to: job.format,
-      files: [source],
-      options: job.exportOptions ?? {},
-      ...(job.signal === undefined ? {} : { signal: job.signal }),
-    });
+    const result =
+      job.sourceFormat === 'svg'
+        ? await client.transcode({
+            from: 'svg',
+            to: job.format,
+            files: [source],
+            options: job.exportOptions ?? {},
+            ...(job.signal === undefined ? {} : { signal: job.signal }),
+          })
+        : await client.transcode({
+            from: 'glb',
+            to: job.format,
+            files: [source],
+            options: job.exportOptions,
+            ...(job.signal === undefined ? {} : { signal: job.signal }),
+          });
     recordHeadlessImageTiming('runtime.transcode', transcodeStartedAt, {
       kind: job.kind,
       identity: job.identity,
@@ -504,7 +518,7 @@ export class HeadlessImageService {
     return result.data;
   }
 
-  private async getImageClient(): Promise<AppRuntimeClient> {
+  private async getImageClient(): Promise<ImageClient> {
     if (this.imageClient) {
       recordHeadlessImageTiming('worker.ready', performance.now(), { cold: false });
       return this.imageClient;
@@ -512,7 +526,9 @@ export class HeadlessImageService {
     if (this.backend.isGpuAvailable && !(await this.backend.isGpuAvailable())) {
       throw new HeadlessImageError(
         'adapter-unavailable',
-        'WebGPU is unavailable; update your browser or use the Tau CLI for image exports.',
+        isDesktopTarget()
+          ? 'WebGPU is unavailable on this computer; use the Tau CLI for image exports.'
+          : 'WebGPU is unavailable; update your browser or use the Tau CLI for image exports.',
       );
     }
     const { generation } = this;

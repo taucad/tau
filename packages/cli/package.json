@@ -68,6 +68,7 @@
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "catalog:",
     "@agentclientprotocol/codex-acp": "catalog:",
+    "@parcel/watcher": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/assimp": "workspace:*",
     "@taucad/bambu": "workspace:*",
@@ -89,6 +90,7 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "citty": "catalog:",
     "consola": "catalog:",
     "ink": "catalog:",

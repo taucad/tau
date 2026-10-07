@@ -7,7 +7,7 @@
 import { codedFailureDetail } from '#harness/coded-failure.js';
 import type { DriverHandle, DriverReport } from '#host/chat-run-effects.js';
 import { externalRefusalOf, externalStopDetail, externalStopStates } from '#host/run-history.js';
-import type { ExternalAgentLogEvent, ExternalAgentPort, ExternalAgentTurn } from '#host/tau-agent-host.js';
+import type { ExternalAgentLogEvent, ExternalAgentPort, ExternalAgentTurn } from '#host/external-agent.js';
 import type { InterruptResolution } from '#waist/ports.js';
 
 /** What starting one external attempt takes. */

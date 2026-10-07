@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { clearGeoSpecEngine, registerGeoSpecEngine } from 'geospec/engine';
+import { mock } from 'vitest-mock-extended';
+import { createModelLoader as createCanonicalModelLoader } from 'geospec/model';
+import type { GeoSpecSubject } from 'geospec/model';
+import type { GeoSpecNativeModelEngine } from 'geospec/runner/native';
+import {
+  clearGeoSpecEngine,
+  getGeoSpecEngineProtocol,
+  registerGeoSpecEngine,
+  geoSpecMatcherRegistryVersion,
+} from 'geospec/engine';
 import { geoSpecEngineImplementation } from '#register.js';
 import type { GeoSpecRunnerEvent, GeoSpecRunnerOptions } from 'geospec/runner/worker';
 import type { GeometrySubject } from '#mesh/types.js';
-import type { GeometrySubject as PublicGeometrySubject } from 'geospec/mesh';
 import { exposeEngineSubject } from '#engine/subject-store.js';
-import { loadMesh } from '#mesh/load-mesh.js';
 import { getOccurrenceSolid } from '#proofs/occurrence-solids.js';
 import {
   accumulateFileResult,
@@ -40,22 +47,45 @@ const emptyStepSubject = (): GeometrySubject => {
   return subject as unknown as GeometrySubject;
 };
 
-const exposed = (subject: GeometrySubject): PublicGeometrySubject => exposeEngineSubject(subject);
-const loadedSubject = async (): Promise<GeometrySubject> => {
-  const result = await loadMesh({ source: { format: 'mesh-buffer', positions: [0, 0, 0, 1, 0, 0, 0, 1, 0] } });
-  if (!result.success) {
-    throw new Error(result.diagnostics.map(({ message }) => message).join('\n'));
-  }
-  return result.subject;
-};
-
 const runnerOptions = (files: Readonly<Record<string, string>>): GeoSpecRunnerOptions => ({
   filesystem: memoryFileSystem(files),
 });
 
+const initializeResponse = (): Uint8Array<ArrayBuffer> =>
+  new TextEncoder().encode(
+    JSON.stringify({
+      requestId: 'configuration',
+      result: {
+        canonicalProfile: 'geospec-jcs-v1',
+        protocolVersion: 3,
+        registryVersion: 5,
+        configuration: { binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 } },
+      },
+    }),
+  );
+
+const canonicalLoaderFixture = () => {
+  const engine = mock<GeoSpecNativeModelEngine>();
+  engine.processRequest.mockReturnValue(initializeResponse());
+  const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+  const subjectHash = 'a'.repeat(64);
+  engine.ingestSubject.mockReturnValue(encode({ result: { subject: { subjectHash } } }));
+  engine.subjectHandle.mockReturnValue(encode({ result: { subjectHandle: { subjectHash, generation: 1 } } }));
+  engine.releaseSubject.mockReturnValue(encode({ result: {} }));
+  return createCanonicalModelLoader({ engine });
+};
+
 describe('countRunnerTests', () => {
-  it('should count pass and fail and ignore skips', () => {
-    expect(countRunnerTests([testCase('passed'), testCase('failed'), testCase('skipped')])).toStrictEqual({
+  it('should count only explicit passes and failures, never unresolved outcomes', () => {
+    const statuses: Array<GeoSpecTestCase['status']> = [
+      'passed',
+      'failed',
+      'skipped',
+      'unsupported',
+      'inconclusive',
+      'not-run',
+    ];
+    expect(countRunnerTests(statuses.map((status) => testCase(status)))).toStrictEqual({
       passed: 1,
       failed: 1,
     });
@@ -87,41 +117,45 @@ describe('accumulateFileResult', () => {
 });
 
 describe('createSerialRunContext', () => {
-  it('should track every resolved subject in the run-wide scope', async () => {
-    const subject = await loadedSubject();
-    const context = createSerialRunContext({ modelLoader: async () => exposed(subject) });
-
-    await context.modelLoader?.({ file: 'main.ts' });
-    await context.resourceScope.dispose();
-
-    expect(context.resourceScope.disposed).toBe(true);
+  it('should retain canonical opaque subject ownership without reference-engine projection', async () => {
+    const engine = mock<GeoSpecNativeModelEngine>();
+    engine.processRequest.mockReturnValue(initializeResponse());
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    const subjectHash = 'a'.repeat(64);
+    engine.ingestSubject.mockReturnValue(encode({ result: { subject: { subjectHash } } }));
+    engine.subjectHandle.mockReturnValue(encode({ result: { subjectHandle: { subjectHash, generation: 1 } } }));
+    engine.releaseSubject.mockReturnValue(encode({ result: {} }));
+    const loader = createCanonicalModelLoader({ engine });
+    const context = createSerialRunContext({ modelLoader: loader });
+    try {
+      const subject = await context.modelLoader?.({ source: Uint8Array.of(1), format: 'step' });
+      expect(subject).toEqual({});
+      expect(subject).not.toHaveProperty('subjectId');
+      expect(engine.releaseSubject).not.toHaveBeenCalled();
+    } finally {
+      await context.resourceScope.dispose();
+    }
+    expect(engine.releaseSubject).toHaveBeenCalledOnce();
   });
 
-  it('should record only the FIRST load key per file', async () => {
-    const subject = await loadedSubject();
-    const context = createSerialRunContext({ modelLoader: async () => exposed(subject) });
-
-    context.beginFile();
-    await context.modelLoader?.({ file: 'a.ts' });
-    const first = context.fileLoadKey();
-    await context.modelLoader?.({ file: 'b.ts' });
-
-    expect(first).toBeDefined();
-    expect(context.fileLoadKey()).toBe(first);
-
-    context.beginFile();
-    expect(context.fileLoadKey()).toBeUndefined();
+  it('should preserve the loader and read every repeated source and variant afresh', async () => {
+    const loader = vi.fn(async () => mock<GeoSpecSubject>());
+    const context = createSerialRunContext({ modelLoader: loader });
+    expect(context.modelLoader).toBe(loader);
+    const first = await context.modelLoader?.({ file: 'a.ts', parameters: { height: 1 } });
+    const second = await context.modelLoader?.({ file: 'a.ts', parameters: { height: 1 } });
+    await context.modelLoader?.({ file: 'a.ts', parameters: { height: 2 } });
+    expect(first).not.toBe(second);
+    expect(loader.mock.calls).toEqual([
+      [{ file: 'a.ts', parameters: { height: 1 } }],
+      [{ file: 'a.ts', parameters: { height: 1 } }],
+      [{ file: 'a.ts', parameters: { height: 2 } }],
+    ]);
+    await context.resourceScope.dispose();
   });
 
   it('should keep an absent loader absent rather than inventing one', () => {
     expect(createSerialRunContext({}).modelLoader).toBeUndefined();
-  });
-
-  it('should reject a model loader that returns a forged detached subject', async () => {
-    const context = createSerialRunContext({
-      modelLoader: async () => ({ subjectId: 'forged' }) as unknown as PublicGeometrySubject,
-    });
-    await expect(context.modelLoader?.({ file: 'main.ts' })).rejects.toThrow(/ingested subject reference/u);
   });
 
   it('should clear prepared occurrence solids when the run scope ends', async () => {
@@ -155,7 +189,7 @@ describe('executeGeoSpecFile', () => {
 
     const result = await executeGeoSpecFile({ runner, context, file: 'spec.geospec.ts', collectOnly: true });
 
-    expect(result.success && result.tests.every((test) => test.status === 'skipped')).toBe(true);
+    expect(result.success && result.tests.map((test) => test.status)).toEqual(['not-run']);
   });
 
   it('should thread the test filters through', async () => {
@@ -179,6 +213,61 @@ describe('createSerialGeoSpecRunner', () => {
     'first.geospec.ts': passingSpec('first'),
     'second.geospec.ts': passingSpec('second'),
   };
+
+  it('should qualify cross-file resource generations using actual locators, not aliases', async () => {
+    let generation = 0;
+    const spec = `import { it } from 'geospec'; import { loadModel } from 'geospec/model';
+      it('resource', async () => { await loadModel({ source: new Uint8Array([1]), format: 'gltf', resources: [{ name: 'alias.bin', source: 'textures/data.bin' }] }); });`;
+    const runner = createSerialGeoSpecRunner({
+      filesystem: memoryFileSystem({ 'first.geospec.ts': spec, 'second.geospec.ts': spec }),
+      nativeModelLoader: Object.assign(
+        async (): Promise<Awaited<ReturnType<NonNullable<GeoSpecRunnerOptions['nativeModelLoader']>>>> => ({
+          subjectHash: 'a'.repeat(64),
+          load: {
+            loadId: 'resource-load',
+            status: 'complete',
+            format: 'gltf',
+            parameters: {},
+            ingestOptions: {},
+            artifacts: [
+              {
+                name: 'alias.bin',
+                sourcePath: 'textures/data.bin',
+                sha256: (++generation === 1 ? 'b' : 'c').repeat(64),
+                byteLength: 1,
+              },
+            ],
+          },
+        }),
+        {
+          async releaseAll() {
+            /* This fixture retains no native handles. */
+          },
+        },
+      ),
+      nativeAssertions: { engine: mock<NonNullable<GeoSpecRunnerOptions['nativeAssertions']>['engine']>() },
+    });
+    const result = await runner.run({ files: ['first.geospec.ts', 'second.geospec.ts'] });
+    await runner.close();
+    expect(result).toMatchObject({ success: false, failed: 0, lineageStatus: 'mixed' });
+  });
+
+  it('should reject duplicate requested files before admission and preserve exact not-run accounting', async () => {
+    const runner = createSerialGeoSpecRunner(runnerOptions(twoFiles));
+    const starts = vi.fn();
+    runner.on('run-start', starts);
+    const files = ['first.geospec.ts', 'first.geospec.ts'];
+    const result = await runner.run({ files });
+    await runner.close();
+    expect(starts).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: false,
+      files: [],
+      lineageStatus: 'unavailable',
+      issues: [{ code: 'GEOSPEC_DUPLICATE_FILES' }],
+      accounting: { requestedFiles: files, completedFiles: [], notRunFiles: files, discoveryComplete: false },
+    });
+  });
 
   it('should run every file and emit the lifecycle in order', async () => {
     const events: GeoSpecRunnerEvent[] = [];
@@ -312,7 +401,7 @@ describe('the optional runner dependencies', () => {
           describe('deps', () => { it('sees the builtin', () => { if (note !== 'ok') throw new Error(note); }); });
         `,
       }),
-      stepLoader: async () => exposed(emptyStepSubject()),
+      stepLoader: async () => exposeEngineSubject(emptyStepSubject()),
       builtinModules: { 'project/extra': { version: '1', code: "export const note = 'ok';" } },
       internalProfile: profileCounters(),
     });
@@ -327,23 +416,101 @@ describe('the optional runner dependencies', () => {
 });
 
 describe('the remaining serial legs', () => {
-  it('should forward runner and protocol forensic spans for an observed matcher run', async () => {
-    const model = await loadedSubject();
+  it('should hold completion until the native loader finishes releasing its run', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const releaseAll = vi.fn(async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    const runner = createSerialGeoSpecRunner({
+      ...runnerOptions({ 'a.geospec.ts': passingSpec('a') }),
+      nativeModelLoader: Object.assign(async () => ({ subjectHash: 'a'.repeat(64), generation: 1 }), { releaseAll }),
+    });
+    let finished = false;
+    const running = (async () => {
+      const result = await runner.run({ files: ['a.geospec.ts'] });
+      finished = true;
+      return result;
+    })();
+    await entered.promise;
+    expect(finished).toBe(false);
+    release.resolve();
+    expect(await running).toMatchObject({ success: true, failed: 0 });
+    expect(releaseAll).toHaveBeenCalledOnce();
+    await runner.close();
+  });
+
+  it('should report native cleanup failure without inventing a geometry failure', async () => {
+    const releaseAll = vi.fn(async () => {
+      throw new Error('release refused');
+    });
+    const runner = createSerialGeoSpecRunner({
+      ...runnerOptions({ 'a.geospec.ts': passingSpec('a') }),
+      nativeModelLoader: Object.assign(async () => ({ subjectHash: 'a'.repeat(64), generation: 1 }), { releaseAll }),
+    });
+    expect(await runner.run({ files: ['a.geospec.ts'] })).toMatchObject({
+      success: false,
+      failed: 0,
+      passed: 1,
+      issues: [{ code: 'GEOSPEC_NATIVE_CLEANUP_FAILED', message: 'release refused' }],
+    });
+    expect(releaseAll).toHaveBeenCalledOnce();
+    await runner.close();
+  });
+
+  it('should refuse an aggregate pass when a completed module lacks consumed load lineage', async () => {
+    const runner = createSerialGeoSpecRunner({
+      filesystem: memoryFileSystem({
+        'missing-lineage.geospec.ts': `import { it } from 'geospec';
+          import { loadModel } from 'geospec/model';
+          it('loads without retained host evidence', async () => { await loadModel({ file: 'main.ts' }); });`,
+      }),
+      nativeModelLoader: Object.assign(async () => ({ subjectHash: 'a'.repeat(64), generation: 1 }), {
+        async releaseAll() {
+          /* No retained engine handles in this custom loader fixture. */
+        },
+      }),
+      nativeAssertions: { engine: mock<NonNullable<GeoSpecRunnerOptions['nativeAssertions']>['engine']>() },
+    });
+    const result = await runner.run({ files: ['missing-lineage.geospec.ts'] });
+    await runner.close();
+    expect(result.files[0]?.result).toMatchObject({ success: true, passed: false, lineage: { status: 'unavailable' } });
+    expect(result).toMatchObject({
+      success: false,
+      failed: 0,
+      lineageStatus: 'unavailable',
+      accounting: { discovered: 1, selected: 1, completed: 1, passed: 1, notRunFiles: [] },
+    });
+  });
+
+  it('should forward runner and low-level protocol forensic spans without projecting model subjects', async () => {
     const events: GeoSpecRunnerEvent[] = [];
+    const loader = canonicalLoaderFixture();
     const runner = createSerialGeoSpecRunner({
       filesystem: memoryFileSystem({
         'forensic.geospec.ts': `
-          import { describe, expectGeo, it } from 'geospec';
+          import { describe, it } from 'geospec';
           import { loadModel } from 'geospec/model';
           describe('forensic', () => {
             it('measures', async () => {
-              const model = await loadModel({ file: 'main.ts' });
-              expectGeo(model).toHaveVolume({ value: 0 });
+              await loadModel({ source: new Uint8Array([1]), format: 'step' });
             });
           });
         `,
       }),
-      modelLoader: async () => exposed(model),
+      modelLoader: Object.assign(
+        async (options: Parameters<typeof loader>[0]) => {
+          await getGeoSpecEngineProtocol()?.submitClaims({
+            requestId: 'low-level-forensic',
+            registryVersion: geoSpecMatcherRegistryVersion,
+            execution: { matcherWallBackstop: 1000, forensic: true },
+            claims: [],
+          });
+          return loader(options);
+        },
+        { dispose: async () => loader.dispose() },
+      ),
     });
     runner.on('forensic', (event) => events.push(event));
 
@@ -354,7 +521,7 @@ describe('the remaining serial legs', () => {
     });
     await runner.close();
 
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true, failed: 0, lineageStatus: 'complete' });
     expect(events.some((event) => event.type === 'forensic' && event.name === 'runner.file')).toBe(true);
     expect(events.some((event) => event.type === 'forensic' && event.name === 'engine.claims')).toBe(true);
   });
@@ -390,22 +557,25 @@ describe('the remaining serial legs', () => {
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted.');
   });
 
-  it('should report the affinity key of a file that loaded a model', async () => {
-    const subject = await loadedSubject();
+  it('should not report obsolete reference cache affinity for a canonical model load', async () => {
+    const loader = canonicalLoaderFixture();
+    const modelLoader = Object.assign(vi.fn(loader), { dispose: async () => loader.dispose() });
     const runner = createSerialGeoSpecRunner({
       filesystem: memoryFileSystem({
         'a.geospec.ts': `
           import { describe, it } from 'geospec';
           import { loadModel } from 'geospec/model';
-          describe('affinity', () => { it('loads', async () => { await loadModel({ file: 'main.ts' }); }); });
+          describe('affinity', () => { it('loads', async () => { await loadModel({ source: new Uint8Array([1]), format: 'step' }); }); });
         `,
       }),
-      modelLoader: async () => exposed(subject),
+      modelLoader,
     });
 
     const result = await runner.run({ files: ['a.geospec.ts'] });
     await runner.close();
 
-    expect(typeof result.files[0]?.primaryLoadKey).toBe('string');
+    expect(result).toMatchObject({ success: true, failed: 0, lineageStatus: 'complete' });
+    expect(modelLoader).toHaveBeenCalledOnce();
+    expect(result.files[0]).not.toHaveProperty('primaryLoadKey');
   });
 });

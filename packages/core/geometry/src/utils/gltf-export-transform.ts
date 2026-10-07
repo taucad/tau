@@ -1,7 +1,7 @@
-import { NodeIO } from '@gltf-transform/core';
-import type { JSONDocument } from '@gltf-transform/core';
+import { WebIO } from '@gltf-transform/core';
+import type { Document, JSONDocument } from '@gltf-transform/core';
 
-import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import { allExtensions } from '#gltf.extensions.js';
 import { admitMechanism, transformMechanism } from '@taucad/kinematics';
 import { createCoordinateTransform, createScalingTransform, gltfCoordinateTransformMatrix } from '#gltf.transforms.js';
 import { registerTauGltfExtensions } from '#extensions/registry.js';
@@ -18,10 +18,7 @@ type GltfExportTransformOptions = GeometryOutputTransformOptions & {
   preserveMeshTopology?: boolean;
 };
 
-const preserveTransformedMeshTopology = (
-  document: Awaited<ReturnType<NodeIO['readBinary']>>,
-  options: GltfExportTransformOptions,
-): boolean => {
+const preserveTransformedMeshTopology = (document: Document, options: GltfExportTransformOptions): boolean => {
   const root = document.getRoot();
   const topology = root.getExtension<TauCadTopologyRoot>(tauCadTopologyExtension);
   if (!topology) {
@@ -62,7 +59,7 @@ const preserveTransformedMeshTopology = (
   return true;
 };
 
-const stripTopologyMetadataForTransformedExport = (document: Awaited<ReturnType<NodeIO['readBinary']>>): void => {
+const stripTopologyMetadataForTransformedExport = (document: Document): void => {
   const root = document.getRoot();
   root.setExtension(kittyCadBoundaryRepresentationExtension, null);
   root.setExtension(tauCadTopologyExtension, null);
@@ -111,22 +108,26 @@ export async function transformGltfExportBytes(
 ): Promise<Uint8Array<ArrayBuffer>> {
   const shouldRotate = options.coordinateSystem === 'z-up';
   const shouldScale = options.unit?.length === 'millimeter';
-  if (!shouldRotate && !shouldScale) {
+  const sourceIsGlb =
+    bytes.byteLength >= 4 &&
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true) === 0x46_54_6c_67;
+  if (!shouldRotate && !shouldScale && sourceIsGlb === (options.format === 'glb')) {
     return bytes;
   }
 
-  const io = registerTauGltfExtensions(new NodeIO()).registerExtensions([KHRMaterialsUnlit]);
-  const document =
-    options.format === 'glb'
-      ? await io.readBinary(bytes)
-      : await io.readJSON({
-          json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'],
-          resources: {},
-        });
+  const io = registerTauGltfExtensions(new WebIO()).registerExtensions(allExtensions);
+  const document = sourceIsGlb
+    ? await io.readBinary(bytes)
+    : await io.readJSON({
+        json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'],
+        resources: {},
+      });
 
-  await document.transform(createCoordinateTransform(shouldRotate), createScalingTransform(shouldScale));
-  if (!options.preserveMeshTopology || !preserveTransformedMeshTopology(document, options)) {
-    stripTopologyMetadataForTransformedExport(document);
+  if (shouldRotate || shouldScale) {
+    await document.transform(createCoordinateTransform(shouldRotate), createScalingTransform(shouldScale));
+    if (!options.preserveMeshTopology || !preserveTransformedMeshTopology(document, options)) {
+      stripTopologyMetadataForTransformedExport(document);
+    }
   }
 
   if (options.format === 'glb') {

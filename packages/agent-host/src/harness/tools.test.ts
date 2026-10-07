@@ -314,7 +314,7 @@ describe('CaptureToolResults', () => {
 
   it('leaves non-capture tool results as JSON text', async () => {
     const registry: ToolRegistry = {
-      list: () => [{ name: 'get_kernel_result', description: 'Render', inputSchema: { type: 'object' } }],
+      list: () => [{ name: 'evaluate_model', description: 'Render', inputSchema: { type: 'object' } }],
       invoke: async () => ({ content: { success: true, status: 'ready' }, isError: false }),
     };
     const [tool] = createAgentTools({ registry, runId: 'run-1' });

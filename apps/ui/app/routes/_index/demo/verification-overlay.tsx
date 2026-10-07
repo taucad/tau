@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Check, X, Loader2 } from 'lucide-react';
-import type { Geometry } from '@taucad/types';
+import { asKnownArtifact } from '@taucad/runtime';
+import type { Artifact } from '@taucad/runtime';
 import { cn } from '@taucad/ui/utils/cn';
 import { applyCanonicalGltfWorld } from '#components/geometry/graphics/three/gltf-world.js';
 
@@ -19,13 +20,14 @@ type Measured = {
  * Measure the real axis-aligned bounding box of the generated geometry. The
  * runtime emits glTF in metres; we report the largest edge in millimetres.
  */
-async function measureGeometry(geometry: Geometry): Promise<Measured | undefined> {
-  if (geometry.format !== 'gltf') {
+async function measureArtifact(artifact: Artifact): Promise<Measured | undefined> {
+  const known = asKnownArtifact(artifact);
+  if (known?.mimeType !== 'model/gltf-binary') {
     return undefined;
   }
 
   const loader = new GLTFLoader();
-  const gltf = await loader.parseAsync(geometry.content.buffer, '');
+  const gltf = await loader.parseAsync(new Uint8Array(known.content).buffer, '');
   applyCanonicalGltfWorld(gltf.scene);
   const box = new THREE.Box3().setFromObject(gltf.scene);
   if (box.isEmpty()) {
@@ -45,7 +47,7 @@ function CheckChip({ state, label }: { readonly state: CheckState; readonly labe
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full border bg-background/80 px-2.5 py-1 text-xs backdrop-blur-sm',
         state === 'pass' && 'border-primary/40 text-foreground',
-        state === 'fail' && 'border-destructive/40 text-destructive',
+        state === 'fail' && 'border-feature/40 text-feature',
         state === 'pending' && 'text-muted-foreground',
       )}
     >
@@ -66,43 +68,43 @@ function CheckChip({ state, label }: { readonly state: CheckState; readonly labe
  * demo signal; richer assertions (volume budget, interference) can later route
  * through the GeoSpec worker (`apps/ui/app/workers/geospec-runner.worker.ts`).
  */
-export function VerificationOverlay({ geometry }: { readonly geometry: Geometry | undefined }): React.JSX.Element {
+export function VerificationOverlay({ artifact }: { readonly artifact: Artifact | undefined }): React.JSX.Element {
   const [measurement, setMeasurement] = useState<{
-    readonly geometry: Geometry;
+    readonly artifact: Artifact;
     readonly measured: Measured | undefined;
   }>();
 
   useEffect(() => {
-    if (!geometry) {
+    if (!artifact) {
       return;
     }
 
     let cancelled = false;
-    async function measure(target: Geometry): Promise<void> {
+    async function measure(target: Artifact): Promise<void> {
       try {
-        const result = await measureGeometry(target);
+        const result = await measureArtifact(target);
         if (!cancelled) {
-          setMeasurement({ geometry: target, measured: result });
+          setMeasurement({ artifact: target, measured: result });
         }
       } catch (error) {
         console.error('[VerificationOverlay] measure failed:', error);
         if (!cancelled) {
-          setMeasurement({ geometry: target, measured: undefined });
+          setMeasurement({ artifact: target, measured: undefined });
         }
       }
     }
 
-    void measure(geometry);
+    void measure(artifact);
 
     return () => {
       cancelled = true;
     };
-  }, [geometry]);
+  }, [artifact]);
 
-  const measured = measurement && measurement.geometry === geometry ? measurement.measured : undefined;
-  const measuring = geometry !== undefined && measurement?.geometry !== geometry;
+  const measured = measurement && measurement.artifact === artifact ? measurement.measured : undefined;
+  const measuring = artifact !== undefined && measurement?.artifact !== artifact;
 
-  const validState: CheckState = geometry ? 'pass' : 'pending';
+  const validState: CheckState = artifact ? 'pass' : 'pending';
   const fitState: CheckState = measured ? (measured.maxDimensionMm <= printBedMm ? 'pass' : 'fail') : 'pending';
 
   const fitLabel = measured

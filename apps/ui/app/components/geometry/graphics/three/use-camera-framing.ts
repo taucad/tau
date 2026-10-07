@@ -8,7 +8,6 @@ import { defaultStageOptions } from '#components/geometry/graphics/three/stage.j
 import { resolveCameraUp } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
 
 const significantRadiusChangeRatio = 0.1;
-const significantAspectChangeRatio = 0.1;
 
 const toCameraBounds = (bounds: THREE.Box3): CameraBounds => ({
   min: [bounds.min.x, bounds.min.y, bounds.min.z],
@@ -29,8 +28,9 @@ const directionFromRotation = ({
 /**
  * Sends geometry framing policy to the provider-owned portable camera actor.
  *
- * The first real geometry uses configured angles. Later significant bounds/aspect
- * changes and Fit view preserve the user's direction: they only recentre and zoom.
+ * The first real geometry uses configured angles. Later significant bounds changes
+ * and Fit view preserve the user's direction: they only recentre and zoom.
+ * Resizing changes the projection through ActorBridge, preserving the placed camera.
  * Kinematic pose updates refresh bounds without changing the camera.
  */
 export function useCameraFraming<
@@ -49,8 +49,7 @@ export function useCameraFraming<
   const rig = useCameraRig();
   const framing = useViewCameraFraming();
   const graphicsActor = useGraphics();
-  const { size } = useThree();
-  const viewportAspect = size.width > 0 && size.height > 0 ? size.width / size.height : 1;
+  const get = useThree((state) => state.get);
   const resolvedOptions = useMemo(
     () => ({
       ...defaultStageOptions,
@@ -63,7 +62,6 @@ export function useCameraFraming<
    * `framing` record carries the entry-scoped half, so a remount does not re-frame. */
   const previousRadiusRef = useRef<number | undefined>(undefined);
   const previousBoundsRef = useRef<THREE.Box3 | undefined>(undefined);
-  const previousAspectRef = useRef(viewportAspect);
 
   const frame = useCallback(
     (options?: { enableConfiguredAngles?: boolean }) => {
@@ -71,8 +69,16 @@ export function useCameraFraming<
         return;
       }
 
+      const { size } = get();
       const actor = rig.actorRef;
       const { view } = actor.getSnapshot().context;
+      if (
+        size.width > 0 &&
+        size.height > 0 &&
+        (view.viewport.width !== size.width || view.viewport.height !== size.height)
+      ) {
+        actor.send({ type: 'setViewport', viewport: { ...view.viewport, width: size.width, height: size.height } });
+      }
       if (options?.enableConfiguredAngles ?? true) {
         const direction = directionFromRotation(resolvedOptions.rotation);
         const up = resolveCameraUp({
@@ -90,7 +96,7 @@ export function useCameraFraming<
       actor.send({ type: 'setBounds', bounds: toCameraBounds(geometryBounds) });
       actor.send({ type: 'frame', margin: resolvedOptions.fitMargin });
     },
-    [geometryBounds, geometryRadius, resolvedOptions.fitMargin, resolvedOptions.rotation, rig],
+    [geometryBounds, geometryRadius, get, resolvedOptions.fitMargin, resolvedOptions.rotation, rig],
   );
 
   useLayoutEffect(() => {
@@ -101,7 +107,6 @@ export function useCameraFraming<
     const commit = (): void => {
       previousRadiusRef.current = geometryRadius;
       previousBoundsRef.current = geometryBounds.clone();
-      previousAspectRef.current = viewportAspect;
     };
 
     if (!framing.initialized) {
@@ -146,20 +151,7 @@ export function useCameraFraming<
       previousRadiusRef.current = geometryRadius;
       previousBoundsRef.current = geometryBounds.clone();
     }
-  }, [framing, frame, geometryBounds, geometryRadius, isPoseUpdate, rig, viewportAspect]);
-
-  useLayoutEffect(() => {
-    if (previousRadiusRef.current === undefined || geometryRadius <= 0) {
-      previousAspectRef.current = viewportAspect;
-      return;
-    }
-    const previousAspect = previousAspectRef.current;
-    const aspectChange = Math.abs(viewportAspect - previousAspect) / Math.max(previousAspect, 1e-9);
-    if (aspectChange > significantAspectChangeRatio) {
-      previousAspectRef.current = viewportAspect;
-      frame({ enableConfiguredAngles: false });
-    }
-  }, [frame, geometryRadius, viewportAspect]);
+  }, [framing, frame, geometryBounds, geometryRadius, isPoseUpdate, rig]);
 
   useLayoutEffect(() => {
     // Fit view zooms and recentres on the model; it never rotates the camera.

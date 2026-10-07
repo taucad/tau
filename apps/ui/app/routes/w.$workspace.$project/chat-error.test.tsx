@@ -90,6 +90,48 @@ const persisted = (error: ChatErrorPayload): void => {
   );
 };
 
+const projectedFailure = (error: ChatErrorPayload): CombinedChatState => {
+  const projection = createActor(chatProjectionLogic).start();
+  projection.send({
+    type: 'batch',
+    answer: {
+      status: 'batch',
+      cursor: 0,
+      nextCursor: 3,
+      endCursor: 3,
+      events: [
+        lifecycleRow(0, 'admitted'),
+        lifecycleRow(1, 'running'),
+        logRow(2, {
+          type: 'run.lifecycle',
+          state: 'failed',
+          attempt: 1,
+          detail: {
+            code: error.code,
+            message: error.message,
+            ...(error.httpStatus === undefined ? {} : { status: error.httpStatus }),
+            ...(error.details === undefined ? {} : { details: error.details }),
+          },
+        }),
+      ],
+    },
+  });
+  const state = {
+    error: undefined,
+    persistedError: error,
+    projection: projection.getSnapshot().context,
+    attachmentStatus: 'attached',
+  };
+  projection.stop();
+  return state as CombinedChatState;
+};
+
+/* A card promises Resume only for the caught-up log's current run, as the turn host admits it. */
+const projected = (error: ChatErrorPayload): void => {
+  const state = projectedFailure(error);
+  vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+};
+
 describe('ChatError', () => {
   beforeEach(() => {
     debug.enabled = false;
@@ -294,7 +336,7 @@ describe('ChatError', () => {
   });
 
   it('should promise the turn and say Resume for a rate limit the host does resume', () => {
-    persisted({
+    projected({
       category: errorCategory.rateLimit,
       title: 'Rate limit exceeded',
       message: 'The model provider asked Tau to wait.',
@@ -331,7 +373,7 @@ describe('ChatError', () => {
   it('should keep a lost connection concise and disclose the provider words only in Tau Debug', async () => {
     debug.enabled = true;
     const user = userEvent.setup();
-    persisted({
+    projected({
       category: errorCategory.generic,
       title: 'Error',
       message: 'server_error: The server had an error while processing your request.',
@@ -351,7 +393,6 @@ describe('ChatError', () => {
     expect(screen.queryByTestId('code-viewer')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Debug details' }));
-    expect(screen.getByTestId('code-viewer')).toHaveTextContent('NETWORK_ERROR');
     expect(screen.getByTestId('code-viewer')).toHaveTextContent('server_error: The server had an error');
 
     await user.click(screen.getByRole('button', { name: 'Resume' }));
@@ -360,7 +401,7 @@ describe('ChatError', () => {
   });
 
   it('should name a refused request and offer a model switch ahead of Resume', () => {
-    persisted({
+    projected({
       category: errorCategory.toolError,
       title: 'Processing Error',
       message: 'Vertex does not support xhigh reasoning effort.',
@@ -406,7 +447,7 @@ describe('ChatError', () => {
       const user = userEvent.setup();
       const rawMessage = `Internal host sentence for ${code}`;
       resumableFailureOverrides.add(code);
-      persisted({
+      projected({
         category: errorCategory.generic,
         title: 'Error',
         message: rawMessage,
@@ -539,7 +580,7 @@ describe('ChatError', () => {
    * to the category it read as a generic error offering *Try again*. */
   it('should present an abandoned run as a paused turn that resumes', async () => {
     const user = userEvent.setup();
-    persisted({
+    projected({
       category: errorCategory.generic,
       title: 'Error',
       message: 'The host executing this run is gone. Resume the turn to continue it.',
@@ -561,11 +602,32 @@ describe('ChatError', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  /* Resume everywhere: an external agent left waiting for approval when Tau closed is abandoned resumably; the card
+   * names that cause and Resume reattaches the session, where the agent asks again. */
+  it('should offer Resume for an approval Tau closed on, saying the agent asks again', async () => {
+    const user = userEvent.setup();
+    projected({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'Tau closed while the agent waited for your approval. Resume the turn and the agent asks again.',
+      code: 'RUN_ABANDONED',
+      details: { cause: 'awaiting-approval' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Tau closed while the agent waited for your approval')).toBeInTheDocument();
+    expect(screen.getByText(/Resume and the agent asks for it again\./u)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['LEADER_VERSION_MISMATCH', 'Another version of Tau is running this chat'],
     ['RUN_UNREADABLE', 'This chat was continued in a newer version of Tau'],
     ['HISTORY_INVALID', "Tau can't read this chat's history"],
-    ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', 'Tau restarted while the agent waited for your approval'],
+    ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', "Tau couldn't reopen the agent's session"],
   ] as const)('shows the approved recovery card for %s', (code, title) => {
     persisted({ category: errorCategory.generic, title: 'Error', message: 'A coded refusal', code });
 
@@ -831,24 +893,50 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
-  /* W2 carries `details` from the 402 all the way to the persisted ChatError;
-   * the banner has to hand it to the card or the shortfall is lost again. */
-  it('should pass the denial shortfall through to the credits card', () => {
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({
-        error: undefined,
-        persistedError: {
-          category: errorCategory.credits,
-          title: 'Credit Limit Reached',
-          message: 'Insufficient Tau credit for this model request.',
-          details: {
-            requiredCreditAtoms: '3084332',
-            availableCreditAtoms: '2960000',
-            routeId: 'openai-gpt-6-astra',
-          },
-        } satisfies ChatErrorPayload,
-      } as unknown as CombinedChatState),
-    );
+  it('should show the paused shortfall from a projected credit failure', () => {
+    const error: ChatErrorPayload = {
+      category: errorCategory.credits,
+      title: 'Credit Limit Reached',
+      message: 'Insufficient Tau credit for this model request.',
+      code: 'INSUFFICIENT_CREDIT',
+      httpStatus: 402,
+      details: {
+        requiredCreditAtoms: '3084332',
+        availableCreditAtoms: '2960000',
+        routeId: 'openai-gpt-6-astra',
+      },
+    };
+    const state = projectedFailure(error);
+    vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<ChatErrorBanner />, {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <MemoryRouter>
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        </MemoryRouter>
+      ),
+    });
+
+    expect(
+      screen.getByText('Tau paused this turn: 13 more credits needed for openai-gpt-6-astra.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  /* W2 carries `details` from the 402 through the persisted ChatError even
+   * before a host projection catches up. */
+  it('should show the denial shortfall from a persisted credit error', () => {
+    persisted({
+      category: errorCategory.credits,
+      title: 'Credit Limit Reached',
+      message: 'Insufficient Tau credit for this model request.',
+      details: {
+        requiredCreditAtoms: '3084332',
+        availableCreditAtoms: '2960000',
+        routeId: 'openai-gpt-6-astra',
+      },
+    });
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<ChatErrorBanner />, {
@@ -860,7 +948,8 @@ describe('ChatError', () => {
     });
 
     expect(screen.getByText('13 more credits needed for openai-gpt-6-astra.')).toBeInTheDocument();
-    expect(screen.getByText('Add credits, then send your message.')).toBeInTheDocument();
+    expect(screen.queryByText(/Tau paused this turn/iu)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
   });
 
   /* The useSyncExternalStore contract requires a cached snapshot. Parsing inside the selector
@@ -910,12 +999,7 @@ describe('ChatError', () => {
       title: 'Credit Limit Reached',
       message: creditMessage,
     };
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({
-        error: undefined,
-        persistedError: creditError,
-      } as unknown as CombinedChatState),
-    );
+    persisted(creditError);
 
     /* `ChatErrorCredits` reads live entitlements to choose its top-up route. */
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

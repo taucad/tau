@@ -17,6 +17,7 @@ import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.j
 import {
   classifyUpstreamRefusal,
   cloudUpstreamRefusalMessage,
+  isContextWindowRefusal,
   maximumRefusalMessageCharacters,
   readUpstreamRefusal,
   upstreamRetryAfterSeconds,
@@ -111,6 +112,46 @@ const canonicalize = (value: unknown): unknown =>
         ? value.toString()
         : value;
 
+/* Ponytail: the bounded `error.type` a refusal site attached to the error it throws, so the
+ * one catch around admission and dispatch records each failed call exactly once. */
+// oxlint-disable-next-line typescript/no-restricted-types -- WeakMap keys are thrown objects
+const failureTypes = new WeakMap<object, string>();
+const classified = <E extends Error>(error: E, errorType: string): E => {
+  failureTypes.set(error, errorType);
+  return error;
+};
+/** Bounded `error.type` of a supplier refusal; `upstream_4xx` stays caller-side, a key refusal is `upstream_auth`. */
+const upstreamErrorType = (status: number): string =>
+  status === 401 || status === 403
+    ? 'upstream_auth'
+    : status === 429
+      ? 'upstream_429'
+      : status >= 500
+        ? 'upstream_5xx'
+        : 'upstream_4xx';
+/** Bounded `error.type` of a stream that ended without final usage. */
+const streamErrorType = (reason: string | undefined): string =>
+  reason === 'client_abort'
+    ? 'aborted'
+    : reason === 'deadline'
+      ? 'timeout'
+      : reason === 'authorized_exhausted' || reason === 'malformed_response' || reason === 'service_restart'
+        ? reason
+        : 'incomplete';
+const genAiTokenTypes = new Map([
+  ['uncached_input', 'input'],
+  ['cache_read', 'cache_read'],
+  ['cache_write', 'cache_write'],
+  ['output', 'output'],
+]);
+const genAiAttributes = (qualification: QualifiedBillableInvocation): Record<string, string> => ({
+  'gen_ai.request.model': qualification.modelId,
+  'gen_ai.provider.name': qualification.providerId,
+  'tau.surface': qualification.surface,
+});
+/** One credit atom is one micro-USD. */
+const creditAtomsPerUsd = 1_000_000;
+
 /** Owns one funded model invocation from qualified admission through one terminal mutation. */
 @Injectable()
 export class BillableModelInvocationService {
@@ -146,6 +187,7 @@ export class BillableModelInvocationService {
   }
 
   private async invokeBound(suppliedIntent: BillableInvocationIntent): Promise<BillableInvocationResult> {
+    const startedAt = performance.now();
     assertRequestBound(suppliedIntent.body);
     const intent = {
       ...suppliedIntent,
@@ -162,7 +204,7 @@ export class BillableModelInvocationService {
         operationId: existing.id,
       };
     }
-    let qualification = this.resolver.resolve({
+    const resolved = this.resolver.resolve({
       environment: intent.environment,
       surface: intent.surface,
       attempt: intent.attempt,
@@ -173,6 +215,25 @@ export class BillableModelInvocationService {
       ...(intent.projectHint === undefined ? {} : { projectHint: intent.projectHint }),
       ...(intent.chatHint === undefined ? {} : { chatHint: intent.chatHint }),
     });
+    try {
+      return await this.admitAndDispatch(intent, resolved, startedAt);
+    } catch (error) {
+      this.recordOperationDuration(
+        resolved,
+        startedAt,
+        (typeof error === 'object' && error !== null ? failureTypes.get(error) : undefined) ??
+          (intent.signal.aborted ? 'aborted' : error instanceof LlmGatewayError ? 'refused' : 'internal'),
+      );
+      throw error;
+    }
+  }
+
+  private async admitAndDispatch(
+    intent: BillableInvocationIntent,
+    resolved: QualifiedBillableInvocation,
+    startedAt: number,
+  ): Promise<BillableInvocationResult> {
+    let qualification = resolved;
     await this.assertRouteNotPaused(intent, qualification);
     const selectedCount = qualification.inputCount;
     let countSignal: AbortSignal | undefined;
@@ -228,7 +289,7 @@ export class BillableModelInvocationService {
               requestDigest: this.requestDigest(intent, qualification),
             });
           }
-          throw this.denial(eligible, intent, qualification.routeId);
+          throw classified(this.denial(eligible, intent, qualification.routeId), eligible.reason);
         }
         executionDeadline = eligible.executionDeadline;
         countSignal = AbortSignal.any([intent.signal, AbortSignal.timeout(eligible.remaining)]);
@@ -325,7 +386,7 @@ export class BillableModelInvocationService {
       admission = await this.ledger.admitOperation(admissionInput);
     }
     if (admission.status === 'denied') {
-      throw this.denial(admission, intent, qualification.routeId);
+      throw classified(this.denial(admission, intent, qualification.routeId), admission.reason);
     }
     if (admission.status === 'replay') {
       intent.onAdmitted?.(admission.operationId);
@@ -352,7 +413,7 @@ export class BillableModelInvocationService {
     if (!(await this.ledger.markDispatchIntent(row.id, admission.generation))) {
       return { state: 'pending', operationId: row.id };
     }
-    return this.dispatch(intent, qualification, row, admission.generation, countSignal);
+    return this.dispatch(intent, qualification, row, admission.generation, startedAt, countSignal);
   }
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one immutable invocation checkpoint
@@ -361,6 +422,7 @@ export class BillableModelInvocationService {
     qualification: QualifiedBillableInvocation,
     row: InvocationRow,
     generation: bigint,
+    startedAt: number,
     countSignal?: AbortSignal,
   ): Promise<BillableInvocationResult> {
     const remaining = await this.ledger.getDispatchTimeRemaining(row.id, generation);
@@ -385,6 +447,7 @@ export class BillableModelInvocationService {
     };
     intent.signal.addEventListener('abort', recordCancellation, { once: true });
     let response: Response;
+    const dispatchedAt = performance.now();
     try {
       response = await qualification.adapter.executeOnce({
         qualification,
@@ -399,10 +462,13 @@ export class BillableModelInvocationService {
         generation,
         collector.failed(signal.aborted ? (intent.signal.aborted ? 'client_abort' : 'deadline') : 'malformed_response'),
       );
-      throw new LlmGatewayError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        'PROVIDER_UNAVAILABLE',
-        'The model provider is unavailable.',
+      throw classified(
+        new LlmGatewayError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          'PROVIDER_UNAVAILABLE',
+          'The model provider is unavailable.',
+        ),
+        signal.aborted ? (intent.signal.aborted ? 'aborted' : 'timeout') : 'upstream_unreachable',
       );
     }
     if (!response.ok || !response.body) {
@@ -430,7 +496,19 @@ export class BillableModelInvocationService {
       const recognized = providerAccountRefusal(qualification.providerId, body);
       if (recognized) {
         // Settled as provider_rejected above: the customer is charged nothing for it.
-        throw this.providerAccountExhausted(intent, recognized.providerId, recognized.refusal);
+        throw classified(
+          this.providerAccountExhausted(intent, recognized.providerId, recognized.refusal),
+          'provider_account_exhausted',
+        );
+      }
+      /* F-11: the upstream key is always Tau's here, so a 401/403 is Tau's supplier account
+         failing, never the caller's request. The supplier's sentence stays in the log above. */
+      if (response.status === 401 || response.status === 403) {
+        this.metrics?.billingProviderAccountRefusals.add(1, {
+          'deployment.environment': intent.environment,
+          providerId: qualification.providerId,
+          reason: 'credential_rejected',
+        });
       }
       const retryAfterSeconds = upstreamRetryAfterSeconds(response.headers);
       const classification = classifyUpstreamRefusal({
@@ -439,8 +517,15 @@ export class BillableModelInvocationService {
         ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       });
       // Tau owns the key here, so the supplier's own sentence never leaves the API.
-      const message = cloudUpstreamRefusalMessage({ type: classification.type, status: response.status });
-      throw new LlmGatewayError(classification.status, classification.type, message, classification.details);
+      const message = cloudUpstreamRefusalMessage({
+        type: classification.type,
+        status: response.status,
+        contextWindowExceeded: isContextWindowRefusal(body),
+      });
+      throw classified(
+        new LlmGatewayError(classification.status, classification.type, message, classification.details),
+        response.ok ? 'malformed_response' : upstreamErrorType(response.status),
+      );
     }
     // The supplier answered: the operation is in flight, not abandoned. Losing this
     // transition to recovery never abandons a response that is already being charged.
@@ -454,6 +539,7 @@ export class BillableModelInvocationService {
       intent,
       recordCancellation,
       signal,
+      { startedAt, dispatchedAt },
     );
     const relayed = isGatewayProviderId(qualification.providerId)
       ? observed.body.pipeThrough(
@@ -491,12 +577,16 @@ export class BillableModelInvocationService {
     intent: BillableInvocationIntent,
     recordCancellation: () => void,
     signal: AbortSignal,
+    { startedAt, dispatchedAt }: { readonly startedAt: number; readonly dispatchedAt: number },
   ): {
     body: ReadableStream<Uint8Array<ArrayBuffer>>;
     completion: Promise<void>;
   } {
     const reader = upstream.getReader();
     const projection = qualification.adapter.createClientProjection?.(qualification);
+    const requestBody = qualification.normalizedRequest.body;
+    const streaming =
+      typeof requestBody === 'object' && requestBody !== null && 'stream' in requestBody && requestBody.stream === true;
     let bytes = 0;
     let projectedBytes = 0;
     let done = false;
@@ -512,6 +602,11 @@ export class BillableModelInvocationService {
       }
       done = true;
       intent.signal.removeEventListener('abort', recordCancellation);
+      this.recordOperationDuration(
+        qualification,
+        startedAt,
+        evidence.kind === 'final_usage' ? '' : streamErrorType(evidence.normalizationEvidence?.terminalReason),
+      );
       try {
         await this.finish(qualification, row, generation, evidence);
         resolveCompletion();
@@ -542,6 +637,13 @@ export class BillableModelInvocationService {
         controller.close();
         await finish(collector.complete());
         return false;
+      }
+      if (bytes === 0 && part.value.byteLength > 0 && streaming) {
+        this.metrics?.genAiTimeToFirstToken.record(
+          // From the supplier request, not invocation entry: admission is not model responsiveness.
+          (performance.now() - dispatchedAt) / 1000,
+          genAiAttributes(qualification),
+        );
       }
       bytes += part.value.byteLength;
       if (bytes > qualification.maximumResponseBytes) {
@@ -681,7 +783,7 @@ export class BillableModelInvocationService {
     if (evidence.kind === 'absorbed_unknown' && !cutByStop) {
       return;
     }
-    await this.ledger.terminalizeOperation({
+    const receipt = await this.ledger.terminalizeOperation({
       operationId: row.id,
       accountId: row.accountId,
       requestDigest: row.requestDigest,
@@ -690,6 +792,54 @@ export class BillableModelInvocationService {
       resolvedAt: new Date(),
       // Recovery's own reason for expiring an absorbed hold: no supplier evidence is coming.
       ...(cutByStop ? { expireSpendHold: true } : {}),
+    });
+    this.recordSettledUsage(qualification, row, evidence, receipt.chargedAtoms);
+  }
+
+  /**
+   * Records the tokens and charged USD of one operation this service settled, written together so
+   * the two series reconcile. An operation left pending for recovery records neither here, and
+   * recovery's own settlement is not recorded either (a known gap in both series).
+   */
+  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one settled operation
+  private recordSettledUsage(
+    qualification: QualifiedBillableInvocation,
+    row: InvocationRow,
+    evidence: TerminalEvidence,
+    chargedAtoms: bigint,
+  ): void {
+    this.metrics?.genAiCost.add(Number(chargedAtoms) / creditAtomsPerUsd, {
+      ...genAiAttributes(qualification),
+      'tau.activity': row.activity,
+    });
+    // A stop-cut absorbed turn settles at zero; its partial meters are not usage it was charged for.
+    const meterItems =
+      evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
+    for (const item of meterItems) {
+      const tokenType = genAiTokenTypes.get(item.dimension);
+      if (tokenType !== undefined) {
+        this.metrics?.genAiTokenUsage.record(Number(item.quantity), {
+          ...genAiAttributes(qualification),
+          'gen_ai.token.type': tokenType,
+          'tau.activity': row.activity,
+        });
+      }
+    }
+  }
+
+  /**
+   * Records one funded call's end-to-end latency from invocation entry, so it includes billing
+   * admission (unlike time to first token, which starts at the supplier request). `errorType` is
+   * empty on success, which the `llm-error-rate` alert excludes with `error_type!=""`.
+   */
+  private recordOperationDuration(
+    qualification: QualifiedBillableInvocation,
+    startedAt: number,
+    errorType: string,
+  ): void {
+    this.metrics?.genAiOperationDuration.record((performance.now() - startedAt) / 1000, {
+      ...genAiAttributes(qualification),
+      'error.type': errorType,
     });
   }
 
@@ -860,10 +1010,13 @@ export class BillableModelInvocationService {
       'tau.billing.denial.reason': 'supplier_route_paused',
     });
     this.logger.warn(`Funded admission denied: supplier_route_paused for ${qualification.sku} by case ${paused.id}`);
-    throw new LlmGatewayError(
-      HttpStatus.SERVICE_UNAVAILABLE,
-      'PROVIDER_UNAVAILABLE',
-      'This model route is paused while Tau reconciles its supplier evidence.',
+    throw classified(
+      new LlmGatewayError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'PROVIDER_UNAVAILABLE',
+        'This model route is paused while Tau reconciles its supplier evidence.',
+      ),
+      'route_paused',
     );
   }
 
@@ -884,6 +1037,7 @@ export class BillableModelInvocationService {
     this.metrics?.billingProviderAccountRefusals.add(1, {
       'deployment.environment': intent.environment,
       providerId,
+      reason: 'credit_exhausted',
     });
     this.logger.warn(
       `Supplier account exhausted on ${providerId} (${refusal.providerCode ?? 'no code'}) in ${intent.environment}: ${refusal.message}`,

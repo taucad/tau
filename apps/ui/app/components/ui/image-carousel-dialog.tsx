@@ -40,6 +40,13 @@ type ImageCarouselDialogProperties = {
 
 const imageCarouselOverlayControlAttribute = 'data-image-carousel-overlay-control';
 
+/** Marks caller-owned controls portalled beside the viewer, so interacting with them keeps it open. */
+const imageCarouselOverlayControlProps = { [imageCarouselOverlayControlAttribute]: '' } as const;
+
+/** The viewer's floating control finish; size and position are the caller's. */
+const imageCarouselControlClassName =
+  'rounded-full border-0 bg-background text-foreground shadow-md hover:bg-background/90 [&_svg]:size-5';
+
 function clampImageIndex(index: number, itemCount: number): number {
   if (itemCount === 0) {
     return 0;
@@ -72,7 +79,7 @@ function DownloadLink({ directory, item, name }: DownloadLinkProperties): React.
     <Button
       asChild
       aria-label={`Download ${name}`}
-      className='rounded-full border-0 bg-background text-foreground shadow-md hover:bg-background/90 [&_svg]:size-5'
+      className={imageCarouselControlClassName}
       size='icon-lg'
       variant='outline'
     >
@@ -238,7 +245,7 @@ function ImageCarouselDialog({
               <DialogClose asChild>
                 <Button
                   aria-label='Close image preview'
-                  className='rounded-full border-0 bg-background text-foreground shadow-md hover:bg-background/90 [&_svg]:size-5'
+                  className={imageCarouselControlClassName}
                   size='icon-lg'
                   type='button'
                   variant='outline'
@@ -256,6 +263,11 @@ function ImageCarouselDialog({
           if (isImageCarouselOverlayControlEvent(event)) {
             event.preventDefault();
           }
+        }}
+        // The backdrop covers the page, so focus leaving is never a dismissal: a menu that opened the
+        // viewer returns focus to its trigger as it closes. Backdrop clicks, Close and Escape still dismiss.
+        onFocusOutside={(event) => {
+          event.preventDefault();
         }}
         onPointerDownOutside={(event) => {
           if (isImageCarouselOverlayControlEvent(event)) {
@@ -308,11 +320,17 @@ function ImageCarouselDialog({
                   ? createPortal(
                       <div className='contents' data-image-carousel-overlay-control='' {...dialogProps}>
                         <CarouselPrevious
-                          className='fixed top-1/2 left-4 z-102 size-10 -translate-y-1/2 rounded-full border-0 bg-background text-foreground shadow-md hover:bg-background/90 disabled:opacity-40 [&_svg]:size-5'
+                          className={cn(
+                            imageCarouselControlClassName,
+                            'fixed top-1/2 left-4 z-102 size-10 -translate-y-1/2 disabled:opacity-40',
+                          )}
                           size='icon-lg'
                         />
                         <CarouselNext
-                          className='fixed top-1/2 right-4 z-102 size-10 -translate-y-1/2 rounded-full border-0 bg-background text-foreground shadow-md hover:bg-background/90 disabled:opacity-40 [&_svg]:size-5'
+                          className={cn(
+                            imageCarouselControlClassName,
+                            'fixed top-1/2 right-4 z-102 size-10 -translate-y-1/2 disabled:opacity-40',
+                          )}
                           size='icon-lg'
                         />
                       </div>,
@@ -336,5 +354,5 @@ function ImageCarouselDialog({
   );
 }
 
-export { ImageCarouselDialog };
+export { ImageCarouselDialog, imageCarouselControlClassName, imageCarouselOverlayControlProps };
 export type { ImageCarouselDialogItem };

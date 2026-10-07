@@ -65,7 +65,7 @@ try {
   const invoke = async (toolCallId: string): Promise<{ isError: boolean; content: unknown }> => {
     const outcome = await registry.invoke({
       toolCallId,
-      toolName: 'get_kernel_result',
+      toolName: 'evaluate_model',
       input: { targetFile },
       signal: new AbortController().signal,
     });

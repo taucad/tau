@@ -22,12 +22,13 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 
 import { ClientSideConnection } from '@agentclientprotocol/sdk';
-import type { Client, SessionConfigOption, SessionUpdate, StopReason } from '@agentclientprotocol/sdk';
+import type { Agent, Client, SessionConfigOption, SessionUpdate, StopReason } from '@agentclientprotocol/sdk';
 
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { AgentChannelAdmissionConfig } from '@taucad/agent-host/wire';
 import type { AgentLogEvent, ExternalAgentTurn, JsonValue, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
 import { reduceEventLog } from '@taucad/agent-host';
+import { parseQuestionsFile, serializeAnswersFile } from '@taucad/chat';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -162,7 +163,7 @@ const startHarness = async (
   const api = await startStubApi();
   const mcp = createHostMcpEndpoint({
     secret: randomBytes(32).toString('base64url'),
-    registry,
+    registry: options.mcpRegistry ?? registry,
     workspaceRoot,
     ...(options.mcpNow === undefined ? {} : { now: options.mcpNow }),
   });
@@ -287,8 +288,10 @@ const runTurn = async (
 
 const readLog = async (workspaceRoot: string, chatId: string): Promise<readonly AgentLogEvent[]> => {
   const raw = await readFile(join(workspaceRoot, '.tau', 'chats', chatId, 'events.jsonl'), 'utf8');
+  // A line is complete once its newline lands; a poll can see the run still appending the last one.
+  const complete = raw.slice(0, raw.lastIndexOf('\n') + 1);
   return (
-    raw
+    complete
       .split('\n')
       .filter((line) => line.trim() !== '')
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the log this test just wrote is the vocabulary by construction.
@@ -308,7 +311,7 @@ const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[
 const lifecycleOf = (events: readonly AgentLogEvent[]): readonly string[] =>
   events.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []));
 
-/** Whether the runner refused a turn whose outcome ACP cannot prove. */
+/** Whether the runner refused a turn because it could not reopen the agent's session. */
 const recoveryUnknown = (events: readonly AgentLogEvent[]): boolean =>
   events.some((event) => event.type === 'run.lifecycle' && event.detail?.code === 'EXTERNAL_AGENT_RECOVERY_UNKNOWN');
 
@@ -499,6 +502,56 @@ const trackedAdapter = async (mode: string): Promise<{ readonly adapter: AcpAdap
 };
 
 describe('the external agent run kind', () => {
+  it('should publish and consume every generated GeoSpec skill resource through an active ACP fixture session', async () => {
+    const { default: geospecBundles } = await import('geospec/agent/resources.js');
+    const harness = await startHarness({ systemSkillBundles: geospecBundles });
+    await runTurn(harness, {
+      chatId: 'chat-geospec-skills',
+      runId: 'run-geospec-skills',
+      text: 'inspect skills noask',
+    });
+    const assistant = messagesOf(await readLog(harness.workspaceRoot, 'chat-geospec-skills'))
+      .filter((message) => message.role === 'assistant')
+      .map((message) => textOfMessage(message))
+      .join('');
+    const marker = 'native-skills: ';
+    expect(assistant).toContain(marker);
+    const consumed = JSON.parse(assistant.slice(assistant.indexOf(marker) + marker.length)) as Array<{
+      readonly root: string;
+      readonly files: Readonly<Record<string, string>>;
+    }>;
+    expect(consumed).toHaveLength(1);
+    const expectedPaths = geospecBundles.flatMap((bundle) => bundle.files.map((file) => `${bundle.slug}/${file.path}`));
+    expect(Object.keys(consumed[0]!.files).toSorted()).toEqual(expectedPaths.toSorted());
+    const digest = createHash('sha256')
+      .update(
+        JSON.stringify(
+          geospecBundles.map((bundle) => ({
+            slug: bundle.slug,
+            files: bundle.files.map(({ path, sha256 }) => ({ path, sha256 })),
+          })),
+        ),
+      )
+      .digest('hex');
+    expect(consumed[0]!.root.split('/').at(-1)).toBe(digest);
+    const opened = harness.frames.find(
+      (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
+    );
+    const directories = (JSON.parse(opened!.frame) as { params: { additionalDirectories: string[] } }).params
+      .additionalDirectories;
+    expect(directories).toEqual([consumed[0]!.root]);
+    for (const bundle of geospecBundles) {
+      for (const resource of bundle.files) {
+        const content = consumed[0]!.files[`${bundle.slug}/${resource.path}`]!;
+        expect(Buffer.byteLength(content)).toBe(resource.byteLength);
+        expect(createHash('sha256').update(content).digest('hex')).toBe(resource.sha256);
+        // oxlint-disable-next-line no-await-in-loop -- verify each actively consumed resource against its owner bytes.
+        expect(content).toBe(await readFile(new URL(resource.url), 'utf8'));
+      }
+      expect(consumed[0]!.files[`${bundle.slug}/SKILL.md`]).toBe(bundle.body);
+    }
+  }, 60_000);
+
   it('drains admitted filesystem work even after the adapter transport closes', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-fs-drain-'));
     roots.push(cwd);
@@ -982,7 +1035,7 @@ describe('the external agent run kind', () => {
     expect(sent(frames, 'session/prompt')).toBe(0);
   }, 60_000);
 
-  it('fails an interrupted turn whose outcome ACP cannot prove after a daemon restart', async () => {
+  it('continues a turn its host abandoned mid-stream on the session it remembered', async () => {
     const { launcher, workspaceRoot, frames } = await startHarness();
     const chatId = 'chat-external-resume';
     const runId = 'run-external-resume';
@@ -1026,24 +1079,21 @@ describe('the external agent run kind', () => {
     expect(sent(frames, 'initialize')).toBe(0);
 
     await launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } });
-    await until(
-      async () => lifecycleOf(await readLog(workspaceRoot, chatId)).at(-1) === 'failed',
-      'the ambiguous resumed run to fail',
-      { dump: async () => readLog(workspaceRoot, chatId) },
-    );
-    /* The person's Resume re-enters the vendor session, not a new one, but ACP
-     * exposes no idempotency key or turn-status query that could prove this
-     * turn's result, so nothing is prompted. */
-    expect(sent(frames, 'session/resume')).toBe(1);
-    expect(sent(frames, 'session/prompt')).toBe(0);
-    expect(sent(frames, 'session/new')).toBe(0);
-    const resumedEvents = await readLog(workspaceRoot, chatId);
-    expect(lifecycleOf(resumedEvents).at(-1)).toBe('failed');
-    /* The attempt's settlement row follows its terminal row (W8 TS-S6). */
-    expect(resumedEvents.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
-      type: 'run.lifecycle',
-      detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
+    await until(async () => sent(frames, 'session/prompt') === 1, 'the continuation prompt', {
+      dump: async () => readLog(workspaceRoot, chatId),
     });
+    /* Resume everywhere: the adapter died with its host, so the vendor turn has
+     * ended; the person's Resume re-enters the same vendor session and asks the
+     * agent to carry on from its own transcript. */
+    expect(sent(frames, 'session/resume')).toBe(1);
+    expect(sent(frames, 'session/new')).toBe(0);
+    const prompt = frames.find(
+      ({ direction, frame }) => direction === 'client->agent' && frame.includes('"method":"session/prompt"'),
+    );
+    expect(prompt?.frame).toContain('Continue from where you stopped.');
+    expect(prompt?.frame).not.toContain('write the file');
+    expect(recoveryUnknown(await readLog(workspaceRoot, chatId))).toBe(false);
+    await launcher.execute({ type: 'cancel', commandId: 'cmd-cancel', payload: { chatId, runId } });
   }, 90_000);
 
   /*
@@ -1270,9 +1320,10 @@ describe('the external agent run kind', () => {
   /*
    * F3. A resume reuses the run id, so a run that stopped, resumed and was
    * *then* cut short by a restart still carries the first stop's `failed` row.
-   * Continuing on that stale row is exactly the turn ACP cannot prove finished.
+   * The state this attempt resumes from is the takeover's `RUN_ABANDONED`, not
+   * that stale stop, and it continues the same session (resume everywhere).
    */
-  it('should refuse a resume whose own attempt a restart cut short, stale stop and all', async () => {
+  it('should continue a resume whose own attempt a restart cut short, from the abandonment', async () => {
     const { launcher, workspaceRoot, frames } = await startHarness();
     const chatId = 'chat-external-stale-stop';
     const runId = 'run-external-stale-stop';
@@ -1321,27 +1372,23 @@ describe('the external agent run kind', () => {
       dump: async () => readLog(workspaceRoot, chatId),
     });
     await launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } });
-    await until(
-      async () => recoveryUnknown(await readLog(workspaceRoot, chatId)),
-      'the ambiguous resumed run to fail again',
-      { dump: async () => readLog(workspaceRoot, chatId) },
-    );
+    await until(async () => sent(frames, 'session/prompt') === 1, 'the continuation prompt', {
+      dump: async () => readLog(workspaceRoot, chatId),
+    });
 
-    /* Reattached to the remembered session, and then refused: no prompt was
-     * sent on a turn whose outcome ACP cannot report. */
     expect(sent(frames, 'session/resume')).toBe(1);
     expect(sent(frames, 'session/new')).toBe(0);
-    expect(sent(frames, 'session/prompt')).toBe(0);
-    const settled = await readLog(workspaceRoot, chatId);
-    /* The attempt's settlement row follows its terminal row (W8 TS-S6). */
-    expect(settled.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
-      type: 'run.lifecycle',
-      state: 'failed',
-      detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
-    });
+    const prompt = frames.find(
+      ({ direction, frame }) => direction === 'client->agent' && frame.includes('"method":"session/prompt"'),
+    );
+    expect(prompt?.frame).toContain('Continue from where you stopped.');
+    expect(recoveryUnknown(await readLog(workspaceRoot, chatId))).toBe(false);
+    await launcher.execute({ type: 'cancel', commandId: 'cmd-cancel', payload: { chatId, runId } });
   }, 90_000);
 
-  it('should record the sentence inside a provider error body rather than its JSON', async () => {
+  /* A model the account's login cannot run is a model choice, not a crash:
+   * Try again meets the same refusal, so it is typed for Switch model. */
+  it('should record a provider model refusal as a typed model-unavailable stop in its own words', async () => {
     const harness = await startHarness();
     const chatId = 'chat-external-model';
 
@@ -1352,7 +1399,7 @@ describe('the external agent run kind', () => {
     expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
       state: 'failed',
       detail: {
-        code: 'EXTERNAL_AGENT_FAILED',
+        code: 'EXTERNAL_AGENT_MODEL_UNAVAILABLE',
         message,
         details: { agentId: 'codex', failure: { category: 'service', title: message, actions: ['retry'] } },
       },
@@ -1494,10 +1541,7 @@ describe('the external agent run kind', () => {
   }, 30_000);
 });
 
-/* oxlint-disable-next-line typescript/no-deprecated -- the same long-lived
- * connection shape `runAcpSession` uses; the replacement scopes a connection to
- * one callback, which cannot outlive the multi-prompt cases below. */
-type FixtureConnection = ClientSideConnection;
+type FixtureConnection = Required<Agent>;
 
 /**
  * A fixture agent driven directly over ACP, with no launcher in between.
@@ -1794,12 +1838,12 @@ describe('the fixture agent', () => {
     const { connection } = await openFixture({ mode: 'silent' });
 
     const answered = await Promise.race([
-      connection
-        .initialize({
+      Promise.resolve(
+        connection.initialize({
           protocolVersion: 1,
           clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-        })
-        .then(() => 'answered'),
+        }),
+      ).then(() => 'answered'),
       new Promise<string>((resolve) => {
         setTimeout(() => {
           resolve('silent');
@@ -2031,7 +2075,7 @@ describe('one ACP session per chat', () => {
   }, 30_000);
 
   it('declines an elicitation that arrives between turns, and records it against nothing', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-late-login-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-between-turns-'));
     roots.push(cwd);
     const frames: AcpWireFrame[] = [];
     const appended: unknown[] = [];
@@ -2300,8 +2344,24 @@ describe('one ACP session per chat', () => {
     expect(
       arrangementInputs.map((message) => (message.role === 'tool-input' ? message.call?.toolCallId : undefined)),
     ).toEqual(['mcp-arrange-1', 'mcp-arrange-conflict-2']);
-    expect(arrangementOutputs).toHaveLength(2);
-    expect(JSON.stringify(arrangementOutputs.at(-1)?.content)).toContain('RECORD_CONFLICT');
+    expect(arrangementOutputs).toMatchObject([
+      {
+        call: { toolCallId: 'mcp-arrange-1' },
+        isError: false,
+        content: {
+          status: 'written',
+          revisions: [
+            { path: '.tau/workbench/layout.json', digest: `sha256:${'a'.repeat(64)}`, previousDigest: 'missing' },
+          ],
+          visible: [{ kind: 'view', view: 'front' }],
+        },
+      },
+      {
+        call: { toolCallId: 'mcp-arrange-conflict-2' },
+        isError: true,
+        content: { errorCode: 'RECORD_CONFLICT', message: 'The workbench arrangement changed.' },
+      },
+    ]);
   }, 90_000);
 
   it('gives a second agent in the same chat its own session', async () => {
@@ -2527,6 +2587,53 @@ describe('authentication, initialize and prompt content', () => {
     expect(sent(harness.frames, 'session/prompt')).toBe(0);
   }, 30_000);
 
+  it('asks a form elicitation through the chat question record and answers with the person’s choice', async () => {
+    const harness = await startHarness();
+    const chatDirectory = join(harness.workspaceRoot, '.tau', 'chats', 'chat-ask');
+    /* The person's client: answer the ask as soon as it is recorded. */
+    const answerWhenAsked = async (): Promise<void> => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
+        const text = await readFile(join(chatDirectory, 'questions.yaml'), 'utf8').catch(() => undefined);
+        const [recorded] = parseQuestionsFile(text).asks;
+        if (recorded !== undefined) {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
+          await writeFile(
+            join(chatDirectory, 'answers.yaml'),
+            serializeAnswersFile({
+              version: 1,
+              answers: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- claude-agent-acp's wire field name
+                [recorded.id]: { questions: { question_0: { choice: 'PLA', at: new Date().toISOString() } } },
+              },
+            }),
+          );
+          return;
+        }
+        // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
+        await new Promise((resolve) => {
+          setTimeout(resolve, 50);
+        });
+      }
+    };
+    await Promise.all([
+      runTurn(harness, { chatId: 'chat-ask', runId: 'run-ask', text: 'ask-form noask' }),
+      answerWhenAsked(),
+    ]);
+
+    const [ask] = parseQuestionsFile(await readFile(join(chatDirectory, 'questions.yaml'), 'utf8')).asks;
+    expect(ask).toMatchObject({
+      callId: 'ask-1',
+      source: 'acp',
+      agentId: 'codex',
+      questions: [{ id: 'question_0', header: 'Material', recommended: 0, allowsText: true }],
+      resolution: { outcome: 'answered' },
+    });
+    const events = await readLog(harness.workspaceRoot, 'chat-ask');
+    expect(JSON.stringify(events)).toContain(String.raw`ask-form: accept {\"question_0\":\"PLA\"}`);
+    expect(lifecycleOf(events).at(-1)).toBe('completed');
+  }, 30_000);
+
   it('records a url elicitation as a durable login, resolves it, and finishes the turn', async () => {
     const harness = await startHarness();
 
@@ -2545,7 +2652,7 @@ describe('authentication, initialize and prompt content', () => {
     /* The agent was told Tau can present one; that is why it offered the flow. */
     expect(
       harness.frames.some(
-        (frame) => frame.direction === 'client->agent' && frame.frame.includes('"elicitation":{"url":{}}'),
+        (frame) => frame.direction === 'client->agent' && frame.frame.includes('"elicitation":{"url":{},"form":{}}'),
       ),
     ).toBe(true);
   }, 30_000);

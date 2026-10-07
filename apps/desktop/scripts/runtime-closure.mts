@@ -12,7 +12,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { cp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { basename, dirname, parse, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -236,12 +236,19 @@ const packageIdentity = async (directory: string): Promise<string> => {
   return `${manifest.name}@${manifest.version}`;
 };
 
-/** Runtime dependencies one package declares. */
-const runtimeDependencies = async (directory: string): Promise<readonly string[]> => {
+/** Ordinary dependencies plus only the optional payloads this caller selected. */
+const runtimeDependencies = async (
+  directory: string,
+  optionalDependencies: readonly string[],
+): Promise<readonly string[]> => {
   const manifest = JSON.parse(await readFile(resolve(directory, 'package.json'), 'utf8')) as {
     readonly dependencies?: Readonly<Record<string, string>>;
+    readonly optionalDependencies?: Readonly<Record<string, string>>;
   };
-  return Object.keys(manifest.dependencies ?? {});
+  return [
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...optionalDependencies.filter((name) => Object.hasOwn(manifest.optionalDependencies ?? {}, name)),
+  ];
 };
 
 /**
@@ -280,9 +287,11 @@ const resolveFromTree = async (from: string, name: string, stopAt: string): Prom
  * A dependency already visible up the staged tree at the same version is
  * skipped, which is Node's own resolution rule and also the cycle guard.
  *
- * Optional dependencies are deliberately not followed: they are the platform
- * payloads a host either already has or does not need, and following them would
- * pull Codex's 258 MB vendored binary into every Tau package.
+ * Optional dependencies are not followed unless the caller selects their exact
+ * names. Desktop native payloads retain each consuming package's installed
+ * version; unrelated optional payloads, such as Codex's vendored binary, stay out.
+ * Select shared native libraries before addons so both are siblings when an
+ * addon's relative library lookup requires that layout.
  *
  * @param options - The package to stage, where it lives, the staged
  *   `node_modules` it is copied into (also the highest directory a staged
@@ -294,18 +303,19 @@ export const copyRuntimeClosure = async (options: {
   readonly source: string;
   readonly modulesRoot: string;
   readonly filter?: ((path: string) => boolean) | undefined;
+  readonly optionalDependencies?: readonly string[];
 }): Promise<void> => {
-  const { modulesRoot, filter = (): boolean => true } = options;
+  const { modulesRoot, filter = (): boolean => true, optionalDependencies = [] } = options;
   const stage = async (packageName: string, from: string, into: string): Promise<void> => {
     const target = resolve(into, packageName);
     /* `node_modules` is dropped because this function rebuilds it; `src` is
      * dropped for the same reason the engine packages drop it — published
      * packages run from their build output. */
     await copyTree(from, target, (path) => !['node_modules', 'src'].includes(basename(path)) && filter(path));
-    for (const dependency of await runtimeDependencies(from)) {
+    for (const dependency of await runtimeDependencies(from, optionalDependencies)) {
       /* oxlint-disable no-await-in-loop -- Siblings would race on the same nested
        * directories; staging one dependency at a time keeps the layout decidable. */
-      const dependencySource = await resolveFromTree(from, dependency, '/');
+      const dependencySource = await resolveFromTree(from, dependency, parse(from).root);
       if (!dependencySource) {
         throw new Error(`${packageName} depends on ${dependency}, which does not resolve from ${from}`);
       }

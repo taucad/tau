@@ -2,6 +2,8 @@
 
 pub(crate) mod exact;
 mod gltf;
+pub(crate) mod material;
+pub(crate) mod material_intersection;
 #[cfg(test)]
 mod reference_tests;
 
@@ -287,6 +289,7 @@ pub struct MeshAnalysis {
     canonical: OnceCell<Rc<Vec<u32>>>,
     mesh_quality: OnceCell<Rc<MeshQuality>>,
     watertight: OnceCell<Rc<Watertight>>,
+    #[cfg(test)]
     pieces: OnceCell<Rc<Vec<Piece>>>,
     /// The first connected-component result a prepared batch accepted, by
     /// normalized tolerance bits; later plans on this subject reuse it.
@@ -343,19 +346,47 @@ impl MeshAnalysis {
         )
     }
 
+    #[cfg(test)]
     fn pieces(&self) -> &Rc<Vec<Piece>> {
         self.pieces
             .get_or_init(|| Rc::new(sub_meshes(&self.record, self.canonical())))
     }
 
     /// Sorted clusters, before their C(C-1)/2 pairwise gaps exist.
-    pub(crate) fn component_clusters(&self, tolerance_mm: f64) -> Vec<ClusterReport> {
-        component_clusters(self, self.pieces(), tolerance_mm)
+    #[cfg(test)]
+    pub(crate) fn component_clusters(
+        &self,
+        tolerance_mm: f64,
+        budget: &Budget,
+        byte_limit: u64,
+    ) -> Result<Vec<ClusterReport>, crate::backend::BackendError> {
+        self.component_clusters_traced(
+            tolerance_mm,
+            budget,
+            byte_limit,
+            &mut exact::ChargeTrace::disabled(),
+        )
+    }
+
+    pub(crate) fn component_clusters_traced(
+        &self,
+        tolerance_mm: f64,
+        budget: &Budget,
+        byte_limit: u64,
+        trace: &mut exact::ChargeTrace,
+    ) -> Result<Vec<ClusterReport>, crate::backend::BackendError> {
+        let groups =
+            material::clusters_traced(&self.record, tolerance_mm, budget, byte_limit, trace)?;
+        let pieces = pieces_from_groups(&self.record, groups);
+        Ok(component_clusters(self, &pieces))
     }
 
     #[cfg(test)]
     pub fn connected_components(&self, tolerance_mm: f64) -> ConnectedComponents {
-        ConnectedComponents::from_clusters(self.component_clusters(tolerance_mm))
+        ConnectedComponents::from_clusters(
+            self.component_clusters(tolerance_mm, &Budget::new(u64::MAX), u64::MAX)
+                .expect("qualified material fixture"),
+        )
     }
 
     /// A result an earlier plan accepted for these tolerance bits.
@@ -960,6 +991,7 @@ fn watertight(record: &MeshAnalysisRecord, canonical: &[u32]) -> Watertight {
     }
 }
 
+#[cfg(test)]
 fn sub_meshes(record: &MeshAnalysisRecord, canonical: &[u32]) -> Vec<Piece> {
     const UNSET: usize = usize::MAX;
     let mut parent: Vec<usize> = (0..record.triangles.len()).collect();
@@ -990,6 +1022,10 @@ fn sub_meshes(record: &MeshAnalysisRecord, canonical: &[u32]) -> Vec<Piece> {
         }
         groups[*group_index].push(triangle_index);
     }
+    pieces_from_groups(record, groups)
+}
+
+fn pieces_from_groups(record: &MeshAnalysisRecord, groups: Vec<Vec<usize>>) -> Vec<Piece> {
     groups
         .into_iter()
         .map(|members| {
@@ -1297,47 +1333,8 @@ impl BoxTree {
     }
 }
 
-fn component_clusters(
-    analysis: &MeshAnalysis,
-    pieces: &[Piece],
-    tolerance_mm: f64,
-) -> Vec<ClusterReport> {
-    let mut parent: Vec<usize> = (0..pieces.len()).collect();
-    let axis = sweep_axis(pieces.iter().map(|piece| piece.aabb));
-    let mut order: Vec<usize> = (0..pieces.len()).collect();
-    order.sort_by(|&left, &right| {
-        partial_cmp(pieces[left].aabb.min[axis], pieces[right].aabb.min[axis])
-            .then_with(|| left.cmp(&right))
-    });
-    for index in 0..order.len() {
-        let current_index = order[index];
-        let current = &pieces[current_index];
-        for &candidate_index in &order[index + 1..] {
-            let candidate = &pieces[candidate_index];
-            if candidate.aabb.min[axis] > current.aabb.max[axis] + tolerance_mm {
-                break;
-            }
-            if !overlaps_within(current.aabb, candidate.aabb, tolerance_mm) {
-                continue;
-            }
-            let left = find(&mut parent, current_index);
-            let right = find(&mut parent, candidate_index);
-            if left != right {
-                parent[left] = right;
-            }
-        }
-    }
-
-    let mut merged: Vec<Vec<usize>> = Vec::new();
-    let mut merged_indices = HashMap::new();
-    for piece_index in 0..pieces.len() {
-        let root = find(&mut parent, piece_index);
-        let group_index = *merged_indices.entry(root).or_insert_with(|| {
-            merged.push(Vec::new());
-            merged.len() - 1
-        });
-        merged[group_index].push(piece_index);
-    }
+fn component_clusters(analysis: &MeshAnalysis, pieces: &[Piece]) -> Vec<ClusterReport> {
+    let merged = (0..pieces.len()).map(|index| vec![index]);
 
     struct Draft {
         label: String,
@@ -1346,7 +1343,6 @@ fn component_clusters(
         total_vertices: u32,
     }
     let drafts: Vec<_> = merged
-        .into_iter()
         .map(|group| {
             let mut aabb = empty_aabb();
             let mut total_vertices = 0;
@@ -1453,6 +1449,7 @@ pub fn analyze(record: &Rc<MeshAnalysisRecord>) -> MeshAnalysis {
         canonical: OnceCell::new(),
         mesh_quality: OnceCell::new(),
         watertight: OnceCell::new(),
+        #[cfg(test)]
         pieces: OnceCell::new(),
         components: OnceCell::new(),
     }
@@ -1462,7 +1459,7 @@ pub fn analyze(record: &Rc<MeshAnalysisRecord>) -> MeshAnalysis {
 mod tests {
     use super::*;
 
-    fn box_record(offset: f64) -> MeshAnalysisRecord {
+    pub(super) fn box_record(offset: f64) -> MeshAnalysisRecord {
         let positions = vec![
             [offset, 0.0, 0.0],
             [offset + 1.0, 0.0, 0.0],
@@ -1532,17 +1529,18 @@ mod tests {
         for (index, label) in labels.into_iter().enumerate() {
             let vertex_start = record.positions.len() as u32;
             let x = index as f64 * 10.0;
-            record
-                .positions
-                .extend([[x, 0.0, 0.0], [x + 1.0, 0.0, 0.0], [x, 1.0, 0.0]]);
-            record
-                .triangles
-                .push([vertex_start, vertex_start + 1, vertex_start + 2]);
-            record.triangle_primitives.push(index as u32);
+            let cube = box_record(x);
+            record.positions.extend(cube.positions);
+            record.triangles.extend(
+                cube.triangles
+                    .into_iter()
+                    .map(|triangle| triangle.map(|vertex| vertex + vertex_start)),
+            );
+            record.triangle_primitives.extend([index as u32; 12]);
             record.primitives.push(Primitive {
                 name: format!("{label}#0"),
                 vertex_start,
-                vertex_count: 3,
+                vertex_count: 8,
             });
         }
         let analysis = analyze(&Rc::new(record));
@@ -1805,6 +1803,60 @@ mod tests {
     }
 
     #[test]
+    fn hollow_housing_and_rotor_remain_two_spatial_material_components() {
+        let mut record = MeshAnalysisRecord {
+            positions: Vec::new(),
+            triangles: Vec::new(),
+            triangle_primitives: Vec::new(),
+            primitives: Vec::new(),
+        };
+        for (radius, inward, primitive) in [(3.0, false, 0), (2.0, true, 0), (1.0, false, 1)] {
+            let cube = box_record(0.0);
+            let start = record.positions.len() as u32;
+            record.positions.extend(
+                cube.positions
+                    .into_iter()
+                    .map(|point| point.map(|value| (2.0 * value - 1.0) * radius)),
+            );
+            record
+                .triangles
+                .extend(cube.triangles.into_iter().map(|triangle| {
+                    let [a, b, c] = triangle.map(|vertex| start + vertex);
+                    if inward {
+                        [c, b, a]
+                    } else {
+                        [a, b, c]
+                    }
+                }));
+            record.triangle_primitives.extend([primitive; 12]);
+        }
+        record.primitives = vec![
+            Primitive {
+                name: "housing#0".into(),
+                vertex_start: 0,
+                vertex_count: 16,
+            },
+            Primitive {
+                name: "rotor#0".into(),
+                vertex_start: 16,
+                vertex_count: 8,
+            },
+        ];
+        let analysis = analyze(&Rc::new(record));
+        assert!(analysis.watertight().watertight);
+        assert_eq!(
+            analysis.pieces().len(),
+            3,
+            "boundary surfaces are a separate fact"
+        );
+        assert_eq!(analysis.mesh_count, 2, "two producer-named occurrences");
+        assert!((analysis.mesh_quality().signed_volume - 160.0).abs() < 1e-12);
+        // Outer +/-3 minus cavity +/-2 is one material housing. Rotor +/-1
+        // is another body, separated from that material by exactly 1 mm.
+        assert_eq!(analysis.connected_components(0.0).count, 2);
+    }
+
+    #[test]
     fn joins_components_at_the_declared_tolerance_boundary() {
         let mut record = box_record(0.0);
         let right = box_record(2.0);
@@ -1854,12 +1906,13 @@ mod tests {
             };
             BatchAnalysis::new([("s".to_owned(), tolerance.to_bits())], limits).unwrap()
         };
+        let slot = OnceCell::new();
 
         let first = plan(0.0, u64::MAX)
-            .connected_components("s", 0.0, &analysis)
+            .connected_components("s", 0.0, &analysis, &Budget::new(u64::MAX), &slot)
             .unwrap();
         let second = plan(-0.0, u64::MAX)
-            .connected_components("s", -0.0, &analysis)
+            .connected_components("s", -0.0, &analysis, &Budget::new(u64::MAX), &slot)
             .unwrap();
         assert_eq!(first.count, 2);
         assert!(
@@ -1869,7 +1922,7 @@ mod tests {
 
         // A plan whose limit the retained result exceeds still refuses it.
         let refusal = plan(0.0, 1)
-            .connected_components("s", 0.0, &analysis)
+            .connected_components("s", 0.0, &analysis, &Budget::new(u64::MAX), &slot)
             .unwrap_err();
         assert_eq!(
             refusal.message,
@@ -1878,7 +1931,7 @@ mod tests {
 
         // Another tolerance is built, not served from the retained result.
         let joined = plan(1.0, u64::MAX)
-            .connected_components("s", 1.0, &analysis)
+            .connected_components("s", 1.0, &analysis, &Budget::new(u64::MAX), &slot)
             .unwrap();
         assert_eq!(joined.count, 1);
         assert!(Rc::ptr_eq(

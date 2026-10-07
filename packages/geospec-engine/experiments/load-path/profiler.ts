@@ -2,12 +2,9 @@
 import { WebIO } from '@gltf-transform/core';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { exposeEngineSubject } from '#engine/subject-store.js';
 import { analyzeMeshOverlap } from '#mesh/overlap.js';
 import { buildMeshAnalysisRecord, recordGeometryStats } from '#mesh/analysis-record.js';
 import type { GeometrySubject } from '#mesh/types.js';
-import { createSerialGeoSpecRunner } from '#runner/serial.js';
-import type { GeoSpecModelLoader } from 'geospec/model';
 import { summarizeLoadPathSamples } from '#experiments/load-path/summary.js';
 import type { LoadPathBucket, LoadPathSummary, LoadPathTimingSample } from '#experiments/load-path/summary.js';
 
@@ -29,16 +26,6 @@ export type LoadPathProfileOptions = {
 export type LoadPathProfileResult = {
   samples: LoadPathTimingSample[];
   summary: LoadPathSummary;
-};
-
-/**
- *
- */
-export type CanonicalPerTestLoadPathProfileResult = LoadPathProfileResult & {
-  authoredLoadModelCalls: number;
-  underlyingModelLoaderCalls: number;
-  passed: number;
-  failed: number;
 };
 
 /**
@@ -81,36 +68,6 @@ export type NodeCliLoadPathProfileResult = LoadPathProfileResult & {
   };
   runs: NodeCliLoadPathProfileRun[];
 };
-
-class MemoryProfileFileSystem {
-  private readonly files = new Map<string, string>();
-
-  public setText(path: string, content: string): void {
-    this.files.set(path, content);
-  }
-
-  public async exists(path: string): Promise<boolean> {
-    return this.files.has(path);
-  }
-
-  public async readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
-  public async readFile(path: string, encoding: 'utf8'): Promise<string>;
-  public async readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-    const content = this.files.get(path);
-    if (content === undefined) {
-      throw new Error(`ENOENT: ${path}`);
-    }
-    return encoding === 'utf8' ? content : new TextEncoder().encode(content);
-  }
-
-  public async writeFile(path: string, content: string): Promise<void> {
-    this.files.set(path, content);
-  }
-
-  public async ensureDir(_path: string): Promise<void> {
-    return undefined;
-  }
-}
 
 const measure = async <T>(
   bucket: LoadPathBucket,
@@ -180,18 +137,6 @@ const createSubject = (stats: GeometrySubject['mesh']['stats']): GeometrySubject
   diagnostics: [],
 });
 
-const createSubjectFromGlb = async (options: {
-  bytes: Uint8Array<ArrayBuffer>;
-  io: WebIO;
-  samples: LoadPathTimingSample[];
-}): Promise<GeometrySubject> => {
-  const document = await measure('glbParse', options.samples, async () => options.io.readBinary(options.bytes));
-  const record = await measure('recordBuild', options.samples, () => buildMeshAnalysisRecord(document));
-  const stats = await measure('statsFacade', options.samples, () => recordGeometryStats(record));
-  await measure('partition', options.samples, () => stats.analyseConnectedComponents(0.1));
-  return createSubject(stats);
-};
-
 export const profileLoadPath = async (options: LoadPathProfileOptions): Promise<LoadPathProfileResult> => {
   const samples: LoadPathTimingSample[] = [];
   const iterations = options.iterations ?? 1;
@@ -228,68 +173,6 @@ export const profileLoadPath = async (options: LoadPathProfileOptions): Promise<
   }
 
   return {
-    samples,
-    summary: summarizeLoadPathSamples(samples),
-  };
-};
-
-const canonicalPerTestGeoSpecSource = `import { describe, it } from 'geospec';
-import { loadModel } from 'geospec/model';
-
-describe('canonical per-test load path', () => {
-  it('loads for bounds', async () => {
-    await loadModel({ file: 'main.ts', format: 'glb' });
-  });
-
-  it('loads for watertightness', async () => {
-    await loadModel({ format: 'glb', file: 'main.ts' });
-  });
-
-  it('loads for connected components', async () => {
-    await loadModel({ file: 'main.ts', format: 'glb' });
-  });
-
-  it('loads for overlap', async () => {
-    await loadModel({ file: 'main.ts', format: 'glb' });
-  });
-});
-`;
-
-export const profileCanonicalPerTestLoadPath = async (options: {
-  glbBytes: Uint8Array<ArrayBuffer>;
-  iterations?: number;
-}): Promise<CanonicalPerTestLoadPathProfileResult> => {
-  const samples: LoadPathTimingSample[] = [];
-  const iterations = options.iterations ?? 1;
-  const io = new WebIO();
-  let underlyingModelLoaderCalls = 0;
-  let passed = 0;
-  let failed = 0;
-  const modelLoader: GeoSpecModelLoader = async () => {
-    underlyingModelLoaderCalls += 1;
-    return exposeEngineSubject(await createSubjectFromGlb({ bytes: options.glbBytes, io, samples }));
-  };
-
-  for (let iteration = 0; iteration < iterations; iteration++) {
-    const filesystem = new MemoryProfileFileSystem();
-    filesystem.setText('main.geospec.ts', canonicalPerTestGeoSpecSource);
-    const runner = createSerialGeoSpecRunner({ filesystem, modelLoader });
-    const result = await measure('geospecRun', samples, async () => {
-      try {
-        return await runner.run({ files: ['main.geospec.ts'] });
-      } finally {
-        await runner.close();
-      }
-    });
-    passed += result.passed;
-    failed += result.failed;
-  }
-
-  return {
-    authoredLoadModelCalls: iterations * 4,
-    underlyingModelLoaderCalls,
-    passed,
-    failed,
     samples,
     summary: summarizeLoadPathSamples(samples),
   };

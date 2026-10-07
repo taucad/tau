@@ -24,6 +24,7 @@ import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
+import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 /** One revision, as every card and history row reads it. @public */
@@ -265,7 +266,9 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
           listener();
         }
       };
-      const unsubscribeMembership = store.subscribeMembership(() => bind());
+      const unsubscribeMembership = store.subscribeMembership(() => {
+        bind();
+      });
       bind(false);
       return () => {
         unsubscribeMembership();
@@ -290,36 +293,38 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
   const version = useSyncExternalStore(subscribe, snapshot, () => '');
   return useMemo(
     () =>
-      store.observedChatIdsOf(projectId).flatMap((chatId): FinalizedRevision[] => {
-        const projection = store.getProjection(chatId);
-        if (projection === undefined) {
-          return [];
-        }
-        return Object.values(projection.ledger.runs).flatMap((run) =>
-          run.settlements.flatMap(({ event }): FinalizedRevision[] =>
-            event.type === 'turn.finalized' && event.revisionId !== undefined
-              ? [
-                  {
-                    branch: event.branch,
-                    card: {
-                      revisionId: event.revisionId,
-                      n: undefined,
-                      createdAt: 0,
-                      summary: '',
-                      actor: '',
-                      turnId: event.turnId,
-                      conflicted: false,
-                      tags: [],
-                      trigger: 'turn',
-                      changedPaths: event.changedPaths,
-                      ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
-                    },
-                  },
-                ]
-              : [],
-          ),
-        );
-      }),
+      version === ''
+        ? []
+        : store.observedChatIdsOf(projectId).flatMap((chatId): FinalizedRevision[] => {
+            const projection = store.getProjection(chatId);
+            if (projection === undefined) {
+              return [];
+            }
+            return Object.values(projection.ledger.runs).flatMap((run) =>
+              run.settlements.flatMap(({ event }): FinalizedRevision[] =>
+                event.type === 'turn.finalized' && event.revisionId !== undefined
+                  ? [
+                      {
+                        branch: event.branch,
+                        card: {
+                          revisionId: event.revisionId,
+                          n: undefined,
+                          createdAt: 0,
+                          summary: '',
+                          actor: '',
+                          turnId: event.turnId,
+                          conflicted: false,
+                          tags: [],
+                          trigger: 'turn',
+                          changedPaths: event.changedPaths,
+                          ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
+                        },
+                      },
+                    ]
+                  : [],
+              ),
+            );
+          }),
     [projectId, store, version],
   );
 };
@@ -704,33 +709,69 @@ export function useRevisionChanges(card: RevisionCard | undefined): readonly Rev
   return useMemo(() => attested?.map((path) => ({ path, kind: 'modified' }) as const) ?? data ?? [], [attested, data]);
 }
 
+/** Invalidate only the live query owned by this mounted comparison. */
+function useCheckoutComparisonRefresh(
+  client: RevisionClient | undefined,
+  input: Readonly<{ checkoutId: string | undefined; queryKey: readonly unknown[]; enabled: boolean }>,
+): void {
+  const { checkoutId, queryKey, enabled } = input;
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    return client?.subscribeEvents((event) => {
+      if (event.type === 'checkout.changed' && event.checkoutId === checkoutId) {
+        // Reset cancels even an initial pending read before requesting the new checkout.
+        void queryClient.resetQueries({ queryKey, exact: true });
+      }
+    });
+  }, [client, checkoutId, queryClient, queryKey, enabled]);
+}
+
 /**
- * Which paths differ between one revision and the checkout's head, for
- * *Compare with current* (canvas round 4b): the whole revision against the
- * files as they are now, each path then opening the same checkout comparison a
- * file row does.
+ * Paths that differ between a revision and the selected live checkout.
  *
- * Both revisions are immutable, so the answer is exact for the head it was
- * asked at; a new head is a new question.
- *
- * @param card - The revision to compare, or `undefined` while nothing is asked.
- * @returns The paths, empty until the first answer.
+ * @param card - The saved revision to compare with the current files.
+ * @returns Live paths, loading state, and retryable read failure.
  * @public
  */
 export function useRevisionChangesSince(card: RevisionCard | undefined): Readonly<{
   changes: readonly RevisionDiffEntry[];
   isLoaded: boolean;
+  error: string | undefined;
+  retry: () => void;
 }> {
+  const { projectId } = useProject();
   const client = useRevisionClient();
-  const head = useRevisionStatus()?.headRevisionId;
-  const { data } = useQuery({
-    queryKey: ['revision-diff-since', card?.revisionId ?? '', head ?? ''],
-    enabled: client !== undefined && card !== undefined && head !== undefined,
-    queryFn: async () =>
-      card === undefined || head === undefined ? [] : ((await client?.diff(head, card.revisionId)) ?? []),
-    staleTime: Number.POSITIVE_INFINITY,
+  const status = useRevisionStatus();
+  const revision = card?.revisionId;
+  const checkoutId = status?.checkoutId;
+  const head = status?.headRevisionId;
+  const queryKey = useMemo(
+    () => ['revision-diff-since', projectId, checkoutId ?? '', revision ?? '', head ?? ''],
+    [projectId, checkoutId, revision, head],
+  );
+  const { data, error, refetch } = useQuery({
+    queryKey,
+    enabled: client !== undefined && revision !== undefined && checkoutId !== undefined,
+    queryFn: async () => {
+      if (client === undefined || revision === undefined) {
+        throw new Error('The revision comparison is unavailable.');
+      }
+      return client.diff(revision, undefined, { against: 'checkout' });
+    },
+    staleTime: 0,
   });
-  return { changes: data ?? [], isLoaded: data !== undefined };
+  useCheckoutComparisonRefresh(client, { checkoutId, queryKey, enabled: card !== undefined });
+  return {
+    changes: data ?? [],
+    isLoaded: data !== undefined,
+    error: error instanceof Error ? error.message : undefined,
+    retry: () => {
+      void refetch();
+    },
+  };
 }
 
 /**
@@ -745,9 +786,9 @@ export function useRevisionChangesSince(card: RevisionCard | undefined): Readonl
  * A revision is immutable, but the checkout is not, and nothing on the
  * projection says how many times it has been written — a per-write counter on
  * the wire would move the projection on every keystroke, which is the opposite
- * of "settled values out" (A38, ruling P28). So the working side is simply not
- * cached: one round trip per open of the compare view, resolved in the worker
- * against the live tree (W7 review R7).
+ * of "settled values out" (A38, ruling P28). The working side is read
+ * on every open and reset on checkout change events, including a write during
+ * the first pending read (W7 review R7).
  *
  * @param revisionId - The revision to compare.
  * @param path - The file inside it.
@@ -762,36 +803,47 @@ export function useRevisionFileComparison(
 ): Readonly<{
   original: string;
   modified: string;
+  comparison: RevisionFileComparison | undefined;
   isLoading: boolean;
   isLoaded: boolean;
   error: string | undefined;
   retry: () => void;
 }> {
+  const { projectId } = useProject();
   const client = useRevisionClient();
   const status = useRevisionStatus();
-  const { data, isPending, error, refetch } = useQuery({
-    queryKey: [
+  const checkoutId = against === 'checkout' ? status?.checkoutId : undefined;
+  const head = against === 'checkout' ? status?.headRevisionId : undefined;
+  const queryKey = useMemo(
+    () => [
       'revision-compare',
+      projectId,
       revisionId ?? '',
       path ?? '',
       against ?? 'parent',
-      against === 'checkout' ? (status?.headRevisionId ?? '') : '',
+      checkoutId ?? '',
+      head ?? '',
     ],
+    [projectId, revisionId, path, against, checkoutId, head],
+  );
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey,
     enabled: client !== undefined && revisionId !== undefined && path !== undefined,
-    queryFn: async () =>
-      revisionId === undefined || path === undefined
-        ? { original: '', modified: '' }
-        : ((await client?.compare(revisionId, path, against === undefined ? undefined : { against })) ?? {
-            original: '',
-            modified: '',
-          }),
+    queryFn: async () => {
+      if (client === undefined || revisionId === undefined || path === undefined) {
+        throw new Error('The revision comparison is unavailable.');
+      }
+      return client.compare(revisionId, path, against === undefined ? undefined : { against });
+    },
     /* A revision against its own parent is immutable and cached for the
      * session; the working side is re-read every time it is opened. */
     staleTime: against === 'checkout' ? 0 : Number.POSITIVE_INFINITY,
   });
+  useCheckoutComparisonRefresh(client, { checkoutId, queryKey, enabled: against === 'checkout' });
   return {
     original: data?.original ?? '',
     modified: data?.modified ?? '',
+    comparison: data,
     isLoading: isPending,
     isLoaded: data !== undefined,
     error: error instanceof Error ? error.message : undefined,

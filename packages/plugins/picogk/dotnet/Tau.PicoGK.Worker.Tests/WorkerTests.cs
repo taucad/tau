@@ -243,8 +243,8 @@ static class Second
         var arguments = new[] { "--workspace", root, "--artifacts", Path.Combine(root, "artifacts"), "--parent-pid", Environment.ProcessId.ToString() };
 
         var output = Run(arguments, """
-{"protocolVersion":7,"requestId":"1","method":"resolve","params":{"entryPath":"./regions/other.cs"}}
-{"protocolVersion":7,"requestId":"2","method":"resolve","params":{"entryPath":"Shared.cs"}}
+{"protocolVersion":8,"requestId":"1","method":"resolve","params":{"entryPath":"./regions/other.cs"}}
+{"protocolVersion":8,"requestId":"2","method":"resolve","params":{"entryPath":"Shared.cs"}}
 """);
 
         Assert.Contains("\"sources\":[\"Shared.cs\",\"regions/other.cs\"]", output);
@@ -611,13 +611,13 @@ Library.Go(2f, () =>
         Assert.Equal([0x11 / 255f, 0x22 / 255f, 0x33 / 255f, 0x80 / 255f], mesh.Color);
         Assert.Equal(0.25f, mesh.Metallic);
         Assert.Equal(0.75f, mesh.Roughness);
-        Assert.True(mesh.Positions.Max() >= 10);
+        Assert.True(WorldPositions(mesh).Max() >= 10);
         Assert.Equal(mesh.Positions.Length, mesh.Normals.Length);
         Assert.NotEmpty(mesh.Indices);
         var line = result.Components[1];
         Assert.Empty(line.Normals);
         Assert.Equal(new uint[] { 0, 1, 1, 2 }, line.Indices);
-        Assert.Contains(5f, line.Positions);
+        Assert.Contains(5f, WorldPositions(line));
         Assert.All(new[]
         {
             result.Timings.EntryPointInvoke,
@@ -756,7 +756,7 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
 
             backend.SetObjectMatrix(first, Matrix4x4.CreateTranslation(10, 0, 0));
             var transformed = backend.Extract();
-            Assert.True(transformed.Components[1].Positions.Max() >= 10);
+            Assert.True(WorldPositions(transformed.Components[1]).Max() >= 10);
             backend.Dispose();
         }
         finally
@@ -792,7 +792,7 @@ Library.Go(1f, () => {
         Assert.Equal(["Assembly/Rotor", "Assembly/Axis", "Assembly/Ball"],
             MeshArtifactWriter.Write(Path.Combine(root, "named-artifacts"), result,
                 new WorkerDiagnostics(new WorkerTimings(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new WorkerMetrics(0, 0, 0)))
-                .Components.Select(component => component.Name));
+                .Occurrences.Select(component => component.Name));
         Write("main.cs", "using PicoGK; Library.Go(1f, () => { });");
         var next = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "next-artifacts"));
         Assert.False(next.RecycleAfterResponse); // The source type did not root its collectible assembly.
@@ -927,13 +927,14 @@ Library.Go(1f, () =>
         0.04f,
         Animation.EType.Once,
         Easing.EEasing.LINEAR));
+    viewer.bPoll(); // Start the animation clock before measuring its existing completion interval.
     System.Threading.Thread.Sleep(90);
 });
 """);
         var result = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "animation-artifacts"));
 
-        Assert.True(AxisExtent(result.Components[0].Positions, 0) > 5f);
-        Assert.True(AxisExtent(result.Components[0].Positions, 1) < 3f);
+        Assert.True(AxisExtent(WorldPositions(result.Components[0]), 0) > 5f);
+        Assert.True(AxisExtent(WorldPositions(result.Components[0]), 1) < 3f);
     }
 
     [Fact]
@@ -1042,7 +1043,7 @@ Library.Go(1f, () =>
     }
 
     [Fact]
-    public void BulkReadbackMatchesFallbackAndBoundsCallerBuffers()
+    public void CaptureReadbackPreservesIndicesAndBoundsCallerBuffers()
     {
         using var library = new Library(1f);
         Library.RegisterGlobalLibrary(library);
@@ -1054,8 +1055,7 @@ Library.Go(1f, () =>
             mesh.nAddVertex(new Vector3(4, 5, 6));
             mesh.nAddVertex(new Vector3(7, 8, 9));
             mesh.nAddTriangle(0, 1, 2);
-            var bulk = mesh.TauCopyGeometry(); var fallback = mesh.TauCopyGeometry(false);
-            Assert.Equal(1, (int)typeof(Mesh).GetField("m_tauBulkAvailable", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!);
+            var bulk = mesh.TauCopyGeometry(); var fallback = mesh.TauCopyGeometry();
             Assert.Equal(new float[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 }, bulk.Positions);
             Assert.Equal(new uint[] { 0, 1, 2 }, bulk.Indices);
             Assert.Equal(fallback.Positions, bulk.Positions);
@@ -1089,7 +1089,7 @@ Library.Go(1f, () =>
             Assert.Throws<ObjectDisposedException>(() => mesh.nAddTriangle(0, 1, 2));
             using var nonfinite = new Mesh();
             nonfinite.nAddVertex(new Vector3(float.NaN, 0, 0));
-            Assert.Equal("PicoGK readback returned a nonfinite vertex.", Assert.Throws<InvalidOperationException>(() => nonfinite.TauCopyGeometry()).Message);
+            Assert.Equal("PicoGK immutable capture contains invalid geometry or counts.", Assert.Throws<ArgumentException>(() => nonfinite.TauCopyGeometry()).Message);
         }
         finally { Library.UnregisterGlobalLibrary(); }
     }
@@ -1117,7 +1117,7 @@ Library.Go(1f, () =>
             {
                 var geometry = mesh.TauCopyGeometry();
                 Assert.All(geometry.Indices, index => Assert.True(index < geometry.Positions.Length / 3));
-                Assert.Equal(geometry.Indices, mesh.TauCopyGeometry(false).Indices.Take(geometry.Indices.Length));
+                Assert.Equal(geometry.Indices, mesh.TauCopyGeometry().Indices.Take(geometry.Indices.Length));
             }
             await mutation;
             Assert.Same(original.Positions, Assert.Single(backend.Extract().Components).Positions);
@@ -1125,6 +1125,104 @@ Library.Go(1f, () =>
             Assert.Equal(257 * 3, Assert.Single(backend.Extract().Components).Indices.Length);
         }
         finally { Library.UnregisterGlobalLibrary(); }
+    }
+
+    [Fact]
+    public void FailedCommandReleasesBarriersAlreadyDrainedIntoItsBatch()
+    {
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "failed-batch"));
+        using var completion = new ManualResetEventSlim();
+        using var secondCompletion = new ManualResetEventSlim();
+        var ranAfterFailure = false;
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var applyBatch = typeof(CaptureViewerBackend).GetMethod("ApplyBatch", flags)!;
+        var commandType = typeof(CaptureViewerBackend).GetNestedType("ViewerCommand", System.Reflection.BindingFlags.NonPublic)!;
+        object Command(Action apply, ManualResetEventSlim? signal = null) => Activator.CreateInstance(commandType, [apply, signal])!;
+        var batch = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(commandType))!;
+        batch.Add(Command(() => throw new InvalidOperationException("batch failed")));
+        batch.Add(Command(() => { }, completion));
+        batch.Add(Command(() => ranAfterFailure = true, secondCompletion));
+        var failure = Assert.Throws<System.Reflection.TargetInvocationException>(() => applyBatch.Invoke(backend, [batch]));
+        Assert.Equal("batch failed", Assert.IsType<InvalidOperationException>(failure.InnerException).Message);
+        Assert.True(completion.Wait(TimeSpan.FromSeconds(3)), "A failed command must wake every barrier in its batch.");
+        Assert.True(secondCompletion.Wait(TimeSpan.FromSeconds(3)), "Every remaining barrier must wake after the first failure.");
+        Assert.False(ranAfterFailure);
+        Assert.Equal("batch failed", Assert.Throws<InvalidOperationException>(backend.RequestUpdate).Message);
+        Assert.Equal("batch failed", Assert.Throws<InvalidOperationException>(backend.Dispose).Message);
+        Assert.Throws<ObjectDisposedException>(() => _ = backend.IsIdle);
+        backend.Dispose();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ViewerAdmissionPreservesFailureWhenQueueClosesAfterInitialCheck(bool captureFailure)
+    {
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "closing-admission"));
+        using var started = new ManualResetEventSlim();
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var gate = typeof(CaptureViewerBackend).GetField("gate", flags)!.GetValue(backend)!;
+        var commands = typeof(CaptureViewerBackend).GetField("commands", flags)!.GetValue(backend)!;
+        Exception? admissionError = null;
+        var producer = new Thread(() =>
+        {
+            started.Set();
+            try { backend.RequestUpdate(); }
+            catch (Exception error) { admissionError = error; }
+        }) { IsBackground = true };
+        lock (gate)
+        {
+            producer.Start();
+            Assert.True(started.Wait(TimeSpan.FromSeconds(3)));
+            // The producer has passed the initial error check and is waiting for this gate.
+            Assert.True(SpinWait.SpinUntil(() => (producer.ThreadState & ThreadState.WaitSleepJoin) != 0, TimeSpan.FromSeconds(3)));
+            if (captureFailure)
+                typeof(CaptureViewerBackend).GetField("pumpError", flags)!.SetValue(backend,
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(new InvalidOperationException("capture failed")));
+            commands.GetType().GetMethod("CompleteAdding")!.Invoke(commands, null);
+        }
+        Assert.True(producer.Join(TimeSpan.FromSeconds(3)), "Closed admission must release the producer.");
+        var failure = Assert.IsType<InvalidOperationException>(admissionError);
+        if (captureFailure)
+        {
+            Assert.Equal("capture failed", failure.Message);
+            Assert.Equal("capture failed", Assert.Throws<InvalidOperationException>(backend.Dispose).Message);
+        }
+        else backend.Dispose();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletionAndExtractionJoinPumpWhenAnotherCallerHasStartedClosing(bool extract)
+    {
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "concurrent-complete"));
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        // Pause the first closer after marking completed, before it closes the collection.
+        typeof(CaptureViewerBackend).GetField("completed", flags)!.SetValue(backend, true);
+        var commands = typeof(CaptureViewerBackend).GetField("commands", flags)!.GetValue(backend)!;
+        var pump = (Task)typeof(CaptureViewerBackend).GetField("pump", flags)!.GetValue(backend)!;
+        var joining = Task.Run(() =>
+        {
+            started.SetResult();
+            if (extract) backend.Extract();
+            else backend.Complete();
+        });
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var interval = Task.Delay(TimeSpan.FromMilliseconds(100));
+            Assert.Same(interval, await Task.WhenAny(joining, interval));
+        }
+        finally
+        {
+            commands.GetType().GetMethod("CompleteAdding")!.Invoke(commands, null);
+            await pump.WaitAsync(TimeSpan.FromSeconds(3));
+            await joining.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        backend.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => _ = backend.IsIdle);
     }
 
     [Fact]
@@ -1267,15 +1365,15 @@ Library.Go(1f, () =>
                 new WorkerMetrics(1, 2, 3)));
 
         Assert.True(result.RecycleAfterResponse);
-        Assert.Equal(116, result.ByteLength);
-        Assert.Equal("triangles", result.Components[0].Kind);
-        Assert.Equal("lines", result.Components[1].Kind);
-        Assert.Equal(0, result.Components[0].PositionOffset);
-        Assert.Equal(36, result.Components[0].NormalOffset);
-        Assert.Equal(72, result.Components[0].IndexOffset);
-        Assert.Equal(84, result.Components[1].PositionOffset);
-        Assert.Equal(108, result.Components[1].NormalOffset);
-        Assert.Equal(108, result.Components[1].IndexOffset);
+        Assert.Equal(108, result.ByteLength);
+        Assert.Equal("triangles", result.Prototypes[0].Kind);
+        Assert.Equal("lines", result.Prototypes[1].Kind);
+        Assert.Equal(0, result.Prototypes[0].PositionOffset);
+        Assert.Equal(36, result.Prototypes[0].NormalOffset);
+        Assert.Equal(72, result.Prototypes[0].IndexOffset);
+        Assert.Equal(80, result.Prototypes[1].PositionOffset);
+        Assert.Equal(104, result.Prototypes[1].NormalOffset);
+        Assert.Equal(104, result.Prototypes[1].IndexOffset);
         Assert.Equal(1, result.Metrics.ManagedHeapBytes);
         Assert.Equal(2, result.Metrics.PicoGkNativeBytes);
         Assert.Equal(3, result.Metrics.ProcessWorkingSetBytes);
@@ -1307,9 +1405,9 @@ Library.Go(2f, () =>
         Assert.Throws<KeyNotFoundException>(() => Program.ParseArguments(["--workspace", root]));
 
         var output = Run(arguments, """
-{"protocolVersion":7,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
-{"protocolVersion":7,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
-{"protocolVersion":7,"requestId":"3","method":"shutdown","params":{}}
+{"protocolVersion":8,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
+{"protocolVersion":8,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
+{"protocolVersion":8,"requestId":"3","method":"shutdown","params":{}}
 """);
         Assert.Contains("\"type\":\"ready\"", output);
         Assert.Contains("\"defaultParameters\":{}", output);
@@ -1337,9 +1435,9 @@ Library.Go(2f, () =>
         Assert.Equal(2, Program.Run(arguments, new StringReader("{\"protocolVersion\":3,\"requestId\":\"1\",\"method\":\"x\",\"params\":{}}"), new StringWriter(), new StringWriter()));
         Assert.Equal(2, Program.Run(arguments, new StringReader(new string('x', 1_048_577)), new StringWriter(), new StringWriter()));
 
-        var output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
+        var output = Run(arguments, "{\"protocolVersion\":8,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
         Assert.Contains("CS_TAU_PROTOCOL", output);
-        output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
+        output = Run(arguments, "{\"protocolVersion\":8,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
         Assert.Contains("CS_TAU_RUNTIME", output);
         Assert.DoesNotContain("\"location\":null", output);
 
@@ -1350,11 +1448,11 @@ Library.Go(2f, () =>
         {
             Assert.ThrowsAny<Exception>(() => Program.ValidateEntryPath(Json(json), root));
         }
-        output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":8,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("CS_TAU_NO_SCENE", output);
 
         Write("main.cs", "using System; using System.Numerics; using PicoGK; Library.Go(1f, () => { Library.oViewer().Add(Utils.mshCreateCube(Vector3.One)); throw new InvalidOperationException(\"failed after start\"); });");
-        output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":8,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("failed after start", output);
     }
 
@@ -1392,11 +1490,11 @@ public static class Params
         var frames = new[]
         {
             // A cancel with nothing in flight has nothing to stop.
-            """{"protocolVersion":7,"requestId":"0","method":"cancel"}""",
-            """{"protocolVersion":7,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":7,"requestId":"1","method":"cancel"}""",
-            """{"protocolVersion":7,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":7,"requestId":"3","method":"shutdown","params":{}}""",
+            """{"protocolVersion":8,"requestId":"0","method":"cancel"}""",
+            """{"protocolVersion":8,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":8,"requestId":"1","method":"cancel"}""",
+            """{"protocolVersion":8,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":8,"requestId":"3","method":"shutdown","params":{}}""",
         };
 
         // The cancel is held back until the model is demonstrably running, so it stops a build in flight.
@@ -1428,10 +1526,12 @@ public static class Params
         Assert.True(Program.ParentIsAlive(Environment.ProcessId));
         Assert.False(Program.ParentIsAlive(int.MaxValue));
         var terminated = new ManualResetEventSlim();
-        var checks = new Queue<bool>([true, false]);
+        var checks = new Queue<bool>([true, true, false]);
         var watcher = Program.StartParentWatch(1, terminated.Set, _ => checks.Dequeue(), pollMilliseconds: 1);
+        Assert.NotNull(watcher);
         Assert.True(terminated.Wait(TimeSpan.FromSeconds(1)));
         watcher.Join();
+        Assert.Null(Program.StartParentWatch(1, () => throw new InvalidOperationException("hidden parent"), _ => false));
 
         Assert.False(Program.DisposeLibrary(null, new StringWriter()));
         Assert.False(Program.DisposeLibrary(new MemoryStream(), new StringWriter()));
@@ -1473,7 +1573,7 @@ public static class Params
         var originalError = Console.Error;
         try
         {
-            Console.SetIn(new StringReader("{\"protocolVersion\":7,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
+            Console.SetIn(new StringReader("{\"protocolVersion\":8,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
             var output = new StringWriter();
             Console.SetOut(output);
             Console.SetError(new StringWriter());

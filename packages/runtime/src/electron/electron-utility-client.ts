@@ -6,18 +6,10 @@
 
 import { wrapMessagePort, wrapMessagePortMain, createChannelClient } from '@taucad/rpc';
 import type { Channel, MessagePortMainLike, Port } from '@taucad/rpc';
-import type { Geometry } from '@taucad/types';
-import type {
-  ExportGeometryResult,
-  GeometryTransport,
-  RuntimeExportResultTransport,
-  RuntimeInitializeResult,
-  RuntimeProtocol,
-} from '#index.js';
-import { runtimeProtocolSchemas } from '#transport/index.js';
-import { materialiseExportResult } from '#transport/_internal/export-materialiser.js';
-import { materialiseGeometry } from '#transport/_internal/geometry-materialiser.js';
-import { triggerRenderTimeout } from '#transport/_internal/abort-channel.js';
+import type { BinaryContentDelivery, RuntimeInitializeResult } from '#index.js';
+import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
+import { materialiseBinaryContent } from '#transport/_internal/export-materialiser.js';
 import type {
   RuntimeInitializeMemoryHandle,
   RuntimeInitializePayload,
@@ -89,20 +81,20 @@ export type ElectronUtilityMainClientOptions = {
   /** `MessagePortMain` transferred from Electron main into another utility process. */
   readonly port: MessagePortMainLike;
   /** Release the corresponding main-owned utility lease. */
-  readonly release?: (reason: 'requested' | 'render-timeout') => void;
+  readonly release?: (reason: 'requested' | 'operation-timeout') => void;
 };
 
 type ElectronUtilityClientHooks = {
   readonly origin: string;
   readonly machines?: ElectronUtilityTransportOptions['machines'];
-  readonly release?: (reason: 'requested' | 'render-timeout') => void;
+  readonly release?: (reason: 'requested' | 'operation-timeout') => void;
   readonly subscribeHostExit?: (listener: (detail: ElectronRuntimeHostExitDetail) => void) => void;
   readonly wrappedPort: Port<unknown>;
 };
 
 const createElectronUtilityClient = (
   hooks: ElectronUtilityClientHooks,
-): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
+): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
   const { origin, release, subscribeHostExit, wrappedPort } = hooks;
   debugLog(origin, 'port-wrapped');
   /* Carried beside the CAD channel, never over it: the shell brokers the
@@ -110,7 +102,8 @@ const createElectronUtilityClient = (
   const machines = createLazyMachineFacet(hooks.machines);
 
   let openPromise: Promise<TransportClientReady> | undefined;
-  let channel: Channel<RuntimeProtocol> | undefined;
+  let closePromise: Promise<void> | undefined;
+  let channel: Channel<RuntimeDocumentProtocol> | undefined;
   let isClosed = false;
   /* A utility that dies before its hello failed to start; one that dies after
    * it died mid-session. Readiness is the only thing that separates them. */
@@ -143,7 +136,7 @@ const createElectronUtilityClient = (
       /* Best-effort */
     }
     try {
-      release?.(result.cause === 'render-timeout' ? 'render-timeout' : 'requested');
+      release?.(result.cause === 'operation-timeout' ? 'operation-timeout' : 'requested');
     } catch {
       /* Best-effort */
     }
@@ -175,7 +168,7 @@ const createElectronUtilityClient = (
    * disentangles the port first, so finishing on it immediately is what threw
    * the exit code away. Hold the close for the relay window instead — the relay
    * finishes at once whenever it arrives, before or after. */
-  wrappedPort.onClose?.(() => {
+  const scheduleHostExit = (): void => {
     if (isClosed || relayWait !== undefined) {
       return;
     }
@@ -183,7 +176,8 @@ const createElectronUtilityClient = (
       relayWait = undefined;
       void finish(hostExitResult(undefined));
     }, hostExitRelayWindow);
-  });
+  };
+  wrappedPort.onClose?.(scheduleHostExit);
   subscribeHostExit?.((detail) => {
     void finish(hostExitResult(detail));
   });
@@ -193,13 +187,13 @@ const createElectronUtilityClient = (
       return openPromise;
     }
     openPromise = (async () => {
-      if (isClosed) {
+      if (isClosed || closePromise) {
         throw new Error('electronUtilityClient: closed before open()');
       }
-      channel = createChannelClient<RuntimeProtocol>({
+      channel = createChannelClient<RuntimeDocumentProtocol>({
         port: wrappedPort,
         sessionKey,
-        protocolSchemas: runtimeProtocolSchemas,
+        protocolSchemas: runtimeDocumentProtocolSchemas,
       });
       debugLog(origin, 'channel-created');
       /* Only a bye the host chose to send is a reason. A local close echoes
@@ -209,6 +203,9 @@ const createElectronUtilityClient = (
       channel.onClose((info) => {
         if (info.origin === 'remote' && info.reason !== portClosedReason) {
           wireReason = info.reason;
+        }
+        if (info.origin === 'remote') {
+          scheduleHostExit();
         }
       });
       await channel.ready;
@@ -222,20 +219,13 @@ const createElectronUtilityClient = (
   return {
     id: electronUtilityId,
     machines: machines.facet,
-    reservePreview() {
-      return {};
+    signalDocumentAbort() {
+      return false;
     },
-    renderTimeoutRecovery: {
+    operationTimeoutRecovery: {
       kind: 'terminable',
-      abortRender(target): void {
-        if (!channel) {
-          return;
-        }
-        debugLog(origin, 'render-timeout', target);
-        triggerRenderTimeout(channel, undefined, target);
-      },
       async terminate(): Promise<void> {
-        await finish({ cause: 'render-timeout' });
+        await finish({ cause: 'operation-timeout' });
       },
     },
     describe(): TransportDescriptor<typeof electronUtilityId> {
@@ -252,14 +242,26 @@ const createElectronUtilityClient = (
       const memoryHandle: RuntimeInitializeMemoryHandle = {};
       return channel.call('initialize', { ...input, memoryHandle });
     },
-    async resolveGeometry(transport: GeometryTransport): Promise<Geometry> {
-      return materialiseGeometry(transport, undefined);
-    },
-    async resolveExport(transport: RuntimeExportResultTransport): Promise<ExportGeometryResult> {
-      return materialiseExportResult(transport, undefined);
+    async resolveBinary(transport: BinaryContentDelivery): Promise<Uint8Array<ArrayBuffer>> {
+      return materialiseBinaryContent(transport, undefined);
     },
     async close(): Promise<void> {
-      await finish({ cause: 'requested' });
+      closePromise ??= (async () => {
+        try {
+          if (!isClosed && phase === 'session') {
+            // The existing document worker owner makes disposal idempotent.
+            await channel?.call('dispose', null);
+          }
+        } catch {
+          // A failed/dead peer must still release its utility; synchronous terminate cannot await errors.
+          if (relayWait !== undefined) {
+            await closed;
+          }
+        } finally {
+          await finish({ cause: 'requested' });
+        }
+      })();
+      await closePromise;
     },
     closed,
   };
@@ -274,7 +276,7 @@ const createElectronUtilityClient = (
  */
 export const electronUtilityClient = (
   clientOptions: ElectronUtilityTransportOptions,
-): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
+): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> => {
   const { port: receivedPort, machines } = clientOptions;
   const releaseRuntimeHost = takeElectronRuntimeHostRelease(receivedPort);
   const wrappedPort = wrapMessagePort<unknown>(receivedPort, {
@@ -308,7 +310,7 @@ electronUtilityClient.describe = electronUtilityClientDescribe;
  */
 export const electronUtilityMainClient = (
   options: ElectronUtilityMainClientOptions,
-): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> =>
+): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, typeof electronUtilityId> =>
   createElectronUtilityClient({
     origin: 'utility:client',
     wrappedPort: wrapMessagePortMain<unknown>(options.port, { label: 'electron-utility:utility-client' }),

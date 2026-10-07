@@ -1,4 +1,4 @@
-import { Document } from '@gltf-transform/core';
+import { Document, WebIO } from '@gltf-transform/core';
 import type { Buffer as GltfBuffer, Material, Mesh, Node, Scene } from '@gltf-transform/core';
 
 import type {
@@ -23,7 +23,7 @@ import type {
   File3dmObject,
 } from 'rhino3dm';
 import { cadMaterialDefaults } from '@taucad/runtime/types';
-import { createNodeIo, createReverseCoordinateTransform, ImportLoader } from '@taucad/geometry-core';
+import { allExtensions, createReverseCoordinateTransform, ImportLoader } from '@taucad/geometry-core';
 import type { ImportFile } from '@taucad/geometry-core';
 
 // Type for rhino3dm geometry JSON structure
@@ -83,7 +83,7 @@ export class ThreeDmLoader extends ImportLoader<Document> {
   }
 
   protected async mapToGlb(document: Document): Promise<Uint8Array<ArrayBuffer>> {
-    const io = await createNodeIo();
+    const io = new WebIO().registerExtensions(allExtensions);
 
     await document.transform(createReverseCoordinateTransform());
 

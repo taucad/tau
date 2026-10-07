@@ -2,13 +2,14 @@
 /**
  * Prepare or verify the complete Node/mixed package payload for CI transport.
  * Uses existing Nx producers; hashes establish transport identity, not qualification.
- * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery|cache-key
+ * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery|cache-key|product-key
  * Optional env: GEOSPEC_DELIVERY_CACHE and existing delivery tool selectors.
  * GEOSPEC_NATIVE_DELIVERY_CACHE selects independent retained native-prefix reuse;
  * GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER/RECIPE and GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES
  * apply only to that prefix's verification. Mixed selectors remain independent.
  * GEOSPEC_NATIVE_PREFIX_PATH overrides PATH only for native-prefix verification.
- * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt,mixed-inputs,mixed-commands}.json
+ * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt,mixed-inputs,mixed-commands}.json;
+ * product-key prints the digest of the product source closure on any platform, for cross-run reuse.
  * Exit: 0 complete and matching; 1 missing, changed or failed prerequisite.
  */
 import assert from 'node:assert/strict';
@@ -58,11 +59,47 @@ const sourceKitOnly = new Set([
   `${packagePath}/bench/performance-lab.test.ts`,
   `${packagePath}/vitest.config.ts`,
 ]);
+/** Workspace files outside the package that select the Rust toolchain or crate graph. */
+const productWorkspaceFiles = new Set(['rust-toolchain.toml', 'Cargo.toml', 'Cargo.lock']);
+/** Package paths that never reach the five products: the TypeScript facade (bundled into
+ * dist at assembly, which the full source identity still binds), benchmarks, conformance
+ * corpora, host suites, trust helpers, documentation, licence texts and JS/Python tests. */
+const nonProductRoots = ['src/', 'bench/', 'conformance/', 'host-tests/', 'quality/', 'trust/', 'licenses/'];
+const nonProductFiles = new Set([
+  'AGENTS.md',
+  'CLAUDE.md',
+  'README.md',
+  'LICENSE',
+  'NOTICE',
+  '.size-limit.json',
+  'tsdown.config.ts',
+]);
+/** Whether a source-identity path can change the generated bindings, addon or WASM.
+ * @type {(path: string) => boolean}
+ */
+const productInput = (path) => {
+  if (sourceKitOnly.has(path)) {
+    return false;
+  }
+  if (!path.startsWith(`${packagePath}/`)) {
+    return productWorkspaceFiles.has(path) || path.startsWith('.cargo/');
+  }
+  const relative = path.slice(packagePath.length + 1);
+  return (
+    !nonProductRoots.some((root) => relative.startsWith(root)) &&
+    !nonProductFiles.has(relative) &&
+    !/^(?:tsconfig[^/]*\.json|vitest[^/]*\.ts)$/u.test(relative) &&
+    !/\.test\.[cm]?[jt]s$/u.test(relative) &&
+    !/(?:^|\/)test_[^/]*\.py$/u.test(relative)
+  );
+};
 const lockPath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.lock';
 const activePath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.active.json';
 /** @type {number | undefined} */
 let heldLockFile;
-/** Keep the lock alive in an active producer even if this coordinator is killed. */
+/** Keep the lock alive in an active producer even if this coordinator is killed.
+ * @type {(capture?: boolean) => import('node:child_process').StdioOptions}
+ */
 const producerStdio = (capture = false) =>
   heldLockFile === undefined
     ? capture
@@ -72,7 +109,10 @@ const producerStdio = (capture = false) =>
       ? ['inherit', 'pipe', 'pipe', heldLockFile]
       : ['inherit', 'inherit', 'inherit', heldLockFile];
 /** @type {() => {id: string | null, attempt: string | null}} */
-const workflowRun = () => ({ id: process.env.GITHUB_RUN_ID ?? null, attempt: process.env.GITHUB_RUN_ATTEMPT ?? null });
+const workflowRun = () => ({
+  id: process.env['GITHUB_RUN_ID'] ?? null,
+  attempt: process.env['GITHUB_RUN_ATTEMPT'] ?? null,
+});
 /** The recorded workflow belongs to the original producer, not the verifying host. */
 /** @type {(value: unknown) => {id: string | null, attempt: string | null}} */
 const recordedWorkflowRun = (value) => {
@@ -88,13 +128,13 @@ const recordedWorkflowRun = (value) => {
   );
   return { id: run.id, attempt: run.attempt };
 };
-const outputs = [
+const outputs = /** @type {const} */ ([
   `${packagePath}/bindings/node/generated/index.d.ts`,
   `${packagePath}/bindings/node/generated/index.js`,
   `${packagePath}/bindings/node/generated/geospec-engine-native.darwin-arm64.node`,
   `${packagePath}/bindings/emscripten/generated/geospec_engine_native.mjs`,
   `${packagePath}/bindings/emscripten/generated/geospec_engine_native.wasm`,
-];
+]);
 /** @type {(bytes: import('node:crypto').BinaryLike) => string} */
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 /** Resolve a runner against its caller PATH before a producer receives a stricter PATH.
@@ -178,18 +218,18 @@ export const recoverExitedProducer = (root, groupAlive, recipeSha256 = producerR
   }
   const marker = readJson(path);
   assert.ok(
-    typeof marker.owner === 'string' &&
-      typeof marker.pid === 'number' &&
-      Number.isSafeInteger(marker.pgid) &&
-      marker.pgid === marker.pid &&
-      marker.pgid > 0 &&
-      marker.recipeSha256 === recipeSha256 &&
-      typeof marker.started === 'string',
+    typeof marker['owner'] === 'string' &&
+      typeof marker['pid'] === 'number' &&
+      Number.isSafeInteger(marker['pgid']) &&
+      marker['pgid'] === marker['pid'] &&
+      marker['pgid'] > 0 &&
+      marker['recipeSha256'] === recipeSha256 &&
+      typeof marker['started'] === 'string',
     `GeoSpec producer marker is not a recognized closed recipe: ${path}; explicit operator recovery required.`,
   );
   assert.ok(
-    !groupAlive(marker.pgid),
-    `GeoSpec producer group ${marker.pgid} still has a possible writer; refusing retry.`,
+    !groupAlive(marker['pgid']),
+    `GeoSpec producer group ${marker['pgid']} still has a possible writer; refusing retry.`,
   );
   // Invalidate the only reusable publication before allowing another producer.
   rmSync(resolve(root, inventoryPath), { force: true });
@@ -261,11 +301,44 @@ const sourceIdentity = (root) => {
  * @type {(root: string) => string}
  */
 const closedRecipe = (root) => digest(JSON.stringify(sourceIdentity(root).files));
-/** @type {(source: ReturnType<typeof sourceIdentity>) => ReturnType<typeof sourceIdentity>} */
-const producerIdentity = (source) => ({
+/** The napi CLI writes the generated Node loader, so its locked release is the one product
+ * input that pnpm selects. Peer suffixes are dropped: they follow unrelated workspace bumps.
+ * @type {(root: string) => ReturnType<typeof fileRecord>[]}
+ */
+const napiCliRecord = (root) => {
+  const lockfile = resolve(root, 'pnpm-lock.yaml');
+  if (!existsSync(lockfile)) {
+    return [];
+  }
+  const lines = readFileSync(lockfile, 'utf8').split('\n');
+  const importer = lines.indexOf(`  ${packagePath}:`);
+  assert.ok(importer !== -1, `pnpm-lock.yaml lacks the ${packagePath} importer.`);
+  const end = lines.findIndex((line, index) => index > importer && /^ {0,3}\S/u.test(line));
+  const block = lines.slice(importer + 1, end === -1 ? undefined : end);
+  const entry = block.indexOf("      '@napi-rs/cli':");
+  const version = block
+    .slice(entry + 1, entry + 3)
+    .map((line) => /^ {8}version: ([^(\s]+)/u.exec(line)?.[1])
+    .find(Boolean);
+  assert.ok(entry !== -1 && version, 'pnpm-lock.yaml lacks the locked @napi-rs/cli release.');
+  const resolution = lines.indexOf(`  '@napi-rs/cli@${version}':`);
+  const integrity = /^ {4}resolution: \{integrity: (\S+)\}$/u.exec(lines[resolution + 1] ?? '')?.[1];
+  assert.ok(resolution !== -1 && integrity, `pnpm-lock.yaml lacks the @napi-rs/cli@${version} integrity.`);
+  const bytes = Buffer.from(`@napi-rs/cli@${version} ${integrity}\n`);
+  return [{ path: 'pnpm-lock.yaml#@napi-rs/cli', bytes: bytes.length, sha256: digest(bytes) }];
+};
+/** Products depend only on the native closure, so a workspace, facade or test edit keeps them.
+ * @type {(root: string, source: ReturnType<typeof sourceIdentity>) => ReturnType<typeof sourceIdentity>}
+ */
+const producerIdentity = (root, source) => ({
   ...source,
-  files: source.files.filter((file) => !sourceKitOnly.has(file.path)),
+  files: [...source.files.filter((file) => productInput(file.path)), ...napiCliRecord(root)],
 });
+/** Digest of the product closure: equal keys mean a transport's products verify on this checkout.
+ * @type {(root: string) => string}
+ * @internal
+ */
+export const productKey = (root) => digest(JSON.stringify(producerIdentity(root, sourceIdentity(root)).files));
 /** Nx's runtime input uses the same source closure as transport verification.
  * The delivery generation covers the selected host tools, compilers, SDK and
  * pinned OCCT recipe without requiring downloads or generated outputs.
@@ -438,24 +511,26 @@ const checkReceipt = (root, inventory) => {
   assert.ok(typeof sourceRoot === 'string' && posix.isAbsolute(sourceRoot), 'Mixed receipt lacks producer root.');
   assert.ok(manifestSha256 === fileRecord(root, mixedInputsPath).sha256, 'Mixed receipt/input-manifest hash differs.');
   const inputs = readJson(resolve(root, mixedInputsPath));
-  assert.ok(inputs.schema === 'geospec-mixed-build-inputs-v3', 'Unsupported mixed input manifest.');
+  assert.ok(inputs['schema'] === 'geospec-mixed-build-inputs-v3', 'Unsupported mixed input manifest.');
   const fixedSimd = { rustFlags: ['-C', 'target-feature=+simd128'], cxxFlag: '-msimd128', linkFlag: '-msimd128' };
-  assert.deepEqual(inputs.wasmSimd, fixedSimd, 'Mixed inputs lack selected fixed-SIMD flags.');
+  assert.deepEqual(inputs['wasmSimd'], fixedSimd, 'Mixed inputs lack selected fixed-SIMD flags.');
   assert.deepEqual(wasmSimd, fixedSimd, 'Mixed receipt fixed-SIMD flags differ from inputs.');
   const nativeEh = {
     compileFlags: ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm'],
     linkFlags: ['-fwasm-exceptions', '-sWASM_LEGACY_EXCEPTIONS=1', '-sSUPPORT_LONGJMP=wasm'],
   };
-  assert.deepEqual(inputs.wasmEh, nativeEh, 'Mixed inputs lack selected native WASM EH flags.');
+  assert.deepEqual(inputs['wasmEh'], nativeEh, 'Mixed inputs lack selected native WASM EH flags.');
   assert.deepEqual(wasmEh, nativeEh, 'Mixed receipt native WASM EH flags differ from inputs.');
   assert.ok(
-    inputs.environment !== null && typeof inputs.environment === 'object' && !Array.isArray(inputs.environment),
+    inputs['environment'] !== null &&
+      typeof inputs['environment'] === 'object' &&
+      !Array.isArray(inputs['environment']),
     'Mixed inputs lack the producer environment.',
   );
-  const { CARGO_HOME: cargoHome } = /** @type {Record<string, unknown>} */ (inputs.environment);
+  const { CARGO_HOME: cargoHome } = /** @type {Record<string, unknown>} */ (inputs['environment']);
   assert.ok(typeof cargoHome === 'string' && posix.isAbsolute(cargoHome), 'Mixed inputs lack Cargo source root.');
   assert.ok(
-    typeof inputs.rustPrefix === 'string' && posix.isAbsolute(inputs.rustPrefix),
+    typeof inputs['rustPrefix'] === 'string' && posix.isAbsolute(inputs['rustPrefix']),
     'Mixed inputs lack Rust source root.',
   );
   assert.deepEqual(
@@ -466,7 +541,7 @@ const checkReceipt = (root, inventory) => {
         'target-feature=+simd128',
         `--remap-path-prefix=${sourceRoot}=tau`,
         `--remap-path-prefix=${cargoHome}=cargo`,
-        `--remap-path-prefix=${posix.join(inputs.rustPrefix, 'lib/rustlib/src/rust')}=rust-src`,
+        `--remap-path-prefix=${posix.join(inputs['rustPrefix'], 'lib/rustlib/src/rust')}=rust-src`,
       ].join('\u001F'),
       CXXFLAGS_wasm32_unknown_emscripten:
         '-msimd128 -frtti -fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=1 -sSUPPORT_LONGJMP=wasm',
@@ -474,28 +549,28 @@ const checkReceipt = (root, inventory) => {
       GEOSPEC_PRODUCER_ROUTE: 'nx-build-mixed-st-release-v1',
       GEOSPEC_PRODUCER_CARGO_CWD: sourceRoot,
       GEOSPEC_PRODUCER_MANIFEST: posix.join(sourceRoot, packagePath, 'bindings/emscripten/Cargo.toml'),
-      GEOSPEC_MIXED_INPUTS: posix.join(inputs.preparationCache, 'mixed-inputs-simd128.json'),
+      GEOSPEC_MIXED_INPUTS: posix.join(/** @type {string} */ (inputs['preparationCache']), 'mixed-inputs-simd128.json'),
       GEOSPEC_PRODUCER_MIXED_INPUTS_SHA256: manifestSha256,
     },
     'Mixed receipt compile environment differs from fixed-SIMD selection.',
   );
   assert.ok(
-    inputs.sourceRoot === sourceRoot && inputs.sourceRevision === sourceRevision,
+    inputs['sourceRoot'] === sourceRoot && inputs['sourceRevision'] === sourceRevision,
     'Mixed input source differs from receipt.',
   );
   assert.ok(
-    output === posix.join(sourceRoot, packagePath, 'bindings/emscripten/generated') && inputs.output === output,
+    output === posix.join(sourceRoot, packagePath, 'bindings/emscripten/generated') && inputs['output'] === output,
     'Mixed input/receipt output differs.',
   );
-  assert.ok(typeof inputs.cache === 'string' && posix.isAbsolute(inputs.cache), 'Mixed inputs lack build cache.');
+  assert.ok(typeof inputs['cache'] === 'string' && posix.isAbsolute(inputs['cache']), 'Mixed inputs lack build cache.');
   assert.ok(
-    typeof inputs.preparationCache === 'string' &&
-      posix.isAbsolute(inputs.preparationCache) &&
-      inputs.cache === posix.join(inputs.preparationCache, 'mixed-build-simd128') &&
-      inputs.occtPrefix === posix.join(inputs.preparationCache, 'occt-mixed-simd128/install'),
+    typeof inputs['preparationCache'] === 'string' &&
+      posix.isAbsolute(inputs['preparationCache']) &&
+      inputs['cache'] === posix.join(inputs['preparationCache'], 'mixed-build-simd128') &&
+      inputs['occtPrefix'] === posix.join(inputs['preparationCache'], 'occt-mixed-simd128/install'),
     'Mixed inputs lack isolated fixed-SIMD prefix/cache.',
   );
-  assert.ok(inputs.linkOptimization === 'O3', 'Unsupported mixed link profile.');
+  assert.ok(inputs['linkOptimization'] === 'O3', 'Unsupported mixed link profile.');
   assert.equal(
     profile,
     'emscripten-6.0.5-wasm-legacy-exceptions-wasm-sjlj-st-simd128-v1-rust-c656540-panic-abort-link-O3',
@@ -512,13 +587,13 @@ const checkReceipt = (root, inventory) => {
     const tool = ['rustc', 'emxx', 'cargo', 'emxx'][index];
     assert.ok(tool !== undefined && typeof inputs[tool] === 'string', 'Missing mixed command tool.');
     assert.ok(
-      record.executable === inputs[tool] &&
-        record.status === 0 &&
-        Array.isArray(record.args) &&
-        record.args.every((argument) => typeof argument === 'string'),
+      record['executable'] === inputs[tool] &&
+        record['status'] === 0 &&
+        Array.isArray(record['args']) &&
+        record['args'].every((argument) => typeof argument === 'string'),
       'Mixed command/tool selection differs from inputs.',
     );
-    return record.args;
+    return record['args'];
   });
   assert.deepEqual(commandArguments[0], ['-vV'], 'Mixed Rust version command differs.');
   assert.deepEqual(commandArguments[1], ['--version'], 'Mixed Emscripten version command differs.');
@@ -534,18 +609,20 @@ const checkReceipt = (root, inventory) => {
       '--target',
       'wasm32-unknown-emscripten',
       '--target-dir',
-      posix.join(inputs.cache, 'target'),
+      posix.join(inputs['cache'], 'target'),
     ],
     'Mixed Cargo route differs from inputs.',
   );
+  const linkArguments = commandArguments[3];
+  assert.ok(linkArguments !== undefined, 'Missing mixed link command.');
   assert.ok(
-    isDeepStrictEqual(commandArguments[3].slice(0, 2), [`-${inputs.linkOptimization}`, fixedSimd.linkFlag]) &&
-      nativeEh.linkFlags.every((flag) => commandArguments[3].includes(flag)) &&
-      isDeepStrictEqual(commandArguments[3].slice(-2), ['-o', posix.join(output, 'geospec_engine_native.mjs')]),
+    isDeepStrictEqual(linkArguments.slice(0, 2), [`-${inputs['linkOptimization']}`, fixedSimd.linkFlag]) &&
+      nativeEh.linkFlags.every((flag) => linkArguments.includes(flag)) &&
+      isDeepStrictEqual(linkArguments.slice(-2), ['-o', posix.join(output, 'geospec_engine_native.mjs')]),
     'Mixed link profile/output differs from inputs.',
   );
   assert.ok(
-    commandArguments[3].every(
+    linkArguments.every(
       (argument) =>
         !/^(?:-pthread|-matomics|-mno-simd128|-mrelaxed-simd|-ffast-math|-funsafe-math-optimizations|-fassociative-math|-ffp-contract=fast|-Ofast|-s(?:PTHREADS|USE_PTHREADS|PTHREAD_POOL_SIZE)(?:=.*)?|-Wl,--shared-memory)$/.test(
           argument,
@@ -566,9 +643,13 @@ const checkReceipt = (root, inventory) => {
   assert.ok(isDeepStrictEqual(artifacts, expected), 'Mixed receipt output hashes differ from payload.');
 };
 
+/** @typedef {ReturnType<typeof sourceIdentity>} SourceIdentity */
+/** @typedef {{platform?: unknown, run?: unknown, assemblyRun?: unknown, archives?: ReturnType<typeof fileRecord>[], nativeProof?: unknown}} RecordedDelivery */
+/** @typedef {{schema?: unknown, source: SourceIdentity, producerSource?: SourceIdentity, artifacts: ReturnType<typeof payload>, delivery?: RecordedDelivery}} VerifiedInventory */
+
 /**
  * Verify transported bytes against this checkout without executing any product.
- * @type {(root: string) => {source: ReturnType<typeof sourceIdentity>, artifacts: ReturnType<typeof payload>}}
+ * @type {(root: string) => VerifiedInventory}
  * @internal
  */
 export const verifyArtifacts = (root) => {
@@ -576,7 +657,7 @@ export const verifyArtifacts = (root) => {
     existsSync(resolve(root, inventoryPath)),
     'Missing GeoSpec artifact inventory; run geospec-engine-native:prepare-geospec-ci-artifacts on Darwin ARM64 or restore its complete same-source transport.',
   );
-  const inventory = readJson(resolve(root, inventoryPath));
+  const inventory = /** @type {Record<string, unknown> & VerifiedInventory} */ (readJson(resolve(root, inventoryPath)));
   const { schema, source: recordedSource, producerSource, artifacts: recordedArtifacts } = inventory;
   const source = sourceIdentity(root);
   const artifacts = payload(root);
@@ -586,7 +667,7 @@ export const verifyArtifacts = (root) => {
   );
   assert.ok(
     schema === 'geospec-ci-artifacts-v3'
-      ? isDeepStrictEqual(producerSource?.files, producerIdentity(source).files)
+      ? isDeepStrictEqual(producerSource?.files, producerIdentity(root, source).files)
       : isDeepStrictEqual(recordedSource.files, source.files),
     'GeoSpec artifact source inputs differ from this checkout.',
   );
@@ -594,14 +675,16 @@ export const verifyArtifacts = (root) => {
     isDeepStrictEqual(recordedArtifacts, artifacts),
     'GeoSpec artifact membership/bytes/hashes differ from inventory.',
   );
-  for (const [key, path] of [
+  for (const [key, path] of /** @type {const} */ ([
     ['mixedReceipt', receiptPath],
     ['mixedInputs', mixedInputsPath],
     ['mixedCommands', mixedCommandsPath],
-  ]) {
+  ])) {
     assert.ok(isDeepStrictEqual(inventory[key], fileRecord(root, path)), `${key} changed during transport.`);
   }
-  checkReceipt(root, { source: schema === 'geospec-ci-artifacts-v3' ? producerSource : recordedSource, artifacts });
+  const receiptSource = schema === 'geospec-ci-artifacts-v3' ? producerSource : recordedSource;
+  assert.ok(receiptSource !== undefined, 'GeoSpec artifact inventory lacks its producer source.');
+  checkReceipt(root, { source: receiptSource, artifacts });
   return { ...inventory, source: recordedSource, artifacts };
 };
 
@@ -743,7 +826,7 @@ export const prepareArtifacts = (root) => {
   rmSync(resolve(root, inventoryPath), { force: true });
   const cacheKey = deliveryCacheKey(root);
   const source = sourceIdentity(root);
-  const pnpmRunner = executableOnPath('pnpm', process.env.PATH);
+  const pnpmRunner = executableOnPath('pnpm', process.env['PATH']);
   assert.ok(pnpmRunner, 'pnpm is not executable on the caller PATH.');
   const { GEOSPEC_DELIVERY_CACHE: deliveryCache } = process.env;
   let cache = resolve(root, deliveryCache ?? 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh');
@@ -759,20 +842,21 @@ export const prepareArtifacts = (root) => {
     assert.ok(/^[0-9a-f]{64}$/u.test(generation), 'Invalid GeoSpec delivery generation.');
     cache = join(cache, 'generations', generation);
   }
-  const reusePrefixes = process.env.GEOSPEC_NATIVE_DELIVERY_CACHE !== undefined;
-  const nativeCache = resolve(root, process.env.GEOSPEC_NATIVE_DELIVERY_CACHE ?? cache);
+  const reusePrefixes = process.env['GEOSPEC_NATIVE_DELIVERY_CACHE'] !== undefined;
+  const nativeCache = resolve(root, process.env['GEOSPEC_NATIVE_DELIVERY_CACHE'] ?? cache);
   const nativeBuilder = resolve(
     root,
-    (reusePrefixes ? process.env.GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER : process.env.GEOSPEC_OCCT_PRODUCER_BUILDER) ??
-      `${packagePath}/native/occt/build-occt.sh`,
+    (reusePrefixes
+      ? process.env['GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER']
+      : process.env['GEOSPEC_OCCT_PRODUCER_BUILDER']) ?? `${packagePath}/native/occt/build-occt.sh`,
   );
   mkdirSync(cache, { recursive: true });
   const nativeTarget = mkdtempSync(join(cache, 'ci-node-target-'));
   const environment = {
     ...process.env,
     NX_DAEMON: 'false',
-    PATH: process.env.PATH,
-    CARGO_HOME: resolve(root, process.env.CARGO_HOME ?? join(homedir(), '.cargo')),
+    PATH: process.env['PATH'],
+    CARGO_HOME: resolve(root, process.env['CARGO_HOME'] ?? join(homedir(), '.cargo')),
     pnpm_config_verify_deps_before_run: 'warn',
     GEOSPEC_DELIVERY_CACHE: cache,
     GEOSPEC_DELIVERY_GENERATION: generation,
@@ -846,7 +930,7 @@ export const prepareArtifacts = (root) => {
               RUSTC_LOG: overrides.RUSTC_LOG,
             },
             prefixBuilder: nativeBuilder,
-            ownedTarget: /** @type {{'build-node': unknown}} */ (project.targets)['build-node'],
+            ownedTarget: /** @type {{'build-node': unknown}} */ (project['targets'])['build-node'],
             logs: ['build-node.stdout', 'build-node.stderr'].map((name) =>
               fileRecord(root, `${transportPath}/${name}`),
             ),
@@ -862,16 +946,16 @@ export const prepareArtifacts = (root) => {
   run('prepare-delivery:tools');
   if (reusePrefixes) {
     assert.ok(
-      executableOnPath('node', process.env.GEOSPEC_NATIVE_PREFIX_PATH ?? process.env.PATH),
+      executableOnPath('node', process.env['GEOSPEC_NATIVE_PREFIX_PATH'] ?? process.env['PATH']),
       'Native prefix PATH lacks executable node for nested Nx and env-node scripts.',
     );
     run('prepare-delivery:reuse-native', {
-      PATH: process.env.GEOSPEC_NATIVE_PREFIX_PATH ?? process.env.PATH,
+      PATH: process.env['GEOSPEC_NATIVE_PREFIX_PATH'] ?? process.env['PATH'],
       GEOSPEC_DELIVERY_CACHE: nativeCache,
       GEOSPEC_DELIVERY_GENERATION: undefined,
       GEOSPEC_OCCT_PRODUCER_BUILDER: nativeBuilder,
-      GEOSPEC_OCCT_PRODUCER_RECIPE: process.env.GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE,
-      GIT_CEILING_DIRECTORIES: process.env.GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES,
+      GEOSPEC_OCCT_PRODUCER_RECIPE: process.env['GEOSPEC_NATIVE_OCCT_PRODUCER_RECIPE'],
+      GIT_CEILING_DIRECTORIES: process.env['GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES'],
     });
     run('prepare-delivery:reuse-mixed');
   } else {
@@ -905,7 +989,7 @@ export const prepareArtifacts = (root) => {
   const inventory = {
     schema: 'geospec-ci-artifacts-v3',
     source,
-    producerSource: producerIdentity(source),
+    producerSource: producerIdentity(root, source),
     artifacts,
     mixedReceipt: fileRecord(root, receiptPath),
     mixedInputs: fileRecord(root, mixedInputsPath),
@@ -992,17 +1076,18 @@ const reassembleDelivery = (root, inventory) => {
   const inputs = readJson(resolve(root, mixedInputsPath));
   const proof = readJson(resolve(root, proofPath));
   const nativePrefix =
-    proof.actualPrefix !== null && typeof proof.actualPrefix === 'object'
-      ? /** @type {{path?: unknown}} */ (proof.actualPrefix).path
+    proof['actualPrefix'] !== null && typeof proof['actualPrefix'] === 'object'
+      ? /** @type {{path?: unknown}} */ (proof['actualPrefix']).path
       : undefined;
   const nativeCargoHome = /** @type {{invocation?: {environment?: {CARGO_HOME?: unknown}}} | undefined} */ (
-    proof.actualBuild
+    proof['actualBuild']
   )?.invocation?.environment?.CARGO_HOME;
-  const nativeToolPath = /** @type {{invocation?: {environment?: {PATH?: unknown}}} | undefined} */ (proof.actualBuild)
-    ?.invocation?.environment?.PATH;
+  const nativeToolPath = /** @type {{invocation?: {environment?: {PATH?: unknown}}} | undefined} */ (
+    proof['actualBuild']
+  )?.invocation?.environment?.PATH;
   assert.ok(
-    typeof inputs.preparationCache === 'string' &&
-      posix.isAbsolute(inputs.preparationCache) &&
+    typeof inputs['preparationCache'] === 'string' &&
+      posix.isAbsolute(inputs['preparationCache']) &&
       typeof nativePrefix === 'string' &&
       posix.isAbsolute(nativePrefix) &&
       typeof nativeCargoHome === 'string' &&
@@ -1026,7 +1111,7 @@ const reassembleDelivery = (root, inventory) => {
         pnpm_config_verify_deps_before_run: 'warn',
         PATH: nativeToolPath,
         CARGO_HOME: nativeCargoHome,
-        GEOSPEC_DELIVERY_CACHE: inputs.preparationCache,
+        GEOSPEC_DELIVERY_CACHE: inputs['preparationCache'],
         GEOSPEC_OCCT_PREFIX: nativePrefix,
         GEOSPEC_PRODUCER_RECEIPT: resolve(root, proofPath),
         GEOSPEC_MIXED_INPUTS: resolve(root, mixedInputsPath),
@@ -1063,8 +1148,8 @@ const reassembleDelivery = (root, inventory) => {
     source,
     producerSource:
       inventory.schema === 'geospec-ci-artifacts-v3'
-        ? /** @type {ReturnType<typeof sourceIdentity>} */ (inventory.producerSource)
-        : producerIdentity(inventory.source),
+        ? inventory.producerSource
+        : producerIdentity(root, inventory.source),
     delivery: {
       platform: 'darwin-arm64',
       run: recordedWorkflowRun(inventory.delivery?.run),
@@ -1112,7 +1197,16 @@ export const ensureDelivery = (root) => {
       console.log(`Preparing GeoSpec delivery: ${error instanceof Error ? error.message : String(error)}`);
       return prepareArtifacts(root);
     }
-    return reassembleDelivery(root, compatible);
+    try {
+      return reassembleDelivery(root, compatible);
+    } catch (assemblyError) {
+      // Products restored from an earlier run keep their recorded prefix and Cargo paths; on a
+      // host without them only a full producer run can make a current-source delivery.
+      console.log(
+        `Rebuilding GeoSpec delivery: source-kit assembly failed: ${assemblyError instanceof Error ? assemblyError.message : String(assemblyError)}`,
+      );
+      return prepareArtifacts(root);
+    }
   }
 };
 
@@ -1164,6 +1258,10 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
       console.log(deliveryCacheKey(root));
       process.exit(0);
     }
+    if (process.argv.length === 3 && process.argv[2] === 'product-key') {
+      console.log(productKey(root));
+      process.exit(0);
+    }
     const worker = process.argv[2] === '--producer';
     assert.ok(
       process.argv.length === (worker ? 4 : 3),
@@ -1203,11 +1301,18 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
         );
       }
       if (!worker && produces) {
-        const child = childProcess.spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--producer', mode], {
+        // Node's spawnSync honours `detached` (a new process group) although its types omit it.
+        /** @type {import('node:child_process').SpawnSyncOptions & {detached: boolean}} */
+        const producerOptions = {
           cwd: root,
           detached: true,
           stdio: ['inherit', 'inherit', 'inherit', heldLockFile],
-        });
+        };
+        const child = childProcess.spawnSync(
+          process.execPath,
+          [fileURLToPath(import.meta.url), '--producer', mode],
+          producerOptions,
+        );
         assert.ok(child.status === 0, `GeoSpec producer failed: ${child.error?.message ?? child.status}`);
       } else if (mode === 'snapshot-delivery') {
         console.log(`ASSEMBLY_ROOT=${snapshotDelivery(root)}`);

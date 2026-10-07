@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTauMcpHttpHandler, tauMcpInstructions, tauMcpToolNames } from '#tau-mcp.js';
 import type { TauMcpDispatch, TauMcpHostCall, TauMcpHostTool } from '#tau-mcp.js';
 
-const rpcName = { getKernelResult: 'get_kernel_result' } as const;
-const toolName = { getKernelResult: 'get_kernel_result' } as const;
+const rpcName = { evaluateModel: 'evaluate_model' } as const;
+const toolName = { evaluateModel: 'evaluate_model' } as const;
 
 const servers = new Set<ReturnType<typeof createServer>>();
 const pendingRequests = new Set<Promise<void>>();
@@ -144,7 +144,7 @@ describe('Tau MCP Streamable HTTP transport', () => {
           jsonrpc: '2.0',
           id,
           method: 'tools/call',
-          params: { name: 'get_kernel_result', arguments: { targetFile: 'main.ts' } },
+          params: { name: 'evaluate_model', arguments: { targetFile: 'main.ts' } },
         }),
       });
 
@@ -174,15 +174,15 @@ describe('Tau MCP Streamable HTTP transport', () => {
     const listed = await client.listTools();
     expect(listed.tools.map(({ name }) => name)).toEqual(tauMcpToolNames);
     expect(listed.tools.map(({ name, annotations }) => [name, annotations?.readOnlyHint])).toEqual([
-      ['get_kernel_result', true],
+      ['evaluate_model', true],
       ['test_model', true],
       ['screenshot', true],
-      ['export_geometry', false],
+      ['export_model', false],
     ]);
     await expect(
-      client.callTool({ name: toolName.getKernelResult, arguments: { targetFile: 'main.ts' } }),
+      client.callTool({ name: toolName.evaluateModel, arguments: { targetFile: 'main.ts' } }),
     ).resolves.toMatchObject({ structuredContent: { status: 'ready' } });
-    expect(calls).toEqual([{ rpcName: rpcName.getKernelResult, args: { targetFile: 'main.ts' } }]);
+    expect(calls).toEqual([{ rpcName: rpcName.evaluateModel, args: { targetFile: 'main.ts' } }]);
     await client.close();
   });
 
@@ -317,11 +317,9 @@ describe('Tau MCP Streamable HTTP transport', () => {
     };
     const client = await connect(await serve(dispatch));
     const cancellation = new AbortController();
-    const pending = client.callTool(
-      { name: toolName.getKernelResult, arguments: { targetFile: 'main.ts' } },
-      undefined,
-      { signal: cancellation.signal },
-    );
+    const pending = client.callTool({ name: toolName.evaluateModel, arguments: { targetFile: 'main.ts' } }, undefined, {
+      signal: cancellation.signal,
+    });
     await started;
     cancellation.abort();
 

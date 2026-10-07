@@ -1,0 +1,261 @@
+diff --git a/src/renderers/common/RenderObject.js b/src/renderers/common/RenderObject.js
+--- a/src/renderers/common/RenderObject.js
++++ b/src/renderers/common/RenderObject.js
+@@ -325,6 +325,14 @@
+ 
+ 		};
+ 
++		this.onObjectDispose = () => {
++
++			this.dispose();
++
++		};
++
++		if ( this.object.isInstancedMesh === true ) this.object.addEventListener( 'dispose', this.onObjectDispose );
++
+ 		this.material.addEventListener( 'dispose', this.onMaterialDispose );
+ 		this.geometry.addEventListener( 'dispose', this.onGeometryDispose );
+ 
+@@ -903,6 +911,37 @@
+ 	 */
+ 	dispose() {
+ 
++		const state = this._nodes.has( this ) ? this._nodes.get( this ).nodeBuilderState : undefined;
++		if ( this.object.isInstancedMesh === true && state !== undefined && state.usedTimes === 1 ) {
++
++			// Retire generated attributes with their last node-builder state user.
++			const released = new Set();
++			for ( const attribute of this.getAttributes() ) {
++
++				const buffer = attribute.isInterleavedBufferAttribute ? attribute.data : attribute;
++				if ( buffer !== this.object.instanceMatrix && buffer.array === this.object.instanceMatrix.array ) {
++
++					if ( released.has( buffer ) ) {
++
++						this._geometries.attributes.data.delete( attribute );
++						this._geometries.attributes.info.destroyAttribute( attribute );
++
++					}
++					else {
++
++						this._geometries.attributes.delete( attribute );
++						this._geometries.attributes.backend.delete( buffer );
++						released.add( buffer );
++
++					}
++
++				}
++
++			}
++		}
++
++		if ( this.object.isInstancedMesh === true ) this.object.removeEventListener( 'dispose', this.onObjectDispose );
++
+ 		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
+ 		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
+ 
+diff --git a/src/renderers/webgpu/utils/WebGPUBindingUtils.js b/src/renderers/webgpu/utils/WebGPUBindingUtils.js
+--- a/src/renderers/webgpu/utils/WebGPUBindingUtils.js
++++ b/src/renderers/webgpu/utils/WebGPUBindingUtils.js
+@@ -611,6 +611,20 @@
+ 
+ 		const bindingsData = backend.get( bindGroup );
+ 
++		// Unshared bindings are cloned per render object by NodeBuilderState.
++		// Shared group buffers belong to their surviving users.
++		for ( const binding of bindGroup.bindings ) {
++
++			if ( binding.isUniformBuffer && binding.groupNode.shared !== true ) {
++
++				const bindingData = backend.get( binding );
++				if ( bindingData.buffer !== undefined ) bindingData.buffer.destroy();
++				backend.delete( binding );
++
++			}
++
++		}
++
+ 		if ( bindingsData.layout ) {
+ 
+ 			bindingsData.layout.usedTimes --;
+diff --git a/build/three.webgpu.js b/build/three.webgpu.js
+--- a/build/three.webgpu.js
++++ b/build/three.webgpu.js
+@@ -155,6 +155,7 @@
+ 		if ( hasInitialized === false ) {
+ 
+ 			this.getRenderObjectData( renderObject );
++			this.getMaterialData( renderObject.material );
+ 
+ 			return true;
+ 
+@@ -29723,6 +29724,14 @@
+ 
+ 		};
+ 
++		this.onObjectDispose = () => {
++
++			this.dispose();
++
++		};
++
++		if ( this.object.isInstancedMesh === true ) this.object.addEventListener( 'dispose', this.onObjectDispose );
++
+ 		this.material.addEventListener( 'dispose', this.onMaterialDispose );
+ 		this.geometry.addEventListener( 'dispose', this.onGeometryDispose );
+ 
+@@ -30300,6 +30309,37 @@
+ 	 * Frees internal resources.
+ 	 */
+ 	dispose() {
++
++		const state = this._nodes.has( this ) ? this._nodes.get( this ).nodeBuilderState : undefined;
++		if ( this.object.isInstancedMesh === true && state !== undefined && state.usedTimes === 1 ) {
++
++			// Retire generated attributes with their last node-builder state user.
++			const released = new Set();
++			for ( const attribute of this.getAttributes() ) {
++
++				const buffer = attribute.isInterleavedBufferAttribute ? attribute.data : attribute;
++				if ( buffer !== this.object.instanceMatrix && buffer.array === this.object.instanceMatrix.array ) {
++
++					if ( released.has( buffer ) ) {
++
++						this._geometries.attributes.data.delete( attribute );
++						this._geometries.attributes.info.destroyAttribute( attribute );
++
++					}
++					else {
++
++						this._geometries.attributes.delete( attribute );
++						this._geometries.attributes.backend.delete( buffer );
++						released.add( buffer );
++
++					}
++
++				}
++
++			}
++		}
++
++		if ( this.object.isInstancedMesh === true ) this.object.removeEventListener( 'dispose', this.onObjectDispose );
+ 
+ 		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
+ 		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
+@@ -78657,6 +78697,20 @@
+ 
+ 		const bindingsData = backend.get( bindGroup );
+ 
++		// Unshared bindings are cloned per render object by NodeBuilderState.
++		// Shared group buffers belong to their surviving users.
++		for ( const binding of bindGroup.bindings ) {
++
++			if ( binding.isUniformBuffer && binding.groupNode.shared !== true ) {
++
++				const bindingData = backend.get( binding );
++				if ( bindingData.buffer !== undefined ) bindingData.buffer.destroy();
++				backend.delete( binding );
++
++			}
++
++		}
++
+ 		if ( bindingsData.layout ) {
+ 
+ 			bindingsData.layout.usedTimes --;
+diff --git a/build/three.webgpu.nodes.js b/build/three.webgpu.nodes.js
+--- a/build/three.webgpu.nodes.js
++++ b/build/three.webgpu.nodes.js
+@@ -155,6 +155,7 @@
+ 		if ( hasInitialized === false ) {
+ 
+ 			this.getRenderObjectData( renderObject );
++			this.getMaterialData( renderObject.material );
+ 
+ 			return true;
+ 
+@@ -29723,6 +29724,14 @@
+ 
+ 		};
+ 
++		this.onObjectDispose = () => {
++
++			this.dispose();
++
++		};
++
++		if ( this.object.isInstancedMesh === true ) this.object.addEventListener( 'dispose', this.onObjectDispose );
++
+ 		this.material.addEventListener( 'dispose', this.onMaterialDispose );
+ 		this.geometry.addEventListener( 'dispose', this.onGeometryDispose );
+ 
+@@ -30300,6 +30309,37 @@
+ 	 * Frees internal resources.
+ 	 */
+ 	dispose() {
++
++		const state = this._nodes.has( this ) ? this._nodes.get( this ).nodeBuilderState : undefined;
++		if ( this.object.isInstancedMesh === true && state !== undefined && state.usedTimes === 1 ) {
++
++			// Retire generated attributes with their last node-builder state user.
++			const released = new Set();
++			for ( const attribute of this.getAttributes() ) {
++
++				const buffer = attribute.isInterleavedBufferAttribute ? attribute.data : attribute;
++				if ( buffer !== this.object.instanceMatrix && buffer.array === this.object.instanceMatrix.array ) {
++
++					if ( released.has( buffer ) ) {
++
++						this._geometries.attributes.data.delete( attribute );
++						this._geometries.attributes.info.destroyAttribute( attribute );
++
++					}
++					else {
++
++						this._geometries.attributes.delete( attribute );
++						this._geometries.attributes.backend.delete( buffer );
++						released.add( buffer );
++
++					}
++
++				}
++
++			}
++		}
++
++		if ( this.object.isInstancedMesh === true ) this.object.removeEventListener( 'dispose', this.onObjectDispose );
+ 
+ 		this.material.removeEventListener( 'dispose', this.onMaterialDispose );
+ 		this.geometry.removeEventListener( 'dispose', this.onGeometryDispose );
+@@ -78657,6 +78697,20 @@
+ 
+ 		const bindingsData = backend.get( bindGroup );
+ 
++		// Unshared bindings are cloned per render object by NodeBuilderState.
++		// Shared group buffers belong to their surviving users.
++		for ( const binding of bindGroup.bindings ) {
++
++			if ( binding.isUniformBuffer && binding.groupNode.shared !== true ) {
++
++				const bindingData = backend.get( binding );
++				if ( bindingData.buffer !== undefined ) bindingData.buffer.destroy();
++				backend.delete( binding );
++
++			}
++
++		}
++
+ 		if ( bindingsData.layout ) {
+ 
+ 			bindingsData.layout.usedTimes --;
+diff --git a/src/materials/nodes/manager/NodeMaterialObserver.js b/src/materials/nodes/manager/NodeMaterialObserver.js
+--- a/src/materials/nodes/manager/NodeMaterialObserver.js
++++ b/src/materials/nodes/manager/NodeMaterialObserver.js
+@@ -147,6 +147,7 @@
+ 		if ( hasInitialized === false ) {
+ 
+ 			this.getRenderObjectData( renderObject );
++			this.getMaterialData( renderObject.material );
+ 
+ 			return true;
+ 

@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-09-22'
+updated: '2026-10-02'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -101,7 +101,7 @@ For persisted browser projects, trusted application composition selects the auth
 | **KernelMiddleware**       | Middleware capability contract (author API, via `defineMiddleware`). Wraps kernel operations.                                                                                                                                                                                                                                             | Plugin Author  |
 | **Plugin Factory**         | Consumer-callable named export such as `replicad()`, `image()`, or `middleware()`. Configures and returns a package toolkit plugin without requiring a default export.                                                                                                                                                                    | Consumer       |
 | **Core Package**           | Shared implementation helper package named `@taucad/*-core`. Exposes reusable logic to plugin packages but never exports `plugin` or initializes concrete backends at root import.                                                                                                                                                        | Implementation |
-| **KernelRuntime**          | Services injected into kernel methods: filesystem, logger, bundler, tracer.                                                                                                                                                                                                                                                               | Plugin Author  |
+| **KernelServices**         | Services injected into kernel hooks: filesystem, logger, bundler, tracer and runtime-owned operation progress. Kernels have no `reportProgress` service.                                                                                                                                                                                  | Plugin Author  |
 | **Realm**                  | Execution environment: main thread, Web Worker, Node.js `worker_threads`, remote server.                                                                                                                                                                                                                                                  | Conceptual     |
 
 ## API Audiences
@@ -148,9 +148,9 @@ Shared helper packages live under `packages/core/*` and publish as `@taucad/<nam
 
 ### Payload Isolation
 
-Tree shaking is not an install-boundary guarantee. A browser/WASM-safe plugin package must not hard-depend on native, Python, or daemon implementation packages even if those imports appear unreachable to bundlers. Split incompatible host payloads into explicit packages such as `@taucad/opencascade-native` or `@taucad/build123d`, then let UI, CLI, desktop, or daemon recipes opt into them deliberately.
+Tree shaking is not an install-boundary guarantee. A browser/WASM-safe plugin package must not hard-depend on native, Python, or daemon implementation packages even if those imports appear unreachable to bundlers. Split incompatible host payloads into explicit packages such as `@taucad/build123d`, then let UI, CLI, desktop, or daemon recipes opt into them deliberately.
 
-`@taucad/opencascade` is the browser/WASM-safe OpenCascade package. Native OpenCascade uses an explicit implementation package; Python-backed Build123d uses its own package and runner/daemon requirements.
+`@taucad/opencascade` is the browser/WASM-safe OpenCascade package. Python-backed Build123d uses its own package and runner/daemon requirements.
 
 ### Native-Language Process Boundary
 
@@ -287,7 +287,7 @@ Runtime filesystem access is intentionally authorization-blind. It resolves, rea
 
 ## Transport Abstraction
 
-A transport is a `TransportPlugin` built with `defineRuntimeTransport` (`packages/runtime/src/transport/runtime-transport.types.ts`, `@taucad/runtime/transport`): `{ id, describe(), materialize() }`. `describe()` returns the diagnostic `TransportDescriptor` (`wire`, `memory.geometryDelivery`, `memory.abortSignal`, `fileSystem`) and runtime behaviour MUST NOT branch on it. `materialize()` returns the client-side fat handle `RuntimeTransportClient` — `open()` yields a typed RPC channel and hello, `closed` settles exactly once with a `RuntimeTransportCloseResult` (`requested | render-timeout | host-exit | wire-failure`), and `renderTimeoutRecovery` is the behavioural (not descriptor-derived) recovery contract. Host-side constructors are standalone named exports (`RuntimeTransportHost`), never accessors on the plugin.
+A transport is a `TransportPlugin` built with `defineRuntimeTransport` (`packages/runtime/src/transport/runtime-transport.types.ts`, `@taucad/runtime/transport`): `{ id, describe(), materialize() }`. `describe()` returns the diagnostic `TransportDescriptor` (`wire`, `memory.geometryDelivery`, `memory.abortSignal`, `fileSystem`) and runtime behaviour MUST NOT branch on it. `materialize()` returns the client-side fat handle `RuntimeTransportClient` — `open()` yields a typed RPC channel and hello, `closed` settles exactly once with a `RuntimeTransportCloseResult` (`requested | operation-timeout | host-exit | wire-failure`), and `operationTimeoutRecovery` is the behavioural (not descriptor-derived) recovery contract. Host-side constructors are standalone named exports (`RuntimeTransportHost`), never accessors on the plugin.
 
 Every wire is carried by `@taucad/rpc`'s callback-shaped `Port<T>` (`postMessage` / `onMessage` / `start?` / `close`); adapters map the concrete substrate onto it — `wrapMessagePort` for DOM and `worker_threads` ports (`MessagePortLike`), `wrapWorkerAsPort` for a `Worker`, `wrapMessagePortMain` for Electron. A new wire is a new adapter to `Port<T>` plus a codec if the substrate is not structured-clone; the `WireMessage` envelope and `protocolVersion` do not change.
 
@@ -429,14 +429,19 @@ Key methods:
 
 ### `defineKernel`
 
-Kernel modules define geometry computation logic. Each kernel is an ES module loaded via `import(kernelModuleUrl)`. The pipeline has three phases — build, mesh (display), export — each a pure `native → X` transform:
+Each kernel declares `views` and `exports` as keyed data and implements the same domain-neutral verbs. The framework loads its module lazily and calls:
 
-- `initialize(options, runtime)` — load WASM, register builtin modules. `options` is type-safe via the `Options` generic inferred from `optionsSchema`
-- `getDependencies(input, runtime, ctx)` — return file dependencies
-- `getParameters(input, runtime, ctx)` — extract parameters from code
-- `createGeometry(input, runtime, ctx)` — evaluate source → `{ nativeHandle, geometry? }`. The nativeHandle carries **all export-facing evidence** (shapes, resolved interfaces, datum frames). Manifold, OpenRSCAD, and Tau return display-ready inline `geometry`; Replicad, OpenCascade, Zoo, and JSCAD return reusable native evidence and implement `meshGeometry`. Every input contains only `entryPath` and `parameters`; `options` exists only when the kernel positively declares a Zod-object `createOptionsSchema`. Content and render/export route intent never cross this boundary
-- `meshGeometry(input, runtime, ctx)` _(optional)_ — nativeHandle → display artifact (`GeometryResponse`) at preview tessellation or display packing. Runs **only on the display path**, at the kernel boundary; export-only requests never call it. Contract invariant: a kernel provides a display path either via inline `geometry` or via `meshGeometry` — the orchestrator rejects display renders when neither exists
-- `exportGeometry(input, runtime, ctx)` — export using the framework-materialized nativeHandle. Mesh formats tessellate internally at export quality; BRep formats (STEP/IGES) never tessellate
+- `initialize(options, services)` — load the backend and return kernel-owned context.
+- `resolve(input, services, context)` — return the source closure in runtime paths.
+- `describe(input, services, context)` — return the parameter declaration without evaluating the model.
+- `evaluate(input, services, context)` — perform build-affecting work once and return an opaque handle, issues, offered view/export ids, and any view instances. `evaluateOptionsSchema` declares build-affecting options.
+- `render(input, services, context)` — project one declared view from that handle. A nonempty `views` map requires this hook; an empty map forbids it. View options and the requested instance are narrowed by view id.
+- `export(input, services, context)` — produce a nonempty file set for one declared export. A nonempty `exports` map requires this hook; an empty map forbids it. Export options are narrowed by export id.
+- `isHandleValid`, `releaseHandle`, the paired `serializeHandle`/`deserializeHandle`, and `onDispose` manage retained handles and backend resources.
+
+**Render purity:** `render` reads the handle and its request; it must not mutate the handle or rerun source evaluation. Two views, or a view and an export, may consume the same evaluation concurrently. Clone or isolate a converter that sorts or mutates its input. A view's option changes only its projection; an `evaluateOptionsSchema` change creates a new evaluation. A hidden view need not render. The artifact's `mimeType` comes from the view declaration, with one artifact per render; exports carry their declared media type and extension. A kernel with no views can still offer exports.
+
+`KernelServices` supplies filesystem, logger, bundler, tracer, compute and cancellation. Progress phases and details remain runtime-owned; do not add a kernel `reportProgress` service. While W3's document client is being migrated, the existing client renders the default offered view and passes legacy `renderOptions` as that view's options. This temporary adapter is removed with its callers in W3.
 
 ### `defineTranscoder`
 
@@ -503,6 +508,7 @@ Runtime package exports must not include legacy preset or concrete-capability ba
 @taucad/middleware    → named plugin export plus individual middleware factories
 @taucad/opencascade   → browser/WASM-safe OpenCascade plugin toolkit
 @taucad/build123d     → Node-hosted Build123d kernel; private supervised Python process
+@taucad/tscircuit     → browser/Node tscircuit EDA kernel; `output` render option selects GLB or SVG
 @taucad/occt-core     → shared OCCT helper package, no plugin export
 @taucad/geometry-core → shared geometry helper package, no plugin export
 ```
@@ -537,13 +543,13 @@ createRuntimeClient({
 });
 ```
 
-Two explicit slots (`preview` and `export`) make the quality distinction visible and intentional. Preview tessellation is used by the display path (`meshGeometry` for kernels that defer it, inline `createGeometry` otherwise); export tessellation is normally used by `exportGeometry` for mesh formats. When tessellation changes native construction, as in OpenRSCAD, the kernel declares those construction keys with `createOptionsSchema`. The framework projects the matching resolved render or selected source-export values, deep-merges them over the schema defaults, validates once, and passes only that result to `createGeometry`. BRep exports (STEP/IGES) tessellate nothing.
+Two explicit slots (`preview` and `export`) express the current client's quality defaults. The v2 kernel contract separates construction in `evaluate` from projection in `render` and file production in `export`. Construction-affecting tessellation belongs to `evaluateOptionsSchema`; a selected view or export declares its own options schema when tessellation affects only that projection. The framework admits each selected route's options against its declaration. BRep exports (STEP/IGES) tessellate nothing.
 
 2. **Per-call overrides** — passed as `callOptions` to individual methods:
 
 ```typescript
 client.render({
-  file,
+  source,
   parameters,
   tessellation: { linearTolerance: 0.05, angularTolerance: 15 },
 });
@@ -570,21 +576,17 @@ If no tessellation is specified at any level, each kernel applies its own intern
 
 ### Threading Path
 
-```
+The current client still sends `renderOptions` through its W3 bridge. The worker selects the **first offered** view from the admitted evaluation, validates applicable options and content for that view, then calls the v2 hooks:
+
+```text
 RuntimeClient.render({ source, parameters, renderOptions? })
-  → resolves: input.renderOptions ?? active render options
-    → RuntimeWorkerClient.openFile(..., renderOptions?)
-      → RuntimeCommand { type: 'openFile', options? }
-        → dispatcher → KernelWorker.handleOpenFile(..., options?)
-          → KernelWorker.createGeometry(..., options?)          // publish path
-            → resolve optional createOptionsSchema projection
-              → CreateGeometryInput { entryPath, parameters, options? }
-              → KernelDefinition.createGeometry(input, runtime, ctx)
-            → MeshGeometryInput { nativeHandle, options }        // when geometry deferred
-              → KernelDefinition.meshGeometry(input, runtime, ctx)
+  → resolve(entryPath) → describe(entryPath) → evaluate({ entryPath, parameters, options })
+  → admitted offers: views, exports, instances
+  → select first offered view → render({ handle, view, instance?, options, content? })
+  → artifact MIME from the selected view declaration
 ```
 
-Export follows the same pattern via `exportGeometry` → `ExportGeometryInput { tessellation? }` — without the mesh phase.
+The v2 authoring contract has no global render option or geometry-specific hook. W3 will expose explicit view and export IDs on the document client; until then, the current client renders only the first offered view. `export({ handle, exportId, options, content? })` produces nonempty files for an offered export; it does not require a render when the evaluated handle is available.
 
 ## Plugin Options & Validation
 
@@ -600,19 +602,19 @@ Consumer-facing input uses `options` naming; validated output uses `config` inte
 
 ## Caching Strategy
 
-### Geometry Caches (mesh/build/export split)
+### Geometry Caches (evaluation/view/export split)
 
 The `geometryCache()` middleware persists three role-aligned entries under `.tau/cache/geometry/`:
 
-| Cache      | File                | Wraps            | Stores                                                                          |
-| ---------- | ------------------- | ---------------- | ------------------------------------------------------------------------------- |
-| **build**  | `{hash}.bin`        | `createGeometry` | `serializedNativeHandle` (+ inline display geometry when the kernel returns it) |
-| **mesh**   | `mesh-{hash}.bin`   | `meshGeometry`   | Display `GeometryResponse` at preview tessellation                              |
-| **export** | `export-{hash}.bin` | Final export leg | Target `ExportFile[]` after selected content contributors/transcoders           |
+| Cache      | File                | Wraps          | Stores                                                                |
+| ---------- | ------------------- | -------------- | --------------------------------------------------------------------- |
+| **build**  | `{hash}.bin`        | `wrapEvaluate` | Admitted offers, exact replay input and serialized handle when needed |
+| **mesh**   | `mesh-{hash}.bin`   | `wrapRender`   | Selected view artifact with declared MIME type                        |
+| **export** | `export-{hash}.bin` | `wrapExport`   | Nonempty export files after selected contributors/transcoders         |
 
-The native-build key is exact rather than scope-selected. It covers source/import hashes, parameters, kernel version and initialization, implementation assets, concrete mutative create-phase middleware and dependencies, and the parsed create options when `createOptionsSchema` exists. The complete artifact `dependencyHash` remains separate and additionally covers the selected route, target options, requested content, contributors, and transcoders. Request-specific display packing belongs in `meshGeometry`; file encoding belongs in `exportGeometry`.
+The native-build key is exact rather than scope-selected. It covers source/import hashes, parameters, kernel version and initialization, implementation assets, mutative evaluation middleware and dependencies, and parsed `evaluateOptionsSchema` options. The artifact `dependencyHash` additionally covers the selected view or export, route options, requested content, contributors, and transcoders. View packing belongs in `render`; file encoding belongs in `export`.
 
-A warm exact-match export reuses the artifact's live native slot, restores its serialized slot, or reheats from that artifact's retained `CreateGeometryInput`, in that order, through one resolver. Any export-only request writes no mesh entry. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a wasm instance.
+A warm exact-match export reuses the evaluation's live handle, restores its serialized handle, or reheats from the retained evaluation input, in that order. An export-only request writes no view entry. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the Replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a WASM instance.
 
 ### File-Level Caches
 
@@ -631,10 +633,10 @@ Name the source in every request-scoped result. A kernel result carries the entr
 
 ### Per-Render Caches (cleared each render cycle)
 
-| Cache                   | Purpose                                                           |
-| ----------------------- | ----------------------------------------------------------------- |
-| `renderDependencyCache` | Reuse dependency computation between getParams and createGeometry |
-| `cachedDetectionDeps`   | Reuse deps from detectImports for getDependencies (zero cost)     |
+| Cache                   | Purpose                                                                   |
+| ----------------------- | ------------------------------------------------------------------------- |
+| `renderDependencyCache` | Reuse dependency computation between parameter description and evaluation |
+| `cachedDetectionDeps`   | Reuse deps from import detection for kernel resolution                    |
 
 ## Multi-Client Topology & Cache Parity
 

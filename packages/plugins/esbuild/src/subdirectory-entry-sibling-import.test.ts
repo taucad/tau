@@ -19,21 +19,16 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type {
-  GeometryResponse,
-  GetDependenciesResult,
-  GetDependenciesInput,
-  KernelRuntime,
-} from '@taucad/runtime/types';
+import type { GetDependenciesResult } from '@taucad/runtime/types';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { createKernelParameterDeclaration, defineKernel } from '@taucad/runtime/kernel';
+import { createKernelParameterDeclaration, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 import { defineRuntime } from '@taucad/runtime/worker';
 import { esbuildBundler } from '#esbuild.bundler.js';
 
-const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
+const testGeometry = new Uint8Array([1]);
 
 /** Entry sits in `test-exports`; its dependency sits in the sibling `lib`. */
 const files = {
@@ -55,27 +50,27 @@ describe('subdirectory entry importing a sibling directory', () => {
       extensions: ['ts'],
       name: 'Sibling import probe',
       version: '1.0.0',
-      exportFormats: {},
+      views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+      exports: {},
       initialize: async () => ({}),
       // The real bundler resolution path — the one the regression broke.
-      getDependencies: async (input: GetDependenciesInput, runtime: KernelRuntime) => {
+      resolve: async (input, runtime) => {
         dependencies = await runtime.bundler.resolveDependencies(input.entryPath);
         return dependencies;
       },
-      getParameters: async () => ({
-        success: true,
-        data: createKernelParameterDeclaration(
-          {},
-          { type: 'object', properties: {} },
-          {
-            id: 'urn:taucad:test:sibling-probe',
-            name: 'SiblingProbeParameters',
-          },
-        ),
-        issues: [],
-      }),
-      createGeometry: async () => ({ geometry: testGeometry, nativeHandle: {} }),
-      exportGeometry: async () => ({ success: true, data: [], issues: [] }),
+      describe: async () =>
+        createKernelSuccess({
+          parameters: createKernelParameterDeclaration(
+            {},
+            { type: 'object', properties: {} },
+            {
+              id: 'urn:taucad:test:sibling-probe',
+              name: 'SiblingProbeParameters',
+            },
+          ),
+        }),
+      evaluate: async () => ({ handle: testGeometry }),
+      render: async ({ handle }) => ({ content: handle }),
     });
 
     const runtime = defineRuntime({
@@ -87,21 +82,29 @@ describe('subdirectory entry importing a sibling directory', () => {
     });
     const errors: unknown[] = [];
     const stopErrors = client.on('error', (issues) => errors.push(issues));
+    const document = client.open({ source: { path: 'test-exports/assembly.ts' }, parameters: {}, watch: false });
+    const view = document.view('model');
 
     try {
-      await client.connect();
-      const rendered = await client.render({ source: { path: 'test-exports/assembly.ts' }, parameters: {} });
-
-      expect(rendered.superseded).toBe(false);
-      if (rendered.superseded) {
-        return;
+      const evaluation = await document.evaluation();
+      expect(evaluation.superseded).toBe(false);
+      if (evaluation.superseded || !evaluation.evaluation.success) {
+        throw new Error('Sibling-import evaluation did not complete.');
       }
-      expect(rendered.geometry.success).toBe(true);
+      expect(evaluation.evaluation.success).toBe(true);
+      const rendered = await view.rendering();
+      expect(rendered.superseded).toBe(false);
+      if (rendered.superseded || !rendered.rendering.success) {
+        throw new Error('Sibling-import model did not render.');
+      }
+      expect(rendered.rendering.success).toBe(true);
       expect(errors).toEqual([]);
       // The sibling file is outside the entry's own directory but inside the runtime root.
       expect(dependencies?.resolved).toContain('lib/frame.ts');
       expect(dependencies?.unresolved ?? []).toEqual([]);
     } finally {
+      view.close();
+      document.close();
       stopErrors();
       client.terminate();
     }

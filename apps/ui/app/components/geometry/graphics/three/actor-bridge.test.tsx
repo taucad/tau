@@ -12,6 +12,7 @@ import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js
 
 const mockUseThree = vi.fn();
 const mockGraphicsSend = vi.fn();
+const mockGraphicsActor = { send: mockGraphicsSend };
 const mockCameraSend = vi.fn();
 const mockConnectorRef: { current: ((camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void) | undefined } = {
   current: undefined,
@@ -22,13 +23,14 @@ const mockConsumersRef = {
 const mockRenderFrame = { anchorFrameId: 'test-root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 } as const;
 const mockSetRenderFrame = vi.fn();
 let mockRig: ThreeCameraRig;
+let mockPerspectiveZoom = 1;
 
 const createDriverSnapshot = (projection: CameraProjection, revision: number): CameraDriverSnapshot => ({
   projection,
   view: createCameraView({
     frameId: 'test-root',
     requestedVerticalFieldOfView: projection.kind === 'orthographic' ? 0 : projection.verticalFieldOfView,
-    perspectiveZoom: 1,
+    perspectiveZoom: mockPerspectiveZoom,
     target: [0, 0, 0],
     direction: [1, -1, 0.7],
     up: [0, 0, 1],
@@ -49,7 +51,7 @@ vi.mock('#components/geometry/graphics/three/controls-listener-bridge.js', () =>
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
-  useGraphics: () => ({ send: mockGraphicsSend }),
+  useGraphics: () => mockGraphicsActor,
   useCameraRig: () => mockRig,
   useCameraConnectorRef: () => mockConnectorRef,
   useCameraConsumersRef: () => mockConsumersRef,
@@ -59,6 +61,7 @@ vi.mock('#hooks/use-graphics.js', () => ({
 
 describe('ActorBridge', () => {
   beforeEach(() => {
+    mockPerspectiveZoom = 1;
     const perspectiveCamera = new PerspectiveCamera();
     const orthographicCamera = new OrthographicCamera();
     mockRig = {
@@ -70,12 +73,7 @@ describe('ActorBridge', () => {
       actorRef: {
         getSnapshot: () => ({
           context: {
-            view: {
-              requestedVerticalFieldOfView: 60,
-              target: [0, 0, 0],
-              verticalSpan: 10,
-              viewport: { width: 800, height: 600, pixelRatio: 1 },
-            },
+            view: createDriverSnapshot({ kind: 'perspective', verticalFieldOfView: 60 }, 0).view,
             lastPerspectiveVerticalFieldOfView: 60,
             pixelBudget: 0.25,
             revision: 0,
@@ -123,6 +121,37 @@ describe('ActorBridge', () => {
     expect(state.camera).toBe(orthographicCamera);
     expect(invalidate).toHaveBeenCalledOnce();
     expect(mockGraphicsSend).toHaveBeenLastCalledWith({ type: 'cameraViewChanged', verticalSpan: 10 });
+  });
+
+  it('should retarget viewport revisions without republishing an unchanged grid span', () => {
+    const state = { camera: mockRig.perspectiveCamera as Camera, controls: null, raycaster: { near: 0, far: 0 } };
+    const invalidate = vi.fn();
+    const retarget = vi.fn();
+    mockConsumersRef.current.add(retarget);
+    mockUseThree.mockReturnValue({
+      ...state,
+      get: () => state,
+      invalidate,
+      set: vi.fn(),
+      size: { width: 800, height: 600 },
+    });
+    render(<ActorBridge />);
+    mockGraphicsSend.mockClear();
+    retarget.mockClear();
+    const snapshot = createDriverSnapshot({ kind: 'perspective', verticalFieldOfView: 60 }, 1);
+
+    mockConnectorRef.current?.(mockRig.perspectiveCamera, {
+      ...snapshot,
+      view: { ...snapshot.view, viewport: { ...snapshot.view.viewport, width: 700 } },
+    });
+    expect(retarget).toHaveBeenCalledOnce();
+    expect(mockGraphicsSend).not.toHaveBeenCalled();
+    mockConnectorRef.current?.(mockRig.perspectiveCamera, {
+      ...snapshot,
+      revision: 2,
+      view: { ...snapshot.view, verticalSpan: 5 },
+    });
+    expect(mockGraphicsSend).toHaveBeenCalledExactlyOnceWith({ type: 'cameraViewChanged', verticalSpan: 5 });
   });
 
   it('retargets a same-camera FOV revision before invalidating', () => {
@@ -215,7 +244,38 @@ describe('ActorBridge', () => {
     expect(invalidate).toHaveBeenCalledOnce();
   });
 
+  it('synchronizes late controls with an already published fitted camera', () => {
+    mockPerspectiveZoom = 1.625;
+    CameraControlsImpl.install({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- upstream install shape.
+      THREE,
+    });
+    const camera = mockRig.perspectiveCamera;
+    camera.position.set(8, -6, 4);
+    const controls = new CameraControlsImpl(camera, document.createElement('div'));
+    camera.zoom = 1.625;
+    camera.updateProjectionMatrix();
+    const state = { camera, controls: undefined as CameraControlsImpl | undefined, raycaster: { near: 0, far: 0 } };
+    const binding = { get: () => state, invalidate: vi.fn(), set: vi.fn(), size: { width: 800, height: 600 } };
+    mockUseThree.mockReturnValue({ ...state, ...binding });
+    const { rerender } = render(<ActorBridge />);
+    state.controls = controls;
+    // Simulate a controls frame restoring its constructor pose after the actor fitted the model.
+    camera.position.set(1, -1, 1);
+    camera.zoom = 1;
+    mockUseThree.mockReturnValue({ ...state, ...binding });
+    rerender(<ActorBridge />);
+    controls.update(0);
+    expect(camera.zoom).toBe(1.625);
+    expect(camera.position.length()).toBeGreaterThan(10);
+    void controls.setLookAt(8, -6, 5, 0, 0, 0, false);
+    controls.update(0);
+    expect(camera.zoom).toBe(1.625);
+    controls.dispose();
+  });
+
   it('round-trips observed perspective zoom from CameraControls', () => {
+    mockPerspectiveZoom = 1.75;
     CameraControlsImpl.install({
       // eslint-disable-next-line @typescript-eslint/naming-convention -- `camera-controls` requires this exact install shape.
       THREE,

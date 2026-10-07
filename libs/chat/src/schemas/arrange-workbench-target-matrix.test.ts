@@ -103,7 +103,7 @@ describe('approved workbench Target matrix', () => {
     expect(arrangeWorkbenchInputSchema.safeParse(patch({ entryPath: null })).success).toBe(false);
   });
 
-  it('should cover entry timeout and component display in records and tool', () => {
+  it('should cover canonical entry render timeout and component display in records and tool', () => {
     const settings = {
       renderTimeout: 0,
       components: { hidden: ['bolt'], isolated: ['nut'], opacity: [{ id: 'washer', opacity: 0.5 }] },
@@ -113,7 +113,16 @@ describe('approved workbench Target matrix', () => {
       true,
     );
     expect(
+      arrangeWorkbenchInputSchema.safeParse({ entries: [{ path: 'bracket.ts', renderTimeout: 600_000 }] }).success,
+    ).toBe(true);
+    expect(
       arrangeWorkbenchInputSchema.safeParse({ entries: [{ path: 'bracket.ts', renderTimeout: 600_001 }] }).success,
+    ).toBe(false);
+    expect(
+      arrangeWorkbenchInputSchema.safeParse({ entries: [{ path: 'bracket.ts', operationTimeout: 0 }] }).success,
+    ).toBe(false);
+    expect(
+      workbenchEntriesSchema.safeParse({ version: 1, entries: { 'bracket.ts': { operationTimeout: 0 } } }).success,
     ).toBe(false);
   });
 

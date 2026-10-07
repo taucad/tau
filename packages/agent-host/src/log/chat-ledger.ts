@@ -8,7 +8,7 @@
  */
 import { canonicalJson } from '#log/canonical-json.js';
 import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
-import { isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
+import { isResumableRun } from '#log/resumable.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import operationTable from '#log/run-operation.legality.json' with { type: 'json' };
 import settlementTable from '#log/run-settlement.legality.json' with { type: 'json' };
@@ -30,7 +30,7 @@ import type {
 /** A row before its envelope is stamped. @internal */
 export type LogRowBody = AgentLogEvent extends infer Event
   ? Event extends LogEventBase
-    ? Omit<Event, keyof LogEventBase>
+    ? Omit<Event, Exclude<keyof LogEventBase, 'attempt'>>
     : never
   : never;
 
@@ -68,6 +68,8 @@ export type RunEntry = Readonly<{
   failure?: LedgerRunFailure;
   /** Attempt 1's placement of record (D9). */
   placement?: TurnPlacement;
+  /** First versioned mutation proof by attempt, replayed from `turn.changed`. */
+  changes?: Readonly<Record<number, Readonly<{ checkoutId: string }>>>;
   /** One settlement per attempt (I9). */
   settlements: ReadonlyArray<Readonly<{ attempt: number; row: RowKey; event: TurnSettlementEvent }>>;
   /** Each unresolved interrupt's id → the row that requested it. */
@@ -203,9 +205,7 @@ const attemptEnded = (entry: RunEntry): boolean =>
 /** The lifecycle half of the reopen predicate: a resumable failure, or a native pause with no pending request. */
 const reopenable = (entry: RunEntry): boolean =>
   attemptEnded(entry) &&
-  ((entry.lifecycle === 'failed' && isResumableRunFailure(entry.failure)) ||
-    isUserStoppedRun(entry) ||
-    (entry.lifecycle === 'paused' && Object.keys(entry.pendingInterrupts).length === 0));
+  (isResumableRun(entry) || (entry.lifecycle === 'paused' && Object.keys(entry.pendingInterrupts).length === 0));
 
 /**
  * The one reopen predicate (I10, CL-R9): the fold, the gate and resume all call it. A `running` row opens the next
@@ -405,6 +405,13 @@ const createFold = (ledger: ChatLedger) => {
     switch (event.type) {
       case 'run.lifecycle': {
         lifecycle(event, key);
+        return;
+      }
+      case 'turn.changed': {
+        const entry = entryOf(event.runId);
+        if (entry.turnId === event.turnId && event.attempt <= entry.attempt) {
+          entry.changes = { ...entry.changes, [event.attempt]: { checkoutId: event.checkoutId } };
+        }
         return;
       }
       case 'turn.finalized':
@@ -792,6 +799,9 @@ const gateCode = (ledger: ChatLedger, row: AgentLogEvent, invocations: boolean):
       }
     }
     return undefined;
+  }
+  if (row.type === 'turn.changed') {
+    return entry?.turnId === row.turnId && row.attempt <= entry.attempt ? undefined : 'TURN_CHANGE_UNPLACED';
   }
   if (settlementTypes.has(row.type)) {
     const attempt = statedAttempt(row) ?? entry?.attempt ?? 1;

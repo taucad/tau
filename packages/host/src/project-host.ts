@@ -19,7 +19,8 @@ import type { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import type { ParameterManifest } from '@taucad/parameters';
 import { createParameterSetActor } from '@taucad/parameters/set-machine';
 import type { ParameterSetActor } from '@taucad/parameters/set-machine';
-import type { RuntimeClient } from '@taucad/runtime/client';
+import type { Description } from '@taucad/runtime/client';
+import type { RuntimeFileSystemBase } from '@taucad/runtime/types';
 import { Actor, createActor, waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 
@@ -35,6 +36,27 @@ import type { HostMcpEndpoint } from '#mcp-server.js';
 import { hostRevisionActor } from '#revision-actor.js';
 import { createProjectRevisions } from '#revisions.js';
 import type { HostRevisionEvent, ProjectRevisions, ProjectRevisionsOptions, TurnCheckout } from '#revisions.js';
+
+/**
+ * Admit a checkout's filesystem as the host tools' filesystem. Revision hosts type checkout filesystems loosely, so the
+ * capabilities the host tools need are checked once, where an attempt's tools are opened: a filesystem without them
+ * refuses the turn by name instead of every print tool failing later (blueprint x1c-start-confirmation F8).
+ *
+ * @param filesystem - The checkout's filesystem, as the revision host opened it.
+ * @returns The same filesystem, typed for the host tools.
+ * @throws When it cannot stream reads or write with a precondition.
+ */
+const asHostToolFileSystem = (filesystem: Omit<RuntimeFileSystemBase, 'watch'>): HostToolFileSystem => {
+  if (typeof filesystem.readFileStream !== 'function' || typeof filesystem.writeFileChecked !== 'function') {
+    throw Object.assign(
+      new Error(
+        "This checkout's filesystem cannot stream reads or write with a precondition, so Tau's tools cannot run on it.",
+      ),
+      { code: 'HOST_TOOL_FILESYSTEM_INCOMPLETE' },
+    );
+  }
+  return filesystem as HostToolFileSystem;
+};
 
 /**
  * The process's filesystem authority as one project host uses it. The caller owns its lifetime.
@@ -54,15 +76,15 @@ export type ProjectFileSystem = Readonly<{
 }>;
 
 /** The runtime client a project host's tools and parameter actors run on, for one root. @public */
-export type ProjectHostRuntimeClient = HostRuntimeClient & Pick<RuntimeClient, 'resolveParameters'>;
+export type ProjectHostRuntimeClient = HostRuntimeClient;
 
 /** Options for {@link createProjectHost}. @public */
 export type ProjectHostOptions = Pick<
   ProjectRevisionsOptions,
-  'projectId' | 'checkoutsDirectory' | 'gitExecutable' | 'apiBaseUrl' | 'tauCredential'
+  'projectId' | 'checkoutsDirectory' | 'gitExecutable' | 'apiBaseUrl' | 'tauCredential' | 'syncTelemetryPlacement'
 > &
   Pick<AgentLauncherOptions, 'systemPrompt' | 'model' | 'modelTransport' | 'credential'> &
-  Pick<HostToolRegistryOptions, 'systemSkillBundles' | 'geospecRunner' | 'geospecAuthoringMode' | 'machines'> &
+  Pick<HostToolRegistryOptions, 'systemSkillBundles' | 'geospecRunner' | 'machines'> &
   Readonly<{
     /** Absolute project root: the live checkout, and where `.tau/chats/` lives. */
     workspaceRoot: string;
@@ -133,14 +155,14 @@ const settled =
 const parameterKey = (root: string, entry: string): string => JSON.stringify([root, entry]);
 const parameterRoot = (key: string): string => (JSON.parse(key) as [string, string])[0];
 
-const manifestOf = (result: Awaited<ReturnType<ProjectHostRuntimeClient['resolveParameters']>>): ParameterManifest => {
+const manifestOf = (result: Description): ParameterManifest => {
   if (!result.success) {
     throw Object.assign(
       new Error(result.issues.map(({ message }) => message).join('; ') || 'Parameter resolution failed.'),
       { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
     );
   }
-  return result.data;
+  return result.parameters;
 };
 
 /** How long a parameter actor may take to finish its last write when its host closes (D16). Milliseconds. */
@@ -254,7 +276,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
       },
       resolve: async ({ entry: source }, signal, resolution) =>
         manifestOf(
-          await runtime.resolveParameters({
+          await runtime.describe({
             source: { path: source },
             ...(resolution === undefined ? {} : { resolution }),
             signal,
@@ -333,6 +355,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
     ...(options.apiBaseUrl === undefined ? {} : { apiBaseUrl: options.apiBaseUrl }),
     ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
+    ...(options.syncTelemetryPlacement === undefined ? {} : { syncTelemetryPlacement: options.syncTelemetryPlacement }),
     events: options.onRevisionEvent,
   });
 
@@ -345,7 +368,6 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     parameterActor: async (root: string, entry: string) => parameters.get(parameterKey(root, entry)),
     ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
     ...(options.geospecRunner === undefined ? {} : { geospecRunner: options.geospecRunner }),
-    ...(options.geospecAuthoringMode === undefined ? {} : { geospecAuthoringMode: options.geospecAuthoringMode }),
     /* The machine tools, over a facet this host already serves; a print request names the project by its id. */
     ...(options.machines === undefined ? {} : { machines: options.machines }),
     ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
@@ -360,7 +382,10 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
   /* The host process is the placement session (TS-R6 holds trivially); no Node host runs an attempt unplaced (D13). */
   const turnPlacement = (
     options.turnPlacement ??
-    ((input) => input.revisions.placement(({ root, filesystem }) => input.toolRegistryFor(root, filesystem)))
+    ((input) =>
+      input.revisions.placement(({ root, filesystem }) =>
+        input.toolRegistryFor(root, asHostToolFileSystem(filesystem)),
+      ))
   )({ revisions, toolRegistryFor });
 
   const externalAgents =

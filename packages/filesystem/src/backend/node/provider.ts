@@ -16,8 +16,8 @@
  */
 
 import fs from 'node:fs/promises';
-import type { FSWatcher, Stats } from 'node:fs';
-import { realpathSync, statSync, watch as watchDirectory } from 'node:fs';
+import type { Stats } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
@@ -29,6 +29,7 @@ import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metad
 import type {
   FileMode,
   FileReadStreamOptions,
+  FileStatOptions,
   FileStat,
   HeadFileStat,
   PathPolicy,
@@ -61,16 +62,63 @@ type AuthorityCheckedDelete = (
 ) => Promise<CheckedFileWriteResult>;
 const authorityCheckedDeletes = new WeakMap<NodeFsProvider, AuthorityCheckedDelete>();
 
-/**
- * Normalize an `fs.watch` filename. Node types it as non-nullable, but the OS
- * genuinely drops it when it cannot describe the change — a loss signal, not a
- * no-op (`from-node-fs-handle.ts:56-61`).
- */
-const toWatchedName = (filename: unknown): string | undefined => {
-  if (typeof filename === 'string') {
-    return filename;
+type NativeSubscription = { unsubscribe(): Promise<void> };
+type NativeWatcher = {
+  subscribe(
+    directory: string,
+    handler: (error: unknown, events: Array<{ path: string; type: string }>) => void,
+  ): Promise<NativeSubscription>;
+};
+type WatchClosures = { pending: Set<Promise<void>>; admissions: Set<Promise<void>>; failures: unknown[] };
+const watchClosures = new WeakMap<NodeFsProvider, WatchClosures>();
+
+const trackWatchClosure = (provider: NodeFsProvider, closure: Promise<void>): void => {
+  const state = watchClosures.get(provider)!;
+  const tracking = { promise: Promise.resolve() };
+  tracking.promise = (async (): Promise<void> => {
+    try {
+      await closure;
+    } catch (error) {
+      state.failures.push(error);
+    } finally {
+      state.pending.delete(tracking.promise);
+    }
+  })();
+  state.pending.add(tracking.promise);
+};
+
+const trackWatchAdmission = (provider: NodeFsProvider, admission: Promise<void>): void => {
+  const state = watchClosures.get(provider)!;
+  const tracking = { promise: Promise.resolve() };
+  tracking.promise = (async (): Promise<void> => {
+    try {
+      await admission;
+    } catch {
+      // The initiating watch or rearm owner handles the admission failure.
+    } finally {
+      state.admissions.delete(tracking.promise);
+    }
+  })();
+  state.admissions.add(tracking.promise);
+};
+
+/** Await physical native watcher closures in the asynchronous Node host lifecycle. @internal */
+export const drainNodeFsProviderWatchClosures = async (provider: NodeFsProvider): Promise<void> => {
+  const state = watchClosures.get(provider);
+  if (!state) {
+    return;
   }
-  return filename instanceof Uint8Array ? new TextDecoder().decode(filename) : undefined;
+  while (state.pending.size > 0 || state.admissions.size > 0) {
+    // oxlint-disable-next-line no-await-in-loop -- Late admission can add another physical closure before the next pass.
+    await Promise.all([...state.pending, ...state.admissions]);
+  }
+  const failures = state.failures.splice(0);
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, 'Native watcher closures failed.');
+  }
 };
 
 // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
@@ -106,7 +154,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   private readonly _base: string;
   private readonly _policy: PathPolicy | undefined;
   private _realBaseCache: Promise<string> | undefined;
-  // eslint-disable-next-line tau-lint/no-handrolled-fanout -- disposal registry, not pub/sub: these thunks are unsubscribes invoked once by dispose().
+
   private readonly _openSubscriptions = new Set<() => void>();
 
   /**
@@ -124,6 +172,7 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     this._policy = options?.policy;
     authorityCheckedWrites.set(this, async (input, assertCurrent) => this.#writeFileChecked(input, assertCurrent));
     authorityCheckedDeletes.set(this, async (input, assertCurrent) => this.#deleteFileChecked(input, assertCurrent));
+    watchClosures.set(this, { pending: new Set(), admissions: new Set(), failures: [] });
   }
 
   /**
@@ -237,7 +286,12 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
     }));
   }
 
-  public async stat(path_: string): Promise<FileStat> {
+  public async stat(path_: string): Promise<FileStat>;
+  public async stat(path_: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
+  public async stat(path_: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
+    if (options?.content === 'head') {
+      return this._headStat(path_);
+    }
     this._assertRootedPath(path_);
     const target = await this._resolve(path_);
     const stats = await fs.stat(target);
@@ -321,20 +375,39 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
    *
    * @param request - Root-relative paths and options to watch.
    * @param handler - Receives every event until the returned unsubscribe runs.
-   * @returns Unsubscribe function.
+   * @returns Unsubscribe function after native observation is admitted.
    */
-  public watch(request: WatchRequest, handler: (event: NodeFsWatchEvent) => void): () => void {
+  public async watch(request: WatchRequest, handler: (event: NodeFsWatchEvent) => void): Promise<() => void> {
     const excludes = request.excludes ?? [];
-    const watchers = new Set<FSWatcher>();
-    const retired = new WeakSet<FSWatcher>();
+    const paths = request.paths.map((requestedPath) => assertRootedPath(requestedPath));
+    let native: NativeWatcher;
+    const watchBase = realpathSync(this._base);
+    const subscriptions = new Set<NativeSubscription>();
     let unsubscribed = false;
+    let admitting = true;
+    let admissionFailure: Error | undefined;
+    type Entry = {
+      rootedPath: string;
+      target: string;
+      directory: string;
+      targetIsDirectory: boolean;
+      native?: NativeSubscription;
+      rearming?: Promise<void>;
+    };
+    const entries: Entry[] = [];
 
     const emit = (event: NodeFsWatchEvent): void => {
-      if (!unsubscribed && (event.type === 'reset' || !isExcluded(event.path, excludes))) {
-        handler(event);
+      if (unsubscribed) {
+        return;
       }
+      if (
+        event.type !== 'reset' &&
+        (isExcluded(event.path, excludes) || inFlightTemporaryName.test(path.basename(event.path)))
+      ) {
+        return;
+      }
+      handler(event);
     };
-
     const classify = (rootedPath: string, absolute: string): void => {
       try {
         emit({ type: 'change', path: rootedPath, kind: statSync(absolute).isDirectory() ? 'dir' : 'file' });
@@ -343,119 +416,151 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         if (code === 'ENOENT' || code === 'ENOTDIR') {
           emit({ type: 'delete', path: rootedPath });
         }
-        // Any other stat failure is the caller's to observe through its re-read.
       }
     };
-
-    const open = (
-      directory: string,
-      recursive: boolean,
-      onName: (name: string | undefined, self: FSWatcher) => void,
-    ): void => {
-      const watcher = watchDirectory(directory, { recursive });
-      watchers.add(watcher);
-      const lose = (): void => {
-        if (unsubscribed || retired.has(watcher)) {
+    const desiredDirectory = (entry: Entry): { directory: string; targetIsDirectory: boolean } => {
+      const targetIsDirectory = this._isDirectorySync(entry.target);
+      let directory = targetIsDirectory ? entry.target : path.dirname(entry.target);
+      while (!this._isDirectorySync(directory) && path.dirname(directory) !== directory) {
+        directory = path.dirname(directory);
+      }
+      return { directory, targetIsDirectory };
+    };
+    const close = (subscription: NativeSubscription): void => {
+      subscriptions.delete(subscription);
+      trackWatchClosure(this, subscription.unsubscribe());
+    };
+    const open = async (entry: Entry): Promise<void> => {
+      const { directory, targetIsDirectory } = desiredDirectory(entry);
+      if (entry.native && entry.directory === directory && entry.targetIsDirectory === targetIsDirectory) {
+        return;
+      }
+      const subscription = await native.subscribe(directory, (error, events) => {
+        if (unsubscribed) {
           return;
         }
-        retired.add(watcher);
-        watchers.delete(watcher);
-        watcher.close();
-        emit({ type: 'reset' });
-      };
-      watcher.on('change', (_eventType, filename) => {
-        onName(toWatchedName(filename), watcher);
+        if (error) {
+          if (admitting) {
+            admissionFailure =
+              error instanceof Error ? error : new Error('Native watch admission failed.', { cause: error });
+            return;
+          }
+          emit({ type: 'reset' });
+          return;
+        }
+        const current = desiredDirectory(entry);
+        if (current.directory !== entry.directory || current.targetIsDirectory !== entry.targetIsDirectory) {
+          entry.rearming ??= open(entry)
+            .then(
+              () => {
+                emit({ type: 'reset' });
+              },
+              () => {
+                emit({ type: 'reset' });
+              },
+            )
+            .finally(() => {
+              entry.rearming = undefined;
+            });
+          trackWatchAdmission(this, entry.rearming);
+        }
+        for (const event of events) {
+          if (!isContained(watchBase, event.path)) {
+            emit({ type: 'reset' });
+            continue;
+          }
+          if (entry.targetIsDirectory) {
+            const relative = path.relative(entry.target, event.path);
+            if (relative === '' || !isContained(entry.target, event.path)) {
+              continue;
+            }
+            if (!request.recursive && relative.includes(path.sep)) {
+              continue;
+            }
+            classify(joinRooted(entry.rootedPath, relative.split(path.sep).join('/')), event.path);
+          } else if (event.path === entry.target) {
+            classify(entry.rootedPath, entry.target);
+          }
+        }
       });
-      watcher.on('error', lose);
-      watcher.on('close', lose);
+      if (unsubscribed) {
+        close(subscription);
+        return;
+      }
+      subscriptions.add(subscription);
+      const previous = entry.native;
+      entry.native = subscription;
+      entry.directory = directory;
+      entry.targetIsDirectory = targetIsDirectory;
+      if (previous) {
+        close(previous);
+      }
+      const current = desiredDirectory(entry);
+      if (current.directory !== directory || current.targetIsDirectory !== targetIsDirectory) {
+        // A parent may appear while native subscribe is still starting. Keep
+        // this admitted stream until its replacement is ready, then reconcile.
+        await open(entry);
+        emit({ type: 'reset' });
+      }
     };
-
-    // MacOS delivers recursive events against the resolved path; watching the
-    // symlinked spelling (`/var/...` for `/private/var/...`) reports every
-    // change as the root's own basename instead of the changed entry.
-    let watchBase: string;
-    try {
-      watchBase = realpathSync(this._base);
-    } catch {
-      watchBase = this._base;
-    }
-
-    const register = (rootedPath: string): void => {
+    const unsubscribe = (): void => {
+      if (unsubscribed) {
+        return;
+      }
+      unsubscribed = true;
+      this._openSubscriptions.delete(unsubscribe);
+      for (const subscription of subscriptions) {
+        close(subscription);
+      }
+    };
+    for (const rootedPath of paths) {
+      if (isExcluded(rootedPath, excludes)) {
+        continue;
+      }
       const target = path.resolve(watchBase, rootedPath);
       if (!isContained(watchBase, target)) {
         throw new VirtualPathError('PATH_OUTSIDE_ROOT', rootedPath);
       }
-      const targetIsDirectory = this._isDirectorySync(target);
-      const desired = targetIsDirectory ? target : path.dirname(target);
-      let directory = desired;
-      while (!this._isDirectorySync(directory) && path.dirname(directory) !== directory) {
-        directory = path.dirname(directory);
-      }
-      const pendingSegment = directory === desired ? undefined : path.relative(directory, desired).split(path.sep)[0];
-
-      open(directory, targetIsDirectory && request.recursive === true, (name, self) => {
-        if (unsubscribed) {
-          return;
-        }
-        if (name === undefined) {
-          emit({ type: 'reset' });
-          return;
-        }
-        if (pendingSegment !== undefined) {
-          if (name !== pendingSegment) {
-            return;
-          }
-          // A gap directory appeared: re-arm onto it before classifying, or the
-          // leaf's own creation is never observed (`from-node-fs-handle.ts:373-379`).
-          retired.add(self);
-          watchers.delete(self);
-          self.close();
-          register(rootedPath);
-          classify(rootedPath, target);
-          return;
-        }
-        if (targetIsDirectory) {
-          const absolute = path.join(target, name);
-          // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-          // ponytail: `fs.watch` on macOS emits one arming event naming the
-          // watched directory itself. An entry that both carries that name and
-          // does not exist is that artifact, not a deletion. A real child named
-          // exactly after its parent directory would be indistinguishable; no
-          // caller has one, and the resync path covers a missed delete.
-          if (name === path.basename(target) && !this._existsSync(absolute)) {
-            return;
-          }
-          classify(joinRooted(rootedPath, name.split(path.sep).join('/')), absolute);
-          return;
-        }
-        if (name === path.basename(target)) {
-          classify(rootedPath, target);
-        }
-      });
-    };
-
-    const unsubscribe = (): void => {
-      unsubscribed = true;
-      this._openSubscriptions.delete(unsubscribe);
-      for (const watcher of watchers) {
-        retired.add(watcher);
-        watcher.close();
-      }
-      watchers.clear();
-    };
-
-    try {
-      for (const requestedPath of request.paths) {
-        const rootedPath = assertRootedPath(requestedPath);
-        if (!isExcluded(rootedPath, excludes)) {
-          register(rootedPath);
-        }
-      }
-    } catch (error) {
-      unsubscribe();
-      throw error;
+      entries.push({ rootedPath, target, directory: '', targetIsDirectory: false });
     }
     this._openSubscriptions.add(unsubscribe);
+    try {
+      const module = await import('@parcel/watcher');
+      native = module.default;
+    } catch (error) {
+      unsubscribe();
+      throw new Error('Node filesystem observation requires @parcel/watcher. Install it in the Node host.', {
+        cause: error,
+      });
+    }
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- dispose() may invoke unsubscribe while the module import is pending.
+    if (unsubscribed) {
+      throw new Error('Node filesystem observation was cancelled during admission.');
+    }
+    const opening = entries.map(async (entry) => open(entry));
+    for (const admission of opening) {
+      trackWatchAdmission(this, admission);
+    }
+    const admissions = await Promise.allSettled(opening);
+    admitting = false;
+    const failure = admissions.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failure !== undefined || admissionFailure !== undefined) {
+      unsubscribe();
+      await drainNodeFsProviderWatchClosures(this);
+      if (admissionFailure) {
+        throw admissionFailure;
+      }
+      if (!failure) {
+        throw new Error('Native watch admission failed.');
+      }
+      if (failure.reason instanceof Error) {
+        throw failure.reason;
+      }
+      throw new Error('Native watch admission failed.', { cause: failure.reason });
+    }
+    if (!this._openSubscriptions.has(unsubscribe)) {
+      throw new Error('Node filesystem observation was cancelled during admission.');
+    }
     return unsubscribe;
   }
 
@@ -566,15 +671,6 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
 
   protected async mkdirSingle(path_: string): Promise<void> {
     await fs.mkdir(await this._resolve(path_));
-  }
-
-  private _existsSync(absolute: string): boolean {
-    try {
-      statSync(absolute);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   private _isDirectorySync(absolute: string): boolean {

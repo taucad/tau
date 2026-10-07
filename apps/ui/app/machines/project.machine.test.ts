@@ -2,9 +2,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { projectToManifest } from '@taucad/types';
-import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
+import { createMockRuntimeClient } from '@taucad/runtime-testing';
+import type { GeometryComponentManifest, ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
+import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -111,6 +113,182 @@ async function startAndLoad(options?: Parameters<typeof createTestActor>[0]) {
 describe('projectMachine', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe('acknowledged runtime close', () => {
+    it.each(['destroyGeometryUnit', 'fileDeleted', 'directoryDeleted'] as const)(
+      'should retain acknowledged private cleanup after %s removes file metadata',
+      async (type) => {
+        const actor = await startAndLoad();
+        const client = createMockRuntimeClient();
+        const cleaned = Promise.withResolvers<void>();
+        vi.spyOn(client, 'shutdown').mockImplementation(async () => cleaned.promise);
+        try {
+          actor.send({ type: 'createGeometryUnit', entryPath: 'retired/main.ts' });
+          const unit = actor.getSnapshot().context.geometryUnits.get('retired/main.ts');
+          if (!unit) {
+            expect.fail('Expected the actual owned CAD unit');
+          }
+          unit.send({ type: 'kernelAllocated', client, cleanups: [] });
+          if (type === 'destroyGeometryUnit') {
+            actor.send({ type, entryPath: 'retired/main.ts' });
+          } else {
+            actor.send({ type, path: type === 'fileDeleted' ? 'retired/main.ts' : 'retired' });
+          }
+          expect(actor.getSnapshot().context.geometryUnits.has('retired/main.ts')).toBe(false);
+          actor.send({ type: 'closeRuntime' });
+          await vi.waitFor(() => {
+            expect(client.shutdown).toHaveBeenCalledOnce();
+          });
+          expect(actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+          cleaned.resolve();
+          await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        } finally {
+          cleaned.resolve();
+          actor.stop();
+        }
+      },
+    );
+
+    it('should bind a retired acknowledgement to its old child while the same path reopens', async () => {
+      const actor = await startAndLoad();
+      const client = createMockRuntimeClient();
+      const cleaned = Promise.withResolvers<void>();
+      vi.spyOn(client, 'shutdown').mockImplementation(async () => cleaned.promise);
+      try {
+        actor.send({ type: 'createGeometryUnit', entryPath: 'reopen.ts' });
+        const old = actor.getSnapshot().context.geometryUnits.get('reopen.ts');
+        if (!old) {
+          expect.fail('Expected the original owned CAD unit');
+        }
+        old.send({ type: 'kernelAllocated', client, cleanups: [] });
+        actor.send({ type: 'destroyGeometryUnit', entryPath: 'reopen.ts' });
+        actor.send({ type: 'createGeometryUnit', entryPath: 'reopen.ts' });
+        const replacement = actor.getSnapshot().context.geometryUnits.get('reopen.ts');
+        expect(replacement).toBeDefined();
+        expect(replacement).not.toBe(old);
+        expect(Object.values(actor.getSnapshot().children)).toContain(old);
+        cleaned.resolve();
+        await vi.waitFor(() => {
+          expect(old.getSnapshot().status).toBe('stopped');
+        });
+        actor.send({ type: 'geometryUnit.runtimeClosed', unit: old });
+        expect(actor.getSnapshot().context.geometryUnits.get('reopen.ts')).toBe(replacement);
+        expect(Object.values(actor.getSnapshot().children)).toContain(replacement);
+        expect(replacement?.getSnapshot().status).toBe('active');
+      } finally {
+        cleaned.resolve();
+        actor.stop();
+      }
+    });
+
+    it('should retain a refused retired child and retry its cleanup before final close', async () => {
+      const actor = await startAndLoad();
+      const client = createMockRuntimeClient();
+      const refusal = new Error('retired cleanup refused');
+      const shutdown = vi.spyOn(client, 'shutdown').mockRejectedValue(refusal);
+      try {
+        actor.send({ type: 'createGeometryUnit', entryPath: 'retired.ts' });
+        const unit = actor.getSnapshot().context.geometryUnits.get('retired.ts');
+        if (!unit) {
+          expect.fail('Expected the retired child');
+        }
+        unit.send({ type: 'kernelAllocated', client, cleanups: [] });
+        actor.send({ type: 'destroyGeometryUnit', entryPath: 'retired.ts' });
+        await waitFor(unit, (state) => state.matches('runtimeCloseFailed'));
+        expect(Object.values(actor.getSnapshot().children)).toContain(unit);
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeCloseFailed'));
+        expect(actor.getSnapshot().context.error).toBeInstanceOf(AggregateError);
+        shutdown.mockResolvedValue(undefined);
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        expect(shutdown).toHaveBeenCalledTimes(3);
+      } finally {
+        actor.stop();
+      }
+    });
+
+    it('should await every CAD owner and fence new units without closing a sibling project', async () => {
+      const actor = await startAndLoad();
+      const sibling = await startAndLoad({ projectId: 'sibling' });
+      const first = createMockRuntimeClient();
+      const second = createMockRuntimeClient();
+      const firstClosed = Promise.withResolvers<void>();
+      const secondClosed = Promise.withResolvers<void>();
+      vi.spyOn(first, 'shutdown').mockImplementation(async () => firstClosed.promise);
+      vi.spyOn(second, 'shutdown').mockImplementation(async () => secondClosed.promise);
+      try {
+        actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+        actor.send({ type: 'createGeometryUnit', entryPath: 'second.ts' });
+        const units = [...actor.getSnapshot().context.geometryUnits.values()];
+        expect(units).toHaveLength(2);
+        units[0]!.send({ type: 'kernelAllocated', client: first, cleanups: [] });
+        units[1]!.send({ type: 'kernelAllocated', client: second, cleanups: [] });
+        actor.send({ type: 'closeRuntime' });
+        await vi.waitFor(() => {
+          expect(first.shutdown).toHaveBeenCalledOnce();
+          expect(second.shutdown).toHaveBeenCalledOnce();
+        });
+        actor.send({ type: 'createGeometryUnit', entryPath: 'too-late.ts' });
+        actor.send({ type: 'openInViewer', entryPath: 'also-too-late.ts' });
+        expect(actor.getSnapshot().context.geometryUnits.size).toBe(2);
+        firstClosed.resolve();
+        await Promise.resolve();
+        expect(actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+        expect(sibling.getSnapshot().matches({ ready: {} })).toBe(true);
+        secondClosed.resolve();
+        await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        actor.send({ type: 'closeRuntime' });
+        expect(first.shutdown).toHaveBeenCalledOnce();
+        expect(second.shutdown).toHaveBeenCalledOnce();
+      } finally {
+        firstClosed.resolve();
+        secondClosed.resolve();
+        actor.stop();
+        sibling.stop();
+      }
+    });
+
+    it('should retain exact cleanup refusal after attempting all units', async () => {
+      const actor = await startAndLoad();
+      const first = createMockRuntimeClient();
+      const second = createMockRuntimeClient();
+      const refusal = new Error('native cleanup refused');
+      vi.spyOn(first, 'shutdown').mockRejectedValue(refusal);
+      try {
+        actor.send({ type: 'createGeometryUnit', entryPath: 'first.ts' });
+        actor.send({ type: 'createGeometryUnit', entryPath: 'second.ts' });
+        const units = [...actor.getSnapshot().context.geometryUnits.values()];
+        units[0]!.send({ type: 'kernelAllocated', client: first, cleanups: [] });
+        units[1]!.send({ type: 'kernelAllocated', client: second, cleanups: [] });
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeCloseFailed'));
+        expect(first.shutdown).toHaveBeenCalledOnce();
+        expect(second.shutdown).toHaveBeenCalledOnce();
+        expect(actor.getSnapshot().context.error).toBeInstanceOf(AggregateError);
+        const { error } = actor.getSnapshot().context;
+        if (!(error instanceof AggregateError)) {
+          expect.fail('Expected the actual aggregated cleanup refusal');
+        }
+        expect(error.errors).toEqual([refusal]);
+        expect(actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+      } finally {
+        actor.stop();
+      }
+    });
+
+    it('should close a cold project without starting a CAD client', async () => {
+      const actor = await startAndLoad();
+      try {
+        expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
+      } finally {
+        actor.stop();
+      }
+    });
   });
 
   describe('project content activity path classification', () => {
@@ -785,6 +963,91 @@ describe('projectMachine', () => {
   // State: ready – view graphics
   // =========================================================================
   describe('ready – view graphics', () => {
+    it('keeps a shared manifest while a sibling GLB pane is live and clears it after the last pane switches or closes', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createViewGraphics', viewId: 'glb' });
+      actor.send({ type: 'createViewGraphics', viewId: 'sibling' });
+      const { viewGraphics, modelInteractionRef } = actor.getSnapshot().context;
+      const first = viewGraphics.get('glb')!;
+      const sibling = viewGraphics.get('sibling')!;
+      const unitId = deriveModelInteractionUnitId({ sourceFile: 'main.ts' });
+      const manifest: GeometryComponentManifest = {
+        schemaVersion: 1,
+        sourceFile: 'main.ts',
+        rootId: 'root',
+        nodeOrder: ['root'],
+        nodesById: {
+          root: {
+            id: 'root',
+            name: 'Model',
+            kind: 'model',
+            selector: 'root',
+            childIds: [],
+            depth: 0,
+            path: ['Model'],
+            meshNodeIndices: [],
+            primitiveIndices: [],
+            materialIndices: [],
+            capabilities: {
+              canHide: true,
+              canIsolate: true,
+              canFocus: true,
+              canAdjustOpacity: true,
+              hasDrawings: false,
+              hasPreciseTopology: false,
+              exports: [],
+            },
+          },
+        },
+        capabilities: {
+          canHide: true,
+          canIsolate: true,
+          canFocus: true,
+          canAdjustOpacity: true,
+          hasDrawings: false,
+          hasPreciseTopology: false,
+          exports: [],
+        },
+      };
+      const showGlb = (graphics: typeof first, hash: string): void => {
+        graphics.send({
+          type: 'updateArtifact',
+          artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
+          hash,
+          sourceFile: 'main.ts',
+        });
+        graphics.send({
+          type: 'gltfPresentationCommitted',
+          revision: graphics.getSnapshot().context.gltfPresentation.requestedRevision,
+          key: hash,
+          unitId,
+          manifest,
+        });
+      };
+      const showSvg = (graphics: typeof first): void => {
+        graphics.send({
+          type: 'updateArtifact',
+          artifact: { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg" />' },
+          hash: 'drawing',
+          sourceFile: 'main.ts',
+        });
+        actor.send({ type: 'reconcileViewManifest', unitId });
+      };
+
+      showGlb(first, 'first');
+      showGlb(sibling, 'second');
+      showSvg(first);
+      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBe(manifest);
+      showSvg(sibling);
+      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBeUndefined();
+
+      showGlb(sibling, 'third');
+      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBe(manifest);
+      actor.send({ type: 'destroyViewGraphics', viewId: 'sibling' });
+      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBeUndefined();
+      actor.stop();
+    });
+
     it('should create a graphics actor for a view', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createViewGraphics', viewId: 'panel-1' });

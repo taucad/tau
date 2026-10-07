@@ -13,14 +13,60 @@ use geospec_engine_native_core::certificates::{
 use serde_json::{json, Value};
 
 const VERIFIER_SOURCE_HASH: &str =
-    include_str!("fixtures/current-profile-v5/verifier-source-hash.txt");
-const NUMERIC_PROFILE: &str = include_str!("fixtures/current-profile-v5/numeric-profile.txt");
+    include_str!("fixtures/current-profile-v6/verifier-source-hash.txt").trim_ascii_end();
+const NUMERIC_PROFILE: &str =
+    include_str!("fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
 
 fn verifier_source_hash() -> String {
     let value = std::env::var("GEOSPEC_F1_VERIFIER_SOURCE_HASH")
         .unwrap_or_else(|_| VERIFIER_SOURCE_HASH.into());
     assert_eq!(value, VERIFIER_SOURCE_HASH, "stale verifier source binding");
     value
+}
+
+#[test]
+fn successor_definition_binds_the_same_inventory_to_current_source_without_rewriting_v5() {
+    let current = include_str!("fixtures/current-profile-v6/f1-definition-records.json");
+    let historical = include_str!("fixtures/current-profile-v5/f1-definition-records.json");
+    assert_eq!(
+        sha256_hex(geospec_engine_native_core::canonicalize(current.as_bytes()).unwrap()),
+        VERIFIER_SOURCE_HASH
+    );
+    assert_eq!(
+        sha256_hex(historical),
+        include_str!("fixtures/current-profile-v5/verifier-source-hash.txt")
+    );
+    assert_ne!(current, historical);
+    let current: Vec<Value> = serde_json::from_str(current).unwrap();
+    let historical: Vec<Value> = serde_json::from_str(historical).unwrap();
+    assert_eq!(current.len(), 45);
+    assert_eq!(current.len(), historical.len());
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let mut archives = 0;
+    let mut sources = 0;
+    for (row, old) in current.iter().zip(&historical) {
+        assert_eq!(row["path"], old["path"], "no inventory widening");
+        let path = row["path"].as_str().unwrap();
+        if path.starts_with("crates/") {
+            archives += 1;
+            assert_eq!(row, old, "unchanged lock-pinned archive authority");
+        } else {
+            sources += 1;
+            let bytes = std::fs::read(root.join(path)).unwrap();
+            assert_eq!(
+                sha256_hex(bytes),
+                row["sha256"],
+                "{path}: actual owning source"
+            );
+        }
+    }
+    assert_eq!((archives, sources), (36, 9));
+    let mut changed = current.clone();
+    changed[0]["sha256"] = json!("0".repeat(64));
+    assert_ne!(
+        sha256_hex(serde_json::to_vec(&changed).unwrap()),
+        VERIFIER_SOURCE_HASH
+    );
 }
 
 #[test]
@@ -72,6 +118,16 @@ fn current_registry_f1_plan_reaches_independent_verifier_after_fresh_admission()
     let current: Value = serde_json::from_slice(&canonical).unwrap();
     assert_eq!(current["registryVersion"], 5);
     assert_eq!(current["numericProfile"], NUMERIC_PROFILE);
+    let mut stale = current.clone();
+    stale["numericProfile"] = json!(include_str!(
+        "fixtures/current-profile-v5/numeric-profile.txt"
+    ));
+    let stale_bytes = canonicalize(&serde_json::to_vec(&stale).unwrap()).unwrap();
+    assert_ne!(sha256_hex(&stale_bytes), sha256_hex(&canonical));
+    assert!(
+        engine.evaluate_plan(&stale_bytes).is_err(),
+        "v5 plan cannot enter v6 evaluation"
+    );
     let mut observations = Vec::new();
     for registry in [5, 4] {
         let mut plan = current.clone();
@@ -83,6 +139,28 @@ fn current_registry_f1_plan_reaches_independent_verifier_after_fresh_admission()
             plan_hash: sha256_hex(&bytes),
             verifier_source_hash: definition.clone(),
         };
+        let historical_binding = VerificationBinding {
+            verifier_source_hash: include_str!(
+                "fixtures/current-profile-v5/verifier-source-hash.txt"
+            )
+            .into(),
+            ..binding.clone()
+        };
+        assert_ne!(historical_binding.verifier_source_hash, definition);
+        assert!(matches!(
+            verify(
+                VerificationRequest {
+                    source: &source,
+                    canonical_plan: &bytes,
+                    claim_id: row["plans"][0]["claimId"].as_str().unwrap(),
+                    subject_slot: "plate",
+                    expected_subject_hash: subject_hash,
+                    expected_verifier_source_hash: &definition,
+                },
+                PlateCandidate { binding: &historical_binding, analysis: &expected },
+            ),
+            Err(PlateError { kind: geospec_engine_native_core::certificates::plate_contract::PlateErrorKind::Unverified, .. })
+        ));
         let result = verify(
             VerificationRequest {
                 source: &source,

@@ -1,18 +1,20 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Allotment, LayoutPriority } from 'allotment';
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
+import type { DockviewApi } from 'dockview-react';
+import { LayoutPriority } from 'allotment';
+import { Allotment } from '#components/panes/allotment.js';
 import { useSelector } from '@xstate/react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
-import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
-import { WorkbenchToggle } from '#routes/w.$workspace.$project/project-workspace-actions.js';
+import { getWorkbenchTabIcon, WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
+import { WorkbenchToggle } from '#routes/w.$workspace.$project/workbench-toggle.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { ProjectManifestIssueBanner } from '#routes/w.$workspace.$project/project-manifest-issue-banner.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
 import { useSidebar } from '#components/ui/sidebar.js';
 import { useProject } from '#hooks/use-project.js';
-import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import {
   resolveCompactAuxiliary,
   useProjectWorkspace,
@@ -46,20 +48,44 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const { open: sidebarOpen } = useSidebar();
   const { setChatOpen, setWorkbenchOpen } = useProjectWorkspace();
   const containerRef = useRef<HTMLDivElement>(null);
-  const { width } = useResizeObserver({ ref: containerRef });
-  const [isClient, setIsClient] = useState(false);
+  const [isCompact, setIsCompact] = useState<boolean>();
+  const isClient = isCompact !== undefined;
+  const [workbenchApi, setWorkbenchApi] = useState<DockviewApi>();
   const isEditorReady = useSelector(editorRef, (state) => state.matches('ready'));
   const desktopLayout = useSelector(editorRef, (state) => state.context.panelState.desktopLayout);
-  const isCompact = width !== undefined && width < compactWorkspaceWidth;
   const compactAuxiliary = isCompact ? resolveCompactAuxiliary(desktopLayout) : undefined;
   const chatVisible = desktopLayout.chatOpen && (!isCompact || compactAuxiliary === 'chat');
   const workbenchVisible = desktopLayout.workbenchOpen && (!isCompact || compactAuxiliary === 'workbench');
   const lanes = useMemo(() => ({ chat: chatVisible, workbench: workbenchVisible }), [chatVisible, workbenchVisible]);
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      setIsClient(true);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    // Resolve the initial lanes before mounting their layout engines. Pixel
+    // changes within the same mode must not rerender the workspace subtree.
+    let compact = container.getBoundingClientRect().width < compactWorkspaceWidth;
+    setIsCompact(compact);
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) {
+        return;
+      }
+      const nextCompact = entry.contentRect.width < compactWorkspaceWidth;
+      if (nextCompact === compact) {
+        return;
+      }
+      compact = nextCompact;
+      // ResizeObserver runs before paint; commit the lane change in that same
+      // delivery instead of letting concurrent React show an intermediate mode.
+      flushSync(() => {
+        setIsCompact(nextCompact);
+      });
     });
+    observer.observe(container);
+    return () => {
+      observer.disconnect();
+    };
   }, []);
 
   const persistWidths = useCallback(
@@ -90,7 +116,12 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
         >
           {isClient && isEditorReady ? (
             <div className='absolute top-1 right-1 z-10 flex gap-1'>
-              <WorkbenchToggle isOpen={workbenchVisible} onOpenChange={setWorkbenchOpen} />
+              <WorkbenchToggle
+                isOpen={workbenchVisible}
+                api={workbenchApi}
+                getIcon={getWorkbenchTabIcon}
+                onOpenChange={setWorkbenchOpen}
+              />
             </div>
           ) : null}
           {/* Until the editor state has loaded and the focused chat exists, the
@@ -98,11 +129,12 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
             {isClient && isEditorReady ? (
               <Allotment
+                paneLabels={['Chat', 'Viewer', 'Workbench']}
                 separator={false}
                 proportionalLayout={false}
                 /* The lanes land rather than snap in: the skeleton they replace holds the same
                    background, so a short fade reads as the workspace resolving (soft land). */
-                className='size-full animate-in duration-200 fade-in-50 [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] motion-reduce:animate-none [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
+                className='size-full animate-in duration-200 fade-in-50 motion-reduce:animate-none [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
                 onDragEnd={persistWidths}
               >
                 <Allotment.Pane
@@ -150,7 +182,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                   priority={LayoutPriority.Low}
                   visible={workbenchVisible}
                 >
-                  <WorkbenchDockview />
+                  <WorkbenchDockview onApiChange={setWorkbenchApi} />
                 </Allotment.Pane>
               </Allotment>
             ) : (

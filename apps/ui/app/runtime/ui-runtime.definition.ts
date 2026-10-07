@@ -12,6 +12,7 @@ import { opencascade } from '@taucad/opencascade';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { tscircuit } from '@taucad/tscircuit';
 import { slicer } from '@taucad/slicer';
 import { zoo } from '@taucad/zoo';
 import { zooCloseErrors } from '#cloud/zoo-close-errors.js';
@@ -59,6 +60,7 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
         },
       },
     }),
+    tscircuit(),
   ],
   middleware: [
     observabilityMiddleware({

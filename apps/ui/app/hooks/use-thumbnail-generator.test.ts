@@ -20,20 +20,39 @@ let snapshotEntryPath: string | undefined = sourceEntryPath;
 const getSnapshot = vi.fn(() => ({
   context: {
     entryPath: snapshotEntryPath,
-    geometry: {
-      format: geometryFormat,
-      content: geometryFormat === 'gltf' ? geometryContent : '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    openAttempt: 0,
+    rendering: {
+      success: true,
+      requestId: 'request-1',
+      evaluationId: 'evaluation-1',
+      transient: false,
+      view: 'model',
+      artifact:
+        geometryFormat === 'gltf'
+          ? { mimeType: 'model/gltf-binary', content: geometryContent }
+          : { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"/>' },
       hash: 'geometry-hash',
+      issues: [],
     },
-    lastRequestedRenderId: 0,
+    evaluation: undefined,
   },
+  matches: () => false,
 }));
-let geometryListener: ((event: { geometry: { hash: string } }) => void) | undefined;
+type RenderEvent = {
+  rendering: {
+    success: true;
+    transient: false;
+    hash: string;
+    evaluationId: string;
+    artifact: ReturnType<typeof getSnapshot>['context']['rendering']['artifact'];
+  };
+};
+let renderingListener: ((event: RenderEvent) => void) | undefined;
 const unsubscribe = vi.fn();
 const unsubscribeSnapshots = vi.fn();
 const subscribe = vi.fn(() => ({ unsubscribe: unsubscribeSnapshots }));
-const on = vi.fn((_event: string, listener: (event: { geometry: { hash: string } }) => void) => {
-  geometryListener = listener;
+const on = vi.fn((_event: string, listener: (event: RenderEvent) => void) => {
+  renderingListener = listener;
   return { unsubscribe };
 });
 
@@ -46,8 +65,9 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 const writeFile = vi.fn(async () => undefined);
+const deleteFile = vi.fn(async () => undefined);
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ writeFile }),
+  useFileManager: () => ({ writeFile, deleteFile }),
 }));
 
 const webpBytes = (marker = 0): Uint8Array<ArrayBuffer> => {
@@ -97,7 +117,7 @@ describe('useThumbnailGenerator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     thumbnailInput = undefined;
-    geometryListener = undefined;
+    renderingListener = undefined;
     snapshotEntryPath = sourceEntryPath;
     geometryFormat = 'gltf';
     getProjectFileSystemConfig.mockResolvedValue(locator('/projects/one'));
@@ -138,7 +158,7 @@ describe('useThumbnailGenerator', () => {
           margin: 0.1,
           projection: { kind: 'perspective', verticalFieldOfView: 45 },
         },
-        quality: 0.9,
+        quality: 0.95,
         ao: {},
       },
     });
@@ -159,7 +179,7 @@ describe('useThumbnailGenerator', () => {
       expect.fail('render should reject without a settled entry path');
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toBe('source-unavailable: settled canonical geometry not ready');
+      expect((error as Error).message).toBe('source-unavailable: committed rendering not ready');
     }
     expect(exportImage).not.toHaveBeenCalled();
   });
@@ -224,20 +244,28 @@ describe('useThumbnailGenerator', () => {
       sourcePath: sourceEntryPath,
       content: '<svg xmlns="http://www.w3.org/2000/svg"/>',
       format: 'webp',
-      exportOptions: { width: 1536, height: 1152, quality: 0.9 },
+      exportOptions: { width: 1536, height: 1152, quality: 0.95 },
     });
   });
 
   it('should include the render recipe in the settled thumbnail identity', () => {
     renderHook(() => useThumbnailGenerator());
 
-    geometryListener?.({ geometry: { hash: 'geometry-hash' } });
+    renderingListener?.({
+      rendering: {
+        success: true,
+        transient: false,
+        hash: 'geometry-hash',
+        evaluationId: 'evaluation-1',
+        artifact: getSnapshot().context.rendering.artifact,
+      },
+    });
 
     const event = send.mock.calls.at(-1)?.[0];
     expect(event?.type).toBe('settled');
     if (event?.type === 'settled') {
       expect(event.hash).toBe(
-        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:1536x1152:m0.1:lw6:camera-bounds-v1:edges:studio-v5',
+        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.95:1536x1152:m0.1:lw6:camera-bounds-v1:edges:studio-v5',
       );
     }
   });

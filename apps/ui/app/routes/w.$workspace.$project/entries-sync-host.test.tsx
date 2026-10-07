@@ -1,4 +1,5 @@
 /* oxlint-disable typescript/no-unsafe-assignment -- Focused actor doubles intentionally expose only the consumed snapshot fields. */
+import type { WatchEvent } from '@taucad/filesystem';
 // @vitest-environment jsdom
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
@@ -8,6 +9,7 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
+import { readRecordIssues } from '#workbench-records/record-issues.js';
 import { EntriesSyncHost, EntryOwner } from '#routes/w.$workspace.$project/entries-sync-host.js';
 
 vi.mock('@xstate/react', () => ({
@@ -19,10 +21,22 @@ let hostContentService: { subscribe: (path: string, listener: () => void) => () 
 let liveRootOnly = false;
 let selectedRoot = '/root';
 let liveWatchEntries: (() => void) | undefined;
-const subscribeWorkbenchRecord = (_path: string, listener: () => void): (() => void) => {
-  liveWatchEntries = listener;
-  return () => {
-    liveWatchEntries = undefined;
+let nextWatchReady: Promise<void> | undefined;
+const watchClosures: Array<ReturnType<typeof Promise.withResolvers<void>>> = [];
+const watchRecordFile = (path: string, listener: (event: WatchEvent) => void) => {
+  const closed = Promise.withResolvers<void>();
+  watchClosures.push(closed);
+  const ready = nextWatchReady ?? Promise.resolve();
+  nextWatchReady = undefined;
+  liveWatchEntries = () => {
+    listener({ type: 'change', path });
+  };
+  return {
+    ready,
+    closed: closed.promise,
+    dispose: () => {
+      liveWatchEntries = undefined;
+    },
   };
 };
 const hostFiles = vi.hoisted(() => {
@@ -33,6 +47,9 @@ const hostFiles = vi.hoisted(() => {
       bytes = next;
     },
     get: () => bytes,
+    remove: () => {
+      bytes = undefined;
+    },
     failOnce: () => {
       fail = true;
     },
@@ -59,7 +76,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     fileManagerRef: { getSnapshot: () => ({ context: { rootDirectory: selectedRoot } }) },
     parameterFiles: hostFiles,
     contentService: hostContentService,
-    subscribeWorkbenchRecord,
+    watchRecordFile,
   }),
 }));
 vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
@@ -69,7 +86,107 @@ describe('entry owner reconciliation', () => {
     liveRootOnly = false;
     selectedRoot = '/root';
     liveWatchEntries = undefined;
+    nextWatchReady = undefined;
+    watchClosures.length = 0;
   });
+  it.each([0, 600_000])('should map durable renderTimeout %i to the runtime operation event', (renderTimeout) => {
+    const send = vi.fn();
+    const cad = {
+      getSnapshot: () => ({ context: { operationTimeout: 180_000 } }),
+      send,
+    } as unknown as ActorRefFrom<typeof cadMachine>;
+    const model = {
+      getSnapshot: () => ({ context: { unitsById: {} } }),
+      send: vi.fn(),
+    } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
+    const view = render(
+      <EntryOwner
+        path='a.ts'
+        cadRef={cad}
+        modelInteractionRef={model}
+        entry={{ renderTimeout }}
+        recordPresent
+        ready
+        write={vi.fn(async () => true)}
+      />,
+    );
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith({ type: 'setOperationTimeout', operationTimeout: renderTimeout });
+    view.unmount();
+  });
+
+  it('re-registers a closed entries watch on retry and applies later external edits', async () => {
+    const bytes = (renderTimeout: number) =>
+      new TextEncoder().encode(
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: { 'a.ts': { renderTimeout } },
+        }),
+      );
+    hostFiles.set(bytes(30_000));
+    hostFiles.writeFileChecked.mockClear();
+    const setEntriesRecord = vi.fn();
+    hostProject = {
+      projectId: 'p',
+      geometryUnits: new Map(),
+      modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
+      entriesRecord: undefined,
+      setEntriesRecord,
+      registerWorkbenchRecordProducer: () => () => undefined,
+      registerEntryPathChange: () => () => undefined,
+      setAppliedEntryRevision: () => undefined,
+    };
+    const view = render(<EntriesSyncHost />);
+    try {
+      await waitFor(() => {
+        expect(setEntriesRecord).toHaveBeenCalled();
+      });
+      await act(async () => {
+        watchClosures[0]!.resolve();
+      });
+      await waitFor(() => {
+        expect(readRecordIssues('p')[0]?.state).toBe('unavailable');
+      });
+      const ready = Promise.withResolvers<void>();
+      nextWatchReady = ready.promise;
+      hostFiles.set(bytes(45_000));
+      setEntriesRecord.mockClear();
+      await act(async () => {
+        await readRecordIssues('p')[0]!.retryRead();
+      });
+      expect(watchClosures).toHaveLength(2);
+      expect(setEntriesRecord).not.toHaveBeenCalled();
+      expect(readRecordIssues('p')[0]?.state).toBe('reading');
+      await act(async () => {
+        ready.resolve();
+      });
+      await waitFor(() => {
+        expect(setEntriesRecord).toHaveBeenCalledWith(
+          expect.objectContaining({
+            entries: { 'a.ts': { renderTimeout: 45_000 } },
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(readRecordIssues('p')).toEqual([]);
+      });
+      hostFiles.set(bytes(60_000));
+      await act(async () => {
+        liveWatchEntries?.();
+      });
+      await waitFor(() => {
+        expect(setEntriesRecord).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            entries: { 'a.ts': { renderTimeout: 60_000 } },
+          }),
+        );
+      });
+      expect(hostFiles.writeFileChecked).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+    }
+  });
+
   it('retains and observes live entry settings after code selects a checkout', async () => {
     liveRootOnly = true;
     selectedRoot = '/projects/p';
@@ -80,12 +197,12 @@ describe('entry owner reconciliation', () => {
       ),
     );
     const setEntriesRecord = vi.fn();
-    let renderTimeout = 30_000;
+    let operationTimeout = 30_000;
     const cad = {
-      getSnapshot: () => ({ context: { renderTimeout } }),
-      send: (event: { type: string; renderTimeout: number }) => {
-        if (event.type === 'setRenderTimeout') {
-          renderTimeout = event.renderTimeout;
+      getSnapshot: () => ({ context: { operationTimeout } }),
+      send: (event: { type: string; operationTimeout: number }) => {
+        if (event.type === 'setOperationTimeout') {
+          operationTimeout = event.operationTimeout;
         }
       },
     };
@@ -122,7 +239,7 @@ describe('entry owner reconciliation', () => {
         }),
       );
     });
-    renderTimeout = 60_000;
+    operationTimeout = 60_000;
     view.rerender(<EntriesSyncHost />);
     await waitFor(
       () => {
@@ -138,6 +255,43 @@ describe('entry owner reconciliation', () => {
     liveRootOnly = false;
     selectedRoot = '/root';
   });
+  it('returns every model to default settings when the entries record is deleted, without writing', async () => {
+    hostFiles.set(
+      new TextEncoder().encode(
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 240_000 } } }),
+      ),
+    );
+    hostFiles.writeFileChecked.mockClear();
+    const setEntriesRecord = vi.fn((record: WorkbenchEntries) => {
+      hostProject['entriesRecord'] = record;
+    });
+    hostProject = {
+      projectId: 'p',
+      geometryUnits: new Map(),
+      modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
+      entriesRecord: undefined,
+      setEntriesRecord,
+      registerWorkbenchRecordProducer: () => () => undefined,
+      registerEntryPathChange: () => () => undefined,
+      setAppliedEntryRevision: () => undefined,
+    };
+    const view = render(<EntriesSyncHost />);
+    await waitFor(() => {
+      expect(setEntriesRecord).toHaveBeenLastCalledWith({
+        version: 1,
+        entries: { 'a.ts': { renderTimeout: 240_000 } },
+      });
+    });
+    hostFiles.remove();
+    await act(async () => {
+      liveWatchEntries?.();
+    });
+    await waitFor(() => {
+      expect(setEntriesRecord).toHaveBeenLastCalledWith({ version: 1, entries: {} });
+    });
+    expect(hostFiles.writeFileChecked).not.toHaveBeenCalled();
+    view.unmount();
+  });
   it('persists an entry owner edit after first service readiness and StrictMode replay', async () => {
     hostFiles.set(
       new TextEncoder().encode(
@@ -146,8 +300,8 @@ describe('entry owner reconciliation', () => {
     );
     hostFiles.writeFileChecked.mockClear();
     hostContentService = undefined;
-    let renderTimeout = 30_000;
-    const cad = { getSnapshot: () => ({ context: { renderTimeout } }), send: vi.fn() };
+    let operationTimeout = 30_000;
+    const cad = { getSnapshot: () => ({ context: { operationTimeout } }), send: vi.fn() };
     const model = { getSnapshot: () => ({ context: { unitsById: {} } }), send: vi.fn() };
     const acknowledged = new Map<string, string>();
     hostProject = {
@@ -181,7 +335,7 @@ describe('entry owner reconciliation', () => {
         <EntriesSyncHost />
       </StrictMode>,
     );
-    renderTimeout = 45_000;
+    operationTimeout = 45_000;
     view.rerender(
       <StrictMode>
         <EntriesSyncHost />
@@ -215,10 +369,11 @@ describe('entry owner reconciliation', () => {
         acknowledged.delete(path);
       }
     });
-    const cad = { getSnapshot: () => ({ context: { renderTimeout: 30_000 } }), send: vi.fn() };
+    const cad = { getSnapshot: () => ({ context: { operationTimeout: 30_000 } }), send: vi.fn() };
     const model = { getSnapshot: () => ({ context: { unitsById: {} } }), send: vi.fn() };
     const geometryUnits = new Map([['a.ts', cad]]);
     hostProject = {
+      projectId: 'p',
       geometryUnits,
       modelInteractionRef: model,
       entriesRecord: undefined,
@@ -238,7 +393,13 @@ describe('entry owner reconciliation', () => {
       liveWatchEntries?.();
     });
     expect(acknowledged.has('a.ts')).toBe(false);
-    expect(screen.getByRole('alert').textContent).toContain('offline');
+    // The failure reaches the settings trigger as a record issue, never as loose page text.
+    expect(screen.queryByRole('alert')).toBeNull();
+    await waitFor(() => {
+      expect(readRecordIssues('p')).toMatchObject([
+        { kind: 'entries', path: '.tau/workbench/entries.json', state: 'reading', message: 'offline' },
+      ]);
+    });
     geometryUnits.set('b.ts', cad);
     view.rerender(<EntriesSyncHost />);
     await act(async () => undefined);
@@ -249,19 +410,19 @@ describe('entry owner reconciliation', () => {
     await waitFor(() => {
       expect(acknowledged.has('a.ts')).toBe(true);
     });
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect(readRecordIssues('p')).toEqual([]);
     view.unmount();
   });
   it('persists a human hide without reverting it and adopts a foreign isolation independently', async () => {
-    let renderTimeout = 180_000;
+    let operationTimeout = 180_000;
     let hidden: string[] = [];
     let isolated: string[] = [];
     let opacity: Record<string, number> = {};
     const cad = {
-      getSnapshot: () => ({ context: { renderTimeout } }),
-      send: vi.fn((event: { type: string; renderTimeout: number }) => {
-        if (event.type === 'setRenderTimeout') {
-          renderTimeout = event.renderTimeout;
+      getSnapshot: () => ({ context: { operationTimeout } }),
+      send: vi.fn((event: { type: string; operationTimeout: number }) => {
+        if (event.type === 'setOperationTimeout') {
+          operationTimeout = event.operationTimeout;
         }
       }),
     } as unknown as ActorRefFrom<typeof cadMachine>;
@@ -337,14 +498,14 @@ describe('entry owner reconciliation', () => {
   });
 
   it('keeps newer local entry settings when an older checked write is received with a foreign sibling field', async () => {
-    let renderTimeout = 180_000;
+    let operationTimeout = 180_000;
     let hidden: string[] = [];
     let isolated: string[] = [];
     const cad = {
-      getSnapshot: () => ({ context: { renderTimeout } }),
-      send: vi.fn((event: { type: string; renderTimeout: number }) => {
-        if (event.type === 'setRenderTimeout') {
-          renderTimeout = event.renderTimeout;
+      getSnapshot: () => ({ context: { operationTimeout } }),
+      send: vi.fn((event: { type: string; operationTimeout: number }) => {
+        if (event.type === 'setOperationTimeout') {
+          operationTimeout = event.operationTimeout;
         }
       }),
     } as unknown as ActorRefFrom<typeof cadMachine>;
@@ -381,7 +542,7 @@ describe('entry owner reconciliation', () => {
       ),
     } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
     type Entry = WorkbenchEntries['entries'][string];
-    const initial: Entry = { renderTimeout, components: { hidden: [], isolated: [], opacity: [] } };
+    const initial: Entry = { renderTimeout: operationTimeout, components: { hidden: [], isolated: [], opacity: [] } };
     const write = vi.fn(async (_path: string, _next: Entry) => true);
     const draw = (entry: Entry, localPatch?: { renderTimeout?: number; components?: { hidden?: string[] } }) => (
       <EntryOwner
@@ -400,14 +561,14 @@ describe('entry owner reconciliation', () => {
       await Promise.resolve();
     });
     hidden = ['part-a'];
-    renderTimeout = 200_000;
+    operationTimeout = 200_000;
     view.rerender(draw(initial));
     await waitFor(() => {
       expect(write).toHaveBeenCalled();
     });
     const olderLocal = write.mock.lastCall![1];
     hidden = ['part-a', 'part-b'];
-    renderTimeout = 300_000;
+    operationTimeout = 300_000;
     view.rerender(draw(initial));
     view.rerender(
       draw(
@@ -419,7 +580,7 @@ describe('entry owner reconciliation', () => {
       expect(isolated).toEqual(['part-c']);
     });
     expect(hidden).toEqual(['part-a', 'part-b']);
-    expect(renderTimeout).toBe(300_000);
+    expect(operationTimeout).toBe(300_000);
     view.unmount();
   });
 });

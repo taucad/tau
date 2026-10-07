@@ -1,11 +1,16 @@
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Box3, Vector3 } from 'three';
+import { createCameraView } from '@taucad/camera';
+import { createThreeCameraRig } from '@taucad/three/camera';
+import type { ThreeCameraRig } from '@taucad/three/camera';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
 
 const send = vi.fn();
 let fitListener: (() => void) | undefined;
-const size = { width: 800, height: 600 };
+let size = { width: 800, height: 600 };
+const get = () => ({ size });
+let liveRig: ThreeCameraRig | undefined;
 const rig = {
   actorRef: {
     getSnapshot: () => ({
@@ -15,6 +20,7 @@ const rig = {
           direction: [0, 0, 1],
           up: [0, 0, 1],
           verticalSpan: 20,
+          viewport: { width: 1, height: 1, pixelRatio: 2 },
         },
       },
     }),
@@ -36,9 +42,12 @@ const graphicsActor = {
   }),
 };
 
-vi.mock('@react-three/fiber', () => ({ useThree: () => ({ size }) }));
+vi.mock('@react-three/fiber', () => ({
+  useThree: <T>(selector?: (state: { size: typeof size; get: typeof get }) => T) =>
+    selector ? selector({ size, get }) : { size, get },
+}));
 vi.mock('#hooks/use-graphics.js', () => ({
-  useCameraRig: () => rig,
+  useCameraRig: () => liveRig ?? rig,
   useViewCameraFraming: () => framing,
   useGraphics: () => graphicsActor,
 }));
@@ -56,8 +65,12 @@ describe('useCameraFraming portable camera events', () => {
       initialized: false,
     };
     fitListener = undefined;
-    size.width = 800;
-    size.height = 600;
+    size = { width: 800, height: 600 };
+  });
+
+  afterEach(() => {
+    liveRig?.dispose();
+    liveRig = undefined;
   });
 
   it('frames the first real bounds and resolves a valid camera up', () => {
@@ -70,7 +83,10 @@ describe('useCameraFraming portable camera events', () => {
       }),
     );
 
-    const setView = send.mock.calls[0]?.[0] as { direction: [number, number, number]; up: [number, number, number] };
+    const setView = send.mock.calls.find(([event]) => event.type === 'setView')?.[0] as {
+      direction: [number, number, number];
+      up: [number, number, number];
+    };
     expect(new Vector3(...setView.direction).cross(new Vector3(...setView.up)).lengthSq()).toBeGreaterThan(1e-8);
     expect(send).toHaveBeenCalledWith({ type: 'setBounds', bounds: { min: [-10, -5, -2], max: [10, 5, 2] } });
     expect(send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
@@ -146,25 +162,71 @@ describe('useCameraFraming portable camera events', () => {
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setView', target: cameraView.target }));
   });
 
-  it('preserves orientation on aspect-only reframing and on Fit view', () => {
+  it('should preserve the placed camera throughout repeated pane resizing', () => {
+    liveRig = createThreeCameraRig({
+      initialView: createCameraView({
+        frameId: 'resize-test',
+        requestedVerticalFieldOfView: 45,
+        perspectiveZoom: 1,
+        target: [0, 0, 0],
+        direction: [1, -1, 1],
+        up: [0, 0, 1],
+        verticalSpan: 10,
+        bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+        viewport: { width: 800, height: 600, pixelRatio: 2 },
+      }),
+    });
+    liveRig.actorRef.start();
+    const bounds = new Box3(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
+    const hook = renderHook(() => useCameraFraming({ geometryRadius: 2, geometryBounds: bounds }));
+    liveRig.actorRef.send({
+      type: 'setView',
+      target: [4, 5, 6],
+      direction: [0, 1, 0],
+      up: [0, 0, 1],
+      verticalSpan: 20,
+    });
+    const placedView = liveRig.actorRef.getSnapshot().context.view;
+    const frame = hook.result.current;
+
+    for (const width of [700, 600, 400, 900, 1400, 800]) {
+      size = { ...size, width };
+      // ActorBridge owns viewport projection; framing must not change the placed camera.
+      liveRig.actorRef.send({ type: 'setViewport', viewport: { ...size, pixelRatio: 2 } });
+      hook.rerender();
+      const resizedView = liveRig.actorRef.getSnapshot().context.view;
+      expect(resizedView.target).toEqual(placedView.target);
+      expect(resizedView.verticalSpan).toBe(placedView.verticalSpan);
+      expect(resizedView.direction).toEqual(placedView.direction);
+      expect(resizedView.up).toEqual(placedView.up);
+      expect(hook.result.current).toBe(frame);
+    }
+    expect(graphicsActor.on).toHaveBeenCalledTimes(1);
+  });
+
+  it('should fit the latest viewport on request without resetting orientation', () => {
     const bounds = new Box3(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
     const hook = renderHook(() => useCameraFraming({ geometryRadius: 2, geometryBounds: bounds }));
     send.mockClear();
 
-    size.width = 1400;
-    hook.rerender();
-    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setView' }));
-    expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
-
-    expect(graphicsActor.on).toHaveBeenCalledWith('viewFitRequested', expect.any(Function));
-    send.mockClear();
+    // No React rerender: the command must read the current R3F measurement.
+    size = { width: 1400, height: 500 };
     act(() => fitListener?.());
-    // Fit view reframes the current bounds without a setView, so the direction and up are kept.
+    expect(send.mock.calls[0]).toEqual([
+      { type: 'setViewport', viewport: { width: 1400, height: 500, pixelRatio: 2 } },
+    ]);
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setView' }));
     expect(send).not.toHaveBeenCalledWith({ type: 'reset' });
     expect(send).toHaveBeenLastCalledWith({ type: 'frame', margin: 0.1 });
     hook.unmount();
-    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('publishes the actual canvas viewport before the first fit', () => {
+    const bounds = new Box3(new Vector3(-1, -1, -1), new Vector3(1, 1, 1));
+    renderHook(() => useCameraFraming({ geometryRadius: 2, geometryBounds: bounds }));
+    expect(send.mock.calls[0]).toEqual([{ type: 'setViewport', viewport: { width: 800, height: 600, pixelRatio: 2 } }]);
+    expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
   });
 
   it('does not frame empty geometry', () => {

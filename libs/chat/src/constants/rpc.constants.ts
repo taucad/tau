@@ -18,10 +18,10 @@ export const rpcName = {
   listDirectory: 'list_directory',
   grep: 'grep',
   globSearch: 'glob_search',
-  getKernelResult: 'get_kernel_result',
+  evaluateModel: 'evaluate_model',
   captureImages: 'capture_images',
   runGeoSpecTests: 'run_geospec_tests',
-  exportGeometry: 'export_geometry',
+  exportModel: 'export_model',
   getParameters: 'get_parameters',
   applyParameterOperation: 'apply_parameter_operation',
   appendFile: 'append_file',
@@ -30,6 +30,7 @@ export const rpcName = {
   resolveSkill: 'resolve_skill',
   readRevisions: 'read_revisions',
   writeTodos: 'write_todos',
+  askQuestions: 'ask_questions',
 } as const satisfies Record<string, string>;
 
 /**
@@ -47,7 +48,7 @@ export const rpcNames = Object.values(rpcName) as [(typeof rpcName)[keyof typeof
  * the matching `tool-output-available` chunk arrives.
  *
  * Read-only RPCs (`readFile`, `grep`, `globSearch`, `listDirectory`,
- * `getKernelResult`, `captureImages`, etc.) intentionally bypass the
+ * `evaluateModel`, `captureImages`, etc.) intentionally bypass the
  * ledger — re-issuing them after an interrupt is harmless.
  *
  * Adding a new mutating RPC requires adding it here; the partition invariant
@@ -63,6 +64,7 @@ export const mutatingRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.arrangeWorkbench,
   rpcName.applyParameterOperation,
   rpcName.writeTodos,
+  rpcName.askQuestions,
 ]);
 
 /**
@@ -77,10 +79,10 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.listDirectory,
   rpcName.grep,
   rpcName.globSearch,
-  rpcName.getKernelResult,
+  rpcName.evaluateModel,
   rpcName.captureImages,
   rpcName.runGeoSpecTests,
-  rpcName.exportGeometry,
+  rpcName.exportModel,
   rpcName.getParameters,
   rpcName.resolveSkill,
   rpcName.readRevisions,

@@ -1,5 +1,6 @@
+import { subscribeToMatcapLoad } from '#components/geometry/graphics/three/materials/matcap-material.js';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useLayoutEffect, useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import type { EventManager } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -9,18 +10,17 @@ import type { SectionCut, SectionPlane } from '#components/geometry/graphics/sec
 import {
   createSectionDragSteps,
   createSectionHandles,
-  createSectionHandlesWarmup,
   resolveSectionDragParameter,
   resolveSectionDragPatch,
 } from '#components/geometry/graphics/three/controls/section-handles.js';
 import type { SectionHandle } from '#components/geometry/graphics/three/controls/section-handles.js';
-import { createSectionPlanePicker } from '#components/geometry/graphics/three/controls/section-plane-picker.js';
 import type { SectionPlanePicker } from '#components/geometry/graphics/three/controls/section-plane-picker.js';
 import { ensureSelectorLabelAtlasReady } from '#components/geometry/graphics/three/controls/selector-label-atlas.js';
 import { SceneOverlay } from '#components/geometry/graphics/three/scene-overlay.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import { setRaycasterFromCamera } from '#components/geometry/graphics/three/utils/raycaster-from-camera.js';
+import { capturePointer, releasePointer } from '#utils/pointer-capture.utils.js';
 import {
   useCameraRig,
   useCameraSelector,
@@ -104,7 +104,8 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
   const get = useThree((state) => state.get);
   const invalidate = useThree((state) => state.invalidate);
   const handles = useMemo(() => createSectionHandles({ backend }), [backend]);
-  const hasPlanePicker = planePicker !== undefined;
+
+  useEffect(() => subscribeToMatcapLoad(invalidate), [invalidate]);
 
   useEffect(
     () => () => {
@@ -112,51 +113,6 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
     },
     [handles],
   );
-
-  // Every program the handles and the picker draw is compiled once, before Section is first on, and kept compiled by
-  // warm-up copies, so the drawings built when Section turns on or the selection changes link none. The copies are
-  // this effect's own: a material disposed while it compiles breaks WebGL's readiness check, so they are disposed
-  // only once the warm-up has settled.
-  useLayoutEffect(() => {
-    const handlesWarmup = createSectionHandlesWarmup({ backend });
-    const pickerWarmup = hasPlanePicker ? createSectionPlanePicker() : undefined;
-    const warmups = [
-      { scene: handlesWarmup.root, camera: cameraRig.perspectiveCamera },
-      { scene: handlesWarmup.root, camera: cameraRig.orthographicCamera },
-      ...(pickerWarmup ? [{ scene: pickerWarmup.scene, camera: pickerWarmup.camera }] : []),
-    ];
-    for (const { scene } of warmups) {
-      scene.traverse((object) => {
-        // WebGPU's `compileAsync` skips what the last frame's frustum culled.
-        object.frustumCulled = false;
-      });
-    }
-    const dispose = (): void => {
-      handlesWarmup.dispose();
-      pickerWarmup?.dispose();
-    };
-    const warmup = { isCancelled: false, isSettled: false };
-    // async-iife: bootstrap — a layout effect cannot await; teardown before the warm-up settles defers the disposal.
-    void (async () => {
-      try {
-        await Promise.all(warmups.map(async ({ scene, camera }) => gl.compileAsync(scene, camera)));
-      } catch (error) {
-        console.error('Section handles pipeline warm-up failed', error);
-      }
-      warmup.isSettled = true;
-      if (warmup.isCancelled) {
-        dispose();
-      } else {
-        invalidate();
-      }
-    })();
-    return () => {
-      warmup.isCancelled = true;
-      if (warmup.isSettled) {
-        dispose();
-      }
-    };
-  }, [backend, cameraRig, gl, hasPlanePicker, invalidate]);
 
   useEffect(() => {
     if (!planePicker) {
@@ -317,9 +273,7 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       }
       press = undefined;
       ended.release();
-      if (surface.hasPointerCapture(ended.pointerId)) {
-        surface.releasePointerCapture(ended.pointerId);
-      }
+      releasePointer(surface, ended.pointerId);
       paint();
     };
 
@@ -373,7 +327,7 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       event.preventDefault();
       isPressOwned = true;
       hoverPicks.cancel();
-      surface.setPointerCapture(event.pointerId);
+      capturePointer(surface, event.pointerId);
       // Only the selected cut has drag handles, so a press on one leaves the selection; a press on an unselected
       // revolution's fan selects it and drags nothing.
       const isSelect = handle?.target.kind === 'select';

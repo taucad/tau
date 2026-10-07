@@ -9,8 +9,8 @@ import {
 } from '#engine/protocol.js';
 import type { GeoSpecClaimResult, GeoSpecSubjectId } from '#engine/protocol.js';
 import { getGeoSpecEngineProtocol } from '#engine/registry.js';
-import { geoSpecNativeMatcherDescriptors } from '#engine/matchers.js';
-import type { GeoSpecFixedNativeMatcherName } from '#engine/matchers.js';
+import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
+import type { GeoSpecFixedMatcherName } from '#engine/matchers.js';
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import { defaultMatcherWallBackstop, resolveMatcherWorkUnitBudget } from '#runner/matcher-budget.js';
 
@@ -97,7 +97,7 @@ export type GeoSpecNativeClaimOptions = GeoSpecNativeClaimContext &
   (
     | {
         readonly arguments: readonly unknown[];
-        readonly capability: GeoSpecFixedNativeMatcherName;
+        readonly capability: GeoSpecFixedMatcherName;
       }
     | {
         readonly arguments: readonly unknown[];
@@ -219,12 +219,20 @@ export const resolveGeoSpecNativeWorkUnitLimit = (engine: GeoSpecNativeEngine, o
   const configuration = jsonRecord(result['configuration']!, 'initialize configuration');
   const { capabilities } = result;
   const advertised = Array.isArray(capabilities)
-    ? capabilities.filter((entry): entry is Record<string, JSONValue> => entry !== null && typeof entry === 'object' && !Array.isArray(entry) && entry['name'] === 'minimumDistance')
+    ? capabilities.filter(
+        (entry): entry is Record<string, JSONValue> =>
+          entry !== null && typeof entry === 'object' && !Array.isArray(entry) && entry['name'] === 'minimumDistance',
+      )
     : [];
   nativeMinimumDistanceSupport.set(
     engine,
-    advertised.length === 1 && advertised.every((entry) => entry['profile'] === 'geospec-minimum-distance-v1' &&
-      entry['implementation'] === 'implemented' && entry['registryVersion'] === nativeRegistryVersion),
+    advertised.length === 1 &&
+      advertised.every(
+        (entry) =>
+          entry['profile'] === 'geospec-minimum-distance-v1' &&
+          entry['implementation'] === 'implemented' &&
+          entry['registryVersion'] === nativeRegistryVersion,
+      ),
   );
   if (configuration['configurationProfile'] !== 'geospec-entry-config-v1') {
     throw new TypeError('GeoSpec engine returned an unsupported configuration profile.');
@@ -256,14 +264,17 @@ export const supportsGeoSpecNativeMinimumDistance = (engine: GeoSpecNativeEngine
  * @public
  */
 export const evaluateGeoSpecNativeClaim = (options: GeoSpecNativeClaimOptions): GeoSpecCanonicalClaimReport => {
-  if (!('kind' in options)) {
+  if (options.capability === 'toSatisfyRationalPlate' || options.capability === 'toSatisfyParallelPlaneDistance') {
     if (options.arguments.length > 0) {
       throw new TypeError(`GeoSpec matcher ${options.capability} does not accept arguments.`);
     }
     return evaluateNativePayload({
       ...options,
-      payload: { contract: geoSpecNativeMatcherDescriptors[options.capability].contract },
+      payload: { contract: geoSpecMatcherDescriptors[options.capability].contract },
     });
+  }
+  if (!('kind' in options)) {
+    throw new TypeError('This GeoSpec matcher requires its canonical kind.');
   }
   return evaluateNativePayload({
     ...options,

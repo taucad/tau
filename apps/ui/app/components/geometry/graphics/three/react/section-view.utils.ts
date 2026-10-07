@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { LineSegments2 } from 'three/addons';
+import type { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { installSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 import type { SectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 import { hasSceneTag, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
@@ -39,6 +39,9 @@ export function collectClippableTargets(rootGroup: THREE.Object3D): ClippableTar
     } else if (isPoints(child)) {
       points.push(child);
     } else if (isMesh(child)) {
+      if (child.matrixAutoUpdate) {
+        child.updateMatrix();
+      }
       child.matrixAutoUpdate = false;
       meshes.push(child);
     }

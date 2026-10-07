@@ -3,14 +3,17 @@
 7 top-level symbols. Signatures are verbatim typescript.
 
 // Declare a named face selected from a Replicad `FaceFinder`
-(select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>) => FaceDeclaration
+// face (function)
+(select: (finder: FaceFinder) => FaceFinder) => FaceDeclaration
 //   select: Selector evaluated against the live Replicad shape
 
 // Declare a named cylindrical or conical axis selected from a Replicad `FaceFinder`
-(select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>) => AxisDeclaration
+// axis (function)
+(select: (finder: FaceFinder) => FaceFinder) => AxisDeclaration
 //   select: Selector evaluated against the live Replicad shape
 
 // Declare a named coordinate frame exported as AP242 supplemental geometry
+// frame (function)
 ({ origin, xAxis, zAxis, }: {
     origin: SimplePoint;
     xAxis?: SimplePoint;
@@ -22,6 +25,7 @@
 supplemental-geometry channel, not a GD&T datum (the semantic
 `DATUM`/`DATUM_FEATURE` family); the old name is a homonym that conflates
 the two concepts. Behaviour is identical.
+// datum (function)
 ({ origin, xAxis, zAxis, }: {
     origin: SimplePoint;
     xAxis?: SimplePoint;
@@ -29,13 +33,16 @@ the two concepts. Behaviour is identical.
 }) => DatumDeclaration
 
 // Declare a named group of face and axis annotations
+// group (function)
 (members: Array<FaceDeclaration | AxisDeclaration>) => GroupDeclaration
 //   members: Face and axis declarations included in the group
 
 // Return whether a candidate interface path is valid for STEP export
+// isValidInterfaceName (function)
 (name: string) => boolean
 //   name: Candidate interface name
 
 // Return whether a candidate top-level authoring key can appear in source code
+// isValidAuthoringKey (function)
 (key: string) => boolean
 //   key: Candidate authoring key

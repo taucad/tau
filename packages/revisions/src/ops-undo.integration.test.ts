@@ -17,7 +17,6 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import type { RootedFileSystem } from '@taucad/filesystem';
 import { createActor } from 'xstate';
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -30,7 +29,7 @@ import type { RestoreMachineEmitted } from '#restore.machine.js';
 import { remoteTrackingRef } from '#remotes.js';
 import type { RevisionActor, RevisionUserActor } from '#revision-authority.js';
 import { createProjectRevisionsActor, createRevisionActors } from '#revision-effects.js';
-import type { RevisionActorsOptions } from '#revision-effects.js';
+import type { RevisionActorsOptions, RevisionFileSystem } from '#revision-effects.js';
 import type { RevisionPort } from '#revision-port.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import type { SyncPushActorOutput } from '#sync.machine.js';
@@ -80,7 +79,7 @@ const run = async <Output>(actor: unknown, input: unknown): Promise<Output> =>
     running.start();
   });
 
-type Project = Readonly<{ root: string; filesystem: RootedFileSystem; port: RevisionPort }>;
+type Project = Readonly<{ root: string; filesystem: RevisionFileSystem; port: RevisionPort }>;
 
 /** One project directory and a port over it: the browser's leg, or a disk host's with a remote. */
 const project = async (

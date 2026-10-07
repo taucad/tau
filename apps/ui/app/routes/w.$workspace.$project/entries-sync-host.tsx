@@ -1,9 +1,12 @@
+/* oxlint-disable typescript/no-restricted-types -- Refused record bytes may be absent (null), as the store reports them. */
+import { useObservation } from '@taucad/fs-client/react/use-observation';
+import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { ActorRefFrom } from 'xstate';
-import { defaultRenderTimeout } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '#constants/editor.constants.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
@@ -15,15 +18,20 @@ import type { modelInteractionMachine } from '#machines/model-interaction.machin
 import type { cadMachine } from '#machines/cad.machine.js';
 import { createWorkbenchEntriesStore } from '#workbench-records/entries-store.js';
 import type { EntryRecordPatch } from '#workbench-records/entries-store.js';
+import { confirmFlush } from '#workbench-records/record-health.js';
+import type { RecordHealth } from '#workbench-records/record-health.js';
+import { recordIssueState, usePublishRecordIssue } from '#workbench-records/record-issues.js';
+import type { RecordIssue } from '#workbench-records/record-issues.js';
 import { digestBytes } from '#utils/crypto.utils.js';
 
 type Entry = WorkbenchEntries['entries'][string];
 const storeMounts = new WeakMap<ReturnType<typeof createWorkbenchEntriesStore>, number>();
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+const emptyEntries = (): WorkbenchEntries => workbenchRecords.entries.schema.parse({ version: 1, entries: {} });
 
 /** One project-lifetime reader and writer for shared per-file workbench settings. */
 export function EntriesSyncHost(): React.JSX.Element {
-  const { parameterFiles, subscribeWorkbenchRecord } = useFileManager();
+  const { parameterFiles, watchRecordFile } = useFileManager();
   const {
     projectId,
     geometryUnits,
@@ -35,10 +43,11 @@ export function EntriesSyncHost(): React.JSX.Element {
     setAppliedEntryRevision,
   } = useProject();
   const root = `/projects/${projectId}`;
-  const [notice, setNotice] = useState<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string }>();
-  const [ioError, setIoError] = useState<string>();
-  const generationRef = useRef(0);
-  const acknowledgedRef = useRef(new Set<string>());
+  const [notice, setNotice] =
+    useState<
+      Readonly<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string; bytes: Uint8Array<ArrayBuffer> | null }>
+    >();
+  const [health, setHealth] = useState<RecordHealth>();
   const [published, setPublished] = useState<{
     record: WorkbenchEntries | undefined;
     patch: EntryRecordPatch | undefined;
@@ -48,63 +57,91 @@ export function EntriesSyncHost(): React.JSX.Element {
     digest: `sha256:${string}`;
     generation: number;
   }>();
-  const clearApplied = useCallback((): void => {
-    for (const path of acknowledgedRef.current) {
-      setAppliedEntryRevision(path, undefined);
-    }
-    acknowledgedRef.current.clear();
-  }, [setAppliedEntryRevision]);
-  // oxlint-disable-next-line react/refs -- Store callbacks run after render.
-  const store = useMemo(
-    () =>
-      // oxlint-disable-next-line react/refs -- Store callbacks read generation after render, not during construction.
-      createWorkbenchEntriesStore({
+  const { store, clearApplied, advanceGeneration, currentGeneration, acknowledge } = useMemo(() => {
+    let generation = 0;
+    const seen = { record: false };
+    const acknowledged = new Set<string>();
+    const clearApplied = (): void => {
+      for (const path of acknowledged) {
+        setAppliedEntryRevision(path, undefined);
+      }
+      acknowledged.clear();
+    };
+    return {
+      store: createWorkbenchEntriesStore({
         root,
         files: parameterFiles,
         editDebounce: 500,
+        onHealth: setHealth,
         onChange: (state, _source, locallyAuthored) => {
-          const generation = ++generationRef.current;
+          const currentGeneration = ++generation;
           setPublished({ record: state.record, patch: locallyAuthored });
-          setIoError(undefined);
           clearApplied();
           setEntriesDigest(undefined);
-          setNotice(state.refusal);
+          setNotice(state.refusal ? { ...state.refusal, bytes: state.bytes } : undefined);
           if (state.record) {
+            seen.record = true;
             setEntriesRecord(state.record);
+          } else if (state.bytes === null && seen.record) {
+            // A deleted record is authoritative: every model returns to default settings.
+            setEntriesRecord(emptyEntries());
           }
           if (state.record && state.bytes && !state.refusal) {
             const { bytes } = state;
             const captureAppliedBytes = async (): Promise<void> => {
               const digest = await digestBytes(bytes);
-              if (generation === generationRef.current) {
-                setEntriesDigest({ bytes, digest, generation });
+              if (currentGeneration === generation) {
+                setEntriesDigest({ bytes, digest, generation: currentGeneration });
               }
             };
             void captureAppliedBytes();
           }
         },
-        onError: (error) => {
-          generationRef.current++;
+        onError: () => {
+          // The record's health carries the failure to the settings trigger.
+          generation++;
           setPublished(undefined);
           clearApplied();
           setEntriesDigest(undefined);
-          setIoError(error instanceof Error ? error.message : 'Entry settings unavailable.');
         },
       }),
-    [clearApplied, parameterFiles, root, setEntriesRecord],
+      clearApplied,
+      advanceGeneration: () => {
+        generation++;
+      },
+      currentGeneration: () => generation,
+      acknowledge: (path: string) => {
+        acknowledged.add(path);
+      },
+    };
+  }, [parameterFiles, root, setAppliedEntryRevision, setEntriesRecord]);
+  const observation = useMemo(
+    () =>
+      new ObservationService({
+        resource: `${root}/${workbenchPaths.entries}`,
+        watch: (invalidate, reset) =>
+          watchRecordFile(`${root}/${workbenchPaths.entries}`, (event) => {
+            if (event.type === 'reset') {
+              reset();
+            } else {
+              invalidate();
+            }
+          }),
+        invalidate: store.invalidateRead,
+        read: async () => store.read(!store.ready()),
+      }),
+    [root, store, watchRecordFile],
   );
   useEffect(() => {
-    const unsubscribe = subscribeWorkbenchRecord(workbenchPaths.entries, () => {
-      void store.read();
-    });
-    void store.read(true);
+    // This source's applications belong to its lease; retiring it advances the generation.
+    const lease = observation.acquire();
     return () => {
-      unsubscribe();
-      generationRef.current++;
+      lease.release();
+      advanceGeneration();
       clearApplied();
       setEntriesDigest(undefined);
     };
-  }, [clearApplied, store, subscribeWorkbenchRecord]);
+  }, [advanceGeneration, clearApplied, observation]);
   useEffect(() => {
     storeMounts.set(store, (storeMounts.get(store) ?? 0) + 1);
     return () => {
@@ -118,14 +155,40 @@ export function EntriesSyncHost(): React.JSX.Element {
   }, [store]);
   useEffect(() => registerWorkbenchRecordProducer(async () => store.flush()), [registerWorkbenchRecordProducer, store]);
   useEffect(() => registerEntryPathChange(store.changePaths), [registerEntryPathChange, store]);
-  useFlushOnClose(
-    async () => {
-      if (!(await store.flush())) {
-        throw new Error('Entry settings could not be saved.');
-      }
-    },
-    { stage: 'producer' },
-  );
+  useFlushOnClose(async () => confirmFlush(store.flush, 'Model display settings are not confirmed saved.'), {
+    stage: 'producer',
+  });
+  const observed = useObservation(observation);
+  const sourceHealth: RecordHealth | undefined = observed.error
+    ? { ...(health ?? store.health()), read: 'unavailable', error: observed.error }
+    : observed.status === 'pending' || observed.status === 'registering'
+      ? { ...(health ?? store.health()), read: 'retrying' }
+      : health;
+  const issueState = recordIssueState(notice, sourceHealth);
+  const issue = useMemo((): RecordIssue | undefined => {
+    if (!issueState) {
+      return undefined;
+    }
+    return {
+      kind: 'entries',
+      path: workbenchPaths.entries,
+      state: issueState,
+      message: notice?.message ?? sourceHealth?.error,
+      bytes: notice?.bytes ?? null,
+      writing: health?.writing ?? false,
+      retryRead: async () => {
+        if (observed.error) {
+          observation.refresh();
+          return false;
+        }
+        return store.retryRead();
+      },
+      retrySave: store.flush,
+      reset: async (reviewed) => store.reset(emptyEntries(), reviewed),
+      repair: async (record, reviewed) => store.reset(record, reviewed),
+    };
+  }, [sourceHealth?.error, health?.writing, issueState, notice, observed.error, observation, store]);
+  usePublishRecordIssue(projectId, workbenchPaths.entries, issue);
   const write = useCallback(async (path: string, next: Entry) => store.edit(path, next), [store]);
   const ready = store.ready() && store.snapshot().refusal === undefined;
   const onEntryApplied = useCallback(
@@ -133,17 +196,17 @@ export function EntriesSyncHost(): React.JSX.Element {
       const state = store.snapshot();
       if (
         !entriesDigest ||
-        entriesDigest.generation !== generationRef.current ||
+        entriesDigest.generation !== currentGeneration() ||
         entriesDigest.digest !== digest ||
         state.bytes !== entriesDigest.bytes ||
         state.refusal
       ) {
         return;
       }
-      acknowledgedRef.current.add(path);
+      acknowledge(path);
       setAppliedEntryRevision(path, digest);
     },
-    [entriesDigest, setAppliedEntryRevision, store],
+    [acknowledge, currentGeneration, entriesDigest, setAppliedEntryRevision, store],
   );
   return (
     <>
@@ -164,22 +227,6 @@ export function EntriesSyncHost(): React.JSX.Element {
           onApplied={onEntryApplied}
         />
       ))}
-      {notice ? (
-        <div role='alert'>
-          {notice.message}
-          {notice.code === 'INVALID_RECORD' ? (
-            <button
-              type='button'
-              onClick={() => {
-                void store.reset(entriesRecord ?? workbenchRecords.entries.schema.parse({ version: 1, entries: {} }));
-              }}
-            >
-              Reset
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-      {ioError ? <div role='alert'>{ioError}</div> : null}
     </>
   );
 }
@@ -209,9 +256,8 @@ export function EntryOwner({
   write: (path: string, next: Entry) => Promise<boolean>;
   digest?: `sha256:${string}`;
   onApplied?: (path: string, digest: `sha256:${string}`) => void;
-  // oxlint-disable-next-line typescript/no-restricted-types -- This React owner renders no DOM.
 }>): React.JSX.Element | null {
-  const renderTimeout = useSelector(cadRef, (state) => state.context.renderTimeout);
+  const operationTimeout = useSelector(cadRef, (state) => state.context.operationTimeout);
   const unitId = createSourceModelInteractionUnitId(path);
   const componentUnit = useSelector(modelInteractionRef, (state) => state.context.unitsById[unitId]);
   const components = useMemo(
@@ -225,7 +271,7 @@ export function EntryOwner({
     }),
     [componentUnit],
   );
-  const [observed, setObserved] = useState<{ renderTimeout: number; components: Entry['components'] }>();
+  const [observed, setObserved] = useState<{ operationTimeout: number; components: Entry['components'] }>();
   const appliedEntryRef = useRef<{ entry: Entry | undefined } | undefined>(undefined);
   useEffect(() => {
     if (!recordPresent) {
@@ -234,13 +280,13 @@ export function EntryOwner({
     const previous = appliedEntryRef.current?.entry;
     const first = appliedEntryRef.current === undefined;
     appliedEntryRef.current = { entry };
-    const targetTimeout = entry?.renderTimeout ?? defaultRenderTimeout;
+    const targetTimeout = entry?.renderTimeout ?? defaultOperationTimeout;
     if (
       (first ||
         (!Object.hasOwn(localPatch ?? {}, 'renderTimeout') && previous?.renderTimeout !== entry?.renderTimeout)) &&
-      cadRef.getSnapshot().context.renderTimeout !== targetTimeout
+      cadRef.getSnapshot().context.operationTimeout !== targetTimeout
     ) {
-      cadRef.send({ type: 'setRenderTimeout', renderTimeout: targetTimeout });
+      cadRef.send({ type: 'setOperationTimeout', operationTimeout: targetTimeout });
     }
     const defaults = { hidden: [], isolated: [], opacity: [] };
     const target = entry?.components ?? defaults;
@@ -294,7 +340,7 @@ export function EntryOwner({
       return;
     }
     const previous = observed;
-    const next = { renderTimeout, components };
+    const next = { operationTimeout, components };
     if (same(previous, next)) {
       return;
     }
@@ -304,14 +350,15 @@ export function EntryOwner({
       return;
     }
     const changedTimeout =
-      previous.renderTimeout !== renderTimeout && renderTimeout !== (entry?.renderTimeout ?? defaultRenderTimeout);
+      previous.operationTimeout !== operationTimeout &&
+      operationTimeout !== (entry?.renderTimeout ?? defaultOperationTimeout);
     const changedComponents =
       !same(previous.components, components) &&
       !same(components, entry?.components ?? { hidden: [], isolated: [], opacity: [] });
     if (!changedTimeout && !changedComponents) {
       return;
     }
-    void write(path, { ...entry, renderTimeout, components });
-  }, [components, entry, observed, path, ready, renderTimeout, write]);
+    void write(path, { ...entry, renderTimeout: operationTimeout, components });
+  }, [components, entry, observed, path, ready, operationTimeout, write]);
   return null;
 }

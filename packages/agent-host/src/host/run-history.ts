@@ -7,7 +7,7 @@ import { transportFailureDiagnosticType } from '#harness/session-record.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type { LogRowBody } from '#log/chat-ledger.js';
 import type { AgentLogEvent, JsonObject, JsonValue, ProviderMessage, RunLifecycleState } from '#log/event-types.js';
-import type { ExternalSessionState } from '#host/tau-agent-host.js';
+import type { ExternalSessionState } from '#host/external-agent.js';
 import type { InterruptRequest } from '#waist/ports.js';
 
 type SessionEvent = LogRowBody;

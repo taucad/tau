@@ -6,15 +6,15 @@ import type { toolName } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
 
-const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog, mockStartEditingMessage } = vi.hoisted(
-  () => ({
+const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog, mockStartEditingMessage, textRenderCounts } =
+  vi.hoisted(() => ({
     mockMessagesById: new Map<string, MyUIMessage>(),
     mockMessageOrder: [] as string[],
     mockStatus: { value: 'ready' as 'ready' | 'streaming' | 'submitted' | 'error' },
     mockSkillsCatalog: [] as SkillMetadata[],
     mockStartEditingMessage: vi.fn(),
-  }),
-);
+    textRenderCounts: new Map<string, number>(),
+  }));
 
 const getMockChatSelectorState = (): {
   messages: MyUIMessage[];
@@ -90,6 +90,14 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ appliedWorkbenchRevisions: new Map(), appliedEntryRevisions: new Map() }),
 }));
 
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useWorkbenchLayoutController: () => ({
+    snapshot: () => undefined,
+    subscribe: () => () => undefined,
+    restorePreviousArrangement: async () => false,
+  }),
+}));
+
 vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
   ChatMessagePlanning({ messageId, className }: { readonly messageId: string; readonly className?: string }) {
     return (
@@ -134,6 +142,7 @@ vi.mock('#routes/w.$workspace.$project/chat-message-context-compaction.js', () =
 
 vi.mock('#routes/w.$workspace.$project/chat-message-text.js', () => ({
   ChatMessageText({ part }: { readonly part: { text: string } }) {
+    textRenderCounts.set(part.text, (textRenderCounts.get(part.text) ?? 0) + 1);
     return <div data-testid='chat-message-text'>{part.text}</div>;
   },
 }));
@@ -296,6 +305,36 @@ afterEach(() => {
   mockMessageOrder.length = 0;
   mockStatus.value = 'ready';
   mockSkillsCatalog.length = 0;
+  textRenderCounts.clear();
+});
+
+describe('ChatMessage completed activity rendering', () => {
+  it('renders a completed paragraph once while the active tail receives five updates', () => {
+    const completed: MyUIMessage['parts'][number] = { type: 'text', text: 'Completed paragraph', state: 'done' };
+    setMessages(
+      [{ id: 'stream', role: 'assistant', parts: [completed, { type: 'text', text: 'Live 0', state: 'streaming' }] }],
+      'streaming',
+    );
+    const view = render(<ChatMessage messageId='stream' footer={<span>0</span>} />);
+    for (let index = 1; index <= 5; index++) {
+      setMessages(
+        [
+          {
+            id: 'stream',
+            role: 'assistant',
+            parts: [completed, { type: 'text', text: `Live ${String(index)}`, state: 'streaming' }],
+          },
+        ],
+        'streaming',
+      );
+      view.rerender(<ChatMessage messageId='stream' footer={<span>{index}</span>} />);
+    }
+    expect(screen.getByText('Live 5')).toBeDefined();
+    expect(textRenderCounts.get('Completed paragraph')).toBe(1);
+    expect([...textRenderCounts].filter(([text]) => text.startsWith('Live')).map(([, count]) => count)).toEqual([
+      1, 1, 1, 1, 1, 1,
+    ]);
+  });
 });
 
 describe('ChatMessage column wrapper layout', () => {
@@ -550,6 +589,25 @@ describe('ChatMessage source part rendering', () => {
     expect(link).toHaveAttribute('href', 'https://example.com/source');
   });
 
+  it.each([
+    // oxlint-disable-next-line no-script-url -- the hostile URL under test.
+    'javascript:alert(1)',
+    'data:text/html,<p>hi</p>',
+    'not a url',
+  ])('should render a %s source-url as text, not a link', (url) => {
+    const message: MyUIMessage = {
+      id: 'msg-unsafe-source-url',
+      role: 'assistant',
+      parts: [{ type: 'source-url', sourceId: 'source-1', url, title: 'Unsafe reference' }],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-unsafe-source-url' />);
+
+    expect(screen.getByText('Unsafe reference')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Unsafe reference' })).not.toBeInTheDocument();
+  });
+
   it('should render source-document parts without throwing', () => {
     const message: MyUIMessage = {
       id: 'msg-source-document',
@@ -591,9 +649,9 @@ describe('ChatMessage agent media', () => {
     const article = screen.getByRole('article');
     const image = within(article).getByRole('img', { name: 'Agent image' });
     const [before, after] = within(article).getAllByTestId('chat-message-text');
-    // eslint-disable-next-line no-bitwise -- compareDocumentPosition returns a bitmask.
+    // oxlint-disable-next-line eslint/no-bitwise -- compareDocumentPosition returns a bitmask.
     expect(before!.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // eslint-disable-next-line no-bitwise -- compareDocumentPosition returns a bitmask.
+    // oxlint-disable-next-line eslint/no-bitwise -- compareDocumentPosition returns a bitmask.
     expect(image.compareDocumentPosition(after!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByTestId('chat-message-file-attachments')).not.toBeInTheDocument();
   });
@@ -812,12 +870,12 @@ describe('ChatMessage external Tau MCP porcelain', () => {
         {
           type: 'dynamic-tool',
           toolCallId: 'call-kernel',
-          toolName: 'get_kernel_result',
+          toolName: 'evaluate_model',
           state: 'output-available',
           input: { targetFile: 'main.ts' },
           output: { status: 'ready' },
           toolMetadata: {
-            tau: { origin: 'external', nativeName: 'get_kernel_result', presentation: 'tau-mcp' },
+            tau: { origin: 'external', nativeName: 'evaluate_model', presentation: 'tau-mcp' },
           },
         },
       ],
@@ -838,11 +896,11 @@ describe('ChatMessage external Tau MCP porcelain', () => {
         {
           type: 'dynamic-tool',
           toolCallId: 'call-foreign-kernel',
-          toolName: 'get_kernel_result',
+          toolName: 'evaluate_model',
           state: 'output-available',
           input: { targetFile: 'main.ts' },
           output: { status: 'ready' },
-          toolMetadata: { tau: { origin: 'external', nativeName: 'get_kernel_result' } },
+          toolMetadata: { tau: { origin: 'external', nativeName: 'evaluate_model' } },
         },
       ],
     };
@@ -857,13 +915,13 @@ describe('ChatMessage external Tau MCP porcelain', () => {
     const preliminaryPart = {
       type: 'dynamic-tool',
       toolCallId: 'call-preliminary-kernel',
-      toolName: 'get_kernel_result',
+      toolName: 'evaluate_model',
       state: 'output-available',
       input: { targetFile: 'main.scad' },
       output: { status: 'pending' },
       preliminary: true,
       toolMetadata: {
-        tau: { origin: 'external', nativeName: 'get_kernel_result', presentation: 'tau-mcp' },
+        tau: { origin: 'external', nativeName: 'evaluate_model', presentation: 'tau-mcp' },
       },
     };
     const message: MyUIMessage = {

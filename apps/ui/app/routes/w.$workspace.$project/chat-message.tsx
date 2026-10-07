@@ -11,7 +11,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
 import type { DynamicToolUIPart } from 'ai';
@@ -58,6 +58,10 @@ import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-me
 import { ChatMessageToolRevisions } from '#routes/w.$workspace.$project/chat-message-tool-revisions.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessageToolUpdateTodos } from '#routes/w.$workspace.$project/chat-message-tool-update-todos.js';
+import {
+  ChatMessageToolAskQuestions,
+  ChatMessageToolExternalOrQuestion,
+} from '#routes/w.$workspace.$project/chat-message-tool-ask-questions.js';
 import { ChatMessageToolArrangeWorkbench } from '#routes/w.$workspace.$project/chat-message-tool-arrange-workbench.js';
 import { ChatMessageToolRequestPrint } from '#routes/w.$workspace.$project/chat-message-tool-request-print.js';
 import { ChatMessagePartUnknown } from '#routes/w.$workspace.$project/chat-message-tool-unknown.js';
@@ -328,14 +332,14 @@ function renderAssistantPart(
               />
             );
           }
-          case 'get_kernel_result': {
+          case 'evaluate_model': {
             return (
               <ChatMessageToolGetKernelResult
                 key={part.toolCallId}
                 part={
-                  { ...part, type: 'tool-get_kernel_result', state } as Extract<
+                  { ...part, type: 'tool-evaluate_model', state } as Extract<
                     MyMessagePart,
-                    { type: 'tool-get_kernel_result' }
+                    { type: 'tool-evaluate_model' }
                   >
                 }
               />
@@ -361,14 +365,24 @@ function renderAssistantPart(
               />
             );
           }
-          case 'export_geometry': {
+          case 'export_model': {
             return (
               <ChatMessageToolExportGeometry
                 key={part.toolCallId}
                 part={
-                  { ...part, type: 'tool-export_geometry', state } as Extract<
+                  { ...part, type: 'tool-export_model', state } as Extract<MyMessagePart, { type: 'tool-export_model' }>
+                }
+              />
+            );
+          }
+          case 'ask_questions': {
+            return (
+              <ChatMessageToolAskQuestions
+                key={part.toolCallId}
+                part={
+                  { ...part, type: 'tool-ask_questions', state } as Extract<
                     MyMessagePart,
-                    { type: 'tool-export_geometry' }
+                    { type: 'tool-ask_questions' }
                   >
                 }
               />
@@ -376,10 +390,21 @@ function renderAssistantPart(
           }
         }
       }
-      return <ChatMessageToolExternal key={part.toolCallId} part={part} />;
+      return <ChatMessageToolExternalOrQuestion key={part.toolCallId} part={part} />;
     }
 
     case 'source-url': {
+      // Model-emitted, so only web URLs become links (same guard as the plan link).
+      if (!['http:', 'https:'].includes(URL.parse(part.url)?.protocol ?? '')) {
+        return (
+          <span
+            key={`${messageId}-message-part-${index}`}
+            className='block max-w-full truncate text-xs text-muted-foreground'
+          >
+            {part.title ?? part.url}
+          </span>
+        );
+      }
       return (
         <a
           key={`${messageId}-message-part-${index}`}
@@ -445,7 +470,7 @@ function renderAssistantPart(
       return <ChatMessageToolGlobSearch key={part.toolCallId} part={part} />;
     }
 
-    case 'tool-get_kernel_result': {
+    case 'tool-evaluate_model': {
       return <ChatMessageToolGetKernelResult key={part.toolCallId} part={part} />;
     }
 
@@ -457,7 +482,7 @@ function renderAssistantPart(
       return <ChatMessageToolRevisions key={part.toolCallId} part={part} />;
     }
 
-    case 'tool-export_geometry': {
+    case 'tool-export_model': {
       return <ChatMessageToolExportGeometry key={part.toolCallId} part={part} />;
     }
 
@@ -481,6 +506,10 @@ function renderAssistantPart(
 
     case 'tool-update_todos': {
       return <ChatMessageToolUpdateTodos key={part.toolCallId} part={part} />;
+    }
+
+    case 'tool-ask_questions': {
+      return <ChatMessageToolAskQuestions key={part.toolCallId} part={part} />;
     }
 
     case 'tool-arrange_workbench': {
@@ -620,6 +649,29 @@ const activityIcons: Record<ActivityFamily, LucideIcon> = {
   other: Wrench,
 };
 
+const AssistantActivityGroup = memo(function AssistantActivityGroup({
+  group,
+  groupIndex,
+  messageId,
+  lastMeaningfulIndex,
+  isActiveGroup,
+  isMessageActive,
+}: {
+  readonly group: ActivityGroup;
+  readonly groupIndex: number;
+  readonly messageId: string;
+  readonly lastMeaningfulIndex: number;
+  readonly isActiveGroup: boolean;
+  readonly isMessageActive: boolean;
+}): React.JSX.Element | undefined {
+  return renderActivityGroup(group, groupIndex, {
+    messageId,
+    lastMeaningfulIndex,
+    isActiveGroup,
+    isMessageActive,
+  });
+});
+
 function AssistantParts({
   parts,
   messageId,
@@ -634,21 +686,20 @@ function AssistantParts({
     (state) => state.messageOrder.at(-1) === messageId && state.status === 'streaming',
   );
 
-  const renderContextForGroup = useCallback(
-    (absoluteIndex: number): PartRenderContext => {
-      const isLastGroup = absoluteIndex === lastGroupIndex;
-      return {
-        messageId,
-        lastMeaningfulIndex,
-        isActiveGroup: isLastGroup && isMessageActive,
-        isMessageActive,
-      };
-    },
-    [messageId, lastMeaningfulIndex, lastGroupIndex, isMessageActive],
-  );
-
   return (
-    <>{groups.map((group, groupIndex) => renderActivityGroup(group, groupIndex, renderContextForGroup(groupIndex)))}</>
+    <>
+      {groups.map((group, groupIndex) => (
+        <AssistantActivityGroup
+          key={group.kind === 'singleton' ? group.partIndex : group.partIndices[0]}
+          group={group}
+          groupIndex={groupIndex}
+          messageId={messageId}
+          lastMeaningfulIndex={lastMeaningfulIndex}
+          isActiveGroup={groupIndex === lastGroupIndex && isMessageActive}
+          isMessageActive={isMessageActive}
+        />
+      ))}
+    </>
   );
 }
 
@@ -913,7 +964,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               className={cn(
                 'flex flex-col gap-0 min-w-0',
                 isUser &&
-                  'relative z-10 cursor-action rounded-lg border bg-background px-3 py-1 outline-none hover:border-primary focus-visible:focus-outline',
+                  'relative z-10 cursor-action rounded-lg border bg-background px-3 py-1 outline-none hover:border-foreground/20 focus-visible:focus-outline',
                 shouldRenderCollapsedUserRows && 'max-h-60.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}

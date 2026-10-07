@@ -66,7 +66,7 @@ const createClient = (state: State, files: Readonly<Record<string, string>>) => 
     state === 'warm-cache-disabled'
       ? new Worker(new URL('uncached.worker.ts', import.meta.url), { name: 'tau-bundler-uncached', type: 'module' })
       : new Worker(new URL('cached.worker.ts', import.meta.url), { name: 'tau-bundler-cached', type: 'module' });
-  return createRuntimeClient(createWebWorkerClientOptions({ createWorker, files, renderTimeout: 300_000 }));
+  return createRuntimeClient(createWebWorkerClientOptions({ createWorker, files, operationTimeout: 300_000 }));
 };
 
 const invoke = async (input: {
@@ -93,13 +93,19 @@ const invoke = async (input: {
         }
       : { path: fixture.entry };
   const started = performance.now();
-  const result = await client.export('glb', { source });
+  const document = client.open({ source, watch: false });
+  let result;
+  try {
+    result = await document.export('glb');
+  } finally {
+    document.close();
+  }
   const wall = performance.now() - started;
   off();
   if (!result.success) {
     throw new Error(result.issues.map(({ message }) => message).join('; '));
   }
-  const output = result.data.find(({ name }) => name.endsWith('.glb'))?.bytes;
+  const output = result.files.find(({ name }) => name.endsWith('.glb'))?.bytes;
   if (output === undefined) {
     throw new Error('Runtime returned no GLB output.');
   }
@@ -126,7 +132,7 @@ const cold = async (name: FixtureName): Promise<BenchmarkRow> => {
   try {
     return await invoke({ client, fixture, state: 'cold', index: 0 });
   } finally {
-    await client.shutdown({ drain: true });
+    await client.shutdown();
   }
 };
 
@@ -151,7 +157,7 @@ const warm = async (input: {
     }
   } finally {
     const shutdownStarted = performance.now();
-    await client.shutdown({ drain: true });
+    await client.shutdown();
     shutdown = performance.now() - shutdownStarted;
   }
   return { clientCreation, shutdown, rows };

@@ -47,7 +47,7 @@ function getSeverityIcon(severity: IssueSeverity): typeof AlertTriangle {
 function getSeverityIconClass(severity: IssueSeverity): string {
   switch (severity) {
     case 'error': {
-      return 'text-destructive';
+      return 'text-feature';
     }
 
     case 'warning':
@@ -98,7 +98,7 @@ function FilenameLink({ targetFile }: { readonly targetFile: string }): React.JS
 export function ChatMessageToolGetKernelResult({
   part,
 }: {
-  readonly part: ToolInvocation<typeof toolName.getKernelResult>;
+  readonly part: ToolInvocation<typeof toolName.evaluateModel>;
 }): React.JSX.Element {
   switch (part.state) {
     case 'input-streaming': {
@@ -159,7 +159,7 @@ export function ChatMessageToolGetKernelResult({
             <ChatToolCardHeader>
               <ChatToolCardIcon
                 icon={status === 'error' ? XCircle : CheckCircle}
-                tone={status === 'error' ? 'destructive' : undefined}
+                tone={status === 'error' ? 'error' : undefined}
               />
               <ChatToolCardTitle>
                 <ChatToolLabel verb={status === 'error' ? 'Failed to render' : 'Rendered'}>
@@ -181,8 +181,8 @@ export function ChatMessageToolGetKernelResult({
       // AlertTriangle shape (which is enough to convey severity) without a
       // tone so the success/warning headers don't visually compete with real
       // failures.
-      const headerIconTone = hasErrors ? 'destructive' : undefined;
-      const borderClass = hasErrors ? 'border-destructive/30' : 'border-warning/30';
+      const headerIconTone = hasErrors ? 'error' : undefined;
+      const borderClass = hasErrors ? 'border-feature/30' : 'border-warning/30';
       const cardStatus = hasErrors ? 'error' : 'warning';
 
       const titleLabel = ((): React.ReactNode => {
@@ -256,7 +256,7 @@ export function ChatMessageToolGetKernelResult({
     case 'approval-requested':
     case 'approval-responded':
     case 'output-denied': {
-      throw new Error(`Unexpected ${toolName.getKernelResult} state: ${part.state}`);
+      throw new Error(`Unexpected ${toolName.evaluateModel} state: ${part.state}`);
     }
   }
 }

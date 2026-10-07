@@ -184,8 +184,8 @@ it('renders a workbench look along -Y as the same frame as the canonical front c
         quality: 1,
         camera: {
           framing: 'bounds',
-          direction: orientation.direction,
-          up: orientation.up,
+          direction: [orientation.direction[0], orientation.direction[1], orientation.direction[2]],
+          up: [orientation.up[0], orientation.up[1], orientation.up[2]],
           margin: 0.1,
           projection: { kind: 'orthographic' },
         },

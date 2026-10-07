@@ -11,6 +11,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import '@taucad/geospec-engine/register/node';
+import { Engine } from '@taucad/geospec-engine-native/node';
 import { createExampleRuntimeClient } from '@taucad/tau-examples/runtime';
 import { createModelLoader } from 'geospec/model';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
@@ -81,7 +82,16 @@ describe('geospec example suites (regression backbone)', () => {
     { timeout: 1_500_000 },
     async (name) => {
       const report = await runGeoSpecSuite(`libs/tau-examples/src/kernels/replicad/${name}`);
-      expect(report.failed, JSON.stringify(report.files, null, 2)).toBe(0);
+      const unpassed = (report.files ?? []).flatMap(({ file, tests }) =>
+        (tests ?? [])
+          .filter(({ status }) => status !== 'passed')
+          .map(({ suite, name: test, status, diagnostics }) => ({
+            test: [file, ...suite, test].join(' > '),
+            status,
+            codes: diagnostics?.map(({ code }) => code),
+          })),
+      );
+      expect(unpassed).toStrictEqual([]);
       expect(report.success).toBe(true);
     },
   );
@@ -109,10 +119,13 @@ describe('geospec example suites (regression backbone)', () => {
     { timeout: 1_500_000 },
     async () => {
       const projectPath = resolve(repoRoot, 'libs/tau-examples/src/kernels/picogk/turbofan');
+      const engine = new Engine();
       const runner = createGeoSpecNodeRunner({
         projectPath,
         filesystem: createNodeVmFileSystem(projectPath),
+        nativeAssertions: { engine },
         modelLoader: createModelLoader({
+          engine,
           projectPath,
           runtime: async () => createExampleRuntimeClient(projectPath) as unknown as GeoSpecRuntimeClient,
         }),
@@ -123,6 +136,7 @@ describe('geospec example suites (regression backbone)', () => {
         expect(report.success).toBe(true);
       } finally {
         await runner.close();
+        engine.close();
       }
     },
   );

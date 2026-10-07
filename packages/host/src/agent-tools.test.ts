@@ -7,7 +7,7 @@ import type { ParameterSnapshot } from '@taucad/parameters';
  * runtime attached. Rendering itself is *not* browser-only — the native raster
  * backend runs under plain Node (probe:
  * `substrate/capture/nanoraster-node-probe.txt`) — so `screenshot` and
- * `export_geometry` are real capabilities here, driven through the runtime's
+ * `export_model` are real capabilities here, driven through the runtime's
  * own export routes rather than a second rendering path.
  */
 
@@ -20,11 +20,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { toPiToolContent } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
-import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
+import { NodeFsProvider, serveNodeFsProvider } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import workbenchBundles from '@taucad/workbench/agent/resources.js';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { MachineClient, MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
-import type { HashedGeometryResult } from '@taucad/runtime/types';
+import type {
+  RuntimeDocument,
+  ViewSubscription,
+  WideViewRequest,
+  Evaluation,
+  Rendering,
+  ExportResult,
+  Description,
+  UpdateOutcome,
+} from '@taucad/runtime/client';
+import type { SourceRevision } from '@taucad/runtime/types';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { createActor, createAsyncLogic } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
@@ -115,23 +127,71 @@ const glb = (): Uint8Array<ArrayBuffer> => {
   return content;
 };
 
-const fakeRuntime = (overrides: Partial<HostRuntimeClient> = {}): HostRuntimeClient => {
+const fakeView = (current: () => Rendering): ViewSubscription => ({
+  view: 'model',
+  request: {},
+  rendering: vi.fn(async () => ({ superseded: false, rendering: current() })),
+  update: vi.fn(async () => ({ superseded: false, rendering: current() })),
+  on: vi.fn(() => () => undefined),
+  close: vi.fn(),
+});
+
+const fakeDocument = (
+  overrides: Partial<Pick<RuntimeDocument, 'evaluation' | 'export'>> & { rendering?: () => Rendering } = {},
+): RuntimeDocument => {
   const content = glb();
-  const base: HostRuntimeClient = {
-    connect: vi.fn(async () => undefined),
-    capabilities: undefined,
-    evaluate: vi.fn(
-      async (): Promise<HashedGeometryResult> => ({
+  const evaluation: Evaluation = {
+    id: 'evaluation',
+    success: true,
+    transient: false,
+    views: [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }],
+    exports: [],
+    issues: [],
+  };
+  const rendering: Rendering = {
+    success: true,
+    requestId: 'rendering',
+    evaluationId: evaluation.id,
+    transient: false,
+    view: 'model',
+    artifact: { mimeType: 'model/gltf-binary', content },
+    hash: 'geometry',
+    issues: [],
+  };
+  const viewSpy = vi.fn((_id?: string, _request?: WideViewRequest) =>
+    fakeView(overrides.rendering ?? (() => rendering)),
+  );
+  function documentView(): ViewSubscription<string, Readonly<{ options?: never; instance?: never; content?: never }>>;
+  function documentView<Id extends string>(id: Id, request?: WideViewRequest): ViewSubscription<Id>;
+  function documentView(id?: string, request?: WideViewRequest): ViewSubscription {
+    return viewSpy(id, request);
+  }
+  return {
+    id: 'document',
+    evaluation: vi.fn(async () => ({ superseded: false, evaluation })),
+    update: vi.fn(async () => ({ superseded: false, evaluation })),
+    view: documentView,
+    export: vi.fn<RuntimeDocument['export']>(
+      async (): Promise<ExportResult> => ({
         success: true,
-        data: { format: 'gltf', content, hash: 'geometry' },
+        exportId: 'glb',
+        evaluationId: evaluation.id,
+        files: [webpFile('render.webp')],
         issues: [],
       }),
     ),
-    export: vi.fn<HostRuntimeClient['export']>(async () => ({
-      success: true,
-      data: [webpFile('render.webp')],
-      issues: [],
-    })),
+    on: vi.fn(() => () => undefined),
+    close: vi.fn(),
+    ...overrides,
+  };
+};
+
+const fakeRuntime = (overrides: Partial<HostRuntimeClient> = {}): HostRuntimeClient => {
+  const base: HostRuntimeClient = {
+    connect: vi.fn(async () => undefined),
+    capabilities: undefined,
+    open: vi.fn(() => fakeDocument()),
+    describe: vi.fn(async (): Promise<Description> => ({ success: false, kernelId: undefined, issues: [] })),
     transcode: vi.fn<HostRuntimeClient['transcode']>(async () => ({
       success: true,
       data: [webpFile('render.webp')],
@@ -165,24 +225,105 @@ const waitForFileEvent = async (
   }
 };
 
-describe('createHostToolRegistry', () => {
-  it.each([undefined, 'legacy', 'native'] as const)(
-    'should publish the explicit %s factory authoring contract before opening its runner',
-    async (geospecAuthoringMode) => {
-      const geospecRunner = vi.fn<() => Promise<GeoSpecRunner>>();
-      const registry = createHostToolRegistry({
-        workspaceRoot: await makeWorkspace(),
-        geospecRunner,
-        geospecAuthoringMode,
-      });
-      const description = registry.list().find((tool) => tool.name === 'test_model')?.description;
-      const native = geospecAuthoringMode === 'native';
-      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
-      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
-      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
-      expect(geospecRunner).not.toHaveBeenCalled();
+/** A bound X1C, its provider, and a runtime whose slice is a fixed container: the print path minus a printer. */
+const printFixture = () => {
+  const timestamp = '2026-09-24T00:00:00.000Z';
+  /* Not a real container: the planner's summary is advisory and covered in its own tests. */
+  const sliced = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+  const slice = vi.fn<RuntimeDocument['export']>(async () => ({
+    success: true,
+    exportId: 'gcode.3mf',
+    evaluationId: 'evaluation',
+    files: [{ name: 'main.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf', bytes: sliced }],
+    issues: [],
+  }));
+  const runtimeClient = async () => fakeRuntime({ open: vi.fn(() => fakeDocument({ export: slice })) });
+  const projectId = 'proj_000000000000000000001';
+  const entry = {
+    machineId: 'machine-1',
+    providerId: 'bambu',
+    descriptor: {
+      id: 'physical-1',
+      name: 'Workshop X1C',
+      model: 'X1C',
+      accepts: [
+        {
+          contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+          mediaType: 'application/vnd.bambulab.gcode-3mf',
+          requiredMembers: ['Metadata/plate_1.gcode'],
+          payloadSelection: 'plate',
+          technology: 'additive.fff',
+        },
+      ],
     },
-  );
+    snapshot: {
+      connection: 'connected',
+      readiness: 'idle',
+      observedAt: timestamp,
+      setup: { bedType: 'textured-pei', materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
+    },
+    freshness: 'current',
+  } as unknown as MachineDirectoryEntry;
+  const provider = {
+    id: 'bambu',
+    name: 'Bambu Lab',
+    manifest: {
+      schemaVersion: 2,
+      identity: { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'X1C' },
+      toolhead: {
+        filamentDiameter: { value: 1.75, unit: 'mm' },
+        nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],
+      },
+      bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+      slicing: {
+        recommended: { nozzleTemperature: { value: 220, unit: 'Cel' }, bedTemperature: { value: 55, unit: 'Cel' } },
+      },
+    },
+  } as unknown as MachineProvider;
+  const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
+    requestId: input.requestId,
+    machineId: input.machineId,
+    artifact: input.artifact,
+    configuration: input.configuration,
+    requestedBy: input.requestedBy,
+    summary: input.summary ?? { fileName: 'main.gcode.3mf' },
+    state: 'awaiting-approval',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }));
+  const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>();
+  const machines = {
+    available: true,
+    list: async () => ({
+      cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
+      entries: [entry],
+    }),
+    listProviders: async () => [provider],
+    requestPrint,
+    listPrintRequests: async () =>
+      Promise.all(
+        requestPrint.mock.results.map(async (result) => result.value as ReturnType<MachineClient['requestPrint']>),
+      ),
+    withdrawPrintRequest,
+  } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
+
+  return { timestamp, sliced, slice, runtimeClient, projectId, requestPrint, withdrawPrintRequest, machines };
+};
+
+describe('createHostToolRegistry', () => {
+  it('should publish only the canonical factory authoring contract before opening its runner', async () => {
+    const geospecRunner = vi.fn<() => Promise<GeoSpecRunner>>();
+    const registry = createHostToolRegistry({
+      workspaceRoot: await makeWorkspace(),
+      geospecRunner,
+    });
+    const description = registry.list().find((tool) => tool.name === 'test_model')?.description;
+    expect(description).toContain('expectGeo');
+    expect(description).toContain('loadModel');
+    expect(description).not.toContain('expectNativeGeo');
+    expect(description).not.toContain('loadNativeModel');
+    expect(geospecRunner).not.toHaveBeenCalled();
+  });
 
   it('offers the file tools and use_skill with no runtime, and never a geometry tool it cannot serve', async () => {
     const registry = createHostToolRegistry({ workspaceRoot: await makeWorkspace() });
@@ -193,9 +334,9 @@ describe('createHostToolRegistry', () => {
     expect(names).toContain('grep');
     /* Skills are disk, not geometry: they never depend on a runtime. */
     expect(names).toContain('use_skill');
-    expect(names).not.toContain('get_kernel_result');
+    expect(names).not.toContain('evaluate_model');
     expect(names).not.toContain('screenshot');
-    expect(names).not.toContain('export_geometry');
+    expect(names).not.toContain('export_model');
   });
 
   it("refuses a tool write under Tau's control metadata and still serves the read (V19 mask)", async () => {
@@ -325,29 +466,60 @@ describe('createHostToolRegistry', () => {
   it('names the source revision of every model test_model loaded (R4)', async () => {
     const workspaceRoot = await makeWorkspace();
     await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
-    const sourceRevision = { entry: 'cube.ts', files: { 'cube.ts': `sha256:${'a'.repeat(64)}` } };
-    const run = vi.fn(async ({ files }: { readonly files: readonly string[] }) => ({
+    await writeFile(join(workspaceRoot, 'cube.ts'), 'cube source control', 'utf8');
+    const sourceRevision: SourceRevision = {
+      entry: 'cube.ts',
+      files: {
+        // SAFETY: the fixture uses the actual SHA-256 of the authored source bytes.
+        'cube.ts': `sha256:${await sha256Bytes(new TextEncoder().encode('cube source control'))}` as Exclude<
+          SourceRevision['files'][string],
+          'missing'
+        >,
+      },
+    };
+    const run = vi.fn<GeoSpecRunner['run']>(async ({ files = [] }) => ({
       success: true,
       passed: 1,
       failed: 0,
       selectedTests: 1,
-      files: files.map(
-        (file) =>
-          ({
-            file,
-            result: {
-              success: true,
-              issues: [],
-              tests: [{ suite: ['cube'], name: 'is watertight', status: 'passed', assertions: [], diagnostics: [] }],
-            },
-          }) as const,
-      ),
+      files: files.map((file) => ({
+        file,
+        result: {
+          success: true,
+          passed: false,
+          bundle: { success: true, code: '', issues: [], dependencies: [], unresolvedPaths: [] },
+          issues: [],
+          tests: [{ suite: ['cube'], name: 'is watertight', status: 'passed', assertions: [], diagnostics: [] }],
+          lineage: {
+            status: 'unavailable',
+            modules: [],
+            loads: [
+              {
+                loadId: 'cube-load',
+                status: 'unavailable',
+                evidence: {
+                  loadId: 'cube-load',
+                  status: 'complete',
+                  format: 'glb',
+                  parameters: {},
+                  ingestOptions: {},
+                  sourceRevision,
+                  artifacts: [],
+                },
+              },
+            ],
+          },
+        },
+      })),
     }));
     const registry = createHostToolRegistry({
       workspaceRoot,
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake supplies exactly the runner slice the adapter drives, plus the provenance it reports.
-      geospecRunner: async () =>
-        ({ run, close: async () => undefined, sourceRevisions: () => [sourceRevision] }) as unknown as GeoSpecRunner,
+      geospecRunner: async () => ({
+        run,
+        on: () => () => undefined,
+        abort: () => undefined,
+        close: async () => undefined,
+      }),
     });
 
     const result = await invoke(registry, 'test_model', {});
@@ -455,89 +627,14 @@ describe('createHostToolRegistry', () => {
     });
     const names = registry.list().map((tool) => tool.name);
 
-    expect(names).toContain('get_kernel_result');
+    expect(names).toContain('evaluate_model');
     expect(names).toContain('screenshot');
-    expect(names).toContain('export_geometry');
+    expect(names).toContain('export_model');
   });
 
   it('offers request_print only with a runtime, a project id and a machine, and slices at the requested quality through its own export route', async () => {
     const workspaceRoot = await makeWorkspace();
-    const timestamp = '2026-09-24T00:00:00.000Z';
-    /* Not a real container: the planner's summary is advisory and covered in its own tests. */
-    const sliced = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
-    const slice = vi.fn<HostRuntimeClient['export']>(async () => ({
-      success: true,
-      data: [{ name: 'main.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf', bytes: sliced }],
-      issues: [],
-    }));
-    const runtimeClient = async () => fakeRuntime({ export: slice });
-    const projectId = 'proj_000000000000000000001';
-    const entry = {
-      machineId: 'machine-1',
-      providerId: 'bambu',
-      descriptor: {
-        id: 'physical-1',
-        name: 'Workshop X1C',
-        model: 'X1C',
-        accepts: [
-          {
-            contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-            mediaType: 'application/vnd.bambulab.gcode-3mf',
-            requiredMembers: ['Metadata/plate_1.gcode'],
-            payloadSelection: 'plate',
-            technology: 'additive.fff',
-          },
-        ],
-      },
-      snapshot: {
-        connection: 'connected',
-        readiness: 'idle',
-        observedAt: timestamp,
-        setup: { bedType: 'textured-pei', materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
-      },
-      freshness: 'current',
-    } as unknown as MachineDirectoryEntry;
-    const provider = {
-      id: 'bambu',
-      name: 'Bambu Lab',
-      manifest: {
-        toolhead: {
-          filamentDiameter: { value: 1.75, unit: 'mm' },
-          nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],
-        },
-        bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
-        slicing: {
-          recommended: { nozzleTemperature: { value: 220, unit: 'Cel' }, bedTemperature: { value: 55, unit: 'Cel' } },
-        },
-      },
-    } as unknown as MachineProvider;
-    const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
-      requestId: input.requestId,
-      machineId: input.machineId,
-      artifact: input.artifact,
-      configuration: input.configuration,
-      requestedBy: input.requestedBy,
-      summary: input.summary ?? { fileName: 'main.gcode.3mf' },
-      state: 'awaiting-approval',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }));
-    const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>();
-    const machines = {
-      available: true,
-      list: async () => ({
-        cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
-        entries: [entry],
-      }),
-      listProviders: async () => [provider],
-      requestPrint,
-      listPrintRequests: async () =>
-        Promise.all(
-          requestPrint.mock.results.map(async (result) => result.value as ReturnType<MachineClient['requestPrint']>),
-        ),
-      withdrawPrintRequest,
-    } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
-
+    const { sliced, slice, runtimeClient, projectId, requestPrint, withdrawPrintRequest, machines } = printFixture();
     const names = (options: Partial<HostToolRegistryOptions>) =>
       createHostToolRegistry({ workspaceRoot, ...options })
         .list()
@@ -560,9 +657,8 @@ describe('createHostToolRegistry', () => {
     });
     /* The quality the agent asked for is what the slicer receives, over the machine's own options. */
     expect(slice).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
-      source: { path: 'main.ts' },
       signal: expect.any(AbortSignal) as AbortSignal,
-      exportOptions: {
+      options: {
         plate: 'textured-pei',
         nozzleDiameter: 0.4,
         filamentDiameter: 1.75,
@@ -608,6 +704,53 @@ describe('createHostToolRegistry', () => {
       resolution: { interruptId: 'interrupt-1', outcome: 'cancelled' },
     });
     expect(withdrawPrintRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: 'call-1' }));
+  });
+
+  it("reads the project's print intent through the filesystem authority a project host opens its roots with", async () => {
+    const workspaceRoot = await makeWorkspace();
+    /* The double's own intent (2026-10-03): the high-temperature plate and the external spool. */
+    await mkdir(join(workspaceRoot, '.tau', 'machines', 'settings'), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, '.tau', 'machines', 'settings', 'bambu.x1c.json'),
+      JSON.stringify({
+        version: 1,
+        typeId: 'bambu.x1c',
+        activeProfile: 'default',
+        profiles: {
+          default: {
+            name: 'Default',
+            configurations: {
+              'bambu.machine.settings': { version: '1.0.0', values: { plate: 'high-temperature' } },
+            },
+          },
+        },
+      }),
+    );
+    /* The desktop and `tau serve` hand the host the authority's client, not a local provider (services-host.impl.ts). */
+    const { port1, port2 } = new MessageChannel();
+    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (root) => root === workspaceRoot });
+    const channel = new NodeFsChannel(port1);
+    try {
+      const { runtimeClient, projectId, requestPrint, machines } = printFixture();
+      const registry = createHostToolRegistry({
+        workspaceRoot,
+        runtimeClient,
+        projectId,
+        machines,
+        filesystem: (root) => new NodeFsProviderClient(channel, root),
+      });
+
+      const result = await invoke(registry, 'request_print', { targetFile: 'main.ts' });
+
+      expect(result).toMatchObject({ isError: false, content: { request: { state: 'awaiting-approval' } } });
+      /* The project's saved choices, not the printer's defaults, prepared the request. */
+      expect(requestPrint.mock.calls[0]![0].summary).toMatchObject({
+        preferences: { scope: 'project', typeId: 'bambu.x1c', profileId: 'default' },
+      });
+    } finally {
+      channel.close();
+      await stop();
+    }
   });
 
   it('offers both parameter tools only with a native parameter actor and preserves its outcome', async () => {
@@ -747,41 +890,37 @@ describe('createHostToolRegistry', () => {
 
     const alphaEvents: Array<{ readonly type: string; readonly path?: string }> = [];
     const betaEvents: Array<{ readonly type: string; readonly path?: string }> = [];
-    const stopAlpha = new NodeFsProvider(alphaRoot).watch({ paths: ['main.ts'] }, (event) => alphaEvents.push(event));
-    const stopBeta = new NodeFsProvider(betaRoot).watch({ paths: ['main.ts'] }, (event) => betaEvents.push(event));
+    const stopAlpha = await new NodeFsProvider(alphaRoot).watch({ paths: ['main.ts'] }, (event) =>
+      alphaEvents.push(event),
+    );
+    const stopBeta = await new NodeFsProvider(betaRoot).watch({ paths: ['main.ts'] }, (event) =>
+      betaEvents.push(event),
+    );
+    const opened = new Map<string, RuntimeDocument[]>();
     const runtimeFor = (root: string, label: string): HostRuntimeClient =>
       fakeRuntime({
-        evaluate: vi.fn<HostRuntimeClient['evaluate']>(async ({ source }) => {
+        open: vi.fn<HostRuntimeClient['open']>(({ source }) => {
           if (source.path === undefined) {
             throw new TypeError('Expected a source path');
           }
-          return {
-            success: true,
-            issues: [],
-            data: {
-              format: 'gltf',
-              content: glb(),
-              hash: `${label}:${await readFile(join(root, source.path), 'utf8')}`,
-            },
-          };
-        }),
-        export: vi.fn<HostRuntimeClient['export']>(async (format, options) => {
-          // oxlint-disable-next-line typescript/no-unnecessary-condition -- tsgo's spec config keeps options optional.
-          const sourcePath = options?.source?.path;
-          if (sourcePath === undefined) {
-            throw new TypeError('Expected export source options');
-          }
-          return {
-            success: true,
-            issues: [],
-            data: [
-              {
-                name: `model.${format}`,
-                mimeType: 'model/stl',
-                bytes: new TextEncoder().encode(await readFile(join(root, sourcePath), 'utf8')),
-              },
-            ],
-          };
+          const sourcePath = source.path;
+          const document = fakeDocument({
+            export: vi.fn<RuntimeDocument['export']>(async (format) => ({
+              success: true,
+              exportId: format,
+              evaluationId: `${label}:evaluation`,
+              issues: [],
+              files: [
+                {
+                  name: `model.${format}`,
+                  mimeType: 'model/stl',
+                  bytes: new TextEncoder().encode(await readFile(join(root, sourcePath), 'utf8')),
+                },
+              ],
+            })),
+          });
+          opened.set(label, [...(opened.get(label) ?? []), document]);
+          return document;
         }),
       });
     const alphaRuntime = runtimeFor(alphaRoot, 'alpha');
@@ -845,23 +984,23 @@ describe('createHostToolRegistry', () => {
       expect(outsideRead.isError).toBe(true);
 
       await Promise.all([
-        invoke(alpha, 'get_kernel_result', { targetFile: 'main.ts' }),
-        invoke(beta, 'get_kernel_result', { targetFile: 'main.ts' }),
+        invoke(alpha, 'evaluate_model', { targetFile: 'main.ts' }),
+        invoke(beta, 'evaluate_model', { targetFile: 'main.ts' }),
       ]);
       const [alphaExport, betaExport, alphaSpec, betaSpec] = await Promise.all([
-        invoke(alpha, 'export_geometry', { targetFile: 'main.ts', format: 'stl' }),
-        invoke(beta, 'export_geometry', { targetFile: 'main.ts', format: 'stl' }),
+        invoke(alpha, 'export_model', { targetFile: 'main.ts', to: 'stl' }),
+        invoke(beta, 'export_model', { targetFile: 'main.ts', to: 'stl' }),
         invoke(alpha, 'test_model', { files: ['model.geospec.ts'] }),
         invoke(beta, 'test_model', { files: ['model.geospec.ts'] }),
       ]);
       const artifactPath = '.tau/artifacts/call-1__main.ts-stl/model.stl';
       expect(alphaExport).toMatchObject({
         isError: false,
-        content: { success: true, format: 'stl', files: [{ name: 'model.stl', artifactPath }] },
+        content: { success: true, to: 'stl', files: [{ name: 'model.stl', artifactPath }] },
       });
       expect(betaExport).toMatchObject({
         isError: false,
-        content: { success: true, format: 'stl', files: [{ name: 'model.stl', artifactPath }] },
+        content: { success: true, to: 'stl', files: [{ name: 'model.stl', artifactPath }] },
       });
       const alphaArtifact = await invoke(alpha, 'read_file', { targetFile: artifactPath });
       const betaArtifact = await invoke(beta, 'read_file', { targetFile: artifactPath });
@@ -874,8 +1013,8 @@ describe('createHostToolRegistry', () => {
       });
       const alphaExport2 = await alpha.invoke({
         toolCallId: 'call-2',
-        toolName: 'export_geometry',
-        input: { targetFile: 'main.ts', format: 'stl' },
+        toolName: 'export_model',
+        input: { targetFile: 'main.ts', to: 'stl' },
         signal: new AbortController().signal,
       });
       const artifactPath2 = '.tau/artifacts/call-2__main.ts-stl/model.stl';
@@ -897,10 +1036,14 @@ describe('createHostToolRegistry', () => {
         passed: 1,
         passes: [{ requirement: 'beta > rooted', targetFile: 'model.geospec.ts' }],
       });
-      expect(alphaRuntime.evaluate).toHaveBeenCalledWith(expect.objectContaining({ source: { path: 'main.ts' } }));
-      expect(betaRuntime.evaluate).toHaveBeenCalledWith(expect.objectContaining({ source: { path: 'main.ts' } }));
-      expect(alphaRuntime.export).toHaveBeenCalledWith('stl', expect.objectContaining({ source: { path: 'main.ts' } }));
-      expect(betaRuntime.export).toHaveBeenCalledWith('stl', expect.objectContaining({ source: { path: 'main.ts' } }));
+      expect(alphaRuntime.open).toHaveBeenCalledWith(expect.objectContaining({ source: { path: 'main.ts' } }));
+      expect(betaRuntime.open).toHaveBeenCalledWith(expect.objectContaining({ source: { path: 'main.ts' } }));
+      expect(
+        opened.get('alpha')?.some((document) => vi.mocked(document.export).mock.calls.some(([to]) => to === 'stl')),
+      ).toBe(true);
+      expect(
+        opened.get('beta')?.some((document) => vi.mocked(document.export).mock.calls.some(([to]) => to === 'stl')),
+      ).toBe(true);
       expect(alphaGeoSpec.run).toHaveBeenCalledWith({ files: ['model.geospec.ts'] });
       expect(betaGeoSpec.run).toHaveBeenCalledWith({ files: ['model.geospec.ts'] });
 
@@ -948,7 +1091,7 @@ describe('createHostToolRegistry', () => {
     });
     const batch = await invoke(batchRegistry, 'screenshot', { targetFile: 'main.ts', mode: 'multi_angle' });
     expect(batch.isError).toBe(false);
-    expect(JSON.stringify(batch.content)).toContain('"view":"bottom"');
+    expect(JSON.stringify(batch.content)).toContain('"view":"model","angle":"bottom"');
 
     /* `toPiToolContent` is the one seam both placements record
      * through, so a daemon capture reaches the model as image blocks too,
@@ -960,12 +1103,33 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(piContent)).not.toContain('data:image/webp;base64,');
   });
 
-  it('uses the evaluated SVG coordinate unit without host configuration and refuses unknown scale', async () => {
-    const evaluate = vi.fn<HostRuntimeClient['evaluate']>(async () => ({
+  it('uses the evaluated SVG coordinate unit and keeps unitless capture free of a fabricated physical scale', async () => {
+    let svgRendering: Rendering = {
       success: true,
+      requestId: 'drawing-render',
+      evaluationId: 'drawing-evaluation',
+      transient: false,
+      view: 'drawing',
+      artifact: {
+        mimeType: 'image/svg+xml',
+        content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"/>',
+        units: { length: 'cm' },
+      },
+      hash: 'drawing',
       issues: [],
-      data: { format: 'svg', content: '<svg viewBox="0 0 10 10"/>', hash: 'drawing', units: { length: 'cm' } },
-    }));
+    };
+    const svgEvaluation: Evaluation = {
+      id: 'drawing-evaluation',
+      success: true,
+      transient: false,
+      views: [{ id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' }],
+      exports: [],
+      issues: [],
+    };
+    const document = fakeDocument({
+      evaluation: vi.fn(async (): Promise<UpdateOutcome> => ({ superseded: false, evaluation: svgEvaluation })),
+      rendering: () => svgRendering,
+    });
     const transcode = vi.fn<HostRuntimeClient['transcode']>(async () => ({
       success: true,
       issues: [],
@@ -973,7 +1137,7 @@ describe('createHostToolRegistry', () => {
     }));
     const registry = createHostToolRegistry({
       workspaceRoot: await makeWorkspace(),
-      runtimeClient: async () => fakeRuntime({ evaluate, transcode }),
+      runtimeClient: async () => fakeRuntime({ open: vi.fn(() => document), transcode }),
     });
 
     const result = await invoke(registry, 'screenshot', { targetFile: 'drawing.ts', mode: 'single' });
@@ -981,18 +1145,25 @@ describe('createHostToolRegistry', () => {
     expect(transcode.mock.calls[0]?.[0]).toMatchObject({
       from: 'svg',
       to: 'png',
-      options: { lengthSymbol: 'cm', axes: true, scaleBar: true },
+      options: { lengthSymbol: 'cm', axes: false, scaleBar: true },
     });
 
-    evaluate.mockResolvedValue({
-      success: true,
-      issues: [],
-      data: { format: 'svg', content: '<svg/>', hash: 'unqualified' },
+    svgRendering = {
+      ...svgRendering,
+      artifact: { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"/>' },
+      hash: 'unqualified',
+    };
+    const unqualified = await invoke(registry, 'screenshot', { targetFile: 'drawing.ts', mode: 'multi_angle' });
+    expect(unqualified.isError).toBe(false);
+    expect(unqualified.content).toMatchObject({ success: true, images: [{ view: 'drawing' }] });
+    expect(JSON.stringify(unqualified.content)).not.toContain('"angle"');
+    expect(transcode).toHaveBeenCalledTimes(2);
+    expect(transcode.mock.calls[1]?.[0]).toMatchObject({
+      from: 'svg',
+      to: 'png',
+      options: { axes: false, scaleBar: false },
     });
-    const unqualified = await invoke(registry, 'screenshot', { targetFile: 'drawing.ts', mode: 'single' });
-    expect(unqualified.isError).toBe(true);
-    expect(JSON.stringify(unqualified.content)).toContain('artifact coordinate length unit');
-    expect(transcode).toHaveBeenCalledTimes(1);
+    expect(transcode.mock.calls[1]?.[0].options).not.toHaveProperty('lengthSymbol');
   });
 
   it('does not start cancelled CAD work after shared lazy acquisition and preserves a sibling request', async () => {
@@ -1009,7 +1180,7 @@ describe('createHostToolRegistry', () => {
     const controller = new AbortController();
     const cancelled = registry.invoke({
       toolCallId: 'cancelled',
-      toolName: 'get_kernel_result',
+      toolName: 'evaluate_model',
       input: { targetFile: 'cancelled.ts' },
       signal: controller.signal,
     });
@@ -1021,15 +1192,15 @@ describe('createHostToolRegistry', () => {
     const siblingController = new AbortController();
     const sibling = registry.invoke({
       toolCallId: 'sibling',
-      toolName: 'get_kernel_result',
+      toolName: 'evaluate_model',
       input: { targetFile: 'sibling.ts' },
       signal: siblingController.signal,
     });
     acquired.resolve(runtime);
     const siblingResult = await sibling;
     expect(siblingResult.isError).toBe(false);
-    expect(runtime.evaluate).toHaveBeenCalledTimes(1);
-    expect(runtime.evaluate).toHaveBeenCalledWith(
+    expect(runtime.open).toHaveBeenCalledTimes(1);
+    expect(runtime.open).toHaveBeenCalledWith(
       expect.objectContaining({
         source: { path: 'sibling.ts' },
         signal: siblingController.signal,
@@ -1061,7 +1232,7 @@ describe('createHostToolRegistry', () => {
     controller.abort();
     await cancelledResult;
     finish.resolve({ success: true, issues: [], data: [webpFile('render.webp')] });
-    const siblingResult = await invoke(registry, 'get_kernel_result', { targetFile: 'sibling.ts' });
+    const siblingResult = await invoke(registry, 'evaluate_model', { targetFile: 'sibling.ts' });
     expect(siblingResult.isError).toBe(false);
   });
 
@@ -1111,7 +1282,7 @@ describe('createHostToolRegistry', () => {
   );
 
   /*
-   * The G4 live proof answered six `get_kernel_result` calls and one
+   * The G4 live proof answered six `evaluate_model` calls and one
    * `screenshot` with `{"errorCode":"IO_ERROR","message":"Runtime render
    * failed"}` while the daemon's own log named the cause — an engine module
    * that would not load. `IO_ERROR` on a file the model had just written reads
@@ -1134,9 +1305,9 @@ describe('createHostToolRegistry', () => {
     });
 
     for (const [toolName, input] of [
-      ['get_kernel_result', { targetFile: 'main.ts' }],
+      ['evaluate_model', { targetFile: 'main.ts' }],
       ['screenshot', { targetFile: 'main.ts', mode: 'single' }],
-      ['export_geometry', { targetFile: 'main.ts', format: 'glb' }],
+      ['export_model', { targetFile: 'main.ts', to: 'glb' }],
     ] as const) {
       // oxlint-disable-next-line no-await-in-loop -- three tools share one assertion, in order.
       const result = await invoke(registry, toolName, input);
@@ -1152,7 +1323,7 @@ describe('createHostToolRegistry', () => {
       workspaceRoot: await makeWorkspace(),
       runtimeClient: async () =>
         fakeRuntime({
-          evaluate: vi.fn(async () => {
+          open: vi.fn(() => {
             /* The runtime's own fallback for a worker `error` state that carried
              * no diagnostic (`runtime-client-core.ts`). */
             throw new Error('Runtime render failed');
@@ -1160,7 +1331,7 @@ describe('createHostToolRegistry', () => {
         }),
     });
 
-    const result = await invoke(registry, 'get_kernel_result', { targetFile: 'main.ts' });
+    const result = await invoke(registry, 'evaluate_model', { targetFile: 'main.ts' });
     expect(result.isError).toBe(true);
     expect(result.content).toMatchObject({ success: false, errorCode: 'UNKNOWN' });
     expect(JSON.stringify(result.content)).toContain('Tau Host');

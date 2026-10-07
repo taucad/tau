@@ -1,3 +1,4 @@
+import { bambuSettingsConfiguration } from '#bambu.settings.js';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine } from '@taucad/runtime/machine';
 import type {
@@ -470,7 +471,8 @@ export const createBambuSimulator = (
         toolId: 'nozzle-0.4',
         bedType: 'textured-pei',
         materials: Object.freeze([
-          { slot: 0, state: 'loaded', materialId: 'pla', profileId: 'GFA00' },
+          // As a Bambu printer reports `tray_type`.
+          { slot: 0, state: 'loaded', materialId: 'PLA', profileId: 'GFA00' },
         ] satisfies MachineSnapshot['setup']['materials']),
       }),
       run: Object.freeze(run ? describeRun(run, at) : (finished ?? { state: 'idle' })),
@@ -769,6 +771,7 @@ const defineSimulator = (input: Readonly<{ simulator?: BambuSimulator }>) =>
     manifest: { ...bambuX1cManifest, identity: { ...bambuX1cManifest.identity, displayName: 'Simulated X1C' } },
     bindingConfiguration: simulatorBindingConfiguration,
     submissionConfiguration: bambuSubmissionConfiguration,
+    settingsConfiguration: bambuSettingsConfiguration,
     async *discover(discoveryInput, runtime) {
       discoveryInput.signal.throwIfAborted();
       const observedAt = runtime.clock.now();

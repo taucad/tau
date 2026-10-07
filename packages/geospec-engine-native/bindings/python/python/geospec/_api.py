@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextvars import ContextVar, Token
 import importlib
 import json
 import math
 import os
 import re
 import struct
+import threading
 from types import MappingProxyType
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Mapping, Protocol, Sequence, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from ._model import GeoSpecModelLoader
+    from ._typing import GeoSpecMatchers
+
+_active_engine: ContextVar[GeoSpecEngine | None] = ContextVar("geospec_engine", default=None)
 
 _MAX_SAFE_INTEGER = 9_007_199_254_740_991
 
@@ -52,7 +60,7 @@ class GeoSpecRegex:
     flags: str = ""
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class GeoSpecSubject:
     """One engine-owned subject and its canonical plan identity."""
 
@@ -62,10 +70,15 @@ class GeoSpecSubject:
     identity: str
     _handle: Mapping[str, object] | None = None
     _closed: bool = False
+    _admission_key: object | None = None
+    provenance: Mapping[str, object] | None = None
 
     def plan_entry(self) -> dict[str, object]:
+        self.engine._ensure_open()
         if self._closed:
             raise RuntimeError("GeoSpec subject is closed.")
+        if self._admission_key is not self.engine._admission_key:
+            raise GeoSpecAssertionError("Load the subject through its owning GeoSpec engine.", code="invalid-subject")
         return {"slot": self.slot, self.identity_field: self.identity}
 
     def close(self) -> None:
@@ -74,7 +87,7 @@ class GeoSpecSubject:
         if self._closed:
             return
         self.engine._release_subject(self)
-        self._closed = True
+        object.__setattr__(self, "_closed", True)
 
     def __enter__(self) -> GeoSpecSubject:
         if self._closed:
@@ -100,6 +113,7 @@ class GeoSpecAssertionReport:
     canonical_result_bytes: bytes
     claim: Mapping[str, object]
     result: Mapping[str, object]
+    provenance: Mapping[str, object] | None = None
 
     @property
     def diagnostics(self) -> tuple[Mapping[str, object], ...]:
@@ -110,6 +124,8 @@ class GeoSpecAssertionReport:
 
     @property
     def passed(self) -> bool:
+        if self.result.get("status") not in ("passed", "failed"):
+            return False
         assertion_passed = self.result.get("assertionPassed")
         if isinstance(assertion_passed, bool):
             return assertion_passed
@@ -185,7 +201,14 @@ class GeoSpecEngine:
         execution_permits: int | None = None,
         native_engine: _NativeEngine | None = None,
         native_module: Any | None = None,
+        model_root: str | None = None,
+        model_loader: GeoSpecModelLoader | None = None,
     ) -> None:
+        self._owner_thread = threading.get_ident()
+        self._scope_tokens: list[Token[GeoSpecEngine | None]] = []
+        self._admission_key = object()
+        self._model_root = model_root
+        self._model_loader = model_loader
         if execution_permits is not None:
             process_cpu_count = getattr(os, "process_cpu_count", os.cpu_count)
             host_cap = process_cpu_count() or 1
@@ -199,33 +222,45 @@ class GeoSpecEngine:
                 )
             if native_engine is not None:
                 raise ValueError("execution_permits cannot configure an injected native_engine")
-        if native_module is None:
+        if native_module is None and native_engine is None:
             native_module = importlib.import_module("geospec_engine_native")
         self._native_module = native_module
         if (cache_root is None) != (project_root is None):
             raise ValueError("cache_root and project_root must be supplied together")
         if native_engine is not None:
             native = native_engine
-        elif cache_root is None:
-            native = (
-                native_module.Engine()
-                if execution_permits is None
-                else native_module.Engine(execution_permits=execution_permits)
-            )
         else:
-            native = (
-                native_module.Engine(cache_root, project_root)
-                if execution_permits is None
-                else native_module.Engine(
-                    cache_root, project_root, execution_permits=execution_permits
+            assert native_module is not None
+            if cache_root is None:
+                native = (
+                    native_module.Engine()
+                    if execution_permits is None
+                    else native_module.Engine(execution_permits=execution_permits)
                 )
-            )
+            else:
+                native = (
+                    native_module.Engine(cache_root, project_root)
+                    if execution_permits is None
+                    else native_module.Engine(
+                        cache_root, project_root, execution_permits=execution_permits
+                    )
+                )
         self._native: _NativeEngine | None = native
         self._next_claim = 0
         self._next_lifecycle = 0
         self._handles: list[Mapping[str, object]] = []
         self._closed = False
         self._cache_flush_result: bytes | None = None
+        self._has_lifecycle = False
+        self._requires_lifecycle = native_engine is None
+        try:
+            self._initialize(work_unit_budget)
+        except BaseException:
+            self.close()
+            raise
+
+    def _initialize(self, work_unit_budget: int | None) -> None:
+        native = self._ensure_open()
         subject_handle = getattr(native, "subject_handle", None)
         release_subject = getattr(native, "release_subject", None)
         if callable(subject_handle) != callable(release_subject):
@@ -233,16 +268,16 @@ class GeoSpecEngine:
                 "GeoSpec native lifecycle requires subject_handle and release_subject together."
             )
         self._has_lifecycle = callable(subject_handle)
-        if native_engine is None and not self._has_lifecycle:
+        if self._requires_lifecycle and not self._has_lifecycle:
             raise RuntimeError(
                 "Installed GeoSpec native Engine does not expose subject lifecycle operations."
             )
-        if native_engine is None and not callable(getattr(native, "close", None)):
+        if self._requires_lifecycle and not callable(getattr(native, "close", None)):
             raise RuntimeError(
                 "Installed GeoSpec native Engine does not expose deterministic close."
             )
         initialized = _decode_object(
-            native.process_request(
+            self._ensure_open().process_request(
                 _json_bytes(
                     {
                         "method": "initialize",
@@ -303,6 +338,7 @@ class GeoSpecEngine:
 
         if self._closed:
             return
+        self._ensure_open()
         first_error: Exception | None = None
         for handle in tuple(self._handles):
             try:
@@ -352,12 +388,15 @@ class GeoSpecEngine:
         return self._cache_flush_result
 
     def __enter__(self) -> GeoSpecEngine:
-        if self._closed:
-            raise RuntimeError("GeoSpec engine is closed.")
+        self._ensure_open()
+        self._scope_tokens.append(_active_engine.set(self))
         return self
 
     def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
-        self.close()
+        try:
+            _active_engine.reset(self._scope_tokens.pop())
+        finally:
+            self.close()
 
     def __del__(self) -> None:
         try:
@@ -366,6 +405,8 @@ class GeoSpecEngine:
             pass
 
     def _ensure_open(self) -> _NativeEngine:
+        if threading.get_ident() != self._owner_thread:
+            raise RuntimeError("GeoSpec engine operations must run on their owner thread.")
         if self._closed or self._native is None:
             raise RuntimeError("GeoSpec engine is closed.")
         return self._native
@@ -476,7 +517,7 @@ class GeoSpecEngine:
             identity = subject.get(field)
             if isinstance(identity, str):
                 handle = self._acquire_handle(field, identity)
-                value = GeoSpecSubject(self, slot, field, identity, handle)
+                value = GeoSpecSubject(self, slot, field, identity, handle, _admission_key=self._admission_key)
                 if handle is not None:
                     self._handles.append(handle)
                 return value
@@ -624,11 +665,13 @@ class GeoSpecEngine:
         }
         # One engine call: u32le plan length, u32le claim length, plan, claim, result.
         frame = bytes(native.evaluate_claim(_json_bytes(request)))
+        if len(frame) < 8:
+            raise GeoSpecAssertionError("GeoSpec engine returned a malformed claim evaluation frame.", code="invalid-response")
         plan_length, claim_length = struct.unpack_from("<II", frame)
         claim_start = 8 + plan_length
         result_start = claim_start + claim_length
         if result_start > len(frame):
-            raise RuntimeError("GeoSpec engine returned a malformed claim evaluation.")
+            raise GeoSpecAssertionError("GeoSpec engine returned a malformed claim evaluation frame.", code="invalid-response")
         canonical_plan = frame[8:claim_start]
         canonical_claim = frame[claim_start:result_start]
         canonical_result = frame[result_start:]
@@ -649,6 +692,7 @@ class GeoSpecEngine:
             canonical_result,
             MappingProxyType(parsed_claim),
             MappingProxyType(results[0]),
+            subject.provenance,
         )
 
 
@@ -705,10 +749,10 @@ def expect_geo(
     subject: GeoSpecSubject,
     *,
     claim_id: str | None = None,
-) -> _Expectation:
+) -> GeoSpecMatchers:
     """Create a positive assertion chain for an ingested subject."""
 
-    return _Expectation(subject, claim_id=claim_id, polarity="positive")
+    return cast("GeoSpecMatchers", _Expectation(subject, claim_id=claim_id, polarity="positive"))
 
 
 def evaluate_geo(

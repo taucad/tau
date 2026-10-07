@@ -1,13 +1,16 @@
 import { useMemo, useState } from 'react';
+import { Bot, SearchX } from 'lucide-react';
 import type { Model } from '#hooks/use-models.js';
 import { Button } from '@taucad/ui/components/button';
-import { Switch } from '@taucad/ui/components/switch';
+import { SwitchRow } from '@taucad/ui/components/switch';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { useModels } from '#hooks/use-models.js';
 import { SearchInput } from '#components/search-input.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { Loader } from '#components/ui/loader.js';
 
 export function ModelSettings(): React.JSX.Element {
-  const { data = [], recommendedModels, isAvailable, setAvailable } = useModels();
+  const { data = [], isLoading, recommendedModels, isAvailable, setAvailable } = useModels();
   const [search, setSearch] = useState('');
   const [showAll, setShowAll] = useState(false);
 
@@ -40,49 +43,107 @@ export function ModelSettings(): React.JSX.Element {
 
       <div className='flex flex-col gap-2'>
         <h2>Available models</h2>
-        <div className='flex flex-col gap-0.5 rounded-xl border p-1'>
-          {visibleModels.map((model) => {
-            const checked = isAvailable(model);
-            return (
-              <button
+        {visibleModels.length === 0 ? (
+          <ModelsEmptyState
+            search={search.trim()}
+            isLoading={isLoading}
+            hasHiddenModels={!showAll && data.length > 0}
+            onClearSearch={() => {
+              setSearch('');
+            }}
+            onShowAll={() => {
+              setShowAll(true);
+            }}
+          />
+        ) : (
+          <div className='flex flex-col gap-0.5 rounded-xl border p-1'>
+            {visibleModels.map((model) => (
+              <SwitchRow
                 key={model.id}
-                type='button'
-                onClick={() => {
-                  setAvailable(model, !checked);
+                icon={<SvgIcon id={model.details.family} className='size-4' />}
+                description={model.description}
+                isChecked={isAvailable(model)}
+                onIsCheckedChange={(isChecked) => {
+                  setAvailable(model, isChecked);
                 }}
-                className='flex w-full items-center justify-between gap-3 rounded-sm px-2.5 py-2 text-left transition-colors hover:bg-menu-highlight focus-visible:bg-menu-highlight focus-visible:focus-outline'
               >
-                <div className='flex min-w-0 items-center gap-2.5'>
-                  <SvgIcon id={model.details.family} className='size-4 shrink-0' />
-                  <div className='flex min-w-0 flex-col'>
-                    <span className='truncate text-sm'>{model.name}</span>
-                    {model.description ? (
-                      <span className='text-xs leading-snug font-medium text-muted-foreground/80'>
-                        {model.description}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-                <Switch className='pointer-events-none shrink-0' tabIndex={-1} checked={checked} />
-              </button>
-            );
-          })}
-        </div>
+                <span className='truncate'>{model.name}</span>
+              </SwitchRow>
+            ))}
+          </div>
+        )}
       </div>
 
-      {visibleModels.length === 0 ? (
-        <p className='text-sm text-muted-foreground'>No models match your search.</p>
+      {visibleModels.length > 0 ? (
+        <Button
+          variant='link'
+          className='self-start px-0'
+          onClick={() => {
+            setShowAll((previous) => !previous);
+          }}
+        >
+          {showAll ? 'Show recommended only' : 'View All Models'}
+        </Button>
       ) : null}
-
-      <Button
-        variant='link'
-        className='self-start px-0'
-        onClick={() => {
-          setShowAll((previous) => !previous);
-        }}
-      >
-        {showAll ? 'Show recommended only' : 'View All Models'}
-      </Button>
     </div>
+  );
+}
+
+function ModelsEmptyState({
+  search,
+  isLoading,
+  hasHiddenModels,
+  onClearSearch,
+  onShowAll,
+}: {
+  readonly search: string;
+  readonly isLoading: boolean;
+  readonly hasHiddenModels: boolean;
+  readonly onClearSearch: () => void;
+  readonly onShowAll: () => void;
+}): React.JSX.Element {
+  const className = 'h-64 rounded-xl border bg-card';
+
+  if (isLoading) {
+    return <PanelEmptyState icon={Loader} title='Loading models' aria-busy className={className} />;
+  }
+
+  if (search) {
+    return (
+      <PanelEmptyState
+        icon={SearchX}
+        title={`No models match “${search}”`}
+        description='Try another model or provider name.'
+        className={className}
+      >
+        <Button variant='outline' size='sm' onClick={onClearSearch}>
+          Clear search
+        </Button>
+      </PanelEmptyState>
+    );
+  }
+
+  if (hasHiddenModels) {
+    return (
+      <PanelEmptyState
+        icon={Bot}
+        title='No recommended models'
+        description='Browse the full catalog to choose the models you want available.'
+        className={className}
+      >
+        <Button variant='outline' size='sm' onClick={onShowAll}>
+          View all models
+        </Button>
+      </PanelEmptyState>
+    );
+  }
+
+  return (
+    <PanelEmptyState
+      icon={Bot}
+      title='No models available'
+      description='The model catalog is empty or could not be reached.'
+      className={className}
+    />
   );
 }

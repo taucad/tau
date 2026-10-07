@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
+import type * as PartGalleryModule from '#components/geometry/cad/part-gallery.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
@@ -11,6 +12,7 @@ import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { createSourceModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
+import * as partThumbnailVisual from '#services/part-thumbnail-visual.js';
 import {
   ChatExplorerTree,
   ComponentRow,
@@ -23,6 +25,13 @@ const mocks = vi.hoisted(() => ({
   paneApis: new Map<string, { setExpanded: ReturnType<typeof vi.fn> }>(),
   useProject: vi.fn(),
   imageService: undefined as undefined | { export: ReturnType<typeof vi.fn> },
+  paneBodyVisible: true,
+  openPartGallery: undefined as undefined | ReturnType<typeof vi.fn>,
+}));
+
+vi.mock('#components/geometry/cad/part-gallery.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof PartGalleryModule>()),
+  useOpenPartGallery: () => mocks.openPartGallery,
 }));
 const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
 const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
@@ -120,7 +129,7 @@ vi.mock('dockview-react', () => ({
               data-size={panel.size}
             >
               <Header api={panel.api} params={panel.params} />
-              <Body params={panel.params} />
+              {mocks.paneBodyVisible && <Body params={panel.params} />}
             </section>
           );
         })}
@@ -279,7 +288,8 @@ function createGraphicsRefForUnit(
   return createStaticActor({
     context: {
       modelInteractionRef: modelRef,
-      geometry: previewGeometry && { format: 'gltf', ...previewGeometry },
+      artifact: previewGeometry && { mimeType: 'model/gltf-binary', content: previewGeometry.content },
+      artifactKey: previewGeometry?.hash,
       gltfPresentation: { presentedKey: previewGeometry?.hash },
     },
   }) as unknown as ActorRefFrom<typeof graphicsMachine>;
@@ -340,6 +350,7 @@ beforeEach(() => {
   mocks.paneApis.clear();
   mocks.useProject.mockReset();
   mocks.imageService = undefined;
+  mocks.paneBodyVisible = true;
 });
 
 afterEach(() => {
@@ -358,6 +369,40 @@ afterEach(() => {
 });
 
 describe('ChatExplorerTree', () => {
+  it('refuses a small GLB view backed by an oversized allocation before preview preparation', async () => {
+    const digest = vi.spyOn(partThumbnailVisual, 'sourceGlbDigest');
+    const prepare = vi.spyOn(partThumbnailVisual, 'canonicalPartPreviews');
+    const fail = vi.spyOn(PartThumbnailService.prototype, 'failPreparationForOwner');
+    const part = {
+      ...createNode(firstComponentId, 'Large backing buffer'),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    mocks.imageService = { export: vi.fn() };
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        [
+          'mainView',
+          createGraphicsRefForUnit('src/main.ts', [part], {
+            selectedComponentIds: [firstComponentId],
+            previewGeometry: {
+              hash: 'presented-glb',
+              content: new Uint8Array(new ArrayBuffer(64 * 1024 * 1024 + 1), 0, 3),
+            },
+          }),
+        ],
+      ]),
+    });
+    renderExplorerTree();
+    await waitFor(() => {
+      expect(fail).toHaveBeenCalledWith('explorer', expect.any(Array), expect.any(RangeError));
+    });
+    expect(digest).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
   it('submits only the presented, visible part primitives to the shared image queue', async () => {
     const exportImage = vi.fn().mockResolvedValue(undefined);
     mocks.imageService = { export: exportImage };
@@ -462,6 +507,174 @@ describe('ChatExplorerTree', () => {
     expect(exportImage.mock.calls[1]?.[0].exportOptions.views).toMatchObject([
       { visiblePrimitives: parts[1]!.primitiveRefs },
     ]);
+    const staleIntersect = intersect;
+    const scroller = screen
+      .getByTestId('model-pane-src/main.ts')
+      .querySelector<HTMLElement>('[data-slot="model-unit-scroller"]')!;
+    scroller.scrollTop = 27;
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter parts' }), { target: { value: 'Part 1' } });
+    expect(screen.getByTestId('model-pane-src/main.ts').querySelector('[data-slot="model-unit-scroller"]')).toBe(
+      scroller,
+    );
+    expect(scroller.scrollTop).toBe(27);
+    await waitFor(() => {
+      expect(demands.mock.lastCall?.[2]).toEqual([]);
+    });
+    act(() =>
+      staleIntersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer),
+    );
+    expect(demands.mock.lastCall?.[2]).toEqual([]);
+  });
+
+  it('observes part rows when Paneview attaches the scroller later', async () => {
+    mocks.paneBodyVisible = false;
+    const observe = vi.fn();
+    let intersect: IntersectionObserverCallback | undefined;
+    const observer = mock<IntersectionObserver>({ observe, unobserve: vi.fn(), disconnect: vi.fn() });
+    vi.stubGlobal(
+      'IntersectionObserver',
+      vi.fn(function (callback: IntersectionObserverCallback) {
+        intersect = callback;
+        return observer;
+      }),
+    );
+    const exportImage = vi.fn().mockResolvedValue(undefined);
+    mocks.imageService = { export: exportImage };
+    const part = {
+      ...createNode(firstComponentId, 'Late part'),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        [
+          'mainView',
+          createGraphicsRefForUnit('src/main.ts', [part], {
+            previewGeometry: { hash: 'presented-glb', content: new Uint8Array([1, 2, 3]) },
+          }),
+        ],
+      ]),
+    });
+    const view = renderExplorerTree();
+    expect(screen.queryByRole('button', { name: 'Late part' })).not.toBeInTheDocument();
+    mocks.paneBodyVisible = true;
+    view.rerender(
+      <TooltipProvider>
+        <ChatExplorerTree />
+      </TooltipProvider>,
+    );
+    const row = screen.getByRole('button', { name: 'Late part' }).closest<HTMLElement>('[data-model-component-row]')!;
+    expect(observe).toHaveBeenCalledWith(row);
+    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: row, isIntersecting: true }], observer));
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('submits each completed same-part retry as one manual preview request', async () => {
+    const exportImage = vi.fn().mockRejectedValue(new Error('Preview unavailable'));
+    mocks.imageService = { export: exportImage };
+    const part = {
+      ...createNode(firstComponentId, 'Retry part'),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        [
+          'mainView',
+          createGraphicsRefForUnit('src/main.ts', [part], {
+            selectedComponentIds: [firstComponentId],
+            previewGeometry: { hash: 'presented-glb', content: new Uint8Array([1, 2, 3]) },
+          }),
+        ],
+      ]),
+    });
+    renderExplorerTree();
+    const properties = screen.getByTestId('model-pane-properties');
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(1);
+    });
+    for (const count of [1, 2]) {
+      // oxlint-disable-next-line no-await-in-loop -- Each failed retry must settle before the next click.
+      fireEvent.click(await within(properties).findByRole('button', { name: 'Retry preview' }));
+      // oxlint-disable-next-line no-await-in-loop -- Each failed retry must settle before the next click.
+      await waitFor(() => {
+        expect(exportImage.mock.calls.filter(([job]) => job.kind === 'manual-thumbnail')).toHaveLength(count);
+      });
+    }
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter parts' }), { target: { value: 'Retry' } });
+    expect(exportImage.mock.calls.filter(([job]) => job.kind === 'manual-thumbnail')).toHaveLength(2);
+  });
+
+  it('does not resurrect an unsubmitted A retry after presenting B and returning to A', async () => {
+    const requests = vi.spyOn(PartThumbnailService.prototype, 'requestForOwner');
+    const exportImage = vi.fn().mockRejectedValue(new Error('Preview unavailable'));
+    mocks.imageService = { export: exportImage };
+    const part = {
+      ...createNode(firstComponentId, 'Retry part'),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    const contentA = new Uint8Array([1, 2, 3]);
+    const contentB = new Uint8Array([4, 5, 6]);
+    const present = (hash: string, content: Uint8Array<ArrayBuffer>): void => {
+      mockProjectForExplorer({
+        mainEntryPath: 'src/main.ts',
+        geometryUnitFiles: ['src/main.ts'],
+        viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+        viewGraphics: new Map([
+          [
+            'mainView',
+            createGraphicsRefForUnit('src/main.ts', [part], {
+              selectedComponentIds: [firstComponentId],
+              previewGeometry: { hash, content },
+            }),
+          ],
+        ]),
+      });
+    };
+    const tree = () => (
+      <TooltipProvider>
+        <ChatExplorerTree />
+      </TooltipProvider>
+    );
+    present('source-a', contentA);
+    const view = render(tree());
+    const properties = screen.getByTestId('model-pane-properties');
+    await waitFor(() => {
+      expect(exportImage).toHaveBeenCalledTimes(1);
+    });
+    const pending = Promise.withResolvers<Awaited<ReturnType<typeof partThumbnailVisual.canonicalPartPreviews>>>();
+    const originalPrepare = partThumbnailVisual.canonicalPartPreviews;
+    const prepare = vi
+      .spyOn(partThumbnailVisual, 'canonicalPartPreviews')
+      .mockImplementation(async () => pending.promise);
+    fireEvent.click(await within(properties).findByRole('button', { name: 'Retry preview' }));
+    await waitFor(() => {
+      expect(prepare).toHaveBeenCalled();
+    });
+    prepare.mockImplementation(originalPrepare);
+    present('source-b', contentB);
+    view.rerender(tree());
+    await waitFor(() => {
+      expect(requests.mock.calls.some((call) => call[1].content === contentB)).toBe(true);
+    });
+    const beforeReturn = requests.mock.calls.length;
+    present('source-a', contentA);
+    view.rerender(tree());
+    await waitFor(() => {
+      expect(requests.mock.calls.slice(beforeReturn).some((call) => call[1].content === contentA)).toBe(true);
+    });
+    expect(requests.mock.calls.filter((call) => call[3]?.manualPartId === firstComponentId)).toHaveLength(0);
+    pending.resolve({ visualKey: 'old', previews: [{ key: 'old' }] });
+    fireEvent.click(await within(properties).findByRole('button', { name: 'Retry preview' }));
+    await waitFor(() => {
+      expect(requests.mock.calls.filter((call) => call[3]?.manualPartId === firstComponentId)).toHaveLength(1);
+    });
   });
 
   it('keeps the selected unit preview when another unit finishes later', async () => {
@@ -902,6 +1115,54 @@ describe('Chat explorer component rows', () => {
     expect(row).toHaveClass('text-sm');
     expect(row).toHaveClass('leading-5');
     expect(row).toHaveStyle({ paddingLeft: '8px' });
+  });
+
+  it('leads a renderable part row with an 80 px preview that opens the gallery', async () => {
+    mocks.openPartGallery = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:housing') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const node = {
+      ...createNode(firstComponentId, 'planetary_housing'),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+    renderComponentRow({
+      manifest: createManifest([node]),
+      node,
+      graphicsRef,
+      unitId: internalUnitId,
+      rootDepth: 0,
+      hoveredComponentId: undefined,
+      isSelected: false,
+      isHidden: false,
+      isIsolated: false,
+      isFocused: false,
+      opacity: 1,
+      preview: { status: 'pending', bytes: new Uint8Array([1]) },
+    });
+
+    const preview = screen.getByRole('button', { name: 'Preview planetary_housing' });
+    const row = preview.parentElement;
+    expect(row).toHaveClass('h-22');
+    expect(preview).toHaveClass('size-20', 'rounded-xs');
+    expect(preview).toHaveAttribute('tabindex', '-1');
+    // A refreshing preview keeps its last image, dimmed.
+    expect(preview.querySelector('img')).toHaveClass('opacity-50');
+    // The frame is a sibling of the selection button, never nested in it.
+    expect(screen.getByRole('button', { name: 'planetary_housing' }).querySelector('button')).toBeNull();
+
+    await userEvent.setup().click(preview);
+    expect(mocks.openPartGallery).toHaveBeenCalledWith({
+      graphicsRef,
+      unitId: internalUnitId,
+      componentId: firstComponentId,
+      source: 'explorer',
+      origin: preview,
+    });
+    expect(graphicsRef.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'toggleModelComponentSelection' }),
+    );
+    mocks.openPartGallery = undefined;
   });
 
   it('should toggle selection from the label row instead of adding the part to chat', async () => {

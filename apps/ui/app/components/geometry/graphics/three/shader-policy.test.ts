@@ -13,7 +13,7 @@ const repositoryRoot = existsSync(join(process.cwd(), 'apps', 'ui'))
   ? process.cwd()
   : resolve(process.cwd(), '..', '..');
 const appRoot = join(repositoryRoot, 'apps', 'ui', 'app');
-const productionRoots = [join(appRoot, 'components', 'geometry')];
+const productionRoots = [join(appRoot, 'components', 'geometry'), join(appRoot, 'components', 'printer')];
 
 const productionFiles = productionRoots.flatMap((root) => {
   const files: string[] = [];
@@ -128,11 +128,11 @@ describe('shader policy inventory', () => {
   it('maps every declared risk to named, existing test evidence', () => {
     for (const site of shaderSites) {
       const required = new Set(site.risks.flatMap((risk) => shaderRiskCapabilities[risk]));
-      const siteEvidence = shaderEvidence[site.id];
+      const siteEvidence: Partial<Record<string, readonly string[]>> = shaderEvidence[site.id];
       for (const capability of required) {
         const records = siteEvidence[capability];
         expect(records, `${site.id} lacks ${capability}`).toBeDefined();
-        for (const record of records) {
+        for (const record of records ?? []) {
           const separator = record.indexOf('::');
           const path = join(repositoryRoot, record.slice(0, separator));
           const testName = record.slice(separator + 2);

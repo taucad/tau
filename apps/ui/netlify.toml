@@ -6,38 +6,53 @@
 # dashboard via Terraform (`repos/tau-cloud/stacks/cloud/{staging,prod-us}`).
 # Pattern follows novuhq/novu: one `netlify.toml` shape, sites differ by dashboard env.
 #
-# Triggers:
-#   - staging: pushes to `main` (production context) + PR previews (`taucad` site).
-#   - prod: pushes to Git branch `production` after merging the bot-managed trail PR
-#     (see `.github/workflows/prepare-prod-release.yml`).
+# Triggers: Netlify no longer builds from Git (`deploy_mode = "ci"` in tau-cloud).
+# GitHub Actions runs this build with `netlify deploy --prod --context production`
+# (`.github/workflows/deploy-ui.yml`), after bringing in the GeoSpec engine
+# products that only CI's macOS producer can make:
+#   - staging: pushes to `main` that affect the UI (`ci.yml` deploy-ui-staging).
+#   - prod: pushes to Git branch `production`, made only by dispatching
+#     `.github/workflows/deploy-production.yml` with a release tag.
+# There are no PR deploy previews.
 #
 # SOURCE MAPS (`pnpm nx run ui:sourcemaps`): run inside the Netlify build for
 # **production context** only (`[build]` + `[context.production]` include them);
 # previews skip sourcemaps uploads to avoid leaking prod PostHog project keys into
 # PR builds (POSTHOG_CLI_* are still present on staging for main-branch builds —
-# use a distinct PostHog env per site in Terraform if needed).
+# use a distinct PostHog env per site in Terraform if needed). A failed upload
+# fails the build unless `TAU_SOURCEMAPS_OPTIONAL=true`, which `deploy-ui.yml`
+# sets for staging only, so a bad staging PostHog key cannot block the deploy.
 #
 # NX_PREFER_NODE_STRIP_TYPES: NODE_ENV=production at build time would make pnpm
 # skip devDependencies (including @swc/core). Nx needs a TS transpiler to load
 # plugin config files — this flag uses Node's native type stripping instead.
 
 [build]
+# Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui && pnpm nx run ui:sourcemaps"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 publish = "build/client"
 
 [build.environment]
 # Temporary: current Netlify plan cannot create Builds-scoped secrets.
 NX_NO_CLOUD = "true"
 
+# The React Router plugin writes the SSR function to `.netlify/v1/functions`
+# under this base. Naming that directory makes Netlify bundle the function from
+# its real path, where its import of `build/server/server.js` resolves, as a
+# user function that outranks the copy `deploy-ui.yml` exposes as a framework
+# function through its `.netlify` link (which ships without the server build).
+[functions]
+directory = ".netlify/v1/functions"
+
 [context.production]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui && pnpm nx run ui:sourcemaps"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 
 [context.deploy-preview]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
 
 [context.branch-deploy]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
 
 [dev]
 command = "pnpm nx dev ui"
@@ -49,6 +64,10 @@ NODE_ENV = "development"
 TAU_API_URL = "http://localhost:4000"
 TAU_FRONTEND_URL = "http://localhost:3000"
 TAU_WEBSOCKET_URL = "ws://localhost:4001"
+
+# Marketing site: `netlify/edge-functions/marketing.ts` proxies a full load of
+# `/` and the apps/www pages to the deploy named by the `MARKETING_ORIGIN` site
+# variable (set per site in tau-cloud). Unset, every request reaches the app.
 
 # The docs site serves documentation at its root, so the old runtime-scoped
 # LLM indexes are replaced by its top-level ones rather than moving verbatim.
@@ -119,7 +138,7 @@ Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
 # Referrer Policy
 Referrer-Policy = "strict-origin-when-cross-origin"
 # Permissions Policy (Feature Policy)
-Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()"
+Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=(), interest-cohort=()"
 # Cross-Origin Policies
 Cross-Origin-Opener-Policy = "same-origin"
 Cross-Origin-Resource-Policy = "same-origin"
@@ -138,7 +157,9 @@ Document-Policy = "js-profiling"
 #     Socket.IO endpoint. Listed explicitly so when CSP flips to enforcing
 #     (report-only first) we don't rely on the catch-all `wss:` and any unintended hop is
 #     immediately reported.
-Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
+#   - https://*.ingest.sentry.io / https://*.ingest.us.sentry.io: Sentry browser
+#     error reports (launch gate OBS-7), sent only when SENTRY_DSN is set.
+Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.taucad.dev https://cdn.tau.new https://github.com https:; font-src 'self' data:; connect-src 'self' https://cdn.taucad.dev https://cdn.tau.new https://api.github.com https://api.zoo.dev https://api.kittycad.io https://api.tau.new wss://api.tau.new https://*.ingest.sentry.io https://*.ingest.us.sentry.io wss:; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests;"
 
 # Homepage cache policy. Previously a `headers` export in
 # `app/routes/_index/route.tsx`; moved here because React Router SPA mode (the

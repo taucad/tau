@@ -1,5 +1,6 @@
 /* oxlint-disable max-params, no-await-in-loop, no-eval, no-restricted-imports, tau-lint/no-bare-time-identifier, typescript/consistent-type-definitions, typescript/no-restricted-types -- Vitest command callbacks add their context parameter to the explicit external-target contract, and config-time modules cannot use test aliases. `no-eval` is the external-target contract itself: `evaluateTarget`, `evaluateTargetLocator` and `waitForTarget` take a function SOURCE across the browser↔node command boundary — nothing else survives that serialization — and the page reconstitutes it. The sources are spec literals, never page-derived input. */
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -76,6 +77,8 @@ export type AgentHostGatewayState = {
 };
 
 type Session = {
+  geospecFault?: TargetDiagnostics['geospecFault'];
+  geospecWasm?: Promise<TargetDiagnostics['geospecWasm']>;
   readonly agentHostApiRequests: string[];
   readonly agentHostGatewayRequests: unknown[];
   readonly consoleMessages: Array<{
@@ -259,6 +262,7 @@ const disposeSession = async (session: Session): Promise<void> => {
   } catch (error) {
     errors.push(error);
   }
+  await session.geospecWasm;
   if (errors.length > 0) {
     throw new AggregateError(errors, 'UI E2E target cleanup failed.');
   }
@@ -633,6 +637,71 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
   [script?: readonly GatewayScriptTurn[], options?: AgentHostGatewayFixtureOptions]
 > = async (commandContext, script = browserHostScript, options = {}) => {
   const session = sessionFor(commandContext);
+  let geospecFaultActive = options.geospecFault !== undefined;
+  await session.context.route(/\/geospec_engine_native(?:-[\w-]+)?\.wasm(?:\?.*)?$/u, async (route) => {
+    if (geospecFaultActive && options.geospecFault !== undefined) {
+      const kind = options.geospecFault;
+      session.geospecFault = {
+        kind,
+        url: session.geospecFault?.url ?? route.request().url(),
+        requests: (session.geospecFault?.requests ?? 0) + 1,
+      };
+      if (kind === 'missing') {
+        await route.abort('failed');
+      } else {
+        await route.fulfill({
+          status: 200,
+          headers: { 'content-type': 'application/wasm', 'x-tau-geospec-fault': 'corrupt' },
+          body: Buffer.from([0, 1, 2, 3]),
+        });
+      }
+      return;
+    }
+    if (session.geospecWasm !== undefined) {
+      await route.continue();
+      return;
+    }
+    // Capture and forward this intercepted request once, not a second asset fetch.
+    // APIResponse.body is decoded; inspector Response.body can evict this large asset.
+    session.geospecWasm = (async () => {
+      try {
+        const response = await route.fetch();
+        const bytes = await response.body();
+        const headers = response.headers();
+        // The decoded body must not advertise its old compressed framing.
+        delete headers['content-encoding'];
+        delete headers['transfer-encoding'];
+        headers['content-length'] = String(bytes.byteLength);
+        await route.fulfill({ status: response.status(), headers, body: bytes });
+        const sourceBytes = await readFile(
+          resolve(
+            import.meta.dirname,
+            '../../../../packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm',
+          ),
+        );
+        return {
+          url: response.url(),
+          status: response.status(),
+          byteLength: bytes.byteLength,
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          sourceSha256: createHash('sha256').update(sourceBytes).digest('hex'),
+          sourceByteLength: sourceBytes.byteLength,
+          expectedSha256: process.env['TAU_E2E_GEOSPEC_WASM_SHA256'],
+          expectedByteLength:
+            process.env['TAU_E2E_GEOSPEC_WASM_BYTES'] === undefined
+              ? undefined
+              : Number(process.env['TAU_E2E_GEOSPEC_WASM_BYTES']),
+        };
+      } catch (error) {
+        session.pageErrors.push(
+          `GeoSpec WASM response capture failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        await route.abort('failed').catch(() => undefined);
+        return undefined;
+      }
+    })();
+    await session.geospecWasm;
+  });
   session.agentHostGatewayRequests.length = 0;
   session.agentHostApiRequests.length = 0;
   for (const gate of session.agentHostGatewayGates.splice(0)) {
@@ -727,13 +796,19 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<
           'x-tau-operation-id': `browser-host-e2e-operation-${String(currentRequest)}`,
         });
         response.flushHeaders();
+        const turn =
+          step === undefined
+            ? { text: options.summary, usage: { inputTokens: 40, outputTokens: 10 } }
+            : walk.serve(step);
+        // Streaming compilation may refetch after a fault. Keep that entire
+        // first initialization failed, then retire the fault at the first terminal turn.
+        if (turn.toolCalls === undefined && turn.text !== undefined) {
+          geospecFaultActive = false;
+        }
         await writeScriptedTurn({
           currentRequest,
           session,
-          turn:
-            step === undefined
-              ? { text: options.summary, usage: { inputTokens: 40, outputTokens: 10 } }
-              : walk.serve(step),
+          turn,
           turnKey: step?.turn ?? '',
           writeEvent,
         });
@@ -1124,6 +1199,7 @@ export const uiCaptureTargetDiagnostics: BrowserCommand<[], TargetDiagnostics> =
     screenshot,
     tracePath,
     url: session.primary.url(),
+    geospecWasm: await session.geospecWasm,
   };
 };
 
@@ -1773,13 +1849,12 @@ export const uiCloseSecondaryTarget: BrowserCommand = async (commandContext) => 
 };
 
 /**
- * The dedicated workers the target page is running right now (V21, S48(16)).
+ * The dedicated workers exposed for the target page by Playwright (V21, S48(16)).
  *
- * Uninstrumented on purpose: a page cannot enumerate its own dedicated workers,
- * and the alternative was a counter in product code behind a debug flag — which
- * would make the measurement a thing the app has to keep true rather than a
- * thing the browser already knows. Playwright's `page.workers()` is what
- * Chrome's own task manager lists.
+ * Uses the provider's page-scoped observation without product instrumentation.
+ * The selected WebKit provider does not recursively enumerate workers created
+ * inside workers. An empty listing therefore cannot establish their absence or
+ * qualify nested-worker cardinality.
  *
  * @param commandContext - The Vitest browser command context.
  * @param urlSubstring - Keep only workers whose script URL contains this.
@@ -1871,12 +1946,16 @@ export const uiReadTargetEvents: BrowserCommand<
       readonly type: string;
     }>;
     readonly pageErrors: readonly string[];
+    readonly geospecWasm?: TargetDiagnostics['geospecWasm'];
+    readonly geospecFault?: TargetDiagnostics['geospecFault'];
   }
-> = (commandContext) => {
+> = async (commandContext) => {
   const session = sessionFor(commandContext);
   return {
     consoleMessages: session.consoleMessages,
     pageErrors: session.pageErrors,
+    geospecWasm: await session.geospecWasm,
+    geospecFault: session.geospecFault,
   };
 };
 

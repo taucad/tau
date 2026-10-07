@@ -119,6 +119,6 @@ describe('host runtime composition', () => {
     }).toThrow('invoked toolkits');
     expect(() => {
       Reflect.apply(defineRuntime, undefined, [{ plugins: [{}] }]);
-    }).toThrow('expected ABI 2');
+    }).toThrow('expected ABI 5');
   });
 });

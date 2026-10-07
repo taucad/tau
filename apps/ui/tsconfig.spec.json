@@ -15,6 +15,7 @@
   "include": [
     "vite.config.ts",
     "vitest.config.ts",
+    "chat-revision-marker.vitest.browser.config.ts",
     "vitest.setup.ts",
     "react-router.config.ts",
     "./.react-router/types/**/*",
@@ -34,6 +35,8 @@
     "tests/**/*.test.tsx",
     "server.ts",
     "server.test.ts",
+    "netlify/edge-functions/*.ts",
+    "netlify/*.test.ts",
     "scripts/**/*.ts",
     "scripts/**/*.mts",
     "vite-environment.d.ts",

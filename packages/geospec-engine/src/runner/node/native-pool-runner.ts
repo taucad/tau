@@ -1,14 +1,74 @@
-/** Distinct opt-in protocol-3 native Node pool. @module */
+/** Compiled GeoSpec Node pool and caller-inclusive CPU admission. @module */
 
 import { availableParallelism } from 'node:os';
 import { Worker } from 'node:worker_threads';
 import { allocateNativePoolGrants } from 'geospec/runner/native';
-import type { GeoSpecRunner } from 'geospec/runner/worker';
-import { createNodeWorkerHandle } from '#runner/node/node-runner.js';
-import type { NodeWorkerLike } from '#runner/node/node-runner.js';
 import { createGeoSpecPoolRunner } from '#runner/pool/pool.js';
+import type {
+  GeoSpecPoolHostMessage,
+  GeoSpecPoolWorkerHandle,
+  GeoSpecPoolWorkerMessage,
+  GeoSpecRunner,
+} from 'geospec/runner/worker';
 
-/** Options for the opt-in native Node pool. @public */
+/**
+ * The slice of `node:worker_threads`' `Worker` the pool drives.
+ *
+ * Declared structurally so the adapter can be exercised against a stub as well
+ * as against a real thread (D-8: vitest cannot host a TypeScript worker).
+ *
+ * @public
+ */
+export type NodeWorkerLike = {
+  postMessage(value: unknown): void;
+  on(event: 'message', listener: (value: GeoSpecPoolWorkerMessage) => void): void;
+  on(event: 'exit', listener: (code: number) => void): void;
+  on(event: 'error', listener: (error: Error) => void): void;
+  terminate(): Promise<number> | number;
+};
+
+/**
+ * Adapt a Node worker thread to the pool's host-agnostic handle.
+ *
+ * @param worker - The spawned worker.
+ * @returns The pool handle.
+ * @public
+ */
+export const createNodeWorkerHandle = (worker: NodeWorkerLike): GeoSpecPoolWorkerHandle => {
+  let shuttingDown = false;
+  let lastError: string | undefined;
+  return {
+    postMessage(message: GeoSpecPoolHostMessage) {
+      if (message.type === 'shutdown') {
+        shuttingDown = true;
+      }
+      worker.postMessage(message);
+    },
+    onMessage(listener) {
+      worker.on('message', listener);
+    },
+    onExit(listener) {
+      worker.on('error', (error: Error) => {
+        lastError = error.message;
+      });
+      worker.on('exit', (code: number) => {
+        // An exit during shutdown is the expected end of a worker's life; an
+        // exit at any other time killed a shard, and the pool must hear about
+        // it rather than wait forever for a reply that will not come.
+        listener({
+          unexpected: !shuttingDown && code !== 0,
+          ...(lastError === undefined ? {} : { message: lastError }),
+        });
+      });
+    },
+    async terminate() {
+      shuttingDown = true;
+      await worker.terminate();
+    },
+  };
+};
+
+/** Options for the compiled Node pool. @public */
 export type GeoSpecNativeNodePoolOptions = {
   /** Absolute project root. */
   projectPath: string;
@@ -26,7 +86,7 @@ export type GeoSpecNativeNodePoolOptions = {
 };
 
 /**
- * Create an opt-in native pool with one engine constructed inside each worker.
+ * Create a compiled pool with one engine constructed inside each worker.
  *
  * Workers are threads of this process and share one OCCT library instance and
  * pool width, so inner parallelism is all-or-nothing: either several workers
@@ -63,7 +123,9 @@ export const createGeoSpecNativeNodePoolRunner = (options: GeoSpecNativeNodePool
             import.meta.url.endsWith('.ts') ? './native-pool-worker-entry.ts' : './native-pool-worker-entry.mjs',
             import.meta.url,
           ),
-          { workerData: { projectPath: options.projectPath, grant: grants[index++] } },
+          {
+            workerData: { projectPath: options.projectPath, grant: grants[index++] },
+          },
         ) as NodeWorkerLike,
       ),
     initializeWorker: (worker) => {

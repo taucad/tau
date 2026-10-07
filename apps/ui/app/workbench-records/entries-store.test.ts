@@ -42,7 +42,7 @@ function memory() {
     files: { exists: async () => bytes !== null, readFile: async () => bytes!, writeFileChecked: writes },
     writes,
     get: () => bytes,
-    setBytes: (next: Uint8Array<ArrayBuffer>) => {
+    setBytes: (next: Uint8Array<ArrayBuffer> | null) => {
       bytes = next;
     },
     delay: () => {
@@ -64,6 +64,207 @@ const store = (m: ReturnType<typeof memory>) =>
   });
 
 describe('workbench entries checked store', () => {
+  it('fences internal publication immediately when its source invalidates during a read', async () => {
+    const data = memory();
+    const entered = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    const onChange = vi.fn();
+    let hold = true;
+    const owner = createWorkbenchEntriesStore({
+      root: '/root',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          const bytes = await data.files.readFile();
+          if (hold) {
+            hold = false;
+            entered.resolve();
+            await gate.promise;
+          }
+          return bytes;
+        },
+      },
+      onChange,
+      onError: () => undefined,
+    });
+    try {
+      const pending = owner.read();
+      await entered.promise;
+      owner.invalidateRead();
+      gate.resolve();
+      await pending;
+      expect(onChange).not.toHaveBeenCalled();
+      expect(owner.ready()).toBe(false);
+      await owner.read();
+      expect(owner.ready()).toBe(true);
+      expect(onChange).toHaveBeenCalledOnce();
+    } finally {
+      owner.dispose();
+    }
+  });
+
+  it('should keep invalid bytes preservable when an unchanged edit owes no fields', async () => {
+    const data = memory();
+    const entries = store(data);
+    try {
+      await entries.read();
+      const invalid = encoder.encode('{broken');
+      data.setBytes(invalid);
+      await entries.read();
+      expect(await entries.edit('a.ts', seed().entries['a.ts']!)).toBe(false);
+      expect(await entries.flush()).toBe(true);
+      expect(data.get()).toEqual(invalid);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('should hold an accepted edit and flush until its first record read settles', async () => {
+    const data = memory();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          entered.resolve();
+          await release.promise;
+          return data.files.readFile();
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      const hydration = entries.read();
+      await entered.promise;
+      const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+      let settled = false;
+      const drained = (async () => {
+        const saved = await entries.flush();
+        settled = true;
+        return saved;
+      })();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(data.writes).not.toHaveBeenCalled();
+      release.resolve();
+      await hydration;
+      expect(await edited).toBe(true);
+      expect(await drained).toBe(true);
+      expect(workbenchRecords.entries.read(data.get()!)).toMatchObject({
+        status: 'current',
+        record: { entries: { 'a.ts': { renderTimeout: 240_000 } } },
+      });
+    } finally {
+      release.resolve();
+      entries.dispose();
+    }
+  });
+
+  it.each(['{broken', '{"version":2}'])(
+    'should retain blocked entry intent through flush and repair (%s)',
+    async (invalid) => {
+      const data = memory();
+      const entries = store(data);
+      try {
+        await entries.read();
+        const release = data.delay();
+        const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+        await vi.waitFor(() => {
+          expect(data.writes).toHaveBeenCalledOnce();
+        });
+        const foreign = encoder.encode(invalid);
+        data.setBytes(foreign);
+        release();
+        expect(await edited).toBe(false);
+        expect(await entries.flush()).toBe(false);
+        expect(data.get()).toEqual(foreign);
+        data.setBytes(encoder.encode(workbenchRecords.entries.serialize(seed())));
+        await entries.read();
+        expect(await entries.flush()).toBe(true);
+        expect(workbenchRecords.entries.read(data.get()!)).toMatchObject({
+          status: 'current',
+          record: { entries: { 'a.ts': { renderTimeout: 240_000 } } },
+        });
+      } finally {
+        entries.dispose();
+      }
+    },
+  );
+
+  it('should preserve invalid entry bytes on a clean flush', async () => {
+    const data = memory();
+    const foreign = encoder.encode('{broken');
+    data.setBytes(foreign);
+    const entries = store(data);
+    try {
+      await entries.read();
+      expect(await entries.flush()).toBe(true);
+      expect(data.get()).toEqual(foreign);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('should preserve noncanonical timeout bytes until an explicit checked Reset', async () => {
+    const data = memory();
+    const entries = store(data);
+    try {
+      await entries.read();
+      const invalid = encoder.encode('{"version":1,"entries":{"a.ts":{"operationTimeout":240000}}}');
+      data.setBytes(invalid);
+      await entries.read();
+      expect(entries.snapshot().refusal?.code).toBe('INVALID_RECORD');
+      expect(await entries.edit('a.ts', { renderTimeout: 240_000 })).toBe(false);
+      expect(await entries.flush()).toBe(false);
+      expect(data.get()).toEqual(invalid);
+      expect(data.writes).not.toHaveBeenCalled();
+      expect(await entries.reset(seed())).toBe(true);
+      expect(await entries.flush()).toBe(true);
+      expect(workbenchRecords.entries.read(data.get()!)).toEqual({ status: 'current', record: seed() });
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('should retire a disposed entry owner before a late write failure can retry', async () => {
+    vi.useFakeTimers();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const data = memory();
+    const writeFileChecked = vi.fn(async (): Promise<CheckedFileWriteResult> => {
+      entered.resolve();
+      await release.promise;
+      throw new Error('offline');
+    });
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: { ...data.files, writeFileChecked },
+      onChange: () => undefined,
+      onError: vi.fn(),
+    });
+    try {
+      await entries.read();
+      const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+      await entered.promise;
+      entries.dispose();
+      release.resolve();
+      expect(await edited).toBe(false);
+      await vi.runOnlyPendingTimersAsync();
+      expect(writeFileChecked).toHaveBeenCalledOnce();
+      expect(await entries.edit('a.ts', { renderTimeout: 300_000 })).toBe(false);
+      expect(writeFileChecked).toHaveBeenCalledOnce();
+    } finally {
+      release.resolve();
+      entries.dispose();
+      vi.useRealTimers();
+    }
+  });
   it('marks only exact in-flight entry patch fields on a matching watch read', async () => {
     const data = memory();
     const committed = Promise.withResolvers<void>();
@@ -226,10 +427,16 @@ describe('workbench entries checked store', () => {
         i % 2 === 0
           ? [
               a.edit('a.ts', { renderTimeout: 15_000 }),
-              b.edit('a.ts', { renderTimeout: 180_000, components: { hidden: ['part'], isolated: [], opacity: [] } }),
+              b.edit('a.ts', {
+                renderTimeout: 180_000,
+                components: { hidden: ['part'], isolated: [], opacity: [] },
+              }),
             ]
           : [
-              b.edit('a.ts', { renderTimeout: 180_000, components: { hidden: ['part'], isolated: [], opacity: [] } }),
+              b.edit('a.ts', {
+                renderTimeout: 180_000,
+                components: { hidden: ['part'], isolated: [], opacity: [] },
+              }),
               a.edit('a.ts', { renderTimeout: 15_000 }),
             ],
       );
@@ -284,25 +491,28 @@ describe('workbench entries checked store', () => {
 
   it('lets the delayed checked writer win competing timeout and component values', async () => {
     type Entry = WorkbenchEntries['entries'][string];
-    const variants: ReadonlyArray<{ field: 'renderTimeout' | 'hidden' | 'isolated' | 'opacity'; a: Entry; b: Entry }> =
-      [
-        { field: 'renderTimeout', a: { renderTimeout: 15_000 }, b: { renderTimeout: 30_000 } },
-        {
-          field: 'hidden',
-          a: { components: { hidden: ['a'], isolated: [], opacity: [] } },
-          b: { components: { hidden: ['b'], isolated: [], opacity: [] } },
-        },
-        {
-          field: 'isolated',
-          a: { components: { hidden: [], isolated: ['a'], opacity: [] } },
-          b: { components: { hidden: [], isolated: ['b'], opacity: [] } },
-        },
-        {
-          field: 'opacity',
-          a: { components: { hidden: [], isolated: [], opacity: [{ id: 'a', opacity: 0.5 }] } },
-          b: { components: { hidden: [], isolated: [], opacity: [{ id: 'b', opacity: 0.25 }] } },
-        },
-      ];
+    const variants: ReadonlyArray<{
+      field: 'renderTimeout' | 'hidden' | 'isolated' | 'opacity';
+      a: Entry;
+      b: Entry;
+    }> = [
+      { field: 'renderTimeout', a: { renderTimeout: 15_000 }, b: { renderTimeout: 30_000 } },
+      {
+        field: 'hidden',
+        a: { components: { hidden: ['a'], isolated: [], opacity: [] } },
+        b: { components: { hidden: ['b'], isolated: [], opacity: [] } },
+      },
+      {
+        field: 'isolated',
+        a: { components: { hidden: [], isolated: ['a'], opacity: [] } },
+        b: { components: { hidden: [], isolated: ['b'], opacity: [] } },
+      },
+      {
+        field: 'opacity',
+        a: { components: { hidden: [], isolated: [], opacity: [{ id: 'a', opacity: 0.5 }] } },
+        b: { components: { hidden: [], isolated: [], opacity: [{ id: 'b', opacity: 0.25 }] } },
+      },
+    ];
     for (const variant of variants) {
       for (let i = 0; i < 100; i++) {
         const m = memory();
@@ -524,5 +734,204 @@ describe('workbench entries checked store', () => {
       expect(read.record.entries['b.ts']).toBeUndefined();
     }
     entries.dispose();
+  });
+});
+
+describe('workbench entries record recovery', () => {
+  const record = (value: WorkbenchEntries): Uint8Array<ArrayBuffer> =>
+    encoder.encode(workbenchRecords.entries.serialize(value));
+  const current = (bytes: Uint8Array<ArrayBuffer> | null): WorkbenchEntries => {
+    const read = workbenchRecords.entries.read(bytes!);
+    if (read.status !== 'current') {
+      throw new Error(read.message);
+    }
+    return read.record;
+  };
+
+  it('does not resurrect settings from a deleted record when a later edit writes', async () => {
+    const m = memory();
+    m.setBytes(
+      record({ version: 1, entries: { 'main.ts': { renderTimeout: 240_000 }, 'other.ts': { renderTimeout: 90_000 } } }),
+    );
+    const entries = store(m);
+    try {
+      await entries.read();
+      m.setBytes(null);
+      await entries.read();
+      expect(entries.snapshot().record).toBeUndefined();
+      expect(await entries.edit('main.ts', { renderTimeout: 120_000 })).toBe(true);
+      expect(current(m.get()).entries).toEqual({ 'main.ts': { renderTimeout: 120_000 } });
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('keeps a genuinely pending edit across deletion without stale siblings', async () => {
+    vi.useFakeTimers();
+    const m = memory();
+    m.setBytes(
+      record({ version: 1, entries: { 'main.ts': { renderTimeout: 240_000 }, 'other.ts': { renderTimeout: 90_000 } } }),
+    );
+    const original = m.files.writeFileChecked;
+    let failures = 1;
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: {
+        ...m.files,
+        writeFileChecked: async (input) => {
+          if (failures-- > 0) {
+            throw Object.assign(new Error('offline'), { applicationState: 'known-not-applied' });
+          }
+          return original(input);
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await entries.read();
+      expect(await entries.edit('main.ts', { renderTimeout: 120_000 })).toBe(false);
+      m.setBytes(null);
+      await entries.read();
+      expect(await entries.flush()).toBe(true);
+      expect(current(m.get()).entries).toEqual({ 'main.ts': { renderTimeout: 120_000 } });
+    } finally {
+      entries.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('removes a saved render timeout when the edit omits it', async () => {
+    const m = memory();
+    const entries = store(m);
+    try {
+      await entries.read();
+      expect(await entries.edit('a.ts', {})).toBe(true);
+      expect(current(m.get()).entries['a.ts']).toEqual({});
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('repairs only against the bytes the person reviewed', async () => {
+    const m = memory();
+    const reviewed = encoder.encode('{"version":1,"entries":{"a.ts":{"operationTimeout":240000}}}');
+    m.setBytes(reviewed);
+    const entries = store(m);
+    try {
+      await entries.read();
+      const newer = encoder.encode('{"version":1,"entries":{"a.ts":{"operationTimeout":180000}}}');
+      m.setBytes(newer);
+      await entries.read();
+      expect(await entries.reset({ version: 1, entries: { 'a.ts': { renderTimeout: 240_000 } } }, reviewed)).toBe(
+        false,
+      );
+      expect(m.get()).toEqual(newer);
+      expect(m.writes).not.toHaveBeenCalled();
+      expect(await entries.reset({ version: 1, entries: { 'a.ts': { renderTimeout: 180_000 } } }, newer)).toBe(true);
+      expect(current(m.get()).entries['a.ts']).toEqual({ renderTimeout: 180_000 });
+    } finally {
+      entries.dispose();
+    }
+  });
+});
+
+describe('workbench entries record health', () => {
+  it('retries a failed read with backoff, then reports the record unavailable', async () => {
+    vi.useFakeTimers();
+    const m = memory();
+    const readFile = vi.fn(async (): Promise<Uint8Array<ArrayBuffer>> => {
+      throw new Error('disk busy');
+    });
+    const health = vi.fn();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: { ...m.files, readFile },
+      onChange: () => undefined,
+      onError: () => undefined,
+      onHealth: health,
+    });
+    try {
+      await entries.read();
+      expect(health).toHaveBeenLastCalledWith(expect.objectContaining({ read: 'retrying', error: 'disk busy' }));
+      await vi.runAllTimersAsync();
+      expect(readFile).toHaveBeenCalledTimes(4);
+      expect(health).toHaveBeenLastCalledWith(expect.objectContaining({ read: 'unavailable' }));
+      readFile.mockImplementation(async () => m.get()!);
+      await entries.retryRead();
+      await vi.runAllTimersAsync();
+      expect(entries.health().read).toBe('ok');
+      expect(entries.ready()).toBe(true);
+    } finally {
+      entries.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['applied', true, 1],
+    ['not applied', false, 2],
+  ])('reconciles a potentially-applied write that was %s before writing again', async (_name, applied, writes) => {
+    vi.useFakeTimers();
+    const m = memory();
+    const original = m.files.writeFileChecked;
+    const writeFileChecked = vi.fn(async (input: Parameters<typeof original>[0]) => {
+      if (writeFileChecked.mock.calls.length === 1) {
+        if (applied) {
+          await original(input);
+        }
+        throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+      }
+      return original(input);
+    });
+    const health = vi.fn();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: { ...m.files, writeFileChecked },
+      onChange: () => undefined,
+      onError: () => undefined,
+      onHealth: health,
+    });
+    try {
+      await entries.read();
+      expect(await entries.edit('a.ts', { renderTimeout: 120_000 })).toBe(false);
+      expect(entries.health().unconfirmed).toBe(true);
+      expect(await entries.flush()).toBe(true);
+      expect(writeFileChecked).toHaveBeenCalledTimes(writes);
+      expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
+        status: 'current',
+        record: { entries: { 'a.ts': { renderTimeout: 120_000 } } },
+      });
+      expect(entries.health().unconfirmed).toBe(false);
+    } finally {
+      entries.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('marks a change unconfirmed while its write is outstanding past the slow threshold', async () => {
+    vi.useFakeTimers();
+    const m = memory();
+    const health = vi.fn();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: m.files,
+      onChange: () => undefined,
+      onError: () => undefined,
+      onHealth: health,
+    });
+    try {
+      await entries.read();
+      const release = m.delay();
+      const saved = entries.edit('a.ts', { renderTimeout: 120_000 });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(entries.health()).toMatchObject({ writing: true, unconfirmed: true });
+      release();
+      expect(await saved).toBe(true);
+      expect(entries.health()).toMatchObject({ writing: false, unconfirmed: false });
+    } finally {
+      entries.dispose();
+      vi.useRealTimers();
+    }
   });
 });

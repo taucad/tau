@@ -1,0 +1,136 @@
+{
+  "baseline": "faecc9ac8f456b7fa5639fc0eb146012e3e499c8",
+  "assemblySource": {
+    "path": "libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts",
+    "bytes": 18706,
+    "sha256": "1f7b4e11f80020eb19f5fbbb5beb7ee9b6112a6b0384bac006450e3205d65931"
+  },
+  "assemblyParts": 34,
+  "illustrationOnly": true,
+  "freshGeospecRun": true,
+  "oldHeroGeometry": {
+    "path": "apps/ui/app/components/geometry/splash/assets/planetary.glb",
+    "bytes": 2806748,
+    "sha256": "68a30867ca9c12e9d6a8f4fe481d86bbd8e212fc01dd6ea1bcb1f8d57ef806da"
+  },
+  "renderRecipe": "scripts/capture-stills.mjs",
+  "responsiveAndSocialRecipe": "scripts/optimize-assets.mjs",
+  "firstPartySourceLicense": "Apache-2.0",
+  "notes": "Hero poster and story stills are captured from the shipped scene module (scripts/capture-stills.mjs) so static and live views match. The faceWidth 18 variant stores per-vertex axial offsets exported from the authored model with the same tessellation; XY is unchanged and the committed base mesh is verified identical before export. The GeoSpec evidence is a recorded local run of the example's own spec (3 passed, 0 failed, 7 inconclusive); it is displayed as recorded, not re-run by visitors. Agent lanes and print preparation are illustrations; rigid kinematics are prescribed, not physics. The metal Escher star remains Tau's own metal-morph capture.",
+  "refreshedAssets": [
+    {
+      "path": "apps/www/public/metal-hero.webp",
+      "bytes": 37170,
+      "sha256": "9c8d5e4403992eeda6b25177555966575b437b05bfdb4e29ea71a6ce353571cb"
+    },
+    {
+      "path": "apps/www/public/metal-hero-640.webp",
+      "bytes": 19768,
+      "sha256": "0a4c9b305f516f08a4f34b31cf82b329d7eee2d89a4b1c6d31ee582468d60985"
+    },
+    {
+      "path": "apps/www/public/planetary.bin.gz",
+      "bytes": 955158,
+      "sha256": "847c7e6739255da9cb5955c6cd8377e48098a488f97e672e73c063092d99ae31"
+    },
+    {
+      "path": "apps/www/public/planetary.json",
+      "bytes": 10087,
+      "sha256": "dc4ec724d6ac5f36a88a9a4a0f341b0789116f2711773c7a423576f14607c4e6"
+    },
+    {
+      "path": "apps/www/public/social.png",
+      "bytes": 151747,
+      "sha256": "e9ddf0e76126e28581f52121c56309f65e18fe8dd43527e362e0870b0840c930"
+    }
+  ],
+  "metalHero": {
+    "source": [
+      "apps/ui/app/components/geometry/loader/metal-morph-shapes.ts",
+      "apps/ui/app/components/geometry/loader/metal-morph-material.node.ts",
+      "apps/ui/app/components/geometry/loader/metal-morph-environment.ts"
+    ],
+    "recipe": "scripts/capture-metal-hero.mjs",
+    "shape": "escher-star",
+    "detail": 6,
+    "capturePixelRatio": 2,
+    "static": true
+  },
+  "storyRecipe": "scripts/export-story-assets.mjs",
+  "modelUnchangedThrough": "df1966a64f28dac856d514cb4030ef26a707151a",
+  "variantRecipe": "scripts/export-variant-assets.mjs",
+  "geospecEvidence": {
+    "path": "apps/www/content/evidence/planetary-geospec-run.json",
+    "bytes": 2261,
+    "sha256": "ceb28fe8e05d231072a4fd7a7afef6f58e21b102ccd021b2adcc887912575e7c"
+  },
+  "liveViews": [
+    {
+      "path": "apps/www/public/hero-gearbox.webp",
+      "bytes": 120742,
+      "sha256": "fc2ccc1b2bb7fd4157aface1c49e8a6ad378404c62d74ba8df88de296b30cd65"
+    },
+    {
+      "path": "apps/www/public/hero-gearbox-720.webp",
+      "bytes": 58372,
+      "sha256": "5aa9e7ea667e4f695eabfa833e81da75fcb967438a3eff20daf3db8c57deb233"
+    },
+    {
+      "path": "apps/www/public/story-0.webp",
+      "bytes": 1952,
+      "sha256": "ccd1b54012fed2798a0c967a6b9b6787676c2d0d8f2ee83899e3703867d92f5f"
+    },
+    {
+      "path": "apps/www/public/story-1.webp",
+      "bytes": 1952,
+      "sha256": "ccd1b54012fed2798a0c967a6b9b6787676c2d0d8f2ee83899e3703867d92f5f"
+    },
+    {
+      "path": "apps/www/public/story-2.webp",
+      "bytes": 37272,
+      "sha256": "43e4dd1fac09145bc5397df55f0af0044dd1a8db313ac86507609322e5fb616d"
+    },
+    {
+      "path": "apps/www/public/story-3.webp",
+      "bytes": 21038,
+      "sha256": "862ce7b195523d7a8be1ec75a68b4e9d84d25a507b551e252799e6f871bc59d3"
+    },
+    {
+      "path": "apps/www/public/story-4.webp",
+      "bytes": 63962,
+      "sha256": "93e52901f53f4acdb165712872fbbf522456e8aed1bef3dc079fbf902bdb3b1d"
+    },
+    {
+      "path": "apps/www/public/story-5.webp",
+      "bytes": 88964,
+      "sha256": "a226f26de3ff95a5f58e451cbade22b4a4df1810a6f4b3f18134fda7a14a3f3e"
+    },
+    {
+      "path": "apps/www/public/story-6.webp",
+      "bytes": 97904,
+      "sha256": "f44e86c6c6064d7080decbf044322468208c0baacf925d7f64f925170b715da8"
+    },
+    {
+      "path": "apps/www/public/story-7.webp",
+      "bytes": 50850,
+      "sha256": "b26e737f7d6b47966ec3a8a0e4d4407a01dc73b4cb60fe30a976212f7a6e2b88"
+    },
+    {
+      "path": "apps/www/public/story-8.webp",
+      "bytes": 17780,
+      "sha256": "c6d2e02ad4c238eab6d1053d1aedd2b44183a86a9958785a6c654fd91cc25163"
+    }
+  ],
+  "variantGeometry": [
+    {
+      "path": "apps/www/public/planetary-face18.json",
+      "bytes": 2501,
+      "sha256": "63d72fde78ecee506f5bd2214ffa5953fc7d626c09be2764d8c90eee58dfb487"
+    },
+    {
+      "path": "apps/www/public/planetary-face18.bin.gz",
+      "bytes": 2225,
+      "sha256": "52ee23b6d9cf33bad1b2661291732d062f17bce7fddb93e0010f4f18ce92906a"
+    }
+  ]
+}

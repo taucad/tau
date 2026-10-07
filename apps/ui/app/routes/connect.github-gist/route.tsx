@@ -118,7 +118,7 @@ export default function ConnectGithubGistRoute(): React.JSX.Element {
         {granted ? undefined : (
           <CardContent className='flex flex-col gap-2'>
             {error === undefined ? undefined : (
-              <p role='alert' className='text-sm text-destructive'>
+              <p role='alert' className='text-sm text-feature'>
                 {error}
               </p>
             )}

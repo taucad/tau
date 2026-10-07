@@ -9,6 +9,7 @@
  * @typedef {import('eslint').Rule.RuleModule} RuleModule
  * @typedef {{ importsMap: Record<string, string>; packageDirectory: string }} ResolveContext
  * @typedef {{ publicFiles: Map<string, Set<string>>; resolveContext: ResolveContext }} TraversalContext
+ * @typedef {{ range: [number, number]; value: string }} JsdocComment
  */
 
 import fs from 'node:fs';
@@ -313,20 +314,20 @@ function getPublicFiles(filename) {
  *
  * @param {import('estree').Node} node
  * @param {import('eslint').Rule.RuleContext['sourceCode']} sourceCode
- * @param {import('estree').Comment[]} jsdocComments
- * @returns {import('estree').Comment | undefined}
+ * @param {readonly JsdocComment[]} jsdocComments
+ * @returns {JsdocComment | undefined}
  */
 function findJsdocBefore(node, sourceCode, jsdocComments) {
-  const nodeStart = /** @type {[number, number]} */ (node.range)[0];
-  /** @type {import('estree').Comment | undefined} */
+  const [nodeStart] = sourceCode.getRange(node);
+  /** @type {JsdocComment | undefined} */
   let closest;
 
   for (const jsdoc of jsdocComments) {
-    const jsdocEnd = /** @type {[number, number]} */ (jsdoc.range)[1];
+    const jsdocEnd = jsdoc.range[1];
     if (jsdocEnd >= nodeStart) {
       continue;
     }
-    if (!closest || jsdocEnd > /** @type {[number, number]} */ (closest.range)[1]) {
+    if (!closest || jsdocEnd > closest.range[1]) {
       closest = jsdoc;
     }
   }
@@ -335,7 +336,7 @@ function findJsdocBefore(node, sourceCode, jsdocComments) {
     return undefined;
   }
 
-  const closestEnd = /** @type {[number, number]} */ (closest.range)[1];
+  const closestEnd = closest.range[1];
   const gap = sourceCode.getText().slice(closestEnd, nodeStart);
   const gapWithoutLineComments = gap.replaceAll(/\/\/[^\n]*/g, '');
   if (gapWithoutLineComments.trim().length > 0) {
@@ -364,7 +365,7 @@ export const requirePublicExportJsdocRule = {
       return {};
     }
 
-    /** @type {import('estree').Comment[]} */
+    /** @type {JsdocComment[]} */
     const jsdocComments = [];
 
     /** @type {Map<string, Array<{ exported: string; typeOnly: boolean }>>} */
@@ -414,8 +415,9 @@ export const requirePublicExportJsdocRule = {
     return {
       Program(node) {
         for (const comment of context.sourceCode.getAllComments()) {
-          if (comment.type === 'Block' && comment.value.startsWith('*')) {
-            jsdocComments.push(comment);
+          const { range, value } = comment;
+          if (comment.type === 'Block' && value.startsWith('*') && range) {
+            jsdocComments.push({ range, value });
           }
         }
 

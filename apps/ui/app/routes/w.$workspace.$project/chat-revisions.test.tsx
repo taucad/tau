@@ -807,9 +807,15 @@ describe('Revisions pane closeout', () => {
     const user = userEvent.setup();
     renderPane();
     await user.click(await screen.findByRole('button', { name: 'Rev 1 · Thicker base' }));
+    // The head row's own files compare with its parent; the working copy is an explicit comparison.
+    expect(await screen.findByRole('button', { name: 'Compare src/main.scad' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'More actions for Rev 1' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Compare with current' }));
 
+    const since = await screen.findByRole('list', { name: 'Changed since Rev 1' });
+    expect(revisionStatusHarness.diffRequests).toContain('rev-1..checkout');
     expect(
-      await screen.findByRole('button', { name: 'Compare src/main.scad with the current file' }),
+      within(since).getByRole('button', { name: 'Compare src/main.scad with the current file' }),
     ).toBeInTheDocument();
   });
 
@@ -946,14 +952,14 @@ describe('History over a long line (B2)', () => {
       </QueryClientProvider>,
     );
   };
-  const rowButtons = (): HTMLElement[] => screen.getAllByRole('button', { name: /^Rev \d+ · /u });
-
   it('reads one page, shows its rows, then reads the next page when Show more reaches the end', async () => {
     const user = userEvent.setup();
     onLongLine();
     renderStablePane();
 
     expect(await screen.findByRole('button', { name: 'Show 38 more' })).toBeInTheDocument();
+    const history = screen.getByRole('list', { name: 'Revision history' });
+    const rowButtons = (): HTMLElement[] => within(history).getAllByRole('button', { name: /^Rev \d+ · /u });
     expect(revisionStatusHarness.logRequests).toEqual(['main']);
     await user.click(screen.getByRole('button', { name: 'Show 38 more' }));
     expect(rowButtons()).toHaveLength(50);

@@ -12,14 +12,15 @@ import {
   selectRemoteComputeDevice,
   useRemoteComputePlacement,
 } from '#lib/remote-compute-placement.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 const placementCopy = {
-  local: 'Rendering in this browser',
+  local: isDesktopTarget() ? 'Rendering on this computer' : 'Rendering in this browser',
   connecting: 'Connecting to remote compute…',
   remote: 'Rendering on the selected remote device',
   'device-offline': 'The selected remote device is offline or revoked',
   busy: 'The selected remote device is at capacity',
-  'version-mismatch': 'The browser and remote runtime versions do not match',
+  'version-mismatch': 'This Tau and the remote runtime versions do not match',
   disconnected: 'The remote runtime disconnected',
 } as const;
 
@@ -102,7 +103,7 @@ export function RemoteComputeSettings(): React.JSX.Element {
           <div>
             <p className='text-sm font-medium'>{placementCopy[placement.state]}</p>
             {placement.state !== 'local' && placement.message ? (
-              <p className='text-xs text-destructive'>{placement.message}</p>
+              <p className='text-xs text-feature'>{placement.message}</p>
             ) : null}
           </div>
           <Button size='sm' variant='outline' disabled={placement.state === 'local'} onClick={selectLocalCompute}>
@@ -144,7 +145,7 @@ export function RemoteComputeSettings(): React.JSX.Element {
         ))}
 
         {error ? (
-          <p role='alert' className='text-sm text-destructive'>
+          <p role='alert' className='text-sm text-feature'>
             {error}
           </p>
         ) : null}

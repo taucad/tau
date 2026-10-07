@@ -90,7 +90,7 @@ for (const { part, directory } of entries) {
     'parameters.ts':
       generated +
       serializedNumbers +
-      `export const defaultParams = ${json(part.parameters)};\nexport const parameterDomains = ${json(part.domains)};\nexport const design = ${JSON.stringify(part.design)};\nexport const parameterCases = ${json(part.cases)};\n`,
+      `export const defaultParams = ${json(part.parameters)};\nexport const parameterDomains = ${json(part.domains)};\nexport const design = ${JSON.stringify(part.design)};\n`,
     'validation.ts': validation,
     'main.ts':
       generated +

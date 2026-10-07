@@ -3,7 +3,7 @@ import type { JSONValue } from '@taucad/runtime/types';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from '#assertion-client/index.js';
 import type { GeoSpecNativeClaimEvaluation, GeoSpecNativeEngine } from '#assertion-client/index.js';
 import { evaluateGeoSpecNativeClaim } from '#engine/client.js';
-import { geoSpecMatcherDescriptors, geoSpecNativeMatcherDescriptors } from '#engine/matchers.js';
+import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
 import { createGeoSpecVitestAdapter } from '#vitest/index.js';
 
 const hash = 'f'.repeat(64);
@@ -63,20 +63,13 @@ const createClient = (engine: GeoSpecNativeEngine) =>
   });
 
 describe('fixed rational-plate public authoring', () => {
-  it('should retain F1 after the unchanged legacy 24 and before F2', () => {
-    const legacyNames = Object.keys(geoSpecMatcherDescriptors);
-
-    expect(legacyNames).toHaveLength(24);
-    expect(Object.keys(geoSpecNativeMatcherDescriptors)).toStrictEqual([
-      ...legacyNames,
-      'toSatisfyRationalPlate',
-      'toSatisfyParallelPlaneDistance',
-    ]);
-    expect(Object.keys(createGeoSpecVitestAdapter(createClient(new FixedContractEngine())).matchers)).toStrictEqual([
-      ...legacyNames,
-      'toSatisfyRationalPlate',
-      'toSatisfyParallelPlaneDistance',
-    ]);
+  it('should retain F1 and F2 at the end of the single canonical catalogue', () => {
+    const names = Object.keys(geoSpecMatcherDescriptors);
+    expect(names).toHaveLength(26);
+    expect(names.slice(-2)).toStrictEqual(['toSatisfyRationalPlate', 'toSatisfyParallelPlaneDistance']);
+    expect(Object.keys(createGeoSpecVitestAdapter(createClient(new FixedContractEngine())).matchers)).toStrictEqual(
+      names,
+    );
   });
 
   it.each(['positive', 'negative'] as const)(
@@ -84,9 +77,7 @@ describe('fixed rational-plate public authoring', () => {
     async (polarity) => {
       const engine = new FixedContractEngine();
       const chain = createClient(engine).expectGeo({ subjectHash: hash });
-      const report = await (polarity === 'positive'
-        ? chain.toSatisfyRationalPlate()
-        : chain.not.toSatisfyRationalPlate());
+      const report = polarity === 'positive' ? chain.toSatisfyRationalPlate() : chain.not.toSatisfyRationalPlate();
       const plan = record(engine.request?.['plan'] ?? null);
       const { claims } = plan;
 
@@ -129,7 +120,7 @@ describe('fixed rational-plate public authoring', () => {
     const engine = new FixedContractEngine('failed');
 
     try {
-      await createClient(engine).expectGeo({ subjectHash: hash }).toSatisfyRationalPlate();
+      createClient(engine).expectGeo({ subjectHash: hash }).toSatisfyRationalPlate();
       expect.fail('The failed core report should reject the assertion.');
     } catch (error) {
       expect(error).toBeInstanceOf(GeoSpecAssertionError);

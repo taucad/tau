@@ -17,8 +17,8 @@
 #   3. Push the resulting image to `registry.fly.io/<app>:<sha>` and deploy
 #      it via `flyctl deploy --image ...` so Fly.io skips its own builder.
 #
-# UI is on Netlify: staging builds from `main`, production from git branch
-# `production`. See docs/architecture/ui-deployment-topology.md.
+# The UI is built in Actions and published to Netlify by `deploy-ui.yml`.
+# See docs/architecture/ui-deployment-topology.md.
 
 name: Deploy to Fly.io
 
@@ -58,6 +58,20 @@ jobs:
     concurrency: deploy-${{ inputs.app }}-${{ inputs.environment }}
 
     steps:
+      # Production deploys start only from deploy-production.yml, whose run a
+      # release manager approves; it dispatches this workflow at the release tag.
+      - name: Require a production deploy started by Deploy release to production
+        if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production'
+        env:
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$TRIGGERING_ACTOR" != 'github-actions[bot]' ] || ! [[ "$REF" =~ ^refs/tags/api@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Deploy to production with Deploy release to production (deploy-production.yml); it dispatches this workflow at the release tag."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 

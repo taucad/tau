@@ -15,6 +15,34 @@ const startMeasuring = () => {
 };
 
 describe('graphics machine measure', () => {
+  it('should invalidate pickable inventories on every line visibility transition', () => {
+    const actor = startMeasuring();
+    try {
+      const initial = actor.getSnapshot().context.pickableMeshesVersion;
+      for (const [offset, visible] of [false, true, false, true].entries()) {
+        actor.send({ type: 'setLinesVisibility', payload: visible });
+        expect(actor.getSnapshot().context.enableLines).toBe(visible);
+        expect(actor.getSnapshot().context.pickableMeshesVersion).toBe(initial + offset + 1);
+      }
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should retain an empty measurement list through inactive invalidations', () => {
+    const actor = startMeasuring();
+    try {
+      actor.send({ type: 'setMeasureActive', payload: false });
+      const { measurements } = actor.getSnapshot().context;
+      actor.send({ type: 'measurementPoseChanged', revision: 1 });
+      actor.send({ type: 'measurementSourceChanged', geometryKey: 'new' });
+      actor.send({ type: 'measurementCutChanged' });
+      expect(actor.getSnapshot().context.measurements).toBe(measurements);
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('keeps a touch-previewed target through catalog refresh until Use target commits once', () => {
     const actor = startMeasuring();
     try {
@@ -135,6 +163,11 @@ describe('graphics machine measure', () => {
       actor.send({ type: 'measurementPoseChanged', revision: 2 });
       actor.send({ type: 'resolveMeasurementRecord', id: 'pending', patch: { status: 'current', distance: 1 } });
       expect(actor.getSnapshot().context.measurements[0]).toMatchObject({ status: 'out-of-date', distance: 0 });
+      const { measurements } = actor.getSnapshot().context;
+      actor.send({ type: 'measurementPoseChanged', revision: 3 });
+      actor.send({ type: 'measurementSourceChanged', geometryKey: 'different' });
+      actor.send({ type: 'measurementCutChanged' });
+      expect(actor.getSnapshot().context.measurements).toBe(measurements);
     } finally {
       actor.stop();
     }

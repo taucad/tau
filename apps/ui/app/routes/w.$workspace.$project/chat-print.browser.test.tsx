@@ -1,11 +1,10 @@
 import '#styles/global.css';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { page } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   agentRequest,
-  bambuStudioVersion,
   createBambuStudio,
   createBridge,
   createFixture,
@@ -42,9 +41,13 @@ vi.doMock('#routes/w.$workspace.$project/chat-converter.js', async (importOrigin
 vi.doMock('#components/geometry/parameters/parameters.js', async (importOriginal) =>
   parametersMock(await importOriginal()),
 );
-vi.doMock('#routes/w.$workspace.$project/chat-print-summary.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  summarizeGcodeContainer: summarizeGcodeContainerMock,
+vi.doMock('#components/printer/printer-preparation.js', () => ({
+  printerPreparation: {
+    prepare: async ({ signal }: { bytes: Uint8Array<ArrayBuffer>; signal: AbortSignal }) => {
+      signal.throwIfAborted();
+      return { kind: 'refused', summary: summarizeGcodeContainerMock(), preparationDuration: 0 };
+    },
+  },
 }));
 vi.doMock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -90,22 +93,32 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     </TooltipProvider>,
   );
   if (scenario === 'studio') {
-    // The real printer with Bambu Studio: presets, then the Quality settings open with one change.
-    await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`);
+    // The real printer with Bambu Studio: presets, then Advanced settings with its overrides and one change.
     await screen.findByRole('group', { name: 'Bambu Studio presets' });
-    await page.getByRole('button', { name: 'More settings' }).click();
+    await page.getByRole('button', { name: /^Advanced settings/u }).click();
+    await screen.findByRole('group', { name: 'Bambu Studio overrides' });
     await page.getByRole('button', { name: 'Group: Quality' }).click();
     await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
     fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer Height' }));
     await screen.findByRole('button', { name: 'Reset Layer Height' });
+    // Headless Chromium draws few frames between actions, so the stages' open animations would still
+    // be running when measured; finish them (time-based only: scroll shadows follow the scroller).
+    for (const animation of document.getAnimations()) {
+      if (animation.timeline === document.timeline && animation.effect?.getComputedTiming().endTime !== Infinity) {
+        animation.finish();
+      }
+    }
   } else if (scenario === 'prepare') {
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await page.getByRole('region', { name: 'Prepare' }).getByRole('button', { name: 'Slice and preview' }).click();
-    await screen.findByLabelText('Slice result');
+    // The Machine select names the printer and its status; slicing is the pane's action bar.
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Machine' })).toHaveTextContent('Workshop X1CReady');
+    });
+    await page.getByRole('button', { name: 'Slice and preview' }).click();
+    await screen.findByRole('group', { name: 'Slice result' });
   } else {
     const name = 'Print request awaiting you: pyramid.gcode.3mf';
     const region = await screen.findByRole('region', { name });
-    expect(within(region).getByRole('button', { name: 'Open printer preview' })).toBeEnabled();
+    expect(within(region).getByRole('button', { name: 'Preview' })).toBeEnabled();
     await page.getByRole('region', { name }).getByRole('button', { name: 'Accept' }).click();
     const confirmation = await within(region).findByRole('group', { name: 'Confirm before starting' });
     if (scenario === 'busy') {
@@ -123,6 +136,39 @@ afterEach(() => {
 });
 
 describe('Print pane screenshots', () => {
+  it.each(Object.entries(widths).flatMap(([size, width]) => themes.map((theme) => ({ size, width, theme }))))(
+    'should keep the Prepare reset beside its title at $size in $theme',
+    async ({ size, width, theme }) => {
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+      await page.viewport(size === 'desktop' ? 1000 : width, 900);
+      await mount('studio', width);
+      const prepare = screen.getByRole('region', { name: 'Prepare' });
+      const trigger = within(prepare).getByRole('button', { name: /^Prepare/u });
+      const title = within(trigger).getByText('Prepare', { exact: true });
+      const reset = within(prepare).getByRole('button', { name: 'Reset print settings' });
+      const titleBounds = title.getBoundingClientRect();
+      const resetBounds = reset.getBoundingClientRect();
+      expect(resetBounds.left - titleBounds.right).toBe(8);
+      expect(resetBounds.top + resetBounds.height / 2).toBe(titleBounds.top + titleBounds.height / 2);
+      expect(trigger).not.toContainElement(reset);
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+      const evidence = '../../../../../out/artifacts/print-reset-placement';
+      await page.screenshot({ element: prepare, path: `${evidence}/prepare-${size}-${theme}.png` });
+      await page.getByRole('button', { name: 'Reset print settings' }).hover();
+      await screen.findByRole('tooltip', { name: 'Reset print settings' });
+      await page.screenshot({ element: prepare, path: `${evidence}/prepare-${size}-${theme}-hover.png` });
+
+      await page.getByRole('button', { name: /^Prepare/u }).click();
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      expect(reset.getBoundingClientRect().left).toBe(resetBounds.left);
+      await page.getByRole('button', { name: 'Reset print settings' }).click();
+      await waitFor(() => {
+        expect(within(prepare).queryByRole('button', { name: 'Reset print settings' })).not.toBeInTheDocument();
+      });
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    },
+  );
+
   it.each(
     ['Machine', 'Plate', 'Material', 'Process', 'Filament A1'].flatMap((label) => [
       { label, width: 720, theme: 'light' },
@@ -162,6 +208,20 @@ describe('Print pane screenshots', () => {
       expect(screen.getByRole('combobox', { name: label }).getBoundingClientRect().toJSON()).toEqual(before.toJSON());
     },
   );
+
+  it('should space the Prepare setup rows evenly', async () => {
+    await page.viewport(800, 1200);
+    await mount('studio', 720);
+    // The filament presets are overrides under Advanced settings, not Prepare setup rows.
+    const rows = ['Profile', 'Plate', 'Material', 'Process'].map((label) =>
+      screen
+        .getByRole('combobox', { name: label })
+        .closest(String.raw`.group\/field`)!
+        .getBoundingClientRect(),
+    );
+    const gaps = rows.slice(1).map((row, index) => row.top - rows[index]!.bottom);
+    expect(gaps).toEqual(gaps.map(() => gaps[0]));
+  });
 
   for (const scenario of ['prepare', 'approval', 'busy', 'studio'] as const) {
     for (const [size, width] of Object.entries(widths)) {

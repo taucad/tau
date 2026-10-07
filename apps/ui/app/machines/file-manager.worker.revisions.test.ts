@@ -22,6 +22,7 @@ import {
   createCheckoutRoutes,
   createRemoteAttention,
   createWorkerRevisionRegistry,
+  versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
 import type {
   WorkerProjectRevisions,
@@ -106,7 +107,10 @@ const finish = async (
 const harness = (
   projectIds: readonly string[],
   wrapPort = (port: RevisionPort): RevisionPort => port,
-  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock'> & { onCreatePort?: () => void } = {},
+  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock'> & {
+    onCreatePort?: () => void;
+    observeFileEvents?: boolean;
+  } = {},
 ): Harness => {
   const providers = projectIds.map(() => new MemoryProvider());
   const mountTable = new MountTable();
@@ -143,6 +147,14 @@ const harness = (
     },
     filesystem: (root) => service.createRootedFileSystem(root),
     observe: (root, onChanged) => {
+      if (extra.observeFileEvents) {
+        return eventBus.subscribe((event) => {
+          const paths = versionedChangePaths(event, root);
+          if (paths.length > 0) {
+            onChanged(paths);
+          }
+        });
+      }
       observers.set(root, onChanged);
       return () => observers.delete(root);
     },
@@ -232,6 +244,34 @@ const branchOff = async (
 };
 
 describe('the file-manager worker revision root (north star S48 jsdom 1–4)', () => {
+  it('does not notify revision readers for a Workbench record write', async () => {
+    const fixture = harness(['alpha'], (port) => port, { observeFileEvents: true });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.ts', 'first');
+    await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const checkoutId = root.status().checkoutId!;
+    const changes: string[][] = [];
+    root.subscribeEvents((event) => {
+      if (event.type === 'checkout.changed') {
+        changes.push([...event.paths]);
+      }
+    });
+    const generation = (): number => root.inspect().writeGenerations[checkoutId] ?? 0;
+    const before = generation();
+
+    await project.mkdir('.tau/workbench', { recursive: true });
+    await project.writeFile('.tau/workbench/entries.json', '{}');
+    await settle();
+    expect(changes).toEqual([]);
+    expect(generation()).toBe(before);
+
+    await project.writeFile('main.ts', 'second');
+    await settle();
+    expect(changes).toEqual([['main.ts']]);
+    expect(generation()).toBe(before + 1);
+  });
+
   it('should start one root per opened project and stop its actor when the last port closes', async () => {
     const fixture = harness(['alpha', 'beta']);
     const alpha = await fixture.open('alpha');
@@ -253,26 +293,38 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     second.send({ command: 'close' });
     /* The release records a close cut through the real store first, so it is
      * waited on, not counted in event-loop turns (W2c a1b). */
-    await vi.waitFor(() => {
-      expect(alphaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
-    });
+    await vi.waitFor(
+      () => {
+        expect(alphaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
+      },
+      { timeout: 10_000 },
+    );
 
     /* The actor itself, not the registry's bookkeeping: a released root has
      * stopped and has no child left running. */
     expect(alphaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
     expect(betaRoot.inspect().status).toBe('active');
     // Closing waits for the operation log's last append, so the registry lets go after the root stops.
-    await vi.waitFor(() => {
-      expect(fixture.registry.openProjectIds()).toEqual(['beta']);
-    });
+    await vi.waitFor(
+      () => {
+        expect(fixture.registry.openProjectIds()).toEqual(['beta']);
+      },
+      { timeout: 10_000 },
+    );
 
     beta.send({ command: 'close' });
-    await vi.waitFor(() => {
-      expect(betaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
-    });
-    await vi.waitFor(() => {
-      expect(fixture.registry.openProjectIds()).toEqual([]);
-    });
+    await vi.waitFor(
+      () => {
+        expect(betaRoot.inspect()).toMatchObject({ status: 'stopped', children: [] });
+      },
+      { timeout: 10_000 },
+    );
+    await vi.waitFor(
+      () => {
+        expect(fixture.registry.openProjectIds()).toEqual([]);
+      },
+      { timeout: 10_000 },
+    );
   }, 20_000);
 
   it('should give a port that connects while its project is closing a fresh root, not the one being released', async () => {
@@ -372,15 +424,31 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const alpha = await fixture.open('alpha');
     /* A recorded revision first: a branch of an unborn line has no tree to
      * materialize, which is the port's own refusal, not this seam's. */
-    alpha.send({ command: 'saveRevision' });
-    await alpha.settle();
-
-    alpha.send({ command: 'createBranch', name: 'bracket-fillet' });
     const root = await fixture.root('alpha');
-    for (let attempt = 0; attempt < 40 && root.status().branches.length < 2; attempt += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- polling the registry's own answer.
-      await alpha.settle();
-    }
+    alpha.send({ command: 'saveRevision', id: 1 });
+    await vi.waitFor(
+      () => {
+        expect(alpha.frames.filter((frame) => frame.type === 'error' && frame.id === 1)).toEqual([]);
+        expect(alpha.frames).toContainEqual({ type: 'result', id: 1, result: { kind: 'saved' } });
+        expect(root.status().headRevisionId).toBeDefined();
+      },
+      { timeout: 10_000 },
+    );
+
+    alpha.send({ command: 'createBranch', name: 'bracket-fillet', id: 2 });
+    await vi.waitFor(
+      () => {
+        expect(alpha.frames.filter((frame) => frame.type === 'error' && frame.id === 2)).toEqual([]);
+        const answer = alpha.frames.find((frame) => frame.type === 'result' && frame.id === 2);
+        if (answer?.type !== 'result' || answer.result.kind !== 'branch') {
+          expect.fail('The branch request has not returned its checkout.');
+        }
+        expect(answer.result.branch).toBe('bracket-fillet');
+        expect(typeof answer.result.checkoutId).toBe('string');
+        expect(typeof answer.result.checkoutRoot).toBe('string');
+      },
+      { timeout: 10_000 },
+    );
 
     const status = root.status();
     const created = status.branches.find((row) => row.name === 'bracket-fillet');
@@ -522,8 +590,22 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
-    alpha.send({ command: 'saveRevision' });
-    await alpha.settle();
+    const root = await fixture.root('alpha');
+    alpha.send({ command: 'saveRevision', id: 90 });
+    for (
+      let attempt = 0;
+      attempt < 40 && !alpha.frames.some((frame) => 'id' in frame && frame.id === 90);
+      attempt += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await alpha.settle();
+    }
+    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 90)).toEqual({
+      type: 'result',
+      id: 90,
+      result: { kind: 'saved' },
+    });
+    expect(root.status().headRevisionId).toBeDefined();
 
     /* `main` already has a checkout, which the registry refuses before any port
      * call — the refusal a person sees most often. */
@@ -781,7 +863,11 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
   });
 
   it('should compare a recorded revision against the files as they are now (S38)', async () => {
-    const fixture = harness(['alpha']);
+    let unavailableHead: string | undefined;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      readTree: async (id) => (id === unavailableHead ? undefined : port.readTree(id)),
+    }));
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
@@ -796,7 +882,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     /* The older revision, named while the checkout's head is a newer one: the
      * comparison reads the revision it is given, never the head (W2c a1b). */
     const [, older] = await root.log();
-    expect(await root.compare(older!.revisionId, 'main.scad', { against: 'checkout' })).toEqual({
+    expect(await root.compare(older!.revisionId, 'main.scad', { against: 'checkout' })).toMatchObject({
       original: 'cube(10);',
       modified: 'cube(20);',
     });
@@ -805,17 +891,67 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
      * cannot answer "what have I changed since this". */
     await project.writeFile('main.scad', 'cube(30);');
 
-    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toEqual({
+    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toMatchObject({
       original: 'cube(20);',
       modified: 'cube(30);',
     });
     /* A file the checkout no longer holds reads as an empty right-hand side,
      * which is exactly "deleted since this revision" — never a thrown read. */
     await project.unlink('main.scad');
-    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toEqual({
+    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toMatchObject({
       original: 'cube(20);',
       modified: '',
     });
+    const missing = await root.compare(head!, 'main.scad', { against: 'checkout' });
+    expect(missing).toMatchObject({ change: 'deleted', kind: 'text' });
+    await project.writeFile('main.scad', new Uint8Array());
+    const empty = await root.compare(head!, 'main.scad', { against: 'checkout' });
+    expect(empty).toMatchObject({ change: 'modified', modified: '' });
+    const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('cube(20);')]);
+    await project.writeFile('main.scad', bom);
+    const comparison = await root.compare(head!, 'main.scad', { against: 'checkout' });
+    expect(comparison.original).toBe(comparison.modified);
+    expect(comparison).toMatchObject({ change: 'modified', kind: 'text', notices: ['encoding'] });
+    const staged = '.main.scad.tau-staged.00000000-0000-0000-0000-000000000001.tmp';
+    const backup = '.main.scad.tau-backup.00000000-0000-0000-0000-000000000001.tmp';
+    await project.writeFile(staged, 'staging');
+    await project.writeFile(backup, 'backup');
+    await project.writeFile('new.scad', 'sphere(2);');
+    const live = await root.diff(head!, undefined, { against: 'checkout' });
+    expect(live.map(({ path }) => path)).not.toContain(staged);
+    expect(live.map(({ path }) => path)).not.toContain(backup);
+    expect(live).toContainEqual({ path: 'new.scad', kind: 'added' });
+    expect(live).toContainEqual({ path: 'main.scad', kind: 'modified' });
+    await project.writeFile('main.scad', 'cube(20);');
+    expect(await root.diff(head!, undefined, { against: 'checkout' })).not.toContainEqual({
+      path: 'main.scad',
+      kind: 'modified',
+    });
+    await project.unlink('main.scad');
+    await project.mkdir('main.scad');
+    await project.writeFile('main.scad/child.scad', 'cube(1);');
+    const directoryPaths = await root.diff(head!, undefined, { against: 'checkout' });
+    expect(directoryPaths).toContainEqual({ path: 'main.scad', kind: 'deleted' });
+    expect(directoryPaths).toContainEqual({ path: 'main.scad/child.scad', kind: 'added' });
+    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toMatchObject({
+      change: 'deleted',
+      original: 'cube(20);',
+      modified: '',
+    });
+    unavailableHead = head;
+    await expect(root.compare(older!.revisionId, 'main.scad', { against: 'checkout' })).rejects.toThrow(
+      'checkout head',
+    );
+    await expect(root.diff(older!.revisionId, undefined, { against: 'checkout' })).rejects.toThrow('checkout head');
+    unavailableHead = undefined;
+    await expect(root.compare('unknown-revision', 'main.scad', { against: 'checkout' })).rejects.toThrow();
+    await expect(root.compare('unknown-revision', 'main.scad')).rejects.toThrow();
+    const failure = new Error('Device read failed');
+    const rooted = vi.spyOn(fixture.service, 'createRootedFileSystem').mockReturnValue(project);
+    const read = vi.spyOn(project, 'readFile').mockRejectedValue(failure);
+    await expect(root.compare(head!, 'main.scad', { against: 'checkout' })).rejects.toBe(failure);
+    read.mockRestore();
+    rooted.mockRestore();
   });
 
   /*

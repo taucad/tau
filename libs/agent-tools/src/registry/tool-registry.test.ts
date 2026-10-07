@@ -10,9 +10,10 @@ import type {
   RpcParameterClient,
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
-import { toRpcError } from '@taucad/chat/rpc';
 import type { JsonValue } from '@taucad/agent-host';
 import { toolDescriptions } from '@taucad/chat/constants';
+import { testModelOutputSchema } from '@taucad/chat';
+import { parseToolErrorText } from '@taucad/chat/utils';
 import { ResourceQueue } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -21,11 +22,10 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
 import { createChatToolRegistry } from '#registry/tool-registry.js';
 import type { ChatToolRegistryOptions } from '#registry/tool-registry.js';
-import { createRuntimeAgentClients } from '#runtime/runtime-agent-clients.js';
-import type { RuntimeAgentClient } from '#runtime/runtime-agent-clients.js';
 
 const emptyFileSystem = (): RpcFileSystem => ({
   readFile: async () => 'export const main = 1;\n',
+  readBinaryFile: async () => new TextEncoder().encode('export const main = 1;\n'),
   writeFile: async () => undefined,
   writeFileChecked: async () => {
     throw new Error('No checked authority in this fixture.');
@@ -91,56 +91,54 @@ const fileTools = [
   'grep',
   'glob_search',
   'update_todos',
+  'ask_questions',
 ];
 
 describe('createChatToolRegistry listing', () => {
   it('offers arrange_workbench with only a filesystem', () => {
     expect(listOf()).toContain('arrange_workbench');
   });
-  it.each([undefined, 'legacy', 'native'] as const)(
-    'should advertise the selected %s authoring API before any tool invocation',
-    (geospecAuthoringMode) => {
-      const runTests = vi.fn();
-      const definitions = build({ geospec: { runTests }, geospecAuthoringMode }).list();
-      const description = definitions.find((tool) => tool.name === 'test_model')?.description;
-      const native = geospecAuthoringMode === 'native';
-      expect(description).toContain(native ? 'Selected GeoSpec API: native' : 'Selected GeoSpec API: legacy');
-      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
-      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
-      expect(description).toContain(native ? "'geospec/runner/native'" : "'geospec/model'");
-      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
-      expect(description).not.toContain(native ? 'loadModel' : 'loadNativeModel');
-      for (const definition of definitions.filter((tool) => tool.name !== 'test_model')) {
-        expect(definition.description).toBe(toolDescriptions[definition.name as keyof typeof toolDescriptions]);
-      }
-      expect(runTests).not.toHaveBeenCalled();
-    },
-  );
+  it('should advertise only the canonical authoring API before any tool invocation', () => {
+    const runTests = vi.fn();
+    const definitions = build({ geospec: { runTests } }).list();
+    const description = definitions.find((tool) => tool.name === 'test_model')?.description;
+    expect(description).toContain('Selected GeoSpec API: canonical');
+    expect(description).toContain('expectGeo');
+    expect(description).toContain('loadModel');
+    expect(description).toContain("'geospec/model'");
+    expect(description).not.toContain('expectNativeGeo');
+    expect(description).not.toContain('loadNativeModel');
+    expect(description).not.toContain('legacy');
+    for (const definition of definitions.filter((tool) => tool.name !== 'test_model')) {
+      expect(definition.description).toBe(toolDescriptions[definition.name as keyof typeof toolDescriptions]);
+    }
+    expect(runTests).not.toHaveBeenCalled();
+  });
 
   it.each([
     {
       label: 'filesystem only',
       options: {},
       offered: [],
-      withheld: ['get_kernel_result', 'export_geometry', 'screenshot', 'test_model', 'use_skill'],
+      withheld: ['evaluate_model', 'export_model', 'screenshot', 'test_model', 'use_skill'],
     },
     {
       label: 'kernel client only',
-      options: { kernelClient: { getKernelResult: vi.fn() } },
-      offered: ['get_kernel_result'],
-      withheld: ['export_geometry', 'screenshot', 'test_model', 'use_skill'],
+      options: { kernelClient: { evaluateModel: vi.fn() } },
+      offered: ['evaluate_model'],
+      withheld: ['export_model', 'screenshot', 'test_model', 'use_skill'],
     },
     {
       label: 'graphics only',
-      options: { graphics: { exportGeometry: vi.fn() } },
-      offered: ['export_geometry'],
-      withheld: ['get_kernel_result', 'screenshot'],
+      options: { graphics: { exportModel: vi.fn() } },
+      offered: ['export_model'],
+      withheld: ['evaluate_model', 'screenshot'],
     },
     {
       label: 'images only',
       options: { images: { captureImages: vi.fn() } },
       offered: ['screenshot'],
-      withheld: ['export_geometry', 'get_kernel_result'],
+      withheld: ['export_model', 'evaluate_model'],
     },
     {
       label: 'geospec only',
@@ -176,8 +174,8 @@ describe('createChatToolRegistry listing', () => {
 
   it('lists the browser worker set when every client is attached', () => {
     const names = listOf({
-      kernelClient: { getKernelResult: vi.fn() },
-      graphics: { exportGeometry: vi.fn() },
+      kernelClient: { evaluateModel: vi.fn() },
+      graphics: { exportModel: vi.fn() },
       images: { captureImages: vi.fn() },
       geospec: { runTests: vi.fn() },
       skillResolver: { resolveSkill: vi.fn() },
@@ -185,11 +183,12 @@ describe('createChatToolRegistry listing', () => {
     expect(names.toSorted()).toStrictEqual(
       [
         'arrange_workbench',
+        'ask_questions',
         'create_file',
         'delete_file',
         'edit_file',
-        'export_geometry',
-        'get_kernel_result',
+        'export_model',
+        'evaluate_model',
         'glob_search',
         'grep',
         'list_directory',
@@ -204,9 +203,9 @@ describe('createChatToolRegistry listing', () => {
 
   /* EQ6 (W7 RA-S9): a call that writes more than one path, or outside the
    * workspace, runs its batch in call order; every other tool stays parallel. */
-  it('should declare sequential execution only where one call spans more than one path', () => {
+  it('should declare sequential execution only where one call spans more than one path or waits on the person', () => {
     const registry = build({
-      graphics: { exportGeometry: vi.fn() },
+      graphics: { exportModel: vi.fn() },
       parameters: { getParameters: vi.fn(), applyParameterOperation: vi.fn() },
     });
 
@@ -215,7 +214,7 @@ describe('createChatToolRegistry listing', () => {
       .filter((tool) => tool.executionMode === 'sequential')
       .map((tool) => tool.name);
 
-    expect(sequential.toSorted()).toStrictEqual(['apply_parameter_operation', 'export_geometry']);
+    expect(sequential.toSorted()).toStrictEqual(['apply_parameter_operation', 'ask_questions', 'export_model']);
   });
 
   /* Review a1 R15: the read-only history tool is listed exactly where a client
@@ -517,6 +516,30 @@ describe('createChatToolRegistry invocation', () => {
       content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' },
     });
     expect(result.content).not.toHaveProperty('success');
+    expect(parseToolErrorText(JSON.stringify(result.content))).toMatchObject({
+      errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+      toolName: 'read_file',
+      toolCallId: 'call-1',
+      validationErrors: expect.arrayContaining([
+        { path: 'targetFile', message: expect.any(String) as string },
+      ]) as Array<{ path: string; message: string }>,
+    });
+  });
+
+  it('should preserve the amplifier export refusal as a complete validation error', async () => {
+    const exportModel = vi.fn();
+    const result = await invoke(build({ graphics: { exportModel } }), 'export_model', {
+      input: { targetFile: 'main.tsx', to: 'glb', toolCallId: 'untrusted-call-id' },
+    });
+    expect(result.isError).toBe(true);
+    expect(parseToolErrorText(JSON.stringify(result.content))).toEqual({
+      errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+      message: '✖ Unrecognized key: "toolCallId"',
+      toolName: 'export_model',
+      toolCallId: 'call-1',
+      validationErrors: [{ path: '', message: 'Unrecognized key: "toolCallId"' }],
+    });
+    expect(exportModel).not.toHaveBeenCalled();
   });
 
   it('dispatches a validated call to the RPC handler', async () => {
@@ -527,9 +550,32 @@ describe('createChatToolRegistry invocation', () => {
     expect(JSON.stringify(result.content)).toContain('export const main');
   });
 
+  it('preserves reviewed digest input and non-retryable conflict through the normal tool wire', async () => {
+    const fileSystem = emptyFileSystem();
+    const editFile = vi.fn<RpcFileSystem['editFile']>(async () => {
+      throw Object.assign(new Error('Reviewed bytes changed'), { code: 'EDIT_CONFLICT' });
+    });
+    fileSystem.editFile = editFile;
+    const registry = build({ fileSystemFor: () => fileSystem });
+    const input = { targetFile: 'main.ts', oldString: '1', newString: '2', expectedDigest: `sha256:${'a'.repeat(64)}` };
+    const refusal = await invoke(registry, 'edit_file', { input });
+    expect(refusal).toMatchObject({
+      isError: true,
+      content: { errorCode: 'EDIT_CONFLICT' },
+    });
+    expect(refusal.content).not.toHaveProperty('retryable');
+    expect(editFile).toHaveBeenCalledExactlyOnceWith(input);
+    await expect(
+      invoke(registry, 'edit_file', { input: { ...input, expectedDigest: 'missing' } }),
+    ).resolves.toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+    expect(editFile).toHaveBeenCalledTimes(1);
+  });
+
   it('uses the trusted invocation ID for exported artifact paths', async () => {
-    const exportGeometry = vi.fn<RpcGraphicsClient['exportGeometry']>(async () => ({
+    const exportModel = vi.fn<RpcGraphicsClient['exportModel']>(async () => ({
       success: true,
+      exportId: 'mesh',
+      issues: [],
       files: [
         {
           name: 'model.stl',
@@ -538,13 +584,17 @@ describe('createChatToolRegistry invocation', () => {
         },
       ],
     }));
-    const result = await invoke(build({ graphics: { exportGeometry } }), 'export_geometry', {
+    const registry = build({ graphics: { exportModel } });
+    const spoofed = await invoke(registry, 'export_model', {
       input: {
         targetFile: 'main.ts',
-        format: 'stl',
+        to: 'stl',
         toolCallId: 'untrusted',
       },
     });
+    expect(spoofed).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+    expect(exportModel).not.toHaveBeenCalled();
+    const result = await invoke(registry, 'export_model', { input: { targetFile: 'main.ts', to: 'stl' } });
 
     expect(result).toMatchObject({
       isError: false,
@@ -555,31 +605,18 @@ describe('createChatToolRegistry invocation', () => {
     });
   });
 
-  it('should drop the exportOptions a model adds to export_geometry before the runtime export', async () => {
-    const exportModel = vi.fn<RuntimeAgentClient['export']>(async () => ({
-      success: true,
-      data: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
-      issues: [],
-    }));
-    const { graphics } = createRuntimeAgentClients({
-      runtime: { evaluate: vi.fn<RuntimeAgentClient['evaluate']>(), export: exportModel },
-      exportImage: vi.fn(),
-      mapRuntimeError: (error) => toRpcError(error),
-    });
-
-    const result = await invoke(build({ graphics }), 'export_geometry', {
+  it('should reject obsolete private exportOptions before invoking the graphics client', async () => {
+    const exportModel = vi.fn<RpcGraphicsClient['exportModel']>();
+    const result = await invoke(build({ graphics: { exportModel } }), 'export_model', {
       input: {
         targetFile: 'main.ts',
-        format: 'stl',
+        to: 'stl',
         exportOptions: { engine: 'service', service: { url: 'https://slicer.example.com', token: 'stolen-token' } },
       },
     });
 
-    expect(result).toMatchObject({ isError: false, content: { success: true } });
-    expect(exportModel).toHaveBeenCalledExactlyOnceWith('stl', {
-      source: { path: 'main.ts' },
-      signal: expect.any(AbortSignal) as AbortSignal,
-    });
+    expect(result).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+    expect(exportModel).not.toHaveBeenCalled();
   });
 
   it('persists export artifacts through the invocation record filesystem only', async () => {
@@ -587,18 +624,20 @@ describe('createChatToolRegistry invocation', () => {
       throw Object.assign(new Error('Agent records are read-only.'), { code: 'EROFS' });
     });
     const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
-    const exportGeometry = vi.fn<RpcGraphicsClient['exportGeometry']>(async () => ({
+    const exportModel = vi.fn<RpcGraphicsClient['exportModel']>(async () => ({
       success: true,
+      exportId: 'mesh',
+      issues: [],
       files: [{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }],
     }));
     const registry = build({
       fileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: agentWrite }),
       recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
-      graphics: { exportGeometry },
+      graphics: { exportModel },
     });
 
-    const result = await invoke(registry, 'export_geometry', {
-      input: { targetFile: 'main.ts', format: 'stl' },
+    const result = await invoke(registry, 'export_model', {
+      input: { targetFile: 'main.ts', to: 'stl' },
     });
 
     expect(result).toMatchObject({ isError: false, content: { success: true } });
@@ -804,7 +843,7 @@ describe('createChatToolRegistry invocation', () => {
    * still fails, which is the loop this programme exists to end. */
   it('names the kernel death instead of repeating the verdict it answered before it', async () => {
     let answered = false;
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => {
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () => {
       if (answered) {
         throw Object.assign(new Error('RuntimeClient has been terminated.'), {
           code: 'RUNTIME_UNAVAILABLE',
@@ -824,13 +863,13 @@ describe('createChatToolRegistry invocation', () => {
         ],
       };
     });
-    const registry = build({ kernelClient: { getKernelResult } });
+    const registry = build({ kernelClient: { evaluateModel } });
 
-    await expect(invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } })).resolves.toMatchObject({
+    await expect(invoke(registry, 'evaluate_model', { input: { targetFile: 'main.ts' } })).resolves.toMatchObject({
       isError: false,
       content: { status: 'error' },
     });
-    const afterDeath = await invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } });
+    const afterDeath = await invoke(registry, 'evaluate_model', { input: { targetFile: 'main.ts' } });
 
     expect(afterDeath).toMatchObject({
       isError: true,
@@ -841,20 +880,23 @@ describe('createChatToolRegistry invocation', () => {
 
   it('forwards local cancellation context without serializing it into RPC input', async () => {
     const controller = new AbortController();
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => ({
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () => ({
       success: true,
       status: 'ready',
       kernelIssues: [],
     }));
-    const result = await invoke(build({ kernelClient: { getKernelResult } }), 'get_kernel_result', {
+    const result = await invoke(build({ kernelClient: { evaluateModel } }), 'evaluate_model', {
       input: { targetFile: 'main.ts' },
       signal: controller.signal,
     });
 
     expect(result.isError).toBe(false);
-    expect(getKernelResult).toHaveBeenCalledExactlyOnceWith('main.ts', {
-      signal: controller.signal,
-    });
+    expect(evaluateModel).toHaveBeenCalledExactlyOnceWith(
+      { targetFile: 'main.ts' },
+      {
+        signal: controller.signal,
+      },
+    );
     expect(JSON.stringify(result.content)).not.toContain('signal');
   });
 
@@ -862,8 +904,8 @@ describe('createChatToolRegistry invocation', () => {
     const first = new AbortController();
     const second = new AbortController();
     const seenSignals: AbortSignal[] = [];
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(
-      async (targetFile: string, context?: RpcInvocationContext) => {
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(
+      async ({ targetFile }, context?: RpcInvocationContext) => {
         if (context?.signal) {
           seenSignals.push(context.signal);
         }
@@ -875,12 +917,12 @@ describe('createChatToolRegistry invocation', () => {
         return { success: true, status: 'ready', kernelIssues: [] };
       },
     );
-    const registry = build({ kernelClient: { getKernelResult } });
-    const interrupted = invoke(registry, 'get_kernel_result', {
+    const registry = build({ kernelClient: { evaluateModel } });
+    const interrupted = invoke(registry, 'evaluate_model', {
       input: { targetFile: 'a.ts' },
       signal: first.signal,
     });
-    const sibling = invoke(registry, 'get_kernel_result', {
+    const sibling = invoke(registry, 'evaluate_model', {
       input: { targetFile: 'b.ts' },
       signal: second.signal,
     });
@@ -915,6 +957,13 @@ describe('createChatToolRegistry freshness gate', () => {
       }
       return content;
     },
+    readBinaryFile: async (path) => {
+      const content = store.get(path);
+      if (content === undefined) {
+        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+      }
+      return new TextEncoder().encode(content);
+    },
     writeFile: async (path, content) => {
       store.set(path, content);
     },
@@ -935,57 +984,57 @@ describe('createChatToolRegistry freshness gate', () => {
       ],
       ...(sourceRevision === undefined ? {} : { sourceRevision }),
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a hand-built RPC result stands in for the runtime's.
-    }) as unknown as Awaited<ReturnType<RpcRuntimeClient['getKernelResult']>>;
+    }) as unknown as Awaited<ReturnType<RpcRuntimeClient['evaluateModel']>>;
 
   const writeThenAsk = async (
-    getKernelResult: RpcRuntimeClient['getKernelResult'],
+    evaluateModel: RpcRuntimeClient['evaluateModel'],
     content = 'repaired',
     outOfBand?: (store: Map<string, string>) => void,
   ): Promise<Awaited<ReturnType<ReturnType<typeof build>['invoke']>>> => {
     const store = new Map<string, string>();
-    const registry = build({ kernelClient: { getKernelResult }, fileSystemFor: () => storedFileSystem(store) });
+    const registry = build({ kernelClient: { evaluateModel }, fileSystemFor: () => storedFileSystem(store) });
     await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content } });
     outOfBand?.(store);
-    return invoke(registry, 'get_kernel_result', { input: { targetFile: 'main.ts' } });
+    return invoke(registry, 'evaluate_model', { input: { targetFile: 'main.ts' } });
   };
 
   /* F1: the write memory is per registry, so a person editing in the editor, a
    * peer run or a `git checkout` makes it name bytes nobody has. The verdict
    * that reads what is actually there is the fresh one. */
   it('accepts a verdict for bytes edited outside the tools, without asking twice', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict(closure(digestOf('edited in the editor'))),
     );
 
-    const verdict = await writeThenAsk(getKernelResult, 'repaired', (store) => {
+    const verdict = await writeThenAsk(evaluateModel, 'repaired', (store) => {
       store.set('main.ts', 'edited in the editor');
     });
 
-    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(evaluateModel).toHaveBeenCalledOnce();
     expect(verdict).toMatchObject({ isError: false, content: { status: 'error' } });
   });
 
   it('still refuses when the path the verdict answered for is gone', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict(closure(digestOf('broken'))),
     );
 
-    const verdict = await writeThenAsk(getKernelResult, 'repaired', (store) => {
+    const verdict = await writeThenAsk(evaluateModel, 'repaired', (store) => {
       store.delete('main.ts');
     });
 
-    expect(getKernelResult).toHaveBeenCalledTimes(2);
+    expect(evaluateModel).toHaveBeenCalledTimes(2);
     expect(verdict).toMatchObject({ isError: true, content: { errorCode: 'STALE_EVALUATION' } });
   });
 
   it('refuses a verdict that still answers for replaced bytes after one re-invocation', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict(closure(digestOf('broken'))),
     );
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel);
 
-    expect(getKernelResult).toHaveBeenCalledTimes(2);
+    expect(evaluateModel).toHaveBeenCalledTimes(2);
     expect(verdict).toMatchObject({
       isError: true,
       content: {
@@ -999,7 +1048,7 @@ describe('createChatToolRegistry freshness gate', () => {
 
   it('returns the fresh verdict when the re-invocation answers for the written bytes', async () => {
     let asked = 0;
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => {
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () => {
       asked += 1;
       return asked === 1
         ? kernelVerdict(closure(digestOf('broken')))
@@ -1009,43 +1058,45 @@ describe('createChatToolRegistry freshness gate', () => {
             status: 'ready',
             kernelIssues: [],
             sourceRevision: closure(digestOf('repaired')),
-          } as unknown as Awaited<ReturnType<RpcRuntimeClient['getKernelResult']>>);
+          } as unknown as Awaited<ReturnType<RpcRuntimeClient['evaluateModel']>>);
     });
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel);
 
-    expect(getKernelResult).toHaveBeenCalledTimes(2);
+    expect(evaluateModel).toHaveBeenCalledTimes(2);
     expect(verdict).toMatchObject({ isError: false, content: { status: 'ready' } });
   });
 
   it('passes an unproven verdict through untouched rather than calling it fresh', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () => kernelVerdict());
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () => kernelVerdict());
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel);
 
-    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(evaluateModel).toHaveBeenCalledOnce();
     expect(verdict).toMatchObject({ isError: false, content: { status: 'error' } });
   });
 
   it('invokes once when the verdict names the digest the write left', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict(closure(digestOf('repaired'))),
     );
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel);
 
-    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(evaluateModel).toHaveBeenCalledOnce();
     expect(verdict).toMatchObject({ isError: false, content: { status: 'error' } });
   });
 
   it('ignores a closure that never read the written path', async () => {
-    const getKernelResult = vi.fn<RpcRuntimeClient['getKernelResult']>(async () =>
+    const evaluateModel = vi.fn<RpcRuntimeClient['evaluateModel']>(async () =>
       kernelVerdict({ entry: 'other.ts', files: { 'other.ts': digestOf('unrelated') } }),
     );
 
-    const verdict = await writeThenAsk(getKernelResult);
+    const verdict = await writeThenAsk(evaluateModel, 'repaired', (store) => {
+      store.set('other.ts', 'unrelated');
+    });
 
-    expect(getKernelResult).toHaveBeenCalledOnce();
+    expect(evaluateModel).toHaveBeenCalledOnce();
     expect(verdict).toMatchObject({ isError: false });
   });
 
@@ -1074,5 +1125,547 @@ describe('createChatToolRegistry freshness gate', () => {
         actual: { path: 'main.ts', digest: digestOf('broken') },
       },
     });
+  });
+});
+describe('createChatToolRegistry GeoSpec evidence normalization', () => {
+  const verdict = (
+    seed: number,
+    sourceText?: string,
+  ): Extract<Awaited<ReturnType<RpcGeoSpecClient['runTests']>>, { success: true }> => ({
+    success: true,
+    ...testModelOutputSchema.parse({
+      passed: 1,
+      total: 1,
+      failures: [],
+      passes: [
+        {
+          id: 'main.geospec.ts:bounds',
+          requirement: 'bounds',
+          targetFile: 'main.geospec.ts',
+          reports: [
+            {
+              claimId: `claim-${seed}`,
+              loadId: `load-${seed}`,
+              status: 'passed',
+              polarity: 'positive',
+              claim: { seed },
+              result: { seed },
+              diagnostics: [],
+              canonical: { claim: [0, seed, 255], plan: [255, seed, 0], result: [seed, 254, 1] },
+            },
+          ],
+        },
+      ],
+      ...(sourceText === undefined
+        ? {}
+        : {
+            sourceRevisions: [
+              {
+                entry: 'main.ts',
+                files: { 'main.ts': `sha256:${createHash('sha256').update(sourceText).digest('hex')}` },
+              },
+            ],
+          }),
+    }),
+  });
+
+  it.each(['module', 'direct', 'resource'] as const)(
+    'should refuse externally replaced %s bytes with no remembered tool write',
+    async (kind) => {
+      const provider = new MemoryProvider();
+      const target = kind === 'module' ? 'lib/check.ts' : 'part.glb';
+      const before = Uint8Array.from(kind === 'module' ? [97] : [0, 255, 97]);
+      const after = Uint8Array.from(kind === 'module' ? [98] : [0, 254, 97]);
+      await provider.writeFile(target, before);
+      const digest = createHash('sha256').update(before).digest('hex');
+      const original = testModelOutputSchema.parse({
+        ...verdict(7),
+        lineage: [
+          {
+            file: 'main.geospec.ts',
+            lineage: {
+              status: 'complete',
+              modules:
+                kind === 'module'
+                  ? [
+                      {
+                        entryPath: 'main.geospec.ts',
+                        bundleSha256: digest,
+                        files: { [target]: `sha256:${digest}` },
+                        consistent: true,
+                      },
+                    ]
+                  : [],
+              loads:
+                kind === 'module'
+                  ? []
+                  : [
+                      {
+                        loadId: 'load-7',
+                        status: 'complete',
+                        evidence: {
+                          loadId: 'load-7',
+                          status: 'complete',
+                          format: 'glb',
+                          parameters: {},
+                          ingestOptions: {},
+                          ...(kind === 'direct' ? { sourcePath: target } : {}),
+                          artifacts: [
+                            { name: 'alias.bin', sourcePath: target, sha256: digest, byteLength: before.byteLength },
+                          ],
+                        },
+                      },
+                    ],
+            },
+          },
+        ],
+      });
+      const runTests = vi.fn<RpcGeoSpecClient['runTests']>(async () => {
+        await provider.writeFile(target, after);
+        return { success: true, ...original };
+      });
+      if (kind === 'resource') {
+        expect(original.lineage?.[0]?.lineage.loads[0]?.evidence?.artifacts[0]).toMatchObject({
+          name: 'alias.bin',
+          sourcePath: target,
+        });
+      }
+      const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+      const view = composeView({ filesystem: provider }, { consumer: 'agent', policy: tauPathPolicy });
+      const registry = build({
+        geospec: { runTests },
+        fileSystemFor: () => createProviderRpcFileSystem({ provider: view, mutations: new ResourceQueue() }),
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      });
+      expect(await invoke(registry, 'test_model', { input: {} })).toMatchObject({
+        isError: true,
+        content: { errorCode: 'STALE_EVALUATION', actual: { path: target, digest: `sha256:${digest}` } },
+      });
+      expect(runTests).toHaveBeenCalledTimes(2);
+      expect(recordWrite).not.toHaveBeenCalled();
+      expect(await provider.readFile(target)).toEqual(after);
+    },
+  );
+
+  it('should refuse an uncheckable module path without reading outside the rooted authority', async () => {
+    const provider = new MemoryProvider();
+    const stat = vi.spyOn(provider, 'stat');
+    const digest = createHash('sha256').update('foreign').digest('hex');
+    const original = testModelOutputSchema.parse({
+      ...verdict(8),
+      lineage: [
+        {
+          file: 'main.geospec.ts',
+          lineage: {
+            status: 'complete',
+            loads: [],
+            modules: [
+              {
+                entryPath: 'main.geospec.ts',
+                bundleSha256: digest,
+                files: { '/foreign/spec.ts': `sha256:${digest}` },
+                consistent: true,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const runTests = vi.fn<RpcGeoSpecClient['runTests']>(async () => ({ success: true, ...original }));
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const view = composeView({ filesystem: provider }, { consumer: 'agent', policy: tauPathPolicy });
+    const result = await invoke(
+      build({
+        geospec: { runTests },
+        fileSystemFor: () => createProviderRpcFileSystem({ provider: view, mutations: new ResourceQueue() }),
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    expect(result).toMatchObject({
+      isError: true,
+      content: {
+        errorCode: 'STALE_EVALUATION',
+        expected: { path: '/foreign/spec.ts', digest: 'unavailable' },
+      },
+    });
+    expect(runTests).toHaveBeenCalledTimes(2);
+    expect(stat).not.toHaveBeenCalled();
+    expect(recordWrite).not.toHaveBeenCalled();
+  });
+
+  it('should await the record owner and retain exact canonical bytes before compacting', async () => {
+    const original = verdict(1);
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const stored = new Map<string, Uint8Array<ArrayBuffer>>();
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async (path, bytes) => {
+      stored.set(path, Uint8Array.from(bytes));
+      started.resolve();
+      await finish.promise;
+    });
+    const agentWrite = vi.fn<RpcFileSystem['writeBinaryFile']>();
+    const registry = build({
+      geospec: { runTests: async () => original },
+      fileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: agentWrite }),
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+    });
+    let completed = false;
+    const pending = invoke(registry, 'test_model', { input: {} });
+    const observed = (async () => {
+      await pending;
+      completed = true;
+    })();
+    try {
+      await Promise.race([started.promise, observed]);
+      expect(recordWrite).toHaveBeenCalledOnce();
+      expect(completed).toBe(false);
+    } finally {
+      finish.resolve();
+    }
+    const result = await pending;
+    expect(agentWrite).not.toHaveBeenCalled();
+    expect(result.isError).toBe(false);
+    const compact = testModelOutputSchema.parse(result.content);
+    expect(compact.passes[0]?.reports?.[0]).toMatchObject({ claimId: 'claim-1', loadId: 'load-1', status: 'passed' });
+    expect(compact.passes[0]?.reports?.[0]).not.toHaveProperty('canonical');
+    expect(compact.fullResult?.path).toMatch(/^\.tau\/artifacts\//u);
+    const bytes = stored.get(compact.fullResult!.path)!;
+    expect(compact.fullResult).toMatchObject({
+      byteLength: bytes.byteLength,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      mimeType: 'application/json',
+    });
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(original);
+  });
+
+  it('should refuse when complete evidence cannot be persisted', async () => {
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => {
+      throw new Error('record authority unavailable');
+    });
+    const result = await invoke(
+      build({
+        geospec: { runTests: async () => verdict(2) },
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    expect(recordWrite).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ isError: true, content: { errorCode: 'IO_ERROR' } });
+    expect(result.content).not.toHaveProperty('fullResult');
+    expect(result.content).not.toHaveProperty('passes');
+  });
+
+  it('should persist only the finalized fresh result after one stale retry', async () => {
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const runTests = vi
+      .fn<RpcGeoSpecClient['runTests']>()
+      .mockResolvedValueOnce(verdict(3, 'broken'))
+      .mockResolvedValueOnce(verdict(4, 'repaired'));
+    const registry = build({
+      geospec: { runTests },
+      fileSystemFor: () => ({ ...emptyFileSystem(), readBinaryFile: async () => new TextEncoder().encode('repaired') }),
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+    });
+    await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content: 'repaired' } });
+    const result = await invoke(registry, 'test_model', { input: {} });
+    expect(result.isError).toBe(false);
+    expect(runTests).toHaveBeenCalledTimes(2);
+    expect(recordWrite).toHaveBeenCalledOnce();
+    const bytes = recordWrite.mock.calls[0]![1];
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(verdict(4, 'repaired'));
+  });
+
+  it.each(['module', 'load', 'direct'] as const)(
+    'should refuse replaced %s lineage before retaining canonical evidence',
+    async (kind) => {
+      const digest = createHash('sha256').update('broken').digest('hex');
+      const original = {
+        ...verdict(3),
+        lineage: [
+          {
+            file: 'main.geospec.ts',
+            lineage: {
+              status: 'complete',
+              modules:
+                kind === 'module'
+                  ? [
+                      {
+                        entryPath: 'main.geospec.ts',
+                        bundleSha256: digest,
+                        files: { 'main.ts': `sha256:${digest}` },
+                        consistent: true,
+                      },
+                    ]
+                  : [],
+              loads:
+                kind === 'module'
+                  ? []
+                  : [
+                      {
+                        loadId: 'load-3',
+                        status: 'complete',
+                        evidence: {
+                          loadId: 'load-3',
+                          status: 'complete',
+                          format: 'glb',
+                          parameters: {},
+                          ingestOptions: {},
+                          ...(kind === 'direct'
+                            ? { sourcePath: 'main.ts' }
+                            : { sourceRevision: { entry: 'main.ts', files: { 'main.ts': `sha256:${digest}` } } }),
+                          artifacts: [{ name: 'main.glb', sha256: digest, byteLength: 6 }],
+                        },
+                      },
+                    ],
+            },
+          },
+        ],
+      };
+      const runTests = vi.fn<RpcGeoSpecClient['runTests']>(async () => ({
+        success: true,
+        ...testModelOutputSchema.parse(original),
+      }));
+      const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+      const registry = build({
+        geospec: { runTests },
+        fileSystemFor: () => ({
+          ...emptyFileSystem(),
+          readBinaryFile: async () => new TextEncoder().encode('repaired'),
+        }),
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      });
+      await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content: 'repaired' } });
+      expect(await invoke(registry, 'test_model', { input: {} })).toMatchObject({
+        isError: true,
+        content: { errorCode: 'STALE_EVALUATION' },
+      });
+      expect(runTests).toHaveBeenCalledTimes(2);
+      expect(recordWrite).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should not persist a result that remains stale after retry', async () => {
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const runTests = vi.fn<RpcGeoSpecClient['runTests']>(async () => verdict(5, 'broken'));
+    const registry = build({
+      geospec: { runTests },
+      fileSystemFor: () => ({ ...emptyFileSystem(), readBinaryFile: async () => new TextEncoder().encode('repaired') }),
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+    });
+    await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content: 'repaired' } });
+    const result = await invoke(registry, 'test_model', { input: {} });
+    expect(result).toMatchObject({ isError: true, content: { errorCode: 'STALE_EVALUATION' } });
+    expect(runTests).toHaveBeenCalledTimes(2);
+    expect(recordWrite).not.toHaveBeenCalled();
+  });
+
+  it('should retain the full oversized result before limiting inline failure rows', async () => {
+    const original = {
+      ...verdict(6),
+      total: 26,
+      failures: Array.from({ length: 25 }, (_, index) => ({
+        id: `failure-${index}`,
+        requirement: `requirement-${index}`,
+        reason: 'x'.repeat(7000),
+        suggestion: 'Inspect complete evidence',
+        targetFile: 'main.geospec.ts',
+      })),
+    };
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const result = await invoke(
+      build({
+        geospec: { runTests: async () => original },
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    const compact = testModelOutputSchema.parse(result.content);
+    expect(result.isError).toBe(false);
+    expect(compact).toMatchObject({ passed: 1, total: 26, omittedFailures: 5, omittedPasses: 1 });
+    expect(compact.failures).toHaveLength(20);
+    expect(compact.failures[0]?.reason).toHaveLength(512);
+    expect(compact.passes).toEqual([]);
+    expect(recordWrite).toHaveBeenCalledOnce();
+    expect(JSON.parse(new TextDecoder().decode(recordWrite.mock.calls[0]![1]))).toEqual(original);
+  });
+
+  it('should not publish a compact verdict when cancellation arrives during persistence', async () => {
+    const cancelled = new AbortController();
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => {
+      cancelled.abort(new Error('cancelled while recording evidence'));
+    });
+    const registry = build({
+      geospec: { runTests: async () => verdict(7) },
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+    });
+    await expect(invoke(registry, 'test_model', { input: {}, signal: cancelled.signal })).rejects.toThrow(
+      'cancelled while recording evidence',
+    );
+    expect(recordWrite).toHaveBeenCalledOnce();
+  });
+
+  it.each(['mixed', 'unavailable'] as const)(
+    'should preserve final skipped/not-run accounting and %s lineage qualification',
+    async (lineageStatus) => {
+      const original: Extract<Awaited<ReturnType<RpcGeoSpecClient['runTests']>>, { success: true }> = {
+        ...verdict(8),
+        runStatus: 'not-run',
+        lineageStatus,
+        accounting: {
+          discovered: 3,
+          selected: 2,
+          completed: 1,
+          passed: 1,
+          failed: 0,
+          unsupported: 0,
+          inconclusive: 0,
+          skipped: 1,
+          notRun: 1,
+          requestedFiles: ['main.geospec.ts', 'later.geospec.ts'],
+          completedFiles: ['main.geospec.ts'],
+          notRunFiles: ['later.geospec.ts'],
+          discoveryComplete: false,
+          cancelled: false,
+          bailed: true,
+        },
+        tests: [
+          { id: 'passed', requirement: 'passed', targetFile: 'main.geospec.ts', status: 'passed' },
+          { id: 'skipped', requirement: 'skipped', targetFile: 'main.geospec.ts', status: 'skipped' },
+          { id: 'not-run', requirement: 'not-run', targetFile: 'main.geospec.ts', status: 'not-run' },
+        ],
+        lineage: [{ file: 'main.geospec.ts', lineage: { status: lineageStatus, modules: [], loads: [] } }],
+      };
+      const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+      const registry = build({
+        geospec: { runTests: async () => original },
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      });
+      const result = await invoke(registry, 'test_model', { input: {} });
+      const compact = testModelOutputSchema.parse(result.content);
+      expect(compact).toMatchObject({
+        runStatus: 'not-run',
+        lineageStatus,
+        accounting: original.accounting,
+        tests: original.tests,
+        lineage: original.lineage,
+      });
+      expect(JSON.parse(new TextDecoder().decode(recordWrite.mock.calls[0]![1]))).toEqual(original);
+    },
+  );
+
+  it('should archive oversized lineage and tests without hiding final qualification or accounting', async () => {
+    const original = {
+      success: true,
+      ...testModelOutputSchema.parse({
+        passed: 0,
+        total: 1,
+        passes: [],
+        failures: [
+          {
+            id: 'not-run',
+            requirement: 'not-run',
+            reason: 'Not started',
+            suggestion: 'Retry',
+            targetFile: 'main.geospec.ts',
+          },
+        ],
+        runStatus: 'not-run',
+        lineageStatus: 'mixed',
+        accounting: {
+          discovered: 2,
+          selected: 1,
+          completed: 0,
+          passed: 0,
+          failed: 0,
+          unsupported: 0,
+          inconclusive: 0,
+          skipped: 1,
+          notRun: 1,
+          requestedFiles: ['main.geospec.ts'],
+          completedFiles: ['main.geospec.ts'],
+          notRunFiles: [],
+          discoveryComplete: true,
+          cancelled: false,
+          bailed: false,
+        },
+        tests: [
+          { id: 'skipped', requirement: 'skipped', targetFile: 'main.geospec.ts', status: 'skipped' },
+          { id: 'not-run', requirement: 'not-run', targetFile: 'main.geospec.ts', status: 'not-run' },
+        ],
+        lineage: [
+          {
+            file: 'main.geospec.ts',
+            lineage: {
+              status: 'mixed',
+              loads: [],
+              modules: [
+                {
+                  entryPath: 'main.geospec.ts',
+                  bundleSha256: 'a'.repeat(64),
+                  consistent: false,
+                  files: Object.fromEntries(
+                    Array.from({ length: 2000 }, (_, index) => [
+                      `dependency-${index}.ts`,
+                      `sha256:${createHash('sha256').update('export const main = 1;\n').digest('hex')}`,
+                    ]),
+                  ),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    } satisfies Extract<Awaited<ReturnType<RpcGeoSpecClient['runTests']>>, { success: true }>;
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const result = await invoke(
+      build({
+        geospec: { runTests: async () => original },
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    const compact = testModelOutputSchema.parse(result.content);
+    expect(compact).toMatchObject({
+      runStatus: 'not-run',
+      lineageStatus: 'mixed',
+      accounting: original.accounting,
+      omittedTests: 2,
+      omittedLineage: 1,
+    });
+    expect(compact).not.toHaveProperty('tests');
+    expect(compact).not.toHaveProperty('lineage');
+    expect(JSON.stringify(compact).length).toBeLessThan(128 * 1024);
+    expect(recordWrite).toHaveBeenCalledOnce();
+    expect(JSON.parse(new TextDecoder().decode(recordWrite.mock.calls[0]![1]))).toEqual(original);
+  });
+
+  it('should retain evidence through the composed record authority and refuse the agent-only view', async () => {
+    const checkout = new MemoryProvider();
+    const agentView = composeView({ filesystem: checkout }, { consumer: 'agent', policy: tauPathPolicy });
+    const recordView = composeView({ filesystem: checkout }, { consumer: 'user', policy: tauPathPolicy });
+    const mutations = new ResourceQueue();
+    const fileSystemFor = (signal: AbortSignal) =>
+      createProviderRpcFileSystem({ provider: agentView, mutations, signal });
+    const recordFileSystemFor = (signal: AbortSignal) =>
+      createProviderRpcFileSystem({ provider: recordView, mutations, signal });
+    const original = verdict(9);
+    const geospec = { runTests: async () => original };
+    const refused = await invoke(build({ geospec, fileSystemFor }), 'test_model', { input: {} });
+    expect(refused).toMatchObject({ isError: true, content: { errorCode: 'IO_ERROR' } });
+    expect(await checkout.exists('.tau/artifacts')).toBe(false);
+    const recorded = await invoke(build({ geospec, fileSystemFor, recordFileSystemFor }), 'test_model', { input: {} });
+    const compact = testModelOutputSchema.parse(recorded.content);
+    expect(recorded.isError).toBe(false);
+    const bytes = await checkout.readFile(compact.fullResult!.path);
+    expect(compact.fullResult).toMatchObject({
+      byteLength: bytes.byteLength,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    });
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(original);
   });
 });

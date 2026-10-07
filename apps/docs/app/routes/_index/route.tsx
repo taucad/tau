@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from '@taucad/ui/components/card';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
+import { TauWordmark } from '#components/tau-wordmark.js';
 import { baseOptions } from '#lib/fumadocs/layout.shared.js';
 
 const quickStartCommand = 'pnpm add @taucad/runtime @taucad/replicad @taucad/esbuild zod';
@@ -154,7 +155,12 @@ const LandingPage = (): React.JSX.Element => {
                   Apache-2.0
                 </Badge>
               </div>
-              <pre className='overflow-x-auto px-5 py-7'>
+              <pre
+                role='region'
+                aria-label='Install runtime packages'
+                tabIndex={0}
+                className='overflow-x-auto px-5 py-7'
+              >
                 <code className='block min-w-max text-sm text-foreground'>
                   <span aria-hidden className='text-fd-primary'>
                     ${' '}
@@ -233,7 +239,11 @@ const LandingPage = (): React.JSX.Element => {
 
       <footer className='border-t border-border bg-background text-foreground'>
         <div className='mx-auto flex w-full max-w-7xl flex-col gap-3 px-6 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between lg:px-10'>
-          <p>TAU / DOCS</p>
+          <p className='flex items-center gap-2'>
+            <TauWordmark aria-hidden className='h-4 w-auto text-foreground' />
+            <span className='sr-only'>Tau</span>
+            <span className='font-mono text-xs'>DOCS</span>
+          </p>
           <p className='font-mono text-xs'>Tau-authored source · Apache-2.0</p>
         </div>
       </footer>

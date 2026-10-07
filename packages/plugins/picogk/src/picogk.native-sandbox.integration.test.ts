@@ -22,12 +22,19 @@ import { picogk } from '#index.js';
 type ResourceManifest = {
   readonly workerPath: string;
   readonly workerSha256: string;
-  readonly resourceFiles: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly label: string }>;
+  readonly resourceFiles: ReadonlyArray<{
+    readonly path: string;
+    readonly sha256: string;
+    readonly label: string;
+  }>;
 };
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const targetRoot = resolve(workspaceRoot, `apps/desktop/resources/picogk/${process.platform}-${process.arch}`);
 const manifest = JSON.parse(readFileSync(resolve(targetRoot, 'tau-runtime-manifest.json'), 'utf8')) as ResourceManifest;
+// Upstream PicoGK ships no Linux voxel library, so a Linux payload carries the managed worker
+// without it and these suites run only where the native engine is present.
+const nativeEngineAvailable = manifest.resourceFiles.some(({ path }) => /^picogk\.\d/u.test(path));
 
 const runtime = defineRuntime({
   plugins: [
@@ -52,6 +59,14 @@ type Outcomes = Record<
   string
 >;
 const denied = ['UnauthorizedAccessException', 'IOException'];
+// On Linux the sandbox hides each read-denied root (user homes, /tmp) behind an empty tmpfs, so a
+// hidden file reads as missing rather than forbidden. A write there lands in that throwaway tmpfs,
+// and a write to the read-only root fails with an IOException. Neither reaches the host, which the
+// existsSync checks below prove. macOS denies all of these with UnauthorizedAccessException.
+const hiddenRead =
+  process.platform === 'linux' ? [...denied, 'FileNotFoundException', 'DirectoryNotFoundException'] : denied;
+const containedWrite =
+  process.platform === 'linux' ? [...denied, 'FileNotFoundException', 'DirectoryNotFoundException', 'allowed'] : denied;
 
 const literal = (value: string): string => JSON.stringify(value);
 
@@ -110,7 +125,7 @@ public static class Sandbox
 }
 `;
 
-describe('PicoGK native sandbox', () => {
+describe.runIf(nativeEngineAvailable)('PicoGK native sandbox', () => {
   it('should deny host reads, writes, network, and subprocess escapes from top-level code and Library.Go', async () => {
     const id = randomUUID();
     const paths = {
@@ -121,27 +136,34 @@ describe('PicoGK native sandbox', () => {
     };
     writeFileSync(paths.homeCanary, 'secret');
     writeFileSync(paths.tempCanary, 'secret');
-    const client = createTestRuntimeClient({ runtime, files: { 'main.cs': hostileSource(paths) } });
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.cs': hostileSource(paths) },
+    });
+    const document = client.open({ source: { path: 'main.cs' }, watch: false });
     try {
-      const rendered = await client.render({ source: { path: 'main.cs' } });
+      const rendered = await document.evaluation();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Hostile PicoGK render was unexpectedly superseded.');
       }
-      expect(rendered.geometry.success).toBe(false);
-      if (rendered.geometry.success) {
+      expect(rendered.evaluation.success).toBe(false);
+      if (rendered.evaluation.success) {
         throw new Error('Hostile PicoGK project produced geometry.');
       }
-      const report = rendered.geometry.issues.map(({ message }) => message).join('\n');
+      const report = rendered.evaluation.issues.map(({ message }) => message).join('\n');
       const probe = /TAU_SANDBOX_PROBE (?<json>\{.*\})/u.exec(report)?.groups?.['json'];
       expect(probe, report).toBeDefined();
-      const outcomes = JSON.parse(probe!) as { readonly import: Outcomes; readonly main: Outcomes };
+      const outcomes = JSON.parse(probe!) as {
+        readonly import: Outcomes;
+        readonly main: Outcomes;
+      };
       for (const phase of ['import', 'main'] as const) {
         const outcome = outcomes[phase];
-        expect(denied, `${phase} home_read ${outcome.home_read}`).toContain(outcome.home_read);
-        expect(denied, `${phase} temp_read ${outcome.temp_read}`).toContain(outcome.temp_read);
-        expect(denied, `${phase} outside_write ${outcome.outside_write}`).toContain(outcome.outside_write);
-        expect(denied, `${phase} home_write ${outcome.home_write}`).toContain(outcome.home_write);
+        expect(hiddenRead, `${phase} home_read ${outcome.home_read}`).toContain(outcome.home_read);
+        expect(hiddenRead, `${phase} temp_read ${outcome.temp_read}`).toContain(outcome.temp_read);
+        expect(containedWrite, `${phase} outside_write ${outcome.outside_write}`).toContain(outcome.outside_write);
+        expect(containedWrite, `${phase} home_write ${outcome.home_write}`).toContain(outcome.home_write);
         expect(outcome.socket, `${phase} socket`).not.toBe('allowed');
         expect(outcome.dns, `${phase} dns`).not.toBe('allowed');
         expect(outcome.subprocess, `${phase} subprocess`).not.toBe('exit:0');
@@ -150,6 +172,7 @@ describe('PicoGK native sandbox', () => {
       expect(existsSync(paths.outsideEscape)).toBe(false);
       expect(existsSync(paths.homeEscape)).toBe(false);
     } finally {
+      document.close();
       await client.shutdown();
       for (const path of Object.values(paths)) {
         rmSync(path, { force: true });

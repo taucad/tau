@@ -124,6 +124,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { Separator } from '@taucad/ui/components/separator';
 import { formatKeyCombination } from '#utils/keys.utils.js';
+import { capturePointer, releasePointer } from '#utils/pointer-capture.utils.js';
 import type {
   FileViewerPaneContent,
   FileViewerPresentation,
@@ -1118,16 +1119,9 @@ function FileWorkbenchPane({
     requestsFiles: shouldRenderFiles,
     presentation,
   });
-  const [filesWidth, setFilesWidth] = useState(paneState.filesWidth);
   const [fileActionsContainer, setFileActionsContainer] = useState<HTMLDivElement>();
   const alternateView = presentation?.views.find((view) => view.id !== paneState.viewId);
   const filesAction = paneState.filesOpen ? `Hide files for ${title}` : `Show files for ${title}`;
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      setFilesWidth(paneState.filesWidth);
-    });
-  }, [paneState.filesWidth]);
 
   const actions = (
     <div className='ml-2 flex shrink-0 items-center gap-1' role='group' aria-label={`File actions for ${title}`}>
@@ -1179,31 +1173,24 @@ function FileWorkbenchPane({
       <div className='flex min-h-0 flex-1'>
         <div className='min-h-0 min-w-0 flex-1'>{children}</div>
         {paneState.filesOpen ? (
-          <div
-            id={regionId}
-            role='region'
-            aria-label={`Files for ${title}`}
-            className='h-full shrink-0'
-            style={{ width: filesWidth }}
-          >
-            <FilePaneFilesSidecar
-              actionsContainer={fileActionsContainer}
-              width={filesWidth}
-              onWidthChange={setFilesWidth}
-              onWidthCommit={(width) => {
-                panelApi.updateParameters({ filesWidth: width });
-                if (filePath && profile !== 'shared') {
-                  editorRef.send({ type: 'setFileSidebarWidth', path: filePath, width });
-                }
-              }}
-              onOpenChange={(open) => {
-                panelApi.updateParameters({ filesOpen: open });
-              }}
-              onOpenFile={onOpenFile}
-              shouldHandleReveal={shouldHandleReveal}
-              isReadOnly={profile === 'shared'}
-            />
-          </div>
+          <FilePaneFilesSidecar
+            regionId={regionId}
+            title={title}
+            actionsContainer={fileActionsContainer}
+            width={paneState.filesWidth}
+            onWidthCommit={(width) => {
+              panelApi.updateParameters({ filesWidth: width });
+              if (filePath && profile !== 'shared') {
+                editorRef.send({ type: 'setFileSidebarWidth', path: filePath, width });
+              }
+            }}
+            onOpenChange={(open) => {
+              panelApi.updateParameters({ filesOpen: open });
+            }}
+            onOpenFile={onOpenFile}
+            shouldHandleReveal={shouldHandleReveal}
+            isReadOnly={profile === 'shared'}
+          />
         ) : null}
       </div>
     </div>
@@ -1534,18 +1521,20 @@ function RoutedFileViewer({
 const clampFilesWidth = (width: number): number => Math.min(maximumFilesWidth, Math.max(minimumFilesWidth, width));
 
 function FilePaneFilesSidecar({
+  regionId,
+  title,
   actionsContainer,
-  width,
-  onWidthChange,
+  width: savedWidth,
   onWidthCommit,
   onOpenChange,
   onOpenFile,
   shouldHandleReveal,
   isReadOnly = false,
 }: {
+  readonly regionId: string;
+  readonly title: string;
   readonly actionsContainer: Element | DocumentFragment | undefined;
   readonly width: number;
-  readonly onWidthChange: (width: number) => void;
   readonly onWidthCommit: (width: number) => void;
   readonly onOpenChange: (open: boolean) => void;
   readonly onOpenFile: (path: string, readOnly?: boolean) => void;
@@ -1553,15 +1542,37 @@ function FilePaneFilesSidecar({
   readonly isReadOnly?: boolean;
 }): React.JSX.Element {
   const drag = useRef<{ readonly x: number; readonly width: number; currentWidth: number } | undefined>(undefined);
+  const [draftWidth, setDraftWidth] = useState<number>();
+  const width = draftWidth ?? savedWidth;
+  const cancelDrag = useCallback(() => {
+    drag.current = undefined;
+    setDraftWidth(undefined);
+  }, []);
+  const requestOpen = useCallback(() => {
+    onOpenChange(true);
+  }, [onOpenChange]);
+
+  useEffect(() => {
+    window.addEventListener('blur', cancelDrag);
+    return () => {
+      window.removeEventListener('blur', cancelDrag);
+    };
+  }, [cancelDrag]);
 
   const commitWidth = (nextWidth: number): void => {
     const clamped = clampFilesWidth(nextWidth);
-    onWidthChange(clamped);
     onWidthCommit(clamped);
+    setDraftWidth(undefined);
   };
 
   return (
-    <div className='relative size-full border-l border-border'>
+    <div
+      id={regionId}
+      role='region'
+      aria-label={`Files for ${title}`}
+      className='relative h-full shrink-0 border-l border-border'
+      style={{ width }}
+    >
       <div
         role='separator'
         aria-label='Resize Files pane'
@@ -1572,8 +1583,11 @@ function FilePaneFilesSidecar({
         tabIndex={0}
         className='absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize outline-none focus-visible:focus-outline'
         onPointerDown={(event) => {
+          if (event.button !== 0) {
+            return;
+          }
           drag.current = { x: event.clientX, width, currentWidth: width };
-          event.currentTarget.setPointerCapture(event.pointerId);
+          capturePointer(event.currentTarget, event.pointerId);
         }}
         onPointerMove={(event) => {
           if (!drag.current) {
@@ -1581,7 +1595,7 @@ function FilePaneFilesSidecar({
           }
           const nextWidth = clampFilesWidth(drag.current.width + drag.current.x - event.clientX);
           drag.current.currentWidth = nextWidth;
-          onWidthChange(nextWidth);
+          setDraftWidth(nextWidth);
         }}
         onPointerUp={(event) => {
           if (!drag.current) {
@@ -1589,9 +1603,12 @@ function FilePaneFilesSidecar({
           }
           const { currentWidth } = drag.current;
           drag.current = undefined;
-          event.currentTarget.releasePointerCapture(event.pointerId);
+          releasePointer(event.currentTarget, event.pointerId);
           onWidthCommit(currentWidth);
+          setDraftWidth(undefined);
         }}
+        onPointerCancel={cancelDrag}
+        onLostPointerCapture={cancelDrag}
         onKeyDown={(event) => {
           if (event.key === 'ArrowLeft') {
             event.preventDefault();
@@ -1611,9 +1628,7 @@ function FilePaneFilesSidecar({
         onOpenFile={onOpenFile}
         shouldHandleReveal={shouldHandleReveal}
         readOnly={isReadOnly}
-        onRequestOpen={() => {
-          onOpenChange(true);
-        }}
+        onRequestOpen={requestOpen}
       />
     </div>
   );
@@ -1650,8 +1665,11 @@ export function WorkbenchRightHeaderActions(properties: IDockviewHeaderActionsPr
  */
 export const WorkbenchDockview = memo(function ({
   profile = 'editor',
+  onApiChange,
 }: {
   readonly profile?: WorkbenchProfile;
+  /** Reports the Dockview once ready, and `undefined` on unmount, for the workspace's Workbench toggle. */
+  readonly onApiChange?: (api: DockviewApi | undefined) => void;
 } = {}): React.JSX.Element {
   const { editorRef } = useProject();
   const { connectWorkbench, setWorkbenchOpen, layoutController } = useProjectWorkspace();
@@ -1660,6 +1678,13 @@ export const WorkbenchDockview = memo(function ({
   const monaco = useConfiguredMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
+
+  useEffect(() => {
+    onApiChange?.(api);
+    return () => {
+      onApiChange?.(undefined);
+    };
+  }, [api, onApiChange]);
   const adoptedProjectionRef = useRef<string | undefined>(undefined);
   const pendingUserFilePathRef = useRef<string | undefined>(undefined);
   const pendingFilePlacementRef = useRef(new Map<string, PendingFilePlacement>());

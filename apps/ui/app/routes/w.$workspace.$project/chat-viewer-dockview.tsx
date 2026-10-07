@@ -10,9 +10,9 @@ import type {
   IWatermarkPanelProps,
 } from 'dockview-react';
 import { positionToDirection } from 'dockview-react';
-import type { ViewerNode } from '@taucad/workbench';
+import type { ViewerNode, WorkbenchView } from '@taucad/workbench';
 import { Box } from 'lucide-react';
-import type { CapabilitiesManifest } from '@taucad/runtime';
+import type { CapabilitiesManifest, Evaluation } from '@taucad/runtime';
 import { sourcePathMatchesExtensions } from '@taucad/utils/file';
 import type { FileEntry } from '@taucad/types';
 import { idPrefix, tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
@@ -28,6 +28,7 @@ import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
 import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
+import { chooseProjection } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { DockviewEmptyAction, DockviewEmptyCloseAction } from '#components/panes/dockview-empty-action.js';
@@ -35,6 +36,12 @@ import { getViewerTabIcon, ViewerDockviewTab } from '#components/panes/viewer-ta
 import { DockviewLeftActions, DockviewFileActionProvider } from '#components/panes/dockview-open-file-action.js';
 import { ProjectWorkspaceActions } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import { ViewerChatLaneToggle } from '#routes/w.$workspace.$project/chat-lane-toggle.js';
+import { selectCadEvaluation } from '#machines/cad.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
+import type { ActorRefFrom } from 'xstate';
+import { setLocalInstanceChoice } from '#workbench-records/local-instance.js';
+import { useCommandPaletteItems } from '#components/layout/command-palette.js';
+import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 
 /**
  * Params passed to each viewer panel via Dockview.
@@ -49,6 +56,21 @@ type ViewerProfile = 'editor' | 'shared';
 
 const isViewerPanelParameters = (parameters: unknown): parameters is ViewerPanelParameters =>
   typeof (parameters as Partial<ViewerPanelParameters> | undefined)?.viewId === 'string';
+
+/** Projection suffixes distinguish panels for one file only when a build offers a choice. */
+export function viewerPanelTitle(
+  record: WorkbenchView,
+  siblingCount: number,
+  evaluation: Evaluation | undefined,
+): string {
+  const title = viewTabTitle(record);
+  if (siblingCount < 2 || !evaluation?.success || evaluation.views.length < 2) {
+    return title;
+  }
+  const id = record.selectedKernelView ?? evaluation.views[0]?.id;
+  const offer = evaluation.views.find((view) => view.id === id);
+  return id ? `${title} · ${offer?.title ?? id}` : title;
+}
 
 /** Adopt the record and return only view IDs genuinely removed from the arrangement. */
 export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): string[] {
@@ -342,7 +364,7 @@ function ViewerEmptyState({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath,
-          renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
+          operationTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
         });
       };
 
@@ -435,6 +457,45 @@ function ViewerLeftActions(properties: IDockviewHeaderActionsProps): React.JSX.E
   );
 }
 
+/** Palette actions follow the active Dockview panel and the build's current offers. */
+export function ViewerProjectionCommandItems({
+  cadActor,
+  viewId,
+  entryPath,
+}: {
+  readonly cadActor: ActorRefFrom<typeof cadMachine>;
+  readonly viewId: string;
+  readonly entryPath: string;
+}): undefined {
+  const evaluation = useSelector(cadActor, selectCadEvaluation);
+  const viewCommands = useWorkbenchViewCommands();
+  useCommandPaletteItems(
+    'viewer-projections',
+    (): CommandPaletteItem[] =>
+      evaluation?.success && evaluation.views.length > 1
+        ? evaluation.views.flatMap((view): CommandPaletteItem[] => [
+            {
+              id: `show-view-${view.id}`,
+              label: `Show ${view.title}`,
+              detail: entryPath,
+              group: 'Viewer',
+              icon: <Box />,
+              action: () => {
+                setLocalInstanceChoice(viewId, undefined);
+                chooseProjection({ viewCommands, viewId, entryPath, evaluation, nextId: view.id });
+              },
+            },
+          ])
+        : [],
+    [entryPath, evaluation, viewCommands, viewId],
+  );
+  return undefined;
+}
+
+export function ViewerRightActions(properties: IDockviewHeaderActionsProps): React.JSX.Element {
+  return <ProjectWorkspaceActions {...properties} />;
+}
+
 /**
  * ViewerDockview
  *
@@ -450,7 +511,7 @@ export const ViewerDockview = memo(function ({
 }: {
   readonly profile?: ViewerProfile;
 } = {}): React.JSX.Element {
-  const { projectRef, mainEntryPath, viewRecords, entriesRecord, setViewEntryPath } = useProject();
+  const { projectRef, mainEntryPath, viewRecords, entriesRecord, geometryUnits, setViewEntryPath } = useProject();
   const viewCommands = useWorkbenchViewCommands();
   // oxlint-disable-next-line typescript/no-unnecessary-condition -- The optional workspace is absent in shared-profile embeds.
   const layoutController = useProjectWorkspace({ enableNoContext: true })?.layoutController;
@@ -468,6 +529,13 @@ export const ViewerDockview = memo(function ({
   const adoptedProjectionRef = useRef<string | undefined>(undefined);
   // Track the active (focused) viewer panel for settings inheritance
   const [activeViewerPanelId, setActiveViewerPanelId] = useState<string | undefined>();
+  const activeViewerPanel = activeViewerPanelId
+    ? api?.panels.find((panel) => panel.id === activeViewerPanelId)
+    : api?.activePanel;
+  const activeViewerParams =
+    activeViewerPanel && isViewerPanelParameters(activeViewerPanel.params) ? activeViewerPanel.params : undefined;
+  const activeViewerEntryPath = activeViewerParams?.entryPath;
+  const activeViewerCadActor = activeViewerEntryPath ? geometryUnits.get(activeViewerEntryPath) : undefined;
 
   /* The entry's CAD actor owns its render timeout; a unit is seeded with the durable value at spawn
    * rather than pushed from a mount (Finding 4, E1). */
@@ -561,6 +629,7 @@ export const ViewerDockview = memo(function ({
     const removeDisposable = api.onDidRemovePanel((event) => {
       if (isViewerPanelParameters(event.params)) {
         const viewId = event.id;
+        setLocalInstanceChoice(viewId, undefined);
         setViewEntryPath(viewId, undefined);
         projectRef.send({ type: 'destroyViewGraphics', viewId });
         if (!isRestoringLayout.current && profile === 'editor') {
@@ -583,6 +652,16 @@ export const ViewerDockview = memo(function ({
     if (!api || profile === 'shared') {
       return;
     }
+    const counts = new Map<string, number>();
+    for (const panel of api.panels) {
+      const record = viewRecords.get(panel.id);
+      if (!record) {
+        continue;
+      }
+      if (record.entryPath !== null) {
+        counts.set(record.entryPath, (counts.get(record.entryPath) ?? 0) + 1);
+      }
+    }
     for (const panel of api.panels) {
       if (!isViewerPanelParameters(panel.params)) {
         continue;
@@ -596,12 +675,13 @@ export const ViewerDockview = memo(function ({
         panel.api.updateParameters({ entryPath: nextPath });
       }
       setViewEntryPath(panel.id, record.entryPath);
-      const title = viewTabTitle(record);
+      const evaluation = geometryUnits.get(record.entryPath ?? '')?.getSnapshot().context.evaluation;
+      const title = viewerPanelTitle(record, counts.get(record.entryPath ?? '') ?? 0, evaluation);
       if (panel.title !== title) {
         panel.api.setTitle(title);
       }
     }
-  }, [api, profile, setViewEntryPath, viewRecords]);
+  }, [api, geometryUnits, profile, setViewEntryPath, viewRecords]);
 
   // Tag outgoing tab drags with the viewer MIME so the editor can identify them
   useEffect(() => {
@@ -680,19 +760,21 @@ export const ViewerDockview = memo(function ({
         return;
       }
       const panelViewId = panel.id;
-      if (!panel.api.isVisible) {
+      const visible = panel.api.isVisible;
+      // Editor tabs need their record owner even when graphics rendering is hidden.
+      if (profile === 'editor' || visible) {
+        const settings = viewRecords.get(panelViewId);
+        const validatedSettings = settings ? graphicsSettingsForView(settings) : defaultGraphicsSettings;
+        if (!admittedGraphics.current.has(panelViewId)) {
+          admittedGraphics.current.add(panelViewId);
+          projectRef.send({ type: 'createViewGraphics', viewId: panelViewId, settings: validatedSettings });
+        }
+      }
+      if (!visible) {
         if (visibleGeometryDemand.current.delete(panelViewId)) {
           projectRef.send({ type: 'setViewerGeometryDemand', viewId: panelViewId });
         }
         return;
-      }
-      const settings = viewRecords.get(panelViewId);
-
-      const validatedSettings = settings ? graphicsSettingsForView(settings) : defaultGraphicsSettings;
-
-      if (!admittedGraphics.current.has(panelViewId)) {
-        admittedGraphics.current.add(panelViewId);
-        projectRef.send({ type: 'createViewGraphics', viewId: panelViewId, settings: validatedSettings });
       }
 
       let panelEntryPath = (panel.params as ViewerPanelParameters | undefined)?.entryPath;
@@ -719,7 +801,7 @@ export const ViewerDockview = memo(function ({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: panelEntryPath,
-          renderTimeout: entriesRecord?.entries[panelEntryPath]?.renderTimeout,
+          operationTimeout: entriesRecord?.entries[panelEntryPath]?.renderTimeout,
         });
       }
       if (panelEntryPath && visibleGeometryDemand.current.get(panelViewId) !== panelEntryPath) {
@@ -866,7 +948,7 @@ export const ViewerDockview = memo(function ({
           projectRef.send({
             type: 'createGeometryUnit',
             entryPath,
-            renderTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
+            operationTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
           });
         },
       });
@@ -898,7 +980,7 @@ export const ViewerDockview = memo(function ({
       projectRef.send({
         type: 'createGeometryUnit',
         entryPath: path,
-        renderTimeout: entriesRecord?.entries[path]?.renderTimeout,
+        operationTimeout: entriesRecord?.entries[path]?.renderTimeout,
       });
     },
     [entriesRecord, getInheritedSettings, profile, projectRef, viewCommands],
@@ -906,7 +988,14 @@ export const ViewerDockview = memo(function ({
 
   return (
     <DockviewFileActionProvider value={handleOpenFile}>
-      <div className='relative size-full'>
+      {profile === 'editor' && activeViewerParams && activeViewerEntryPath && activeViewerCadActor ? (
+        <ViewerProjectionCommandItems
+          cadActor={activeViewerCadActor}
+          viewId={activeViewerParams.viewId}
+          entryPath={activeViewerEntryPath}
+        />
+      ) : null}
+      <div className='@container/viewer relative size-full'>
         <Dockview
           components={components}
           noPanelsOverlay='emptyGroup'
@@ -916,7 +1005,7 @@ export const ViewerDockview = memo(function ({
           watermarkComponent={ViewerWatermark}
           leftHeaderActionsComponent={ViewerLeftActions}
           prefixHeaderActionsComponent={profile === 'editor' ? ViewerChatLaneToggle : undefined}
-          rightHeaderActionsComponent={profile === 'editor' ? ProjectWorkspaceActions : undefined}
+          rightHeaderActionsComponent={profile === 'editor' ? ViewerRightActions : undefined}
           onReady={onReady}
           onDidDrop={onDidDrop}
         />

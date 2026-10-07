@@ -234,6 +234,8 @@ export const refusals = {
   ENGINE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },
   INVALID_REPOSITORY: { owner: 'revisions', retry: 'never' },
   INVALID_TRANSPORT: { owner: 'revisions', retry: 'never' },
+  /** The remote transfer exceeded its byte bound; change the requested scope before retrying. */
+  FETCH_LIMIT_EXCEEDED: { owner: 'revisions', retry: 'never' },
   LFS_REMOTE_UNSUPPORTED: { owner: 'revisions', retry: 'never' },
   MISSING_LARGE_OBJECT: { owner: 'revisions', retry: 'never' },
   /** The remote's copy is damaged: terminal after one attempt (D22). */

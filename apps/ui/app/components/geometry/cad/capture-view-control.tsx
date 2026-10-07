@@ -3,6 +3,7 @@ import { Camera, Check } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { randomUuid } from '@taucad/utils/id';
+import type { Rendering } from '@taucad/runtime';
 import { useGraphics } from '#hooks/use-graphics.js';
 import { useCad } from '#hooks/use-cad.js';
 import { useProject } from '#hooks/use-project.js';
@@ -15,7 +16,10 @@ import { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } fr
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import { attachmentModelForExecution } from '#utils/chat.utils.js';
 
-const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<void>) => {
+const useCaptureCurrentViewToChat = (
+  onSuccess?: () => void,
+  captureRendering?: () => Promise<Rendering>,
+): (() => Promise<void>) => {
   const graphicsRef = useGraphics();
   const cadRef = useCad();
   const { projectRef } = useProject();
@@ -43,6 +47,7 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
         graphicsRef,
         imageService,
         recipe: { purpose: 'chat', mode: 'current' },
+        captureRendering,
       });
       const publishStartedAt = performance.now();
       addDraftAttachment(captureFilesToDataUrls(files)[0]!, {
@@ -62,7 +67,17 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
         projectRef.send({ type: 'releaseGeometryUnit', claimId });
       }
     }
-  }, [addDraftAttachment, cadRef, execution, graphicsRef, imageService, onSuccess, projectRef, selectedModel]);
+  }, [
+    addDraftAttachment,
+    cadRef,
+    captureRendering,
+    execution,
+    graphicsRef,
+    imageService,
+    onSuccess,
+    projectRef,
+    selectedModel,
+  ]);
 };
 
 /**
@@ -75,9 +90,13 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
  * relies on the surrounding `<GraphicsProvider>` (per-view) and
  * `<ActiveChatProvider>` (project route) for context resolution.
  */
-export function CaptureViewControl(): React.JSX.Element {
+export function CaptureViewControl({
+  captureRendering,
+}: {
+  readonly captureRendering?: () => Promise<Rendering>;
+}): React.JSX.Element {
   const { ticked, trigger } = useTickAnimation();
-  const handleCapture = useCaptureCurrentViewToChat(trigger);
+  const handleCapture = useCaptureCurrentViewToChat(trigger, captureRendering);
 
   return (
     <Tooltip>

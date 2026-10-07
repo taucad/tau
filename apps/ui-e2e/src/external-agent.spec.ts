@@ -28,7 +28,7 @@
 
 import { describe, expect, inject, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
-import { getKernelResultOutputSchema, screenshotOutputSchema } from '@taucad/chat';
+import { evaluateModelOutputSchema, screenshotOutputSchema } from '@taucad/chat';
 import * as target from '#support/external-target.js';
 
 const composer = '[aria-label="Ask Tau to build anything..."]';
@@ -85,12 +85,8 @@ const selectCodex = async (): Promise<void> => {
   await target.expectVisible(tab, 60_000);
   await target.click(tab);
   await target.click(selectors.getByRole('option').first());
-  /* The copy the user reads once the chat is placed: their own login, and the
-   * project's tree — never a promise of per-action approval (SP-4 Result 3). */
-  await target.expectVisible(
-    selectors.getByText(/^Runs with your local Codex login on .+, in this project's tree\.$/u),
-    10_000,
-  );
+  /* Choosing a model returns to the sheet, whose Model row now names the agent. */
+  await target.expectVisible(selectors.getByRole('button', { name: /^Model: Codex, .+\. Change$/u }), 10_000);
   await target.keyboardPress('Escape');
   await target.expectVisible(selectors.getByRole('button', { name: /^Agent and model: Codex, /u }), 30_000);
 };
@@ -147,7 +143,7 @@ describe('external agent (AV-5)', () => {
         throw error;
       }
       const events = await durableEvents();
-      for (const name of ['get_kernel_result', 'screenshot']) {
+      for (const name of ['evaluate_model', 'screenshot']) {
         expect(
           events.some(
             (event) =>
@@ -159,9 +155,9 @@ describe('external agent (AV-5)', () => {
         ).toBe(true);
       }
       const kernel = events.findLast(
-        (event) => event.message?.role === 'tool-output' && event.message.toolName === 'get_kernel_result',
+        (event) => event.message?.role === 'tool-output' && event.message.toolName === 'evaluate_model',
       );
-      expect(getKernelResultOutputSchema.parse(kernel?.message?.content)).toMatchObject({
+      expect(evaluateModelOutputSchema.parse(kernel?.message?.content)).toMatchObject({
         status: 'ready',
         kernelIssues: [],
       });

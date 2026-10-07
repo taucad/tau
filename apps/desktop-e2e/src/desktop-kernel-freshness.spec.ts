@@ -86,9 +86,9 @@ test('answers the repaired source after reporting the broken one', async () => {
   fixture = await startGatewayFixture({
     toolCalls: [
       { name: 'create_file', input: { targetFile: 'main.ts', content: brokenSource } },
-      { name: 'get_kernel_result', input: { targetFile: 'main.ts' } },
+      { name: 'evaluate_model', input: { targetFile: 'main.ts' } },
       { name: 'edit_file', input: { targetFile: 'main.ts', oldString: staleSentinel, newString: '' } },
-      { name: 'get_kernel_result', input: { targetFile: 'main.ts' } },
+      { name: 'evaluate_model', input: { targetFile: 'main.ts' } },
     ],
   });
   await fixture.routeThrough(page);
@@ -116,7 +116,7 @@ test('answers the repaired source after reporting the broken one', async () => {
     /* The closing request carries the whole conversation, so one request holds
      * both verdicts. */
     const verdicts = gatewayToolResults(fixture.gatewayRequests.slice(-1)).filter(
-      (result) => result.name === 'get_kernel_result',
+      (result) => result.name === 'evaluate_model',
     );
     const seen = JSON.stringify(verdicts);
     expect(verdicts, `expected two kernel verdicts, saw ${seen}`).toHaveLength(2);
@@ -124,7 +124,7 @@ test('answers the repaired source after reporting the broken one', async () => {
      * transition and not a model that never broke. */
     expect(verdicts[0]!.text, `the first verdict did not report the broken model: ${seen}`).toContain('notAMethod');
     /* Green half. The status enum is `ready | error`
-     * (`libs/chat/src/schemas/tools/get-kernel-result.tool.schema.ts`); the
+     * (`libs/chat/src/schemas/tools/evaluate-model.tool.schema.ts`); the
      * sentinel check is what separates "fresh" from "stale", because a stale
      * answer repeats the first error verbatim. */
     expect(verdicts[1]!.text, `the repaired source was not answered as ready: ${seen}`).toMatch(

@@ -32,10 +32,10 @@ import {
   DropdownMenuSliderItem,
   preventMenuSliderEscapeDismissal,
 } from '#components/ui/menu-slider-item.js';
-import { defaultRenderTimeout } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '#constants/editor.constants.js';
 import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
-import { selectCadRenderTimeout } from '#machines/cad.machine.js';
+import { selectCadOperationTimeout } from '#machines/cad.machine.js';
 import { clamp } from '#utils/number.utils.js';
 
 // Up direction options
@@ -58,7 +58,7 @@ const timeoutOptions: TimeoutOption[] = [
 ];
 
 const defaultTimeoutOption =
-  timeoutOptions.find((option) => option.value === defaultRenderTimeout) ?? timeoutOptions[0]!;
+  timeoutOptions.find((option) => option.value === defaultOperationTimeout) ?? timeoutOptions[0]!;
 
 const upDirectionOptions: Array<{ value: UpDirection; label: React.ReactNode; ariaLabel: string }> = [
   { value: 'x', label: <AxisLabel axis='x' />, ariaLabel: 'X-up' },
@@ -82,6 +82,8 @@ type ViewerSettingsProps = {
   readonly side?: DropdownMenuContentProps['side'];
   /** How the menu aligns against the trigger. */
   readonly align?: DropdownMenuContentProps['align'];
+  /** The current view's kernel settings, closing the Rendering section; the viewer supplies them per pane. */
+  readonly kernelSettings?: React.ReactNode;
 };
 
 /**
@@ -157,7 +159,12 @@ function FieldOfViewRow(): React.JSX.Element {
  * All settings are per-view, read from the per-view GraphicsMachine state via GraphicsProvider
  * and the per-view CadMachine state via CadProvider.
  */
-export function ViewerSettings({ className, side = 'right', align = 'end' }: ViewerSettingsProps): React.ReactNode {
+export function ViewerSettings({
+  className,
+  side = 'right',
+  align = 'end',
+  kernelSettings,
+}: ViewerSettingsProps): React.ReactNode {
   const graphicsRef = useGraphics();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -173,10 +180,10 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const enablePostProcessing = useGraphicsSelector((state) => state.context.enablePostProcessing);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
-  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
+  const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
 
   const cadRef = useCad();
-  const renderTimeout = useCadSelector(selectCadRenderTimeout, defaultRenderTimeout);
+  const operationTimeout = useCadSelector(selectCadOperationTimeout, defaultOperationTimeout);
 
   const handleMeshToggle = useCallback(
     (checked: boolean) => {
@@ -234,16 +241,16 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
     [graphicsRef],
   );
 
-  const handleRenderTimeoutChange = useCallback(
+  const handleOperationTimeoutChange = useCallback(
     (value: string) => {
-      cadRef?.send({ type: 'setRenderTimeout', renderTimeout: Number(value) });
+      cadRef?.send({ type: 'setOperationTimeout', operationTimeout: Number(value) });
     },
     [cadRef],
   );
 
   const currentTimeoutOption = useMemo(
-    () => timeoutOptions.find((option) => option.value === renderTimeout) ?? defaultTimeoutOption,
-    [renderTimeout],
+    () => timeoutOptions.find((option) => option.value === operationTimeout) ?? defaultTimeoutOption,
+    [operationTimeout],
   );
 
   const getTimeoutValue = useCallback((option: TimeoutOption): string => String(option.value), []);
@@ -287,38 +294,28 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
               <PenLine />
               Lines
             </DropdownMenuSwitchItem>
-            <DropdownMenuSwitchItem className='h-10' isChecked={enableMatcap} onIsCheckedChange={handleMatcapToggle}>
-              <Sparkles />
-              <div className='flex flex-col'>
-                <span className='flex items-center gap-1'>
-                  Matcap{' '}
-                  <InfoTooltip>
-                    A material that gives models a consistent appearance independent of scene lighting.
-                    <br /> Rendering performance is improved with this enabled.
-                  </InfoTooltip>
-                </span>
-                <span className='text-xs font-medium text-muted-foreground/80'>
-                  Lighting effects are {enableMatcap ? 'inactive' : 'active'}
-                </span>
-              </div>
+            <DropdownMenuSwitchItem
+              icon={<Sparkles />}
+              description={`Lighting effects are ${enableMatcap ? 'inactive' : 'active'}`}
+              isChecked={enableMatcap}
+              onIsCheckedChange={handleMatcapToggle}
+            >
+              Matcap{' '}
+              <InfoTooltip>
+                A material that gives models a consistent appearance independent of scene lighting.
+                <br /> Rendering performance is improved with this enabled.
+              </InfoTooltip>
             </DropdownMenuSwitchItem>
             <DropdownMenuSwitchItem
-              className='h-10'
+              icon={<Layers />}
+              description={`Ambient occlusion is ${enablePostProcessing ? 'active' : 'inactive'}`}
               isChecked={enablePostProcessing}
               onIsCheckedChange={handlePostProcessingToggle}
             >
-              <Layers />
-              <div className='flex flex-col'>
-                <span className='flex items-center gap-1'>
-                  Post-processing{' '}
-                  <InfoTooltip>
-                    Enables screen-space ambient occlusion for more realistic depth and contact shadows.
-                  </InfoTooltip>
-                </span>
-                <span className='text-xs font-medium text-muted-foreground/80'>
-                  Ambient occlusion is {enablePostProcessing ? 'active' : 'inactive'}
-                </span>
-              </div>
+              Post-processing{' '}
+              <InfoTooltip>
+                Enables screen-space ambient occlusion for more realistic depth and contact shadows.
+              </InfoTooltip>
             </DropdownMenuSwitchItem>
             <DropdownMenuSeparator />
           </>
@@ -366,11 +363,12 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
               <br /> Set to &quot;Disabled&quot; to turn off timeout.
             </InfoTooltip>
           }
-          onValueChange={handleRenderTimeoutChange}
+          onValueChange={handleOperationTimeoutChange}
         >
           <Timer />
           Timeout
         </DropdownMenuSelectItem>
+        {kernelSettings}
       </DropdownMenuContent>
     </DropdownMenu>
   );

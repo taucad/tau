@@ -3,6 +3,86 @@ import { jsonValueSchema } from '#schemas/message-provider.schema.js';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 
+const geoSpecTestStatusSchema = z.enum(['passed', 'failed', 'unsupported', 'inconclusive', 'not-run', 'skipped']);
+const geoSpecLineageStatusSchema = z.enum(['complete', 'unavailable', 'mixed']);
+const sha256Schema = z.string().regex(/^[\da-f]{64}$/u);
+const observedCountSchema = z.number().int().nonnegative();
+
+/** Complete observed accounting; unstarted modules do not imply known test counts. @public */
+export const geoSpecRunAccountingSchema = z
+  .object({
+    discovered: observedCountSchema,
+    selected: observedCountSchema,
+    completed: observedCountSchema,
+    passed: observedCountSchema,
+    failed: observedCountSchema,
+    unsupported: observedCountSchema,
+    inconclusive: observedCountSchema,
+    skipped: observedCountSchema,
+    notRun: observedCountSchema,
+    requestedFiles: z.array(z.string()),
+    completedFiles: z.array(z.string()),
+    notRunFiles: z.array(z.string()),
+    discoveryComplete: z.boolean(),
+    cancelled: z.boolean(),
+    bailed: z.boolean(),
+  })
+  .strict();
+
+/** Consumed module, per-load source and artifact identities, without live engine handles. @public */
+export const geoSpecRunLineageSchema = z
+  .object({
+    status: geoSpecLineageStatusSchema,
+    modules: z.array(
+      z
+        .object({
+          entryPath: z.string(),
+          bundleSha256: sha256Schema,
+          files: z.record(z.string(), z.string().regex(/^(?:sha256:[\da-f]{64}|missing)$/u)),
+          consistent: z.boolean(),
+        })
+        .strict(),
+    ),
+    loads: z.array(
+      z
+        .object({
+          loadId: z.string(),
+          status: z.enum(['complete', 'unavailable', 'failed']),
+          subject: z
+            .object({ subjectHash: sha256Schema.optional(), contentHash: sha256Schema.optional() })
+            .strict()
+            .optional(),
+          evidence: z
+            .object({
+              loadId: z.string(),
+              status: z.enum(['complete', 'unavailable']),
+              format: z.string(),
+              parameters: z.record(z.string(), jsonValueSchema),
+              exportOptions: z.record(z.string(), jsonValueSchema).optional(),
+              ingestOptions: z.record(z.string(), jsonValueSchema),
+              sourceRevision: sourceRevisionSchema.optional(),
+              sourcePath: z.string().optional(),
+              artifacts: z.array(
+                z
+                  .object({
+                    name: z.string(),
+                    sha256: sha256Schema,
+                    byteLength: observedCountSchema,
+                    sourcePath: z.string().optional(),
+                  })
+                  .strict(),
+              ),
+            })
+            .strict()
+            .optional(),
+          error: z.string().optional(),
+          diagnostics: z.array(jsonValueSchema).optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
 // =============================================================================
 // View and Observation Schemas (internal use for capturing screenshots)
 // =============================================================================
@@ -106,10 +186,8 @@ const geometryDiagnosticSchema = z
   .describe('Structured GeoSpec diagnostic preserved from the matcher runner');
 
 /**
- * JSON-safe projection of one complete native GeoSpec claim report.
- *
- * The model reads the claim, result and evidence as JSON. Canonical engine
- * bytes stay with the engine-side report and never enter the model channel.
+ * JSON-safe projection of one compiled GeoSpec claim report. Exact bytes
+ * travel to the record owner before compact model-facing normalization.
  *
  * @public
  */
@@ -121,6 +199,15 @@ export const nativeGeoSpecReportSchema = z.object({
   result: z.record(z.string(), jsonValueSchema),
   diagnostics: z.array(jsonValueSchema),
   evidence: jsonValueSchema.optional(),
+  loadId: z.string().optional(),
+  canonical: z
+    .object({
+      claim: z.array(z.number().int().min(0).max(255)),
+      plan: z.array(z.number().int().min(0).max(255)),
+      result: z.array(z.number().int().min(0).max(255)),
+    })
+    .strict()
+    .optional(),
 });
 /** @public */
 export type NativeGeoSpecReport = z.infer<typeof nativeGeoSpecReportSchema>;
@@ -171,8 +258,8 @@ export type TestPass = z.infer<typeof testPassSchema>;
 /** Full GeoSpec result retained when its inline MCP response would be too large. @public */
 export const testModelResultArtifactSchema = z
   .object({
-    path: z.string().regex(/^attachments\/[\da-f]{64}\.json$/u),
-    absolutePath: z.string().min(1),
+    path: z.string().regex(/^(?:attachments\/[\da-f]{64}\.json|\.tau\/artifacts\/[\w.-]+\/result\.json)$/u),
+    absolutePath: z.string().min(1).optional(),
     mimeType: z.literal('application/json'),
     byteLength: z.number().int().positive(),
     sha256: z.string().regex(/^[\da-f]{64}$/u),
@@ -188,7 +275,32 @@ export const testModelOutputSchema = z.object({
   failures: z.array(testFailureSchema).describe('Array of failed tests with actionable feedback'),
   passes: z.array(testPassSchema).describe('Array of passed tests'),
   passed: z.number().describe('Number of tests that passed'),
-  total: z.number().describe('Total number of tests run'),
+  total: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe('Observed selected test count; requested-run coverage is named by accounting.'),
+  runStatus: z
+    .enum(['passed', 'failed', 'unsupported', 'inconclusive', 'not-run'])
+    .optional()
+    .describe('Run qualification, distinct from individual passed claims; absence is unqualified.'),
+  accounting: geoSpecRunAccountingSchema.optional(),
+  lineageStatus: geoSpecLineageStatusSchema.optional(),
+  lineage: z.array(z.object({ file: z.string(), lineage: geoSpecRunLineageSchema }).strict()).optional(),
+  tests: z
+    .array(
+      z
+        .object({
+          id: z.string(),
+          requirement: z.string(),
+          targetFile: z.string(),
+          status: geoSpecTestStatusSchema,
+          ordinal: observedCountSchema.optional(),
+        })
+        .strict(),
+    )
+    .optional()
+    .describe('Every observed test, including skipped and not-run requirements.'),
   sourceRevisions: z
     .array(sourceRevisionSchema)
     .optional()
@@ -199,6 +311,8 @@ export const testModelOutputSchema = z.object({
   omittedFailures: z.number().int().nonnegative().optional(),
   omittedPasses: z.number().int().nonnegative().optional(),
   omittedSourceRevisions: z.number().int().nonnegative().optional(),
+  omittedTests: z.number().int().nonnegative().optional(),
+  omittedLineage: z.number().int().nonnegative().optional(),
 });
 /**
  * Inferred aggregate output from `test_model` / GeoSpec evaluation runs.

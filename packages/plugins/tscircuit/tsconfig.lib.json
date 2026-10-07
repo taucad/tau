@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/lib",
+    "allowJs": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "target": "ESNext"
+  },
+  "include": ["src/**/*.ts", "tsdown.engine.ts", "check-vendored-licenses.mjs"],
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts", "src/**/*.test-d.ts"]
+}

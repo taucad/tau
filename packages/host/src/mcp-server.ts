@@ -77,16 +77,17 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
  * @public
  */
 export const hostMcpAllowedTools = [
-  toolName.getKernelResult,
+  toolName.evaluateModel,
   toolName.testModel,
   toolName.screenshot,
-  toolName.exportGeometry,
+  toolName.exportModel,
   toolName.arrangeWorkbench,
   toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
   toolName.listPrintRequests,
   toolName.cancelPrint,
+  toolName.askQuestions,
 ] as const;
 
 /** One name from {@link hostMcpAllowedTools}. @public */
@@ -100,6 +101,7 @@ export type HostMcpAllowedTool = (typeof hostMcpAllowedTools)[number];
  */
 const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAllowedTool>([
   toolName.arrangeWorkbench,
+  toolName.askQuestions,
   toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
@@ -122,10 +124,42 @@ const hostMcpAnnotationOverrides: Readonly<Partial<Record<string, NonNullable<Ta
     idempotentHint: true,
     openWorldHint: false,
   },
+  /* Records a question for the person and waits for them; nothing outside the chat changes. */
+  [toolName.askQuestions]: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
 };
 
 const isJsonObject = (value: JsonValue): value is JsonObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Registry tools whose `chatId` input the endpoint supplies from the signed claim.
+ * An external agent does not know Tau's chat id, and must not choose another chat.
+ */
+const chatScopedRegistryTools: ReadonlySet<string> = new Set<string>([toolName.askQuestions]);
+
+/**
+ * A tool's input schema without its `chatId` property.
+ *
+ * @param schema - The registry's JSON Schema.
+ * @returns The schema an external agent sees.
+ */
+const withoutChatId = (schema: JsonObject): JsonObject => {
+  const { properties, required } = schema;
+  if (properties === undefined || !isJsonObject(properties)) {
+    return schema;
+  }
+  const { chatId: _chatId, ...rest } = properties;
+  return {
+    ...schema,
+    properties: rest,
+    ...(Array.isArray(required) ? { required: required.filter((name) => name !== 'chatId') } : {}),
+  };
+};
 
 /** Keep a diagnostic summary bounded while the full report remains readable by path. */
 const shortDiagnostic = (value: string): string => (value.length > 300 ? `${value.slice(0, 300)}…` : value);
@@ -141,7 +175,9 @@ const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMc
   return {
     name: definition.name,
     description: definition.description,
-    inputSchema: definition.inputSchema,
+    inputSchema: chatScopedRegistryTools.has(definition.name)
+      ? withoutChatId(definition.inputSchema)
+      : definition.inputSchema,
     annotations: hostMcpAnnotationOverrides[definition.name] ?? {
       readOnlyHint: reads,
       destructiveHint: definition.name === toolName.cancelPrint,
@@ -160,10 +196,10 @@ const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMc
  * (`apps/api/app/api/mcp/mcp-authority.service.ts`).
  */
 const toolForRpc: Readonly<Record<TauMcpRpcName, HostMcpAllowedTool>> = {
-  [rpcName.getKernelResult]: toolName.getKernelResult,
+  [rpcName.evaluateModel]: toolName.evaluateModel,
   [rpcName.runGeoSpecTests]: toolName.testModel,
   [rpcName.captureImages]: toolName.screenshot,
-  [rpcName.exportGeometry]: toolName.exportGeometry,
+  [rpcName.exportModel]: toolName.exportModel,
 };
 
 const capabilityClaimsSchema = z
@@ -422,12 +458,16 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
           const verdict = testModelOutputSchema.parse(payload);
           const full = JSON.stringify(verdict);
           if (Buffer.byteLength(full, 'utf8') > 128 * 1024) {
-            const saved = await saveChatAttachment({
-              workspaceRoot: options.workspaceRoot,
-              chatId: claims.chatId,
-              data: Buffer.from(full, 'utf8').toString('base64'),
-              mimeType: 'application/json',
-            });
+            const saved =
+              verdict.fullResult ??
+              (await saveChatAttachment({
+                workspaceRoot: options.workspaceRoot,
+                chatId: claims.chatId,
+                data: Buffer.from(full, 'utf8').toString('base64'),
+                mimeType: 'application/json',
+              }));
+            signal.throwIfAborted();
+            binding?.signal.throwIfAborted();
             const failures = verdict.failures.slice(0, 20).map((failure) => ({
               id: shortDiagnostic(failure.id),
               requirement: shortDiagnostic(failure.requirement),
@@ -439,11 +479,16 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
               success: true,
               passed: verdict.passed,
               total: verdict.total,
+              ...(verdict.runStatus === undefined ? {} : { runStatus: verdict.runStatus }),
+              ...(verdict.accounting === undefined ? {} : { accounting: verdict.accounting }),
+              ...(verdict.lineageStatus === undefined ? {} : { lineageStatus: verdict.lineageStatus }),
               failures,
               passes: [],
-              omittedFailures: verdict.failures.length - failures.length,
-              omittedPasses: verdict.passes.length,
-              omittedSourceRevisions: verdict.sourceRevisions?.length ?? 0,
+              omittedFailures: (verdict.omittedFailures ?? 0) + verdict.failures.length - failures.length,
+              omittedPasses: (verdict.omittedPasses ?? 0) + verdict.passes.length,
+              omittedSourceRevisions: (verdict.omittedSourceRevisions ?? 0) + (verdict.sourceRevisions?.length ?? 0),
+              omittedTests: (verdict.omittedTests ?? 0) + (verdict.tests?.length ?? 0),
+              omittedLineage: (verdict.omittedLineage ?? 0) + (verdict.lineage?.length ?? 0),
               fullResult: { ...saved, mimeType: 'application/json' },
             };
           }
@@ -459,6 +504,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         return { success: true, ...content };
       }
       return {
+        ...content,
         errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
         message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
       };
@@ -498,7 +544,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
          * falls back to it, so a stale id is never a stale directory. */
         runId: binding.runId,
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `@taucad/mcp` validated these args against the tool's own schema.
-        input: args as unknown as JsonValue,
+        input: (chatScopedRegistryTools.has(tool) ? { ...args, chatId: claims.chatId } : args) as unknown as JsonValue,
         signal: AbortSignal.any(
           [binding.signal, dispatchOptions.signal, signal].filter(
             (candidate): candidate is AbortSignal => candidate !== undefined,
@@ -523,6 +569,12 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     };
     return async (call, dispatchOptions) => {
       if ('rpcName' in call) {
+        // Export RPCs carry call identity in args; the tool registry takes it
+        // from invocation metadata and adds it after strict input validation.
+        if (call.rpcName === rpcName.exportModel) {
+          const { toolCallId: _toolCallId, ...input } = call.args;
+          return invokeAllowed(toolName.exportModel, input, dispatchOptions);
+        }
         return invokeAllowed(toolForRpc[call.rpcName], call.args, dispatchOptions);
       }
       const tool = hostMcpAllowedTools.find((name) => name === call.toolName);

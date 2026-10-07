@@ -70,6 +70,17 @@ describe('collectClippableTargets', () => {
     expect((lineSegments.material as THREE.Material).clippingPlanes).toBeNull();
   });
 
+  it('should compose initial placement before freezing a mesh and preserve an already posed matrix', () => {
+    const { rootGroup, mesh1, mesh2 } = createTestSceneGraph();
+    mesh1.position.set(2, 3, 4);
+    mesh2.matrixAutoUpdate = false;
+    mesh2.matrix.makeTranslation(5, 6, 7);
+    collectClippableTargets(rootGroup);
+    rootGroup.updateMatrixWorld(true);
+    expect(mesh1.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([2, 3, 4]);
+    expect(mesh2.getWorldPosition(new THREE.Vector3()).toArray()).toEqual([5, 6, 7]);
+  });
+
   it('should set matrixAutoUpdate to false on collected meshes', () => {
     const { rootGroup, mesh1, mesh2 } = createTestSceneGraph();
 

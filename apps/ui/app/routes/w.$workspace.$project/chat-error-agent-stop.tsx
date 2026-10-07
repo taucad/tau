@@ -1,16 +1,7 @@
 import { memo, useEffect, useState } from 'react';
 import type React from 'react';
 import type { LucideIcon } from 'lucide-react';
-import {
-  CircleAlert,
-  Clock,
-  Gauge,
-  MessageSquarePlus,
-  Play,
-  RefreshCcw,
-  Repeat,
-  Timer,
-} from 'lucide-react';
+import { CircleAlert, Clock, Gauge, MessageSquarePlus, Play, RefreshCcw, Repeat, Timer } from 'lucide-react';
 import type { ExternalAgentStop } from '@taucad/agent-host/wire';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions } from '#hooks/use-chat.js';

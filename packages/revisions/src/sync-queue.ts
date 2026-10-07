@@ -5,7 +5,7 @@
  * the records filesystem and the single-writer chain it owns itself.
  */
 import type { SyncQueueEntry, SyncQueueRecord } from '#sync.types.js';
-import type { RevisionFileSystem } from '#revision-effects.js';
+import type { RevisionFileSystem } from '#revision-effects.types.js';
 
 /**
  * Build the pending-sync queue reader and writer over one project's records.

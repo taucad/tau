@@ -1,0 +1,130 @@
+{
+  "name": "@taucad/tscircuit",
+  "version": "0.1.0-beta.0",
+  "description": "tscircuit EDA kernel for Tau: TSX circuits rendered to 3D boards, schematic and PCB SVG, with BOM, netlist and circuit JSON exports",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/plugins/tscircuit"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/plugins/tscircuit#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "agent",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "THIRD_PARTY_LICENSES.md",
+    "check-vendored-licenses.mjs"
+  ],
+  "keywords": [
+    "cad",
+    "plugin",
+    "tscircuit"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent": "./agent/skills.json",
+    "./agent/*": "./agent/*",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./agent": "./agent/skills.json",
+      "./agent/*": "./agent/*",
+      "./package.json": "./package.json"
+    },
+    "imports": {
+      "#*.js": "./dist/*.mjs"
+    }
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@taucad/esbuild": "workspace:*",
+    "@taucad/middleware": "workspace:*",
+    "@taucad/runtime": "workspace:*",
+    "@taucad/runtime-testing": "workspace:*",
+    "@tscircuit/alphabet": "catalog:",
+    "@tscircuit/capacity-autorouter": "catalog:",
+    "@tscircuit/checks": "catalog:",
+    "@tscircuit/circuit-json-util": "catalog:",
+    "@tscircuit/copper-pour-solver": "catalog:",
+    "@tscircuit/core": "catalog:",
+    "@tscircuit/create-fdm-enclosure": "catalog:",
+    "@tscircuit/footprinter": "catalog:",
+    "@tscircuit/image-utils": "catalog:",
+    "@tscircuit/infer-cable-insertion-point": "catalog:",
+    "@tscircuit/infgrid-ijump-astar": "catalog:",
+    "@tscircuit/matchpack": "catalog:",
+    "@tscircuit/math-utils": "catalog:",
+    "@tscircuit/miniflex": "catalog:",
+    "@tscircuit/props": "catalog:",
+    "@tscircuit/schematic-match-adapt": "catalog:",
+    "@tscircuit/schematic-trace-solver": "catalog:",
+    "@tscircuit/solver-utils": "catalog:",
+    "@tscircuit/soup-util": "catalog:",
+    "bpc-graph": "catalog:",
+    "calculate-elbow": "catalog:",
+    "circuit-json": "catalog:",
+    "circuit-json-to-bom-csv": "catalog:",
+    "circuit-json-to-bpc": "catalog:",
+    "circuit-json-to-connectivity-map": "catalog:",
+    "circuit-json-to-gltf": "catalog:",
+    "circuit-json-to-readable-netlist": "catalog:",
+    "circuit-json-to-spice": "catalog:",
+    "circuit-to-svg": "catalog:",
+    "connectivity-map": "catalog:",
+    "format-si-unit": "catalog:",
+    "graphics-debug": "catalog:",
+    "minicssgrid": "catalog:",
+    "nanoid": "catalog:",
+    "react": "catalog:",
+    "rolldown": "catalog:",
+    "schematic-symbols": "catalog:",
+    "spicets": "catalog:",
+    "spicey": "catalog:",
+    "tsdown": "catalog:",
+    "zod": "catalog:"
+  },
+  "taucad": {
+    "hostTarget": "browser"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "catalog:",
+    "@resvg/resvg-wasm": "2.6.2",
+    "@taucad/geometry-core": "workspace:*",
+    "@tscircuit/manifold-2d": "catalog:"
+  },
+  "tau": {
+    "skills": "./agent/skills.json"
+  },
+  "scripts": {
+    "prepublishOnly": "node check-vendored-licenses.mjs"
+  }
+}

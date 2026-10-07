@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
 const tokenStyles = readFileSync(join(process.cwd(), '../../packages/ui/src/styles/tokens.css'), 'utf8');
 const appStyles = readFileSync(join(process.cwd(), 'app/styles/global.css'), 'utf8');
 const appStyleLinks = readFileSync(join(process.cwd(), 'app/styles/global.styles.ts'), 'utf8');
-const globalStyles = `${tokenStyles}\n${appStyles}`;
+const scrollShadowStyles = readFileSync(join(process.cwd(), 'app/styles/scroll-shadows.css'), 'utf8');
+const globalStyles = `${tokenStyles}\n${appStyles}\n${scrollShadowStyles}`;
 
 const structuralTokens = [
   '--background',

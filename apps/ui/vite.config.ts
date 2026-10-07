@@ -76,6 +76,20 @@ export const uiSsrOptions = {
   external: ['@taucad/runtime', '@taucad/openrscad', '@taulabs/openrscad-engine'],
 } as const satisfies UserConfig['ssr'];
 
+/**
+ * Module aliases shared with `desktop/vite.config.ts`.
+ *
+ * `@resvg/resvg-js`: `@taucad/tscircuit` (composed into the runtime worker)
+ * depends on `circuit-json-to-gltf`, whose `svg-to-png` chunk statically imports
+ * this native `.node` binding; the kernel never reaches it
+ * (`boardTextureResolution: 0`) but the dependency optimizer and the production
+ * bundle fail on the binary. See `app/lib/browser-stubs/resvg-js.ts` and the
+ * tscircuit EDA kernel charter (T8).
+ */
+export const uiResolveAlias = [
+  { find: '@resvg/resvg-js', replacement: path.resolve(__dirname, 'app/lib/browser-stubs/resvg-js.ts') },
+] as const satisfies NonNullable<UserConfig['resolve']>['alias'];
+
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
   readonly tauCloudEnabled?: boolean;
@@ -374,7 +388,9 @@ export const createUiReactCompilerPlugin = (): Plugin => {
 export default defineConfig(({ mode }) => {
   const mtAssets = createGeoSpecMtAssets(process.env['GEOSPEC_MT_STAGED_PACKAGE_ROOT']);
   const isTest = mode === 'test';
-  const isNetlify = process.env['NETLIFY'] === 'true';
+  // Netlify's own CI sets NETLIFY=true; `netlify deploy` from GitHub Actions
+  // (deploy-ui.yml) builds with NETLIFY_LOCAL=true instead. Both need the SSR function.
+  const isNetlify = process.env['NETLIFY'] === 'true' || process.env['NETLIFY_LOCAL'] === 'true';
   const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
   const tauCloudEnabled = isTest ? true : resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 
@@ -450,14 +466,10 @@ export default defineConfig(({ mode }) => {
       plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled })],
     },
     resolve: {
-      alias: isTest
-        ? [
-            {
-              find: testScriptsAlias,
-              replacement: path.resolve(__dirname, 'scripts'),
-            },
-          ]
-        : [],
+      alias: [
+        ...uiResolveAlias,
+        ...(isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : []),
+      ],
     },
     ssr: uiSsrOptions,
 

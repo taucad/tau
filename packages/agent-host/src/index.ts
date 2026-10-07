@@ -12,7 +12,7 @@ export {
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
 export { createTauAgentHost } from '#host/tau-agent-host.js';
-export { isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
+export { isResumableRun, isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
 export {
   emptyChatLedger,
   foldChatLedger,
@@ -81,6 +81,7 @@ export type {
   ProviderMessageMetadata,
   TurnConflictedLogEvent,
   TurnFailedLogEvent,
+  TurnChangedLogEvent,
   TurnFinalizedLogEvent,
   RunLifecycleEvent,
   RunTrigger,
@@ -151,8 +152,6 @@ export type {
 export { materializeAttachments } from '#harness/session-record.js';
 export type { AttachmentReader, DocumentBlockBuilder, MaterializedAttachments } from '#harness/session-record.js';
 export type {
-  CommandKey,
-  CreateTauAgentHostOptions,
   ExternalAgentLogEvent,
   ExternalAgentPort,
   ExternalAgentTurn,
@@ -160,9 +159,8 @@ export type {
   ExternalSessionState,
   ExternalTurnOutcome,
   TauAgentAdmissionConfig,
-  TauAgentHost,
-  TauAgentTurnRequest,
-} from '#host/tau-agent-host.js';
+} from '#host/external-agent.js';
+export type { CommandKey, CreateTauAgentHostOptions, TauAgentHost, TauAgentTurnRequest } from '#host/tau-agent-host.js';
 export type {
   CachedSystemPromptOptions,
   GatewayModelErrorCode,

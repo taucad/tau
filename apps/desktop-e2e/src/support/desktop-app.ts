@@ -37,6 +37,46 @@ const clientRoot = process.env['TAU_DESKTOP_CLIENT_ROOT'] ?? join(workspaceRoot,
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
 const defaultPackagedExecutable = join(desktopRoot, 'package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau');
 const diagnosticsRoot = join(workspaceRoot, 'out/test-results/desktop-e2e');
+
+/** Select the complete descendant command records from one successful ps snapshot. */
+export const desktopDescendants = (
+  electronPid: number | undefined,
+  snapshot: string,
+): ReadonlyArray<{ pid: number; command: string }> => {
+  const records = snapshot
+    .trim()
+    .split('\n')
+    .flatMap((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s+(.+)$/u.exec(line);
+      return match ? [{ pid: Number(match[1]), parent: Number(match[2]), command: match[3] ?? '' }] : [];
+    });
+  const parents = new Map(records.map(({ pid, parent }) => [pid, parent]));
+  if (
+    electronPid === undefined ||
+    !Number.isSafeInteger(electronPid) ||
+    electronPid <= 0 ||
+    !parents.has(electronPid)
+  ) {
+    throw new Error('Electron owner is absent or invalid');
+  }
+  return records
+    .filter(({ pid }) => {
+      if (pid === electronPid) {
+        return false;
+      }
+      const visited = new Set<number>();
+      let current: number | undefined = pid;
+      while (current && !visited.has(current)) {
+        if (current === electronPid) {
+          return true;
+        }
+        visited.add(current);
+        current = parents.get(current);
+      }
+      return false;
+    })
+    .map(({ pid, command }) => ({ pid, command }));
+};
 const completedArtifactForbiddenEnvironment = [
   'NODE_OPTIONS',
   'NODE_PATH',
@@ -163,6 +203,8 @@ export const launchDesktopApp = async (options: {
   readonly preserveProfile?: boolean | undefined;
   /** Capture startup traffic before Playwright can attach its request listener. */
   readonly captureStartupNetwork?: boolean | undefined;
+  /** WAV input for Chromium's fake capture driver; leaves the OS microphone unchanged. */
+  readonly fakeMicrophonePath?: string | undefined;
 }): Promise<DesktopSession> => {
   if (desktopE2ECompletedArtifact && options.packaged === false) {
     throw new Error('A completed-artifact run cannot launch the workspace desktop app.');
@@ -206,6 +248,15 @@ export const launchDesktopApp = async (options: {
       `--user-data-dir=${userData}`,
       ...(startupNetworkLogPath ? [`--log-net-log=${startupNetworkLogPath}`] : []),
       ...webGpuArguments(),
+      ...(options.fakeMicrophonePath
+        ? [
+            '--use-fake-device-for-media-stream',
+            '--use-fake-ui-for-media-stream',
+            // Chromium's sandboxed audio service cannot read the test-owned WAV on macOS.
+            '--no-sandbox',
+            `--use-file-for-fake-audio-capture=${options.fakeMicrophonePath}`,
+          ]
+        : []),
     ],
     cwd: packaged ? userData : desktopRoot,
     env: {
@@ -235,6 +286,7 @@ export const launchDesktopApp = async (options: {
       TAU_CONFIG_DIR: join(userData, 'config'),
       ...options.env,
       TAU_E2E_HIDE_WINDOW: '1',
+      ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
     },
   });
   const child = application.process();
@@ -258,6 +310,31 @@ export const launchDesktopApp = async (options: {
   const consoleErrors: string[] = [];
   let page: Page;
   try {
+    /* A packaged launch releases main bootstrap before its first window exists.
+     * Configure the main-process test overrides only after that startup boundary. */
+    page = await application.firstWindow();
+    await page.waitForLoadState('domcontentloaded');
+    if (options.fakeMicrophonePath) {
+      // Chromium recommends disabling DSP for calibrated file microphone input.
+      // Keep the real capture driver; change only its audio-processing constraints.
+      await page.addInitScript(() => {
+        const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async (constraints) => {
+          if (!constraints?.audio) {
+            return capture(constraints);
+          }
+          return capture({
+            ...constraints,
+            audio: {
+              ...(typeof constraints.audio === 'object' ? constraints.audio : {}),
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+          });
+        };
+      });
+    }
     await application.evaluate(({ dialog, shell }, selectedDirectory) => {
       const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
       shell.openExternal = async (url): Promise<void> => {
@@ -266,8 +343,6 @@ export const launchDesktopApp = async (options: {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
       dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
     }, pickedDirectory);
-    page = await application.firstWindow();
-    await page.waitForLoadState('domcontentloaded');
     page.setDefaultTimeout(60_000);
     page.on('console', (message) => {
       if (message.type() === 'error') {

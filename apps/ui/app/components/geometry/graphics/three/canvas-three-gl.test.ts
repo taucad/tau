@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { OrthographicCamera, PerspectiveCamera, Vector3, WebGLCoordinateSystem, WebGPUCoordinateSystem } from 'three';
 
 const hoisted = vi.hoisted(() => ({
@@ -13,10 +13,16 @@ describe('createTauR3fGlProp', () => {
   beforeEach(() => {
     hoisted.createRenderer.mockReset();
     hoisted.createRenderer.mockImplementation(async () => ({
+      setPixelRatio: vi.fn(),
+      getPixelRatio: () => 1,
       init: vi.fn(async () => {
         //
       }),
     }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('delegates WebGPU canvases to createRenderer viewport presets', async () => {
@@ -51,6 +57,55 @@ describe('createTauR3fGlProp', () => {
     expect(hoisted.createRenderer).toHaveBeenCalledWith('viewport', 'webgl', canvas);
   });
 
+  it('should preserve DPR changes but skip buffer resets for an unchanged DPR', async () => {
+    const { createTauR3fGlProp } = await import('#components/geometry/graphics/three/canvas-three-gl.js');
+    let ratio = 1;
+    const setPixelRatio = vi.fn((value: number) => {
+      ratio = value;
+    });
+    const renderer = { setPixelRatio, getPixelRatio: () => ratio };
+    hoisted.createRenderer.mockResolvedValue(renderer);
+    const factory = createTauR3fGlProp('webgl');
+    if (typeof factory !== 'function') {
+      throw new TypeError('Expected renderer factory');
+    }
+    await factory({ canvas: document.createElement('canvas') });
+    renderer.setPixelRatio(1);
+    renderer.setPixelRatio(2);
+    renderer.setPixelRatio(2);
+    renderer.setPixelRatio(1);
+    expect(setPixelRatio.mock.calls).toEqual([[2], [1]]);
+  });
+
+  it('should report renderer creation failure and never settle so R3F leaves no unhandled rejection', async () => {
+    const { createTauR3fGlProp } = await import('#components/geometry/graphics/three/canvas-three-gl.js');
+    const failure = new Error('Error creating WebGL context.');
+    hoisted.createRenderer.mockRejectedValue(failure);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onCreateError = vi.fn();
+    const glFactory = createTauR3fGlProp('webgl', [], onCreateError);
+    if (typeof glFactory !== 'function') {
+      throw new TypeError('Expected the R3F renderer factory.');
+    }
+    const settlement = async (): Promise<'settled'> => {
+      try {
+        await glFactory({ canvas: document.createElement('canvas') });
+      } catch {
+        return 'settled';
+      }
+      return 'settled';
+    };
+    const stillPending = async (): Promise<'pending'> => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      return 'pending';
+    };
+
+    expect(await Promise.race([settlement(), stillPending()])).toBe('pending');
+    expect(onCreateError).toHaveBeenCalledWith(failure);
+  });
+
   it('should restore both retained cameras to forward depth before a WebGL canvas starts', async () => {
     const { createTauR3fGlProp } = await import('#components/geometry/graphics/three/canvas-three-gl.js');
     const cameras = [new PerspectiveCamera(35, 1.6, 0.1, 1000), new OrthographicCamera(-3, 7, 5, -2, 0.1, 1000)];
@@ -62,7 +117,11 @@ describe('createTauR3fGlProp', () => {
       expect(new Vector3(0, 0, -camera.near).applyMatrix4(camera.projectionMatrix).z).toBeCloseTo(1, 12);
       expect(new Vector3(0, 0, -camera.far).applyMatrix4(camera.projectionMatrix).z).toBeCloseTo(0, 12);
     }
-    hoisted.createRenderer.mockResolvedValue({ coordinateSystem: WebGLCoordinateSystem });
+    hoisted.createRenderer.mockResolvedValue({
+      setPixelRatio: vi.fn(),
+      getPixelRatio: () => 1,
+      coordinateSystem: WebGLCoordinateSystem,
+    });
     const glFactory = createTauR3fGlProp('webgl', cameras);
     if (typeof glFactory !== 'function') {
       throw new TypeError('Expected the R3F renderer factory.');
@@ -81,7 +140,12 @@ describe('createTauR3fGlProp', () => {
   it('should configure both native camera projections before the first WebGPU scene pass', async () => {
     const { createTauR3fGlProp } = await import('#components/geometry/graphics/three/canvas-three-gl.js');
     const cameras = [new PerspectiveCamera(35, 1.6, 0.1, 1000), new OrthographicCamera(-3, 7, 5, -2, 0.1, 1000)];
-    hoisted.createRenderer.mockResolvedValue({ coordinateSystem: WebGPUCoordinateSystem, reversedDepthBuffer: true });
+    hoisted.createRenderer.mockResolvedValue({
+      setPixelRatio: vi.fn(),
+      getPixelRatio: () => 1,
+      coordinateSystem: WebGPUCoordinateSystem,
+      reversedDepthBuffer: true,
+    });
     const glFactory = createTauR3fGlProp('webgpu', cameras);
     if (typeof glFactory !== 'function') {
       throw new TypeError('Expected the R3F renderer factory.');

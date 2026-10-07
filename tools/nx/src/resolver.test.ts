@@ -91,15 +91,15 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — forty-nine today', () => {
+  it('is every non-private type:package project, sorted — fifty-one today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    expect(names).toHaveLength(49);
+    expect(names).toHaveLength(51);
     expect(names).toEqual([...names].sort());
-    // Both ends of the train, and the native package added most recently.
-    for (const name of ['runtime', 'runtime-testing', 'geospec-engine', 'opencascade-native']) {
+    // Both ends of the train.
+    for (const name of ['runtime', 'runtime-testing', 'geospec-engine']) {
       expect(names).toContain(name);
     }
 
@@ -139,6 +139,22 @@ describe('validateTags()', () => {
 
   it('accepts every project in the workspace, inferred ones included', () => {
     expect(validateTags(live)).toEqual([]);
+  });
+
+  it('should allow no release tag or release:app and reject unknown or duplicate release tags', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('unreleased', ['scope:ui', 'type:app'], undefined),
+          project('released', ['scope:ui', 'type:app', 'release:app'], undefined),
+          project('unknown-release', ['scope:ui', 'type:app', 'release:npm'], undefined),
+          project('two-releases', ['scope:ui', 'type:app', 'release:app', 'release:app'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-release: unknown tag "release:npm" (release: must be one of app)',
+      'fixture/two-releases: expected exactly one release: tag, found release:app, release:app',
+    ]);
   });
 
   it('rejects a project Nx inferred from a bare package.json that declares no tags', () => {
@@ -270,8 +286,8 @@ describe('publishWaves()', () => {
         }
       }
     }
-    // The current publishable graph has nine dependency layers.
-    expect(waves).toHaveLength(9);
+    // The current publishable graph has eleven dependency layers.
+    expect(waves).toHaveLength(11);
     expect(publishWaves(fixture)).toEqual([['base'], ['leaf']]);
   });
 });
@@ -281,12 +297,14 @@ describe('publishableClosure()', () => {
     const closure = publishableClosure(live, ['esbuild', 'replicad']);
     expect(closure).toEqual([
       'cache-core',
-      'filesystem',
       'project-core',
+      'rpc',
       'spatial',
       'units',
       'kinematics',
+      'filesystem',
       'parameters',
+      'revisions',
       'runtime',
       'bundler-core',
       'geometry-core',

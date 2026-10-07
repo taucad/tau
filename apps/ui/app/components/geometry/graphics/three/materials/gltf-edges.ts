@@ -1,7 +1,8 @@
-import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import type { Group, LineSegments, Object3D, Vector2 } from 'three';
 import { InterleavedBufferAttribute } from 'three';
-import { LineSegments2, LineSegmentsGeometry, LineMaterial } from 'three/addons';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegments2 as WebGpuFatLineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
@@ -276,20 +277,35 @@ export function setGltfFatLineMaterialColor(material: GltfFatLineMaterial, edgeC
 function wrapAsFatLineSegments(
   lineSegments: LineSegments,
   material: GltfFatLineMaterial,
-  backend: ResolvedGraphicsBackend,
+  options: Readonly<{
+    backend: ResolvedGraphicsBackend;
+    prototypes: Map<LineSegments['geometry'], LineSegmentsGeometry>;
+  }>,
 ): Object3D | undefined {
-  const positions = extractPositions(lineSegments);
+  const { backend, prototypes } = options;
+  const reused = prototypes.get(lineSegments.geometry);
+  const positions = reused ? undefined : extractPositions(lineSegments);
 
-  if (!positions || positions.length === 0) {
+  if (!reused && (!positions || positions.length === 0)) {
     console.warn('[FatLines] Failed to extract positions from LineSegments');
     return undefined;
   }
 
-  const fatLine = createGltfFatLineSegmentsFromPositions({ backend, positions, material });
+  const fatLine = reused
+    ? backend === 'webgpu'
+      ? new WebGpuFatLineSegments2(reused, material as Line2NodeMaterial)
+      : new LineSegments2(reused, material as LineMaterial)
+    : createGltfFatLineSegmentsFromPositions({
+        backend,
+        positions: positions!,
+        material,
+      });
   if (!fatLine) {
     return undefined;
   }
 
+  prototypes.set(lineSegments.geometry, fatLine.geometry);
+  fatLine.raycast = disableRaycast;
   fatLine.position.copy(lineSegments.position);
   fatLine.rotation.copy(lineSegments.rotation);
   fatLine.scale.copy(lineSegments.scale);
@@ -320,6 +336,8 @@ type ApplyFatLineSegmentsOptions = Readonly<{
   resolution: Vector2;
   backend: ResolvedGraphicsBackend;
   edgeColor?: number;
+  /** Keep a live pose target as the parent when edges are expanded after presentation. */
+  preserveSourceNodes?: boolean;
 }>;
 
 /**
@@ -336,8 +354,17 @@ export function getFatLineSourceIndices(object: Object3D): Uint32Array | Uint16A
 
 /** The shared theme-coloured material each fat line wears when its component is not emphasised. */
 const fatLineBaseMaterials = new WeakMap<Object3D, GltfFatLineMaterial>();
+const fatLinePrototypeSources = new WeakMap<Object3D, LineSegments['geometry']>();
 
-type EdgeEmphasisMaterials = Readonly<{ hover: GltfFatLineMaterial; selected: GltfFatLineMaterial }>;
+/** Canonical loader prototype identity retained without hashing or flattening occurrences. */
+export function getFatLinePrototypeSource(object: Object3D): LineSegments['geometry'] | undefined {
+  return fatLinePrototypeSources.get(object);
+}
+
+type EdgeEmphasisMaterials = Readonly<{
+  hover: GltfFatLineMaterial;
+  selected: GltfFatLineMaterial;
+}>;
 
 /**
  * Per-base-material hover/selected variants, built lazily on first emphasis so an idle
@@ -406,14 +433,22 @@ export function collectGltfFatLineMaterials(object: Object3D): GltfFatLineMateri
   return emphasis ? [base, emphasis.hover, emphasis.selected] : [base];
 }
 
-export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOptions): void {
+export function applyFatLineSegments(
+  gltf: {
+    readonly scene: Object3D;
+    readonly parser?: {
+      readonly associations: Pick<ReadonlyMap<Object3D, unknown>, 'get'>;
+    };
+  },
+  options: ApplyFatLineSegmentsOptions,
+): void {
   const { resolution, backend, edgeColor = gltfEdgeColorLightMode } = options;
   // Capture paths and tests hand this function a scene without a loader parser.
-  const associations = (gltf as { parser?: GLTF['parser'] }).parser?.associations as Map<Object3D, unknown> | undefined;
+  const associations = gltf.parser?.associations instanceof Map ? gltf.parser.associations : undefined;
   const sources: Array<{ parent: Group; lineSegments: LineSegments }> = [];
 
   gltf.scene.traverse((object) => {
-    if (object.type === 'LineSegments') {
+    if (object.type === 'LineSegments' && object.userData['fatLineSource'] !== true) {
       const lineSegments = object as LineSegments;
       const parent = lineSegments.parent as Group | undefined;
       if (parent) {
@@ -427,17 +462,43 @@ export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOp
   }
 
   // Single material instance shared across every wrapped fat line — the R1 perf win.
-  const sharedMaterial = createGltfFatLineMaterial({ backend, resolution, edgeColor });
+  const sharedMaterial = createGltfFatLineMaterial({
+    backend,
+    resolution,
+    edgeColor,
+  });
 
+  const prototypes = new Map<LineSegments['geometry'], LineSegmentsGeometry>();
   for (const { parent, lineSegments } of sources) {
-    const fatLine = wrapAsFatLineSegments(lineSegments, sharedMaterial, backend);
+    const fatLine = wrapAsFatLineSegments(lineSegments, sharedMaterial, {
+      backend,
+      prototypes,
+    });
     if (!fatLine) {
       continue;
     }
 
-    parent.remove(lineSegments);
-    parent.add(fatLine);
+    if (options.preserveSourceNodes) {
+      // The kinematics composer owns this source node's matrix. Preserve that owner;
+      // its render-only child inherits the pose, visibility and component membership.
+      fatLine.position.set(0, 0, 0);
+      fatLine.quaternion.identity();
+      fatLine.scale.set(1, 1, 1);
+      fatLine.matrix.identity();
+      const hiddenMaterial = lineSegments.material;
+      for (const material of Array.isArray(hiddenMaterial) ? hiddenMaterial : [hiddenMaterial]) {
+        material.visible = false;
+      }
+      lineSegments.material = hiddenMaterial;
+      lineSegments.raycast = disableRaycast;
+      lineSegments.userData['fatLineSource'] = true;
+      lineSegments.add(fatLine);
+    } else {
+      parent.remove(lineSegments);
+      parent.add(fatLine);
+    }
     fatLineBaseMaterials.set(fatLine, sharedMaterial);
+    fatLinePrototypeSources.set(fatLine, lineSegments.geometry);
 
     const sourceIndices = lineSegments.geometry.index?.array;
     if (sourceIndices instanceof Uint32Array || sourceIndices instanceof Uint16Array) {
@@ -445,12 +506,17 @@ export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOp
     }
     // The replacement inherits the source's glTF identity, so consumers keyed on the loader's
     // associations (component annotation, in-place updates) still resolve the primitive.
-    const association = associations?.get(lineSegments);
+    const association: unknown = associations?.get(lineSegments);
     if (association !== undefined) {
-      associations?.delete(lineSegments);
+      if (!options.preserveSourceNodes) {
+        associations?.delete(lineSegments);
+      }
       associations?.set(fatLine, association);
     }
 
+    if (options.preserveSourceNodes) {
+      continue;
+    }
     lineSegments.geometry.dispose();
     if (Array.isArray(lineSegments.material)) {
       for (const material of lineSegments.material) {
@@ -470,6 +536,7 @@ export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOp
  * @param resolution - The new viewport resolution
  */
 export function updateLineMaterialResolution(scene: Group, resolution: Vector2): void {
+  const visited = new Set<GltfFatLineMaterial>();
   scene.traverse((object) => {
     if (object.type !== 'LineSegments2') {
       return;
@@ -478,9 +545,10 @@ export function updateLineMaterialResolution(scene: Group, resolution: Vector2):
     const worn = (object as LineSegments2).material as GltfFatLineMaterial;
     const materials = fatLineBaseMaterials.has(object) ? collectGltfFatLineMaterials(object) : [worn];
     for (const material of materials) {
-      if ('resolution' in material) {
+      if (!visited.has(material) && 'resolution' in material && !material.resolution.equals(resolution)) {
         material.resolution.copy(resolution);
       }
+      visited.add(material);
     }
   });
 }
@@ -505,7 +573,9 @@ export function updateGltfEdgeColor(scene: Group, edgeColor: number): Set<GltfFa
 
     const edgeMaterial =
       fatLineBaseMaterials.get(object) ?? ((object as LineSegments2).material as GltfFatLineMaterial);
-    setGltfFatLineMaterialColor(edgeMaterial, edgeColor);
+    if (!updatedMaterials.has(edgeMaterial) && edgeMaterial.color.getHex() !== edgeColor) {
+      setGltfFatLineMaterialColor(edgeMaterial, edgeColor);
+    }
     updatedMaterials.add(edgeMaterial);
   });
 

@@ -31,12 +31,12 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
-import { picogkRuntimeManifestSchema } from '@taucad/picogk';
+import { FuseState, FuseV1Options, getCurrentFuseWire } from '@electron/fuses';
 
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { parseMacosPackageMode } from './macos-package-mode.mjs';
+import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
@@ -46,6 +46,7 @@ const appExecutable = resolve(appPath, 'Contents/MacOS/Tau');
 const brandingRoot = resolve(appPath, 'Contents/Resources/branding');
 const extensionTemporaryRoot = resolve(tmpdir(), 'tau-quick-look');
 const { release, unsigned } = parseMacosPackageMode(process.argv.slice(2));
+const { picogkRuntimeManifestSchema } = await import('@taucad/picogk');
 /** The PicoGK worker protocol, which the prepared resource manifest also records. */
 const picoGkWireProtocol = picogkRuntimeManifestSchema.shape.protocolVersion.value;
 
@@ -172,6 +173,76 @@ const stopPackagedApp = (): void => {
     if (row.command === appExecutable) {
       process.kill(row.pid, 'SIGTERM');
     }
+  }
+};
+
+/**
+ * Prints what macOS recorded about a Quick Look request that failed twice. The
+ * probe only sees `QLThumbnailErrorDomain error 0`; the reason (sandbox denial,
+ * launch refusal, extension crash) is in the unified log and crash reports.
+ */
+const printQuickLookDiagnostics = async (): Promise<void> => {
+  const predicate = [
+    'subsystem == "com.taucad.tau.desktop"',
+    'process BEGINSWITH "TauQuickLook"',
+    'process == "ThumbnailsAgent"',
+    'process == "quicklookd"',
+    'process == "pkd"',
+    'eventMessage CONTAINS[c] "TauQuickLook"',
+    'eventMessage CONTAINS[c] "com.taucad.tau.desktop.quicklook"',
+  ].join(' OR ');
+  const log = spawnSync(
+    '/usr/bin/log',
+    ['show', '--last', '3m', '--info', '--style', 'compact', '--predicate', predicate],
+    {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 60_000,
+    },
+  );
+  const failed = log.error !== undefined || log.status !== 0;
+  if (failed) {
+    // A timeout or maxBuffer overflow still returns what was captured; print it below as partial.
+    console.error(
+      `Could not fully collect the Quick Look unified log (status ${String(log.status)}): ${String(log.error ?? log.stderr)}`,
+    );
+  }
+  // ponytail: last 300 lines keeps the CI log readable; widen --last or the slice if the cause scrolls off.
+  const lines = log.stdout
+    .trim()
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .slice(-300);
+  if (lines.length === 0) {
+    console.error('The Quick Look unified log has no matching entries in the last 3 minutes.');
+  } else {
+    console.error(
+      `::group::Quick Look unified log${failed ? ' (partial)' : ''} (last ${String(lines.length)} lines)\n${lines.join('\n')}\n::endgroup::`,
+    );
+  }
+  // ReportCrash writes the .ips a moment after the process dies.
+  await new Promise((resolve) => {
+    setTimeout(resolve, 3000);
+  });
+  const home = process.env['HOME'] ?? '';
+  const reportRoots = [
+    join(home, 'Library/Logs/DiagnosticReports'),
+    join(home, 'Library/Logs/DiagnosticReports/Retired'),
+    '/Library/Logs/DiagnosticReports',
+  ];
+  const reports = reportRoots
+    .filter((root) => existsSync(root))
+    .flatMap((root) =>
+      readdirSync(root)
+        .filter((name) => name.includes('TauQuickLook'))
+        .map((name) => join(root, name)),
+    )
+    .toSorted();
+  for (const report of reports) {
+    console.error(`::group::${report}\n${readFileSync(report, 'utf8').slice(0, 20_000)}\n::endgroup::`);
+  }
+  if (reports.length === 0) {
+    console.error(`No TauQuickLook crash reports in ${reportRoots.join(', ')}.`);
   }
 };
 
@@ -495,6 +566,19 @@ for (const path of filesUnder(appPath)) {
   arm64MachObjectCount += 1;
 }
 
+/* A package with Electron's default fuses is a general-purpose Node runtime that
+ * honours NODE_OPTIONS and loads an unchecked ASAR (security assessment F-3). */
+const fuseWire = await getCurrentFuseWire(appPath);
+for (const [fuse, enabled] of Object.entries(macosPackageFuses({ release }))) {
+  const option = Number(fuse) as FuseV1Options;
+  const expected = enabled ? FuseState.ENABLE : FuseState.DISABLE;
+  if (fuseWire[option] !== expected) {
+    throw new Error(
+      `Electron fuse ${FuseV1Options[option]} is ${String(fuseWire[option])}, expected ${String(expected)}.`,
+    );
+  }
+}
+
 verifyPythonResource('arm64');
 const picoGkWorker = verifyPicoGkResource();
 if (!unsigned) {
@@ -591,7 +675,8 @@ const picoGkResult = picoGkBuild?.['result'] as
       readonly artifactPath?: unknown;
       readonly byteLength?: unknown;
       readonly sha256?: unknown;
-      readonly components?: unknown;
+      readonly prototypes?: unknown;
+      readonly occurrences?: unknown;
     }
   | undefined;
 const picoGkArtifact = typeof picoGkResult?.artifactPath === 'string' ? resolve(picoGkResult.artifactPath) : '';
@@ -601,8 +686,10 @@ if (
   typeof picoGkResult?.byteLength !== 'number' ||
   picoGkResult.byteLength <= 0 ||
   typeof picoGkResult.sha256 !== 'string' ||
-  !Array.isArray(picoGkResult.components) ||
-  picoGkResult.components.length !== 1 ||
+  !Array.isArray(picoGkResult.prototypes) ||
+  picoGkResult.prototypes.length !== 1 ||
+  !Array.isArray(picoGkResult.occurrences) ||
+  picoGkResult.occurrences.length !== 1 ||
   !existsSync(picoGkArtifact) ||
   readFileSync(picoGkArtifact).byteLength !== picoGkResult.byteLength ||
   sha256(picoGkArtifact) !== picoGkResult.sha256
@@ -635,7 +722,14 @@ if (unsigned) {
   const probeBundle = resolve(probeRoot, 'TauQuickLookConverterProbe.app');
   const probeExecutable = resolve(probeBundle, 'Contents/MacOS/TauQuickLookConverterProbe');
   const probeResources = resolve(probeBundle, 'Contents/Resources');
-  const initialSessions = temporarySessions();
+  const probeTemporaryRoot = resolve(probeRoot, 'temporary');
+  const probeSessionRoot = resolve(probeTemporaryRoot, 'tau-quick-look');
+  const assertNoProbeSessions = (): void => {
+    const leaked = existsSync(probeSessionRoot) ? readdirSync(probeSessionRoot) : [];
+    if (leaked.length > 0) {
+      throw new Error(`Unsigned Quick Look converter left temporary sessions behind: ${leaked.join(', ')}`);
+    }
+  };
   try {
     mkdirSync(dirname(probeExecutable), { recursive: true });
     mkdirSync(probeResources, { recursive: true });
@@ -665,7 +759,7 @@ if (unsigned) {
     copyFileSync(resolve(workspaceRoot, 'packages/plugins/brep/src/fixtures/cube.step'), source);
     const preview = resolve(probeRoot, 'preview.usdz');
     const thumbnail = resolve(probeRoot, 'thumbnail.png');
-    run(probeExecutable, [source, 'usdz', preview, 'convert'], 60_000);
+    run(probeExecutable, [source, 'usdz', preview, 'convert', probeTemporaryRoot], 60_000);
     if (
       !readFileSync(preview)
         .subarray(0, 4)
@@ -678,14 +772,14 @@ if (unsigned) {
     if (!previewMembers.split('\n').some((name) => /\.usd[ac]?$/u.test(name))) {
       throw new Error(`The unsigned Quick Look converter USDZ contains no USD member: ${previewMembers}`);
     }
-    run(probeExecutable, [source, 'png', thumbnail, 'convert'], 60_000);
+    run(probeExecutable, [source, 'png', thumbnail, 'convert', probeTemporaryRoot], 60_000);
     assertThumbnailDimensions(thumbnail, 128);
 
     const malformed = resolve(probeRoot, 'malformed.off');
     writeFileSync(malformed, 'OFF\n8 12 0\nnot geometry\n');
     const malformedResult = spawnSync(
       probeExecutable,
-      [malformed, 'png', resolve(probeRoot, 'malformed.png'), 'convert'],
+      [malformed, 'png', resolve(probeRoot, 'malformed.png'), 'convert', probeTemporaryRoot],
       {
         encoding: 'utf8',
         timeout: 60_000,
@@ -700,11 +794,8 @@ if (unsigned) {
         `Malformed input did not produce the expected conversion diagnostic: status=${String(malformedResult.status)} signal=${String(malformedResult.signal)} stderr=${malformedResult.stderr}`,
       );
     }
-    run(probeExecutable, [source, 'png', resolve(probeRoot, 'cancelled.png'), 'cancel'], 10_000);
-    const leaked = [...temporarySessions()].filter((name) => !initialSessions.has(name));
-    if (leaked.length > 0) {
-      throw new Error(`Unsigned Quick Look converter left temporary sessions behind: ${leaked.join(', ')}`);
-    }
+    run(probeExecutable, [source, 'png', resolve(probeRoot, 'cancelled.png'), 'cancel', probeTemporaryRoot], 10_000);
+    assertNoProbeSessions();
   } finally {
     rmSync(probeRoot, { recursive: true, force: true });
   }
@@ -737,26 +828,35 @@ if (unsigned) {
     throw new Error('Tau remained running; offline extension verification is invalid');
   }
 
-  const classifications = [
-    ['packages/plugins/gltf/src/fixtures/cube.glb', ['org.khronos.glb']],
-    ['packages/plugins/brep/src/fixtures/cube.step', ['com.taucad.step', 'com.shapr3d.step', 'com.shapr3d.stp']],
-    ['packages/plugins/rhino/src/fixtures/cube-mesh.3dm', ['com.mcneel.rhinoceros.3dm', 'com.shapr3d.rhino.3dm']],
-    ['packages/plugins/assimp/src/fixtures/cube-ascii.fbx', ['com.autodesk.mac.fbx']],
-  ] as const;
-  for (const [relativePath, expectedTypes] of classifications) {
-    const path = resolve(workspaceRoot, relativePath);
-    const metadata = run('mdls', ['-raw', '-name', 'kMDItemContentType', path]).trim();
-    if (!(expectedTypes as readonly string[]).includes(metadata)) {
-      throw new Error(`${relativePath} resolved to unexpected UTI ${metadata}`);
-    }
-  }
-
   const testRoot = mkdtempSync(join(tmpdir(), 'tau-quick-look-verify-'));
+  const contentTypeProbe = resolve(testRoot, 'content-type-probe');
   const thumbnailProbe = resolve(testRoot, 'quick-look-thumbnail-probe');
   const previewProbe = resolve(testRoot, 'quick-look-preview-probe');
   const initialSessions = temporarySessions();
   const measurements: string[] = [];
   try {
+    const classifications = [
+      ['packages/plugins/gltf/src/fixtures/cube.glb', ['org.khronos.glb']],
+      ['packages/plugins/brep/src/fixtures/cube.step', ['com.taucad.step', 'com.shapr3d.step', 'com.shapr3d.stp']],
+      ['packages/plugins/rhino/src/fixtures/cube-mesh.3dm', ['com.mcneel.rhinoceros.3dm', 'com.shapr3d.rhino.3dm']],
+      ['packages/plugins/assimp/src/fixtures/cube-ascii.fbx', ['com.autodesk.mac.fbx']],
+    ] as const;
+    // Ask Launch Services rather than Spotlight: kMDItemContentType is indexed
+    // when the checkout is written, before the packaged app declares its types.
+    run('xcrun', ['swiftc', '-O', resolve(desktopRoot, 'scripts/content-type-probe.swift'), '-o', contentTypeProbe]);
+    const contentTypes = run(
+      contentTypeProbe,
+      classifications.map(([relativePath]) => resolve(workspaceRoot, relativePath)),
+    )
+      .trim()
+      .split('\n');
+    for (const [index, [relativePath, expectedTypes]] of classifications.entries()) {
+      const contentType = contentTypes[index] ?? '';
+      if (!(expectedTypes as readonly string[]).includes(contentType)) {
+        throw new Error(`${relativePath} resolved to unexpected UTI ${contentType}`);
+      }
+    }
+
     run('xcrun', [
       'swiftc',
       '-O',
@@ -781,7 +881,17 @@ if (unsigned) {
         return await runMeasured(options);
       } catch (error) {
         console.warn(`thumbnail request failed once, retrying (host-side Quick Look teardown race): ${String(error)}`);
-        return runMeasured(options);
+        try {
+          return await runMeasured(options);
+        } catch (retryError) {
+          try {
+            await printQuickLookDiagnostics();
+          } catch (diagnosticError) {
+            // Diagnostics are supplementary; never let them replace the probe failure.
+            console.error(`Could not collect Quick Look diagnostics: ${String(diagnosticError)}`);
+          }
+          throw retryError;
+        }
       }
     };
 

@@ -62,6 +62,8 @@ const staticFamilies = new Map<string, ActivityFamily>([
   ['tool-delete_file', 'edit'],
   ['tool-apply_parameter_operation', 'edit'],
   ['tool-arrange_workbench', 'edit'],
+  ['tool-evaluate_model', 'render'],
+  // Durable pre-migration turns remain readable; these names are display-only, never tool registrations.
   ['tool-get_kernel_result', 'render'],
   ['tool-screenshot', 'screenshot'],
   ['tool-test_model', 'test'],
@@ -82,6 +84,7 @@ const nativeFamilies = new Map<string, ActivityFamily>([
   ['create_file', 'edit'],
   ['delete_file', 'edit'],
   ['apply_parameter_operation', 'edit'],
+  ['evaluate_model', 'render'],
   ['get_kernel_result', 'render'],
   ['screenshot', 'screenshot'],
   ['test_model', 'test'],
@@ -178,6 +181,9 @@ const familyLabels: Record<Exclude<ActivityFamily, 'other'>, Record<ActivityStat
   },
 };
 
+/** External agents' own question tools, whose forms Tau presents as question cards. */
+const questionToolNames = new Set(['AskUserQuestion', 'request_user_input']);
+
 const tauFacts = (part: MyMessagePart): Record<string, unknown> | undefined =>
   part.type === 'dynamic-tool' && isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
 
@@ -239,9 +245,15 @@ export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
       return 'skip';
     }
     const nativeName = tauMcpToolName(part);
-    return nativeName === 'export_geometry' || nativeName === 'arrange_workbench' ? 'write' : 'research';
+    /* A question is a decision, never folded into routine activity (agent questions blueprint D7). */
+    if (nativeName === 'ask_questions' || questionToolNames.has(String(tauFacts(part)?.['nativeName']))) {
+      return 'data';
+    }
+    return nativeName === 'export_model' || nativeName === 'export_geometry' || nativeName === 'arrange_workbench'
+      ? 'write'
+      : 'research';
   }
-  if (part.type === 'tool-export_geometry' || part.type === 'tool-arrange_workbench') {
+  if (part.type === 'tool-export_model' || part.type === 'tool-arrange_workbench') {
     return 'write';
   }
   if (staticFamilies.has(part.type)) {
@@ -385,7 +397,7 @@ export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGr
     if (pendingParts.length === 0) {
       return;
     }
-    const toolParts = pendingParts.filter((part) => classifyActivityPart(part) === 'research');
+    const toolParts = pendingParts.filter((part) => cachedCategory(part) === 'research');
     const isReasoning = toolParts.length === 0;
     groups.push({
       kind: 'aggregated',
@@ -400,7 +412,7 @@ export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGr
   };
 
   for (const [partIndex, part] of parts.entries()) {
-    const category = classifyActivityPart(part);
+    const category = cachedCategory(part);
     if (category === 'skip') {
       continue;
     }
@@ -413,5 +425,41 @@ export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGr
     groups.push({ kind: 'singleton', part, partIndex, category });
   }
   flush();
+  const first = parts[0];
+  if (first !== undefined) {
+    const previous = activityGroups.get(first);
+    for (const [index, group] of groups.entries()) {
+      const old = previous?.[index];
+      if (
+        old?.kind === 'singleton' &&
+        group.kind === 'singleton' &&
+        old.part === group.part &&
+        old.partIndex === group.partIndex
+      ) {
+        groups[index] = old;
+      } else if (
+        old?.kind === 'aggregated' &&
+        group.kind === 'aggregated' &&
+        old.category === group.category &&
+        old.parts.length === group.parts.length &&
+        old.parts.every((part, at) => part === group.parts[at] && old.partIndices[at] === group.partIndices[at])
+      ) {
+        groups[index] = old;
+      }
+    }
+    activityGroups.set(first, groups);
+  }
   return groups;
+};
+
+const partCategories = new WeakMap<MyMessagePart, ActivityCategory>();
+const activityGroups = new WeakMap<MyMessagePart, ActivityGroup[]>();
+const cachedCategory = (part: MyMessagePart): ActivityCategory => {
+  const prior = partCategories.get(part);
+  if (prior !== undefined) {
+    return prior;
+  }
+  const category = classifyActivityPart(part);
+  partCategories.set(part, category);
+  return category;
 };

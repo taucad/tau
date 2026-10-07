@@ -22,7 +22,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -37,12 +37,16 @@ import {
   emittedSpecifiers,
   hostTargetIssues,
   internalImportsIssues,
+  isJsonTypesDeclaration,
+  knownDeclarationDefects,
   libDependencyIssues,
   packageMetadataIssues,
+  partitionConsumerDiagnostics,
   peerRules,
   peerDependencyIssues,
   pluginRuntimePeerDependencyIssues,
   probedSpecifiers,
+  publishedRawWasmAssets,
   publishableManifestIssues,
   strictConsumerCompilerOptions,
   vendoredAssetIssues,
@@ -241,7 +245,7 @@ function validateEsmOnlyPackageMetadata(): CheckResult {
   const publishPackage = applyPublishConfig(packageJson);
   const issues: string[] = [];
 
-  function visit(value: unknown, path: string): void {
+  function visit(value: unknown, path: string, jsonTypes = false): void {
     if (Array.isArray(value)) {
       for (const [index, item] of value.entries()) {
         visit(item, `${path}[${String(index)}]`);
@@ -258,7 +262,7 @@ function validateEsmOnlyPackageMetadata(): CheckResult {
         if (path === '$' && key === 'module') {
           issues.push(`${nextPath}: legacy package.json module field is not allowed`);
         }
-        visit(child, nextPath);
+        visit(child, nextPath, key === 'types' && path.startsWith('$.exports.') && isJsonTypesDeclaration(value));
       }
       return;
     }
@@ -273,7 +277,7 @@ function validateEsmOnlyPackageMetadata(): CheckResult {
     if (value.includes('.cjs')) {
       issues.push(`${path}: .cjs output is not allowed (${value})`);
     }
-    if (value.includes('.d.cts')) {
+    if (value.includes('.d.cts') && !jsonTypes) {
       issues.push(`${path}: .d.cts declarations are not allowed (${value})`);
     }
   }
@@ -480,6 +484,8 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
   '@taucad/geospec-engine': {
     '#cache/node-evidence-store.js':
       'browser/default platform swap for the evidence store, pinned by src/browser-import-graph.test.ts',
+    '#model/default-runtime-client.js':
+      'browser/default platform swap for the private model runtime fallback, pinned by src/browser-import-graph.test.ts',
     // The canonical map reaches `src/` only, and `.oxlintrc.json` ("no-restricted-imports",
     // regex `^\.`) bans the relative import that would replace these workspace-wide — so a
     // directory outside `src/` can only be reached through a key of its own.
@@ -673,7 +679,7 @@ function validateVendoredAssets(): CheckResult {
     input: `${destinations.join('\n')}\n`,
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (ignored.error || (ignored.status !== 0 && ignored.status !== 1)) {
+  if (ignored.error ?? (ignored.status !== 0 && ignored.status !== 1)) {
     throw ignored.error ?? new Error(`git check-ignore failed: ${ignored.stderr}`);
   }
   const ignoredPaths = ignored.stdout.split('\n').filter((path) => path.length > 0);
@@ -817,6 +823,46 @@ function linkInstalledPackage(from: string, nodeModules: string, dependency: str
   return true;
 }
 
+/** Stage the files npm would publish, without running package lifecycle scripts. */
+function copyPackedFiles(source: string, destination: string): void {
+  const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+    cwd: source,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const packs: unknown = JSON.parse(output);
+  if (!Array.isArray(packs) || packs.length !== 1 || !isRecord(packs[0]) || !Array.isArray(packs[0].files)) {
+    throw new Error(`npm pack returned an invalid file list for ${source}`);
+  }
+
+  const sourceRoot = realpathSync(source);
+  for (const file of packs[0].files) {
+    if (!isRecord(file) || typeof file.path !== 'string') {
+      throw new Error(`npm pack returned an invalid file path for ${source}`);
+    }
+    const { path } = file;
+    if (path === 'package.json') {
+      // The staged manifest must retain publishConfig overrides and omit scripts.
+      continue;
+    }
+    if (
+      path.startsWith('/') ||
+      path.includes('\\') ||
+      path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+    ) {
+      throw new Error(`npm pack returned an unsafe file path: ${path}`);
+    }
+    const fileSource = realpathSync(join(source, path));
+    const relativeSource = relative(sourceRoot, fileSource);
+    if (isAbsolute(relativeSource) || relativeSource.split(sep)[0] === '..') {
+      throw new Error(`npm pack returned a file outside the package: ${path}`);
+    }
+    const fileDestination = join(destination, path);
+    mkdirSync(dirname(fileDestination), { recursive: true });
+    cpSync(fileSource, fileDestination);
+  }
+}
+
 /**
  * Install one workspace package into a throwaway consumer the way npm would:
  * its `publishConfig`-applied manifest plus its built `dist`, never its source
@@ -844,7 +890,7 @@ function stagePublishedPackage(projectDirectory: string, nodeModules: string, st
     // hide exactly the defect `tau-no-vendored-node-modules` exists to catch.
     failures.push(`${name}: dist/node_modules exists; declare the vendored dependencies instead of shipping a copy`);
   } else if (existsSync(distribution)) {
-    cpSync(distribution, join(destination, 'dist'), { recursive: true });
+    copyPackedFiles(projectDirectory, destination);
   } else {
     failures.push(`${name}: dist/ is missing; build it before running pkgcheck`);
   }
@@ -920,7 +966,13 @@ void [
  * check every shipped `.d.mts` under both resolution modes.
  */
 function consumerProbeSource(specifiers: readonly string[]): string {
-  const imports = specifiers.map((specifier, index) => `import * as probe${String(index)} from '${specifier}';`);
+  const { exports } = applyPublishConfig(packageJson);
+  const imports = specifiers.map((specifier, index) => {
+    const subpath = `.${specifier.slice(packageName.length)}`;
+    const target = isRecord(exports) ? exports[subpath] : undefined;
+    const attribute = typeof target === 'string' && target.endsWith('.json') ? ' with { type: "json" }' : '';
+    return `import * as probe${String(index)} from '${specifier}'${attribute};`;
+  });
   const bindings = specifiers.map((_, index) => `probe${String(index)}`);
   const prologue = packageName === '@taucad/runtime' ? runtimeConsumerProbe : '';
   return `${prologue}${imports.join('\n')}\nvoid [${bindings.join(', ')}];\n`;
@@ -965,7 +1017,16 @@ function validateStrictConsumerTypes(): CheckResult {
         });
       } catch (error) {
         const execError = error as { stdout?: string; stderr?: string };
-        failures.push(`${resolution}:\n${`${execError.stdout ?? ''}${execError.stderr ?? ''}`.trim()}`);
+        const { remaining, explained } = partitionConsumerDiagnostics(
+          `${execError.stdout ?? ''}${execError.stderr ?? ''}`,
+          knownDeclarationDefects,
+        );
+        if (explained.length > 0) {
+          notes.push(`${resolution}: ${String(explained.length)} line(s) from a known third-party declaration defect`);
+        }
+        if (remaining.length > 0 || explained.length === 0) {
+          failures.push(`${resolution}:\n${remaining.join('\n')}`);
+        }
       }
     }
   } finally {
@@ -1011,24 +1072,27 @@ async function runAttw(): Promise<CheckResult> {
     delete publishPackage.scripts;
     writeFileSync(join(stagingDirectory, 'package.json'), JSON.stringify(publishPackage, undefined, 2));
 
-    const distributionSource = join(absoluteRoot, 'dist');
-    if (existsSync(distributionSource)) {
-      cpSync(distributionSource, join(stagingDirectory, 'dist'), { recursive: true });
-    }
-
-    const readmeSource = join(absoluteRoot, 'README.md');
-    if (existsSync(readmeSource)) {
-      cpSync(readmeSource, join(stagingDirectory, 'README.md'));
-    }
+    copyPackedFiles(absoluteRoot, stagingDirectory);
 
     const attwConfigSource = join(absoluteRoot, '.attw.json');
     if (existsSync(attwConfigSource)) {
       cpSync(attwConfigSource, join(stagingDirectory, '.attw.json'));
     }
 
+    const rawWasmEntrypoints = publishedRawWasmAssets(publishPackage.exports).map(({ subpath }) =>
+      subpath === '.' ? '.' : subpath.slice(2),
+    );
     const output = execFileSync(
       resolve('node_modules/.bin/attw'),
-      ['--pack', '.', '--format', 'table', '--profile', 'esm-only'],
+      [
+        '--pack',
+        '.',
+        '--format',
+        'table',
+        '--profile',
+        'esm-only',
+        ...(rawWasmEntrypoints.length === 0 ? [] : ['--exclude-entrypoints', ...rawWasmEntrypoints]),
+      ],
       {
         cwd: stagingDirectory,
         encoding: 'utf8',
@@ -1072,6 +1136,7 @@ async function runMadge(): Promise<CheckResult> {
     const result = await madge(join(absoluteRoot, 'src'), {
       fileExtensions: ['ts', 'tsx', 'js', 'jsx'],
       tsConfig: tsconfigPath,
+      detectiveOptions: { ts: { skipTypeImports: true } },
       excludeRegExp: [/\.test\./, /\.spec\./, /\/testing\//],
     });
 
@@ -1101,7 +1166,7 @@ async function runMadge(): Promise<CheckResult> {
 }
 
 async function runSizeLimit(): Promise<CheckResult> {
-  const hasSizeLimitConfig = packageJson['size-limit'] || existsSync(join(absoluteRoot, '.size-limit.json'));
+  const hasSizeLimitConfig = Boolean(packageJson['size-limit']) || existsSync(join(absoluteRoot, '.size-limit.json'));
   if (!hasSizeLimitConfig) {
     // A publishable without a budget is an unbudgeted tarball, not an exemption
     // (npm-policy Rule 7 lists size-limit at error severity).
@@ -1235,7 +1300,7 @@ type ExportRow = {
 
 function buildExportRows(): ExportRow[] {
   const publishPackage = applyPublishConfig(packageJson);
-  const exports = publishPackage['exports'] as ExportsMap | undefined;
+  const exports = publishPackage.exports as ExportsMap | undefined;
   if (!exports) {
     return [];
   }

@@ -1,4 +1,15 @@
-import { AtSign, Eye, EyeOff, FileBox, Focus, EllipsisVertical, Rotate3d, RotateCcw, Target } from 'lucide-react';
+import {
+  AtSign,
+  Eye,
+  EyeOff,
+  FileBox,
+  Focus,
+  EllipsisVertical,
+  Maximize2,
+  Rotate3d,
+  RotateCcw,
+  Target,
+} from 'lucide-react';
 import { findLinkByComponent } from '@taucad/kinematics';
 import type { ActorRefFrom } from 'xstate';
 import type {
@@ -43,7 +54,7 @@ import {
   weightLabel,
 } from '#components/geometry/cad/part-quantities.js';
 import type { PartQuantity } from '#components/geometry/cad/part-quantities.js';
-import { PartPreviewImage } from '#components/geometry/cad/part-preview-image.js';
+import { isPreviewablePart, useOpenPartGallery } from '#components/geometry/cad/part-gallery.js';
 import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
@@ -92,6 +103,7 @@ type ModelComponentActionDescriptor =
   | {
       readonly type: 'item';
       readonly id:
+        | 'openPreview'
         | 'focus'
         | 'addToChat'
         | 'revealInExplorer'
@@ -214,14 +226,7 @@ function ModelComponentDropdownItems(data: ModelComponentActionMenuData): React.
 
   return (
     <>
-      <ModelComponentMenuHeader
-        node={data.node}
-        quantity={data.quantity}
-        preview={data.preview}
-        onPreviewDecodeError={data.onPreviewDecodeError}
-        onPreviewDecoded={data.onPreviewDecoded}
-        Row={DropdownMenuDisclosureItem}
-      />
+      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={DropdownMenuDisclosureItem} />
       {descriptors.map((descriptor) => renderDropdownActionDescriptor(descriptor))}
     </>
   );
@@ -232,14 +237,7 @@ function ModelComponentContextMenuItems(data: ModelComponentActionMenuData): Rea
 
   return (
     <>
-      <ModelComponentMenuHeader
-        node={data.node}
-        quantity={data.quantity}
-        preview={data.preview}
-        onPreviewDecodeError={data.onPreviewDecodeError}
-        onPreviewDecoded={data.onPreviewDecoded}
-        Row={ContextMenuDisclosureItem}
-      />
+      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={ContextMenuDisclosureItem} />
       {descriptors.map((descriptor) => renderContextActionDescriptor(descriptor))}
     </>
   );
@@ -253,14 +251,7 @@ export function ModelComponentViewerMenuItems({
 
   return (
     <>
-      <ModelComponentMenuHeader
-        node={data.node}
-        quantity={data.quantity}
-        preview={data.preview}
-        onPreviewDecodeError={data.onPreviewDecodeError}
-        onPreviewDecoded={data.onPreviewDecoded}
-        Row={MenuDisclosureItem}
-      />
+      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={MenuDisclosureItem} />
       {descriptors.map((descriptor) => renderViewerActionDescriptor(descriptor, onRequestClose))}
     </>
   );
@@ -298,21 +289,15 @@ function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'me
 
 /**
  * The menu opens on the part it acts on: a row with its name and a material swatch that discloses
- * the material factors, collapsed to keep the menu lean.
+ * the material factors, collapsed to keep the menu lean. The part's image lives in the gallery.
  */
 function ModelComponentMenuHeader({
   node,
   quantity,
-  preview,
-  onPreviewDecodeError,
-  onPreviewDecoded,
   Row,
 }: {
   readonly node: GeometryComponentNode;
   readonly quantity?: PartQuantity;
-  readonly preview?: PartThumbnailState;
-  readonly onPreviewDecodeError?: () => void;
-  readonly onPreviewDecoded?: () => void;
   readonly Row: React.ComponentType<MenuDisclosureItemProperties>;
 }): React.JSX.Element {
   const materials = node.appearance?.materials;
@@ -320,40 +305,12 @@ function ModelComponentMenuHeader({
   return (
     <>
       <Row
-        label={
-          <span className='flex min-w-0 flex-col'>
-            <span className='truncate'>{node.name}</span>
-            <span className='truncate text-xs font-normal text-muted-foreground'>{summaryLabel(node, facts)}</span>
-          </span>
-        }
-        trailing={
-          (preview?.bytes ?? materials?.length) ? (
-            <span className='flex shrink-0 items-center gap-1.5'>
-              {preview?.bytes ? (
-                <PartPreviewImage
-                  bytes={preview.bytes}
-                  className='size-6 rounded-sm bg-muted object-contain'
-                  onError={onPreviewDecodeError}
-                  onLoad={onPreviewDecoded}
-                />
-              ) : undefined}
-              {!preview?.bytes && materials?.length ? <MaterialSwatch materials={materials} /> : undefined}
-            </span>
-          ) : undefined
-        }
+        label={<span className='font-medium'>{node.name}</span>}
+        description={summaryLabel(node, facts)}
+        trailing={materials?.length ? <MaterialSwatch materials={materials} /> : undefined}
       >
         <ModelComponentMaterialSummary node={node} quantity={facts} Row={Row} />
       </Row>
-      {preview?.status === 'pending' || preview?.status === 'failed' ? (
-        <p
-          role={preview.status === 'failed' ? 'alert' : 'status'}
-          aria-label='Preview status'
-          aria-busy={preview.status === 'pending' || undefined}
-          className='px-3 pb-1 text-xs text-muted-foreground'
-        >
-          {preview.status === 'pending' ? 'Preview loading' : 'Preview unavailable'}
-        </p>
-      ) : undefined}
       <div role='separator' className={menuSeparatorVariants()} />
     </>
   );
@@ -373,7 +330,7 @@ export function ModelComponentMaterialSummary({
 
   return (
     <div role='group' aria-label={`Inspection for ${node.name}`}>
-      <dl className='space-y-1 pt-1 pr-3 pb-2 pl-8.5 text-xs text-foreground'>
+      <dl className='space-y-1 px-3 pt-1 pb-2 text-xs text-foreground'>
         <div className='flex justify-between gap-4'>
           <dt className='text-muted-foreground'>Appearance</dt>
           <dd className='max-w-48 text-right'>{appearanceLabel(node)}</dd>
@@ -394,13 +351,13 @@ export function ModelComponentMaterialSummary({
       <p
         role={status.kind === 'failed' ? 'alert' : 'status'}
         aria-label='Measurement status'
-        className='px-3 pb-2 pl-8.5 text-xs text-muted-foreground'
+        className='px-3 pb-2 text-xs text-muted-foreground'
       >
         {status.sentence}
       </p>
       {materials?.length ? (
-        <Row label='Rendering' className='pl-8.5'>
-          <dl className='space-y-1 pt-1 pr-3 pb-2 pl-8.5 text-xs text-foreground'>
+        <Row label='Rendering'>
+          <dl className='space-y-1 px-3 pt-1 pb-2 text-xs text-foreground'>
             <div className='flex justify-between gap-4'>
               <dt className='text-muted-foreground'>Base color</dt>
               <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>
@@ -430,7 +387,35 @@ function useModelComponentActionDescriptors(
   data: ModelComponentActionMenuData,
 ): readonly ModelComponentActionDescriptor[] {
   const actions = useModelComponentActions(data);
+  const openPartGallery = useOpenPartGallery();
   const opacityPercent = Math.round(data.opacity * 100);
+  const openPreviewDescriptor: readonly ModelComponentActionDescriptor[] =
+    openPartGallery && isPreviewablePart(data.node)
+      ? [
+          {
+            type: 'item',
+            id: 'openPreview',
+            label: 'Open preview',
+            icon: <Maximize2 className='size-3.5' />,
+            onSelect: () => {
+              openPartGallery({
+                graphicsRef: data.graphicsRef,
+                unitId: data.unitId,
+                componentId: data.node.id,
+                source: data.source,
+                // Menu triggers are not focused on pointer open and re-render on selection, so focus
+                // returns to the Explorer row's keyboard stop.
+                origin:
+                  data.source === 'explorer'
+                    ? (document.querySelector<HTMLElement>(
+                        `[data-model-part-button][data-model-component-id="${CSS.escape(data.node.id)}"]`,
+                      ) ?? undefined)
+                    : undefined,
+              });
+            },
+          },
+        ]
+      : [];
   const revealInExplorerDescriptor: readonly ModelComponentActionDescriptor[] =
     data.source === 'viewer' && data.manifest.sourceFile
       ? [
@@ -457,6 +442,7 @@ function useModelComponentActionDescriptors(
       : [];
 
   return [
+    ...openPreviewDescriptor,
     {
       type: 'item',
       id: 'focus',

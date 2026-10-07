@@ -74,7 +74,8 @@
     "./vite": "./src/vite/index.ts",
     "./nextjs/config": "./src/nextjs/config.ts",
     "./nextjs/browser-node-builtins": "./src/nextjs/browser-node-builtins.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./machine/settings": "./src/machines/settings.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -269,7 +270,12 @@
         "import": "./dist/nextjs/browser-node-builtins.mjs",
         "default": "./dist/nextjs/browser-node-builtins.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./machine/settings": {
+        "types": "./dist/machines/settings.d.mts",
+        "import": "./dist/machines/settings.mjs",
+        "default": "./dist/machines/settings.mjs"
+      }
     },
     "imports": {}
   },
@@ -300,12 +306,16 @@
     "ws": "catalog:"
   },
   "peerDependencies": {
+    "@parcel/watcher": "catalog:",
     "electron": ">=37.0.0",
     "next": ">=15.3.0 <17.0.0",
     "vite": "^7.0.0 || ^8.0.0",
     "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
+    "@parcel/watcher": {
+      "optional": true
+    },
     "electron": {
       "optional": true
     },
@@ -317,6 +327,7 @@
     }
   },
   "devDependencies": {
+    "@parcel/watcher": "catalog:",
     "@taucad/events": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/json-schema": "workspace:*",

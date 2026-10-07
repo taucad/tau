@@ -1,3 +1,7 @@
+import type { ObservationWatch } from '@taucad/fs-client/observation-service';
+import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
+import { machineSettingsPath } from '@taucad/runtime/machine/settings';
+import type { FileSystemBridgeRootedProxy, FileSystemBridgeConnection, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ReactNode } from 'react';
 import { createContext, useContext, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
@@ -16,10 +20,10 @@ import type {
   ScopedStorageClient,
 } from '@taucad/fs-client/file-system-client';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
-import { createRootedContentClient } from '@taucad/fs-client/rooted-content-client';
-import type { RootedContentClient } from '@taucad/fs-client/rooted-content-client';
+import { createRootedContentClient, rootedPathOf } from '@taucad/fs-client/rooted-content-client';
+import type { RootedContentClient, RootedContentOwner } from '@taucad/fs-client/rooted-content-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
-import type { MountConfig, WorkspaceMutationError, WorkspaceScope } from '@taucad/filesystem';
+import type { MountConfig, WorkspaceMutationError, WorkspaceScope, WatchEvent } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import { pathRegistry } from '@taucad/filesystem/path-registry';
 import {
@@ -31,12 +35,11 @@ import {
   updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
 import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
-import type { RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
-import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import type { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { FileManagerNotReadyError } from '#filesystem/workspace-errors.js';
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
@@ -52,6 +55,32 @@ type FileManagerSnapshot = SnapshotFrom<typeof fileManagerMachine>;
  * `connectingWorker`/`initializingServices`. 30s matches the worker
  * boot budget tracked in `runtime-blueprint-v5-implementation-audit`.
  */
+type RecordBridgeOpener = (root: string, consumer: RootedBridgeConsumer) => FileSystemBridgeConnection;
+
+function recordConnectionsForIncarnation(fallback: RecordBridgeOpener, ready: () => Promise<unknown>) {
+  let owner: RootedContentOwner<RootedBridgeConsumer> | undefined;
+  let previous: RecordBridgeOpener | undefined;
+  return (opener: RecordBridgeOpener | undefined) => {
+    if (!owner || (previous !== undefined && opener !== previous)) {
+      owner = createRootedContentClient({
+        open: async (root, consumer: RootedBridgeConsumer) => {
+          await ready();
+          const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+          const proxy = createFileSystemBridgeProxy((opener ?? fallback)(root, consumer));
+          return {
+            files: proxy,
+            dispose: () => {
+              proxy.dispose();
+            },
+          };
+        },
+      });
+    }
+    previous = opener;
+    return owner;
+  };
+}
+
 export const fileManagerReadyTimeout = 30_000;
 
 function createErrorAwareWaitPredicate(
@@ -236,7 +265,11 @@ type FileManagerContextType = {
   treeService: FileTreeService | undefined;
   workerChangeChannel: WorkerChangeChannel | undefined;
   /** Observe one workbench record in the live project while code may follow a checkout. */
-  subscribeWorkbenchRecord: (path: string, listener: () => void) => () => void;
+  watchRecordFile: (
+    path: string,
+    listener: (event: WatchEvent) => void,
+    options?: { recursive?: boolean },
+  ) => ObservationWatch;
   /** Resolves once both content and tree facades are bound (or rejects if the machine enters `error`). */
   whenServicesReady: () => Promise<{
     contentService: FileContentService;
@@ -355,6 +388,7 @@ type FileManagerContextType = {
    * parameter set's target moves — never a batch and never a listing.
    */
   parameterFiles: ParameterFilesClient;
+  machineSettings: MachineSettingsStore;
   workbenchFiles: WorkbenchFilesClient;
   /**
    * The ephemeral preview mount's slice (`use-cad-preview.tsx`).
@@ -847,6 +881,30 @@ export function FileManagerProvider({
     [fileManagerRef],
   );
 
+  const machineSettings = useMemo(() => {
+    const connection: { proxy?: FileSystemBridgeRootedProxy } = {};
+    const service = async (): Promise<FileSystemBridgeRootedProxy> => {
+      await whenServicesReady();
+      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+      // A known opener belongs to this store incarnation; the first undefined opener waits for the current one.
+      const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(rootDirectory, 'user'));
+      connection.proxy = proxy;
+      await proxy.ready;
+      return proxy;
+    };
+    return new MachineSettingsStore(
+      service,
+      (typeId, refresh) => contentService?.subscribe(machineSettingsPath({ typeId }), refresh) ?? (() => undefined),
+      () => connection.proxy?.dispose(),
+    );
+  }, [bridgeOpener, rootDirectory, openRootedFileSystemBridge, whenServicesReady, contentService]);
+  useEffect(
+    () => () => {
+      machineSettings.dispose();
+    },
+    [machineSettings],
+  );
+
   /*
    * The one-shot read a duplicate journals, on its own connection.
    *
@@ -897,33 +955,16 @@ export function FileManagerProvider({
    * capability — an `'agent'` caller must never be answered with the unmasked
    * handle a record store opened first.
    */
-  const rootedConnections = useMemo(
-    () =>
-      createRootedContentClient({
-        open: async (root, consumer: RootedBridgeConsumer) => {
-          await whenServicesReady();
-          const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-          const proxy = createFileSystemBridgeProxy(openRootedFileSystemBridge(root, consumer));
-          return {
-            files: proxy,
-            dispose: () => {
-              proxy.dispose();
-            },
-          };
-        },
-      }),
+  const connectionsForIncarnation = useMemo(
+    () => recordConnectionsForIncarnation(openRootedFileSystemBridge, whenServicesReady),
     [openRootedFileSystemBridge, whenServicesReady],
   );
+  const rootedConnections = useMemo(
+    () => connectionsForIncarnation(bridgeOpener),
+    [bridgeOpener, connectionsForIncarnation],
+  );
 
-  const previousBridgeOpener = useRef(bridgeOpener);
-  useLayoutEffect(() => {
-    if (previousBridgeOpener.current && previousBridgeOpener.current !== bridgeOpener) {
-      rootedConnections.dispose();
-    }
-    previousBridgeOpener.current = bridgeOpener;
-  }, [bridgeOpener, rootedConnections]);
-
-  useEffect(
+  useLayoutEffect(
     () => () => {
       rootedConnections.dispose();
     },
@@ -939,88 +980,60 @@ export function FileManagerProvider({
    */
   const workingCopyFiles = useMemo(() => rootedConnections.files('working-copy'), [rootedConnections]);
 
-  /* The FileContentService watches the selected checkout. Workbench records stay in the
-   * live project, so one separately rooted bridge owns their change channel. Its arrival
-   * triggers a new host read after subscription, closing the async-open observation gap. */
-  const [liveRecordWatch, setLiveRecordWatch] = useState<{
-    projectId: string;
-    opener: typeof bridgeOpener;
-    channel: WorkerChangeChannel;
-    signal: AbortSignal;
-  }>();
-  useEffect(() => {
-    if (!projectId || !bridgeOpener) {
-      return undefined;
-    }
-    const abort = new AbortController();
-    const stale = (): boolean =>
-      abort.signal.aborted || fileManagerRef.getSnapshot().context.openFileSystemBridge !== bridgeOpener;
-    let release = (): void => undefined;
-    // async-iife: bootstrap
-    void (async () => {
-      try {
-        await whenServicesReady();
-        if (stale()) {
-          return;
-        }
-        const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-        if (stale()) {
-          return;
-        }
-        const proxy = createFileSystemBridgeProxy(bridgeOpener(`/projects/${projectId}`, 'working-copy'));
-        const channel = new WorkerChangeChannel({ transport: proxy });
-        release = () => {
-          channel.dispose();
-          proxy.dispose();
-        };
-        if (stale()) {
-          release();
-          return;
-        }
-        setLiveRecordWatch({ projectId, opener: bridgeOpener, channel, signal: abort.signal });
-      } catch (error) {
-        if (!abort.signal.aborted) {
-          console.warn('[FileManager] Live workbench record watch unavailable', error);
-        }
-      }
-    })();
-    return () => {
-      abort.abort();
-      release();
-    };
-  }, [bridgeOpener, fileManagerRef, projectId, whenServicesReady]);
-  const subscribeWorkbenchRecord = useCallback(
-    (path: string, listener: () => void): (() => void) => {
-      const watch =
-        liveRecordWatch &&
-        !liveRecordWatch.signal.aborted &&
-        liveRecordWatch.projectId === projectId &&
-        liveRecordWatch.opener === bridgeOpener
-          ? liveRecordWatch.channel
-          : undefined;
-      if (!watch) {
-        return () => undefined;
-      }
-      const exact = (changedPath: string): boolean => changedPath === path;
-      const contains = (changedPath: string): boolean => changedPath === '' || path.startsWith(`${changedPath}/`);
-      const off = [
-        watch.onFileWritten({ interestedIn: exact, handler: listener }),
-        watch.onFileDeleted({ interestedIn: exact, handler: listener }),
-        watch.onFileRenamed({ interestedIn: exact, handler: listener }),
-        watch.onFileCopied({ interestedIn: exact, handler: listener }),
-        watch.onDirectoryChanged({ interestedIn: contains, handler: listener }),
-        watch.onDirectoryCreated({ interestedIn: contains, handler: listener }),
-        watch.onDirectoryDeleted({ interestedIn: contains, handler: listener }),
-        watch.onDirectoryRenamed({ interestedIn: contains, handler: listener }),
-        watch.onDirectoryCopied({ interestedIn: contains, handler: listener }),
-      ];
-      return () => {
-        for (const unsubscribe of off) {
-          unsubscribe();
+  const watchRecordFile = useCallback(
+    (
+      absolutePath: string,
+      listener: (event: WatchEvent) => void,
+      options?: { recursive?: boolean },
+    ): ObservationWatch => {
+      const { root, path } = rootedPathOf(absolutePath);
+      const ready = Promise.withResolvers<void>();
+      const closed = Promise.withResolvers<void>();
+      const abort = new AbortController();
+      let disposeConnection = (): void => undefined;
+      let disposedConnection = false;
+      const open = async (): Promise<void> => {
+        try {
+          await whenServicesReady();
+          abort.signal.throwIfAborted();
+          const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+          abort.signal.throwIfAborted();
+          const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(root, 'working-copy'));
+          const watch = proxy.watchReady({ paths: [path], ...options }, listener);
+          disposeConnection = () => {
+            if (!disposedConnection) {
+              disposedConnection = true;
+              watch.unsubscribe();
+              proxy.dispose();
+            }
+          };
+          if (abort.signal.aborted) {
+            disposeConnection();
+            abort.signal.throwIfAborted();
+          }
+          await watch.ready;
+          abort.signal.throwIfAborted();
+          ready.resolve();
+          await watch.closed;
+          closed.resolve();
+          disposeConnection();
+        } catch (error) {
+          ready.reject(error);
+          closed.resolve();
+          disposeConnection();
         }
       };
+      void open();
+      return {
+        ready: ready.promise,
+        closed: closed.promise,
+        dispose: () => {
+          abort.abort();
+          disposeConnection();
+        },
+      };
     },
-    [bridgeOpener, liveRecordWatch, projectId],
+    [bridgeOpener, openRootedFileSystemBridge, whenServicesReady],
   );
 
   /**
@@ -1362,11 +1375,12 @@ export function FileManagerProvider({
   const value = useMemo<FileManagerContextType>(
     () => ({
       fileManagerRef,
+      machineSettings,
       backendType,
       contentService,
       treeService,
       workerChangeChannel,
-      subscribeWorkbenchRecord,
+      watchRecordFile,
       whenServicesReady,
       writeFile,
       writeFiles,
@@ -1404,11 +1418,12 @@ export function FileManagerProvider({
     }),
     [
       fileManagerRef,
+      machineSettings,
       backendType,
       contentService,
       treeService,
       workerChangeChannel,
-      subscribeWorkbenchRecord,
+      watchRecordFile,
       whenServicesReady,
       writeFile,
       writeFiles,

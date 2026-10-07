@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import { cloudClientEnvironmentKeys, cloudEnvironmentShape } from '#cloud/environment-billing.js';
 import type { CloudBillingEnvironment } from '#cloud/environment-billing.types.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 type RawEnvironment = Record<string, string | undefined>;
 
@@ -97,6 +98,10 @@ const environmentSchema = z.preprocess(
       .default('us-assets.i.posthog.com')
       .describe('PostHog asset host for the PostHog client.'),
     POSTHOG_CLIENT_KEY: z.string().optional().describe('PostHog client key. Set to enable analytics.'),
+
+    // Sentry error reporting (launch gate OBS-7). Written to the Netlify site by tau-cloud; a DSN is public by design.
+    SENTRY_DSN: z.string().optional().describe('Sentry DSN for browser error reporting. Set to enable it.'),
+    SENTRY_ENVIRONMENT: z.string().optional().describe('Sentry environment name, such as staging or production.'),
     /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
   }),
 );
@@ -135,6 +140,8 @@ const baseClientEnvironmentKeys = [
   'POSTHOG_UI_HOST',
   'POSTHOG_ASSET_HOST',
   'POSTHOG_CLIENT_KEY',
+  'SENTRY_DSN',
+  'SENTRY_ENVIRONMENT',
 ] as const satisfies ReadonlyArray<keyof Environment>;
 const clientEnvironmentKeys = [...baseClientEnvironmentKeys, ...cloudClientEnvironmentKeys] as const;
 
@@ -170,7 +177,9 @@ const resolveIsomorphicClientEnvironment = (): Partial<ClientEnvironment> => {
     return globalThis.window.ENV ?? {};
   }
 
-  /* A Web Worker has neither `window` nor `process`: it is a client without a
+  /* Desktop SPA generation runs in Node before preload injects window.ENV,
+   * but remains an unbootstrapped client, not a web server. A Web Worker has
+   * neither `window` nor `process`: it is a client without a
    * document, not a server. Treating "no window" as "node" dereferenced
    * `process.env` and threw, which is how one `ENV.TAU_DEBUG` read inside the
    * agent-host worker abandoned a queued capture job for 900 s
@@ -178,7 +187,7 @@ const resolveIsomorphicClientEnvironment = (): Partial<ClientEnvironment> => {
    * defect 1). A worker gets the same empty environment SSR would get from an
    * absent injection: `requireClientEnvironment` still names the missing key. */
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.process is absent in a worker.
-  if (!globalThis.process) {
+  if (!globalThis.process || isDesktopTarget()) {
     return {};
   }
 

@@ -1,13 +1,14 @@
-/* oxlint-disable typescript/no-unsafe-assignment -- private kernel context is intentionally erased by the public definition. */
+/* oxlint-disable typescript/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any. */
 // @vitest-environment node
 import { createHash } from 'node:crypto';
+import { NodeIO, WebIO } from '@gltf-transform/core';
 
-import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import { createMockFileSystem, createMockKernelRuntime } from '@taucad/runtime-testing';
+import { createMockFileSystem, createMockKernelRuntime, expectKernelProjectionOrder } from '@taucad/runtime-testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
+import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
 import { PicogkWorkerError } from '#picogk-session.js';
 import type { PicogkSession } from '#picogk-session.js';
 
@@ -29,7 +30,13 @@ const triangle = (() => {
   return bytes;
 })();
 
-const compilationTimings = { cacheHit: false, sourceRead: 1, parse: 2, analyze: 3, emit: 4 };
+const compilationTimings = {
+  cacheHit: false,
+  sourceRead: 1,
+  parse: 2,
+  analyze: 3,
+  emit: 4,
+};
 const workerTimings = {
   compileCacheHit: true,
   sourceRead: 1,
@@ -48,28 +55,41 @@ const buildResult = (id = 'component:picogk-1') => ({
   artifactPath: '/private/model.tau-mesh',
   byteLength: triangle.byteLength,
   sha256: createHash('sha256').update(triangle).digest('hex'),
-  components: [
+  prototypes: [
     {
-      id,
+      id: 'prototype:1',
       kind: 'triangles',
-      name: 'Part',
-      color: [0x11 / 255, 0x22 / 255, 0x33 / 255, 1],
-      metallic: 0.25,
-      roughness: 0.75,
       positionOffset: 0,
       positionCount: 9,
       normalOffset: 36,
       normalCount: 9,
       indexOffset: 72,
       indexCount: 3,
+      indexComponentType: 5125,
+    },
+  ],
+  occurrences: [
+    {
+      id,
+      prototypeId: 'prototype:1',
+      name: 'Part',
+      color: [0x11 / 255, 0x22 / 255, 0x33 / 255, 1],
+      metallic: 0.25,
+      roughness: 0.75,
+      matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
     },
   ],
   recycleAfterResponse: false,
   timings: workerTimings,
-  metrics: { managedHeapBytes: 10, picoGkNativeBytes: 0, processWorkingSetBytes: 20 },
+  metrics: {
+    managedHeapBytes: 10,
+    picoGkNativeBytes: 0,
+    processWorkingSetBytes: 20,
+  },
 });
 
-const context = () => ({
+const contextData = () => ({
+  computeTransport: { dispose: vi.fn(), start: vi.fn() },
   mirror: {
     sync: vi.fn().mockResolvedValue(['helper.cs', 'main.cs', 'asset.txt', 'tau.json', 'thumbnail.webp']),
     cleanup: vi.fn(),
@@ -118,11 +138,17 @@ const endedSpanAttributes = (name: string): Record<string, unknown> | undefined 
   return end.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
 };
 
+const loadDefinition = async () => resolveRuntimePluginDefinition('kernel', picogkKernel(kernelOptions));
+// These hook tests need only the mirror and session methods they exercise.
+const context = () =>
+  contextData() as ReturnType<typeof contextData> &
+    Parameters<Awaited<ReturnType<typeof loadDefinition>>['evaluate']>[2];
+
 describe('PicoGK kernel', () => {
-  let definition: AnyKernelDefinition;
+  let definition: Awaited<ReturnType<typeof loadDefinition>>;
   beforeEach(async () => {
     vi.clearAllMocks();
-    definition = await resolveRuntimePluginDefinition('kernel', picogkKernel(kernelOptions));
+    definition = await loadDefinition();
   });
 
   it('never reads the generated root thumbnail during workspace discovery', async () => {
@@ -144,12 +170,12 @@ describe('PicoGK kernel', () => {
         : [],
     );
     const mirrorRuntime = { ...createMockKernelRuntime(), filesystem };
-    const value = await definition.initialize(kernelOptions, mirrorRuntime);
+    const value = await definition.initialize(picogkOptionsSchema.parse(kernelOptions), mirrorRuntime);
     vi.spyOn((value as { readonly session: PicogkSession }).session, 'request').mockResolvedValue({
       sources: ['main.cs'],
     });
     try {
-      await expect(definition.getDependencies({ entryPath: 'main.cs' }, mirrorRuntime, value)).resolves.toEqual({
+      await expect(definition.resolve({ entryPath: 'main.cs' }, mirrorRuntime, value)).resolves.toEqual({
         resolved: ['main.cs', 'package.json'],
         unresolved: [],
       });
@@ -159,54 +185,70 @@ describe('PicoGK kernel', () => {
         ['tau.json', undefined],
       ]);
     } finally {
-      await definition.cleanup?.(value);
+      await definition.onDispose?.(value);
     }
   });
 
   it('owns C#, watches model inputs but not Tau system artifacts, and preserves issue provenance', async () => {
     const value = context();
-    value.session.request.mockResolvedValueOnce({ sources: ['helper.cs', 'main.cs'] });
-    await expect(definition.getDependencies({ entryPath: 'main.cs' }, runtime, value)).resolves.toEqual({
+    value.session.request.mockResolvedValueOnce({
+      sources: ['helper.cs', 'main.cs'],
+    });
+    await expect(definition.resolve({ entryPath: 'main.cs' }, runtime, value)).resolves.toEqual({
       resolved: ['helper.cs', 'main.cs', 'asset.txt'],
       unresolved: [],
     });
     // Another program in the project is its own model: never compiled, watched or hashed with this one.
     value.mirror.sync.mockResolvedValueOnce(['helper.cs', 'main.cs', 'other.cs', 'asset.txt', 'tau.json']);
-    value.session.request.mockResolvedValueOnce({ sources: ['helper.cs', 'other.cs'] });
-    await expect(definition.getDependencies({ entryPath: 'other.cs' }, runtime, value)).resolves.toEqual({
+    value.session.request.mockResolvedValueOnce({
+      sources: ['helper.cs', 'other.cs'],
+    });
+    await expect(definition.resolve({ entryPath: 'other.cs' }, runtime, value)).resolves.toEqual({
       resolved: ['helper.cs', 'other.cs', 'asset.txt'],
       unresolved: [],
     });
     expect(value.session.request).toHaveBeenLastCalledWith(
-      expect.objectContaining({ method: 'resolve', params: { entryPath: 'other.cs' } }),
+      expect.objectContaining({
+        method: 'resolve',
+        params: { entryPath: 'other.cs' },
+      }),
     );
     // An entry the worker cannot select watches every input, so the edit that settles it re-renders it.
     value.mirror.sync.mockResolvedValueOnce(['helper.cs', 'main.cs', 'other.cs', 'asset.txt', 'tau.json']);
     value.session.request.mockRejectedValueOnce(workerError('validation'));
-    await expect(definition.getDependencies({ entryPath: 'helper.cs' }, runtime, value)).resolves.toEqual({
+    await expect(definition.resolve({ entryPath: 'helper.cs' }, runtime, value)).resolves.toEqual({
       resolved: ['helper.cs', 'main.cs', 'other.cs', 'asset.txt'],
       unresolved: [],
     });
     value.session.request.mockRejectedValueOnce(new Error('worker exited'));
-    await expect(definition.getDependencies({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
+    await expect(definition.resolve({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
       issues: [expect.objectContaining({ message: 'worker exited', type: 'runtime' })],
     });
     value.mirror.sync.mockRejectedValueOnce(workerError('syntax'));
-    await expect(definition.getDependencies({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
+    await expect(definition.resolve({ entryPath: 'main.cs' }, runtime, value)).rejects.toMatchObject({
       issues: [
-        expect.objectContaining({ type: 'compilation', details: { workerCode: 'CS_TEST', workerType: 'syntax' } }),
+        expect.objectContaining({
+          type: 'compilation',
+          details: { workerCode: 'CS_TEST', workerType: 'syntax' },
+        }),
       ],
     });
 
     value.session.request.mockRejectedValueOnce(workerError('validation'));
-    await expect(definition.getParameters({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
+    await expect(definition.describe({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
       success: false,
       issues: [expect.objectContaining({ type: 'compilation' })],
     });
     value.session.request.mockRejectedValueOnce('plain failure');
-    await expect(definition.getParameters({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
+    await expect(definition.describe({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
       success: false,
-      issues: [{ message: 'plain failure', type: 'runtime', location: { fileName: 'main.cs' } }],
+      issues: [
+        {
+          message: 'plain failure',
+          type: 'runtime',
+          location: { fileName: 'main.cs' },
+        },
+      ],
     });
   });
 
@@ -216,14 +258,18 @@ describe('PicoGK kernel', () => {
       method === 'resolve'
         ? { sources: ['main.cs'] }
         : method === 'analyze'
-          ? { defaultParameters: {}, jsonSchema: { type: 'object' }, timings: compilationTimings }
+          ? {
+              defaultParameters: {},
+              jsonSchema: { type: 'object' },
+              timings: compilationTimings,
+            }
           : buildResult(),
     );
     const render = { ...runtime, operationId: 1 };
 
-    await definition.getDependencies({ entryPath: 'main.cs' }, render, value);
-    await definition.getParameters({ entryPath: 'main.cs' }, render, value);
-    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, render, value);
+    await definition.resolve({ entryPath: 'main.cs' }, render, value);
+    await definition.describe({ entryPath: 'main.cs' }, render, value);
+    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, render, value);
 
     // The mirror reuses its own walk per operation id.
     expect(value.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
@@ -244,18 +290,18 @@ describe('PicoGK kernel', () => {
       ],
       mechanism: { schemaVersion: 2 },
     });
-    const result = await definition.createGeometry(
-      { entryPath: 'main.cs', parameters: {}, options: {} },
-      runtime,
-      value,
-    );
-    expect(result.geometry).toMatchObject({ format: 'gltf' });
+    const result = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    expect(result.handle.glb).toBeInstanceOf(Uint8Array);
     expect(result.issues).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: 'INVALID_ANNOTATION',
           severity: 'warning',
-          details: { producer: { kernelId: 'picogk' }, workerCode: 'CS_TAU_MECHANISM', workerType: 'validation' },
+          details: {
+            producer: { kernelId: 'picogk' },
+            workerCode: 'CS_TAU_MECHANISM',
+            workerType: 'validation',
+          },
         }),
         expect.objectContaining({
           code: 'INVALID_ANNOTATION',
@@ -273,17 +319,13 @@ describe('PicoGK kernel', () => {
       jsonSchema: { type: 'object' },
       timings: compilationTimings,
     });
-    await expect(definition.getParameters({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
+    await expect(definition.describe({ entryPath: 'main.cs' }, runtime, value)).resolves.toMatchObject({
       success: true,
-      data: { defaults: {} },
+      data: { parameters: { defaults: {} } },
     });
 
     value.session.request.mockResolvedValueOnce(buildResult());
-    const built = await definition.createGeometry(
-      { entryPath: 'main.cs', parameters: {}, options: {} },
-      runtime,
-      value,
-    );
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
     /* D8: the C# stage timings are attributes on the span that measured the request, not a debug
      * log line, so the breakdown is answerable from the trace file with no log parsing. */
     expect(endedSpanAttributes('picogk.analyze')).toMatchObject(compilationTimings);
@@ -293,53 +335,124 @@ describe('PicoGK kernel', () => {
     // W17/D2: an aborted build stops the worker cooperatively, which is what the live-edit lane needs.
     expect(value.session.request).toHaveBeenLastCalledWith(expect.objectContaining({ cancelMethod: 'cancel' }));
     expect(definition.cancellation).toBe('cooperative');
-    expect(built.geometry).toMatchObject({ format: 'gltf' });
-    const handle = built.nativeHandle as { glb: Uint8Array<ArrayBuffer> };
-    expect(handle.glb).toEqual((built.geometry as { content: Uint8Array<ArrayBuffer> }).content);
-    const serialized = definition.serializeNativeHandle?.({ nativeHandle: handle }, runtime, value);
-    const restored = definition.deserializeNativeHandle?.(
-      { serializedNativeHandle: serialized },
-      runtime,
-      value,
-    ) as typeof handle;
+    const handle = built.handle as { glb: Uint8Array<ArrayBuffer> };
+    const artifact = await definition.render!({ view: 'model', handle, options: {} }, runtime, value);
+    expect(handle.glb).toEqual(artifact.content);
+    const serialized = definition.serializeHandle!({ handle }, runtime, value);
+    const restored = definition.deserializeHandle!({ serialized }, runtime, value);
     expect(restored.glb).toEqual(handle.glb);
     expect(restored.glb).not.toBe(handle.glb);
 
-    const exported = await definition.exportGeometry(
-      { format: 'glb', nativeHandle: handle, options: {} },
+    const exported = await definition.export!(
+      { exportId: 'glb', handle, options: picogkExportSchemas.glb.parse({}) },
       runtime,
       value,
     );
-    expect(exported).toMatchObject({ success: true, data: [{ name: 'model.glb' }] });
+    expect(exported).toMatchObject({ files: [{ name: 'model.glb' }] });
+    const binaryWrites = vi.spyOn(WebIO.prototype, 'writeBinary');
+    try {
+      const jsonExport = await definition.export!(
+        {
+          exportId: 'gltf',
+          handle,
+          options: picogkExportSchemas.gltf.parse({ coordinateSystem: 'z-up' }),
+        },
+        runtime,
+        value,
+      );
+      expect(jsonExport.files).toHaveLength(1);
+      expect(jsonExport.files[0].name).toBe('model.gltf');
+      const document = await new NodeIO().readJSON({
+        json: JSON.parse(new TextDecoder().decode(jsonExport.files[0].bytes)),
+        resources: {},
+      });
+      expect(document.getRoot().listMeshes()).toHaveLength(1);
+      expect(
+        document
+          .getRoot()
+          .listNodes()
+          .map((node) => node.getName()),
+      ).toEqual(['Part']);
+      expect(binaryWrites).not.toHaveBeenCalled();
+    } finally {
+      binaryWrites.mockRestore();
+    }
+
+    const render = async (valueHandle: typeof handle) => {
+      const projected = await definition.render!({ view: 'model', handle: valueHandle, options: {} }, runtime, value);
+      return projected.content;
+    };
+    const exportModel = async (valueHandle: typeof handle) => {
+      const projected = await definition.export!(
+        {
+          exportId: 'glb',
+          handle: valueHandle,
+          options: picogkExportSchemas.glb.parse({}),
+        },
+        runtime,
+        value,
+      );
+      return projected.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(handle),
+      renderB: async () => exportModel(handle),
+      freshB: async () => exportModel(restored),
+      export: async () => render(restored),
+    });
+    expect(ordered.first).toEqual(artifact.content);
+    expect(ordered.intervening).toEqual(artifact.content);
   });
 
   it('recycles requested generations and returns structured build/export failures', async () => {
     const value = context();
-    value.session.request.mockResolvedValueOnce({ ...buildResult(), recycleAfterResponse: true });
-    await definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    value.session.request.mockResolvedValueOnce({
+      ...buildResult(),
+      recycleAfterResponse: true,
+    });
+    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
     expect(value.session.recycle).toHaveBeenCalled();
 
     value.session.request.mockRejectedValueOnce(workerError('kernel'));
     await expect(
-      definition.createGeometry({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value),
-    ).rejects.toMatchObject({ issues: [expect.objectContaining({ type: 'kernel' })] });
+      definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value),
+    ).rejects.toMatchObject({
+      issues: [expect.objectContaining({ type: 'kernel' })],
+    });
     const badHandle = Object.defineProperty({}, 'glb', {
       get() {
         throw new Error('unreadable handle');
       },
     });
-    const badExport = await definition.exportGeometry(
-      { format: 'glb', nativeHandle: badHandle, options: {} },
-      runtime,
-      value,
-    );
-    expect(badExport).toMatchObject({ success: false, issues: [expect.objectContaining({ type: 'runtime' })] });
+    await expect(
+      definition.export!(
+        {
+          exportId: 'glb',
+          handle: badHandle as { glb: Uint8Array<ArrayBuffer> },
+          options: picogkExportSchemas.glb.parse({}),
+        },
+        runtime,
+        value,
+      ),
+    ).rejects.toMatchObject({
+      issues: [expect.objectContaining({ type: 'runtime' })],
+    });
+  });
+
+  it('releases the native session and mirror when compute disposal fails', async () => {
+    const value = context();
+    value.computeTransport.dispose.mockImplementationOnce(() => {
+      throw new Error('compute disposal failed');
+    });
+    await expect(definition.onDispose?.(value)).rejects.toThrow('compute disposal failed');
+    expect(value.session.cleanup).toHaveBeenCalledOnce();
+    expect(value.mirror.cleanup).toHaveBeenCalledOnce();
   });
 
   it('always removes the mirror when session cleanup fails', async () => {
     const value = context();
     value.session.cleanup.mockRejectedValueOnce(new Error('cleanup failed'));
-    await expect(definition.cleanup?.(value)).rejects.toThrow('cleanup failed');
+    await expect(definition.onDispose?.(value)).rejects.toThrow('cleanup failed');
     expect(value.mirror.cleanup).toHaveBeenCalled();
   });
 });

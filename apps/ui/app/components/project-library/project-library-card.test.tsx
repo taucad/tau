@@ -40,28 +40,41 @@ vi.mock('#components/project-library/project-action-dropdown.js', () => ({
   ProjectActionDropdown: () => <button type='button'>Actions</button>,
 }));
 
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({
-    client: { readFile: vi.fn().mockRejectedValue(new Error('not found')) },
+vi.mock('#hooks/use-file-manager.js', () => {
+  // Stable like the provider's memoized value: thumbnails are observed per record client and watch.
+  const missing = Object.assign(new Error('not found'), { code: 'ENOENT' });
+  const fileManager = {
+    client: { readFile: vi.fn().mockRejectedValue(missing) },
+    recordFiles: { readFile: vi.fn().mockRejectedValue(missing) },
+    watchRecordFile: () => ({
+      ready: Promise.resolve(),
+      closed: new Promise<never>(() => {
+        // Never closes.
+      }),
+      dispose: () => undefined,
+    }),
     contentService: undefined,
-  }),
-  SharedWorkerGate: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='shared-worker-gate'>{children}</div>
-  ),
-  HomeFileManagerProvider: ({
-    children,
-    projectId,
-    rootDirectory,
-  }: {
-    readonly children: React.ReactNode;
-    readonly projectId: string;
-    readonly rootDirectory: string;
-  }) => (
-    <FileManagerProbe projectId={projectId} rootDirectory={rootDirectory}>
-      {children}
-    </FileManagerProbe>
-  ),
-}));
+  };
+  return {
+    useFileManager: () => fileManager,
+    SharedWorkerGate: ({ children }: { readonly children: React.ReactNode }) => (
+      <div data-testid='shared-worker-gate'>{children}</div>
+    ),
+    HomeFileManagerProvider: ({
+      children,
+      projectId,
+      rootDirectory,
+    }: {
+      readonly children: React.ReactNode;
+      readonly projectId: string;
+      readonly rootDirectory: string;
+    }) => (
+      <FileManagerProbe projectId={projectId} rootDirectory={rootDirectory}>
+        {children}
+      </FileManagerProbe>
+    ),
+  };
+});
 
 function FileManagerProbe({
   children,
@@ -203,7 +216,7 @@ describe('ProjectLibraryCard live preview', () => {
     expect(preview).toHaveAttribute('data-project-id', mockProject.id);
     expect(preview).toHaveAttribute('data-main-file', 'main.scad');
     expect(preview).toHaveAttribute('data-has-files', 'false');
-    expect(screen.getByTestId('cad-preview-viewer')).toBeInTheDocument();
+    expect(await screen.findByTestId('cad-preview-viewer')).toBeInTheDocument();
   });
 
   it('should unmount the preview subtree when preview is toggled off', async () => {

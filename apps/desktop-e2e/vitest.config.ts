@@ -19,6 +19,10 @@ export default defineConfig({
         replacement: resolve(import.meta.dirname, '../../packages/runtime-testing/src/index.ts'),
       },
       {
+        find: /^@taucad\/workbench$/u,
+        replacement: resolve(import.meta.dirname, '../../packages/workbench/src/index.ts'),
+      },
+      {
         find: /^#support\/(.*)\.js$/u,
         replacement: `${resolve(import.meta.dirname, 'src/support')}/$1.ts`,
       },

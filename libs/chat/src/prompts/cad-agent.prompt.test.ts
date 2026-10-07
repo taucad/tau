@@ -3,6 +3,8 @@ import { kernelProviders } from '@taucad/types/constants';
 import { describe, expect, it } from 'vitest';
 import { getCadSystemPrompt } from '#prompts/cad-agent.prompt.js';
 import type { ResolvedSection } from '#prompts/prompt-section-registry.js';
+import { toolDescriptions } from '#constants/tool-description.constants.js';
+import { toolName } from '#constants/tool.constants.js';
 
 const allKernelProviders: readonly KernelProvider[] = kernelProviders;
 const maxCoreTokens = 3000;
@@ -153,6 +155,16 @@ describe('getCadSystemPrompt progressive-disclosure contract', () => {
     },
   );
 
+  it.each(promptBranches)(
+    'should name ask_questions in the plan step for $mode/testing=$testingEnabled/images=$supportsImageInput',
+    ({ mode, testingEnabled, supportsImageInput }) => {
+      const prompt = getCadSystemPrompt('replicad', mode, testingEnabled, { supportsImageInput });
+
+      expect(prompt.static).toContain(`settle hard forks only the person can decide with \`${toolName.askQuestions}\``);
+      expect(toolDescriptions[toolName.askQuestions]).toContain('Never ask for permission');
+    },
+  );
+
   it('should omit content migrated to kernel and GeoSpec skills from Block 1', () => {
     const sections: ResolvedSection[] = [];
     getCadSystemPrompt('replicad', 'agent', true, {
@@ -180,5 +192,23 @@ describe('workbench prompt', () => {
     const prompt = renderDefaultPrompt('openscad');
     expect(prompt.dynamic).toContain('arrange_workbench');
     expect(prompt.dynamic).toContain('basedOn');
+  });
+});
+
+describe('GeoSpec repair guidance', () => {
+  it('preserves qualified connectivity requirements rather than rescuing them with closure or visual tolerance', () => {
+    const prompt = renderDefaultPrompt('replicad');
+    expect(prompt.static).not.toContain('raise `tolerance` if parts visibly touch');
+    expect(prompt.static).not.toContain('fuse them in the kernel and assert `watertight`');
+    expect(prompt.static).toContain('Watertightness does not prove material connectivity');
+  });
+
+  it('describes complete selected-scope evidence instead of hiding known failures', () => {
+    const description = toolDescriptions[toolName.testModel];
+    expect(description).not.toContain('Skip one known failing check');
+    expect(description).not.toContain('Empty failures with total > 0 means');
+    expect(description).toContain('runStatus');
+    expect(description).toContain('accounting');
+    expect(description).toContain('fullResult');
   });
 });

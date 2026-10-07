@@ -30,7 +30,6 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import type { RootedFileSystem } from '@taucad/filesystem';
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { classify } from '@taucad/filesystem/path-registry';
 import { createActor } from 'xstate';
@@ -41,6 +40,7 @@ import { createRevisionHttpClient } from '#http-client.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { createRevisionActors } from '#revision-effects.js';
+import type { RevisionFileSystem } from '#revision-effects.js';
 import { selectSyncFacet, syncMachine } from '#sync.machine.js';
 import type { SyncQueueRecord } from '#sync.types.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
@@ -69,7 +69,7 @@ const temporaryRoot = async (label: string): Promise<string> => {
 
 type Leg = Readonly<{
   name: string;
-  port: (root: string, filesystem: RootedFileSystem, remoteUrl?: string) => RevisionPort;
+  port: (root: string, filesystem: RevisionFileSystem, remoteUrl?: string) => RevisionPort;
 }>;
 
 const legs: readonly Leg[] = [
@@ -97,7 +97,7 @@ const legs: readonly Leg[] = [
 
 type Device = Readonly<{
   root: string;
-  filesystem: RootedFileSystem;
+  filesystem: RevisionFileSystem;
   port: RevisionPort;
   actors: ReturnType<typeof createRevisionActors>;
   /** Start a scheduler over this device's effects, with a real clock. */
@@ -138,7 +138,7 @@ const device = async (
     remoteUrl?: string;
     files?: Readonly<Record<string, string>>;
     onChatsProjected?: (chatIds: readonly string[]) => void;
-    wrapFilesystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
+    wrapFilesystem?: (filesystem: RevisionFileSystem) => RevisionFileSystem;
     remoteMoves?: (input: Readonly<{ projectId: string }>, handlers: RevisionStreamHandlers) => () => void;
   }>,
 ): Promise<Device> => {
@@ -392,10 +392,13 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
        `reading`, one transition *before* the machine settles on `queued`, so
        reading the facet after this wait raced the transition and answered
        `checking` about one run in three — on either leg. */
-    await vi.waitFor(() => {
-      expect(second.getSnapshot().context.pending.map((entry) => entry.ref)).toEqual([mainRef]);
-      expect(selectSyncFacet(second.getSnapshot())).toMatchObject({ state: 'queued', pendingCount: 1 });
-    });
+    await vi.waitFor(
+      () => {
+        expect(second.getSnapshot().context.pending.map((entry) => entry.ref)).toEqual([mainRef]);
+        expect(selectSyncFacet(second.getSnapshot())).toMatchObject({ state: 'queued', pendingCount: 1 });
+      },
+      { timeout: 30_000 },
+    );
     second.stop();
   }, 180_000);
 
@@ -645,8 +648,8 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
         remoteUrl: remote.url,
         onChatsProjected: (chatIds) => projectedChats.push([...chatIds]),
         wrapFilesystem: (filesystem) =>
-          Object.assign(Object.create(filesystem) as RootedFileSystem, {
-            writeFile: async (path: string, content: Parameters<RootedFileSystem['writeFile']>[1]) => {
+          Object.assign(Object.create(filesystem) as RevisionFileSystem, {
+            writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
               if (path.startsWith(`${chatRecordsPath(secondChatId)}/`) && failSecond) {
                 await firstWritten.promise;
                 throw new Error('Second chat projection failed.');

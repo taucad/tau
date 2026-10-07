@@ -32,19 +32,19 @@ const exportGlb = async (root: string, hostState: string): Promise<{ geometry: s
       },
     }),
   });
+  const document = client.open({ source: { path: 'test-exports/box.ts' }, watch: false });
   try {
-    const result = await client.export('glb', {
-      source: { path: 'test-exports/box.ts' },
-    });
+    const result = await document.export('glb');
     if (!result.success) {
       throw new Error(`export failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
     }
     const control = await engine.control({ workspace });
     const { entries } = await control.inspect({});
-    return { geometry: digest(result.data[0]!.bytes), entries };
+    return { geometry: digest(result.files[0].bytes), entries };
   } finally {
     try {
-      await client.shutdown({ drain: true });
+      document.close();
+      await client.shutdown();
     } finally {
       await engine.dispose();
     }

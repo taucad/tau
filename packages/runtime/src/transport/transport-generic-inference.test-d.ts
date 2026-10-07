@@ -18,12 +18,16 @@ import type {
 } from '#transport/transport-projections.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 
-const stubClient = (): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<string, unknown>>, 'web-worker'> =>
+const stubClient = (): RuntimeTransportClient<
+  RuntimeDocumentProtocol,
+  Readonly<Record<string, unknown>>,
+  'web-worker'
+> =>
   ({ id: 'web-worker' }) as unknown as RuntimeTransportClient<
-    RuntimeProtocol,
+    RuntimeDocumentProtocol,
     Readonly<Record<string, unknown>>,
     'web-worker'
   >;
@@ -54,9 +58,9 @@ describe('transport callable generic inference end-to-end (C12)', () => {
     assertType<'web-worker'>(undefined as unknown as Id);
   });
 
-  it('TransportProtocol projection defaults to RuntimeProtocol', () => {
+  it('TransportProtocol projection retains the document wire', () => {
     type P = TransportProtocol<typeof bundledTransport>;
-    assertType<RuntimeProtocol>(undefined as unknown as P);
+    assertType<RuntimeDocumentProtocol>(undefined as unknown as P);
   });
 
   it('TransportBindingsExtra resolves to `{}` when no phantom extras declared', () => {

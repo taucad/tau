@@ -17,8 +17,10 @@ vi.mock('#cli-runtime.js', () => ({
 }));
 
 const exportFunction = vi.fn<(format: string, input: unknown) => Promise<ExportResult>>();
+const closeDocument = vi.fn<() => void>();
+const openFunction = vi.fn(() => ({ export: exportFunction, close: closeDocument }));
 const terminate = vi.fn<() => void>();
-const shutdown = vi.fn<(_options?: { drain?: boolean }) => Promise<void>>(async () => undefined);
+const shutdown = vi.fn<() => Promise<void>>(async () => undefined);
 const onFunction = vi.fn<(event: string, listener: (entry: unknown) => void) => void>();
 
 const importExportCommand = async () => {
@@ -38,7 +40,9 @@ const importedCliRuntime = async () =>
 
 const buildSuccessResult = (bytes: Uint8Array<ArrayBuffer>): ExportResult => ({
   success: true,
-  data: [
+  exportId: 'fixture-export',
+  evaluationId: 'fixture-evaluation',
+  files: [
     {
       name: 'model.glb',
       bytes,
@@ -71,7 +75,7 @@ describe('exportCommand', () => {
     const runtime = await importedRuntime();
     runtime.createNodeClient.mockResolvedValue({
       on: onFunction,
-      export: exportFunction,
+      open: openFunction,
       terminate,
       shutdown,
     });
@@ -175,14 +179,16 @@ describe('exportCommand', () => {
       rawArgs: [inputPath, '--ext=glb', `--output=${outputPath}`, '--params={"width":150}'],
     });
 
-    expect(exportFunction).toHaveBeenCalledWith('glb', {
+    expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: { width: 150 },
     });
+    expect(exportFunction).toHaveBeenCalledWith('glb', {});
+    expect(closeDocument).toHaveBeenCalledOnce();
     const written = await readFile(outputPath);
     expect(new Uint8Array(written)).toEqual(bytes);
     expect(shutdown).toHaveBeenCalledOnce();
-    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    expect(shutdown).toHaveBeenCalledWith();
     expect(terminate).not.toHaveBeenCalled();
   });
 
@@ -194,10 +200,11 @@ describe('exportCommand', () => {
       rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'unit.glb')}`, '--params={"width":"20in"}'],
     });
 
-    expect(exportFunction).toHaveBeenCalledWith('glb', {
+    expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: { width: '20in' },
     });
+    expect(exportFunction).toHaveBeenCalledWith('glb', {});
   });
 
   it('loads PicoGK resources for an explicit CLI export', async () => {
@@ -218,9 +225,9 @@ describe('exportCommand', () => {
         picoGkCommit: 'commit',
         picoGkArchiveSha256: digest,
         picoGkHostedPatchSha256: digest,
-        hostApiVersion: 1,
+        hostApiVersion: picogkRuntimeManifestSchema.shape.hostApiVersion.value,
         protocolVersion: picogkRuntimeManifestSchema.shape.protocolVersion.value,
-        sceneArtifactVersion: 3,
+        sceneArtifactVersion: picogkRuntimeManifestSchema.shape.sceneArtifactVersion.value,
         topologySchemaVersion: 1,
         sourceFilesSha256: digest,
         workerPath: 'Tau.PicoGK.Worker',
@@ -316,7 +323,7 @@ describe('exportCommand', () => {
       ],
     });
 
-    expect(exportFunction).toHaveBeenCalledWith('glb', {
+    expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: {
         count: 0,
@@ -324,7 +331,9 @@ describe('exportCommand', () => {
         label: '',
         nested: { values: [1, 'two', false] },
       },
-      exportOptions: {
+    });
+    expect(exportFunction).toHaveBeenCalledWith('glb', {
+      options: {
         futurePluginOption: { enabled: false, values: [0, '', true] },
       },
       content: { futureSemantic: { required: false }, labels: ['one', 'two'] },
@@ -345,10 +354,12 @@ describe('exportCommand', () => {
       ],
     });
 
-    expect(exportFunction).toHaveBeenCalledWith('glb', {
+    expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: {},
-      exportOptions: {},
+    });
+    expect(exportFunction).toHaveBeenCalledWith('glb', {
+      options: {},
       content: {},
     });
   });
@@ -356,7 +367,9 @@ describe('exportCommand', () => {
   it('should rename only the primary artifact and preserve nested companion paths', async () => {
     exportFunction.mockResolvedValueOnce({
       success: true,
-      data: [
+      exportId: 'fixture-export',
+      evaluationId: 'fixture-evaluation',
+      files: [
         {
           name: 'model.gltf',
           bytes: new Uint8Array([1]),
@@ -384,7 +397,9 @@ describe('exportCommand', () => {
   it('should reject unsafe companion paths before writing the primary artifact', async () => {
     exportFunction.mockResolvedValueOnce({
       success: true,
-      data: [
+      exportId: 'fixture-export',
+      evaluationId: 'fixture-evaluation',
+      files: [
         {
           name: 'model.gltf',
           bytes: new Uint8Array([1]),
@@ -414,7 +429,9 @@ describe('exportCommand', () => {
   it('should reject resolved path collisions before writing any artifact', async () => {
     exportFunction.mockResolvedValueOnce({
       success: true,
-      data: [
+      exportId: 'fixture-export',
+      evaluationId: 'fixture-evaluation',
+      files: [
         {
           name: 'model.gltf',
           bytes: new Uint8Array([1]),
@@ -448,7 +465,7 @@ describe('exportCommand', () => {
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toThrow(
       /Export failed:\n {2}boom\n {2}kaboom/,
     );
-    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    expect(shutdown).toHaveBeenCalledWith();
   });
 
   it('should separate a capability refusal from a model failure by exit code', async () => {
@@ -514,7 +531,9 @@ describe('exportCommand', () => {
   it('should refuse --output - when the export produced more than one artifact', async () => {
     exportFunction.mockResolvedValueOnce({
       success: true,
-      data: [
+      exportId: 'fixture-export',
+      evaluationId: 'fixture-evaluation',
+      files: [
         {
           name: 'model.gltf',
           bytes: new Uint8Array([1]),
@@ -605,24 +624,26 @@ describe('exportCommand', () => {
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=usda'] })).rejects.toThrow(
       'No export route found for format "usda"',
     );
-    expect(exportFunction).toHaveBeenCalledWith('usda', {
+    expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: {},
     });
+    expect(exportFunction).toHaveBeenCalledWith('usda', {});
   });
 
-  it('should await draining shutdown in finally even when client.export rejects', async () => {
+  it('should close the document and shut down even when document.export rejects', async () => {
     exportFunction.mockRejectedValueOnce(new Error('worker crashed'));
     const command = await importExportCommand();
 
     await expect(runCommand(command, { rawArgs: [inputPath, '--ext=glb'] })).rejects.toThrow('worker crashed');
 
     expect(shutdown).toHaveBeenCalledOnce();
-    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    expect(shutdown).toHaveBeenCalledWith();
+    expect(closeDocument).toHaveBeenCalledOnce();
     expect(terminate).not.toHaveBeenCalled();
   });
 
-  it('should drain the runtime and report the signal exit code when interrupted mid-export', async () => {
+  it('should close the document and report the signal exit code when interrupted mid-export', async () => {
     const neverSettles = Promise.withResolvers<ExportResult>();
     exportFunction.mockImplementationOnce(async () => {
       process.emit('SIGINT', 'SIGINT');
@@ -637,7 +658,8 @@ describe('exportCommand', () => {
       exit: exitCodes.interrupted,
     });
 
-    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    expect(shutdown).toHaveBeenCalledWith();
+    expect(closeDocument).toHaveBeenCalledOnce();
     await expect(readFile(join(workspace, 'model.glb'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
@@ -670,7 +692,9 @@ describe('exportCommand', () => {
   it('should warn through consola for every warning issue in a successful export', async () => {
     const result: ExportResult = {
       success: true,
-      data: [
+      exportId: 'fixture-export',
+      evaluationId: 'fixture-evaluation',
+      files: [
         {
           name: 'warn.glb',
           bytes: new Uint8Array([0]),
@@ -686,6 +710,6 @@ describe('exportCommand', () => {
       rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'warn.glb')}`],
     });
 
-    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    expect(shutdown).toHaveBeenCalledWith();
   });
 });

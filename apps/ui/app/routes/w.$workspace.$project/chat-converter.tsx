@@ -1,3 +1,8 @@
+import { z } from 'zod';
+import { fileExtensions } from '@taucad/types/constants';
+import { runtimeContentSchema } from '@taucad/runtime';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import { useObservation } from '@taucad/fs-client/react/use-observation';
 import { XIcon, Download, Info, Check, ChevronDown, ChevronRight } from 'lucide-react';
 import { useCallback, memo, useState, useMemo, useEffect, useRef } from 'react';
 import type { ReactElement } from 'react';
@@ -42,7 +47,7 @@ import type { FormatEntry } from '#utils/export-formats.utils.js';
 import {
   bestRouteForActiveKernel,
   deriveAvailableFormats,
-  exportWithRuntimeValidatedInput,
+  exportDocumentWithValidatedInput,
   getFormatInfo,
 } from '#utils/export-formats.utils.js';
 import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
@@ -969,63 +974,143 @@ function formatButtonLabel(selectedFormats: FileExtension[], isExporting: boolea
 // Preference persistence
 // =============================================================================
 
-function useExportPreferences(fileManager: ReturnType<typeof useFileManager>) {
-  const [preferences, setPreferences] = useState<ExportPreferences>(defaultPreferences);
-  const loadedRef = useRef(false);
-  const writeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const { contentService } = fileManager;
+const exportPreferencesSchema = z.object({
+  formatContent: z.partialRecord(z.enum(fileExtensions), runtimeContentSchema).optional(),
+  formatOptions: z.partialRecord(z.enum(fileExtensions), z.record(z.string(), z.unknown())).optional(),
+  selectedFormats: z.array(z.enum(fileExtensions)).optional(),
+  shouldDownload: z.boolean().optional(),
+  shouldSaveToProject: z.boolean().optional(),
+  zipMultiple: z.boolean().optional(),
+});
 
+export function useExportPreferences(
+  fileManager: ReturnType<typeof useFileManager>,
+): readonly [ExportPreferences, (next: ExportPreferences) => void] {
+  const { contentService, readFile, writeFiles, exists } = fileManager;
+  const service = useMemo(
+    () =>
+      contentService
+        ? new ObservationService<ExportPreferences>({
+            resource: preferencesPath,
+            watch: (invalidate, reset) =>
+              contentService.watchReady({ paths: [preferencesPath] }, (event) => {
+                if (event.type === 'reset') {
+                  reset();
+                } else {
+                  invalidate();
+                }
+              }),
+            read: async () =>
+              (await exists(preferencesPath))
+                ? {
+                    ...defaultPreferences,
+                    ...exportPreferencesSchema.parse(
+                      JSON.parse(new TextDecoder().decode(await readFile(preferencesPath))),
+                    ),
+                  }
+                : defaultPreferences,
+            equal: (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
+          })
+        : undefined,
+    [contentService, exists, readFile],
+  );
+  const snapshot = useObservation(service);
+  const activeSource = useRef(service);
   useEffect(() => {
-    if (loadedRef.current || !contentService) {
-      return;
-    }
-    loadedRef.current = true;
-
-    // async-iife: bootstrap — hydrate export preferences from workspace JSON once
-    void (async () => {
-      try {
-        const content = await fileManager.readFile(preferencesPath);
-        if (content.byteLength > 0) {
-          const decoded = new TextDecoder().decode(content);
-          const parsed = JSON.parse(decoded) as Partial<ExportPreferences>;
-          setPreferences((previous) => ({ ...previous, ...parsed }));
-        }
-      } catch {
-        // File doesn't exist yet — use defaults
-      }
-    })();
-  }, [contentService, fileManager]);
-
-  useEffect(() => {
+    activeSource.current = service;
     return () => {
-      if (writeTimerRef.current) {
-        clearTimeout(writeTimerRef.current);
+      if (activeSource.current === service) {
+        activeSource.current = undefined;
       }
     };
-  }, []);
+  }, [service]);
+  const [local, setLocal] = useState<{
+    service: ObservationService<ExportPreferences>;
+    patch: Partial<ExportPreferences>;
+  }>();
+  const patch = local?.service === service ? local?.patch : undefined;
+  const preferences = useMemo(() => ({ ...(snapshot.value ?? defaultPreferences), ...patch }), [snapshot.value, patch]);
+
+  const [write, setWrite] = useState<{ local: NonNullable<typeof local>; phase: 'pending' | 'saved' | 'failed' }>();
+  useEffect(() => {
+    if (!service || !local || local.service !== service || snapshot.status !== 'ready') {
+      return undefined;
+    }
+    if (write?.local.service === service) {
+      if (write.phase === 'pending') {
+        return undefined;
+      }
+      if (write.local === local) {
+        if (
+          write.phase === 'saved' &&
+          snapshot.value &&
+          Object.entries(local.patch).every(
+            ([key, value]) =>
+              JSON.stringify(snapshot.value?.[key as keyof ExportPreferences]) === JSON.stringify(value),
+          )
+        ) {
+          queueMicrotask(() => {
+            setLocal((current) => (current === local ? undefined : current));
+          });
+        }
+        return undefined;
+      }
+    }
+    const captured = local;
+    const timer = setTimeout(() => {
+      setWrite({ local: captured, phase: 'pending' });
+      const persist = async (): Promise<void> => {
+        try {
+          await writeFiles({
+            [preferencesPath]: { content: new TextEncoder().encode(JSON.stringify(preferences, null, 2)) },
+          });
+          if (activeSource.current !== service) {
+            return;
+          }
+          setWrite((current) => (current?.local === captured ? { local: captured, phase: 'saved' } : current));
+          service.invalidate();
+        } catch (error) {
+          if (activeSource.current !== service) {
+            return;
+          }
+          setWrite((current) => (current?.local === captured ? { local: captured, phase: 'failed' } : current));
+          toast.error(error instanceof Error ? error.message : 'Export preferences could not be saved.');
+        }
+      };
+      void persist();
+    }, 100);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [local, preferences, service, snapshot.status, snapshot.value, write, writeFiles]);
 
   const persistPreferences = useCallback(
     (next: ExportPreferences) => {
-      setPreferences(next);
-
-      if (writeTimerRef.current) {
-        clearTimeout(writeTimerRef.current);
+      if (!service) {
+        return;
       }
-      writeTimerRef.current = setTimeout(() => {
-        // async-iife: bootstrap — debounced preference persist; timer already tracks lifecycle
-        void (async () => {
-          const content = new TextEncoder().encode(JSON.stringify(next, null, 2));
-          try {
-            await fileManager.writeFiles({ [preferencesPath]: { content } });
-          } catch {
-            // Persisting preferences is best-effort; ignore write failures
-          }
-        })();
-      }, 100);
+      const patch: Partial<ExportPreferences> = {};
+      for (const key of [
+        'formatContent',
+        'formatOptions',
+        'selectedFormats',
+        'shouldDownload',
+        'shouldSaveToProject',
+        'zipMultiple',
+      ] as const) {
+        if (JSON.stringify(next[key]) !== JSON.stringify(preferences[key])) {
+          Object.assign(patch, { [key]: next[key] });
+        }
+      }
+      setLocal((current) => ({ service, patch: { ...(current?.service === service ? current.patch : {}), ...patch } }));
     },
-    [fileManager],
+    [preferences, service],
   );
-
+  useEffect(() => {
+    if (snapshot.error) {
+      toast.error(snapshot.error);
+    }
+  }, [snapshot.error]);
   return [preferences, persistPreferences] as const;
 }
 
@@ -1061,7 +1146,7 @@ export const ConverterPanelBody = function ({
     }
   }, [cuEntries, selectedEntryPath, mainEntryPath]);
 
-  const selectedRenderTimeout = entriesRecord?.entries[selectedEntryPath]?.renderTimeout;
+  const selectedOperationTimeout = entriesRecord?.entries[selectedEntryPath]?.renderTimeout;
   useEffect(() => {
     if (!isShown || !selectedEntryPath) {
       return;
@@ -1071,16 +1156,21 @@ export const ConverterPanelBody = function ({
       type: 'claimGeometryUnit',
       claimId,
       entryPath: selectedEntryPath,
-      renderTimeout: selectedRenderTimeout,
+      operationTimeout: selectedOperationTimeout,
     });
     return () => {
       projectRef.send({ type: 'releaseGeometryUnit', claimId });
     };
-  }, [isShown, projectRef, selectedEntryPath, selectedRenderTimeout]);
+  }, [isShown, projectRef, selectedEntryPath, selectedOperationTimeout]);
 
   const selectedActor = geometryUnits.get(selectedEntryPath);
 
-  const geometry = useSelector(selectedActor, (state) => state?.context.geometry);
+  const rendering = useSelector(selectedActor, (state) => state?.context.rendering);
+  const evaluation = useSelector(selectedActor, (state) => state?.context.evaluation);
+  const latestRenderingOutcome = useSelector(selectedActor, (state) => state?.context.latestRenderingOutcome);
+  const hasExportableDocument =
+    rendering?.success === true ||
+    (latestRenderingOutcome === 'success' && evaluation?.success === true && evaluation.views.length === 0);
   const capabilities = useSelector(selectedActor, (state) => state?.context.capabilities);
   const activeKernelId = useSelector(selectedActor, (state) => state?.context.activeKernelId);
   const kernelClient = useSelector(selectedActor, (state) => state?.context.kernelClient);
@@ -1209,7 +1299,7 @@ export const ConverterPanelBody = function ({
       type: 'claimGeometryUnit',
       claimId,
       entryPath: selectedEntryPath,
-      renderTimeout: selectedRenderTimeout,
+      operationTimeout: selectedOperationTimeout,
     });
     setIsExporting(true);
 
@@ -1223,12 +1313,13 @@ export const ConverterPanelBody = function ({
       if (failedIssues) {
         throw new Error(failedIssues.map((issue) => issue.message).join('; ') || 'The selected CAD render failed');
       }
-      if (settled.context.latestGeometryOutcome !== 'success') {
+      if (settled.context.latestRenderingOutcome !== 'success') {
         throw new Error(`No current successful geometry is available for ${selectedEntryPath}`);
       }
       const freshKernelClient = settled.context.kernelClient;
+      const freshDocument = settled.context.document;
       const freshKernelId = settled.context.activeKernelId;
-      if (!freshKernelClient) {
+      if (!freshKernelClient || !freshDocument) {
         throw new Error('The selected CAD runtime is unavailable');
       }
       /* oxlint-disable no-await-in-loop -- Sequential: each export depends on shared kernel state */
@@ -1276,9 +1367,9 @@ export const ConverterPanelBody = function ({
           const content = contentResolved
             ? runtimeContentFromRecord(sanitizeFormDelta(route.content!.schema, contentResolved.values))
             : undefined;
-          const result = await exportWithRuntimeValidatedInput(freshKernelClient, route, {
+          const result = await exportDocumentWithValidatedInput(freshDocument, route, {
             ...(content && Object.keys(content).length > 0 ? { content } : {}),
-            exportOptions: options,
+            options,
           });
 
           if (!result.success) {
@@ -1286,7 +1377,7 @@ export const ConverterPanelBody = function ({
             continue;
           }
 
-          const files = result.data;
+          const files = [...result.files];
 
           if (shouldDownload) {
             downloadQueue.push({ format, files });
@@ -1329,7 +1420,7 @@ export const ConverterPanelBody = function ({
     kernelClient,
     selectedActor,
     selectedEntryPath,
-    selectedRenderTimeout,
+    selectedOperationTimeout,
     projectRef,
     selectedFormats,
     formatOptions,
@@ -1362,7 +1453,7 @@ export const ConverterPanelBody = function ({
             </div>
           </section>
 
-          {geometry ? (
+          {hasExportableDocument ? (
             availableFormats.length > 0 ? (
               <>
                 <section aria-label='Formats' className='overflow-hidden rounded-xl border border-border bg-card'>

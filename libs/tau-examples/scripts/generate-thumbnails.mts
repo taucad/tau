@@ -14,6 +14,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { createExampleRuntimeClient, exampleKernelIds } from '#scripts/runtime.js';
+import { renderThumbnails } from '#scripts/render-thumbnail.js';
 
 // Nx sets FORCE_COLOR while some shells set NO_COLOR; runtime workers would
 // otherwise emit the same Node warning once for every plugin and example.
@@ -46,9 +47,6 @@ const only = new Set(
     .split(',')
     .filter(Boolean) ?? [],
 );
-// Twice the largest card slot (a featured card is ~750 CSS px wide) so 2× displays and share previews stay sharp.
-const thumbnailOptions = { width: 1536, height: 1152 } as const;
-const thumbnailMargin = 0.1;
 // Edge widths are output pixels. A featured card is drawn at twice a card's size, so its
 // thumbnail halves the width to keep the same on-screen line weight.
 const variants = [
@@ -95,17 +93,20 @@ const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer
   return left.every((byte, index) => byte === right[index]);
 };
 
-const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
-  bytes.byteLength >= 12 &&
-  new TextDecoder().decode(bytes.subarray(0, 4)) === 'RIFF' &&
-  new TextDecoder().decode(bytes.subarray(8, 12)) === 'WEBP';
-
 const decodeWebp = async (
   bytes: Uint8Array<ArrayBuffer>,
-): Promise<{ readonly width: number; readonly height: number; readonly pixels: Uint8Array<ArrayBuffer> }> => {
+): Promise<{
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: Uint8Array<ArrayBuffer>;
+}> => {
   const input = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const { data, info } = await sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  return { width: info.width, height: info.height, pixels: new Uint8Array(data) };
+  return {
+    width: info.width,
+    height: info.height,
+    pixels: new Uint8Array(data),
+  };
 };
 
 const imagesEquivalent = async (
@@ -138,25 +139,6 @@ const imagesEquivalent = async (
   // moving a few raster boundary fragments by 1–3/255 on the same GPU. Keep the
   // golden strict enough that a shifted edge, material change, or rotation fails.
   return changedPixels <= left.width * left.height * 0.001;
-};
-
-const renderSvgThumbnail = async (svg: string): Promise<Uint8Array<ArrayBuffer>> => {
-  const { width, height } = thumbnailOptions;
-  const foreground = await sharp(Buffer.from(svg))
-    .resize({
-      width: Math.round(width * (1 - 2 * thumbnailMargin)),
-      height: Math.round(height * (1 - 2 * thumbnailMargin)),
-      fit: 'contain',
-    })
-    .png()
-    .toBuffer();
-  const thumbnail = await sharp({
-    create: { width, height, channels: 4, background: '#000' },
-  })
-    .composite([{ input: foreground, gravity: 'center' }])
-    .webp()
-    .toBuffer();
-  return new Uint8Array(thumbnail);
 };
 
 const entries = JSON.parse(readFileSync(manifestPath, 'utf8')) as ManifestEntry[];
@@ -213,62 +195,22 @@ for (const entry of isolated ? renderable : []) {
     }
   });
   try {
-    const sourcePath = picogkRoot ? entry.mainFile : `${entry.kernel}/${entry.name}/${entry.mainFile}`;
-    console.log(`Rendering ${entry.kernel}/${entry.name}`);
+    const key = `${entry.kernel}/${entry.name}`;
+    const selected = entry.featured ? variants : variants.slice(0, 1);
+    console.log(`Rendering ${key}`);
     // oxlint-disable-next-line eslint/no-await-in-loop -- One shared runtime/GPU queue renders fixtures serially.
-    const outcome = await client.render({
-      source: { path: sourcePath },
-      content: { includeEdges: true },
-      // Pinned bytes come from PicoVoxel's exact lane, never the fast viewer preview.
-      ...(entry.kernel === 'picovoxel' && { renderOptions: { lane: 'exact' } }),
+    const images = await renderThumbnails(client, {
+      label: key,
+      sourcePath: picogkRoot ? entry.mainFile : `${key}/${entry.mainFile}`,
+      lineWidths: selected.map(({ lineWidth }) => lineWidth),
+      isExactLane: entry.kernel === 'picovoxel',
     });
-    if (outcome.superseded) {
-      throw new Error(`Thumbnail render failed for ${entry.kernel}/${entry.name}: render was superseded`);
-    }
-    for (const { file, lineWidth } of entry.featured ? variants : variants.slice(0, 1)) {
-      const path = join(kernelsDirectory, entry.kernel, entry.name, file);
-      if (outcome.geometry.success && outcome.geometry.data.format === 'svg') {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- Preserve manifest order and the shared render queue.
-        const bytes = await renderSvgThumbnail(outcome.geometry.data.content);
-        thumbnails.push({ entry, bytes, path });
-        continue;
-      }
-      // oxlint-disable-next-line eslint/no-await-in-loop -- Re-export the settled 3D render through the image transcoder.
-      const result = await client.export('webp', {
-        ...(!outcome.geometry.success && { source: { path: sourcePath } }),
-        content: { includeEdges: true },
-        exportOptions: {
-          mode: 'single',
-          ...thumbnailOptions,
-          lineWidth,
-          camera: {
-            framing: 'bounds',
-            direction: [0.6123724357, -0.6123724357, 0.5],
-            up: [0, 0, 1],
-            margin: thumbnailMargin,
-            projection: { kind: 'perspective', verticalFieldOfView: 45 },
-          },
-          quality: 0.9,
-          ao: {},
-        },
-      });
-      if (!result.success) {
-        throw new Error(
-          `Thumbnail export failed for ${entry.kernel}/${entry.name}: ${result.issues
-            .map((issue) => issue.message)
-            .join('; ')}`,
-        );
-      }
-      const thumbnail = result.data[0];
-      if (result.data.length !== 1 || thumbnail?.mimeType !== 'image/webp' || !isWebp(thumbnail.bytes)) {
-        throw new Error(
-          `Thumbnail export expected exactly one valid image/webp artifact, received: ${result.data.map((file) => `${file.mimeType} (${file.bytes.length} bytes)`).join(', ')}`,
-        );
-      }
-      thumbnails.push({ entry, bytes: thumbnail.bytes, path });
+    for (const [index, { file }] of selected.entries()) {
+      thumbnails.push({ entry, bytes: images[index]!, path: join(kernelsDirectory, entry.kernel, entry.name, file) });
     }
   } finally {
-    client.terminate();
+    // oxlint-disable-next-line no-await-in-loop -- Each fixture owns one fresh kernel instance.
+    await client.shutdown();
   }
 }
 

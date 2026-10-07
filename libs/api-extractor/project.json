@@ -135,6 +135,7 @@
         "{projectRoot}/src/generated/**/*",
         "{workspaceRoot}/packages/plugins/*/agent/*.md",
         "{workspaceRoot}/packages/geospec/agent/doctrine.md",
+        "{workspaceRoot}/packages/workbench/agent/doctrine.md",
         "{workspaceRoot}/pnpm-lock.yaml",
         "sharedGlobals"
       ],
@@ -148,13 +149,21 @@
         "{workspaceRoot}/packages/plugins/picovoxel/agent/cad-picovoxel",
         "{workspaceRoot}/packages/plugins/replicad/agent/cad-replicad",
         "{workspaceRoot}/packages/plugins/zoo/agent/cad-zoo",
+        "{workspaceRoot}/packages/plugins/tscircuit/agent/cad-tscircuit",
         "{workspaceRoot}/packages/geospec/agent/geospec-authoring",
+        "{workspaceRoot}/packages/workbench/agent/workbench",
+        "{workspaceRoot}/packages/workbench/agent/resources.js",
+        "{workspaceRoot}/packages/workbench/agent/resources.d.ts",
+        "{workspaceRoot}/packages/workbench/agent/skills.json",
+        "{workspaceRoot}/packages/workbench/agent/skills.d.cts",
         "{workspaceRoot}/packages/plugins/*/agent/resources.js",
         "{workspaceRoot}/packages/plugins/*/agent/resources.d.ts",
         "{workspaceRoot}/packages/plugins/*/agent/skills.json",
+        "{workspaceRoot}/packages/plugins/*/agent/skills.d.cts",
         "{workspaceRoot}/packages/geospec/agent/resources.js",
         "{workspaceRoot}/packages/geospec/agent/resources.d.ts",
-        "{workspaceRoot}/packages/geospec/agent/skills.json"
+        "{workspaceRoot}/packages/geospec/agent/skills.json",
+        "{workspaceRoot}/packages/geospec/agent/skills.d.cts"
       ]
     }
   }

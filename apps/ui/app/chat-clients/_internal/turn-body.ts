@@ -9,7 +9,6 @@ import { createCachedSystemPromptBlocks } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host';
 import type { AgentHostClientOptions } from '#services/agent-host-client.js';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
-import { isFeatureEnabled } from '#flags/feature-flags.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { admittedReasoning } from '#utils/model-reasoning.js';
 import type {
@@ -90,7 +89,7 @@ type TauAgentConfigInput = CadAgentConfigInput & {
 
 const requireTauExecution: (agent: CadAgentConfigInput) => asserts agent is TauAgentConfigInput = (agent) => {
   if (agent.execution.kind !== 'tau') {
-    throw new TypeError('Browser agent host requires Tau execution.');
+    throw new TypeError('The Tau agent host requires Tau execution.');
   }
 };
 
@@ -190,7 +189,7 @@ export const agentHostConfig = (input: {
   const { model } = resolvedModel;
   const hostedModel = hostModel(agent, model);
   if (hostedModel === undefined) {
-    throw new Error('Browser agent host requires resolved model provider metadata.');
+    throw new Error('The Tau agent host requires resolved model provider metadata.');
   }
   const snapshotContext = agent.snapshot ? buildBrowserAgentHostSnapshotContext(agent.snapshot) : undefined;
   return {
@@ -296,6 +295,5 @@ export const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): 
     ? openAgentHostChannel(hostId, {
         projectId,
         workspaceRoot: await desktopWorkspaceRoot(projectId),
-        geoSpecEngine: isFeatureEnabled('nativeGeoSpec') ? 'native' : 'legacy',
       })
     : openAgentHostChannel(hostId);

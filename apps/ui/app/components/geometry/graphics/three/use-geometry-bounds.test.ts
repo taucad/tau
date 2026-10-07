@@ -5,9 +5,12 @@ import * as THREE from 'three';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type { Mechanism } from '@taucad/kinematics';
+import { fromThreeRenderBounds } from '@taucad/three/spatial';
 import type { RenderFrame } from '@taucad/spatial';
 import { useGeometryBounds } from '#components/geometry/graphics/three/use-geometry-bounds.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
+import { createEdgePrototypeGeometry } from '#components/geometry/graphics/three/utils/gltf-edge-batches.js';
+import { sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
 
 const mocks = vi.hoisted(() => ({
@@ -23,7 +26,16 @@ const mocks = vi.hoisted(() => ({
   camera: {
     actorRef: {
       send: vi.fn(),
-      getSnapshot: () => ({ context: { view: { target: [0, 0, 0], up: [0, 0, 1], verticalSpan: 2 } } }),
+      getSnapshot: () => ({
+        context: {
+          view: {
+            target: [0, 0, 0],
+            up: [0, 0, 1],
+            verticalSpan: 2,
+            viewport: { width: 800, height: 600, pixelRatio: 1 },
+          },
+        },
+      }),
     },
   },
   framing: { initialized: false, preserveOrientationOnFirstFrame: false },
@@ -31,12 +43,14 @@ const mocks = vi.hoisted(() => ({
   geometryKey: 'geometry-key',
 }));
 
+const getCanvasState = () => ({ size: { width: 800, height: 600 } });
+
 vi.mock('@react-three/fiber', () => ({
   useFrame: (callback: () => void) => {
     mocks.frame = callback;
   },
-  useThree: <T>(selector?: (state: { invalidate: () => void }) => T) =>
-    selector ? selector({ invalidate: mocks.invalidate }) : { size: { width: 800, height: 600 } },
+  useThree: <T>(selector?: (state: { invalidate: () => void; get: typeof getCanvasState }) => T) =>
+    selector ? selector({ invalidate: mocks.invalidate, get: getCanvasState }) : getCanvasState(),
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
@@ -83,6 +97,70 @@ describe('useGeometryBounds', () => {
 
   afterEach(() => {
     mocks.kinematics?.stop();
+  });
+
+  it('should measure a settled scene once rather than poll for convergence', () => {
+    const { innerRef, outerRef } = createSceneReferences(10);
+    const bounds = vi.spyOn(THREE.Box3.prototype, 'setFromObject');
+    renderHook(() => useGeometryBounds(innerRef, outerRef));
+    act(() => mocks.frame?.());
+    act(() => mocks.frame?.());
+    expect(bounds).toHaveBeenCalledOnce();
+    bounds.mockRestore();
+  });
+
+  it('excludes real edge quads and nested presentation surfaces from physical bounds', () => {
+    const { innerRef, outerRef } = createSceneReferences(0.015);
+    const canonical = innerRef.current!.children[0]!;
+    canonical.scale.set(0.005, 0.0025, 0.001);
+    const expected = new THREE.Box3().setFromObject(innerRef.current!);
+    const presentation = new THREE.Group();
+    presentation.userData[sceneTag.gltfSurfacePresentation] = true;
+    const edge = new THREE.Mesh(
+      createEdgePrototypeGeometry(new Float32Array([0, 0, 0, 0.03, 0, 0]), 2),
+      new THREE.MeshBasicMaterial(),
+    );
+    presentation.add(edge, new THREE.Mesh(new THREE.BoxGeometry(100, 100, 100)));
+    innerRef.current!.add(presentation);
+    expect(new THREE.Box3().setFromObject(innerRef.current!).equals(expected)).toBe(false);
+    const updatePresentation = vi.spyOn(presentation, 'updateWorldMatrix');
+    const originalParent = presentation.parent;
+    const { result } = renderHook(() => useGeometryBounds(innerRef, outerRef));
+    expect(result.current.geometryBounds.equals(expected)).toBe(true);
+    expect(updatePresentation).not.toHaveBeenCalled();
+    expect(presentation.parent).toBe(originalParent);
+    act(() => mocks.frame?.());
+    act(() => mocks.frame?.());
+    expect(updatePresentation).not.toHaveBeenCalled();
+  });
+
+  it('retains default instanced object bounds under rotation, scale and a physical render frame', () => {
+    const { innerRef, outerRef } = createSceneReferences(0);
+    innerRef.current!.clear();
+    const instances = new THREE.InstancedMesh(new THREE.BoxGeometry(2, 4, 6), new THREE.MeshBasicMaterial(), 2);
+    instances.setMatrixAt(0, new THREE.Matrix4().makeTranslation(10, 0, 0));
+    instances.setMatrixAt(1, new THREE.Matrix4().makeTranslation(-5, 3, 0));
+    instances.position.set(7, 11, 13);
+    instances.rotation.z = Math.PI / 2;
+    instances.scale.set(2, 3, 4);
+    innerRef.current!.add(instances);
+    const presentation = new THREE.Mesh(createEdgePrototypeGeometry(new Float32Array([0, 0, 0, 1, 0, 0]), 1));
+    presentation.userData[sceneTag.gltfSurfacePresentation] = true;
+    innerRef.current!.add(presentation);
+    mocks.renderFrame = { anchorFrameId: 'tau:root', originMeters: [10, 20, 30], metersPerRenderUnit: 2 };
+    outerRef.current!.matrixAutoUpdate = false;
+    outerRef.current!.matrix.makeScale(0.5, 0.5, 0.5).setPosition(-5, -10, -15);
+    innerRef.current!.updateWorldMatrix(true, false);
+    const expected = fromThreeRenderBounds({
+      renderFrame: mocks.renderFrame,
+      bounds: new THREE.Box3().setFromObject(instances),
+    });
+    const { result } = renderHook(() => useGeometryBounds(innerRef, outerRef));
+    expect(result.current.geometryBounds.min.toArray()).toEqual(expected.min);
+    expect(result.current.geometryBounds.max.toArray()).toEqual(expected.max);
+    const bounds = vi.spyOn(instances, 'updateWorldMatrix');
+    act(() => mocks.frame?.());
+    expect(bounds).not.toHaveBeenCalled();
   });
 
   it('returns a cloned bounds snapshot with its center and sphere', () => {
@@ -132,6 +210,9 @@ describe('useGeometryBounds', () => {
     const kinematics = mocks.kinematics!;
     kinematics.send({ type: 'loadMechanism', unitId, mechanism });
     const { innerRef, outerRef } = createSceneReferences(10);
+    const presentation = new THREE.Mesh(createEdgePrototypeGeometry(new Float32Array([0, 0, 0, 1, 0, 0]), 1));
+    presentation.userData[sceneTag.gltfSurfacePresentation] = true;
+    innerRef.current!.add(presentation);
     const { result } = renderHook(() => useGeometryBounds(innerRef, outerRef));
     act(() => mocks.frame?.());
     act(() => mocks.frame?.());

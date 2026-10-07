@@ -14,9 +14,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { strFromU8, unzipSync } from 'fflate';
+
 import { resolveBambuSelectionPresets } from '#bambu-studio/catalog.js';
 import type { BambuPresetValues } from '#bambu-studio/catalog.js';
 import { encodeBambuSettings } from '#bambu-studio/options/index.js';
+import { moveStl, placeClearOfTower, presetRect, stlFootprint, unionRect } from '#bambu-studio/plate-layout.js';
+import type { PlateRect } from '#bambu-studio/plate-layout.js';
 import { BambuStudioError, bambuPlates } from '#bambu-studio/types.js';
 import type { BambuStudioSelection, BambuStudioSliceInput, BambuStudioSliceResult } from '#bambu-studio/types.js';
 
@@ -30,6 +34,10 @@ const sliceTimeoutPerMebibyte = 60_000;
 /** Characters of Bambu Studio's log kept for a failure message. */
 const logTail = 2000;
 const hexColor = /^#[\dA-F]{6}$/iu;
+/** Bambu Studio's `CLI_GCODE_PATH_CONFLICTS`: the sliced paths of two objects, such as the prime tower, collide. */
+const pathConflict = -101;
+/** Millimetres kept between a moved assembly and the printed tower or an excluded area. */
+const towerClearance = 3;
 
 type ResultReport = Readonly<{
   return_code?: number;
@@ -212,6 +220,76 @@ const checkedPlate = ({ selection, parts }: Pick<BambuStudioSliceInput, 'selecti
   return plate;
 };
 
+type PlateMeasurement = Readonly<{ tower: PlateRect; arranged: PlateRect; towerX: unknown; towerY: unknown }>;
+
+const boxRect = ([minX = 0, minY = 0, maxX = 0, maxY = 0]: readonly number[]): PlateRect => ({
+  minX,
+  minY,
+  maxX,
+  maxY,
+});
+
+// The printed tower, the arranged objects' bounds and the tower origin, from an export sliced with checks off.
+const measurePlate = (archive: Uint8Array<ArrayBuffer>): PlateMeasurement | undefined => {
+  const files = unzipSync(archive, {
+    filter: ({ name }) => name === 'Metadata/plate_1.json' || name === 'Metadata/project_settings.config',
+  });
+  const plate = files['Metadata/plate_1.json'];
+  const config = files['Metadata/project_settings.config'];
+  if (plate === undefined || config === undefined) {
+    return undefined;
+  }
+  const { bbox_objects: boxes = [] } = JSON.parse(strFromU8(plate)) as {
+    bbox_objects?: ReadonlyArray<Readonly<{ name?: string; bbox?: readonly number[] }>>;
+  };
+  const tower = boxes.find(({ name }) => name === 'wipe_tower')?.bbox;
+  const objects = boxes.filter(({ name }) => name !== 'wipe_tower').map(({ bbox = [] }) => boxRect(bbox));
+  const settings = JSON.parse(strFromU8(config)) as Record<string, unknown>;
+  return tower === undefined || objects.length === 0
+    ? undefined
+    : {
+        tower: boxRect(tower),
+        arranged: unionRect(objects),
+        towerX: settings['wipe_tower_x'],
+        towerY: settings['wipe_tower_y'],
+      };
+};
+
+const readMeasurement = async (
+  archive: string,
+  report: ResultReport | undefined,
+): Promise<PlateMeasurement | undefined> =>
+  report?.return_code === 0 ? measurePlate(Uint8Array.from(await readFile(archive))) : undefined;
+
+// Where the assembly moves and where the tower stays, or nothing when the plate could not be measured.
+const moveClearOfTower = (
+  measurement: PlateMeasurement | undefined,
+  machine: BambuPresetValues,
+  { parts, printer }: Readonly<{ parts: BambuStudioSliceInput['parts']; printer: string }>,
+): Readonly<{ dx: number; dy: number; towerX: unknown; towerY: unknown }> | undefined => {
+  const bed = presetRect(machine['printable_area']);
+  if (measurement === undefined || bed === undefined) {
+    return undefined;
+  }
+  const excluded = presetRect(machine['bed_exclude_area']);
+  const move = placeClearOfTower({
+    bed,
+    exclusions: excluded === undefined ? [] : [excluded],
+    tower: measurement.tower,
+    arranged: measurement.arranged,
+    footprint: unionRect(parts.map(({ stl }) => stlFootprint(stl))),
+    clearance: towerClearance,
+  });
+  if (move === undefined) {
+    throw new BambuStudioError(
+      'BAMBU_STUDIO_SLICE_FAILED',
+      `Bambu Studio could not slice: the model and its prime tower do not fit on the ${printer} plate together. ` +
+        'Print fewer colours, scale the model down, or use a printer with a larger plate.',
+    );
+  }
+  return { ...move, towerX: measurement.towerX, towerY: measurement.towerY };
+};
+
 const sliceNow = async ({
   install,
   selection,
@@ -246,40 +324,78 @@ const sliceNow = async ({
       ),
       ...parts.map(async ({ stl }, index) => writeFile(join(directory, partFiles[index]!), stl)),
       mkdir(join(directory, 'datadir')),
-      mkdir(join(directory, 'out')),
     ]);
     // Preset lists are relative to the working directory because the command line splits them on `;`,
     // which a temporary directory path could contain; the output directory must be absolute or the export fails.
-    const { code, log } = await run(
-      install.executable,
-      [
-        '--datadir',
-        join(directory, 'datadir'),
-        '--slice',
-        '0',
-        '--arrange',
-        '1',
-        '--curr-bed-type',
-        plate.bambuName,
-        '--load-settings',
-        'machine.json;process.json',
-        '--load-filaments',
-        filamentFiles.join(';'),
-        // The project's filament colours come from the command line; filament presets carry none.
-        ...partArguments(parts),
-        '--outputdir',
-        join(directory, 'out'),
-        '--export-3mf',
-        'model.gcode.3mf',
-        ...partFiles.map((file) => join(directory, file)),
-      ],
-      { cwd: directory, signal, sliceTimeout: sliceTimeoutFor(parts) },
-    );
-    let report: ResultReport | undefined;
-    try {
-      report = JSON.parse(await readFile(join(directory, 'out', 'result.json'), 'utf8')) as ResultReport;
-    } catch {
-      report = undefined;
+    const slice = async (
+      options: Readonly<{ arrange: boolean; checks: boolean }>,
+    ): Promise<{ report?: ResultReport; code?: number; log: string }> => {
+      await rm(join(directory, 'out'), { recursive: true, force: true });
+      await mkdir(join(directory, 'out'));
+      const { code, log } = await run(
+        install.executable,
+        [
+          '--datadir',
+          join(directory, 'datadir'),
+          // Bambu Studio 02.08.02.61 still checks a slice when `--no-check` comes after `--slice`.
+          ...(options.checks ? [] : ['--no-check']),
+          '--slice',
+          '0',
+          '--arrange',
+          options.arrange ? '1' : '0',
+          '--curr-bed-type',
+          plate.bambuName,
+          '--load-settings',
+          'machine.json;process.json',
+          '--load-filaments',
+          filamentFiles.join(';'),
+          // The project's filament colours come from the command line; filament presets carry none.
+          ...partArguments(parts),
+          '--outputdir',
+          join(directory, 'out'),
+          '--export-3mf',
+          'model.gcode.3mf',
+          ...partFiles.map((file) => join(directory, file)),
+        ],
+        { cwd: directory, signal, sliceTimeout: sliceTimeoutFor(parts) },
+      );
+      try {
+        return {
+          report: JSON.parse(await readFile(join(directory, 'out', 'result.json'), 'utf8')) as ResultReport,
+          code,
+          log,
+        };
+      } catch {
+        return { code, log };
+      }
+    };
+    let { report, code, log } = await slice({ arrange: true, checks: true });
+    // Bambu Studio arranges a multi-colour assembly against an estimate of its prime tower that is smaller
+    // than the tower it prints, and then refuses its own plate. Measure the printed tower with checks off,
+    // move the assembly clear of it, keep the tower where it was, and slice again with checks on.
+    if (report?.return_code === pathConflict) {
+      const measured = await slice({ arrange: true, checks: false });
+      const measurement = await readMeasurement(join(directory, 'out', 'model.gcode.3mf'), measured.report);
+      // Without a measured tower or a known bed, Bambu Studio's own conflict message stands.
+      const move = moveClearOfTower(measurement, resolved.machine, { parts, printer: selection.printer });
+      if (move !== undefined) {
+        await Promise.all([
+          writeFile(
+            join(directory, 'process.json'),
+            JSON.stringify({
+              ...forCommandLine(process, selection.process, selection.printer),
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio preset key.
+              wipe_tower_x: move.towerX,
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio preset key.
+              wipe_tower_y: move.towerY,
+            }),
+          ),
+          ...parts.map(async ({ stl }, index) =>
+            writeFile(join(directory, partFiles[index]!), moveStl(stl, move.dx, move.dy)),
+          ),
+        ]);
+        ({ report, code, log } = await slice({ arrange: false, checks: true }));
+      }
     }
     if (report?.return_code !== 0) {
       throw new BambuStudioError(
@@ -312,15 +428,19 @@ const sliceNow = async ({
  * Slice a model's parts with the person's Bambu Studio and return its archive untouched.
  *
  * One part slices as one object. Several slice as one assembled object that keeps the parts where
- * the model places them, part *i* printed with filament *i* and recorded in its colour. Presets are
+ * the model places them, part *i* printed with filament *i* and recorded in its colour. When Bambu Studio
+ * arranges an assembly into its own prime tower, the slice is measured with checks off and repeated with
+ * the assembly moved the shortest way clear of the printed tower, inside the bed and its excluded areas.
+ * Presets are
  * resolved (`inherits`, then `include`, then own keys), setting overrides applied last, and the
  * command line runs in a temporary directory with its own data directory. Slices run one at a time
  * per process; the signal stops Bambu Studio, and so does a deadline of two minutes plus one minute per
- * MiB of STL, counted from the moment Bambu Studio starts.
+ * MiB of STL, counted from the moment each Bambu Studio run starts.
  *
  * @param input - Install, selection, the parts as STL in millimetres and the caller's signal.
  * @returns Bambu Studio's `.gcode.3mf`, its version, the presets it loaded and its result report.
- * @throws BambuStudioError - `BAMBU_STUDIO_SLICE_FAILED` with Bambu Studio's message or for no parts,
+ * @throws BambuStudioError - `BAMBU_STUDIO_SLICE_FAILED` with Bambu Studio's message, for no parts, or
+ * when an assembly and its prime tower do not fit on the plate together,
  * `BAMBU_STUDIO_TIMEOUT` when Bambu Studio runs past the deadline and is stopped (slicing again usually
  * succeeds), `BAMBU_STUDIO_SETTINGS_INVALID` for a setting the option catalog cannot encode or a colour
  * that is not `#RRGGBB`, or `BAMBU_STUDIO_PRESET_NOT_FOUND`.
@@ -382,19 +502,23 @@ export const sliceWithBambuStudio = async (input: BambuStudioSliceInput): Promis
   queue = new Promise((resolve) => {
     release = resolve;
   });
+  const { promise: aborted, resolve } = Promise.withResolvers<void>();
+  const onAbort = (): void => {
+    resolve();
+  };
+  input.signal.addEventListener('abort', onAbort, { once: true });
+  if (input.signal.aborted) {
+    onAbort();
+  }
   try {
-    // A cancel while waiting behind another slice rejects now, not when that slice ends.
-    const { promise: aborted, resolve } = Promise.withResolvers<void>();
-    input.signal.addEventListener(
-      'abort',
-      () => {
-        resolve();
-      },
-      { once: true },
-    );
     await Promise.race([previous, aborted]);
+    input.signal.throwIfAborted();
     return await sliceNow(input);
   } finally {
-    release();
+    input.signal.removeEventListener('abort', onAbort);
+    // Cancellation acknowledges immediately, but the next request must still wait for the running predecessor.
+    // async-iife: bootstrap — Queued cancellation acknowledges immediately; admission waits for the running predecessor.
+    // oxlint-disable-next-line promise/prefer-await-to-then -- Awaiting would delay the cancellation acknowledgement.
+    void previous.then(release, release);
   }
 };

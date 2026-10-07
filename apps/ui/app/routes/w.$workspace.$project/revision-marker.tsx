@@ -55,6 +55,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
 import type { RevisionDiffEntry } from '@taucad/revisions';
+import type { RevisionComparisonNotice } from '@taucad/revisions/algorithms';
 import { Spinner } from '#components/ui/spinner.js';
 import { CopyButton } from '#components/copy-button.js';
 import { DiffViewer } from '#components/code/diff-viewer.js';
@@ -95,6 +96,15 @@ const changeLabels: Readonly<Record<RevisionDiffEntry['kind'], string>> = {
 };
 
 const initialFileRows = 3;
+const comparisonNotices: Readonly<Record<RevisionComparisonNotice, string>> = {
+  'empty-added': 'Empty file added.',
+  'empty-deleted': 'Empty file deleted.',
+  encoding: 'File encoding changed.',
+  'executable-added': 'File is now executable.',
+  'executable-removed': 'File is no longer executable.',
+  'line-endings': 'Line endings changed.',
+  'final-newline': 'Final newline changed.',
+};
 
 /**
  * What *Compare* opens under a file row: the shared `DiffViewer` flush inside
@@ -118,7 +128,7 @@ function FileComparison({
   readonly n: number | undefined;
   // oxlint-disable-next-line typescript/no-restricted-types -- required by React
 }): React.JSX.Element | null {
-  const { original, modified, isLoading, isLoaded, error, retry } = useRevisionFileComparison(
+  const { original, modified, comparison, isLoading, isLoaded, error, retry } = useRevisionFileComparison(
     revisionId,
     path,
     compareAgainst === 'checkout' ? 'checkout' : undefined,
@@ -150,10 +160,10 @@ function FileComparison({
       </div>
     );
   }
-  if (!isLoaded) {
+  if (!isLoaded || comparison === undefined) {
     return null;
   }
-  if (original === modified) {
+  if (comparison.change === 'unchanged') {
     return (
       <p id={id} role='note' aria-label={label} className='border-t px-2 py-1.5 text-xs text-muted-foreground'>
         {compareAgainst === 'checkout'
@@ -173,11 +183,26 @@ function FileComparison({
       /* An empty Shiki line keeps its height, and the hidden-lines label keeps the 12 px floor (round 5). */
       className='[scrollbar-width:thin] overflow-x-auto border-t bg-background focus-visible:focus-outline [&_.line:empty]:min-h-[1.6em] [&_.whitespace-nowrap]:text-xs'
     >
-      <DiffViewer
-        originalContent={original}
-        modifiedContent={modified}
-        language={resolveHighlightLanguageForPath(path).shikiLanguage}
-      />
+      {comparison.notices.map((notice) => (
+        <p key={notice} role='note' className='px-2 py-1.5 text-xs text-muted-foreground'>
+          {comparisonNotices[notice]}
+        </p>
+      ))}
+      {comparison.kind === 'text' ? (
+        original === modified ? null : (
+          <DiffViewer
+            originalContent={original}
+            modifiedContent={modified}
+            language={resolveHighlightLanguageForPath(path).shikiLanguage}
+          />
+        )
+      ) : (
+        <p role='note' className='px-2 py-1.5 text-xs text-muted-foreground'>
+          {comparison.kind === 'binary'
+            ? `Binary file ${comparison.change === 'added' ? 'added' : comparison.change === 'deleted' ? 'deleted' : 'changed'}.`
+            : 'Text comparison is unavailable: a version of this file has an unsupported encoding or invalid text.'}
+        </p>
+      )}
     </div>
   );
 }
@@ -308,19 +333,27 @@ function CurrentComparison({
   readonly revision: RevisionCard;
   readonly onStop: () => void;
 }): React.JSX.Element {
-  const { changes, isLoaded } = useRevisionChangesSince(revision);
+  const { changes, isLoaded, error, retry } = useRevisionChangesSince(revision);
   const name = revisionName(revision.n) ?? 'this revision';
-  const body = isLoaded ? (
-    changes.length === 0 ? (
-      <p role='note' className='text-xs text-muted-foreground'>{`No changes since ${name}.`}</p>
+  const body =
+    error === undefined ? (
+      isLoaded ? (
+        changes.length === 0 ? (
+          <p role='note' className='text-xs text-muted-foreground'>{`No changes since ${name}.`}</p>
+        ) : (
+          <FileList revision={revision} changes={changes} compareAgainst='checkout' label={`Changed since ${name}`} />
+        )
+      ) : (
+        <p role='status' aria-busy='true' className='flex items-center gap-2 text-xs text-muted-foreground'>
+          <Spinner className='size-3' /> Loading comparison…
+        </p>
+      )
     ) : (
-      <FileList revision={revision} changes={changes} compareAgainst='checkout' label={`Changed since ${name}`} />
-    )
-  ) : (
-    <p role='status' aria-busy='true' className='flex items-center gap-2 text-xs text-muted-foreground'>
-      <Spinner className='size-3' /> Loading comparison…
-    </p>
-  );
+      <div role='alert' className='flex items-center gap-2 text-xs'>
+        <span>{`Could not compare the current files. ${error}`}</span>
+        <ActionButton verb='Retry' icon={RotateCcw} onClick={retry} />
+      </div>
+    );
   return (
     <div className='flex flex-col gap-1'>
       <div className='flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground'>
@@ -1099,7 +1132,7 @@ export function RevisionRow({
                   }}
                 />
               ) : (
-                <FileRows revision={revision} compareAgainst={isCurrent && isDirty ? 'checkout' : 'parent'} />
+                <FileRows revision={revision} compareAgainst='parent' />
               )}
               {role === 'read' && isCurrent ? (
                 <p className='text-xs text-muted-foreground'>
@@ -1113,14 +1146,9 @@ export function RevisionRow({
                     revision={revision}
                     isCurrent={isCurrent}
                     branch={branch}
-                    /* The current row already compares its files with your edits (S38), so only another revision offers it. */
-                    {...(isCurrent
-                      ? {}
-                      : {
-                          onCompareWithCurrent: () => {
-                            setIsComparingCurrent(true);
-                          },
-                        })}
+                    onCompareWithCurrent={() => {
+                      setIsComparingCurrent(true);
+                    }}
                   />
                 }
               >

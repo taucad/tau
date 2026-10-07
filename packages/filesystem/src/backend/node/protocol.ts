@@ -13,9 +13,10 @@ import { z } from 'zod';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode, FileStat, HeadFileStat } from '#types.js';
+import { streamChunkSize } from '#backend/stream-utils.js';
 
-/** Wire version. Version 4 requires both checked deletion and head listing. @public */
-export const nodeFsProtocolVersion = 4;
+/** Wire version. Version 5 adds authoritative head stat. @public */
+export const nodeFsProtocolVersion = 5;
 
 /**
  * Watch event as it crosses the port. A superset of the library's
@@ -126,6 +127,14 @@ const checkedDeleteRequestSchema = z
 
 export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('readFile'), path: z.string() }),
+  /* One bounded chunk of a streamed read: the client pulls `readFileStream` a chunk at a time. */
+  z.object({
+    ...rooted,
+    op: z.literal('readFileRange'),
+    path: z.string(),
+    position: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    length: z.number().int().positive().max(streamChunkSize),
+  }),
   z.object({ ...rooted, op: z.literal('writeFile'), path: z.string(), data: dataSchema }),
   checkedWriteRequestSchema,
   checkedDeleteRequestSchema,
@@ -133,6 +142,7 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('readdirWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirHeadWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('stat'), path: z.string() }),
+  z.object({ ...rooted, op: z.literal('headStat'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('getFileMode'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('setFileMode'), path: z.string(), mode: z.enum(['100644', '100755']) }),
   z.object({ ...rooted, op: z.literal('mkdir'), path: z.string() }),
@@ -200,6 +210,7 @@ export type NodeFsResponse = z.infer<typeof nodeFsResponseSchema>;
 /** Per-operation result validators, so a drifting host cannot poison the tree. */
 export const nodeFsResultSchemas = {
   readFile: bytesSchema,
+  readFileRange: bytesSchema,
   writeFile: z.undefined(),
   writeFileChecked: checkedWriteResultSchema,
   deleteFileChecked: checkedWriteResultSchema,
@@ -207,6 +218,7 @@ export const nodeFsResultSchemas = {
   readdirWithStats: z.array(z.object({ name: z.string() }).and(fileStatSchema)),
   readdirHeadWithStats: z.array(z.object({ name: z.string() }).and(headFileStatSchema)),
   stat: fileStatSchema,
+  headStat: headFileStatSchema,
   getFileMode: fileModeSchema,
   setFileMode: z.undefined(),
   mkdir: z.undefined(),

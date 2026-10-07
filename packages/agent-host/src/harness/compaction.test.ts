@@ -127,7 +127,7 @@ describe('Compaction', () => {
 
   it('matches the transitional compactable-tool set', async () => {
     const messages: AgentMessage[] = [
-      ...oversizedToolHistory('get_kernel_result'),
+      ...oversizedToolHistory('evaluate_model'),
       {
         role: 'toolResult',
         toolCallId: 'edit-call',

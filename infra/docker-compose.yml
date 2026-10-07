@@ -45,6 +45,7 @@ services:
       - '9090:9090' # Prometheus
       - '3100:3100' # Loki
       - '3200:3200' # Tempo
+      - '4040:4040' # Pyroscope
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     volumes:
@@ -53,8 +54,11 @@ services:
       - ./grafana/otelcol-config.yaml:/otel-lgtm/otelcol-config.yaml
       - otel_lgtm_data:/data
 
+  # MinIO withdrew its published images (quay.io/minio/* and minio/* no longer
+  # pull), so this is the community build from Pigsty, which ships both `minio`
+  # and `mc`. The digest pins the exact bytes; bump tag and digest together.
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     container_name: tau-minio
     command: server /data --console-address ":9001"
     environment:
@@ -76,7 +80,8 @@ services:
     restart: unless-stopped
 
   minio-bootstrap:
-    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    # Same community image as `minio` above; it carries `mc`.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     container_name: tau-minio-bootstrap
     depends_on:
       minio:

@@ -14,7 +14,7 @@ import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi, PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneVirtualList } from '#components/panes/pane-virtual-list.js';
-import { PaneviewReact } from 'dockview-react';
+import { Paneview } from '#components/panes/paneview.js';
 import { convert, createQuantity, quantityKinds } from '@taucad/units/quantity';
 import type { DegreeOfFreedom, Mechanism } from '@taucad/kinematics';
 import type { KernelIssue } from '@taucad/runtime';
@@ -1339,7 +1339,7 @@ function KinematicsPaneview({
   }, [reveal]);
 
   return (
-    <PaneviewReact
+    <Paneview
       key={paneviewKey}
       className={paneviewAttachedSurfaceStyleOverrides}
       components={paneviewComponents}

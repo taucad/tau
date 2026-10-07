@@ -36,6 +36,14 @@
           "target": "build"
         },
         {
+          "projects": ["desktop"],
+          "target": "prepare-build123d-python"
+        },
+        {
+          "projects": ["desktop"],
+          "target": "prepare-picogk-dotnet"
+        },
+        {
           "projects": ["api"],
           "target": "build"
         }
@@ -60,7 +68,11 @@
     "test:e2e:workbench": {
       "executor": "nx:run-commands",
       "parallelism": false,
-      "dependsOn": [{ "projects": ["desktop"], "target": "build" }],
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "build" },
+        { "projects": ["desktop"], "target": "prepare-build123d-python" },
+        { "projects": ["desktop"], "target": "prepare-picogk-dotnet" }
+      ],
       "options": {
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,
@@ -82,7 +94,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "The kernel-utility cap gate (R5 of docs/research/electron-kernel-utility-cap-blueprint.md): nine live projects in one window, a get_kernel_result turn in the ninth, and the park and return of a hidden one. Kept off test:e2e because the row holds nine kernel utilities at once and waits out the 2-minute park window, neither of which is proven on the Ubuntu e2e runner; promote it once it has been observed green there."
+        "description": "The kernel-utility cap gate (R5 of docs/research/electron-kernel-utility-cap-blueprint.md): nine live projects in one window, an evaluate_model turn in the ninth, and the park and return of a hidden one. Kept off test:e2e because the row holds nine kernel utilities at once and waits out the 2-minute park window, neither of which is proven on the Ubuntu e2e runner; promote it once it has been observed green there."
       },
       "dependsOn": [
         {
@@ -126,7 +138,7 @@
         "parallel": false,
         "commands": [
           "./scripts/ensure-services.sh",
-          "TAU_E2E_DESKTOP_EXECUTABLE=\"$PWD/../desktop/package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau\" ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts src/desktop-main-editor-kernels.spec.ts src/desktop-converter.spec.ts src/desktop-ephemeral-isolation.spec.ts src/desktop-image-geospec.spec.ts src/desktop-geometry-host.spec.ts src/desktop-measurement-exact.spec.ts src/desktop-thumbnail-lifecycle.spec.ts src/desktop-native-payload.spec.ts src/desktop-community-preview.spec.ts"
+          "TAU_E2E_DESKTOP_EXECUTABLE=\"$PWD/../desktop/package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau\" ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts src/desktop-main-editor-kernels.spec.ts src/desktop-converter.spec.ts src/desktop-ephemeral-isolation.spec.ts src/desktop-image-geospec.spec.ts src/desktop-geometry-host.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-in-project.spec.ts src/desktop-measurement-exact.spec.ts src/desktop-thumbnail-lifecycle.spec.ts src/desktop-native-payload.spec.ts src/desktop-community-preview.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014"
@@ -255,6 +267,59 @@
           "TAU_WEBSOCKET_URL": "ws://localhost:4001",
           "TAU_FRONTEND_URL": "http://localhost:3000"
         }
+      }
+    },
+    "test:e2e:voice": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "build" },
+        { "projects": ["api"], "target": "build" }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-voice.spec.ts"
+        ],
+        "parallel": false
+      },
+      "metadata": {
+        "description": "Chromium's real capture driver reads a 440 Hz WAV through the composer's AudioWorklet into a WAV upload to the real Tau API, whose OpenAI provider reaches a local stub through TAU_TRANSCRIPTION_UPSTREAM_URL; the stub measures the tone and streams the fixed transcript into the editable draft, and Cancel sends nothing. No provider key is needed."
+      }
+    },
+    "test:e2e:voice:live": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "build" },
+        { "projects": ["api"], "target": "build" }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-voice.spec.ts"
+        ],
+        "parallel": false,
+        "env": { "TAU_E2E_LIVE_VOICE": "true" }
+      },
+      "metadata": {
+        "description": "Opt-in macOS synthesized speech through Chromium's file microphone, the Tau API and the real OpenAI transcription provider. Needs a funded OPENAI_API_KEY in apps/api/.env and spends its quota."
+      }
+    },
+    "test:e2e:machine-profiles": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "command": "../../node_modules/.bin/vitest run --config vitest.machine-profiles.config.ts"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Offline production Electron profile CRUD, shared type settings, restart recovery, external record admission and limit/focus/performance checks. Build desktop and prepare its resources first; TAU_E2E_COMPLETED_ARTIFACT also runs this against a selected packaged executable."
       }
     }
   }

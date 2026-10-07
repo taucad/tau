@@ -92,6 +92,7 @@ vi.mock('@taucad/fs-bridge', () => ({
     workerTestState.proxyDeaths.push(die);
     return {
       closed,
+      pollExternalChanges: vi.fn(async () => undefined),
       configureProjectRoots: mockConfigureProjectRoots,
       mount: mockMount,
       unmount: mockUnmount,
@@ -1423,8 +1424,8 @@ describe('fileManagerMachine', () => {
             1, 1,
           ]);
         });
-        expect(disposeContent).not.toHaveBeenCalled();
-        expect(disposeTree).not.toHaveBeenCalled();
+        expect(disposeContent).toHaveBeenCalledOnce();
+        expect(disposeTree).toHaveBeenCalledOnce();
       } finally {
         releaseListing();
         actor.stop();

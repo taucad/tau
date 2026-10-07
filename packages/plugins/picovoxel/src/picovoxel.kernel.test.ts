@@ -6,10 +6,9 @@ import type * as IsolationModule from '@taucad/runtime/cross-origin-isolation';
 import type { IsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 import type * as KernelModule from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/types';
-import { RenderAbortedError } from '@taucad/runtime';
 import { createNodeIo } from '@taucad/geometry-core';
 import type { TauCadTopologyRoot } from '@taucad/geometry-core';
-import { createMockKernelRuntime, glbToDocument } from '@taucad/runtime-testing';
+import { createMockKernelRuntime, expectKernelProjectionOrder, glbToDocument } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { CreatePicoOptions, CreatePicoRuntimeOptions, Mesh, Pico, PicoRuntime, Voxels } from 'picovoxel';
 import type * as PicovoxelModule from 'picovoxel';
@@ -22,6 +21,7 @@ type Artifact = 'serial' | 'multi';
 const isolation = vi.hoisted(() => ({ status: undefined as IsolationStatus | undefined }));
 const abort = vi.hoisted(() => ({ after: Infinity, checks: 0 }));
 const registered = vi.hoisted(() => new Map<string, unknown>());
+const renderAborted = () => Object.assign(new Error('Render aborted'), { name: 'RenderAbortedError' });
 const sessions = vi.hoisted(() => ({
   created: [] as Array<{ artifact: 'serial' | 'multi'; options: CreatePicoOptions; pico: Pico }>,
   runtimes: [] as Array<{ artifact: 'serial' | 'multi'; runtime: PicoRuntime; options: CreatePicoRuntimeOptions }>,
@@ -52,7 +52,7 @@ vi.mock('@taucad/runtime/kernel', async (importOriginal) => {
     checkAbort() {
       abort.checks++;
       if (abort.checks > abort.after) {
-        throw new RenderAbortedError();
+        throw renderAborted();
       }
     },
   };
@@ -119,7 +119,7 @@ vi.mock('picovoxel/multi', async (importOriginal) => recordArtifact('multi', awa
 
 type MainModule = Record<string, unknown>;
 
-type ExportInput = Parameters<typeof definition.exportGeometry>[0];
+type ExportInput = Parameters<NonNullable<typeof definition.export>>[0];
 
 const definition = await resolveRuntimePluginDefinition('kernel', picovoxelKernel());
 
@@ -155,7 +155,7 @@ const createRuntime = (
 const initialize = async (options: PicovoxelOptionsInput, runtime = createRuntime({})) =>
   definition.initialize(definition.optionsSchema!.parse(options), runtime);
 
-const createGeometry = async (input: {
+const evaluate = async (input: {
   module: MainModule | (() => unknown);
   lane?: 'fast' | 'exact';
   wasm?: PicovoxelOptionsInput['wasm'];
@@ -163,7 +163,7 @@ const createGeometry = async (input: {
 }) => {
   const runtime = createRuntime(input.module);
   const context = await initialize({ wasm: input.wasm ?? 'serial' }, runtime);
-  const result = await definition.createGeometry(
+  const result = await definition.evaluate(
     { entryPath: 'main.ts', parameters: input.parameters ?? {}, options: { lane: input.lane ?? 'fast' } },
     runtime,
     context,
@@ -281,23 +281,23 @@ describe('picovoxel kernel', () => {
 
   describe('lanes and artifacts', () => {
     it('should open a fast session without an explicit fastRenorm so the lane bundle turns it on', async () => {
-      const { result } = await createGeometry({ module: offsetSphere, parameters: { voxelSize: 1 } });
+      const { result } = await evaluate({ module: offsetSphere, parameters: { voxelSize: 1 } });
 
       expect(sessions.created).toHaveLength(1);
       expect(sessions.created[0]!.options).toEqual({ voxelSize: 1, lane: 'fast', memoryWarningBytes: 0 });
       // Only a Class-2 op (fastRenorm) gives an offset fast provenance.
-      expect(result.nativeHandle.shapes[0]!.lane).toBe('fast');
+      expect(result.handle.shapes[0]!.lane).toBe('fast');
     });
 
     it('should build exact geometry in an exact session on the serial artifact', async () => {
-      const { result } = await createGeometry({ module: offsetSphere, lane: 'exact', wasm: 'multi' });
+      const { result } = await evaluate({ module: offsetSphere, lane: 'exact', wasm: 'multi' });
 
       expect(sessions.created.map(({ artifact, options }) => [artifact, options.lane])).toEqual([['serial', 'exact']]);
-      expect(result.nativeHandle.shapes[0]!.lane).toBe('exact');
+      expect(result.handle.shapes[0]!.lane).toBe('exact');
     });
 
-    it('should run the fast lane on the multi-threaded artifact and keep its pool warm until cleanup', async () => {
-      const { runtime, context } = await createGeometry({ module: sphere(), wasm: 'multi' });
+    it('should run the fast lane on the multi-threaded artifact and keep its pool warm until onDispose', async () => {
+      const { runtime, context } = await evaluate({ module: sphere(), wasm: 'multi' });
       const [session] = sessions.created;
       const pthread = session!.pico.module.PThread;
 
@@ -307,14 +307,14 @@ describe('picovoxel kernel', () => {
       );
       expect(pthread!.runningWorkers.length).toBeGreaterThan(0);
 
-      // DP10: cleanup terminates the pool; no pthread keeps running.
-      await definition.cleanup!(context);
+      // DP10: onDispose terminates the pool; no pthread keeps running.
+      await definition.onDispose!(context);
       expect(pthread!.runningWorkers).toHaveLength(0);
       expect(context.runtimes.size).toBe(0);
     }, 60_000);
 
     it('should report zero pthreads on the serial artifact', async () => {
-      const { runtime } = await createGeometry({ module: sphere() });
+      const { runtime } = await evaluate({ module: sphere() });
 
       expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel session variant=serial pthreads=0 lane=fast');
     });
@@ -325,11 +325,7 @@ describe('picovoxel kernel', () => {
       isolation.status = { crossOriginIsolated: false, sharedArrayBuffer: false, reason: 'no-secure-context' };
 
       const issues = await buildIssues(
-        definition.createGeometry(
-          { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
-          runtime,
-          context,
-        ),
+        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context),
       );
       expect(issues).toEqual([
         expect.objectContaining({
@@ -339,19 +335,19 @@ describe('picovoxel kernel', () => {
       ]);
       expect(sessions.created).toHaveLength(0);
 
-      const exact = await definition.createGeometry(
+      const exact = await definition.evaluate(
         { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
         runtime,
         context,
       );
-      expect(exact.nativeHandle.shapes).toHaveLength(1);
+      expect(exact.handle.shapes).toHaveLength(1);
     });
 
     it('should start one warm runtime per artifact and open a fresh session per render', async () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'multi' }, runtime);
       const render = async (lane: 'fast' | 'exact') =>
-        definition.createGeometry({ entryPath: 'main.ts', parameters: {}, options: { lane } }, runtime, context);
+        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane } }, runtime, context);
 
       await render('exact');
       const serial = context.runtimes.get('serial');
@@ -367,20 +363,66 @@ describe('picovoxel kernel', () => {
         new Set(sessions.created.filter((session) => session.artifact === artifact).map(({ pico }) => pico.handle));
       // Each render opens its own Library instance on the shared module; handles are never reused.
       expect([handles('serial').size, handles('multi').size]).toEqual([2, 2]);
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     }, 60_000);
   });
 
   describe('results', () => {
+    it.each([
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify invokes this standardized hook name.
+      { toJSON: () => null },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify invokes this standardized hook name.
+      { toJSON: () => ({ pbrMetallicRoughness: { roughnessFactor: 2 } }) },
+    ])('should reject invalid material produced by JSON serialization %#', async (material) => {
+      const issues = await buildIssues(
+        evaluate({ module: { default: (pico: Pico) => ({ shape: helloCube(pico), name: 'Pin', material }) } }),
+      );
+      expect(issues[0]!.message).toMatch(
+        /Pin \(output 1\): (material must be an object|material\.pbrMetallicRoughness\.roughnessFactor must be within \[0, 1])/,
+      );
+    });
+
+    it('should reject invalid resources produced by JSON serialization', async () => {
+      const issues = await buildIssues(
+        evaluate({
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify invokes this standardized hook name.
+          module: { default: () => ({ shapes: [], samplers: [{ wrapS: 10_497, toJSON: () => ({ wrapS: 1 }) }] }) },
+        }),
+      );
+      expect(issues[0]!.message).toContain('model resources: samplers[0].wrapS must be a standard glTF sampler value');
+    });
+
+    it('should own JSON metadata and image bytes while omitting undefined object fields', async () => {
+      const extras = { nested: { value: 1 }, omitted: undefined, array: [undefined, 2] };
+      const data = new Uint8Array([1, 2, 3]);
+      const sampler = { wrapS: 10_497, extras };
+      const { runtime, context, result } = await evaluate({
+        module: { default: () => ({ shapes: [], images: [{ mimeType: 'image/png', data }], samplers: [sampler] }) },
+      });
+      try {
+        expect(result.handle.samplers).toEqual([{ wrapS: 10_497, extras: { nested: { value: 1 }, array: [null, 2] } }]);
+        expect(result.handle.images?.[0]?.data).toEqual(data);
+        expect(result.handle.images?.[0]?.data).not.toBe(data);
+        expect(extras).toHaveProperty('omitted', undefined);
+        extras.nested.value = 9;
+        data[0] = 9;
+        expect(result.handle.samplers?.[0]?.extras).toEqual({ nested: { value: 1 }, array: [null, 2] });
+        expect(result.handle.images?.[0]?.data).toEqual(new Uint8Array([1, 2, 3]));
+      } finally {
+        await definition.onDispose!(context);
+        expect(runtime.logger.error).not.toHaveBeenCalled();
+      }
+    });
+
     it('should reject a malformed model envelope before capturing its parts', async () => {
-      const issues = await buildIssues(createGeometry({ module: { default: () => ({ shapes: {} }) } }));
+      const issues = await buildIssues(evaluate({ module: { default: () => ({ shapes: {} }) } }));
 
       expect(issues[0]!.message).toContain('model.shapes must be a flat array');
     });
 
     it.each([null, [], 42])('should reject non-object material %j with its part context', async (material) => {
       const issues = await buildIssues(
-        createGeometry({ module: { default: (pico: Pico) => ({ shape: helloCube(pico), name: 'Pin', material }) } }),
+        evaluate({ module: { default: (pico: Pico) => ({ shape: helloCube(pico), name: 'Pin', material }) } }),
       );
 
       expect(issues[0]!.message).toContain('Pin (output 1): material must be an object.');
@@ -390,7 +432,7 @@ describe('picovoxel kernel', () => {
       'should reject unsupported material metadata %# before taking a cache snapshot',
       async (value) => {
         const issues = await buildIssues(
-          createGeometry({
+          evaluate({
             module: { default: (pico: Pico) => ({ shape: helloCube(pico), material: { extras: { value } } }) },
           }),
         );
@@ -400,9 +442,58 @@ describe('picovoxel kernel', () => {
       },
     );
 
+    it('should reject a material made invalid by toJSON before caching its snapshot', async () => {
+      const issues = await buildIssues(
+        evaluate({
+          module: {
+            default: (pico: Pico) => ({
+              shape: helloCube(pico),
+              name: 'Pin',
+              material: {
+                pbrMetallicRoughness: { roughnessFactor: 0.5 },
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify requires this method name.
+                toJSON() {
+                  return { pbrMetallicRoughness: { roughnessFactor: 2 } };
+                },
+              },
+            }),
+          },
+        }),
+      );
+
+      expect(issues.map((issue) => issue.message)).toContainEqual(
+        expect.stringContaining('Pin (output 1): material.pbrMetallicRoughness.roughnessFactor'),
+      );
+    });
+
+    it('should reject a sampler made invalid by toJSON before caching its snapshot', async () => {
+      const issues = await buildIssues(
+        evaluate({
+          module: {
+            default: () => ({
+              shapes: [],
+              samplers: [
+                {
+                  wrapS: 10_497,
+                  // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify requires this method name.
+                  toJSON() {
+                    return { wrapS: 42 };
+                  },
+                },
+              ],
+            }),
+          },
+        }),
+      );
+
+      expect(issues.map((issue) => issue.message)).toContainEqual(
+        expect.stringContaining('model resources: samplers[0].wrapS'),
+      );
+    });
+
     it('should retain context when user-authored metadata getters throw non-errors', async () => {
       const materialIssues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: (pico: Pico) => ({
               shape: helloCube(pico),
@@ -419,7 +510,7 @@ describe('picovoxel kernel', () => {
       expect(materialIssues[0]!.message).toContain('Shape 1 (output 1): material getter failed');
 
       const resourceIssues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: () => ({
               shapes: [],
@@ -435,7 +526,7 @@ describe('picovoxel kernel', () => {
     });
 
     it('should preserve authored labels for mixed descriptors and raw parts after session disposal', async () => {
-      const { result } = await createGeometry({
+      const { result } = await evaluate({
         module: {
           default: (pico: Pico) => {
             const mesh = helloCube(pico);
@@ -450,7 +541,7 @@ describe('picovoxel kernel', () => {
           },
         },
       });
-      expect(result.nativeHandle.shapes.map(({ name }) => name)).toEqual([
+      expect(result.handle.shapes.map(({ name }) => name)).toEqual([
         'Housing / 蓋 🧩',
         'Mesh',
         'Shape 3',
@@ -458,27 +549,27 @@ describe('picovoxel kernel', () => {
         'Shape 5',
         'Shape 6',
       ]);
-      expect(result.nativeHandle.shapes[0]!.vertices).toEqual(result.nativeHandle.shapes[2]!.vertices);
-      expect(result.nativeHandle.shapes[0]!.triangles).toEqual(result.nativeHandle.shapes[2]!.triangles);
+      expect(result.handle.shapes[0]!.vertices).toEqual(result.handle.shapes[2]!.vertices);
+      expect(result.handle.shapes[0]!.triangles).toEqual(result.handle.shapes[2]!.triangles);
       expect(() => sessions.created[0]!.pico.memory).toThrow('disposed');
     });
 
     it('should keep a returned mesh and flat arrays of meshes and voxels as numbered shapes', async () => {
-      const { result } = await createGeometry({
+      const { result } = await evaluate({
         module: { default: (pico: Pico) => [helloCube(pico), pico.createVoxels({ shape: 'sphere', radius: 2 })] },
       });
 
-      expect(result.nativeHandle.shapes.map(({ name }) => name)).toEqual(['Shape 1', 'Shape 2']);
-      expect([...result.nativeHandle.shapes[0]!.triangles.subarray(0, 3)]).toEqual([0, 2, 1]);
+      expect(result.handle.shapes.map(({ name }) => name)).toEqual(['Shape 1', 'Shape 2']);
+      expect([...result.handle.shapes[0]!.triangles.subarray(0, 3)]).toEqual([0, 2, 1]);
     });
 
     it('should accept a single named part and retain generated-looking authored labels', async () => {
       for (const name of ['Geometry', 'Shape_0']) {
         // oxlint-disable-next-line no-await-in-loop -- builds share the recorded session list
-        const { result } = await createGeometry({
+        const { result } = await evaluate({
           module: { default: (pico: Pico) => ({ shape: helloCube(pico), name }) },
         });
-        expect(result.nativeHandle.shapes.map((shape) => shape.name)).toEqual([name]);
+        expect(result.handle.shapes.map((shape) => shape.name)).toEqual([name]);
       }
     });
 
@@ -488,7 +579,7 @@ describe('picovoxel kernel', () => {
       [false, 'name must be a string'],
     ])('should reject descriptor name %j and release the session', async (name, message) => {
       const issues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: (pico: Pico) => [helloCube(pico), { shape: helloCube(pico), name }],
           },
@@ -505,14 +596,14 @@ describe('picovoxel kernel', () => {
       [{ shape: { shape: null, name: 'Nested' } }, 'received object'],
       [{ children: [] }, 'cannot contain children. Return a flat array of parts'],
     ])('should reject malformed descriptor %j', async (value, message) => {
-      const issues = await buildIssues(createGeometry({ module: { default: () => [value] } }));
+      const issues = await buildIssues(evaluate({ module: { default: () => [value] } }));
       expect(issues[0]).toMatchObject({ code: 'RUNTIME', message: expect.stringContaining(message) });
       expect(issues[0]!.message).toContain('result 1');
     });
 
     it('should identify the failing duplicate by label and output index', async () => {
       const issues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: (pico: Pico) => [
               { shape: helloCube(pico), name: 'Pin' },
@@ -528,7 +619,7 @@ describe('picovoxel kernel', () => {
     });
 
     it('should drop exactly-zero-area triangles once, for the viewer and every export (D36)', async () => {
-      const { result } = await createGeometry({
+      const { result } = await evaluate({
         module: {
           default: (pico: Pico) => {
             const cube = helloCube(pico);
@@ -538,12 +629,12 @@ describe('picovoxel kernel', () => {
         },
       });
 
-      expect(result.nativeHandle.shapes[0]!.triangles).toHaveLength(36);
+      expect(result.handle.shapes[0]!.triangles).toHaveLength(36);
     });
 
     it('should refuse a shape whose every triangle has zero area as empty, not an index-less mesh', async () => {
       const issues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: (pico: Pico) =>
               pico.createMesh({ vertices: [0, 0, 0, 1, 0, 0, 2, 0, 0, 0, 1, 0], triangles: [0, 0, 3, 0, 1, 2] }),
@@ -557,13 +648,13 @@ describe('picovoxel kernel', () => {
     });
 
     it('should treat an empty array as an empty scene', async () => {
-      const { result } = await createGeometry({ module: { default: () => [] } });
+      const { result } = await evaluate({ module: { default: () => [] } });
 
-      expect(result.nativeHandle.shapes).toEqual([]);
+      expect(result.handle.shapes).toEqual([]);
     });
 
     it('should default the voxel size to half a millimetre', async () => {
-      await createGeometry({ module: sphere() });
+      await evaluate({ module: sphere() });
 
       expect(sessions.created[0]!.options.voxelSize).toBe(0.5);
     });
@@ -585,28 +676,28 @@ describe('picovoxel kernel', () => {
       ],
       [{ main: () => [] }, 'PicoVoxel source must default-export a main(pico, params) function.'],
     ])('should refuse an invalid result %#', async (module, message) => {
-      const issues = await buildIssues(createGeometry({ module }).then(({ result }) => result));
+      const issues = await buildIssues(evaluate({ module }).then(({ result }) => result));
 
       expect(issues[0]!.message).toContain(message);
     });
 
     it('should refuse source that evaluates to something other than a module', async () => {
-      const issues = await buildIssues(createGeometry({ module: () => 'not a module' }).then(({ result }) => result));
+      const issues = await buildIssues(evaluate({ module: () => 'not a module' }).then(({ result }) => result));
 
       expect(issues[0]!.message).toBe('PicoVoxel source must default-export a main(pico, params) function.');
     });
 
     it('should unwrap a CommonJS-style default namespace', async () => {
-      const { result } = await createGeometry({ module: { default: { default: () => [] } } });
+      const { result } = await evaluate({ module: { default: { default: () => [] } } });
 
-      expect(result.nativeHandle.shapes).toEqual([]);
+      expect(result.handle.shapes).toEqual([]);
     });
 
     it.each([
       [{ voxelSize: -1 }, 'received -1'],
       [{ voxelSize: '1' }, 'received string'],
     ])('should refuse the voxel size %j', async (parameters, message) => {
-      const issues = await buildIssues(createGeometry({ module: sphere(), parameters }).then(({ result }) => result));
+      const issues = await buildIssues(evaluate({ module: sphere(), parameters }).then(({ result }) => result));
 
       expect(issues[0]!.message).toBe(
         `PicoVoxel voxelSize must be a positive finite number of millimetres; ${message}.`,
@@ -632,18 +723,18 @@ describe('picovoxel kernel', () => {
       [meshLike([0, 0, 0, 1, 0, Number.NaN, 0, 1, 0], [0, 1, 2]), 'contains a non-finite vertex coordinate.'],
       [meshLike([0, 0, 0, 1, 0, 0, 0, 1, 0], [0, 1, 3]), 'triangle index 3 is outside its 3 vertices.'],
     ])('should refuse a malformed mesh %#', async (module, message) => {
-      const issues = await buildIssues(createGeometry({ module }).then(({ result }) => result));
+      const issues = await buildIssues(evaluate({ module }).then(({ result }) => result));
 
       expect(issues[0]!.message).toContain(message);
     });
 
     it('should fall back to the session lane when a mesh carries none', async () => {
-      const { result } = await createGeometry({
+      const { result } = await evaluate({
         module: meshLike([0, 0, 0, 1, 0, 0, 0, 1, 0], [0, 1, 2]),
         lane: 'exact',
       });
 
-      expect(result.nativeHandle.shapes[0]!.lane).toBe('exact');
+      expect(result.handle.shapes[0]!.lane).toBe('exact');
     });
 
     it('should retain an owned buffer without widening an offset mesh view', async () => {
@@ -659,12 +750,12 @@ describe('picovoxel kernel', () => {
         3,
       );
       triangles.set([0, 1, 2]);
-      const { result } = await createGeometry({
+      const { result } = await evaluate({
         module: {
           default: (pico: Pico) => ({ vertices, triangles, toVoxels: helloCube(pico).toVoxels }),
         },
       });
-      const shape = result.nativeHandle.shapes[0]!;
+      const shape = result.handle.shapes[0]!;
 
       expect(shape.vertices.buffer).toBe(vertices.buffer);
       expect(shape.vertices.byteOffset).toBe(vertices.byteOffset);
@@ -681,16 +772,16 @@ describe('picovoxel kernel', () => {
       shared.set([0, 0, 0, 1, 0, 0, 0, 1, 0]);
       const indices = new Uint32Array(new SharedArrayBuffer(12));
       indices.set([0, 1, 2]);
-      const { result } = await createGeometry({
+      const { result } = await evaluate({
         module: {
           default: (pico: Pico) => ({ vertices: shared, triangles: indices, toVoxels: helloCube(pico).toVoxels }),
         },
       });
 
-      expect(result.nativeHandle.shapes[0]!.vertices.buffer).toBeInstanceOf(ArrayBuffer);
-      expect(result.nativeHandle.shapes[0]!.triangles.buffer).toBeInstanceOf(ArrayBuffer);
-      expect(result.nativeHandle.shapes[0]!.vertices.buffer).not.toBe(shared.buffer);
-      expect(result.nativeHandle.shapes[0]!.triangles.buffer).not.toBe(indices.buffer);
+      expect(result.handle.shapes[0]!.vertices.buffer).toBeInstanceOf(ArrayBuffer);
+      expect(result.handle.shapes[0]!.triangles.buffer).toBeInstanceOf(ArrayBuffer);
+      expect(result.handle.shapes[0]!.vertices.buffer).not.toBe(shared.buffer);
+      expect(result.handle.shapes[0]!.triangles.buffer).not.toBe(indices.buffer);
     });
   });
 
@@ -698,7 +789,7 @@ describe('picovoxel kernel', () => {
     it('should keep an out-of-memory code in the details and name the remedy', async () => {
       const picovoxelModule = await import('picovoxel');
       const issues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: () => {
               throw new picovoxelModule.PicoError('PICO_OUT_OF_MEMORY', 'Failed to allocate.');
@@ -721,7 +812,7 @@ describe('picovoxel kernel', () => {
 
     it('should refuse fast-lane data in an exact build with a typed issue and the Tau remedy', async () => {
       const issues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: (pico: Pico) =>
               pico.createVoxels({ shape: 'sphere', radius: 1 }).offset({ distance: 1, fastRenorm: true }),
@@ -751,7 +842,7 @@ describe('picovoxel kernel', () => {
         'fast',
       );
       const issues = await buildIssues(
-        createGeometry({ module: { default: (pico: Pico) => pico.meshFromStl(fastStl) }, lane: 'exact' }).then(
+        evaluate({ module: { default: (pico: Pico) => pico.meshFromStl(fastStl) }, lane: 'exact' }).then(
           ({ result }) => result,
         ),
       );
@@ -770,9 +861,9 @@ describe('picovoxel kernel', () => {
         { acceptLane: 'fast' },
         'fast',
       );
-      const { result } = await createGeometry({ module: { default: (pico: Pico) => pico.meshFromStl(fastStl) } });
+      const { result } = await evaluate({ module: { default: (pico: Pico) => pico.meshFromStl(fastStl) } });
 
-      expect(result.nativeHandle.shapes[0]!.lane).toBe('fast');
+      expect(result.handle.shapes[0]!.lane).toBe('fast');
     });
 
     it.each([
@@ -781,7 +872,7 @@ describe('picovoxel kernel', () => {
       ['a thrown string', 'plain failure', 'plain failure'],
     ])('should report %s as a runtime issue without a PicoVoxel code', async (_name, thrown, message) => {
       const issues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: () => {
               // oxlint-disable-next-line typescript/only-throw-error -- author code may throw a non-Error.
@@ -802,11 +893,7 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime({}, overrides);
       const context = await initialize({ wasm: 'serial' }, runtime);
       const issues = await buildIssues(
-        definition.createGeometry(
-          { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
-          runtime,
-          context,
-        ),
+        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context),
       );
 
       expect(issues[0]).toMatchObject({ message: 'syntax', code: 'BUNDLER_FAILED' });
@@ -816,7 +903,7 @@ describe('picovoxel kernel', () => {
   describe('memory', () => {
     it('should log memory through the runtime logger and warn above one GiB of native memory', async () => {
       sessions.memoryTotal = 2 ** 31;
-      const { runtime } = await createGeometry({ module: sphere() });
+      const { runtime } = await evaluate({ module: sphere() });
 
       expect(runtime.logger.debug).toHaveBeenCalledWith(
         expect.stringMatching(/^PicoVoxel session memory native=2147483648 heap=\d+ variant=serial$/),
@@ -828,7 +915,7 @@ describe('picovoxel kernel', () => {
     });
 
     it('should not warn for an ordinary render', async () => {
-      const { runtime } = await createGeometry({ module: sphere() });
+      const { runtime } = await evaluate({ module: sphere() });
 
       expect(runtime.logger.warn).not.toHaveBeenCalled();
     });
@@ -839,11 +926,7 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime(module);
       const context = await initialize({ wasm: 'serial' }, runtime);
       const render = async () =>
-        definition.createGeometry(
-          { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
-          runtime,
-          context,
-        );
+        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } }, runtime, context);
       return { runtime, context, render };
     };
 
@@ -858,7 +941,7 @@ describe('picovoxel kernel', () => {
         expect(instantiate.mock.calls.length + instantiateStreaming.mock.calls.length).toBe(1);
         expect(sessions.runtimes).toHaveLength(1);
         expect(sessions.created).toHaveLength(2);
-        await definition.cleanup!(context);
+        await definition.onDispose!(context);
       } finally {
         instantiate.mockRestore();
         instantiateStreaming.mockRestore();
@@ -876,14 +959,14 @@ describe('picovoxel kernel', () => {
       expect(second).toBeDefined();
       expect(first!.options.wasmModule).toBeInstanceOf(WebAssembly.Module);
       expect(second!.options.wasmModule).toBe(first!.options.wasmModule);
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     });
 
     it('should load each artifact from its explicit asset URL, and the pthread glue by filesystem path (D20)', async () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'multi' }, runtime);
       const render = async (lane: 'exact' | 'fast') =>
-        definition.createGeometry({ entryPath: 'main.ts', parameters: {}, options: { lane } }, runtime, context);
+        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane } }, runtime, context);
       await render('exact');
       await render('fast');
 
@@ -895,7 +978,7 @@ describe('picovoxel kernel', () => {
       expect(serial).not.toHaveProperty('mainScriptUrlOrBlob');
       expect(locate(multi, 'pico-multi.wasm')).toBe(import.meta.resolve('picovoxel/multi/wasm'));
       expect(multi!['mainScriptUrlOrBlob']).toBe(fileURLToPath(import.meta.resolve('picovoxel/multi/worker')));
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     }, 60_000);
 
     it('should instantiate a module the host compiled instead of compiling its own', async () => {
@@ -908,7 +991,7 @@ describe('picovoxel kernel', () => {
 
       expect(getCompiledWasmModule).toHaveBeenCalledWith(wasmUrl);
       expect(sessions.runtimes[0]!.options.wasmModule).toBe(hostModule);
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     });
 
     it.each([
@@ -950,7 +1033,7 @@ describe('picovoxel kernel', () => {
       await render();
       expect(sessions.runtimes).toHaveLength(2);
       expect(context.runtimes.size).toBe(1);
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     });
 
     it.each([
@@ -973,9 +1056,9 @@ describe('picovoxel kernel', () => {
       expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel recycled the serial runtime: the build trapped');
 
       const next = await render();
-      expect(next.nativeHandle.shapes).toHaveLength(1);
+      expect(next.handle.shapes).toHaveLength(1);
       expect(sessions.runtimes).toHaveLength(2);
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     });
 
     it('should recycle the runtime when a session cannot be disposed', async () => {
@@ -983,7 +1066,7 @@ describe('picovoxel kernel', () => {
       sessions.disposeThrows = true;
       const result = await render();
 
-      expect(result.nativeHandle.shapes).toHaveLength(1);
+      expect(result.handle.shapes).toHaveLength(1);
       expect(runtime.logger.debug).toHaveBeenCalledWith(
         'PicoVoxel recycled the serial runtime: a session could not be disposed',
       );
@@ -1010,8 +1093,8 @@ describe('picovoxel kernel', () => {
 
       sessions.failStart = undefined;
       const recovered = await render();
-      expect(recovered.nativeHandle.shapes).toHaveLength(1);
-      await definition.cleanup!(context);
+      expect(recovered.handle.shapes).toHaveLength(1);
+      await definition.onDispose!(context);
     });
 
     it('should have nothing to recycle when a runtime runs out of memory while starting', async () => {
@@ -1024,7 +1107,7 @@ describe('picovoxel kernel', () => {
       expect(runtime.logger.debug).not.toHaveBeenCalledWith(expect.stringContaining('recycled'));
     });
 
-    it('should release leftover author resources on cleanup and keep going when a teardown throws', async () => {
+    it('should release leftover author resources on onDispose and keep going when a teardown throws', async () => {
       const { context, render } = await renderTwice(sphere());
       await render();
       const leftover = { dispose: vi.fn() };
@@ -1036,7 +1119,7 @@ describe('picovoxel kernel', () => {
       context.authorResources.add(broken).add(leftover);
       sessions.runtimeDisposeThrows = true;
 
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
 
       expect(broken.dispose).toHaveBeenCalledOnce();
       expect(leftover.dispose).toHaveBeenCalledOnce();
@@ -1044,20 +1127,16 @@ describe('picovoxel kernel', () => {
       await expect(sessions.runtimes[0]!.runtime.createPico()).rejects.toMatchObject({ code: 'PICO_DISPOSED' });
     });
 
-    it('should dispose every runtime on cleanup and skip one that never started', async () => {
+    it('should dispose every runtime on onDispose and skip one that never started', async () => {
       const runtime = createRuntime(sphere());
       const context = await initialize({ wasm: 'multi' }, runtime);
-      await definition.createGeometry(
-        { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
-        runtime,
-        context,
-      );
+      await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } }, runtime, context);
       const failed = Promise.reject(new Error('never started'));
-      // Observed here so the rejection is handled; cleanup must still skip it.
+      // Observed here so the rejection is handled; onDispose must still skip it.
       await expect(failed).rejects.toThrow('never started');
       context.runtimes.set('multi', failed);
 
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
 
       expect(context.runtimes.size).toBe(0);
       await expect(sessions.runtimes[0]!.runtime.createPico()).rejects.toMatchObject({ code: 'PICO_DISPOSED' });
@@ -1081,13 +1160,13 @@ describe('picovoxel kernel', () => {
     };
 
     it('should rebuild a fast multi render that ran out of memory on the serial build, with a visible warning', async () => {
-      const { runtime, context, result } = await createGeometry({ module: await outOfMemoryOnMulti(), wasm: 'multi' });
+      const { runtime, context, result } = await evaluate({ module: await outOfMemoryOnMulti(), wasm: 'multi' });
 
       expect(sessions.created.map(({ artifact, options }) => [artifact, options.lane])).toEqual([
         ['multi', 'fast'],
         ['serial', 'fast'],
       ]);
-      expect(result.nativeHandle.shapes).toHaveLength(1);
+      expect(result.handle.shapes).toHaveLength(1);
       expect(result.issues).toEqual([
         expect.objectContaining({
           code: 'RESOURCE_LIMIT',
@@ -1106,7 +1185,7 @@ describe('picovoxel kernel', () => {
       );
       // The trap recycled the multi runtime.
       expect([...context.runtimes.keys()]).toEqual(['serial']);
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     }, 60_000);
 
     it('should count only the calls of the serial retry when a superseded retry stops', async () => {
@@ -1125,17 +1204,17 @@ describe('picovoxel kernel', () => {
       abort.after = 2;
 
       const aborted = await definition
-        .createGeometry({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context)
+        .evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context)
         .catch((error: unknown) => error);
 
-      expect(aborted).toBeInstanceOf(RenderAbortedError);
+      expect(aborted).toMatchObject({ name: 'RenderAbortedError' });
       expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel stopped a superseded build after 1 PicoVoxel calls');
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     }, 60_000);
 
     it('should rebuild on the serial build when the multi build cannot start', async () => {
       sessions.failStart = 'multi';
-      const { context, result } = await createGeometry({ module: sphere(), wasm: 'multi' });
+      const { context, result } = await evaluate({ module: sphere(), wasm: 'multi' });
 
       expect(sessions.created.map(({ artifact }) => artifact)).toEqual(['serial']);
       expect(result.issues).toEqual([
@@ -1146,7 +1225,7 @@ describe('picovoxel kernel', () => {
           details: expect.objectContaining({ picoCode: 'PICO_WASM_INIT_FAILED' }),
         }),
       ]);
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     });
 
     it('should rebuild on the serial build when the multi artifact cannot even be loaded', async () => {
@@ -1161,7 +1240,7 @@ describe('picovoxel kernel', () => {
         },
       });
       const context = await initialize({ wasm: 'multi' }, runtime);
-      const result = await definition.createGeometry(
+      const result = await definition.evaluate(
         { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
         runtime,
         context,
@@ -1171,11 +1250,11 @@ describe('picovoxel kernel', () => {
       expect(result.issues).toEqual([
         expect.objectContaining({ details: expect.objectContaining({ picoCode: 'PICO_WASM_INIT_FAILED' }) }),
       ]);
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     });
 
     it('should report both the serial failure and the warning when the rebuild fails too', async () => {
-      const issues = await buildIssues(createGeometry({ module: await outOfMemoryOnMulti(true), wasm: 'multi' }));
+      const issues = await buildIssues(evaluate({ module: await outOfMemoryOnMulti(true), wasm: 'multi' }));
 
       expect(issues).toEqual([
         expect.objectContaining({ severity: 'error', details: expect.objectContaining({ artifact: 'serial' }) }),
@@ -1195,7 +1274,7 @@ describe('picovoxel kernel', () => {
         const picovoxelModule = await import('picovoxel');
         const error = thrown?.() ?? new picovoxelModule.PicoError('PICO_OUT_OF_MEMORY', 'aborted');
         const issues = await buildIssues(
-          createGeometry({
+          evaluate({
             module: {
               default: () => {
                 throw error;
@@ -1224,9 +1303,9 @@ describe('picovoxel kernel', () => {
     };
 
     it('should check for cancellation before every PicoVoxel call and keep operand identity', async () => {
-      const { result } = await createGeometry({ module: sphereMinusBeam });
+      const { result } = await evaluate({ module: sphereMinusBeam });
 
-      expect(result.nativeHandle.shapes).toHaveLength(1);
+      expect(result.handle.shapes).toHaveLength(1);
       // Two createVoxels calls, equals, subtract, then the kernel's toMesh.
       expect(abort.checks).toBe(5);
     });
@@ -1235,16 +1314,12 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime(sphereMinusBeam);
       const context = await initialize({ wasm: 'serial' }, runtime);
       const render = async () =>
-        definition.createGeometry(
-          { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
-          runtime,
-          context,
-        );
+        definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
       abort.after = 1;
 
       const aborted = await render().catch((error: unknown) => error);
 
-      expect(aborted).toBeInstanceOf(RenderAbortedError);
+      expect(aborted).toMatchObject({ name: 'RenderAbortedError' });
       expect(abort.checks).toBe(2);
       // The evidence DP15 reads: where the cooperative check caught the build.
       expect(runtime.logger.debug).toHaveBeenCalledWith('PicoVoxel stopped a superseded build after 1 PicoVoxel calls');
@@ -1252,9 +1327,9 @@ describe('picovoxel kernel', () => {
 
       abort.after = Infinity;
       const next = await render();
-      expect(next.nativeHandle.shapes).toHaveLength(1);
+      expect(next.handle.shapes).toHaveLength(1);
       expect(sessions.runtimes).toHaveLength(1);
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     });
   });
 
@@ -1276,13 +1351,13 @@ describe('picovoxel kernel', () => {
         },
       });
 
-      const result = await definition.createGeometry(
+      const result = await definition.evaluate(
         { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
         runtime,
         context,
       );
 
-      expect(result.nativeHandle.shapes).toHaveLength(1);
+      expect(result.handle.shapes).toHaveLength(1);
       expect(sessions.author[0]!.options).toEqual({ memoryWarningBytes: 0, voxelSize: 1 });
       expect(abort.checks).toBe(2);
       expect(() => own!.allocated).toThrow(expect.objectContaining({ code: 'PICO_DISPOSED' }));
@@ -1305,11 +1380,7 @@ describe('picovoxel kernel', () => {
         },
       });
 
-      await definition.createGeometry(
-        { entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } },
-        runtime,
-        context,
-      );
+      await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
 
       expect(abort.checks).toBe(2);
       await expect(ownRuntime!.createPico()).rejects.toMatchObject({ code: 'PICO_DISPOSED' });
@@ -1341,7 +1412,7 @@ describe('picovoxel kernel', () => {
       const runtime = createRuntime(module);
       const context = await initialize({ wasm: 'serial' }, runtime);
       await definition
-        .createGeometry({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context)
+        .evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context)
         .catch(() => undefined);
 
       // The session is gone, so everything it allocated is freed with its Library instance.
@@ -1351,22 +1422,22 @@ describe('picovoxel kernel', () => {
       const fresh = await serialRuntime.createPico();
       expect(Object.values(fresh.allocated).every((count) => count === 0)).toBe(true);
       fresh.dispose();
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     });
   });
 
-  describe('getParameters', () => {
-    const getParameters = async (module: MainModule | (() => never), overrides = {}) => {
+  describe('describe', () => {
+    const describe = async (module: MainModule | (() => never), overrides = {}) => {
       const runtime = createRuntime(module, overrides);
       const context = await initialize({ wasm: 'serial' }, runtime);
-      return definition.getParameters({ entryPath: 'main.ts' }, runtime, context);
+      return definition.describe({ entryPath: 'main.ts' }, runtime, context);
     };
 
     it('should declare voxelSize as a positive length in millimetres', async () => {
-      const result = await getParameters({ defaultParams: { voxelSize: 1, radius: 4 }, default: () => [] });
+      const result = await describe({ defaultParams: { voxelSize: 1, radius: 4 }, default: () => [] });
 
       expect(result.success).toBe(true);
-      const declaration = result.success ? result.data : undefined;
+      const declaration = result.success ? result.data.parameters : undefined;
       expect(declaration?.defaults).toEqual({ voxelSize: 1, radius: 4 });
       expect(declaration?.bindings?.['/voxelSize']).toEqual({
         quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
@@ -1377,7 +1448,7 @@ describe('picovoxel kernel', () => {
     });
 
     it('should leave parameters without a voxel size unannotated', async () => {
-      const result = await getParameters({ defaultParams: { radius: 4 }, default: () => [] });
+      const result = await describe({ defaultParams: { radius: 4 }, default: () => [] });
 
       expect(result.success).toBe(true);
       expect(JSON.stringify(result)).not.toContain('ucumUnit');
@@ -1385,12 +1456,12 @@ describe('picovoxel kernel', () => {
 
     it('should report bundle, execution and thrown failures', async () => {
       const failure: KernelIssue = { message: 'syntax', code: 'BUNDLER_FAILED', severity: 'error' };
-      const bundle = await getParameters({}, { bundleIssues: [failure] });
-      const execute = await getParameters({}, { executeIssues: [failure] });
-      const thrown = await getParameters(() => {
+      const bundle = await describe({}, { bundleIssues: [failure] });
+      const execute = await describe({}, { executeIssues: [failure] });
+      const thrown = await describe(() => {
         throw new Error('boom');
       });
-      const thrownString = await getParameters(() => {
+      const thrownString = await describe(() => {
         // oxlint-disable-next-line no-throw-literal, typescript/only-throw-error -- a thrown non-Error.
         throw 'boom';
       });
@@ -1407,26 +1478,26 @@ describe('picovoxel kernel', () => {
   describe('export', () => {
     const exportFrom = async (
       module: MainModule,
-      input: { format: 'glb' | 'stl'; options?: Record<string, unknown>; lane?: 'fast' | 'exact' },
+      input: { exportId: 'glb' | 'gltf' | 'stl'; options?: Record<string, unknown>; lane?: 'fast' | 'exact' },
     ) => {
-      const { runtime, context, result } = await createGeometry({ module, lane: input.lane ?? 'exact' });
-      const options = { ...definition.exportFormats[input.format].optionsSchema.parse(input.options ?? {}) };
-      return definition.exportGeometry(
-        { format: input.format, options, nativeHandle: result.nativeHandle } as unknown as ExportInput,
+      const { runtime, context, result } = await evaluate({ module, lane: input.lane ?? 'exact' });
+      const options = { ...definition.exports[input.exportId].optionsSchema.parse(input.options ?? {}) };
+      return definition.export!(
+        { exportId: input.exportId, options, handle: result.handle } as ExportInput,
         runtime,
         context,
       );
     };
 
-    it('should write an unstamped STL per shape from an exact handle', async () => {
-      const result = await exportFrom({ default: helloCube }, { format: 'stl' });
+    it('should export an unstamped STL per shape from an exact handle', async () => {
+      const result = await exportFrom({ default: helloCube }, { exportId: 'stl' });
 
-      expect(result.success).toBe(true);
-      const [file] = result.success ? result.data : [];
-      expect(file!.name).toBe('Shape 1.stl');
-      expect(stlHeader(file!.bytes)).toBe('PicoGK UNITS=mm');
-      expect(file!.bytes.byteLength).toBe(84 + 12 * 50);
-      expect(new DataView(file!.bytes.buffer).getUint32(80, true)).toBe(12);
+      expect(result.files).toHaveLength(1);
+      const [file] = result.files;
+      expect(file.name).toBe('Shape 1.stl');
+      expect(stlHeader(file.bytes)).toBe('PicoGK UNITS=mm');
+      expect(file.bytes.byteLength).toBe(84 + 12 * 50);
+      expect(new DataView(file.bytes.buffer).getUint32(80, true)).toBe(12);
     });
 
     it('should make safe unique STL filenames without changing labels or STL geometry', async () => {
@@ -1458,13 +1529,9 @@ describe('picovoxel kernel', () => {
             return names.map((name) => ({ shape, name }));
           },
         },
-        { format: 'stl' },
+        { exportId: 'stl' },
       );
-      expect(result.success).toBe(true);
-      if (!result.success) {
-        throw new Error('STL export failed');
-      }
-      expect(result.data.map((file) => file.name)).toEqual([
+      expect(result.files.map((file) => file.name)).toEqual([
         '.._Housing.stl',
         'A_B.stl',
         'a_b 2.stl',
@@ -1485,19 +1552,18 @@ describe('picovoxel kernel', () => {
         '_CONIN$.stl',
         '_conout$.log.stl',
       ]);
-      const raw = await exportFrom({ default: helloCube }, { format: 'stl' });
-      expect(raw.success).toBe(true);
-      for (const file of result.data) {
-        expect(file.bytes).toEqual(raw.success && raw.data[0]!.bytes);
+      const raw = await exportFrom({ default: helloCube }, { exportId: 'stl' });
+      for (const file of result.files) {
+        expect(file.bytes).toEqual(raw.files[0].bytes);
       }
     });
 
     it('should honour STL units, scale and offset', async () => {
       const result = await exportFrom(
         { default: helloCube },
-        { format: 'stl', options: { unit: 'cm', scale: 2, offset: [1, 0, 0] } },
+        { exportId: 'stl', options: { unit: 'cm', scale: 2, offset: [1, 0, 0] } },
       );
-      const bytes = result.success ? result.data[0]!.bytes : new Uint8Array();
+      const { bytes } = result.files[0];
 
       expect(stlHeader(bytes)).toBe('PicoGK UNITS=cm');
       // First triangle, first corner: vertex 0 = (0,0,0) → ((0+1)·2)/10 cm.
@@ -1505,80 +1571,117 @@ describe('picovoxel kernel', () => {
     });
 
     it('should stamp an explicit fast STL export and any fast-provenance handle', async () => {
-      const explicit = await exportFrom({ default: helloCube }, { format: 'stl', options: { lane: 'fast' } });
-      const provenance = await exportFrom(offsetSphere, { format: 'stl', lane: 'fast' });
+      const explicit = await exportFrom({ default: helloCube }, { exportId: 'stl', options: { lane: 'fast' } });
+      const provenance = await exportFrom(offsetSphere, { exportId: 'stl', lane: 'fast' });
 
-      expect(explicit.success && stlHeader(explicit.data[0]!.bytes)).toBe('PicoGK UNITS=mm LANE=fast');
-      expect(provenance.success && stlHeader(provenance.data[0]!.bytes)).toBe('PicoGK UNITS=mm LANE=fast');
+      expect(stlHeader(explicit.files[0].bytes)).toBe('PicoGK UNITS=mm LANE=fast');
+      expect(stlHeader(provenance.files[0].bytes)).toBe('PicoGK UNITS=mm LANE=fast');
     });
 
     it('should refuse a fast GLB export with a typed issue', async () => {
-      const explicit = await exportFrom({ default: helloCube }, { format: 'glb', options: { lane: 'fast' } });
-      const provenance = await exportFrom(offsetSphere, { format: 'glb', lane: 'fast' });
+      const explicit = exportFrom({ default: helloCube }, { exportId: 'glb', options: { lane: 'fast' } });
+      const provenance = exportFrom(offsetSphere, { exportId: 'glb', lane: 'fast' });
 
-      for (const result of [explicit, provenance]) {
-        expect(result).toEqual({
-          success: false,
-          issues: [
-            expect.objectContaining({
-              code: 'REPRESENTATION_UNSUPPORTED',
-              details: expect.objectContaining({ refusal: 'PICOVOXEL_LANE_EXPORT' }),
-            }),
-          ],
-        });
-      }
+      await Promise.all(
+        [explicit, provenance].map(async (result) =>
+          expect(result).rejects.toMatchObject({
+            issues: [{ code: 'REPRESENTATION_UNSUPPORTED', details: { refusal: 'PICOVOXEL_LANE_EXPORT' } }],
+          }),
+        ),
+      );
     });
 
     it('should export an exact GLB in the requested convention', async () => {
       const result = await exportFrom(
         { default: helloCube },
-        { format: 'glb', options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } } },
+        { exportId: 'glb', options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } } },
       );
-      const document = await glbToDocument(result.success ? result.data[0]!.bytes : new Uint8Array());
+      const document = await glbToDocument(result.files[0].bytes);
 
-      expect(result.success && result.data[0]!.name).toBe('model.glb');
+      expect(result.files[0].name).toBe('model.glb');
       expect(document.getRoot().listAccessors()[0]!.getMax([0, 0, 0])).toEqual([1, 1, 1]);
     });
 
     it('should export an empty GLB and refuse an empty STL', async () => {
-      const glb = await exportFrom({ default: () => [] }, { format: 'glb' });
-      const stl = await exportFrom({ default: () => [] }, { format: 'stl' });
+      const glb = await exportFrom({ default: () => [] }, { exportId: 'glb' });
+      const stl = exportFrom({ default: () => [] }, { exportId: 'stl' });
 
-      expect(glb.success).toBe(true);
-      expect(stl).toEqual({
-        success: false,
-        issues: [
-          expect.objectContaining({
-            code: 'NO_RENDER_GEOMETRY',
-            message: expect.stringContaining('no shapes to export'),
-          }),
-        ],
+      expect(glb.files).toHaveLength(1);
+      await expect(stl).rejects.toMatchObject({
+        issues: [{ code: 'RENDER_ARTIFACT_MISSING', message: expect.stringContaining('no shapes to export') }],
       });
     });
 
     it('should refuse an undeclared format', async () => {
-      const { runtime, context, result } = await createGeometry({ module: { default: () => [] } });
-      const refused = await definition.exportGeometry(
-        { format: 'step', options: {}, nativeHandle: result.nativeHandle } as unknown as ExportInput,
+      const { runtime, context, result } = await evaluate({ module: { default: () => [] } });
+      const refused = definition.export!(
+        { exportId: 'step', options: {}, handle: result.handle } as unknown as ExportInput,
         runtime,
         context,
       );
 
-      expect(refused).toMatchObject({ success: false, issues: [{ code: 'KERNEL_CAPABILITY_MISSING' }] });
+      await expect(refused).rejects.toMatchObject({ issues: [{ code: 'KERNEL_CAPABILITY_MISSING' }] });
     });
   });
 
   describe('mesh and snapshots', () => {
-    it('should mesh a handle to an indexed GLB without edges', async () => {
-      const { runtime, context, result } = await createGeometry({ module: { default: helloCube } });
-      const meshed = await definition.meshGeometry!(
-        { nativeHandle: result.nativeHandle, options: { lane: 'fast' }, content: { includeEdges: true } },
+    it.each(['exact', 'fast'] as const)('keeps %s handle projections stable across content requests', async (lane) => {
+      const { runtime, context, result } = await evaluate({ module: { default: helloCube }, lane });
+      const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
+      const fresh = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
+      const project = async (handle: typeof result.handle, includeEdges: boolean) => {
+        const rendered = await definition.render!(
+          { handle, view: 'model', options: {}, content: { includeEdges } },
+          runtime,
+          context,
+        );
+        return rendered.content;
+      };
+      const exportModel = async () => {
+        const exported = await definition.export!(
+          { exportId: 'glb', options: definition.exports.glb.optionsSchema.parse({}), handle: result.handle },
+          runtime,
+          context,
+        );
+        return exported.files[0].bytes;
+      };
+      await expectKernelProjectionOrder({
+        renderA: async () => project(result.handle, false),
+        renderB: async () => project(result.handle, true),
+        freshB: async () => project(fresh, true),
+        ...(lane === 'exact' ? { export: exportModel } : {}),
+      });
+    });
+
+    it('keeps an empty snapshot projection stable', async () => {
+      const { runtime, context, result } = await evaluate({ module: { default: () => [] }, lane: 'exact' });
+      const fresh = definition.deserializeHandle!(
+        { serialized: structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context)) },
         runtime,
         context,
       );
-      const document = await glbToDocument(
-        meshed.geometry.format === 'gltf' ? meshed.geometry.content : new Uint8Array(),
+      const project = async (handle: typeof result.handle) => {
+        const rendered = await definition.render!({ handle, view: 'model', options: {} }, runtime, context);
+        return rendered.content;
+      };
+      await expectKernelProjectionOrder({
+        renderA: async () => project(result.handle),
+        renderB: async () => project(result.handle),
+        freshB: async () => project(fresh),
+      });
+    });
+
+    it('should mesh a handle to an indexed GLB without edges', async () => {
+      const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
+      const meshed = await definition.render!(
+        { handle: result.handle, view: 'model', options: {}, content: { includeEdges: true } },
+        runtime,
+        context,
       );
+      if (typeof meshed.content === 'string') {
+        throw new TypeError('Expected binary PicoVoxel GLB content');
+      }
+      const document = await glbToDocument(meshed.content);
 
       expect(
         document
@@ -1590,22 +1693,20 @@ describe('picovoxel kernel', () => {
     });
 
     it('should round-trip a native handle through its snapshot', async () => {
-      const { runtime, context, result } = await createGeometry({ module: { default: helloCube } });
-      const snapshot = structuredClone(
-        definition.serializeNativeHandle!({ nativeHandle: result.nativeHandle }, runtime, context),
-      );
+      const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
+      const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
 
-      expect(definition.deserializeNativeHandle!({ serializedNativeHandle: snapshot }, runtime, context)).toEqual(
-        result.nativeHandle,
-      );
+      expect(snapshot.shapes[0]?.vertices).toBeInstanceOf(Uint8Array);
+      expect(snapshot.shapes[0]?.triangles).toBeInstanceOf(Uint8Array);
+      expect(definition.deserializeHandle!({ serialized: snapshot }, runtime, context)).toEqual(result.handle);
     });
 
     it('should preserve authored and legacy snapshot labels and repair blank restored names', async () => {
-      const { runtime, context, result } = await createGeometry({ module: { default: helloCube } });
-      const snapshot = definition.serializeNativeHandle!({ nativeHandle: result.nativeHandle }, runtime, context);
-      const nativeHandle = definition.deserializeNativeHandle!(
+      const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
+      const snapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
+      const nativeHandle = definition.deserializeHandle!(
         {
-          serializedNativeHandle: {
+          serialized: {
             shapes: ['  蓋 / Lid  ', 'Mesh', 'Shape 1', ''].map((name) => ({
               ...snapshot.shapes[0]!,
               name,
@@ -1616,17 +1717,13 @@ describe('picovoxel kernel', () => {
         context,
       );
       expect(nativeHandle.shapes.map(({ name }) => name)).toEqual(['蓋 / Lid', 'Mesh', 'Shape 1', 'Shape 4']);
-      const exported = await definition.exportGeometry(
-        { format: 'glb', nativeHandle, options: definition.exportFormats.glb.optionsSchema.parse({}) },
+      const exported = await definition.export!(
+        { exportId: 'glb', handle: nativeHandle, options: definition.exports.glb.optionsSchema.parse({}) },
         runtime,
         context,
       );
-      expect(exported.success).toBe(true);
       // The cube has exact provenance in either session lane.
-      if (!exported.success) {
-        throw new Error('Restored GLB export failed');
-      }
-      const document = await glbToDocument(exported.data[0]!.bytes);
+      const document = await glbToDocument(exported.files[0].bytes);
       expect(
         document
           .getRoot()
@@ -1643,16 +1740,22 @@ describe('picovoxel kernel', () => {
         { shapes: [{ name: 'Shape 1', vertices: new Float32Array(), triangles: new Uint32Array(), lane: 'open' }] },
         'shape 0',
       ],
+      [
+        { shapes: [{ name: 'Shape 1', vertices: new Uint8Array(3), triangles: new Uint8Array(), lane: 'exact' }] },
+        'vertices byte length must be divisible by four',
+      ],
+      [
+        { shapes: [{ name: 'Shape 1', vertices: new Uint8Array(4), triangles: new Uint8Array(), lane: 'exact' }] },
+        'vertex/triangle bytes must contain scalar triples',
+      ],
     ])('should refuse the malformed snapshot %j', async (snapshot, message) => {
-      const { runtime, context } = await createGeometry({ module: { default: () => [] } });
+      const { runtime, context } = await evaluate({ module: { default: () => [] } });
 
       expect(() =>
-        definition.deserializeNativeHandle!(
+        definition.deserializeHandle!(
           // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Deliberately malformed cache bytes exercise restoration's trust boundary.
           {
-            serializedNativeHandle: snapshot as Parameters<
-              NonNullable<typeof definition.deserializeNativeHandle>
-            >[0]['serializedNativeHandle'],
+            serialized: snapshot as Parameters<NonNullable<typeof definition.deserializeHandle>>[0]['serialized'],
           },
           runtime,
           context,
@@ -1681,7 +1784,7 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
     { label: 'authored fallback-looking', name: 'Shape 1', reference: 'Shape 1', valid: true },
     { label: 'trimmed Unicode', name: '  蓋 / Lid  ', reference: '蓋 / Lid', valid: true },
   ] as const)('should bind $label labels only with explicit name evidence', async ({ name, reference, valid }) => {
-    const { runtime, context, result } = await createGeometry({
+    const { runtime, context, result } = await evaluate({
       module: {
         default: (pico: Pico) => [
           { shape: helloCube(pico), ...(name === undefined ? {} : { name }) },
@@ -1691,20 +1794,19 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
       },
     });
     try {
-      const snapshot = structuredClone(
-        definition.serializeNativeHandle!({ nativeHandle: result.nativeHandle }, runtime, context),
-      );
-      const restored = definition.deserializeNativeHandle!({ serializedNativeHandle: snapshot }, runtime, context);
-      expect(restored).toEqual(result.nativeHandle);
-      expect(restored.mechanism).not.toBe(result.nativeHandle.mechanism);
-      const meshed = await definition.meshGeometry!(
-        { nativeHandle: restored, options: { lane: 'fast' }, content: { includeTopology: true } },
+      const snapshot = structuredClone(definition.serializeHandle!({ handle: result.handle }, runtime, context));
+      const restored = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
+      expect(restored).toEqual(result.handle);
+      expect(restored.mechanism).not.toBe(result.handle.mechanism);
+      const meshed = await definition.render!(
+        { handle: restored, view: 'model', options: {}, content: { includeTopology: true } },
         runtime,
         context,
       );
-      const payload = await readTopology(
-        meshed.geometry.format === 'gltf' ? meshed.geometry.content : new Uint8Array(),
-      );
+      if (typeof meshed.content === 'string') {
+        throw new TypeError('Expected binary topology view');
+      }
+      const payload = await readTopology(meshed.content);
       expect(payload?.['components']).toHaveLength(2);
       if (valid) {
         expect(payload?.['mechanism']).toMatchObject({ links: { base: { components: ['component:node-0'] } } });
@@ -1714,14 +1816,14 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
         expect(meshed.issues).toMatchObject([{ code: 'INVALID_REFERENCE', severity: 'warning' }]);
       }
     } finally {
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     }
   });
 
   it.each([true, false])(
     'should preserve duplicate parts and reject only an ambiguous referenced name (%s)',
     async (referenced) => {
-      const { runtime, context, result } = await createGeometry({
+      const { runtime, context, result } = await evaluate({
         module: {
           default: (pico: Pico) =>
             ['Base', 'Lid', 'Duplicate', 'Duplicate'].map((name) => ({ shape: helloCube(pico), name })),
@@ -1729,16 +1831,17 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
         },
       });
       try {
-        const meshed = await definition.meshGeometry!(
-          { nativeHandle: result.nativeHandle, options: { lane: 'fast' }, content: { includeTopology: true } },
+        const meshed = await definition.render!(
+          { handle: result.handle, view: 'model', options: {}, content: { includeTopology: true } },
           runtime,
           context,
         );
-        const payload = await readTopology(
-          meshed.geometry.format === 'gltf' ? meshed.geometry.content : new Uint8Array(),
-        );
+        if (typeof meshed.content === 'string') {
+          throw new TypeError('Expected binary topology view');
+        }
+        const payload = await readTopology(meshed.content);
         expect(payload?.['components']).toHaveLength(4);
-        expect(result.nativeHandle.shapes.map(({ name }) => name)).toEqual(['Base', 'Lid', 'Duplicate', 'Duplicate']);
+        expect(result.handle.shapes.map(({ name }) => name)).toEqual(['Base', 'Lid', 'Duplicate', 'Duplicate']);
         if (referenced) {
           expect(payload?.['mechanism']).toBeUndefined();
           expect(meshed.issues).toMatchObject([
@@ -1752,50 +1855,50 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
           expect(meshed.issues).toEqual([]);
         }
       } finally {
-        await definition.cleanup!(context);
+        await definition.onDispose!(context);
       }
     },
   );
 
   it.each([42, '', 'Wrong'])('should refuse forged authored name evidence %j', async (authoredName) => {
-    const { runtime, context, result } = await createGeometry({ module: { default: helloCube } });
+    const { runtime, context, result } = await evaluate({ module: { default: helloCube } });
     try {
-      const snapshot = definition.serializeNativeHandle!({ nativeHandle: result.nativeHandle }, runtime, context);
+      const snapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
       // oxlint-disable-next-line typescript/consistent-type-assertions -- Deliberately corrupted cache payload exercises the restoration trust boundary.
       const corrupted = { ...snapshot, shapes: [{ ...snapshot.shapes[0]!, authoredName }] } as typeof snapshot;
-      expect(() =>
-        definition.deserializeNativeHandle!({ serializedNativeHandle: corrupted }, runtime, context),
-      ).toThrow('authoredName must match');
+      expect(() => definition.deserializeHandle!({ serialized: corrupted }, runtime, context)).toThrow(
+        'authoredName must match',
+      );
     } finally {
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     }
   });
 
   it('should own reader warnings across snapshots and emit them once per preview and export', async () => {
-    const { runtime, context, result } = await createGeometry({
+    const { runtime, context, result } = await evaluate({
       module: { default: helloCube, mechanism: { invalid: 1n } },
       lane: 'exact',
     });
     try {
       expect(result.issues).toHaveLength(1);
-      const snapshot = definition.serializeNativeHandle!({ nativeHandle: result.nativeHandle }, runtime, context);
-      const restored = definition.deserializeNativeHandle!({ serializedNativeHandle: snapshot }, runtime, context);
+      const snapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
+      const restored = definition.deserializeHandle!({ serialized: snapshot }, runtime, context);
       expect(restored.mechanismIssues).toEqual(result.issues);
       expect(restored.mechanismIssues).not.toBe(result.issues);
-      const mesh = await definition.meshGeometry!(
-        { nativeHandle: restored, options: { lane: 'exact' }, content: { includeTopology: true } },
+      const mesh = await definition.render!(
+        { handle: restored, view: 'model', options: {}, content: { includeTopology: true } },
         runtime,
         context,
       );
       expect(mesh.issues).toEqual([]);
       const inputs: ExportInput[] = [
-        { format: 'glb', nativeHandle: restored, options: definition.exportFormats.glb.optionsSchema.parse({}) },
-        { format: 'gltf', nativeHandle: restored, options: definition.exportFormats.gltf.optionsSchema.parse({}) },
-        { format: 'stl', nativeHandle: restored, options: definition.exportFormats.stl.optionsSchema.parse({}) },
+        { exportId: 'glb', handle: restored, options: definition.exports.glb.optionsSchema.parse({}) },
+        { exportId: 'gltf', handle: restored, options: definition.exports.gltf.optionsSchema.parse({}) },
+        { exportId: 'stl', handle: restored, options: definition.exports.stl.optionsSchema.parse({}) },
       ];
       for (const input of inputs) {
         // oxlint-disable-next-line no-await-in-loop -- Exports share one kernel context.
-        const exported = await definition.exportGeometry(input, runtime, context);
+        const exported = await definition.export!(input, runtime, context);
         expect(exported.issues).toEqual(result.issues);
       }
       for (const mechanismIssues of [
@@ -1805,12 +1908,10 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
       ]) {
         // oxlint-disable-next-line typescript/consistent-type-assertions -- Deliberately corrupted cache payload exercises warning-envelope validation.
         const corrupted = { ...snapshot, mechanismIssues } as typeof snapshot;
-        expect(() =>
-          definition.deserializeNativeHandle!({ serializedNativeHandle: corrupted }, runtime, context),
-        ).toThrow();
+        expect(() => definition.deserializeHandle!({ serialized: corrupted }, runtime, context)).toThrow();
       }
     } finally {
-      await definition.cleanup!(context);
+      await definition.onDispose!(context);
     }
   });
 });
@@ -1824,7 +1925,7 @@ it('should recycle a mechanism trap and propagate mechanism cancellation after f
   });
   const context = await initialize({ wasm: 'serial' }, runtime);
   try {
-    const result = await definition.createGeometry(
+    const result = await definition.evaluate(
       { entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } },
       runtime,
       context,
@@ -1835,14 +1936,14 @@ it('should recycle a mechanism trap and propagate mechanism cancellation after f
     const aborted = createRuntime({
       default: helloCube,
       mechanism: () => {
-        throw new RenderAbortedError();
+        throw renderAborted();
       },
     });
     await expect(
-      definition.createGeometry({ entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } }, aborted, context),
-    ).rejects.toBeInstanceOf(RenderAbortedError);
+      definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'exact' } }, aborted, context),
+    ).rejects.toMatchObject({ name: 'RenderAbortedError' });
     expect(() => sessions.created[1]!.pico.memory).toThrow(/already been disposed/);
   } finally {
-    await definition.cleanup!(context);
+    await definition.onDispose!(context);
   }
 });

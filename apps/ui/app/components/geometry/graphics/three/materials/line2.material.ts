@@ -43,6 +43,10 @@ import {
   viewportTexture,
 } from 'three/tsl';
 
+// Setup outputs are generated from the semantic inputs below. Their fresh node ids must not
+// become inputs to the next program lookup. Keep this out of NodeMaterial's own-property scan.
+const generatedLineNodes = new WeakMap<Line2NodeMaterial, ReadonlyMap<string, Node>>();
+
 /**
  * Tau-owned non-mip viewport texture singleton for the CB-4 gamma-space blend below
  * (Divergence 4). Mirrors the structure of three.js's stock
@@ -74,7 +78,11 @@ const tauOpaqueViewportTextureSingleton = viewportTexture();
  * (the only level the CB-4 blend ever samples).
  */
 export const tauOpaqueViewportTexture = (uv: typeof screenUV = screenUV, level: unknown = null): unknown =>
-  (tauOpaqueViewportTextureSingleton as { sample: (uv: unknown, level: unknown) => unknown }).sample(uv, level);
+  (
+    tauOpaqueViewportTextureSingleton as {
+      sample: (uv: unknown, level: unknown) => unknown;
+    }
+  ).sample(uv, level);
 
 /**
  * Alpha-composite a linear colour over a sampled copy of the target in sRGB (gamma) space,
@@ -145,6 +153,10 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
    */
   public edgePresentationCoverage = false;
 
+  /** Optional occurrence-transformed prototype endpoints for private edge presentation. */
+  public edgeStartNode?: Node;
+  public edgeEndNode?: Node;
+
   /** Target visible width, in CSS pixels, used when {@link edgePresentationCoverage} is enabled. */
   public edgePresentationLineWidth = 1;
 
@@ -189,10 +201,33 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
     super.alphaToCoverage = value;
   }
 
+  /** Keep equivalent line graphs reusable while retaining caller nodes and structural variants. */
+  public override customProgramCacheKey(): string {
+    const generated = generatedLineNodes.get(this);
+    const inputs = this._getNodeChildren()
+      .filter(({ property, childNode }) => generated?.get(property) !== childNode)
+      .map(({ property, childNode }) => [property, childNode.getCacheKey()]);
+    return JSON.stringify([
+      this.type,
+      Boolean(this.worldUnits),
+      Boolean(this.dashed),
+      Boolean(this.vertexColors),
+      this.transparent,
+      this.alphaToCoverage,
+      this.edgePresentationCoverage,
+      this.usesAnalyticCoverage,
+      this.edgePresentationCoverage ? this.edgePresentationLineWidth : undefined,
+      this.useViewportSrgbBlend,
+      inputs,
+    ]);
+  }
+
   /** @inheritdoc */
   public override setup(builder: unknown): void {
     const self = this as any;
-    const { renderer } = builder as { readonly renderer: { readonly currentSamples: number } };
+    const { renderer } = builder as {
+      readonly renderer: { readonly currentSamples: number };
+    };
 
     const useAlphaToCoverage = self._useAlphaToCoverage as boolean;
     const vertexColors = self.vertexColors as boolean | undefined;
@@ -215,8 +250,8 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
     });
 
     self.vertexNode = Fn(() => {
-      const instanceStart = attribute('instanceStart');
-      const instanceEnd = attribute('instanceEnd');
+      const instanceStart = self.edgeStartNode ?? attribute('instanceStart');
+      const instanceEnd = self.edgeEndNode ?? attribute('instanceEnd');
 
       const start = vec4(modelViewMatrix.mul(vec4(instanceStart, 1.0))).toVar('start');
       const end = vec4(modelViewMatrix.mul(vec4(instanceEnd, 1.0))).toVar('end');
@@ -398,7 +433,12 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
 
         const rayEnd = varyingProperty('vec4', 'worldPos').xyz.normalize().mul(1e5);
         const lineDir = worldEnd.sub(worldStart);
-        const params = closestLineToLine({ p1: worldStart, p2: worldEnd, p3: vec3(0.0, 0.0, 0.0), p4: rayEnd });
+        const params = closestLineToLine({
+          p1: worldStart,
+          p2: worldEnd,
+          p3: vec3(0.0, 0.0, 0.0),
+          p4: rayEnd,
+        });
 
         const pPoint1 = worldStart.add(lineDir.mul(params.x));
         const pPoint2 = rayEnd.mul(params.y);
@@ -497,6 +537,15 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
       self.outputNode = compositeOverViewportSrgb(self.colorNode.rgb, opacityNode, viewportColor);
       self.blending = NoBlending;
     }
+
+    generatedLineNodes.set(
+      this,
+      new Map([
+        ['vertexNode', self.vertexNode],
+        ['colorNode', self.colorNode],
+        ['outputNode', self.outputNode],
+      ]),
+    );
 
     // Skip `ThreeLine2NodeMaterial.setup` (which would rebuild `vertexNode`/`colorNode`/`outputNode`
     // with the upstream broken `nearEstimate = b * -0.5 / a` trim — wiping the corrected graph)

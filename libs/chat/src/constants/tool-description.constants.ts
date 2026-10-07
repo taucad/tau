@@ -23,25 +23,25 @@ Tau model files and assert measurable geometry requirements.
 Filter examples:
 - Run one file: { files: ['main.geospec.ts'] }
 - Run one directory subtree: { files: ['lib'] }
-- Skip one known failing check: { testNamePattern: '^(?!.*no meshing interference).*' }
-- Skip slow files: { exclude: ['**/*.slow.geospec.ts'] }
+- Select a named requirement: { testNamePattern: 'intended envelope' }
+- Exclude an explicitly out-of-scope fixture: { exclude: ['**/fixtures/**'] }
 
-Returns compact pass/fail rows tagged by targetFile, plus \`sourceRevisions\` — one per model the run loaded. Empty failures with total > 0 means all selected tests passed. ${sourceRevisionRule}
+Returns compact rows tagged by targetFile, plus \`sourceRevisions\` for loaded models. Check \`runStatus\`, \`accounting\`, discovery completion and \`lineageStatus\`; empty failures alone do not qualify a run. Unsupported, inconclusive, skipped and not-run requirements are not passes. Filters qualify only the selected scope, never excluded requirements. Read the retained \`fullResult\` when compact details are omitted. ${sourceRevisionRule}
 
 When NOT to use:
-- NOT as a substitute for \`get_kernel_result\` when you only need compile status; \`test_model\` measures geometry against requirements.`,
-  [toolName.getKernelResult]: `Check one file for CAD kernel compile and runtime errors.
+- NOT as a substitute for \`evaluate_model\` when you only need build status; \`test_model\` measures geometry against requirements.`,
+  [toolName.evaluateModel]: `Evaluate one CAD source and its default view, then list what this build can show and export.
 
-Call it after every \`edit_file\`, \`create_file\` or \`delete_file\`. Returns \`status\` — 'ready' or 'error' — with any \`kernelIssues\`. ${sourceRevisionRule}
+Call it after every \`edit_file\`, \`create_file\` or \`delete_file\`. Returns \`status\`, \`kernelIssues\`, offered \`views\`, per-view \`instances\`, and an export-id-to-extension map. A ready build may still report error-severity design issues; inspect them. A default-view render failure is an error, and a valid export-only build can offer zero views. Set \`includeCapabilities: true\` to inspect view/export option schemas, defaults and reachable export targets. ${sourceRevisionRule}
 
 Once 'ready', use \`test_model\` to measure the geometry against requirements.`,
-  [toolName.exportGeometry]: `Produce a persisted interchange/mesh artifact for one geometry unit and write it under \`.tau/artifacts/\` in the active project workspace.
+  [toolName.exportModel]: `Export one model artifact set and write its files under \`.tau/artifacts/\` in the active project workspace.
 
-Give explicit \`targetFile\` and \`format\` (extension only, matching the Tau MIME/extension registry — include the leading dot nowhere).
+Give explicit \`targetFile\` and \`to\`: a declared export ID (such as \`bom\`) or an unambiguous reachable extension (such as \`stl\` or \`3mf\`), without a dot. IDs win over extensions. Use \`evaluate_model({ includeCapabilities: true })\` to discover targets and options. An unavailable or ambiguous target returns the available choices.
 
-Examples: \`format: "stl"\`, \`format: "step"\`, \`format: "glb"\`, \`format: "3mf"\`. The runtime must expose an export route for that extension on the user's active kernel — when it does not, the tool surfaces an RPC error explaining the rejection.
+For a design question, text/JSON exports may be used as evidence only when both the declaration and every actual output file are text/JSON: call \`export_model\`, then \`read_file\` on the returned artifact path, and compare \`sourceRevision\` with the current source. A binary or mixed deliverable requires the person's export request.
 
-Returns an ordered \`files\` array with each producer name, persisted \`artifactPath\`, \`mimeType\`, and \`byteLength\`. The first entry is the primary artifact and later entries are required companions. Any \`warnings\` name what the export could not honour, such as colours; tell the person.
+Returns the resolved \`exportId\`, pinned \`sourceRevision\`, and ordered \`files\` with producer names, persisted paths, MIME types and byte lengths. The first file is primary; later files are required companions. Report \`warnings\` about limits of the written result.
 
 For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and use \`${toolName.testModel}\` instead.`,
   [toolName.getParameters]: `Read the admitted parameter manifest and current checked parameter record for one geometry source file.
@@ -61,15 +61,15 @@ Call get_parameters first and pass its exact identity as expected. ${parameterUn
 A value operation names its field by group and pointer, exactly as get_parameters lists them: native-value carries the number, unit-value carries text plus the inputUnit it was typed in. Nothing else identifies a field. Rejections: UNKNOWN_FIELD — fix the pointer, the manifest did not change; REPRESENTATION_UNSUPPORTED — address a scalar member, or send native-value for a field with no unit; STALE_MANIFEST — call get_parameters again.
 
 A source-unit operation changes the unit the source interprets a value in, and is the operation that asks for confirmation. Only a binding with sourceUnitCapability admits it. Build it from get_parameters, with binding = manifest.bindings[pointer]: producerCapability is { producer: manifest.source.id, sourceRevision: manifest.source.revision, capability: binding.sourceUnitCapability }.`,
-  [toolName.screenshot]: `Capture a screenshot of a specific geometry unit's 3D model for visual inspection.
+  [toolName.screenshot]: `Capture a declared model view for visual inspection.
 
-You MUST pass \`targetFile\` (the source file path of the geometry unit to screenshot, e.g. "main.ts" or "lib/bracket.scad"). There is no project-level fallback. The call fails for a missing source file, render failure or render timeout, an unavailable renderer, or invalid image artifacts. ${sourceRevisionRule}
+Pass \`targetFile\` explicitly. Choose a kernel \`view\`, optional sheet/drawing \`instance\`, and that view's \`options\` from \`evaluate_model\`; omit \`view\` for the default. A 2D view produces one image. Each result echoes its view, instance and, for 3D, camera \`angle\`. The call fails for a missing source, unavailable view or instance, render failure, timeout or invalid image. ${sourceRevisionRule}
 
 Modes:
-- single: Captures one deterministic perspective isometric image
-- multi_angle: Captures 6 separate orthographic images (front, back, right, left, top, bottom)
+- single: one deterministic perspective isometric image for a 3D view
+- multi_angle: six orthographic camera angles for a 3D view (front, back, right, left, top, bottom)
 
-Every image includes:
+Annotated 3D images include:
 - an in-image view label; canonical axis-aligned labels name the camera position as View From ±axis
 - a camera-aligned red-X, green-Y, blue-Z orientation indicator with dot/cross depth notation
 - a physical scale bar; orthographic scale is depth-invariant, while perspective scale is measured at the subject-center plane and marked @ center
@@ -144,15 +144,23 @@ For searching file contents, use \`grep\`.`,
 Send the whole list every time: an item you leave out is removed. Keep one item \`in_progress\` at a time and mark items \`done\` as they finish. Titles are short and outcome-shaped ("Slice the pyramid"), not step narration.
 
 Returns the written path (\`.tau/chats/<chatId>/todo.yaml\`) and a count per status.`,
+  [toolName.askQuestions]: `Ask the person 1–3 multiple-choice questions at a hard fork, keep the turn moving, and get their answers back.
+
+Ask only what the person alone can decide and what changes the work: what to build, scope, intent, or a trade-off with no conventional default, especially a costly or irreversible one. Look up discoverable facts in files, the model and tools instead. Never ask for permission or "should I continue?". Usually ask one question; add another only when it is a second hard fork. Do not ask about what has a sensible default you can state and change later, such as size, detail or print settings.
+
+Ask early, before investing in a direction. Put your recommendation first: it is adopted if nobody answers within waitSeconds. The person can always answer in their own words. Use waitSeconds 0 when you can start on the recommendation now.
+
+Returns each answer and who settled it. Unless status is "answered", proceed with the recommended option and say once which you assumed; a later answer arrives as a message. Never repeat a question or write a multiple-choice question as prose.`,
   [toolName.getMachine]:
     'Read one bound machine: its readiness, loaded setup and printable envelope. Omit machineId when exactly one machine is bound; otherwise the error names every bound machine.',
   [toolName.requestPrint]: `The only way to print. Slices one CAD source file to a .gcode.3mf in the project and opens a print request on a bound machine; nothing is uploaded or started until a person accepts, which starts the print. A Tau-hosted turn waits for the answer and the start; elsewhere it returns the request awaiting-approval for the Print pane. Report the outcome as nextStep states it; an unconfirmed start is unknown, never "submitted" or "started". Never retry or work around a request with other machine tools. First run test_model, check the part fits get_machine's printable envelope, and call get_print_profiles. When get_machine shows no bedType, ask which plate is installed and pass it as plate. Under engine "bambu-studio" presets follow what the printer reports; change them with profiles and settings as get_print_profiles names them. Under the reference engine, options accept only ${requestPrintOptionKeys.join(', ')}.`,
   [toolName.getPrintProfiles]: `List the slicing presets and settings request_print can use for a bound machine. Read-only.
 
-For a Bambu printer with Bambu Studio available it returns engine "bambu-studio": defaults (the presets chosen from the printer's model, nozzle, loaded filament and reported plate), the compatible printers, processes and filaments (source "user" marks the person's own), plates, and every setting's current value by group with enum choices. Pass profiles to read another selection, and keys for full descriptors (units, ranges, descriptions). Otherwise it returns engine "reference" and why. When the project's .tau/machines/printer.json names this printer's model, its presets and settings are the defaults and request_print's arguments override them; printIntent lists the values it supplied. Edit that file to change the project's defaults.`,
+For a Bambu printer with Bambu Studio available it returns engine "bambu-studio": defaults (the presets chosen from the printer's model, nozzle, loaded filament and reported plate), the compatible printers, processes and filaments (source "user" marks the person's own), plates, and every setting's current value by group with enum choices. Pass profiles to read another selection, and keys for full descriptors (units, ranges, descriptions). Otherwise it returns engine "reference" and why. The project’s .tau/machines/settings/<typeId>.json retains named profiles shared by machines of that type. savedProfiles lists stable IDs and the active selection. Pass profileId to inspect or prepare a different saved profile without changing that selection. machinePreferences reports the exact profile and source versions used; request_print arguments override its sparse values. Edit the versioned record to change saved preferences.`,
   [toolName.getPrintRequest]:
-    'Read one print request by its exact request ID: state, summary, receipts, any failure, and a nextStep saying what to tell the person and do next.',
-  [toolName.listPrintRequests]: 'List print requests, newest first, optionally for one machine.',
+    'Read one print request by its exact request ID: state, summary, receipts, any failure, and a nextStep saying what to tell the person and do next. A started request also says whether its run is still running or has ended; only get_machine says whether the machine is ready.',
+  [toolName.listPrintRequests]:
+    "List print requests, newest first, optionally for one machine. A started request's run says whether it is still running or has ended, so a finished print is not read as a busy machine.",
   [toolName.cancelPrint]:
     'Stop a print. Withdraws a request that has not started, or cancels the exact observed provider run of a started one, which stops the printer. Give requestId alone, or machineId with expectedProviderRunId.',
   [toolName.revisions]: `Read this project's saved revisions. Read-only.

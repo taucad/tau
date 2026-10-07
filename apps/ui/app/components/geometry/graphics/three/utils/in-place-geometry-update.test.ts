@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Vector2 } from 'three';
 import type { BufferAttribute, InterleavedBufferAttribute, Mesh, Object3D } from 'three';
+import { parseGltfBytes } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import type { GltfJson } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import { applyFatLineSegments } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import {
   applyInPlaceGeometryUpdate,
@@ -54,6 +56,26 @@ function buildGlb({
       },
     ],
   });
+}
+
+function editJson(bytes: Uint8Array<ArrayBuffer>, edit: (json: GltfJson) => void): Uint8Array<ArrayBuffer> {
+  const { json, bin } = parseGltfBytes(bytes);
+  edit(json);
+  const encoded = new TextEncoder().encode(JSON.stringify(json));
+  const length = Math.ceil(encoded.length / 4) * 4;
+  const result = new Uint8Array(28 + length + bin.length);
+  const view = new DataView(result.buffer);
+  view.setUint32(0, 0x46_54_6c_67, true);
+  view.setUint32(4, 2, true);
+  view.setUint32(8, result.length, true);
+  view.setUint32(12, length, true);
+  view.setUint32(16, 0x4e_4f_53_4a, true);
+  result.fill(32, 20, 20 + length);
+  result.set(encoded, 20);
+  view.setUint32(20 + length, bin.length, true);
+  view.setUint32(24 + length, 0x00_4e_49_42, true);
+  result.set(bin, 28 + length);
+  return result;
 }
 
 async function present(bytes: Uint8Array<ArrayBuffer>): Promise<GLTF> {
@@ -115,6 +137,53 @@ describe('in-place geometry update', () => {
     expect(surface.geometry.boundingSphere).not.toBeNull();
     // Edges are de-indexed copies: the second segment ends at the lifted vertex.
     expect([...(instanceStart.data.array as Float32Array)].slice(6)).toEqual([1, 0, 0, 0, 1, 5]);
+  });
+
+  it('should update every independent occurrence of a primitive', async () => {
+    const repeat = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
+      editJson(bytes, (json) => {
+        json.nodes!.push({ ...json.nodes![0]!, translation: [2, 0, 0] });
+        json.scenes![0]!.nodes!.push(json.nodes!.length - 1);
+      });
+    const bytes = repeat(buildGlb());
+    const gltf = await present(bytes);
+    const edges: Mesh[] = [];
+    gltf.scene.traverse((object) => {
+      if (object.type === 'LineSegments2') {
+        edges.push(object as Mesh);
+      }
+    });
+    expect(edges).toHaveLength(2);
+    const targets = captureInPlaceGeometryTargets({ scene: gltf.scene, associations: gltf.parser.associations, bytes });
+    expect(applyInPlaceGeometryUpdate(targets!, repeat(buildGlb({ lift: 5 })))).toBe(true);
+    const endpoints = edges[1]!.geometry.getAttribute('instanceEnd') as InterleavedBufferAttribute;
+    expect(endpoints.getZ(1)).toBe(5);
+  });
+
+  it('should leave identical payload buffers and unchanged attributes clean', async () => {
+    const bytes = buildGlb();
+    const gltf = await present(bytes);
+    const targets = captureInPlaceGeometryTargets({ scene: gltf.scene, associations: gltf.parser.associations, bytes });
+    const surface = findSurface(gltf.scene);
+    const position = surface.geometry.getAttribute('position') as BufferAttribute;
+    const normal = surface.geometry.getAttribute('normal') as BufferAttribute;
+    const edges = findFatLine(gltf.scene).geometry.getAttribute('instanceStart') as InterleavedBufferAttribute;
+    const versions = [position.version, normal.version, edges.data.version];
+    expect(applyInPlaceGeometryUpdate(targets!, buildGlb())).toBe(true);
+    expect([position.version, normal.version, edges.data.version]).toEqual(versions);
+    expect(applyInPlaceGeometryUpdate(targets!, buildGlb({ lift: 1 }))).toBe(true);
+    expect(normal.version).toBe(versions[1]);
+  });
+
+  it('should refuse scene transform or ownership changes before writing buffers', async () => {
+    const bytes = buildGlb();
+    const gltf = await present(bytes);
+    const targets = captureInPlaceGeometryTargets({ scene: gltf.scene, associations: gltf.parser.associations, bytes });
+    const changed = editJson(buildGlb({ lift: 5 }), (json) => {
+      json.nodes![0]!.translation = [2, 0, 0];
+    });
+    expect(applyInPlaceGeometryUpdate(targets!, changed)).toBe(false);
+    expect(findSurface(gltf.scene).geometry.getAttribute('position').getZ(2)).toBe(0);
   });
 
   it('should refuse a result whose index buffer changed', async () => {

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { clamp } from '#utils/number.utils.js';
+import { capturePointer, releasePointer } from '#utils/pointer-capture.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 
 const dragThresholdPx = 3;
@@ -49,21 +50,6 @@ export type SliderInputProperties = Omit<
   readonly onInputEscape?: () => void;
   readonly onStep?: (direction: -1 | 1, modifiers: { shift: boolean }) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
-};
-
-const capturePointer = (element: Element, pointerId: number): void => {
-  if ('setPointerCapture' in element) {
-    element.setPointerCapture(pointerId);
-  }
-};
-
-const releasePointer = (element: Element, pointerId: number): void => {
-  if ('hasPointerCapture' in element && !element.hasPointerCapture(pointerId)) {
-    return;
-  }
-  if ('releasePointerCapture' in element) {
-    element.releasePointerCapture(pointerId);
-  }
 };
 
 const getDecimalCount = (value: number): number => {
@@ -353,7 +339,12 @@ export const SliderInput = ({
         return;
       }
       const delta = event.key === 'ArrowUp' ? step : -step;
-      const nextValue = clamp(snapToStep(value + delta, step, stepBase), min, max);
+      // Only a declared limit stops a step: past a drag window's end, a value keeps stepping from where it is.
+      const nextValue = clamp(
+        snapToStep(value + delta, step, stepBase),
+        lowerLimit ?? Number.NEGATIVE_INFINITY,
+        upperLimit ?? Number.POSITIVE_INFINITY,
+      );
       setText(String(nextValue));
       setHasUserEdit(false);
       onInputCommit?.(nextValue);
@@ -362,8 +353,6 @@ export const SliderInput = ({
       disabled,
       isReadOnly,
       lowerLimit,
-      max,
-      min,
       onInputCommit,
       onInputEnter,
       onInputEscape,

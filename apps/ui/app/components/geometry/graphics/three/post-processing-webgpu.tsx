@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useCallback, useLayoutEffect, useRef } from 'react';
-import { NodeMaterial, QuadMesh, RenderTarget, UnsignedByteType } from 'three/webgpu';
+import { NodeMaterial, QuadMesh, UnsignedByteType } from 'three/webgpu';
 import type { WebGPURenderer } from 'three/webgpu';
 import {
   colorToDirection,
@@ -26,7 +26,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import type { ThreeCamera } from '@taucad/three/camera';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
-import { useCameraRetarget, useCameraRig, useRenderFrame } from '#hooks/use-graphics.js';
+import { useCameraRetarget, useCameraRig } from '#hooks/use-graphics.js';
 import { pixelsToWorldUnits } from '#components/geometry/graphics/three/utils/spatial.utils.js';
 import { useOverlayDepthRestore } from '#components/geometry/graphics/three/scene-overlay.js';
 import {
@@ -38,15 +38,15 @@ import { createGtaoCameraAdapter } from '#components/geometry/graphics/three/gta
 
 type PostProcessingPipelineResources = Readonly<{
   camera: ThreeCamera;
-  outputQuad: QuadMesh;
+  outputQuad?: QuadMesh;
   outputQuadWithoutAo: QuadMesh;
-  aoNode: ReturnType<typeof ao>;
+  aoNode?: ReturnType<typeof ao>;
   depthRestore: QuadMesh;
   depthRestoreMaterial: NodeMaterial;
-  scenePass: ScenePassWithWarmup;
+  scenePass: ReturnType<typeof pass>;
   displayMode: { value: number };
   compositeStage: { value: number };
-  updateAoCamera: () => void;
+  updateAoCamera?: () => void;
 }>;
 
 /**
@@ -54,7 +54,7 @@ type PostProcessingPipelineResources = Readonly<{
  *
  * Architecture (see `docs/research/webgpu-post-processing-performance-audit.md` R1 and
  * `docs/research/webgpu-composite-quad-depth-write-non-functional.md` for the C2 reversal):
- * - **Single MRT scenePass** — one rasterisation produces beauty color + view-space normal + depth. The legacy
+ * - **Single scenePass** — one rasterisation produces beauty color + depth and, when AO is requested, normals. The legacy
  *   prePass (which re-rasterised the scene purely to harvest depth/normals) is gone.
  * - **Compose-based AO** — the composite quad multiplies beauty by visibility, either before tone mapping
  *   or in linear display RGB. The graph tone-maps once; the AO-only diagnostic bypasses tone mapping.
@@ -65,8 +65,8 @@ type PostProcessingPipelineResources = Readonly<{
  * - **Explicit depth restore** — the active scene-pass depth is sampled by a retained `QuadMesh`
  *   that writes depth into the canvas, or into a caller's target, only when a pass asks for it.
  *   The main scene is never traversed or replayed.
- * - **Scoped warmup** — MRT scene submission restores renderer state synchronously; depth compilation remains async.
- *   Final AO and composite compilation still occurs on first use.
+ * - **Demand preparation** — only the active camera and requested AO graph are created. Compilation occurs
+ *   through the actual frame target on first use.
  *
  * **AA strategy.** Anti-aliasing comes from hardware MSAA on the `WebGPURenderer` (`antialias: true`). The
  * scenePass inherits 4-MSAA on both attachments; the normal MRT being multisampled is acceptable since we no
@@ -76,13 +76,6 @@ type PostProcessingPipelineResources = Readonly<{
  *
  * Does **not** monkey-patch `gl.render` — `QuadMesh.render` calls `renderer.render`.
  */
-type ScenePassWithWarmup = Readonly<{
-  // Three r184's PassNode methods consume only renderer from these contexts.
-  setup(context: { renderer: WebGPURenderer }): void;
-  updateBefore(context: { renderer: WebGPURenderer }): void;
-  dispose(): void;
-}>;
-
 // Preserve the tuned GTAO depth acceptance while making both values derive from one screen-space contract.
 const gtaoThicknessToRadiusRatio = 1 / 0.09;
 const aoDisplayModes = { combined: 0, ao: 1, 'no-ao': 2 } as const;
@@ -108,8 +101,10 @@ const updateGtaoSpatialScale = ({
       size,
       viewport,
     });
-    resource.aoNode.radius.value = radius;
-    resource.aoNode.thickness.value = radius * gtaoThicknessToRadiusRatio;
+    if (resource.aoNode) {
+      resource.aoNode.radius.value = radius;
+      resource.aoNode.thickness.value = radius * gtaoThicknessToRadiusRatio;
+    }
   }
 };
 
@@ -126,11 +121,13 @@ const createPipelineResources = ({
   gpuRenderer,
   scene,
   toneMapping,
+  withAo,
 }: {
   readonly camera: ThreeCamera;
   readonly gpuRenderer: WebGPURenderer;
   readonly scene: Parameters<typeof pass>[0];
   readonly toneMapping: ToneMapping;
+  readonly withAo: boolean;
 }): PostProcessingPipelineResources => {
   const scenePass = pass(scene, camera);
   let aoNode: ReturnType<typeof ao> | undefined;
@@ -138,21 +135,19 @@ const createPipelineResources = ({
   let outputQuadWithoutAo: QuadMesh | undefined;
   let depthRestoreMaterial: NodeMaterial | undefined;
   try {
-    scenePass.setMRT(
-      mrt({
-        // Beauty colour — TSL `output` is the standard fragment output (lit scene colour).
-        output,
-        // View-space normal encoded into a UNORM8 RGB channel; decoded below before feeding GTAO.
-        // Encoding keeps the MRT attachment compact and matches the existing type override.
-        normal: directionToColor(normalView),
-      }),
-    );
-
-    const scenePassNormalTexture = scenePass.getTexture('normal');
-    scenePassNormalTexture.type = UnsignedByteType;
+    if (withAo) {
+      scenePass.setMRT(
+        mrt({
+          // Beauty colour — TSL `output` is the standard fragment output (lit scene colour).
+          output,
+          // View-space normal encoded into a UNORM8 RGB channel; decoded below before feeding GTAO.
+          // Encoding keeps the MRT attachment compact and matches the existing type override.
+          normal: directionToColor(normalView),
+        }),
+      );
+    }
 
     const scenePassColor = scenePass.getTextureNode('output');
-    const scenePassNormal = sample((uv) => colorToDirection(scenePass.getTextureNode('normal').sample(uv)));
     const scenePassDepth = scenePass.getTextureNode('depth');
 
     depthRestoreMaterial = new NodeMaterial();
@@ -162,6 +157,23 @@ const createPipelineResources = ({
     /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- TSL texture node fluent API */
     depthRestoreMaterial.depthNode = scenePassDepth.sample(screenUV);
     const depthRestore = new QuadMesh(depthRestoreMaterial);
+
+    const displayMode = uniform(0);
+    const compositeStage = uniform(0);
+    outputQuadWithoutAo = createOutputQuad(renderOutput(scenePassColor, toneMapping, LinearSRGBColorSpace));
+    if (!withAo) {
+      return {
+        camera,
+        outputQuadWithoutAo,
+        depthRestore,
+        depthRestoreMaterial,
+        scenePass,
+        displayMode,
+        compositeStage,
+      };
+    }
+    scenePass.getTexture('normal').type = UnsignedByteType;
+    const scenePassNormal = sample((uv) => colorToDirection(scenePass.getTextureNode('normal').sample(uv)));
 
     // GTAONode rejects forward depth >= 1 as background. Pair 1-depth with
     // forward projection matrices; changing only the samples corrupts positions.
@@ -179,9 +191,6 @@ const createPipelineResources = ({
     aoNode.distanceFallOff.value = defaultPostProcessingSettings.gtaoDistanceFalloff;
 
     const aoTexture = aoNode.getTextureNode();
-    const displayMode = uniform(0);
-    const compositeStage = uniform(0);
-
     /* oxlint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access -- TSL fluent builder (`.mul`, `.sample`) is typed as `any` in `@types/three`; the runtime shape is verified via the unit + snapshot tests. */
     const aoFactor = aoTexture.sample(screenUV).r;
     const visibility = select<'float'>(displayMode.equal(2), float(1), aoFactor);
@@ -197,9 +206,6 @@ const createPipelineResources = ({
     outputQuad = createOutputQuad(
       mix(beauty, vec4(vec3(aoFactor), scenePassColor.a), select<'float'>(displayMode.equal(1), float(1), float(0))),
     );
-    // A uniform branch still schedules GTAONode's update pass. This retained output graph
-    // samples only the same beauty MRT and applies the same tone mapping.
-    outputQuadWithoutAo = createOutputQuad(renderOutput(scenePassColor, toneMapping, LinearSRGBColorSpace));
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
 
     return {
@@ -209,7 +215,7 @@ const createPipelineResources = ({
       aoNode,
       depthRestore,
       depthRestoreMaterial,
-      scenePass: scenePass as unknown as ScenePassWithWarmup,
+      scenePass,
       displayMode,
       compositeStage,
       updateAoCamera: aoCamera.update,
@@ -226,31 +232,11 @@ const createPipelineResources = ({
 
 const disposePipelineResources = (resources: readonly PostProcessingPipelineResources[]): void => {
   for (const resource of resources) {
-    (resource.outputQuad.material as NodeMaterial).dispose();
+    (resource.outputQuad?.material as NodeMaterial | undefined)?.dispose();
     (resource.outputQuadWithoutAo.material as NodeMaterial).dispose();
-    resource.aoNode.dispose();
+    resource.aoNode?.dispose();
     resource.depthRestoreMaterial.dispose();
     resource.scenePass.dispose();
-  }
-};
-
-/**
- * Render an endpoint once into a throwaway target so its scene materials build their node graphs
- * and pipelines. three keys render contexts by call depth, so the scene pass must nest inside the
- * output quad's render as it does in a live frame; a top-level `updateBefore` builds a context no
- * frame uses. PassNode.compileAsync is avoided because it holds global target/MRT across awaits.
- */
-const warmScenePass = (resource: PostProcessingPipelineResources, gpuRenderer: WebGPURenderer): void => {
-  const previousTarget = gpuRenderer.getRenderTarget();
-  const previousMrt = gpuRenderer.getMRT();
-  const warmTarget = new RenderTarget(1, 1);
-  try {
-    gpuRenderer.setRenderTarget(warmTarget);
-    resource.outputQuad.render(gpuRenderer);
-  } finally {
-    gpuRenderer.setRenderTarget(previousTarget);
-    gpuRenderer.setMRT(previousMrt);
-    warmTarget.dispose();
   }
 };
 
@@ -268,118 +254,74 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
     ...settings,
   };
   const cameraRig = useCameraRig();
-  const resourcesRef = useRef<Map<Camera, PostProcessingPipelineResources> | undefined>(undefined);
-  const allResourcesRef = useRef<readonly PostProcessingPipelineResources[] | undefined>(undefined);
+  const resourcesRef = useRef(new Map<Camera, PostProcessingPipelineResources>());
   const selectedCameraRef = useRef<ThreeCamera>(cameraRig.activeCamera);
-  const aoOutputRef = useRef(aoAllowed && aoEnabled);
-  const renderFrame = useRenderFrame();
+  const targetRef = useRef(new Vector3());
+  const withAo = aoAllowed && aoEnabled && displayMode !== 'no-ao';
 
-  const warmInactiveEndpoints = useCallback((): void => {
-    for (const [camera, resource] of resourcesRef.current ?? []) {
-      if (camera !== selectedCameraRef.current) {
-        warmScenePass(resource, gl as unknown as WebGPURenderer);
-      }
-    }
-  }, [gl]);
-
+  // Only the current endpoint is needed now. The other projection is created on its first frame.
+  // AO changes replace the endpoint resources, so beauty-only scenes own no normal attachment or GTAO graph.
   useLayoutEffect(() => {
-    const gpuRenderer = gl as unknown as WebGPURenderer;
-    const cancellation = { cancelled: false };
-    const resources: PostProcessingPipelineResources[] = [];
+    const resources = resourcesRef.current;
     try {
-      for (const camera of [cameraRig.perspectiveCamera, cameraRig.orthographicCamera]) {
-        resources.push(createPipelineResources({ camera, gpuRenderer, scene, toneMapping }));
-      }
-      allResourcesRef.current = resources;
-    } catch (error) {
-      disposePipelineResources(resources);
-      console.error('Failed to create WebGPU post-processing pipelines', error);
-      return undefined;
-    }
-
-    // Publish only after both endpoint scene passes are warm. Until then the stable
-    // priority-1 owner below renders the scene directly with the active camera.
-    // async-iife: bootstrap — React effects cannot await pipeline warmup; cleanup owns cancellation.
-    void (async (): Promise<void> => {
-      try {
-        for (const resource of resources) {
-          warmScenePass(resource, gpuRenderer);
-        }
-        // The output quads too: an unwarmed one builds its pipeline on the first frame after a
-        // projection switch, a ~200 ms stall.
-        await Promise.all(
-          resources.flatMap((resource) =>
-            [resource.depthRestore, resource.outputQuad, resource.outputQuadWithoutAo].map(async (quad) =>
-              gpuRenderer.compileAsync(quad, quad.camera),
-            ),
-          ),
-        );
-      } catch (error) {
-        console.error('Failed to warm WebGPU post-processing pipelines', error);
-        return;
-      }
-      if (cancellation.cancelled) {
-        return;
-      }
-      resourcesRef.current = new Map(resources.map((resource) => [resource.camera, resource]));
-      warmInactiveEndpoints();
-      invalidate();
-    })();
-
-    return (): void => {
-      cancellation.cancelled = true;
-      resourcesRef.current = undefined;
-      allResourcesRef.current = undefined;
-      disposePipelineResources(resources);
-    };
-  }, [cameraRig, gl, invalidate, scene, toneMapping, warmInactiveEndpoints]);
-
-  useLayoutEffect(() => {
-    aoOutputRef.current = aoAllowed && aoEnabled;
-    for (const resource of allResourcesRef.current ?? []) {
-      // oxlint-disable-next-line react/immutability -- These retained GPU uniforms are owned by this post-processing mount and are updated without rebuilding its graph.
-      resource.aoNode.scale.value = gtaoIntensity;
-      resource.aoNode.distanceFallOff.value = gtaoDistanceFalloff;
-      resource.displayMode.value = aoDisplayModes[displayMode];
-      resource.compositeStage.value = aoCompositeStage === 'display' ? 1 : 0;
-    }
-    if (resourcesRef.current) {
-      invalidate();
-    }
-  }, [aoAllowed, aoCompositeStage, aoEnabled, displayMode, gtaoDistanceFalloff, gtaoIntensity, invalidate]);
-
-  useLayoutEffect(() => {
-    // A scene pass builds new geometry's materials on its first frame. The stage sets a new render
-    // frame once that geometry is mounted; warm the inactive endpoint then, so a projection switch
-    // does not stall ~200 ms on it.
-    void renderFrame;
-    warmInactiveEndpoints();
-  }, [renderFrame, warmInactiveEndpoints]);
-
-  const retarget = useCallback(
-    (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
-      selectedCameraRef.current = camera;
-      const target = new Vector3(
-        ...toThreeRenderPoint({ renderFrame: cameraRig.renderFrame, pointMeters: snapshot.view.target }),
+      const camera = selectedCameraRef.current;
+      resources.set(
+        camera,
+        createPipelineResources({ camera, gpuRenderer: gl as unknown as WebGPURenderer, scene, toneMapping, withAo }),
       );
+      invalidate();
+    } catch (error) {
+      console.error('Failed to create WebGPU post-processing pipeline', error);
+    }
+    return () => {
+      disposePipelineResources([...resources.values()]);
+      resources.clear();
+    };
+  }, [gl, invalidate, scene, toneMapping, withAo]);
+
+  const updateAoSettings = useCallback(
+    (selected: PostProcessingPipelineResources): void => {
+      if (!selected.aoNode) {
+        return;
+      }
+      selected.aoNode.scale.value = gtaoIntensity;
+      selected.aoNode.distanceFallOff.value = gtaoDistanceFalloff;
+      selected.displayMode.value = aoDisplayModes[displayMode];
+      selected.compositeStage.value = aoCompositeStage === 'display' ? 1 : 0;
       updateGtaoSpatialScale({
-        at: target,
-        resources: allResourcesRef.current ?? [],
+        at: targetRef.current,
+        resources: [selected],
         size,
         viewport,
         radiusCssPixels: resolveAoRadiusCssPixels(radiusCssPixels, { ...size, dpr: viewport.dpr }),
       });
-      if (resourcesRef.current) {
-        invalidate();
-      }
+      selected.updateAoCamera?.();
     },
-    [cameraRig, invalidate, radiusCssPixels, size, viewport],
+    [aoCompositeStage, displayMode, gtaoDistanceFalloff, gtaoIntensity, radiusCssPixels, size, viewport],
+  );
+
+  useLayoutEffect(() => {
+    const selected = resourcesRef.current.get(selectedCameraRef.current);
+    if (selected) {
+      updateAoSettings(selected);
+    }
+    invalidate();
+  }, [invalidate, updateAoSettings]);
+
+  const retarget = useCallback(
+    (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
+      selectedCameraRef.current = camera;
+      const target = toThreeRenderPoint({ renderFrame: cameraRig.renderFrame, pointMeters: snapshot.view.target });
+      targetRef.current.set(target.x, target.y, target.z);
+      invalidate();
+    },
+    [cameraRig, invalidate],
   );
   useCameraRetarget(retarget);
 
   const restoreDepth = useCallback(
     (target?: WebGLRenderTarget): void => {
-      const selected = resourcesRef.current?.get(selectedCameraRef.current);
+      const selected = resourcesRef.current.get(selectedCameraRef.current);
       if (!selected) {
         return;
       }
@@ -387,8 +329,6 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
       const previousTarget = renderer.getRenderTarget();
       renderer.setRenderTarget(target ?? null);
       try {
-        // The untested full-screen quad writes every depth texel, so no clear is needed; on the
-        // frame target a clear would also run an extra output pass.
         selected.depthRestore.render(renderer);
       } finally {
         renderer.setRenderTarget(previousTarget);
@@ -399,18 +339,21 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
   useOverlayDepthRestore(restoreDepth);
 
   useFrame((state) => {
-    const selected = resourcesRef.current?.get(selectedCameraRef.current);
-    if (selected) {
-      selected.updateAoCamera();
-      (aoOutputRef.current ? selected.outputQuad : selected.outputQuadWithoutAo).render(
-        state.gl as unknown as WebGPURenderer,
-      );
-      return;
+    const camera = selectedCameraRef.current;
+    let selected = resourcesRef.current.get(camera);
+    if (!selected) {
+      selected = createPipelineResources({
+        camera,
+        gpuRenderer: state.gl as unknown as WebGPURenderer,
+        scene,
+        toneMapping,
+        withAo,
+      });
+      resourcesRef.current.set(camera, selected);
     }
-    // ponytail: untone-mapped until the scene pass is warm; a tone-mapped fallback would need its own pass.
-    state.gl.render(state.scene, state.camera);
+    updateAoSettings(selected);
+    (selected.outputQuad ?? selected.outputQuadWithoutAo).render(state.gl as unknown as WebGPURenderer);
   }, 1);
-
   return null;
 }
 

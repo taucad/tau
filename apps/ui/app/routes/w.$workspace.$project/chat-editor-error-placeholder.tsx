@@ -18,7 +18,7 @@ export function ChatEditorErrorPlaceholder({ cause }: ChatEditorErrorPlaceholder
   return (
     <div className='flex h-full items-center justify-center bg-background p-4'>
       <div className='flex max-w-md flex-col items-center gap-4 text-center'>
-        <TriangleAlert className='size-10 stroke-1 text-destructive' />
+        <TriangleAlert className='size-10 stroke-1 text-feature' />
         <p className='text-sm font-medium'>Failed to load file</p>
         <p className='text-xs text-muted-foreground'>{formatCause(cause)}</p>
       </div>

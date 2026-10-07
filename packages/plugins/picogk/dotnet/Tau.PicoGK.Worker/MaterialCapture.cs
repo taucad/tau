@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using PicoGK;
+using SkiaSharp;
 
 namespace Tau.PicoGK.Worker;
 
@@ -15,7 +16,7 @@ internal sealed class MaterialResources
     private readonly Dictionary<string, int> textures = [];
     private readonly Dictionary<string, int> samplers = [];
 
-    internal Dictionary<string, object?> Texture(MaterialTexture texture, string path)
+    internal Dictionary<string, object?> Texture(MaterialTexture texture, string path, Dictionary<byte[], string>? digests = null)
     {
         var image = texture.Image ?? throw MaterialCapture.Invalid(path + ".Image", "is required");
         var mime = image.Format switch
@@ -33,7 +34,12 @@ internal sealed class MaterialResources
                 ? data.AsSpan().StartsWith(new byte[] { 255, 216, 255 })
                 : data.Length >= 12 && data.AsSpan(0, 4).SequenceEqual("RIFF"u8) && data.AsSpan(8, 4).SequenceEqual("WEBP"u8);
         if (!signature) throw MaterialCapture.Invalid(path + ".Image.Data", "does not match its encoded image format");
-        var imageKey = mime + ":" + image.Name + ":" + Convert.ToHexString(SHA256.HashData(data));
+        if (digests is null || !digests.TryGetValue(data, out var digest))
+        {
+            digest = Convert.ToHexString(SHA256.HashData(data));
+            digests?.Add(data, digest);
+        }
+        var imageKey = mime + ":" + image.Name + ":" + digest;
         if (!images.TryGetValue(imageKey, out var imageIndex))
         {
             imageIndex = Images.Count;
@@ -111,37 +117,98 @@ internal static class MaterialCapture
         return alpha ? [.. result, Number(value.A, path + ".A", 0, 1)] : result;
     }
 
-    private static MaterialTexture? Copy(MaterialTexture? texture)
-    {
-        if (texture is null) return null;
-        var image = texture.Image ?? throw Invalid("Texture.Image", "is required");
-        return texture with { Image = image with { Data = image.Data?.ToArray() ?? throw Invalid("Texture.Image.Data", "is required") } };
-    }
+    internal static Material Snapshot(Material material, int group) => Snapshot(material, group, out _);
 
-    internal static Material Snapshot(Material material, int group)
+    internal static Material Snapshot(Material material, int group, out Dictionary<byte[], string> imageDigests, CancellationToken cancellation = default)
     {
         try
         {
+            cancellation.ThrowIfCancellationRequested();
             ArgumentNullException.ThrowIfNull(material);
+            var ownedImages = new Dictionary<byte[], (byte[] Data, MaterialImageFormat Format)>(ReferenceEqualityComparer.Instance);
+            MaterialTexture? Copy(MaterialTexture? texture, string path)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (texture is null) return null;
+                var image = texture.Image ?? throw Invalid(path + ".Image", "is required");
+                if (!Enum.IsDefined(image.Format)) throw Invalid(path + ".Image.Format", "must be Auto, Png, Jpeg or WebP");
+                var data = image.Data ?? throw Invalid(path + ".Image.Data", "is required");
+                if (!ownedImages.TryGetValue(data, out var owned))
+                {
+                    var bytes = data.ToArray();
+                    owned = (bytes, ValidateImage(bytes, path + ".Image", cancellation));
+                    ownedImages.Add(data, owned);
+                }
+                if (image.Format != MaterialImageFormat.Auto && image.Format != owned.Format)
+                    throw Invalid(path + ".Image.Data", "does not match its encoded image format");
+                return texture with { Image = image with { Data = owned.Data, Format = owned.Format } };
+            }
             var copy = material with
             {
-                ColorTexture = Copy(material.ColorTexture), MetallicRoughnessTexture = Copy(material.MetallicRoughnessTexture),
-                NormalTexture = Copy(material.NormalTexture), OcclusionTexture = Copy(material.OcclusionTexture), EmissiveTexture = Copy(material.EmissiveTexture),
-                Anisotropy = material.Anisotropy is { } a ? a with { Texture = Copy(a.Texture) } : null,
-                Clearcoat = material.Clearcoat is { } c ? c with { Texture = Copy(c.Texture), RoughnessTexture = Copy(c.RoughnessTexture), NormalTexture = Copy(c.NormalTexture) } : null,
-                Iridescence = material.Iridescence is { } i ? i with { Texture = Copy(i.Texture), ThicknessTexture = Copy(i.ThicknessTexture) } : null,
-                Sheen = material.Sheen is { } s ? s with { ColorTexture = Copy(s.ColorTexture), RoughnessTexture = Copy(s.RoughnessTexture) } : null,
-                Specular = material.Specular is { } p ? p with { Texture = Copy(p.Texture), ColorTexture = Copy(p.ColorTexture) } : null,
-                Transmission = material.Transmission is { } t ? t with { Texture = Copy(t.Texture) } : null,
-                Volume = material.Volume is { } v ? v with { ThicknessTexture = Copy(v.ThicknessTexture) } : null,
+                ColorTexture = Copy(material.ColorTexture, "ColorTexture"), MetallicRoughnessTexture = Copy(material.MetallicRoughnessTexture, "MetallicRoughnessTexture"),
+                NormalTexture = Copy(material.NormalTexture, "NormalTexture"), OcclusionTexture = Copy(material.OcclusionTexture, "OcclusionTexture"), EmissiveTexture = Copy(material.EmissiveTexture, "EmissiveTexture"),
+                Anisotropy = material.Anisotropy is { } a ? a with { Texture = Copy(a.Texture, "Anisotropy.Texture") } : null,
+                Clearcoat = material.Clearcoat is { } c ? c with { Texture = Copy(c.Texture, "Clearcoat.Texture"), RoughnessTexture = Copy(c.RoughnessTexture, "Clearcoat.RoughnessTexture"), NormalTexture = Copy(c.NormalTexture, "Clearcoat.NormalTexture") } : null,
+                Iridescence = material.Iridescence is { } i ? i with { Texture = Copy(i.Texture, "Iridescence.Texture"), ThicknessTexture = Copy(i.ThicknessTexture, "Iridescence.ThicknessTexture") } : null,
+                Sheen = material.Sheen is { } s ? s with { ColorTexture = Copy(s.ColorTexture, "Sheen.ColorTexture"), RoughnessTexture = Copy(s.RoughnessTexture, "Sheen.RoughnessTexture") } : null,
+                Specular = material.Specular is { } p ? p with { Texture = Copy(p.Texture, "Specular.Texture"), ColorTexture = Copy(p.ColorTexture, "Specular.ColorTexture") } : null,
+                Transmission = material.Transmission is { } t ? t with { Texture = Copy(t.Texture, "Transmission.Texture") } : null,
+                Volume = material.Volume is { } v ? v with { ThicknessTexture = Copy(v.ThicknessTexture, "Volume.ThicknessTexture") } : null,
             };
-            _ = Project(copy, new MaterialResources());
+            var digests = new Dictionary<byte[], string>(ReferenceEqualityComparer.Instance);
+            _ = Project(copy, new MaterialResources(), digests);
+            imageDigests = digests;
             return copy;
         }
         catch (WorkerException error)
         {
             throw new WorkerException(error.Issues.Select(issue => issue with { Message = $"Group {group}: {issue.Message}" }).ToArray());
         }
+    }
+
+    // New private image-admission bound: full RGBA decode validation must fit 256 MiB.
+    // This does not describe encoded-byte retention or the geometry capture queue budget.
+    private const long MaximumDecodedImageBytes = 256L * 1024 * 1024;
+
+    private static MaterialImageFormat ValidateImage(byte[] data, string path, CancellationToken cancellation)
+    {
+        if (data.Length == 0) throw Invalid(path + ".Data", "must contain encoded image bytes");
+        using var encoded = new MemoryStream(data, writable: false);
+        using var codec = SKCodec.Create(encoded);
+        if (codec is null) throw Invalid(path + ".Data", "must contain a complete supported PNG, JPEG or WebP image");
+        var format = codec.EncodedFormat switch
+        {
+            SKEncodedImageFormat.Png => MaterialImageFormat.Png,
+            SKEncodedImageFormat.Jpeg => MaterialImageFormat.Jpeg,
+            SKEncodedImageFormat.Webp => MaterialImageFormat.WebP,
+            _ => throw Invalid(path + ".Data", "must contain a supported PNG, JPEG or WebP image"),
+        };
+        // Some codecs report a complete raster before checking the container trailer.
+        var complete = format switch
+        {
+            MaterialImageFormat.Png => data.AsSpan().EndsWith(new byte[] { 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130 }),
+            MaterialImageFormat.Jpeg => data.AsSpan().EndsWith(new byte[] { 255, 217 }),
+            // The preceding codec format switch admits exactly these three formats;
+            // Skia WebP detection requires at least 14 signature bytes.
+            _ => (ulong)System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(4, 4)) + 8 == (ulong)data.Length,
+        };
+        if (!complete) throw Invalid(path + ".Data", "must contain a complete PNG, JPEG or WebP image container");
+        var size = codec.Info;
+        // Supported codec header parsers reject nonpositive dimensions before Create succeeds.
+        if (checked((long)size.Width * size.Height) > MaximumDecodedImageBytes / 4)
+            throw Invalid(path + ".Data", "decoded RGBA image must fit within 256 MiB");
+        cancellation.ThrowIfCancellationRequested();
+        var info = new SKImageInfo(size.Width, size.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var pixels = new SKBitmap(info);
+        var frames = Math.Max(1, codec.FrameCount);
+        for (var frame = 0; frame < frames; frame++)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            if (codec.GetPixels(info, pixels.GetPixels(), new SKCodecOptions(frame)) != SKCodecResult.Success)
+                throw Invalid(path + ".Data", "must contain a complete valid PNG, JPEG or WebP image");
+        }
+        cancellation.ThrowIfCancellationRequested();
+        return format;
     }
 
     internal static bool NeedsCoordinates(Material material) =>
@@ -153,8 +220,11 @@ internal static class MaterialCapture
         material.Specular is { } p && (p.Texture is not null || p.ColorTexture is not null) ||
         material.Transmission?.Texture is not null || material.Volume?.ThicknessTexture is not null;
 
-    internal static JsonElement Project(Material material, MaterialResources resources)
+    internal static JsonElement Project(Material material, MaterialResources resources, Dictionary<byte[], string>? ownedDigests = null)
     {
+        // The backend owns these keys (cloned byte arrays), so digests survive exports of
+        // that material generation. Direct internal callers still get a per-projection map.
+        var digests = ownedDigests ?? new Dictionary<byte[], string>(ReferenceEqualityComparer.Instance);
         var extensions = new Dictionary<string, object?>();
         var pbr = new Dictionary<string, object?>
         {
@@ -165,7 +235,7 @@ internal static class MaterialCapture
         void Map(Dictionary<string, object?> owner, string key, MaterialTexture? texture, string path, float? modifier = null, string modifierKey = "scale")
         {
             if (texture is null) return;
-            var info = resources.Texture(texture, path);
+            var info = resources.Texture(texture, path, digests);
             if (modifier is { } number) info[modifierKey] = number;
             owner[key] = info;
         }

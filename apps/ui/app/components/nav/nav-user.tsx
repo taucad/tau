@@ -1,4 +1,4 @@
-import { BookOpen, Bug, CircleHelp, Files, FileText, Settings, Shield, WifiOff } from 'lucide-react';
+import { BookOpen, Bug, CircleHelp, Files, FileText, Scale, Settings, Shield, WifiOff } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -45,6 +45,12 @@ export function NavUser(): React.JSX.Element {
       <a href={legalUrl('terms')} target='_blank' rel='noopener noreferrer'>
         <FileText />
         Terms
+      </a>
+    </DropdownMenuItem>,
+    <DropdownMenuItem key='open-source' asChild>
+      <a href={legalUrl('open-source')} target='_blank' rel='noopener noreferrer'>
+        <Scale />
+        Open-source notices
       </a>
     </DropdownMenuItem>,
     <DropdownMenuItem key='bug' asChild>
@@ -107,7 +113,7 @@ export function NavUser(): React.JSX.Element {
                 <span
                   role='status'
                   aria-label='Offline'
-                  className='absolute top-1 left-5 size-1.5 rounded-full border border-sidebar bg-destructive'
+                  className='absolute top-1 left-5 size-1.5 rounded-full border border-sidebar bg-feature'
                 />
               </TooltipTrigger>
               <TooltipContent side='top'>Offline — reconnect to access online features</TooltipContent>

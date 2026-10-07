@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { IDockviewHeaderActionsProps, IDockviewPanel } from 'dockview-react';
 import { Check, ChevronDown } from 'lucide-react';
 import { DockviewTabIcon } from '#components/panes/dockview-tab.js';
@@ -34,15 +35,12 @@ const renderPanelLabel = (
   iconOptions: Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'>,
 ): React.JSX.Element => {
   const title = getPanelTitle(panel);
-  const path = getPanelPath(panel);
 
+  // Title only: the path stays in the search value, not on the row.
   return (
     <span className='flex min-w-0 flex-1 items-center gap-2'>
       <DockviewTabIcon title={title} leadingIcon={iconOptions.leadingIcon} icon={iconOptions.getIcon?.(panel)} />
-      <span className='flex min-w-0 flex-1 flex-col'>
-        <span className='truncate'>{title}</span>
-        {path && path !== title ? <span className='truncate text-xs text-muted-foreground'>{path}</span> : null}
-      </span>
+      <span className='min-w-0 flex-1 truncate'>{title}</span>
       {activePanel?.id === panel.id ? <Check aria-label='Active tab' className='size-3.5 shrink-0' /> : null}
     </span>
   );
@@ -57,31 +55,24 @@ const useTabsOverflow = ({
 }): boolean => {
   const [isOverflowing, setIsOverflowing] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const tabs = group.element.querySelector<HTMLElement>('.dv-tabs-container');
     if (!tabs) {
       return;
     }
 
-    let frame: number | undefined;
     const measure = (): void => {
-      if (frame !== undefined) {
-        cancelAnimationFrame(frame);
-      }
-      frame = requestAnimationFrame(() => {
-        frame = undefined;
-        setIsOverflowing(panelCount > 0 && tabs.scrollWidth > tabs.clientWidth + 1);
-      });
+      setIsOverflowing(panelCount > 0 && tabs.scrollWidth > tabs.clientWidth + 1);
     };
-
-    const observer = new ResizeObserver(measure);
+    // The fixed slot keeps this update from changing the width we measured.
+    // Deliver resize-driven visibility before paint, not in the next frame.
+    const observer = new ResizeObserver(() => {
+      flushSync(measure);
+    });
     observer.observe(tabs);
     measure();
 
     return () => {
-      if (frame !== undefined) {
-        cancelAnimationFrame(frame);
-      }
       observer.disconnect();
     };
   }, [group, panelCount]);
@@ -89,42 +80,78 @@ const useTabsOverflow = ({
   return isOverflowing;
 };
 
+type DockviewTabsComboBoxProperties = Pick<IDockviewHeaderActionsProps, 'activePanel'> &
+  Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'> &
+  Pick<
+    React.ComponentProps<typeof ComboBoxResponsive<IDockviewPanel>>,
+    'children' | 'isOpen' | 'onOpenChange' | 'popoverProperties'
+  > & {
+    readonly panels: readonly IDockviewPanel[];
+    readonly description?: string;
+    /** Runs before the picked panel is activated. */
+    readonly onPick?: (panel: IDockviewPanel) => void;
+  };
+
+/** The searchable "Open tabs" list shared by every surface that jumps to a Dockview tab. */
+export function DockviewTabsComboBox({
+  activePanel,
+  panels,
+  getIcon,
+  leadingIcon,
+  onPick,
+  popoverProperties,
+  description = 'Search and activate an open tab in this pane.',
+  ...properties
+}: DockviewTabsComboBoxProperties): React.JSX.Element {
+  const groupedItems = useMemo(() => [{ name: 'Open tabs', items: [...panels] }], [panels]);
+
+  return (
+    <ComboBoxResponsive<IDockviewPanel>
+      {...properties}
+      groupedItems={groupedItems}
+      value={activePanel}
+      getValue={getPanelSearchValue}
+      renderLabel={(panel, selectedPanel) => renderPanelLabel(panel, selectedPanel, { getIcon, leadingIcon })}
+      className='w-72'
+      popoverProperties={{ align: 'end', ...popoverProperties }}
+      searchPlaceHolder='Search open tabs…'
+      emptyListMessage='No open tabs found.'
+      title='Open tabs'
+      description={description}
+      onSelect={(value) => {
+        const panel = panels.find((candidate) => getPanelSearchValue(candidate) === value);
+        if (panel) {
+          onPick?.(panel);
+          panel.api.setActive();
+        }
+      }}
+    />
+  );
+}
+
 export function DockviewTabOverflowPicker(
   properties: DockviewTabOverflowPickerProperties,
 ): React.JSX.Element | undefined {
   const { activePanel, getIcon, leadingIcon, panels } = properties;
   const isOverflowing = useTabsOverflow({ group: properties.group, panelCount: panels.length });
-  const groupedItems = useMemo(() => [{ name: 'Open tabs', items: panels }], [panels]);
 
   if (!isOverflowing) {
-    return undefined;
+    return <span aria-hidden className='size-7 shrink-0' data-slot='tab-overflow' />;
   }
 
   return (
-    <Tooltip>
-      <ComboBoxResponsive<IDockviewPanel>
-        groupedItems={groupedItems}
-        value={activePanel}
-        getValue={getPanelSearchValue}
-        renderLabel={(panel, selectedPanel) => renderPanelLabel(panel, selectedPanel, { getIcon, leadingIcon })}
-        className='w-72'
-        popoverProperties={{ align: 'end' }}
-        searchPlaceHolder='Search open tabs…'
-        emptyListMessage='No open tabs found.'
-        title='Open tabs'
-        description='Search and activate an open tab in this pane.'
-        onSelect={(value) => {
-          panels.find((panel) => getPanelSearchValue(panel) === value)?.api.setActive();
-        }}
-      >
-        <TooltipTrigger asChild>
-          {/* Not a hover-revealed pane action: while tabs overflow, this is their visible route. */}
-          <PaneButton aria-label='Open tabs'>
-            <ChevronDown aria-hidden className='size-3.5' />
-          </PaneButton>
-        </TooltipTrigger>
-      </ComboBoxResponsive>
-      <TooltipContent>Open tabs</TooltipContent>
-    </Tooltip>
+    <span className='flex size-7 shrink-0 items-center' data-slot='tab-overflow'>
+      <Tooltip>
+        <DockviewTabsComboBox activePanel={activePanel} panels={panels} getIcon={getIcon} leadingIcon={leadingIcon}>
+          <TooltipTrigger asChild>
+            {/* Not a hover-revealed pane action: while tabs overflow, this is their visible route. */}
+            <PaneButton aria-label='Open tabs'>
+              <ChevronDown aria-hidden className='size-3.5' />
+            </PaneButton>
+          </TooltipTrigger>
+        </DockviewTabsComboBox>
+        <TooltipContent>Open tabs</TooltipContent>
+      </Tooltip>
+    </span>
   );
 }

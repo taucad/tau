@@ -9,18 +9,19 @@
     "list": [
       {
         "name": "service",
-        "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(up, service_name)",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
         "current": { "text": "tau-api", "value": "tau-api" },
-        "includeAll": false,
-        "refresh": 1
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
       },
       {
         "name": "instance",
         "type": "query",
         "datasource": "Prometheus",
-        "query": "label_values(up{service_name=\"$service\"}, instance)",
+        "query": "label_values(process_uptime{service_name=\"$service\"}, instance)",
         "current": { "text": "All", "value": "$__all" },
         "includeAll": true,
         "allValue": ".*",
@@ -49,10 +50,10 @@
       }
     },
     {
-      "title": "Active SSE Connections",
+      "title": "PostgreSQL Backends",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "targets": [{ "expr": "sse_connections_active{service_name=~\"$service\"}" }]
+      "targets": [{ "expr": "sum(postgresql_backends)" }]
     },
     {
       "title": "Node.js Heap Used",
@@ -67,39 +68,35 @@
       "fieldConfig": { "defaults": { "unit": "bytes" } }
     },
     {
-      "title": "DB Query Duration (p95)",
+      "title": "PostgreSQL Row Operations by Kind",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(db_client_operation_duration_bucket{service_name=~\"$service\"}[5m])) by (le, db_operation_name))",
-          "legendFormat": "{{db_operation_name}}"
+          "expr": "sum by (operation) (rate(postgresql_operations_total[5m]))",
+          "legendFormat": "{{operation}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": { "defaults": { "unit": "ops" } }
     },
     {
-      "title": "Redis Command Duration (p95)",
+      "title": "Redis Commands per Second",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum(rate(db_client_operation_duration_bucket{service_name=~\"$service\",db_system=\"redis\"}[5m])) by (le, db_operation_name))",
-          "legendFormat": "{{db_operation_name}}"
-        }
-      ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "targets": [{ "expr": "sum(rate(redis_commands_processed_total[5m]))", "legendFormat": "commands" }],
+      "fieldConfig": { "defaults": { "unit": "ops" } }
     },
     {
-      "title": "SSE Events Rate",
+      "title": "Object Storage Requests by Operation",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "targets": [
         {
-          "expr": "sum(rate(sse_events_total{service_name=~\"$service\"}[5m]))",
-          "legendFormat": "events/s"
+          "expr": "sum by (tau_storage_operation) (rate(tau_storage_operation_duration_count{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{tau_storage_operation}}"
         }
-      ]
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
     },
     {
       "title": "Event Loop Delay (p50 / p99)",
@@ -147,28 +144,28 @@
       }
     },
     {
-      "title": "DB Connection Pool",
+      "title": "PostgreSQL Connections Used",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 28 },
-      "targets": [
-        {
-          "expr": "db_client_connection_count{service_name=~\"$service\"}",
-          "legendFormat": "{{db_client_connection_state}}"
+      "targets": [{ "expr": "sum(postgresql_backends) / max(postgresql_connection_max)" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 0.7, "color": "yellow" },
+              { "value": 0.9, "color": "red" }
+            ]
+          }
         }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      }
     },
     {
-      "title": "DB Pending Requests",
+      "title": "PostgreSQL Rollbacks (5m)",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 28 },
-      "targets": [
-        {
-          "expr": "db_client_connection_pending_requests{service_name=~\"$service\"}",
-          "legendFormat": "pending"
-        }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      "targets": [{ "expr": "sum(increase(postgresql_rollbacks_total[5m])) or vector(0)" }]
     },
     {
       "title": "Fly.io Machine Metrics",
@@ -224,7 +221,7 @@
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} |= \"level\" | json | level = \"error\"", "refId": "A" }],
+      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
       "options": {
         "showTime": true,
         "showLabels": true,

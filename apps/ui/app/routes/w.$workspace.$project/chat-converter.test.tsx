@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ActorRefFrom } from 'xstate';
-import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
+import type { CapabilitiesManifest, ExportRoute, Rendering } from '@taucad/runtime';
+import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { FileExtension, FileParameterEntry, JSONValue } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { admitParameterManifest } from '@taucad/parameters';
+import { bambuA1MiniMachine, bambuMachine } from '@taucad/bambu';
 import { imageEdgeSchemas } from '@taucad/image';
 import { toJSONSchema } from 'zod';
 import type * as RjsfCore from '@rjsf/core';
@@ -25,10 +27,12 @@ vi.mock('@xstate/react', () => ({
 }));
 
 let mockCapabilities: CapabilitiesManifest | undefined;
-let mockGeometry: unknown | undefined;
-let mockHelperGeometry: unknown | undefined;
+let mockRendering: Rendering | undefined;
+let mockHelperRendering: Rendering | undefined;
+let mockDocumentFixture = createMockRuntimeDocument();
+let mockEvaluation = mockDocumentFixture.evaluation;
 let mockActiveKernelId: string | undefined = 'replicad';
-let mockLatestGeometryOutcome: 'success' | 'failure' | undefined = 'success';
+let mockLatestRenderingOutcome: 'success' | 'failure' | undefined = 'success';
 let mockKernelIssues = new Map<string, Array<{ message: string; code: string; type: string; severity: string }>>();
 
 function fidelityRank(fidelity: ExportRoute['fidelity']): number {
@@ -73,22 +77,19 @@ const mockKernelClient = {
     });
     return indexed[0]?.route;
   },
-  export: vi.fn().mockResolvedValue({
-    success: true,
-    data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
-    issues: [],
-  }),
 };
 
 const mockCadRef = {
   getSnapshot: vi.fn(() => ({
     context: {
-      geometry: mockGeometry,
+      rendering: mockRendering,
+      evaluation: mockEvaluation,
       capabilities: mockCapabilities,
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
+      document: mockDocumentFixture.document,
       entryPath: 'main.ts',
-      latestGeometryOutcome: mockLatestGeometryOutcome,
+      latestRenderingOutcome: mockLatestRenderingOutcome,
       kernelIssues: mockKernelIssues,
     },
     hasTag: () => false,
@@ -98,12 +99,14 @@ const mockCadRef = {
 const mockHelperCadRef = {
   getSnapshot: vi.fn(() => ({
     context: {
-      geometry: mockHelperGeometry,
+      rendering: mockHelperRendering,
+      evaluation: mockEvaluation,
       capabilities: mockCapabilities,
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
+      document: mockDocumentFixture.document,
       entryPath: 'helper.ts',
-      latestGeometryOutcome: mockLatestGeometryOutcome,
+      latestRenderingOutcome: mockLatestRenderingOutcome,
       kernelIssues: mockKernelIssues,
     },
     hasTag: () => false,
@@ -170,6 +173,7 @@ vi.mock('#hooks/use-project.js', () => ({
       getSnapshot: () => ({ context: { viewSettings: mockViewSettings, unitSettings: {} } }),
     },
     geometryUnits: mockGeometryUnits,
+    viewRecords: new Map(Object.entries(mockViewSettings)),
     mainEntryPath: 'main.ts',
     parameterService: mockParameterService,
   }),
@@ -182,10 +186,27 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 
 const mockWriteFiles = vi.fn().mockResolvedValue(undefined);
 const mockReadFile = vi.fn().mockRejectedValue(new Error('File not found'));
-let mockContentService: unknown = {};
+const mockExists = vi.fn(async (_path: string) => false);
+/** A content service whose preference watch is ready at once and never fires. */
+const contentServiceStub = (): unknown => ({
+  watchReady: () => ({
+    ready: Promise.resolve(),
+    closed: new Promise<never>(() => {
+      // Never closes.
+    }),
+    dispose: () => undefined,
+  }),
+});
+/** Store preference bytes on disk: the reader checks existence before it reads. */
+const storePreferences = (bytes: Uint8Array<ArrayBuffer>): void => {
+  mockExists.mockResolvedValue(true);
+  mockReadFile.mockResolvedValue(bytes);
+};
+let mockContentService: unknown = contentServiceStub();
 const mockFileManager = {
   writeFiles: mockWriteFiles,
   readFile: mockReadFile,
+  exists: mockExists,
   get contentService(): unknown {
     return mockContentService;
   },
@@ -462,15 +483,31 @@ describe('ChatConverter', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDocumentFixture = createMockRuntimeDocument();
+    vi.mocked(mockDocumentFixture.document.export).mockResolvedValue({
+      success: true,
+      exportId: 'glb',
+      evaluationId: mockDocumentFixture.evaluation.id,
+      files: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
+      issues: [],
+    });
     vi.mocked(awaitFreshRender).mockImplementation(async (actor) => actor.getSnapshot());
-    mockGeometry = { format: 'gltf', content: new Uint8Array([1]) };
-    mockHelperGeometry = { format: 'gltf', content: new Uint8Array([2]) };
+    mockRendering = mockDocumentFixture.rendering;
+    mockEvaluation = mockDocumentFixture.evaluation;
+    if (!mockRendering.success) {
+      throw new Error('The document fixture must render successfully');
+    }
+    mockHelperRendering = {
+      ...mockRendering,
+      artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([2]) },
+    };
     mockCapabilities = createCapabilities();
     mockActiveKernelId = 'replicad';
-    mockLatestGeometryOutcome = 'success';
+    mockLatestRenderingOutcome = 'success';
     mockKernelIssues = new Map();
-    mockContentService = {};
+    mockContentService = contentServiceStub();
     mockReadFile.mockRejectedValue(new Error('File not found'));
+    mockExists.mockResolvedValue(false);
     mockGeometryUnits.clear();
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockViewSettings = {};
@@ -510,9 +547,24 @@ describe('ChatConverter', () => {
   });
 
   it('should show empty state when no geometry is rendered', () => {
-    mockGeometry = undefined;
+    mockRendering = undefined;
     render(<ChatConverter isExpanded />);
     expect(screen.getByText('No geometry to export for this file')).toBeDefined();
+  });
+
+  it('should export a successful document that offers no view', async () => {
+    mockRendering = undefined;
+    const { evaluation } = mockDocumentFixture;
+    if (!evaluation.success) {
+      throw new Error('The document fixture must evaluate successfully');
+    }
+    mockEvaluation = { ...evaluation, views: [] };
+    render(<ChatConverter isExpanded />);
+    fireEvent.click(screen.getByRole('button', { name: /glb/i }));
+    fireEvent.click(screen.getByRole('button', { name: /export glb/i }));
+    await waitFor(() => {
+      expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('glb', { options: {} });
+    });
   });
 
   it('should identify the export source when only one geometry unit exists', () => {
@@ -523,7 +575,7 @@ describe('ChatConverter', () => {
   });
 
   it('should keep the geometry unit selector visible when the selected file has no geometry', () => {
-    mockGeometry = undefined;
+    mockRendering = undefined;
     mockGeometryUnits.set('helper.ts', mockHelperCadRef);
 
     render(<ChatConverter isExpanded />);
@@ -544,7 +596,7 @@ describe('ChatConverter', () => {
       fireEvent.click(await screen.findByText('helper.ts'));
 
       expect(mockProjectSend).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'helper.ts', renderTimeout: undefined }),
+        expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'helper.ts', operationTimeout: undefined }),
       );
     } finally {
       Element.prototype.scrollIntoView = scrollIntoView;
@@ -586,17 +638,17 @@ describe('ChatConverter', () => {
 
     view.rerender(<ChatConverter isExpanded={false} />);
     expect(mockProjectSend).not.toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: operationClaim?.claimId });
-    expect(mockKernelClient.export).not.toHaveBeenCalled();
+    expect(mockDocumentFixture.document.export).not.toHaveBeenCalled();
 
     resolveFresh(mockCadRef.getSnapshot());
     await waitFor(() => {
-      expect(mockKernelClient.export).toHaveBeenCalledWith('glb', { exportOptions: {} });
+      expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('glb', { options: {} });
       expect(mockProjectSend).toHaveBeenCalledWith({ type: 'releaseGeometryUnit', claimId: operationClaim?.claimId });
     });
   });
 
   it('refuses retained geometry and client after the latest CAD render fails', async () => {
-    mockLatestGeometryOutcome = 'failure';
+    mockLatestRenderingOutcome = 'failure';
     mockKernelIssues = new Map([
       ['main.ts', [{ message: 'radius must be positive', code: 'RUNTIME', type: 'runtime', severity: 'error' }]],
     ]);
@@ -608,7 +660,7 @@ describe('ChatConverter', () => {
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('radius must be positive');
     });
-    expect(mockKernelClient.export).not.toHaveBeenCalled();
+    expect(mockDocumentFixture.document.export).not.toHaveBeenCalled();
     const operationClaim = mockProjectSend.mock.calls
       .slice(beforeExport)
       .map(([event]) => event as { type: string; claimId: string })
@@ -775,9 +827,9 @@ describe('ChatConverter', () => {
     fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
 
     await vi.waitFor(() => {
-      expect(mockKernelClient.export).toHaveBeenCalledWith('webp', {
+      expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('webp', {
         content: { includeEdges: true },
-        exportOptions: {},
+        options: {},
       });
     });
   });
@@ -811,6 +863,18 @@ describe('ChatConverter', () => {
     });
     expect(screen.getByRole('heading', { name: 'Content' })).toBeDefined();
     expect(screen.getByRole('heading', { name: 'Format' })).toBeDefined();
+  });
+
+  it.each([
+    ['X1C', bambuMachine],
+    ['A1 mini', bambuA1MiniMachine],
+  ])('compiles the %s submission form, external spool slot included', async (_name, machine) => {
+    const { manifest } = await compileExportConfigurationManifest('bambu', 'machine.submission', {
+      schema: machine().submissionConfiguration.legacyProjection.inputSchema as JSONSchema7,
+      defaults: {},
+    });
+
+    expect(Object.keys(manifest.bindings)).toContain('/expectedMaterials/*/slot');
   });
 
   it('compiles the units the image exporter declares into the checked manifest', async () => {
@@ -873,8 +937,8 @@ describe('ChatConverter', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
     await vi.waitFor(() => {
-      expect(mockKernelClient.export).toHaveBeenCalledWith('webp', {
-        exportOptions: { mode: 'batch' },
+      expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('webp', {
+        options: { mode: 'batch' },
       });
     });
   });
@@ -889,7 +953,7 @@ describe('ChatConverter', () => {
     fireEvent.click(exportButton);
 
     await vi.waitFor(() => {
-      expect(mockKernelClient.export).toHaveBeenCalledWith('glb', { exportOptions: {} });
+      expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('glb', { options: {} });
     });
   });
 
@@ -915,7 +979,7 @@ describe('ChatConverter', () => {
       fireEvent.click(screen.getByRole('button', { name: /stl/i }));
       fireEvent.click(screen.getByRole('button', { name: /export stl/i }));
       await vi.waitFor(() => {
-        expect(mockKernelClient.export).toHaveBeenCalledWith('stl', { exportOptions: { binary: false } });
+        expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('stl', { options: { binary: false } });
       });
     } finally {
       mockParameterService.resolveTarget.mockImplementation(resolveTarget);
@@ -923,9 +987,11 @@ describe('ChatConverter', () => {
   });
 
   it('should persist every dependent artifact when saving one format to the project', async () => {
-    mockKernelClient.export.mockResolvedValueOnce({
+    vi.mocked(mockDocumentFixture.document.export).mockResolvedValueOnce({
       success: true,
-      data: [
+      exportId: 'gltf',
+      evaluationId: mockDocumentFixture.evaluation.id,
+      files: [
         { bytes: new Uint8Array([1]), name: 'model.gltf', mimeType: 'model/gltf+json' },
         { bytes: new Uint8Array([2]), name: 'buffers/model.bin', mimeType: 'application/octet-stream' },
       ],
@@ -1172,7 +1238,7 @@ describe('ChatConverter', () => {
   describe('preference persistence', () => {
     it('should restore persisted format selection on mount', async () => {
       const stored = JSON.stringify({ selectedFormats: ['stl'] });
-      mockReadFile.mockResolvedValue(new TextEncoder().encode(stored));
+      storePreferences(new TextEncoder().encode(stored));
 
       render(<ChatConverter isExpanded />);
 
@@ -1187,7 +1253,7 @@ describe('ChatConverter', () => {
         shouldDownload: false,
         shouldSaveToProject: true,
       });
-      mockReadFile.mockResolvedValue(new TextEncoder().encode(stored));
+      storePreferences(new TextEncoder().encode(stored));
 
       render(<ChatConverter isExpanded />);
 
@@ -1213,7 +1279,7 @@ describe('ChatConverter', () => {
           },
         ],
       });
-      mockReadFile.mockResolvedValue(
+      storePreferences(
         new TextEncoder().encode(
           JSON.stringify({
             selectedFormats: ['webp'],
@@ -1257,9 +1323,9 @@ describe('ChatConverter', () => {
       expect(exportForm?.dataset['fields']).toBe('mode,width,height,quality,lineWidth,background,axes,scaleBar,views');
       fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
       await vi.waitFor(() => {
-        expect(mockKernelClient.export).toHaveBeenCalledWith('webp', {
+        expect(mockDocumentFixture.document.export).toHaveBeenCalledWith('webp', {
           content: { includeEdges: true },
-          exportOptions: {
+          options: {
             mode: 'batch',
             width: 768,
             height: 576,
@@ -1284,7 +1350,7 @@ describe('ChatConverter', () => {
     });
 
     it('should remove invalid and unknown persisted route options', async () => {
-      mockReadFile.mockResolvedValue(
+      storePreferences(
         new TextEncoder().encode(
           JSON.stringify({
             selectedFormats: ['stl'],
@@ -1306,7 +1372,7 @@ describe('ChatConverter', () => {
     });
 
     it('should remove persisted options and content when the active kernel has no matching route', async () => {
-      mockReadFile.mockResolvedValue(
+      storePreferences(
         new TextEncoder().encode(
           JSON.stringify({
             formatOptions: { webp: { width: 1920 } },
@@ -1330,7 +1396,7 @@ describe('ChatConverter', () => {
     });
 
     it('should remove persisted content when the route does not advertise content support', async () => {
-      mockReadFile.mockResolvedValue(
+      storePreferences(
         new TextEncoder().encode(
           JSON.stringify({
             formatContent: { glb: { includeEdges: true } },
@@ -1380,13 +1446,13 @@ describe('ChatConverter', () => {
 
     it('should load preferences once contentService becomes available', async () => {
       const stored = JSON.stringify({ selectedFormats: ['step'] });
-      mockReadFile.mockResolvedValue(new TextEncoder().encode(stored));
+      storePreferences(new TextEncoder().encode(stored));
       mockContentService = undefined;
 
       const { rerender } = render(<ChatConverter isExpanded />);
       expect(mockReadFile).not.toHaveBeenCalled();
 
-      mockContentService = {};
+      mockContentService = contentServiceStub();
       rerender(<ChatConverter isExpanded className='force-rerender' />);
 
       await vi.waitFor(() => {

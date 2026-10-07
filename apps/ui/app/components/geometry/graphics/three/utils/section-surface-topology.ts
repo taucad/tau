@@ -7,7 +7,7 @@ import {
   getModelComponentOwnerInHierarchy,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import type { ModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
-import { hasSceneTag, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { hasSceneTag, hasSceneTagInHierarchy, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
 const float32Epsilon = 1.1920928955078125e-7;
 const sectionCoordinatePrecision = 100_000_000;
@@ -108,8 +108,12 @@ export type VisibleSectionSurfaceSource = Readonly<{
 
 export type GltfSectionTopologyTiming = Readonly<{
   submitMilliseconds: number;
+  /** Aggregate topology build CPU, which may include main-thread fallback; not worker wall time. */
   workerMilliseconds: number;
+  packMilliseconds: number;
+  /** Sum of explicitly measured synchronous hydration, independent of overlapping worker wall time. */
   hydrateMilliseconds: number;
+  resolveMilliseconds: number;
 }>;
 
 export type SectionSurfaceSlice = Readonly<{
@@ -138,6 +142,8 @@ type TopologyBuildInput = Readonly<{
   positions: readonly THREE.Vector3[];
   triangles: TopologyTriangle[];
   allowSeamFallback: boolean;
+  onHydrate?: (milliseconds: number) => void;
+  onPack?: (milliseconds: number) => void;
 }>;
 
 type TopologyTriangleVertices = Readonly<{
@@ -712,7 +718,7 @@ const indexComponentsByTriangle = (triangleCount: number, components: readonly S
   return componentByTriangle;
 };
 
-const hydrateCanonicalTopology = (
+const hydrateCanonicalTopologyRecipe = (
   input: TopologyBuildInput,
   recipe: SectionCanonicalTopologyWorkerResult,
 ): SectionSurfaceTopologyResult => {
@@ -757,6 +763,16 @@ const hydrateCanonicalTopology = (
       buildMilliseconds: recipe.buildMilliseconds,
     },
   };
+};
+
+const hydrateCanonicalTopology = (
+  input: TopologyBuildInput,
+  recipe: SectionCanonicalTopologyWorkerResult,
+): SectionSurfaceTopologyResult => {
+  const startedAt = performance.now();
+  const result = hydrateCanonicalTopologyRecipe(input, recipe);
+  input.onHydrate?.(performance.now() - startedAt);
+  return result;
 };
 
 const buildCanonicalTopology = (input: TopologyBuildInput): SectionSurfaceTopologyResult =>
@@ -824,6 +840,7 @@ const buildCanonicalTopologyAsync = async (input: TopologyBuildInput): Promise<S
   if (!worker) {
     return buildCanonicalTopology(input);
   }
+  const packStartedAt = performance.now();
   const positions = new Float64Array(input.positions.length * 3);
   for (const [vertex, position] of input.positions.entries()) {
     positions[vertex * 3] = position.x;
@@ -840,6 +857,7 @@ const buildCanonicalTopologyAsync = async (input: TopologyBuildInput): Promise<S
     triangleVertices,
     allowSeamFallback: input.allowSeamFallback,
   };
+  input.onPack?.(performance.now() - packStartedAt);
   const id = ++topologyWorkerSequence;
   try {
     const result = await new Promise<SectionCanonicalTopologyWorkerResult>((resolve, reject) => {
@@ -989,11 +1007,15 @@ const buildFallbackTopology = (options: {
 };
 
 const buildFallbackTopologyAsync = async (options: {
+  onHydrate?: (milliseconds: number) => void;
+  onPack?: (milliseconds: number) => void;
   sourceKey: string;
   participants: readonly SectionSurfaceParticipant[];
 }): Promise<SectionSurfaceTopologyResult> => {
   const input = createFallbackTopologyInput(options);
-  return 'status' in input ? input : buildCanonicalTopologyAsync(input);
+  return 'status' in input
+    ? input
+    : buildCanonicalTopologyAsync({ ...input, onHydrate: options.onHydrate, onPack: options.onPack });
 };
 
 const isMaterialVisible = (material: THREE.Material): boolean =>
@@ -1029,17 +1051,15 @@ const participantVisibility = (participant: SectionSurfaceParticipant): 'visible
 
 const createParticipant = (options: {
   mesh: SectionSurfaceMesh;
-  root: THREE.Object3D;
+  rootInverse: THREE.Matrix4;
   order: number;
   association?: GltfAssociation;
 }): SectionSurfaceParticipant => {
   getOrBuildBvh(options.mesh.geometry);
-  options.root.updateWorldMatrix(true, true);
-  options.mesh.updateWorldMatrix(true, false);
-  const rootInverse = new THREE.Matrix4().copy(options.root.matrixWorld).invert();
+
   return {
     mesh: options.mesh,
-    localToSource: new THREE.Matrix4().multiplyMatrices(rootInverse, options.mesh.matrixWorld),
+    localToSource: new THREE.Matrix4().multiplyMatrices(options.rootInverse, options.mesh.matrixWorld),
     order: options.order,
     nodeIndex: options.association?.nodes,
     meshIndex: options.association?.meshes,
@@ -1055,7 +1075,12 @@ const createStandaloneSource = (mesh: SectionSurfaceMesh): SectionSurfaceSource 
   if (cached?.revision === revision) {
     return cached;
   }
-  const participant = createParticipant({ mesh, root: mesh, order: 0 });
+  mesh.updateWorldMatrix(true, true);
+  const participant = createParticipant({
+    mesh,
+    rootInverse: new THREE.Matrix4().copy(mesh.matrixWorld).invert(),
+    order: 0,
+  });
   const builtRevision = geometryRevision(mesh.geometry);
   const source: SectionSurfaceSource = {
     key: mesh.uuid,
@@ -1142,6 +1167,8 @@ const readUnsignedAccessor = async (
 };
 
 const decodeManifoldTopology = async (options: {
+  onHydrate?: (milliseconds: number) => void;
+  onPack?: (milliseconds: number) => void;
   parser: SectionTopologyGltfParser;
   sourceKey: string;
   participants: readonly SectionSurfaceParticipant[];
@@ -1347,6 +1374,8 @@ const decodeManifoldTopology = async (options: {
       positions,
       triangles,
       allowSeamFallback: false,
+      onHydrate: options.onHydrate,
+      onPack: options.onPack,
     });
   } catch (error) {
     return fail(error instanceof Error ? error.message : String(error));
@@ -1407,12 +1436,17 @@ const combineExactTopologies = (
   };
 };
 
-const isSectionSurfaceMesh = (object: THREE.Object3D): object is SectionSurfaceMesh => object instanceof THREE.Mesh;
+const presentationSceneTags = new Set([sceneTag.gltfSurfacePresentation]);
+
+const isSectionSurfaceMesh = (object: THREE.Object3D): object is SectionSurfaceMesh =>
+  object instanceof THREE.Mesh && !hasSceneTagInHierarchy(object, presentationSceneTags);
 
 const hasPositionAttribute = (geometry: THREE.BufferGeometry): boolean =>
   Object.hasOwn(geometry.attributes, 'position');
 
 const createRegisteredSource = async (options: {
+  onHydrate?: (milliseconds: number) => void;
+  onPack?: (milliseconds: number) => void;
   parser: SectionTopologyGltfParser;
   key: string;
   root: THREE.Object3D;
@@ -1437,6 +1471,8 @@ const createRegisteredSource = async (options: {
         sourceKey: options.key,
         participants,
         meshIndex: participants[0]!.meshIndex!,
+        onHydrate: options.onHydrate,
+        onPack: options.onPack,
       }),
     ),
   );
@@ -1463,6 +1499,8 @@ const createRegisteredSource = async (options: {
       ? combineExactTopologies(options.key, exactTopologies)
       : await buildFallbackTopologyAsync({
           sourceKey: options.key,
+          onHydrate: options.onHydrate,
+          onPack: options.onPack,
           participants: options.participants,
         }));
   return {
@@ -1482,11 +1520,13 @@ export const registerGltfSectionSurfaceSources = async (options: {
   unitId: string;
   parser: SectionTopologyGltfParser;
   onTiming?: (timing: GltfSectionTopologyTiming) => void;
+  isCancelled?: () => boolean;
 }): Promise<readonly SectionSurfaceSource[]> => {
   const startedAt = performance.now();
   setGltfSectionSurfaceRegistrationState(options.scene, 'pending');
   const meshes: SectionSurfaceMesh[] = [];
-  options.scene.updateMatrixWorld(true);
+  options.scene.updateWorldMatrix(true, true);
+  const rootInverse = new THREE.Matrix4().copy(options.scene.matrixWorld).invert();
   options.scene.traverse((object) => {
     if (
       isSectionSurfaceMesh(object) &&
@@ -1500,7 +1540,7 @@ export const registerGltfSectionSurfaceSources = async (options: {
   const participants = meshes.map((mesh, order) =>
     createParticipant({
       mesh,
-      root: options.scene,
+      rootInverse,
       order,
       association: getAssociation(mesh, options.parser.associations),
     }),
@@ -1564,18 +1604,49 @@ export const registerGltfSectionSurfaceSources = async (options: {
   }
 
   const submittedAt = performance.now();
-
-  const sources = await Promise.all(
-    sourceInputs.map(async (input) =>
+  let submitMilliseconds = submittedAt - startedAt;
+  let hydrateMilliseconds = 0;
+  let packMilliseconds = 0;
+  const onHydrate = (milliseconds: number): void => {
+    hydrateMilliseconds += milliseconds;
+  };
+  const onPack = (milliseconds: number): void => {
+    packMilliseconds += milliseconds;
+  };
+  const pending: Array<Promise<SectionSurfaceSource>> = [];
+  let sliceStartedAt = performance.now();
+  for (const input of sourceInputs) {
+    if (options.isCancelled?.()) {
+      // Already submitted workers retain their inputs until hydration finishes.
+      // oxlint-disable-next-line no-await-in-loop -- Retain submitted participants until every worker has released them.
+      await Promise.allSettled(pending);
+      throw new DOMException('Section preparation superseded', 'AbortError');
+    }
+    const sourceStartedAt = performance.now();
+    pending.push(
       createRegisteredSource({
         parser: options.parser,
+        onHydrate,
+        onPack,
         key: input.key,
         root: options.scene,
         owner: input.owner,
         participants: input.participants,
       }),
-    ),
-  );
+    );
+    submitMilliseconds += performance.now() - sourceStartedAt;
+    if (performance.now() - sliceStartedAt >= 16) {
+      // oxlint-disable-next-line no-await-in-loop -- Bound main-thread submission slices while keeping workers concurrent.
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      sliceStartedAt = performance.now();
+    }
+  }
+  const sources = await Promise.all(pending);
+  if (options.isCancelled?.()) {
+    throw new DOMException('Section preparation superseded', 'AbortError');
+  }
   sectionSourceRegistry.set(options.scene, { status: 'ready', sources });
   const completedAt = performance.now();
   const workerMilliseconds = sources.reduce(
@@ -1583,15 +1654,20 @@ export const registerGltfSectionSurfaceSources = async (options: {
     0,
   );
   options.onTiming?.({
-    submitMilliseconds: submittedAt - startedAt,
+    submitMilliseconds,
+    packMilliseconds,
     workerMilliseconds,
-    hydrateMilliseconds: Math.max(0, completedAt - submittedAt - workerMilliseconds),
+    hydrateMilliseconds,
+    resolveMilliseconds: completedAt - submittedAt,
   });
   return sources;
 };
 
 /** Collects registered glTF sources plus topology-certified standalone meshes. @internal */
-export const collectSectionSurfaceSources = (root: THREE.Group): VisibleSectionSurfaceSource[] => {
+export const collectSectionSurfaceSources = (
+  root: THREE.Group,
+  onBlocked?: () => void,
+): VisibleSectionSurfaceSource[] => {
   const registered: SectionSurfaceSource[] = [];
   const coveredMeshes = new Set<SectionSurfaceMesh>();
   const blockedRoots = new Set<THREE.Object3D>();
@@ -1602,6 +1678,7 @@ export const collectSectionSurfaceSources = (root: THREE.Group): VisibleSectionS
     }
     if (registration.status === 'pending' || registration.status === 'cancelled') {
       blockedRoots.add(object);
+      onBlocked?.();
       return;
     }
     if (registration.status === 'unsupported') {

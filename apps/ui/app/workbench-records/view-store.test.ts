@@ -21,9 +21,7 @@ function memory() {
       preconditions,
     }: {
       data: string;
-      preconditions: ReadonlyArray<{
-        expected: Uint8Array<ArrayBuffer> | null;
-      }>;
+      preconditions: ReadonlyArray<{ expected: Uint8Array<ArrayBuffer> | null }>;
     }): Promise<CheckedFileWriteResult> => {
       const wait = gate;
       gate = undefined;
@@ -38,21 +36,14 @@ function memory() {
             expected?.length === bytes.length &&
             expected.every((value, index) => value === bytes?.[index]);
       if (!matches) {
-        return {
-          status: 'conflict',
-          conflicts: [{ path: 'view', actual: bytes }],
-        };
+        return { status: 'conflict', conflicts: [{ path: 'view', actual: bytes }] };
       }
       bytes = encoder.encode(data);
       return { status: 'applied', content: bytes };
     },
   );
   return {
-    files: {
-      exists: async () => bytes !== null,
-      readFile: async () => bytes!,
-      writeFileChecked: writes,
-    },
+    files: { exists: async () => bytes !== null, readFile: async () => bytes!, writeFileChecked: writes },
     writes,
     set: (value: WorkbenchView) => {
       bytes = encoder.encode(workbenchRecords.view.serialize(value));
@@ -82,7 +73,172 @@ const makeStore = (data: ReturnType<typeof memory>) =>
   });
 
 describe('workbench view checked store', () => {
-  it('should classify a watch of in-flight local write bytes as a local acknowledgement', async () => {
+  it('fences internal publication immediately when its source invalidates during a read', async () => {
+    const data = memory();
+    const entered = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<void>();
+    const onChange = vi.fn();
+    let hold = true;
+    const owner = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-fenced',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          const bytes = await data.files.readFile();
+          if (hold) {
+            hold = false;
+            entered.resolve();
+            await gate.promise;
+          }
+          return bytes;
+        },
+      },
+      onChange,
+      onError: () => undefined,
+    });
+    try {
+      const pending = owner.read();
+      await entered.promise;
+      owner.invalidateRead();
+      gate.resolve();
+      await pending;
+      expect(onChange).not.toHaveBeenCalled();
+      expect(owner.ready()).toBe(false);
+      await owner.read();
+      expect(owner.ready()).toBe(true);
+      expect(onChange).toHaveBeenCalledOnce();
+    } finally {
+      owner.dispose();
+    }
+  });
+
+  it('should keep invalid bytes preservable when an unchanged edit owes no fields', async () => {
+    const data = memory();
+    const view = makeStore(data);
+    try {
+      await view.read();
+      const invalid = encoder.encode('{broken');
+      data.setBytes(invalid);
+      await view.read();
+      expect(await view.edit(seed())).toBe(false);
+      expect(await view.flush()).toBe(true);
+      expect(data.get()).toEqual(invalid);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      view.dispose();
+    }
+  });
+
+  it('should hold an accepted edit and flush until its first record read settles', async () => {
+    const data = memory();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const view = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'first-read',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          entered.resolve();
+          await release.promise;
+          return data.files.readFile();
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      const hydration = view.read();
+      await entered.promise;
+      const edited = view.edit({ ...seed(), name: 'Accepted before hydration' });
+      let settled = false;
+      const drained = (async () => {
+        const saved = await view.flush();
+        settled = true;
+        return saved;
+      })();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(data.writes).not.toHaveBeenCalled();
+      release.resolve();
+      await hydration;
+      expect(await edited).toBe(true);
+      expect(await drained).toBe(true);
+      expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+        status: 'current',
+        record: { name: 'Accepted before hydration', entryPath: 'a.ts' },
+      });
+    } finally {
+      release.resolve();
+      view.dispose();
+    }
+  });
+
+  it.each(['{broken', '{"version":2}'])(
+    'should retain blocked view intent through flush and repair (%s)',
+    async (invalid) => {
+      const data = memory();
+      const view = makeStore(data);
+      try {
+        await view.read();
+        const release = data.delay();
+        const edited = view.edit({ ...seed(), name: 'Unsaved' });
+        await vi.waitFor(() => {
+          expect(data.writes).toHaveBeenCalledOnce();
+        });
+        const foreign = encoder.encode(invalid);
+        data.setBytes(foreign);
+        release();
+        expect(await edited).toBe(false);
+        expect(await view.flush()).toBe(false);
+        expect(data.get()).toEqual(foreign);
+        data.set(seed());
+        await view.read();
+        expect(await view.flush()).toBe(true);
+        expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+          status: 'current',
+          record: { name: 'Unsaved' },
+        });
+      } finally {
+        view.dispose();
+      }
+    },
+  );
+
+  it('should preserve invalid view bytes on a clean flush', async () => {
+    const data = memory();
+    const foreign = encoder.encode('{broken');
+    data.setBytes(foreign);
+    const view = makeStore(data);
+    try {
+      await view.read();
+      expect(await view.flush()).toBe(true);
+      expect(data.get()).toEqual(foreign);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      view.dispose();
+    }
+  });
+
+  it('should resolve blocked view intent only after an explicit checked Reset', async () => {
+    const data = memory();
+    const view = makeStore(data);
+    try {
+      await view.read();
+      data.setBytes(encoder.encode('{broken'));
+      await view.read();
+      expect(await view.edit({ ...seed(), name: 'Unsaved' })).toBe(false);
+      expect(await view.flush()).toBe(false);
+      expect(await view.reset(seed())).toBe(true);
+      expect(await view.flush()).toBe(true);
+      expect(workbenchRecords.view.read(data.get()!)).toEqual({ status: 'current', record: seed() });
+    } finally {
+      view.dispose();
+    }
+  });
+  it('classifies a watch of in-flight local write bytes as a local acknowledgement', async () => {
     const data = memory();
     const acknowledgement = Promise.withResolvers<void>();
     const onChange = vi.fn<(state: ViewRecordState, source: 'read' | 'write', patch?: ViewRecordPatch) => void>();
@@ -117,6 +273,206 @@ describe('workbench view checked store', () => {
     acknowledgement.resolve();
     expect(await edit).toBe(true);
     expect(onChange).toHaveBeenCalledTimes(2);
+    store.dispose();
+  });
+
+  it('persists a selected kernel view and its options through a stale checked-write conflict', async () => {
+    const data = memory();
+    const store = makeStore(data);
+    await store.read();
+    data.set({ ...seed(), name: 'Foreign' });
+    const next = workbenchRecords.view.schema.parse({
+      ...seed(),
+      selectedKernelView: 'schematic',
+      kernelViews: [{ id: 'schematic', options: { sheet: 'power' } }],
+    });
+    expect(await store.edit(next)).toBe(true);
+    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+      status: 'current',
+      record: {
+        name: 'Foreign',
+        selectedKernelView: 'schematic',
+        kernelViews: [{ id: 'schematic', options: { sheet: 'power' } }],
+      },
+    });
+  });
+
+  it('merges independent projection options and camera changes from two checked writers', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      kernelViews: [
+        { id: 'schematic', options: { sheet: 'main', labels: true }, camera: { kind: 'preset', preset: 'front' } },
+        { id: 'pcb', options: { layer: 'top' } },
+      ],
+    });
+    data.set(base);
+    const first = makeStore(data);
+    const second = makeStore(data);
+    await Promise.all([first.read(), second.read()]);
+    const release = data.delay();
+    const optionsWrite = first.edit({
+      ...base,
+      kernelViews: [
+        { id: 'schematic', options: { sheet: 'power', labels: true }, camera: { kind: 'preset', preset: 'front' } },
+        { id: 'pcb', options: { layer: 'top' } },
+      ],
+    });
+    const cameraWrite = second.edit({
+      ...base,
+      kernelViews: [
+        {
+          id: 'schematic',
+          options: { sheet: 'main', labels: false },
+          authoredInstance: 'sheet:power',
+          camera: { kind: 'preset', preset: 'right' },
+        },
+        { id: 'pcb', options: { layer: 'bottom' } },
+      ],
+    });
+    await Promise.resolve();
+    release();
+    expect(await Promise.all([optionsWrite, cameraWrite])).toEqual([true, true]);
+    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+      status: 'current',
+      record: {
+        kernelViews: [
+          {
+            id: 'schematic',
+            options: { sheet: 'power', labels: false },
+            authoredInstance: 'sheet:power',
+            camera: { kind: 'preset', preset: 'right' },
+          },
+          { id: 'pcb', options: { layer: 'bottom' } },
+        ],
+      },
+    });
+  });
+
+  it('clears a saved projection choice without discarding a foreign projection', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      selectedKernelView: 'schematic',
+      kernelViews: [{ id: 'schematic', options: { sheet: 'main', labels: true } }],
+    });
+    data.set(base);
+    const store = makeStore(data);
+    await store.read();
+    data.set({
+      ...base,
+      kernelViews: [...base.kernelViews!, { id: 'pcb', options: { layer: 'top' } }],
+    });
+    expect(await store.edit({ ...base, selectedKernelView: undefined, kernelViews: undefined })).toBe(true);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.selectedKernelView).toBeUndefined();
+      expect(result.record.kernelViews).toEqual([{ id: 'pcb', options: { layer: 'top' } }]);
+    }
+  });
+
+  it('replaces a removed projection on a queued re-add without restoring its old options or camera', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      kernelViews: [
+        { id: 'schematic', options: { sheet: 'main', labels: true }, camera: { kind: 'preset', preset: 'front' } },
+      ],
+    });
+    data.set(base);
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: data.files,
+      editDebounce: 500,
+      onChange: () => undefined,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    await store.read();
+    const removed = store.edit({ ...base, kernelViews: [] });
+    const replaced = store.edit({ ...base, kernelViews: [{ id: 'schematic', options: { sheet: 'power' } }] });
+    expect(await store.flush()).toBe(true);
+    expect(await Promise.all([removed, replaced])).toEqual([true, true]);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.kernelViews).toEqual([{ id: 'schematic', options: { sheet: 'power' } }]);
+    }
+    store.dispose();
+  });
+
+  it('persists a kernel view whose valid id is __proto__', async () => {
+    const data = memory();
+    const store = makeStore(data);
+    await store.read();
+    expect(await store.edit({ ...seed(), kernelViews: [{ id: '__proto__', options: { sheet: 'power' } }] })).toBe(true);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.kernelViews).toEqual([{ id: '__proto__', options: { sheet: 'power' } }]);
+    }
+  });
+
+  it('keeps a queued __proto__ removal when a later edit changes another projection', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      kernelViews: [
+        { id: '__proto__', options: { sheet: 'main' } },
+        { id: 'pcb', options: { layer: 'top' } },
+      ],
+    });
+    data.set(base);
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: data.files,
+      editDebounce: 500,
+      onChange: () => undefined,
+      onError: (error) => {
+        throw error;
+      },
+    });
+    await store.read();
+    const removed = store.edit({ ...base, kernelViews: [{ id: 'pcb', options: { layer: 'top' } }] });
+    const changed = store.edit({ ...base, kernelViews: [{ id: 'pcb', options: { layer: 'bottom' } }] });
+    expect(await store.flush()).toBe(true);
+    expect(await Promise.all([removed, changed])).toEqual([true, true]);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.kernelViews).toEqual([{ id: 'pcb', options: { layer: 'bottom' } }]);
+    }
+    store.dispose();
+  });
+
+  it('removes a saved constructor option without reading its inherited replacement', async () => {
+    const data = memory();
+    const base = workbenchRecords.view.schema.parse({
+      ...seed(),
+      kernelViews: [
+        {
+          id: 'schematic',
+          options: Object.fromEntries<string | number>([
+            ['constructor', 3],
+            ['sheet', 'main'],
+          ]),
+        },
+      ],
+    });
+    expect(base.kernelViews?.[0]?.options).toHaveProperty('constructor', 3);
+    data.set(base);
+    const store = makeStore(data);
+    await store.read();
+    expect(await store.edit({ ...base, kernelViews: [{ id: 'schematic', options: { sheet: 'main' } }] })).toBe(true);
+    const result = workbenchRecords.view.read(data.get()!);
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.kernelViews).toEqual([{ id: 'schematic', options: { sheet: 'main' } }]);
+    }
     store.dispose();
   });
 
@@ -177,13 +533,112 @@ describe('workbench view checked store', () => {
     await store.read();
     data.setBytes(null);
     await store.read();
-    expect(store.snapshot().record?.entryPath).toBe('a.ts');
+    expect(store.snapshot().record).toBeUndefined();
     expect(data.writes).not.toHaveBeenCalled();
-    expect(await store.edit({ ...store.snapshot().record!, name: 'Renamed' })).toBe(true);
+    expect(await store.edit({ ...seed(), name: 'Renamed' })).toBe(true);
     expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
       status: 'current',
       record: { name: 'Renamed', entryPath: 'a.ts' },
     });
+  });
+
+  it('recreates a deleted view from the live view without restoring deleted saved fields', async () => {
+    const data = memory();
+    data.set({ ...seed(), name: 'Saved', grid: { unit: 'in' } });
+    const store = makeStore(data);
+    await store.read();
+    data.setBytes(null);
+    await store.read();
+    const live = { ...seed(), entryPath: 'b.ts' };
+    expect(await store.edit(live)).toBe(true);
+    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({ status: 'current', record: live });
+  });
+
+  it('keeps a pending view edit across deletion without stale saved fields', async () => {
+    vi.useFakeTimers();
+    const data = memory();
+    data.set({ ...seed(), name: 'Saved' });
+    let failures = 1;
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: {
+        ...data.files,
+        writeFileChecked: async (input) => {
+          if (failures-- > 0) {
+            throw Object.assign(new Error('offline'), { applicationState: 'known-not-applied' });
+          }
+          return data.writes(input);
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read();
+      expect(await store.edit({ ...seed(), name: 'Saved', grid: { unit: 'cm' } })).toBe(false);
+      data.setBytes(null);
+      await store.read();
+      expect(await store.flush()).toBe(true);
+      const read = workbenchRecords.view.read(data.get()!);
+      expect(read).toMatchObject({ status: 'current', record: { name: 'Saved', grid: { unit: 'cm' } } });
+    } finally {
+      store.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('resets only against the bytes the person reviewed', async () => {
+    const data = memory();
+    const reviewed = encoder.encode('{broken');
+    data.setBytes(reviewed);
+    const store = makeStore(data);
+    await store.read();
+    const newer = encoder.encode('{still broken');
+    data.setBytes(newer);
+    await store.read();
+    expect(await store.reset(seed(), reviewed)).toBe(false);
+    expect(data.get()).toEqual(newer);
+    expect(await store.reset(seed(), newer)).toBe(true);
+  });
+
+  it('reports read health and reconciles a potentially-applied write before writing again', async () => {
+    vi.useFakeTimers();
+    const data = memory();
+    const readFile = vi.fn(async (): Promise<Uint8Array<ArrayBuffer>> => {
+      throw new Error('disk busy');
+    });
+    const writeFileChecked = vi.fn(async (input: Parameters<typeof data.writes>[0]) => {
+      if (writeFileChecked.mock.calls.length === 1) {
+        await data.writes(input);
+        throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+      }
+      return data.writes(input);
+    });
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: { ...data.files, readFile, writeFileChecked },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read();
+      await vi.runAllTimersAsync();
+      expect(store.health().read).toBe('unavailable');
+      readFile.mockImplementation(async () => data.get()!);
+      await store.retryRead();
+      await vi.runAllTimersAsync();
+      expect(store.health().read).toBe('ok');
+      expect(await store.edit({ ...seed(), name: 'Renamed' })).toBe(false);
+      expect(store.health().unconfirmed).toBe(true);
+      expect(await store.flush()).toBe(true);
+      expect(writeFileChecked).toHaveBeenCalledTimes(1);
+      expect(store.health().unconfirmed).toBe(false);
+    } finally {
+      store.dispose();
+      vi.useRealTimers();
+    }
   });
 
   it('persists an explicit null entry binding', async () => {
@@ -191,10 +646,7 @@ describe('workbench view checked store', () => {
     const store = makeStore(data);
     await store.read();
     expect(await store.edit({ ...seed(), entryPath: null })).toBe(true);
-    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
-      status: 'current',
-      record: { entryPath: null },
-    });
+    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({ status: 'current', record: { entryPath: null } });
   });
 
   it('does not schedule a new retry when an in-flight owner write fails after disposal', async () => {
@@ -292,19 +744,8 @@ describe('workbench view checked store', () => {
       upDirection: 'y',
       display: { ...seed().display, axes: false, grid: false },
       grid: { unit: 'in' },
-      section: {
-        active: true,
-        cuts: [{ kind: 'plane', plane: 'xz', offset: 1, isFlipped: false }],
-      },
-      measurements: [
-        {
-          id: 'm1',
-          frameId: 'f',
-          startPoint: [0, 0, 0],
-          endPoint: [1, 0, 0],
-          distance: 1,
-        },
-      ],
+      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 1, isFlipped: false }] },
+      measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
     });
     const foreign = workbenchRecords.view.schema.parse({
       ...seed(),
@@ -315,19 +756,8 @@ describe('workbench view checked store', () => {
       upDirection: 'x',
       display: { ...seed().display, lines: false, surfaces: false },
       grid: { unit: 'ft' },
-      section: {
-        active: false,
-        cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }],
-      },
-      measurements: [
-        {
-          id: 'm2',
-          frameId: 'f',
-          startPoint: [0, 0, 0],
-          endPoint: [0, 1, 0],
-          distance: 1,
-        },
-      ],
+      section: { active: false, cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }] },
+      measurements: [{ id: 'm2', frameId: 'f', startPoint: [0, 0, 0], endPoint: [0, 1, 0], distance: 1 }],
     });
     for (const field of [
       'entryPath',
@@ -352,11 +782,7 @@ describe('workbench view checked store', () => {
           continue;
         }
         if (field === 'display') {
-          expect(result.record.display).toEqual({
-            ...foreign.display,
-            axes: false,
-            grid: false,
-          });
+          expect(result.record.display).toEqual({ ...foreign.display, axes: false, grid: false });
         } else {
           expect(result.record[field]).toEqual(person[field]);
         }
@@ -407,63 +833,24 @@ describe('workbench view checked store', () => {
         value: (record: WorkbenchView) => unknown;
       }>
     > = [
-      {
-        field: 'entryPath',
-        edit: (v) => ({ ...v, entryPath: 'person.ts' }),
-        value: (v) => v.entryPath,
-      },
-      {
-        field: 'name',
-        edit: (v) => ({ ...v, name: 'Person' }),
-        value: (v) => v.name,
-      },
-      {
-        field: 'camera',
-        edit: (v) => ({ ...v, camera: { kind: 'preset', preset: 'front' } }),
-        value: (v) => v.camera,
-      },
-      {
-        field: 'fieldOfView',
-        edit: (v) => ({ ...v, fieldOfView: 45 }),
-        value: (v) => v.fieldOfView,
-      },
-      {
-        field: 'upDirection',
-        edit: (v) => ({ ...v, upDirection: 'y' }),
-        value: (v) => v.upDirection,
-      },
-      {
-        field: 'grid.unit',
-        edit: (v) => ({ ...v, grid: { unit: 'in' } }),
-        value: (v) => v.grid.unit,
-      },
-      {
-        field: 'section',
-        edit: (v) => ({ ...v, section: { active: true, cuts: [] } }),
-        value: (v) => v.section,
-      },
+      { field: 'entryPath', edit: (v) => ({ ...v, entryPath: 'person.ts' }), value: (v) => v.entryPath },
+      { field: 'name', edit: (v) => ({ ...v, name: 'Person' }), value: (v) => v.name },
+      { field: 'camera', edit: (v) => ({ ...v, camera: { kind: 'preset', preset: 'front' } }), value: (v) => v.camera },
+      { field: 'fieldOfView', edit: (v) => ({ ...v, fieldOfView: 45 }), value: (v) => v.fieldOfView },
+      { field: 'upDirection', edit: (v) => ({ ...v, upDirection: 'y' }), value: (v) => v.upDirection },
+      { field: 'grid.unit', edit: (v) => ({ ...v, grid: { unit: 'in' } }), value: (v) => v.grid.unit },
+      { field: 'section', edit: (v) => ({ ...v, section: { active: true, cuts: [] } }), value: (v) => v.section },
       {
         field: 'measurements',
         edit: (v) => ({
           ...v,
-          measurements: [
-            {
-              id: 'm1',
-              frameId: 'f',
-              startPoint: [0, 0, 0],
-              endPoint: [1, 0, 0],
-              distance: 1,
-            },
-          ],
+          measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
         }),
         value: (v) => v.measurements,
       },
       ...(['surfaces', 'lines', 'gizmo', 'grid', 'axes', 'matcap', 'postProcessing'] as const).map((field) => ({
         field: `display.${field}`,
-        edit: (v: WorkbenchView) => ({
-          ...v,
-          display: { ...v.display, [field]: !v.display[field] },
-        }),
+        edit: (v: WorkbenchView) => ({ ...v, display: { ...v.display, [field]: !v.display[field] } }),
         value: (v: WorkbenchView) => v.display[field],
       })),
     ];
@@ -559,10 +946,7 @@ describe('workbench view checked store', () => {
         a: (v) => ({ ...v, section: { active: true, cuts: [] } }),
         b: (v) => ({
           ...v,
-          section: {
-            active: false,
-            cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }],
-          },
+          section: { active: false, cuts: [{ kind: 'plane', plane: 'xy', offset: 2, isFlipped: false }] },
         }),
         value: (v) => v.section,
       },
@@ -570,27 +954,11 @@ describe('workbench view checked store', () => {
         field: 'measurements',
         a: (v) => ({
           ...v,
-          measurements: [
-            {
-              id: 'm1',
-              frameId: 'f',
-              startPoint: [0, 0, 0],
-              endPoint: [1, 0, 0],
-              distance: 1,
-            },
-          ],
+          measurements: [{ id: 'm1', frameId: 'f', startPoint: [0, 0, 0], endPoint: [1, 0, 0], distance: 1 }],
         }),
         b: (v) => ({
           ...v,
-          measurements: [
-            {
-              id: 'm2',
-              frameId: 'f',
-              startPoint: [0, 0, 0],
-              endPoint: [0, 1, 0],
-              distance: 1,
-            },
-          ],
+          measurements: [{ id: 'm2', frameId: 'f', startPoint: [0, 0, 0], endPoint: [0, 1, 0], distance: 1 }],
         }),
         value: (v) => v.measurements,
       },
@@ -694,11 +1062,7 @@ describe('workbench view checked store', () => {
       });
       await store.read();
       const first = store.edit({ ...seed(), grid: { unit: 'in' } });
-      const second = store.edit({
-        ...seed(),
-        grid: { unit: 'in' },
-        name: 'Front',
-      });
+      const second = store.edit({ ...seed(), grid: { unit: 'in' }, name: 'Front' });
       expect(data.writes).not.toHaveBeenCalled();
       expect(await store.flush()).toBe(true);
       expect(await Promise.all([first, second])).toEqual([true, true]);

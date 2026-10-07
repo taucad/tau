@@ -133,6 +133,15 @@
       "fixedBy": "W6"
     },
     {
+      "id": "B14G",
+      "bound": "Geometry-runner port request to main (10 s)",
+      "site": "apps/desktop/src/tau/services-host.ts",
+      "token": "geometryPortTimeout",
+      "class": "Peer",
+      "owner": "desktop geometry broker",
+      "fixedBy": "outside this charter: desktop geometry broker owner"
+    },
+    {
       "id": "B15",
       "bound": "Agent-host configuration from main",
       "site": "apps/desktop/src/tau/services-host.impl.ts",
@@ -140,6 +149,15 @@
       "class": "Peer",
       "owner": "W6",
       "fixedBy": "W6"
+    },
+    {
+      "id": "B18",
+      "bound": "Geometry-runner port request to main (10 s)",
+      "site": "apps/desktop/src/tau/services-host.ts",
+      "token": "geometryPortTimeout",
+      "class": "Peer",
+      "owner": "GM",
+      "fixedBy": "outside this charter: desktop geometry-runner port ceremony"
     },
     {
       "id": "C1",
@@ -600,6 +618,38 @@
       "owner": "W9"
     },
     {
+      "id": "D21",
+      "bound": "GeoSpec candidate fetch remote transport abort after 15 s; local consent and filesystem work is not globally timed",
+      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
+      "token": "candidateFetchTimeout = setTimeout",
+      "class": "External edge",
+      "owner": "GM"
+    },
+    {
+      "id": "D22",
+      "bound": "GeoSpec candidate publish remote transport abort after 15 s; local consent and filesystem work is not globally timed",
+      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
+      "token": "candidatePublishTimeout = setTimeout",
+      "class": "External edge",
+      "owner": "GM"
+    },
+    {
+      "id": "D23",
+      "bound": "TUI start admission: 20 s ceiling on retries of answered, not-applied settling refusals; unanswered execute remains channel-owned",
+      "site": "packages/cli/src/tui/app.ts",
+      "token": "// Start settling retry ceiling",
+      "class": "Backoff",
+      "owner": "W4"
+    },
+    {
+      "id": "D24",
+      "bound": "TUI approval admission: 20 s ceiling on retries of answered, not-applied settling refusals; unanswered execute remains channel-owned",
+      "site": "packages/cli/src/tui/app.ts",
+      "token": "// Approval settling retry ceiling",
+      "class": "Backoff",
+      "owner": "W4"
+    },
+    {
       "id": "A14",
       "bound": "Restore's own cut, before and after the tree is applied (30 s, restoreCutMilliseconds; geospec D15). The cut is answered by its request id, so this waits on a peer that always answers",
       "site": "packages/revisions/src/restore.machine.ts",
@@ -720,6 +770,22 @@
       "token": "server.dispose(reason.message)",
       "class": "Debounce",
       "owner": "machines"
+    },
+    {
+      "id": "N3",
+      "bound": "Not a timer: the RevisionClock host-clock interface declares setTimeout without scheduling it",
+      "site": "packages/revisions/src/revision-effects.types.ts",
+      "token": "setTimeout(callback:",
+      "class": "None",
+      "owner": "revisions host clock"
+    },
+    {
+      "id": "E21",
+      "bound": "Agent usage telemetry: drop a turn that never settles after 6 h, unreported",
+      "site": "apps/ui/app/chat-clients/_internal/agent-usage-telemetry.ts",
+      "token": "abandonAfter",
+      "class": "External edge (backstop)",
+      "owner": "W36"
     }
   ]
 }

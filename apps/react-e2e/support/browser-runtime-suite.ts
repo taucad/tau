@@ -54,9 +54,12 @@ export const openBrowserRuntime = async (): Promise<void> => {
 const readGeometryNumber = async (label: string): Promise<number> => {
   const state = await readTarget(selectors.getByLabelText(label));
   const { text } = state;
+  if (state.count !== 1 || text === null || text.trim() === '') {
+    throw new TypeError(`${label} did not contain a geometry measurement.`);
+  }
   const value = Number(text);
   if (!Number.isFinite(value)) {
-    throw new TypeError(`${label} did not contain a finite number: ${text ?? '<missing>'}`);
+    throw new TypeError(`${label} did not contain a finite number: ${text}`);
   }
   return value;
 };
@@ -72,11 +75,12 @@ const readPublishedGeometry = async (): Promise<GeometrySummary> => {
           const { text: message } = errorState;
           throw new Error(message ?? 'Runtime fixture entered error state without an error message');
         }
-        return status;
+        const artifactState = await readTarget(selectors.getByLabelText('Artifact status'));
+        return status === 'ready' && artifactState.text === 'current';
       },
       { timeout: runtimeTimeout },
     )
-    .toBe('ready');
+    .toBe(true);
 
   return {
     meshes: await readGeometryNumber('Geometry mesh count'),

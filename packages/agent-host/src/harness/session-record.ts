@@ -18,7 +18,7 @@ import type {
 import { normalizeToolInput, tauToolKinds, toPiToolContent } from '#harness/tools.js';
 import type { HostToolExecutionDetails } from '#harness/tools.js';
 
-type WithoutBase<Event> = Event extends LogEventBase ? Omit<Event, keyof LogEventBase> : never;
+type WithoutBase<Event> = Event extends LogEventBase ? Omit<Event, Exclude<keyof LogEventBase, 'attempt'>> : never;
 
 /**
  * Tau's own facts about one of its dispatched calls, in the shared vocabulary.

@@ -1,0 +1,377 @@
+{
+  "source": "/**\n * A SOIC-8 controller sinking a resistor-limited LED on pin 1, with a pull-down\n * input on pin 2 and explicit VCC/GND traces on a 30 mm × 20 mm board. Every\n * footprint comes from the built-in footprinter, so the board renders offline.\n */\n// oxlint-disable-next-line typescript/explicit-module-boundary-types -- The board element type comes from the kernel's injected React runtime, not this workspace.\nexport default function LedBoard() {\n  return (\n    <board width='30mm' height='20mm'>\n      <resistor name='R1' resistance='1k' footprint='0402' pcbX={-8} pcbY={4} />\n      <resistor\n        name='R2'\n        resistance='10k'\n        footprint='0402'\n        pcbX={-8}\n        pcbY={-4}\n      />\n      <led name='LED1' footprint='0603' pcbX={0} pcbY={6} />\n      <chip\n        name='U1'\n        footprint='soic8'\n        pcbX={6}\n        pcbY={0}\n        pinAttributes={{\n          pin8: { requiresPower: true },\n          pin4: { requiresGround: true },\n        }}\n      />\n      <net name='VCC' />\n      <net name='GND' />\n      <trace name='R1_VCC' from='.R1 > .pin1' to='net.VCC' />\n      <trace name='U1_VCC' from='.U1 > .pin8' to='net.VCC' />\n      <trace name='R2_GND' from='.R2 > .pin2' to='net.GND' />\n      <trace name='U1_GND' from='.U1 > .pin4' to='net.GND' />\n      <trace name='R1_LED1' from='.R1 > .pin2' to='.LED1 > .anode' />\n      <trace name='LED1_U1' from='.LED1 > .cathode' to='.U1 > .pin1' />\n    </board>\n  );\n}\n",
+  "evaluation": {
+    "success": true,
+    "id": "1",
+    "transient": false,
+    "views": [
+      {
+        "id": "board",
+        "title": "3D board",
+        "mimeType": "model/gltf-binary"
+      },
+      {
+        "id": "schematic",
+        "title": "Schematic",
+        "mimeType": "image/svg+xml",
+        "instances": []
+      },
+      {
+        "id": "pcb",
+        "title": "PCB",
+        "mimeType": "image/svg+xml",
+        "options": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "pinNumbers": {
+                "title": "Pin numbers",
+                "type": "boolean"
+              }
+            }
+          },
+          "defaults": {}
+        }
+      }
+    ],
+    "exports": [
+      {
+        "id": "board",
+        "title": "3D board (glTF)",
+        "mimeType": "model/gltf-binary",
+        "extension": "glb",
+        "options": {
+          "schema": {
+            "type": "object",
+            "properties": {
+              "coordinateSystem": {
+                "default": "y-up",
+                "description": "Output coordinate system convention",
+                "type": "string",
+                "enum": ["y-up", "z-up"]
+              },
+              "unit": {
+                "default": {
+                  "length": "meter"
+                },
+                "description": "Output unit convention",
+                "type": "object",
+                "properties": {
+                  "length": {
+                    "default": "meter",
+                    "description": "Output length unit for geometry coordinates",
+                    "type": "string",
+                    "enum": ["meter", "millimeter"]
+                  }
+                }
+              }
+            }
+          },
+          "defaults": {
+            "coordinateSystem": "y-up",
+            "unit": {
+              "length": "meter"
+            }
+          }
+        }
+      },
+      {
+        "id": "bom",
+        "title": "Bill of materials",
+        "mimeType": "text/csv",
+        "extension": "csv",
+        "options": {
+          "schema": {
+            "type": "object",
+            "properties": {}
+          },
+          "defaults": {}
+        }
+      },
+      {
+        "id": "netlist",
+        "title": "Netlist",
+        "mimeType": "text/plain",
+        "extension": "txt",
+        "options": {
+          "schema": {
+            "type": "object",
+            "properties": {}
+          },
+          "defaults": {}
+        }
+      },
+      {
+        "id": "circuit",
+        "title": "Circuit JSON",
+        "mimeType": "application/json",
+        "extension": "json",
+        "options": {
+          "schema": {
+            "type": "object",
+            "properties": {}
+          },
+          "defaults": {}
+        }
+      }
+    ],
+    "issues": [
+      {
+        "code": "RUNTIME",
+        "message": "Port pin1 on R2 is missing a trace",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "source_pin_missing_trace_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "No <schematicsheet> was found. Add a <schematicsheet> to define the schematic drawing area.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "R1 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "R2 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "LED1 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      }
+    ],
+    "sourceRevision": {
+      "entry": "main.tsx",
+      "files": {
+        "main.tsx": "sha256:63d0108d3ec133dc0104a4760c5c4388d001275fbe94c0578e3ff4ef63598601"
+      }
+    },
+    "documentId": "59855a82-a794-47f9-b701-d76a14264e82",
+    "intent": 0
+  },
+  "rendering": {
+    "view": "board",
+    "mimeType": "model/gltf-binary",
+    "sourceRevision": {
+      "entry": "main.tsx",
+      "files": {
+        "main.tsx": "sha256:63d0108d3ec133dc0104a4760c5c4388d001275fbe94c0578e3ff4ef63598601"
+      }
+    },
+    "issues": [
+      {
+        "code": "RUNTIME",
+        "message": "Port pin1 on R2 is missing a trace",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "source_pin_missing_trace_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "No <schematicsheet> was found. Add a <schematicsheet> to define the schematic drawing area.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "R1 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "R2 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "LED1 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      }
+    ]
+  },
+  "bom": {
+    "exportId": "bom",
+    "sourceRevision": {
+      "entry": "main.tsx",
+      "files": {
+        "main.tsx": "sha256:63d0108d3ec133dc0104a4760c5c4388d001275fbe94c0578e3ff4ef63598601"
+      }
+    },
+    "issues": [
+      {
+        "code": "RUNTIME",
+        "message": "Port pin1 on R2 is missing a trace",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "source_pin_missing_trace_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "No <schematicsheet> was found. Add a <schematicsheet> to define the schematic drawing area.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "R1 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "R2 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "LED1 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      }
+    ],
+    "files": [
+      {
+        "name": "bom.csv",
+        "mimeType": "text/csv",
+        "text": "\"Designator\",\"Comment\",\"Value\",\"Footprint\"\r\n\"R1\",\"1k\",\"1k\",\"res0402\"\r\n\"R2\",\"10k\",\"10k\",\"res0402\"\r\n\"LED1\",\"\",\"\",\"0603\"\r\n\"U1\",\"\",\"\",\"soic8\""
+      }
+    ]
+  },
+  "netlist": {
+    "exportId": "netlist",
+    "sourceRevision": {
+      "entry": "main.tsx",
+      "files": {
+        "main.tsx": "sha256:63d0108d3ec133dc0104a4760c5c4388d001275fbe94c0578e3ff4ef63598601"
+      }
+    },
+    "issues": [
+      {
+        "code": "RUNTIME",
+        "message": "Port pin1 on R2 is missing a trace",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "source_pin_missing_trace_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "No <schematicsheet> was found. Add a <schematicsheet> to define the schematic drawing area.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "R1 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "R2 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      },
+      {
+        "code": "RUNTIME",
+        "message": "LED1 is missing schematic reference designator text. For a custom symbol, add name=\"{REFDES}\" inside the symbol.",
+        "severity": "warning",
+        "details": {
+          "producer": "tscircuit",
+          "elementType": "schematic_component_styling_warning"
+        },
+        "type": "runtime"
+      }
+    ],
+    "files": [
+      {
+        "name": "netlist.txt",
+        "mimeType": "text/plain",
+        "text": "COMPONENTS:\n - R1: 1kΩ res0402 resistor\n - R2: 10kΩ res0402 resistor\n - LED1: LED1, source_component\n - U1: soic8\n\nNET: VCC\n  - U1 pin8\n  - R1 pin1\n\nNET: GND\n  - U1 pin4\n  - R2 pin2\n\nNET: LED1_pos\n  - R1 pin2\n  - LED1 pin1 (+)\n\nNET: LED1_neg\n  - LED1 pin2 (-)\n  - U1 pin1\n\n\nCOMPONENT_PINS:\nR1 (1kΩ res0402)\n- pin1(anode, pos, left): NETS(VCC)\n- pin2(cathode, neg, right): NETS(LED1_pos)\n\nR2 (10kΩ res0402)\n- pin1(anode, pos, left): NOT_CONNECTED\n- pin2(cathode, neg, right): NETS(GND)\n\nLED1\n- pin1(anode, pos, left): NETS(LED1_pos)\n- pin2(cathode, neg, right): NETS(LED1_neg)\n\nU1\n- pin1: NETS(LED1_neg)\n- pin2: NOT_CONNECTED\n- pin3: NOT_CONNECTED\n- pin4: NETS(GND)\n- pin5: NOT_CONNECTED\n- pin6: NOT_CONNECTED\n- pin7: NOT_CONNECTED\n- pin8: NETS(VCC)\n"
+      }
+    ]
+  }
+}

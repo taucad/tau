@@ -1,4 +1,8 @@
-import type { Mesh, Material, Object3D, Texture } from 'three';
+import {
+  qualifyGltfSurfaceMaterial,
+  gltfSurfacePresentationTag,
+} from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
+import type { Mesh, Material, Object3D, Texture, Color } from 'three';
 import { DoubleSide, MeshMatcapMaterial } from 'three';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { MeshMatcapNodeMaterial } from 'three/webgpu';
@@ -16,13 +20,14 @@ function disposeMaterials(material: Material | Material[]): void {
   }
 }
 
-type MaterialWithColor = Material & { color: { getHexString(): string } };
+type MaterialWithColor = Material & { color: Color };
+const matcapBaseColors = new WeakMap<Material, Color>();
 
 type SourceMaterialRenderState = Readonly<{
   opacity: number;
   transparent: boolean;
   depthWrite: boolean;
-  colorHexString?: string;
+  color?: Color;
 }>;
 
 function createMeshMatcapReplacement(
@@ -66,7 +71,7 @@ function resolveSourceMaterialRenderState(material: Material | Material[]): Sour
     opacity,
     transparent: materials.some((sourceMaterial) => sourceMaterial.transparent || sourceMaterial.opacity < 1),
     depthWrite: materials.every((sourceMaterial) => sourceMaterial.depthWrite),
-    ...(colorMaterial ? { colorHexString: colorMaterial.color.getHexString() } : {}),
+    ...(colorMaterial ? { color: colorMaterial.color.clone() } : {}),
   };
 }
 
@@ -94,7 +99,23 @@ function applyMatcapMaterialToMesh({
   readonly tint: number;
   readonly backend: ResolvedGraphicsBackend;
 }): MeshMatcapMaterial | MeshMatcapNodeMaterial {
+  const current = mesh.material;
+  if (
+    !Array.isArray(current) &&
+    matcapBaseColors.has(current) &&
+    ((backend === 'webgl' && current instanceof MeshMatcapMaterial) ||
+      (backend === 'webgpu' && current instanceof MeshMatcapNodeMaterial))
+  ) {
+    current.color.copy(matcapBaseColors.get(current)!).multiplyScalar(tint);
+    return current;
+  }
   const meshMatcap = createMeshMatcapReplacement(backend, matcapTexture);
+  qualifyGltfSurfaceMaterial(meshMatcap);
+  const [source] = getSourceMaterials(mesh.material);
+  if (source) {
+    meshMatcap.name = source.name;
+    meshMatcap.userData = structuredClone(source.userData);
+  }
   const sourceRenderState = resolveSourceMaterialRenderState(mesh.material);
 
   // The section clip carries over to the replacement.
@@ -106,13 +127,14 @@ function applyMatcapMaterialToMesh({
   const hasVertexColors = Boolean(mesh.geometry.attributes['color'] ?? mesh.geometry.attributes['COLOR_0']);
   if (hasVertexColors) {
     meshMatcap.vertexColors = true;
-  } else if (sourceRenderState.colorHexString) {
-    meshMatcap.color.set(`#${sourceRenderState.colorHexString}`);
+  } else if (sourceRenderState.color) {
+    meshMatcap.color.copy(sourceRenderState.color);
   }
 
   applySourceMaterialRenderStateToMatcap(meshMatcap, sourceRenderState);
 
-  if (tint < 1) {
+  matcapBaseColors.set(meshMatcap, meshMatcap.color.clone());
+  if (tint !== 1) {
     meshMatcap.color.multiplyScalar(tint);
   }
 
@@ -140,7 +162,7 @@ export const applyMatcap = async (
   gltf.scene.traverse((child) => {
     // Skip fat-line meshes (`LineSegments2`) — WebGL + WebGPU both use `.type === 'LineSegments2'`.
     // They extend Mesh but use fat-line materials; matcap breaks edge rendering.
-    if ('type' in child && child.type === 'LineSegments2') {
+    if (Boolean(child.userData[gltfSurfacePresentationTag]) || ('type' in child && child.type === 'LineSegments2')) {
       return;
     }
 
@@ -149,7 +171,9 @@ export const applyMatcap = async (
       const meshMatcap = applyMatcapMaterialToMesh({ mesh, matcapTexture, tint, backend });
 
       // Dispose the old material(s) before replacing to prevent GPU memory leaks
-      disposeMaterials(mesh.material);
+      if (mesh.material !== meshMatcap) {
+        disposeMaterials(mesh.material);
+      }
 
       mesh.material = meshMatcap;
     }

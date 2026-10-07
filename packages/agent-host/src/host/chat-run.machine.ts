@@ -24,7 +24,7 @@ import { setup, types } from 'xstate';
 import { chatRunState, executionRefusal, reopens } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody, RunEntry } from '#log/chat-ledger.js';
 import type { JsonValue, RunFailureDetail, TurnPlacement } from '#log/event-types.js';
-import { isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
+import { isResumableRun } from '#log/resumable.js';
 import { chatRunCommandSchemas } from '#host/chat-run-events.js';
 import type {
   ApprovalRequest,
@@ -423,14 +423,19 @@ const orphanRows = (ledger: ChatLedger): readonly ChatRunRow[] => {
   if (runId === undefined || entry === undefined) {
     return [];
   }
-  /* An agent that waited on a person when its host died: the request is resolved with the code, never left open
-   * (L4 D-112), whether or not the run had reached its `paused` row. */
+  /* An agent that waited on a person when its host died: the request is resolved, never left open (L4 D-112),
+   * whether or not the run had reached its `paused` row. The agent's process died with the host, but its session
+   * survives, so the run is abandoned resumably: Resume reattaches the session and the agent asks again. */
   if (entry.kind === 'external' && (entry.lifecycle === 'paused' || Object.keys(entry.pendingInterrupts).length > 0)) {
-    const code = 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' satisfies RefusalCode;
+    const code = 'RUN_ABANDONED' satisfies RefusalCode;
     return [
       ...cancelPending(ledger, runId, code),
       lifecycle('failed', {
-        detail: { code, message: 'The host restarted while the agent waited on you; its session cannot be recovered.' },
+        detail: {
+          code,
+          message: 'Tau closed while the agent waited for your approval. Resume the turn and the agent asks again.',
+          details: { cause: 'awaiting-approval' },
+        },
         executed: true,
       }),
     ].map((body) => ({ runId, body }));
@@ -563,7 +568,7 @@ const resumable = (entry: RunEntry | undefined): boolean => {
   if (entry.lifecycle === 'paused') {
     return entry.kind === 'tau' && Object.keys(entry.pendingInterrupts).length === 0;
   }
-  if (!isUserStoppedRun(entry) && (entry.lifecycle !== 'failed' || !isResumableRunFailure(entry.failure))) {
+  if (!isResumableRun(entry)) {
     return false;
   }
   return entry.appendState !== 'settled' || reopens(entry, { state: 'running' });
@@ -1202,11 +1207,12 @@ export const chatRunMachine = setup({
                 key: next.key,
                 rows: [
                   ...cancelPending(context.ledger, runId),
-                  lifecycle('cancelled', {
-                    ...(context.ledger.runs[runId]?.committed
+                  lifecycle(
+                    'cancelled',
+                    context.ledger.runs[runId]?.committed
                       ? { detail: { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' } }
-                      : {}),
-                  }),
+                      : {},
+                  ),
                 ].map((body) => ({
                   runId,
                   body,

@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/geospec-engine",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"],
+  "tags": ["scope:shared", "type:package", "host:darwin-arm64"],
   "targets": {
     "performance-gate": {
       "command": "vitest run src/runner/node/compiled-module-fanout.bench.test.ts",
@@ -28,7 +28,7 @@
       "cache": false
     },
     "pkgcheck": {
-      "dependsOn": ["generate-provenance", "^build"]
+      "dependsOn": ["generate-provenance", "^build", "pkgcheck-deps"]
     },
     "e2e": {
       "executor": "nx:run-commands",

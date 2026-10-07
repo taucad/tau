@@ -17,6 +17,7 @@ import {
   viewDisplaySchema,
   viewGridSchema,
   workbenchLayoutSchema,
+  workbenchEntriesSchema,
   workbenchPaths,
   workbenchRecords,
   workbenchViewSchema,
@@ -198,6 +199,69 @@ describe('approved record grammar', () => {
         panes: {},
       }).success,
     ).toBe(true);
+  });
+
+  it('round-trips each kernel view choice without changing the selected id', () => {
+    const serialized = workbenchRecords.view.serialize({
+      version: 1,
+      entryPath: 'board.tsx',
+      selectedKernelView: 'schematic',
+      kernelViews: [
+        {
+          id: 'schematic',
+          options: { page: 'power', pins: true, scale: 1.5 },
+          authoredInstance: 'sheet:power',
+          camera: { kind: 'preset', preset: 'front' },
+        },
+        { id: 'pcb', options: { layers: ['front', 'back'] } },
+      ],
+    });
+    const result = workbenchRecords.view.read(bytes(serialized));
+    expect(result.status).toBe('current');
+    if (result.status === 'current') {
+      expect(result.record.selectedKernelView).toBe('schematic');
+      expect(result.record.kernelViews).toEqual([
+        {
+          id: 'schematic',
+          options: { page: 'power', pins: true, scale: 1.5 },
+          authoredInstance: 'sheet:power',
+          camera: { kind: 'preset', preset: 'front' },
+        },
+        { id: 'pcb', options: { layers: ['front', 'back'] } },
+      ]);
+    }
+  });
+
+  it('refuses ambiguous duplicate per-view state and non-JSON options', () => {
+    expect(
+      workbenchViewSchema.safeParse({
+        version: 1,
+        entryPath: 'board.tsx',
+        kernelViews: [{ id: 'pcb' }, { id: 'pcb' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      workbenchViewSchema.safeParse({
+        version: 1,
+        entryPath: 'board.tsx',
+        kernelViews: [{ id: 'pcb', options: { invalid: () => undefined } }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('should keep renderTimeout canonical in workbench entry bytes', () => {
+    const canonical = bytes(JSON.stringify({ version: 1, entries: { 'main.ts': { renderTimeout: 15_000 } } }));
+    const read = workbenchRecords.entries.read(canonical);
+    expect(read.status).toBe('current');
+    if (read.status === 'current') {
+      expect(read.record.entries['main.ts']).toEqual({ renderTimeout: 15_000 });
+      const written = workbenchRecords.entries.serialize(read.record);
+      expect(written).toContain('"renderTimeout": 15000');
+      expect(written).not.toContain('operationTimeout');
+    }
+    expect(
+      workbenchEntriesSchema.safeParse({ version: 1, entries: { 'main.ts': { operationTimeout: 15_000 } } }).success,
+    ).toBe(false);
   });
 
   it('refuses unsafe paths, unknown pane, wrong lane, duplicate tabs and zero look', () => {

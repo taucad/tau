@@ -10,7 +10,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -479,6 +479,147 @@ for (const row of ports) {
 
       expect(replay.status).toBe('replayed');
       await expect.poll(async () => held.leaseIds(), { timeout: 5000 }).toEqual([]);
+    }, 30_000);
+
+    it('should compare exact raw bytes over the host channel without hiding read failures', async () => {
+      let unavailableHead: string | undefined;
+      const held = await harness(row.create, {
+        wrapPort: (port) => ({
+          ...port,
+          readTree: async (id) => (id === unavailableHead ? undefined : port.readTree(id)),
+        }),
+      });
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      const settlement = await held.settlementFor('run-1');
+      if (settlement.revisionId === undefined) {
+        throw new Error('The fixture turn did not record a revision.');
+      }
+      const original = new TextEncoder().encode('export const size = 2;\n');
+      const parentComparison = await held.revisions.channel.request({
+        command: 'compare',
+        revisionId: settlement.revisionId,
+        path: 'main.ts',
+      });
+      expect(parentComparison.result).toMatchObject({
+        original: 'export const size = 1;\n',
+        modified: 'export const size = 2;\n',
+        change: 'modified',
+        kind: 'text',
+      });
+      await expect(
+        held.revisions.channel.request({ command: 'diff', revisionId: settlement.revisionId, against: 'saved' }),
+      ).rejects.toMatchObject({ code: 'INVALID_REVISION_REQUEST' });
+      await expect(
+        held.revisions.channel.request({
+          command: 'compare',
+          revisionId: settlement.revisionId,
+          path: 'main.ts',
+          against: 12,
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_REVISION_REQUEST' });
+      const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...original]);
+      await writeFile(join(held.workspaceRoot, 'main.ts'), bom);
+      const request = { command: 'compare', revisionId: settlement.revisionId, path: 'main.ts', against: 'checkout' };
+      const comparison = await held.revisions.channel.request(request);
+      expect(comparison.result).toEqual({
+        original: 'export const size = 2;\n',
+        modified: 'export const size = 2;\n',
+        kind: 'text',
+        change: 'modified',
+        notices: ['encoding'],
+      });
+      const staged = '.main.ts.tau-staged.00000000-0000-0000-0000-000000000001.tmp';
+      const backup = '.main.ts.tau-backup.00000000-0000-0000-0000-000000000001.tmp';
+      await writeFile(join(held.workspaceRoot, staged), 'staging');
+      await writeFile(join(held.workspaceRoot, backup), 'backup');
+      await writeFile(join(held.workspaceRoot, 'new.ts'), 'export {};');
+      const live = await held.revisions.channel.request({
+        command: 'diff',
+        revisionId: settlement.revisionId,
+        against: 'checkout',
+      });
+      expect(live.result).not.toEqual(expect.arrayContaining([{ path: staged, kind: 'added' }]));
+      expect(live.result).not.toEqual(expect.arrayContaining([{ path: backup, kind: 'added' }]));
+      expect(live.result).toEqual(
+        expect.arrayContaining([
+          { path: 'new.ts', kind: 'added' },
+          { path: 'main.ts', kind: 'modified' },
+        ]),
+      );
+      await writeFile(join(held.workspaceRoot, 'main.ts'), original);
+      const reverted = await held.revisions.channel.request({
+        command: 'diff',
+        revisionId: settlement.revisionId,
+        against: 'checkout',
+      });
+      expect(reverted.result).not.toEqual(expect.arrayContaining([{ path: 'main.ts', kind: 'modified' }]));
+      await unlink(join(held.workspaceRoot, 'main.ts'));
+      const compared1 = await held.revisions.channel.request(request);
+      expect(compared1.result).toMatchObject({ change: 'deleted', modified: '' });
+      await mkdir(join(held.workspaceRoot, 'main.ts'));
+      await writeFile(join(held.workspaceRoot, 'main.ts', 'child.ts'), 'export {};');
+      const directoryPaths = await held.revisions.channel.request({
+        command: 'diff',
+        revisionId: settlement.revisionId,
+        against: 'checkout',
+      });
+      expect(directoryPaths.result).toEqual(
+        expect.arrayContaining([
+          { path: 'main.ts', kind: 'deleted' },
+          { path: 'main.ts/child.ts', kind: 'added' },
+        ]),
+      );
+      const directoryComparison = await held.revisions.channel.request(request);
+      expect(directoryComparison.result).toMatchObject({
+        change: 'deleted',
+        original: 'export const size = 2;\n',
+        modified: '',
+      });
+      await rm(join(held.workspaceRoot, 'main.ts'), { recursive: true });
+      await writeFile(join(held.workspaceRoot, 'main.ts'), new Uint8Array());
+      const compared2 = await held.revisions.channel.request(request);
+      expect(compared2.result).toMatchObject({
+        change: 'modified',
+        modified: '',
+      });
+      await writeFile(join(held.workspaceRoot, 'empty.ts'), new Uint8Array());
+      const compared3 = await held.revisions.channel.request({ ...request, path: 'empty.ts' });
+      expect(compared3.result).toMatchObject({
+        change: 'added',
+        notices: ['empty-added'],
+      });
+      await writeFile(join(held.workspaceRoot, 'main.ts'), original);
+      await chmod(join(held.workspaceRoot, 'main.ts'), 0o755);
+      const compared4 = await held.revisions.channel.request(request);
+      expect(compared4.result).toMatchObject({ notices: ['executable-added'] });
+      await writeFile(join(held.workspaceRoot, 'main.ts'), new Uint8Array([0x80]));
+      const compared5 = await held.revisions.channel.request(request);
+      expect(compared5.result).toMatchObject({ kind: 'unsupported' });
+      const [, older] = await held.revisions.history.log();
+      unavailableHead = settlement.revisionId;
+      await expect(held.revisions.channel.request({ ...request, revisionId: older!.revisionId })).rejects.toThrow(
+        'checkout head',
+      );
+      await expect(
+        held.revisions.channel.request({ command: 'diff', revisionId: older!.revisionId, against: 'checkout' }),
+      ).rejects.toThrow('checkout head');
+      unavailableHead = undefined;
+      await expect(held.revisions.channel.request({ ...request, revisionId: 'unknown-revision' })).rejects.toThrow();
+      await expect(
+        held.revisions.channel.request({ command: 'compare', revisionId: 'unknown-revision', path: 'main.ts' }),
+      ).rejects.toThrow();
+      const failure = new Error('Device read failed');
+      const providerRead = NodeFsProvider.prototype.readFile;
+      const read = vi
+        .spyOn(NodeFsProvider.prototype, 'readFile')
+        .mockImplementation(async function (this: NodeFsProvider, path, options) {
+          if (path === 'main.ts') {
+            throw failure;
+          }
+          return providerRead.call(this, path, options);
+        });
+      await expect(held.revisions.channel.request(request)).rejects.toBe(failure);
+      read.mockRestore();
     }, 30_000);
 
     it('serves the same revision graph and branch verbs over the host channel', async () => {

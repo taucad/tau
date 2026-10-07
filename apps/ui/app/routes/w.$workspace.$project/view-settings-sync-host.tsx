@@ -1,11 +1,18 @@
+/* oxlint-disable typescript/no-restricted-types -- Refused record bytes may be absent (null), as the store reports them. */
+import { useObservation } from '@taucad/fs-client/react/use-observation';
+import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useSelector } from '@xstate/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 import type { ViewRecordPatch } from '#workbench-records/view-store.js';
+import { confirmFlush } from '#workbench-records/record-health.js';
+import type { RecordHealth } from '#workbench-records/record-health.js';
+import { recordIssueState, usePublishRecordIssue } from '#workbench-records/record-issues.js';
+import type { RecordIssue } from '#workbench-records/record-issues.js';
 import { digestBytes } from '#utils/crypto.utils.js';
 import type { ActorRefFrom } from 'xstate';
 import { useProject } from '#hooks/use-project.js';
@@ -53,7 +60,7 @@ function ViewSettingsSyncEntry({
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly projectRef: ActorRefFrom<typeof projectMachine>;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
-}): React.JSX.Element {
+}): null {
   /* The editor record is what names a view's entry; the pane only mirrors it. */
   const {
     projectId,
@@ -64,66 +71,84 @@ function ViewSettingsSyncEntry({
     registerWorkbenchRecordProducer,
     setAppliedWorkbenchRevision,
   } = useProject();
-  const { parameterFiles, subscribeWorkbenchRecord } = useFileManager();
+  const { parameterFiles, watchRecordFile } = useFileManager();
   const root = `/projects/${projectId}`;
-  const [notice, setNotice] = useState<{
-    code: 'INVALID_RECORD' | 'NEWER_RECORD';
-    message: string;
-  }>();
-  const [ioError, setIoError] = useState<string>();
+  const [notice, setNotice] =
+    useState<
+      Readonly<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string; bytes: Uint8Array<ArrayBuffer> | null }>
+    >();
+  const [health, setHealth] = useState<RecordHealth>();
   const [, recordTick] = useState(0);
-  const recordGenerationRef = useRef(0);
   const [localRecordReceipt, setLocalRecordReceipt] = useState<{
     record: WorkbenchView;
     patch: ViewRecordPatch;
   }>();
   const recordPath = workbenchPaths.view(viewId);
-  // oxlint-disable-next-line react/refs -- The store invokes these callbacks after render.
-  const store = useMemo(
-    () =>
-      // oxlint-disable-next-line react/refs -- Store callbacks read generation after render, not during construction.
-      createWorkbenchViewStore({
+  const { store, advanceGeneration, currentGeneration } = useMemo(() => {
+    let generation = 0;
+    return {
+      store: createWorkbenchViewStore({
         root,
         viewId,
         files: parameterFiles,
         editDebounce: 500,
+        onHealth: setHealth,
         onChange: (state, _source, locallyAuthored) => {
-          recordGenerationRef.current++;
+          generation++;
           setLocalRecordReceipt(
             state.record && locallyAuthored ? { record: state.record, patch: locallyAuthored } : undefined,
           );
           setAppliedWorkbenchRevision(recordPath, undefined);
           recordTick((value) => value + 1);
           if (state.refusal) {
-            setNotice(state.refusal);
+            setNotice({ ...state.refusal, bytes: state.bytes });
             return;
           }
           setNotice(undefined);
-          setIoError(undefined);
           if (state.record) {
             setViewRecord(viewId, state.record);
             setViewEntryPath(viewId, state.record.entryPath);
           }
         },
-        onError: (error) => {
-          recordGenerationRef.current++;
+        onError: () => {
+          // The record's health carries the failure to the settings trigger.
+          generation++;
+          setLocalRecordReceipt(undefined);
           setAppliedWorkbenchRevision(recordPath, undefined);
-          setIoError(error instanceof Error ? error.message : 'View record unavailable.');
         },
       }),
-    [parameterFiles, recordPath, root, setAppliedWorkbenchRevision, setViewEntryPath, setViewRecord, viewId],
+      advanceGeneration: () => {
+        generation++;
+      },
+      currentGeneration: () => generation,
+    };
+  }, [parameterFiles, recordPath, root, setAppliedWorkbenchRevision, setViewEntryPath, setViewRecord, viewId]);
+  const observation = useMemo(
+    () =>
+      new ObservationService({
+        resource: `${root}/${workbenchPaths.view(viewId)}`,
+        watch: (invalidate, reset) =>
+          watchRecordFile(`${root}/${workbenchPaths.view(viewId)}`, (event) => {
+            if (event.type === 'reset') {
+              reset();
+            } else {
+              invalidate();
+            }
+          }),
+        invalidate: store.invalidateRead,
+        read: async () => store.read(!store.ready()),
+      }),
+    [root, store, watchRecordFile, viewId],
   );
   useEffect(() => {
-    const unsubscribe = subscribeWorkbenchRecord(workbenchPaths.view(viewId), () => {
-      void store.read();
-    });
-    void store.read(true);
+    // This source's applications belong to its lease; retiring it advances the generation.
+    const lease = observation.acquire();
     return () => {
-      unsubscribe();
-      recordGenerationRef.current++;
+      lease.release();
+      advanceGeneration();
       setAppliedWorkbenchRevision(recordPath, undefined);
     };
-  }, [recordPath, setAppliedWorkbenchRevision, store, subscribeWorkbenchRecord, viewId]);
+  }, [advanceGeneration, observation, recordPath, setAppliedWorkbenchRevision]);
   useEffect(() => {
     storeMounts.set(store, (storeMounts.get(store) ?? 0) + 1);
     return () => {
@@ -137,11 +162,8 @@ function ViewSettingsSyncEntry({
   }, [store]);
   useEffect(() => registerWorkbenchRecordProducer(async () => store.flush()), [registerWorkbenchRecordProducer, store]);
   useFlushOnClose(
-    async () => {
-      if (!(await store.flush())) {
-        throw new Error(`View ${viewId} could not be saved.`);
-      }
-    },
+    async () =>
+      confirmFlush(store.flush, `View settings for ${viewEntryPaths.get(viewId) ?? viewId} are not confirmed saved.`),
     { stage: 'producer' },
   );
   const record = viewRecords.get(viewId);
@@ -152,13 +174,13 @@ function ViewSettingsSyncEntry({
       if (state.record !== applied || !state.bytes || state.refusal) {
         return;
       }
-      const generation = recordGenerationRef.current;
+      const generation = currentGeneration();
       const { bytes } = state;
       async function acknowledgeAppliedBytes(): Promise<void> {
         const digest = await digestBytes(bytes);
         const current = store.snapshot();
         if (
-          generation === recordGenerationRef.current &&
+          generation === currentGeneration() &&
           current.record === applied &&
           current.bytes === bytes &&
           !current.refusal
@@ -168,9 +190,55 @@ function ViewSettingsSyncEntry({
       }
       void acknowledgeAppliedBytes();
     },
-    [recordPath, setAppliedWorkbenchRevision, store],
+    [currentGeneration, recordPath, setAppliedWorkbenchRevision, store],
   );
   const entryPath = record?.entryPath ?? viewEntryPaths.get(viewId);
+  const observed = useObservation(observation);
+  const sourceHealth: RecordHealth | undefined = observed.error
+    ? { ...(health ?? store.health()), read: 'unavailable', error: observed.error }
+    : observed.status === 'pending' || observed.status === 'registering'
+      ? { ...(health ?? store.health()), read: 'retrying' }
+      : health;
+  const issueState = recordIssueState(notice, sourceHealth);
+  const issue = useMemo((): RecordIssue | undefined => {
+    if (!issueState) {
+      return undefined;
+    }
+    return {
+      kind: 'view',
+      path: recordPath,
+      entry: entryPath ?? undefined,
+      state: issueState,
+      message: notice?.message ?? sourceHealth?.error,
+      bytes: notice?.bytes ?? null,
+      writing: health?.writing ?? false,
+      retryRead: async () => {
+        if (observed.error) {
+          observation.refresh();
+          return false;
+        }
+        return store.retryRead();
+      },
+      retrySave: store.flush,
+      reset: async (reviewed) =>
+        store.reset(
+          record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath: entryPath ?? null }),
+          reviewed,
+        ),
+    };
+  }, [
+    entryPath,
+    sourceHealth?.error,
+    health?.writing,
+    issueState,
+    notice,
+    observed.error,
+    observation,
+    record,
+    recordPath,
+    store,
+  ]);
+  usePublishRecordIssue(projectId, recordPath, issue);
   const cadRef = useSelector(projectRef, (state) =>
     entryPath === null || entryPath === undefined ? undefined : state.context.geometryUnits.get(entryPath),
   );
@@ -188,30 +256,5 @@ function ViewSettingsSyncEntry({
     recordReady: store.ready() && store.snapshot().refusal === undefined,
   });
 
-  return (
-    <>
-      {notice ? (
-        <div role='alert'>
-          {notice.message}
-          {notice.code === 'INVALID_RECORD' ? (
-            <button
-              type='button'
-              onClick={() => {
-                const replacement =
-                  record ??
-                  workbenchRecords.view.schema.parse({
-                    version: 1,
-                    entryPath: entryPath ?? null,
-                  });
-                void store.reset(replacement);
-              }}
-            >
-              Reset
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-      {ioError ? <div role='alert'>{ioError}</div> : null}
-    </>
-  );
+  return null;
 }

@@ -614,7 +614,7 @@ describe('Simulated X1C run progression', () => {
   it('should report its loaded spool with a filament profile id', async () => {
     const simulator = createBambuSimulator();
     await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
-      setup: { materials: [{ slot: 0, state: 'loaded', materialId: 'pla', profileId: 'GFA00' }] },
+      setup: { materials: [{ slot: 0, state: 'loaded', materialId: 'PLA', profileId: 'GFA00' }] },
     });
   });
 

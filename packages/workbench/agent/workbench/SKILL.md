@@ -11,7 +11,7 @@ The workbench is files. `.tau/workbench/layout.json` describes the lanes, the vi
 
 - At the end of a task that produced something to look at: a rebuilt part, a new file, a report, a failed test the person should see.
 - When asked to open, compare, review, split, cut open or show something.
-- Never mid-turn to "check your work" (use `screenshot` and `get_kernel_result` for that), never on every small edit, and never to move focus away from what the person is doing.
+- Never mid-turn to "check your work" (use `screenshot` and `evaluate_model` for that), never on every small edit, and never to move focus away from what the person is doing.
 
 Read before you rearrange: the per-turn context lists the lanes, the visible tabs, every view (id, name, file, camera) and every file with settings; `read_file .tau/workbench/layout.json` gives the full trees. Reuse a view that already shows the file you want instead of adding a duplicate.
 
@@ -31,7 +31,7 @@ One rule: each key you send replaces that key; each key you omit keeps what is t
 - `lanes` shows or hides the chat and workbench lanes. You cannot hide a lane the same call opens into.
 - `basedOn` is the `layout.json` digest from the per-turn context. Pass it when your change depends on the arrangement you read; the call is refused with `RECORD_CONFLICT` if the person rearranged since. Views and entries are always written against the bytes just read.
 
-The result is `written` with every record written (path, digest, previous digest; a deleted view has digest `missing`) and the tabs a window will show, or an error: `VALIDATION_ERROR` (a field error naming the path and the fix; nothing was written), `FILE_NOT_FOUND` (a file tab, `entryPath` or `entries[].path` that does not exist), `RECORD_CONFLICT` (read again and retry, or drop `basedOn` to merge), `INVALID_RECORD` (a record on disk is unreadable and the person has been offered Reset; send whole lanes or fix the file, never overwrite it blindly). `written` means the files changed; the person's window shows them live if the project is open, otherwise when it opens, and the card says so. Tell the person in one line what you arranged; never claim they have already seen it.
+The result is `written` with every record written (path, digest, previous digest; a deleted view has digest `missing`) and the tabs a window will show, or an error: `VALIDATION_ERROR` (a field error naming the path and the fix; nothing was written), `FILE_NOT_FOUND` (a file tab, `entryPath` or `entries[].path` that does not exist), `RECORD_CONFLICT` (read again and retry, or drop `basedOn` to merge), `INVALID_RECORD` (a record this call needs is unreadable; the person reviews it from the project's *Settings not applied* action. Send whole lanes or leave it, never rewrite it to work around this; an unreadable `entries.json` refuses only calls that send `entries`). `written` means the files changed; the person's window shows them live if the project is open, otherwise when it opens, and the card says so. Tell the person in one line what you arranged; never claim they have already seen it.
 
 ## Patterns
 

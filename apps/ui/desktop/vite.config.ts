@@ -12,7 +12,7 @@ import { base64Loader } from '@taucad/vite/base64-loader';
  * plugin beats duplicating 40 lines that would then drift.
  */
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- see above.
-import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiSsrOptions } from '../vite.config';
+import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiResolveAlias, uiSsrOptions } from '../vite.config';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
 import { resolveTauCloudBuildEnabled } from '../build-environment';
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- Shared config-load asset gate.
@@ -65,6 +65,7 @@ export default defineConfig({
     // https://vite.dev/config/worker-options.html#worker-plugins
     plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop', tauCloudEnabled })],
   },
+  resolve: { alias: [...uiResolveAlias] },
   ssr: uiSsrOptions,
   server: {
     // 3000 is the web dev server; 3001 keeps both runnable side by side.

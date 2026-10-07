@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { extractPythonApi, resolvePythonExecutable } from '#languages/python/extract-python-api.js';
 import { flattenEntries } from '#model/api-corpus.js';
@@ -33,10 +33,16 @@ describe('resolvePythonExecutable', () => {
 });
 
 describeWithPython('extractPythonApi(build123d)', () => {
-  const corpus: ApiCorpus = extractPythonApi('build123d');
-  const entries = [...flattenEntries(corpus)];
-  const find = (name: string, from: readonly ApiEntry[] = corpus.entries): ApiEntry => {
-    const entry = from.find((candidate) => candidate.name === name);
+  // Extract in a hook: a skipped describe still runs its body, which would throw without the runtime.
+  let corpus: ApiCorpus;
+  let entries: ApiEntry[];
+  // A cold `import build123d` (OCP) on a CI runner outlasts Vitest's 10 s hook default.
+  beforeAll(() => {
+    corpus = extractPythonApi('build123d');
+    entries = [...flattenEntries(corpus)];
+  }, 120_000);
+  const find = (name: string, from?: readonly ApiEntry[]): ApiEntry => {
+    const entry = (from ?? corpus.entries).find((candidate) => candidate.name === name);
     expect(entry, `missing entry ${name}`).toBeDefined();
     return entry!;
   };

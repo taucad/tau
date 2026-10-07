@@ -20,7 +20,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -37,18 +37,19 @@ import type {
   JsonValue,
   RunLifecycleEvent,
 } from '@taucad/agent-host';
-import { externalAgentStopCodes } from '@taucad/agent-host/wire';
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
 import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
 import { tauMcpInstructions } from '@taucad/mcp';
 import { isRecord } from '@taucad/utils/schema';
+import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 
 import { failureError } from '#acp/acp-session.machine.js';
 import type { AcpFailure, AcpTurnResult } from '#acp/acp-session.machine.js';
-import { provideAcpSession } from '#acp/acp-session.js';
+import { provideAcpSession } from '#acp/acp-session-logic.js';
 import { acpSessionsMachine } from '#acp/acp-sessions.machine.js';
 import type { AcpAcquire } from '#acp/acp-sessions.machine.js';
 import { createAcpMediaStore } from '#acp/media.js';
+import type { AcpLentSeams } from '#acp/acp-session-logic.js';
 import type { AcpLimitReset } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
@@ -365,6 +366,34 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
 };
 
 /**
+ * The chat directory of the live project, where questions are recorded (agent questions blueprint D3).
+ *
+ * The record lives beside the chat's log in the workspace root the person's
+ * client watches, never in a candidate checkout.
+ *
+ * @param workspaceRoot - Absolute project root.
+ * @returns Read and write access for project-relative record paths.
+ */
+const questionRecordFileSystem = (workspaceRoot: string): QuestionRecordFileSystem => ({
+  exists: async (path) => {
+    try {
+      await access(join(workspaceRoot, path));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  readFile: async (path) => readFile(join(workspaceRoot, path), 'utf8'),
+  writeFile: async (path, content) => {
+    const target = join(workspaceRoot, path);
+    await mkdir(dirname(target), { recursive: true });
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    await writeFile(temporary, content);
+    await rename(temporary, target);
+  },
+});
+
+/**
  * A document as ACP carries it (D23): a link to the file *and* its bytes.
  *
  * Two carriers, because the adapters have no document item. A `resource` blob
@@ -420,24 +449,30 @@ const stringField = (state: JsonObject | undefined, name: string): string | unde
 const continuationPrompt = 'Continue from where you stopped.';
 
 /**
- * Whether the agent itself ended this run, immediately before this attempt.
+ * Whether the state this attempt resumes from leaves the vendor session holding the turn.
  *
- * A turn arriving with no message is one of two things. The agent stopped and
- * said so — a usage or rate limit the person can retry — which leaves a
- * terminal failure on this run and an idle vendor session holding the whole
- * turn; or a restart found the turn still `running`, and ACP can report
- * nothing about whether it finished. Only the first can be continued.
+ * A turn arriving with no message is a resume. It continues the session the
+ * agent stopped in when the run's last attempt ended in one of three ways:
+ *
+ * - The agent stopped and said trying again can work (a usage or rate limit).
+ * - The person stopped it after its prompt was issued.
+ * - The host is gone (`RUN_ABANDONED`): Tau closed or crashed while the agent
+ *   streamed or waited for approval. The adapter is the host's child and died
+ *   with it, so the vendor turn has ended, and the agent's own transcript shows
+ *   how far it got. Asked to continue, it carries on or asks for the approval
+ *   again (resume everywhere, revising L4 D-112).
+ *
+ * The first and third are `isResumableRunFailure(…, 'external')`, the rule
+ * every surface asks before offering Resume, so no card offers a Resume this
+ * refuses. When the session cannot be reattached, `promptOf` still refuses
+ * `EXTERNAL_AGENT_RECOVERY_UNKNOWN`.
  *
  * Read from the row before this attempt's own opening rows, not from the run's
- * whole history: a resume reuses the run id, so a run that stopped, resumed
- * and was *then* cut short by a restart still carries the first stop's
- * `failed` row, followed by the takeover's `RUN_ABANDONED`. Answering on the
- * first would continue exactly the turn the ambiguity guard exists for, and
- * `RUN_ABANDONED` is the host's record that nobody knows how the turn ended,
- * not the agent's own stop.
+ * whole history: a resume reuses the run id, so earlier attempts' rows are
+ * still there.
  *
  * @param turn - The turn being run.
- * @returns Whether the state this attempt resumes from is the agent's own resumable stop.
+ * @returns Whether the state this attempt resumes from is one the session can continue.
  */
 const stopRecorded = (turn: ExternalAgentTurn): boolean => {
   const rows = turn.history.filter(
@@ -449,9 +484,7 @@ const stopRecorded = (turn: ExternalAgentTurn): boolean => {
   const opening = rows.findLastIndex((row) => row.state !== 'running' && row.state !== 'admitted');
   const prior = rows[opening];
   return (
-    (prior?.state === 'failed' &&
-      externalAgentStopCodes.some((code) => code === prior.detail?.code) &&
-      isResumableRunFailure(prior.detail)) ||
+    (prior?.state === 'failed' && isResumableRunFailure(prior.detail, 'external')) ||
     (prior?.state === 'cancelled' &&
       prior.detail?.code === 'USER_STOPPED' &&
       stringField(turn.state, 'acpPromptedRequestId')?.startsWith(`${turn.runId}:`) === true)
@@ -539,7 +572,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
   const attachments = createNodeAttachmentReader(options.workspaceRoot);
   const warnedAbsent = new Set<string>();
   /* The seams of every lent turn, by request id: the machines hold only the id (MC-R5). */
-  const turns = new Map<string, ExternalAgentTurn>();
+  const turns = new Map<string, AcpLentSeams & ExternalAgentTurn>();
   const settlements = new Map<string, (outcome: AcpTurnResult) => void>();
   const closes = new Map<string, (refusal: AcpFailure | undefined) => void>();
 
@@ -769,7 +802,11 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       /* Every durable row of the turn names agent media by attachment rather
        * than carrying it inline (see `createAcpMediaStore`). */
       const moveMedia = createAcpMediaStore(options.workspaceRoot, turn.chatId);
-      turns.set(requestId, { ...turn, append: async (events) => turn.append(await moveMedia(events)) });
+      turns.set(requestId, {
+        ...turn,
+        append: async (events) => turn.append(await moveMedia(events)),
+        questions: { chatId: turn.chatId, fileSystem: questionRecordFileSystem(options.workspaceRoot) },
+      });
       turn.signal.addEventListener('abort', onAbort, { once: true });
       try {
         sessions().send({ type: 'acquire', acquire });

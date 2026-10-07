@@ -1,0 +1,181 @@
+# Deploy one application's release to production.
+#
+# Production is never deployed by a merge. A person dispatches this workflow
+# from `main` with a release tag (`ui@x.y.z` or `api@x.y.z`, from GitHub's
+# Actions tab, `gh workflow run`, or the Command Center's deploy centre). A
+# release manager approves the run on the `production-promotion` environment,
+# and it deploys that one application at its tag
+# (docs/research/monorepo-app-release-practice.md, R3):
+#
+#   - `api@x.y.z`: `deploy.yml` at the tag deploys the API to Fly (`tau-api`).
+#   - `ui@x.y.z`: `deploy-ui.yml` at the tag publishes tau.new to Netlify with
+#     the GeoSpec artifact of the tag commit's main CI run, and `deploy-docs.yml`
+#     at the tag publishes docs.tau.new.
+#
+# The other application stays where it is, so a UI release never moves the API
+# and a red desktop build never holds a web release. Each deploy runs in the
+# `production` environment at the tag ref, so the environment's deployments
+# record which tag each application runs.
+#
+# Before deploying, the release must be a published GitHub Release whose commit
+# is on `main`, and `release-build.yml` must have succeeded for that tag.
+# Deploying an older version than the application's last production deploy is a
+# rollback and needs `rollback: true`.
+#
+# The API image is built from the tag commit with the registry cache, and the UI
+# is built with the production site's variables: both bundles embed their
+# environment, so the release build's output is the verification, not the
+# deployed bytes.
+#
+# Command Center contract: POST /repos/taucad/tau/actions/workflows/deploy-production.yml/dispatches
+# with {"ref": "main", "inputs": {"release": "<tag>", "rollback": "false"}}.
+name: Deploy release to production
+run-name: Deploy ${{ inputs.release }} to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Release tag to deploy, e.g. ui@0.3.0 or api@0.2.1'
+        required: true
+        type: string
+      rollback:
+        description: 'Allow deploying an older release than production runs'
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: deploy-production-${{ inputs.release && startsWith(inputs.release, 'api@') && 'api' || 'ui' }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote ${{ inputs.release }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production-promotion
+      deployment: false
+    permissions:
+      contents: read
+      actions: write # dispatch the deploy workflows at the release tag
+      deployments: read # the application's last production deploy
+    steps:
+      - name: Require a dispatch from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Dispatch this workflow from main; the release to deploy is the input."
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: main
+          persist-credentials: false
+
+      - name: Check the release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE: ${{ inputs.release }}
+          ROLLBACK: ${{ inputs.rollback }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$RELEASE" =~ ^(ui|api)@([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::error::$RELEASE is not a UI or API release tag (desktop releases ship through their update feed)."
+            exit 1
+          fi
+          app=${BASH_REMATCH[1]}
+          version=${BASH_REMATCH[2]}
+          draft=$(gh release view "$RELEASE" --json isDraft --jq .isDraft) \
+            || { echo "::error::$RELEASE has no GitHub Release"; exit 1; }
+          test "$draft" = false || { echo "::error::$RELEASE is still a draft"; exit 1; }
+
+          git fetch --quiet origin "refs/tags/$RELEASE:refs/tags/$RELEASE"
+          commit=$(git rev-list -n 1 "refs/tags/$RELEASE")
+          git merge-base --is-ancestor "$commit" origin/main \
+            || { echo "::error::$RELEASE ($commit) is not on main"; exit 1; }
+
+          # This release must have built green. A release run's title is its
+          # release's name, which release.yml sets to the tag; the newest run decides.
+          conclusion=$(gh run list --workflow release-build.yml --commit "$commit" --limit 50 \
+            --json conclusion,displayTitle \
+            | jq -r --arg tag "$RELEASE" '[.[] | select(.displayTitle == $tag)][0].conclusion // empty')
+          test "$conclusion" = success \
+            || { echo "::error::release-build.yml has not succeeded for $RELEASE (${conclusion:-no run})"; exit 1; }
+
+          # The application's newest successful production deploy, recorded by
+          # the `production` environment with the tag it ran at.
+          current=""
+          for row in $(gh api "repos/$GH_REPO/deployments?environment=production&per_page=100" \
+            | jq -r --arg app "$app" '.[] | select(.ref | startswith($app + "@")) | "\(.id):\(.ref)"'); do
+            state=$(gh api "repos/$GH_REPO/deployments/${row%%:*}/statuses?per_page=1" --jq '.[0].state // empty')
+            if [ "$state" = success ]; then
+              current=${row#*:}
+              break
+            fi
+          done
+
+          action=forward
+          if [ -z "$current" ]; then
+            echo "::notice::No earlier production deploy of $app is recorded; deploying $RELEASE."
+          elif [ "$current" = "$RELEASE" ]; then
+            echo "::notice::Production already runs $RELEASE; deploying it again."
+            action=redeploy
+          elif [ "$(printf '%s\n%s\n' "${current#*@}" "$version" | sort -V | tail -1)" = "${current#*@}" ]; then
+            if [ "$ROLLBACK" != true ]; then
+              echo "::error::$RELEASE is older than production's $current. Re-run with rollback: true to move production back."
+              exit 1
+            fi
+            action=rollback
+          fi
+          {
+            echo "app=$app"
+            echo "commit=$commit"
+            echo "previous=${current:-none}"
+            echo "action=$action"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the release at its tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE: ${{ inputs.release }}
+          APP: ${{ steps.release.outputs.app }}
+        run: |
+          set -euo pipefail
+          # A GITHUB_TOKEN may start workflow_dispatch runs. Each runs the tag's
+          # own workflow file in the `production` environment, which admits only
+          # release tags of the deployed application (tau-cloud stacks/repo/tau).
+          if [ "$APP" = api ]; then
+            gh workflow run deploy.yml --ref "$RELEASE" -f environment=production -f app=api
+          else
+            gh workflow run deploy-ui.yml --ref "$RELEASE" -f environment=production
+            gh workflow run deploy-docs.yml --ref "$RELEASE" -f environment=production
+          fi
+
+      - name: Summarise
+        env:
+          RELEASE: ${{ inputs.release }}
+          REPOSITORY: ${{ github.repository }}
+          APP: ${{ steps.release.outputs.app }}
+          ACTION: ${{ steps.release.outputs.action }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+          PREVIOUS: ${{ steps.release.outputs.previous }}
+        run: |
+          {
+            echo "### Production: $RELEASE"
+            echo
+            echo "- Action: $ACTION (production ran \`$PREVIOUS\`)"
+            echo "- Commit: \`$COMMIT\`"
+            if [ "$APP" = api ]; then
+              echo "- Started **Deploy to Fly.io** at \`$RELEASE\`; follow it under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy.yml)."
+            else
+              echo "- Started **Deploy UI to Netlify** and **Deploy docs to Netlify** at \`$RELEASE\`; follow them under [Actions](https://github.com/$REPOSITORY/actions/workflows/deploy-ui.yml)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

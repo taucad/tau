@@ -5,15 +5,22 @@
 
 import { Primitive } from '@gltf-transform/core';
 import { createNodeIo } from '@taucad/geometry-core';
+import { asKnownArtifact } from '@taucad/runtime';
+import type { Rendering } from '@taucad/runtime/client';
+import type { Artifact, RenderResult } from '@taucad/runtime/types';
 import { expect } from 'vitest';
 
 const primitiveModeTriangles = Primitive.Mode['TRIANGLES']!;
 
-type GeometryResult = {
-  readonly success: boolean;
-  readonly data?: unknown;
-  readonly issues: readonly unknown[];
-};
+type GeometryResult = RenderResult | Rendering;
+
+const isArtifact = (value: unknown): value is Artifact =>
+  typeof value === 'object' &&
+  value !== null &&
+  'mimeType' in value &&
+  typeof value.mimeType === 'string' &&
+  'content' in value &&
+  (typeof value.content === 'string' || value.content instanceof Uint8Array);
 
 const srgbHexToLinearTuple = (hex: string, alpha: number): [number, number, number, number] => {
   const value = hex.replace(/^#/, '');
@@ -34,11 +41,17 @@ function listAllGlbBuffers(result: GeometryResult): Array<Uint8Array<ArrayBuffer
     return [];
   }
 
-  const { data } = result;
-  if (typeof data !== 'object' || data === null || !('format' in data) || !('content' in data)) {
-    return [];
+  if ('artifact' in result) {
+    const artifact = asKnownArtifact(result.artifact);
+    return artifact?.mimeType === 'model/gltf-binary' ? [artifact.content] : [];
   }
-  return data.format === 'gltf' && data.content instanceof Uint8Array ? [data.content as Uint8Array<ArrayBuffer>] : [];
+
+  const { data } = result;
+  if (isArtifact(data)) {
+    const artifact = asKnownArtifact(data);
+    return artifact?.mimeType === 'model/gltf-binary' ? [artifact.content] : [];
+  }
+  return [];
 }
 
 /**
@@ -78,10 +91,9 @@ export const colorParityCases: readonly ColorParityCase[] = [
 ] as const;
 
 /**
- * Read the `baseColorFactor` of a material from a `HashedGeometryResult`'s
- * embedded GLB.
+ * Read the `baseColorFactor` of a material from a rendering or direct kernel result's GLB.
  *
- * @param result - kernel `createGeometry` result with at least one GLB response
+ * @param result - a successful rendering or direct kernel result with GLB content
  * @param materialIndex - which material to read (defaults to 0)
  * @returns the linear RGBA tuple as stored in the GLB
  * @throws if the result has no GLB or the material does not exist
@@ -170,9 +182,9 @@ export async function getTrianglePrimitiveBaseColors(
 }
 
 /**
- * Read the `alphaMode` of a material from a `HashedGeometryResult`'s GLB.
+ * Read the `alphaMode` of a material from a rendering or direct kernel result's GLB.
  *
- * @param result - kernel `createGeometry` result with at least one GLB response
+ * @param result - a successful rendering or direct kernel result with GLB content
  * @param materialIndex - which material to read (defaults to 0)
  * @returns one of `'OPAQUE'`, `'MASK'`, `'BLEND'`
  * @public

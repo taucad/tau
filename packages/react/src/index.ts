@@ -1,13 +1,12 @@
 export { useRuntime } from '#hooks/use-runtime.js';
 export type {
-  RenderStatus,
   RuntimeParameterRecord,
   SetRuntimeParameters,
   UseRuntimeClientOptionsProvider,
-  UseRuntimeExportGeometry,
-  UseRuntimeExportGeometryOptions,
+  UseRuntimeExportModel,
   UseRuntimeOptions,
   UseRuntimeParameterOptions,
   UseRuntimeResult,
   UseRuntimeTransportPlugin,
+  UseRuntimeView,
 } from '#hooks/use-runtime.js';

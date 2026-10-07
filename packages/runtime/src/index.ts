@@ -1,44 +1,7 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public API re-export */
-// Client
-export { createRuntimeClient } from '#client/runtime-client.js';
-export {
-  RenderTimeoutError,
-  isRenderTimeoutError,
-  RenderAbortedError,
-  isRenderAbortedError,
-} from '#framework/runtime-worker-client.js';
+// Document client
+export * from '#client/runtime-client.js';
 export { SharedPoolEntryNotFoundError, isSharedPoolEntryNotFoundError } from '#transport/shared-pool-errors.js';
-export {
-  NoRenderOutcomeError,
-  isNoRenderOutcomeError,
-  RuntimeNotConnectedError,
-  isRuntimeNotConnectedError,
-  RuntimeConnectionError,
-  isRuntimeConnectionError,
-  RuntimeTerminatedError,
-  isRuntimeTerminatedError,
-} from '#client/runtime-client.js';
-export type {
-  RuntimeClient,
-  RuntimeClientOptions,
-  FilesystemRuntimeSource,
-  InlineRuntimeSource,
-  RuntimeExportOptions,
-  RuntimeRenderInput,
-  RuntimeEvaluateInput,
-  RuntimeSource,
-  RuntimeSourceContent,
-  RuntimeSourceFiles,
-  RuntimeSourceSnapshotAdditionalPath,
-  RuntimeSourceSnapshotInput,
-  ExportResult,
-  RenderOutcome,
-  RenderStatus,
-  RuntimeLifecycleState,
-  RuntimeConnectionCause,
-  RuntimeTerminatedCause,
-  RuntimeTerminatedDetail,
-} from '#client/runtime-client.js';
 
 // Plugin types
 export type {
@@ -78,8 +41,8 @@ export type {
   PluginInstance,
   PluginMeta,
 } from '#plugins/plugin.js';
-export { defineKernel } from '#types/runtime-kernel.types.js';
-export { defineMiddleware } from '#middleware/runtime-middleware.js';
+export { defineKernelV2 as defineKernel } from '#types/runtime-kernel-v2.types.js';
+export { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 export { defineBundler } from '#types/runtime-bundler.types.js';
 export { defineTranscoder } from '#types/runtime-transcoder.types.js';
 export { defineRuntime } from '#worker/runtime-definition.js';
@@ -115,8 +78,6 @@ export type {
   RuntimeFromTransport,
   RuntimeTransportClient,
   RuntimeTransportCloseResult,
-  RuntimeTransportPreviewReservation,
-  RuntimeTransportRenderTarget,
   RuntimeTransportTimeoutRecovery,
   RuntimeTransportHost,
   TransportClientReady,

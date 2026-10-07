@@ -1,0 +1,81 @@
+name: GeoSpec products
+
+# Produces the GeoSpec engine products and the retained OCCT and toolchain preparation on
+# the integration branch, once per native source closure. CI on a pull request into this
+# branch can restore entries saved here (`ci.yml` `plan`), and only a pull request that
+# changes the closure itself queues for a Mac. `main` gets the same entries from CI's own
+# push runs, which keep the producer job.
+# `workflow_dispatch` rebuilds the preparation, skipping Nx Cloud, after a runner-image
+# update changed its toolchain generation or the cache evicted it while the product closure
+# stayed the same. CI's own runs cannot refill it: their prepare task is a remote cache hit,
+# so no preparation exists to retain.
+on:
+  push:
+    branches: [geospec]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: # Required for nrwl/nx-set-shas to read workflow runs
+  contents: 'read'
+  actions: 'read'
+
+jobs:
+  key:
+    name: Identify the GeoSpec engine product closure
+    runs-on: ubuntu-latest
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+      cached: ${{ steps.cache.outputs.cache-hit == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Digest the product closure
+        id: key
+        run: echo "key=geospec-transport-v1-$(node packages/geospec-engine-native/scripts/ci-artifacts.mjs product-key)" >> "$GITHUB_OUTPUT"
+
+      - name: Look for products of this closure
+        id: cache
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ steps.key.outputs.key }}
+          mode: lookup
+
+  produce:
+    name: Produce GeoSpec engine products
+    needs: [key]
+    if: needs.key.outputs.cached != 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+
+      - name: Prepare GeoSpec engine products
+        id: prepare
+        uses: ./.github/actions/geospec-producer
+        with:
+          rebuild: ${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Keep the products for runs of this closure
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ needs.key.outputs.key }}
+          mode: save
+
+      - name: Retain the OCCT and toolchain preparation
+        uses: ./.github/actions/geospec-preparation-save
+        with:
+          generation: ${{ steps.prepare.outputs.generation }}
+          preparation-hit: ${{ steps.prepare.outputs.preparation-hit }}
+          cargo-hit: ${{ steps.prepare.outputs.cargo-hit }}

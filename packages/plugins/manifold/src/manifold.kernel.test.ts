@@ -2,12 +2,14 @@
 import { afterEach, describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import type { ParameterManifest } from '@taucad/parameters';
-import type { GeometryResponse } from '@taucad/runtime/types';
+import { asKnownArtifact } from '@taucad/runtime/types';
 
 import { manifoldKernel } from '#manifold.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
 import {
+  assertRenderingSuccess,
   createMockKernelRuntime,
+  expectKernelProjectionOrder,
   createGeometryTestHelpers,
   createTestGeometry,
   createTestRuntimeClient,
@@ -19,7 +21,7 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 const testRuntime = defineRuntime({ kernels: [manifoldKernel()], bundlers: [esbuildBundler()] });
-const testClients = new Set<ReturnType<typeof createTestRuntimeClient>>();
+const testClients = new Set<ReturnType<typeof createTestRuntimeClient<typeof testRuntime>>>();
 const createClient = (files: Record<string, string>) => {
   const client = createTestRuntimeClient({ runtime: testRuntime, files });
   testClients.add(client);
@@ -42,8 +44,7 @@ const createGeometry = async (
   createTestGeometry({
     runtime: testRuntime,
     files,
-    mainFile,
-    parameters,
+    open: { source: { path: mainFile }, parameters },
   });
 
 const geometryHelpers = createGeometryTestHelpers();
@@ -67,11 +68,15 @@ const readGltfNodeMeshNames = async (
   };
 };
 
-const extractGltfBytes = (result: { data: GeometryResponse }): Uint8Array<ArrayBuffer> => {
-  if (result.data.format !== 'gltf') {
-    throw new Error(`Expected GLTF geometry, received ${result.data.format}`);
+const extractGltfBytes = (result: Awaited<ReturnType<typeof createTestGeometry>>): Uint8Array<ArrayBuffer> => {
+  if (!result.success) {
+    throw new Error(`Expected GLB rendering, received ${result.issues.map(({ message }) => message).join('; ')}`);
   }
-  return result.data.content;
+  const artifact = asKnownArtifact(result.artifact);
+  if (artifact?.mimeType !== 'model/gltf-binary') {
+    throw new Error(`Expected GLB artifact, received ${result.artifact.mimeType}`);
+  }
+  return artifact.content;
 };
 
 const readGlbJson = (
@@ -89,6 +94,56 @@ const readGlbJson = (
 };
 
 describe('ManifoldWorker', () => {
+  it.each([false, true])('keeps %s geometry render and GLB export independent', async (empty) => {
+    const result = await createGeometry(
+      {
+        'model.ts': empty
+          ? `import { Manifold } from 'manifold-3d/manifoldCAD'; export default () => [];`
+          : `import { Manifold } from 'manifold-3d/manifoldCAD'; export default () => Manifold.cube([10, 10, 10]);`,
+      },
+      'model.ts',
+    );
+    assertRenderingSuccess(result);
+    const glb = extractGltfBytes(result);
+    const definition = await resolveRuntimePluginDefinition('kernel', manifoldKernel());
+    const runtime = createMockKernelRuntime();
+    const context = { manifoldCadModule: {} };
+    const handle = { glb };
+    const fresh = definition.deserializeHandle!(
+      {
+        serialized: definition.serializeHandle!({ handle }, runtime, context),
+      },
+      runtime,
+      context,
+    );
+    const render = async (value: typeof handle) => {
+      const projected = await definition.render!({ handle: value, view: 'model', options: {} }, runtime, context);
+      return projected.content;
+    };
+    const exportModel = async (value: typeof handle, coordinateSystem: 'y-up' | 'z-up') => {
+      const projected = await definition.export!(
+        {
+          exportId: 'glb',
+          handle: value,
+          options: {
+            coordinateSystem,
+            unit: { length: coordinateSystem === 'y-up' ? 'meter' : 'millimeter' },
+          },
+        },
+        runtime,
+        context,
+      );
+      return projected.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(handle),
+      renderB: async () => exportModel(handle, 'y-up'),
+      freshB: async () => exportModel(fresh, 'y-up'),
+      export: async () => exportModel(handle, 'z-up'),
+    });
+    expect(ordered.first).toEqual(glb);
+  });
+
   describe('getParameters', () => {
     it('should extract defaultParams from ESM module', async () => {
       const { defaults, schema } = await getParameters(
@@ -203,11 +258,15 @@ describe('ManifoldWorker', () => {
       });
 
       const expectRenderedMesh = async () => {
-        const outcome = await client.render({ source: { path: 'tracked.ts' }, parameters: {} });
+        const document = client.open({ source: { path: 'tracked.ts' }, parameters: {}, watch: false });
+        const view = document.view('model');
+        const outcome = await view.rendering();
         expect(outcome.superseded).toBe(false);
         if (!outcome.superseded) {
-          await geometryHelpers.expectMeshCount(outcome.geometry, 1);
+          await geometryHelpers.expectMeshCount(outcome.rendering, 1);
         }
+        view.close();
+        document.close();
       };
 
       await expectRenderedMesh();
@@ -363,11 +422,11 @@ describe('ManifoldWorker', () => {
         `,
       });
 
-      const exportResult = await client.export('glb', { source: { path: 'cube.ts' } });
+      const exportResult = await client.open({ source: { path: 'cube.ts' }, watch: false }).export('glb');
       expect(exportResult.success).toBe(true);
       if (exportResult.success) {
-        expect(exportResult.data[0]?.bytes).toBeInstanceOf(Uint8Array);
-        const { nodeNames, meshNames } = await readGltfNodeMeshNames(exportResult.data[0]!.bytes);
+        expect(exportResult.files[0].bytes).toBeInstanceOf(Uint8Array);
+        const { nodeNames, meshNames } = await readGltfNodeMeshNames(exportResult.files[0].bytes);
         expect(nodeNames).toEqual(['Shape 1']);
         expect(meshNames).toEqual(['Shape 1']);
       }
@@ -383,13 +442,12 @@ describe('ManifoldWorker', () => {
           }
         `,
       });
-      const zUp = await client.export('glb', {
-        source: { path: 'coordinate-evidence.ts' },
-        exportOptions: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+      const document = client.open({ source: { path: 'coordinate-evidence.ts' }, watch: false });
+      const zUp = await document.export('glb', {
+        options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
       });
-      const yUp = await client.export('glb', {
-        source: { path: 'coordinate-evidence.ts' },
-        exportOptions: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
+      const yUp = await document.export('glb', {
+        options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
       });
       expect(zUp.success).toBe(true);
       expect(yUp.success).toBe(true);
@@ -397,8 +455,8 @@ describe('ManifoldWorker', () => {
         return;
       }
 
-      const zUpEvidence = await readCoordinateEvidence({ bytes: zUp.data[0]!.bytes });
-      const yUpEvidence = await readCoordinateEvidence({ bytes: yUp.data[0]!.bytes });
+      const zUpEvidence = await readCoordinateEvidence({ bytes: zUp.files[0].bytes });
+      const yUpEvidence = await readCoordinateEvidence({ bytes: yUp.files[0].bytes });
       expect(yUpEvidence).toEqual(mapZupMillimetersToYupMeters(zUpEvidence));
     });
 
@@ -413,13 +471,13 @@ describe('ManifoldWorker', () => {
         `,
       });
 
-      const exportResult = await client.export('glb', { source: { path: 'empty.ts' } });
+      const exportResult = await client.open({ source: { path: 'empty.ts' }, watch: false }).export('glb');
       expect(exportResult.success).toBe(true);
       if (!exportResult.success) {
         return;
       }
 
-      const document = await new NodeIO().readBinary(exportResult.data[0]!.bytes);
+      const document = await new NodeIO().readBinary(exportResult.files[0].bytes);
       expect(document.getRoot().listMeshes()).toHaveLength(0);
     });
 
@@ -435,14 +493,14 @@ describe('ManifoldWorker', () => {
       });
 
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- deliberately bypasses the typed format union to test wire rejection.
-      const exportResult = await client.export('gltf' as 'glb', { source: { path: 'cube.ts' } });
+      const exportResult = await client.open({ source: { path: 'cube.ts' }, watch: false }).export('gltf' as 'glb');
       expect(exportResult.success).toBe(false);
       if (!exportResult.success) {
         expect(exportResult.issues[0]?.message).toContain('gltf');
       }
     });
 
-    it('should return error when exporting before creating geometry', async () => {
+    it('should reject export from a failed source without reusing earlier geometry', async () => {
       const client = createClient({
         'cube.ts': `
           import { Manifold } from 'manifold-3d/manifoldCAD';
@@ -453,7 +511,10 @@ describe('ManifoldWorker', () => {
         `,
       });
 
-      await expect(client.export('glb')).rejects.toThrow();
+      const document = client.open({ source: { path: 'missing.ts' }, watch: false });
+      const result = await document.export('glb');
+      expect(result.success).toBe(false);
+      expect(result.issues.length).toBeGreaterThan(0);
     });
 
     it('should return error for unsupported export formats', async () => {
@@ -468,7 +529,7 @@ describe('ManifoldWorker', () => {
       });
 
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- deliberately bypasses the typed format union to test wire rejection.
-      const exportResult = await client.export('step' as 'glb', { source: { path: 'cube.ts' } });
+      const exportResult = await client.open({ source: { path: 'cube.ts' }, watch: false }).export('step' as 'glb');
       expect(exportResult.success).toBe(false);
     });
   });
@@ -476,29 +537,29 @@ describe('ManifoldWorker', () => {
   describe('native-handle snapshots', () => {
     it('should round-trip GLB bytes through the durable native-handle hooks', async () => {
       const definition = await resolveRuntimePluginDefinition('kernel', manifoldKernel());
-      expect(definition.serializeNativeHandle).toBeDefined();
-      expect(definition.deserializeNativeHandle).toBeDefined();
+      expect(definition.serializeHandle).toBeDefined();
+      expect(definition.deserializeHandle).toBeDefined();
 
       const nativeHandle = { glb: new Uint8Array([0x67, 0x6c, 0x54, 0x46]) };
       const runtime = createMockKernelRuntime();
-      const { serializeNativeHandle, deserializeNativeHandle } = definition;
+      const { serializeHandle, deserializeHandle } = definition;
       const serialize =
-        serializeNativeHandle ??
+        serializeHandle ??
         (() => {
           throw new Error('Manifold native-handle serializer must be defined');
         });
       const deserialize =
-        deserializeNativeHandle ??
+        deserializeHandle ??
         (() => {
           throw new Error('Manifold native-handle deserializer must be defined');
         });
       const context = { manifoldCadModule: {} };
-      const serializedNativeHandle = serialize({ nativeHandle }, runtime, context);
-      const restored = deserialize({ serializedNativeHandle }, runtime, context);
+      const serializedHandle = serialize({ handle: nativeHandle }, runtime, context);
+      const restored = deserialize({ serialized: serializedHandle }, runtime, context);
 
       expect(restored.glb).toEqual(nativeHandle.glb);
       expect(restored.glb).not.toBe(nativeHandle.glb);
-      expect(serializedNativeHandle.glb).not.toBe(nativeHandle.glb);
+      expect(serializedHandle.glb).not.toBe(nativeHandle.glb);
     });
   });
 });

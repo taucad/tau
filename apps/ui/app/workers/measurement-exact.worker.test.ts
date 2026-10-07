@@ -2,8 +2,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { replicadKernel } from '@taucad/replicad';
 import { esbuildBundler } from '@taucad/esbuild';
+import { asKnownArtifact } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { assertSuccess, createTestRuntimeClient, extractGltfFromResult } from '@taucad/runtime-testing';
+import { createTestRuntimeClient } from '@taucad/runtime-testing';
 import {
   buildGltfComponentManifest,
   buildGltfMeasurementFeatures,
@@ -27,18 +28,20 @@ describe('displayed Replicad to retained AP242 correspondence', () => {
   it('queries exact whole-occurrence witnesses from the same rendered source', async () => {
     const runtime = defineRuntime({ kernels: [replicadKernel()], bundlers: [esbuildBundler()] });
     const client = createTestRuntimeClient({ runtime, files: { 'main.ts': source } });
+    await client.connect();
+    const document = client.open({ source: { path: 'main.ts' }, watch: false });
+    const view = document.view('model', { content: { includeEdges: true } });
     try {
-      const rendered = await client.render({
-        source: { path: 'main.ts' },
-        // Match the viewer request: the selected Replicad route supplies its topology default.
-        content: { includeEdges: true },
-      });
+      const rendered = await view.rendering();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('The fixture render was superseded.');
       }
-      assertSuccess(rendered.geometry);
-      const glb = extractGltfFromResult(rendered.geometry);
+      if (!rendered.rendering.success) {
+        throw new Error(rendered.rendering.issues.map((issue) => issue.message).join('\n'));
+      }
+      const artifact = asKnownArtifact(rendered.rendering.artifact);
+      const glb = artifact?.mimeType === 'model/gltf-binary' ? artifact.content : undefined;
       expect(glb).toBeDefined();
       const manifest = buildGltfComponentManifest(glb!);
       expect(manifest.nodeOrder.map((id) => manifest.nodesById[id]?.name)).toEqual(
@@ -50,9 +53,11 @@ describe('displayed Replicad to retained AP242 correspondence', () => {
       expect(right?.bounds?.min[0]).toBeCloseTo(0.03, 6);
       const features = buildGltfMeasurementFeatures(glb!, manifest);
       expect([...features.values()].some((item) => item.faces?.length)).toBe(true);
-      const exported = await client.export('step', { exportOptions: { coordinateSystem: 'y-up' } });
-      assertSuccess(exported);
-      const stepBytes = exported.data[0]!.bytes;
+      const exported = await document.export('step', { options: { coordinateSystem: 'y-up' } });
+      if (!exported.success) {
+        throw new Error(exported.issues.map((issue) => issue.message).join('\n'));
+      }
+      const stepBytes = exported.files[0].bytes;
       const query = (id: number, bytes: Uint8Array<ArrayBuffer>, names: readonly [string, string]): ExactRequest => ({
         id,
         source: { format: 'ap242', bytes, coordinateSystem: 'y-up' },
@@ -84,16 +89,22 @@ describe('displayed Replicad to retained AP242 correspondence', () => {
       if (ambiguous.status === 'unavailable') {
         expect(ambiguous.reason).toContain('distinct displayed AP242 occurrence names');
       }
-      const mixedUnits = await evaluateExactOccurrenceDistance(query(
-        3,
-        new TextEncoder().encode(new TextDecoder().decode(stepBytes).replace('SI_UNIT(.MILLI.,.METRE.)', 'SI_UNIT($,.METRE.)')),
-        ['left', 'right'],
-      ));
+      const mixedUnits = await evaluateExactOccurrenceDistance(
+        query(
+          3,
+          new TextEncoder().encode(
+            new TextDecoder().decode(stepBytes).replace('SI_UNIT(.MILLI.,.METRE.)', 'SI_UNIT($,.METRE.)'),
+          ),
+          ['left', 'right'],
+        ),
+      );
       expect(mixedUnits.status).toBe('unavailable');
       if (mixedUnits.status === 'unavailable') {
         expect(mixedUnits.reason).toContain('units or frame');
       }
     } finally {
+      view.close();
+      document.close();
       await client.shutdown();
     }
   });

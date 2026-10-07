@@ -19,6 +19,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { createParameterSetActor } from '@taucad/parameters/set-machine';
 import type { ParameterSetActor } from '@taucad/parameters/set-machine';
 import { Actor, waitFor } from 'xstate';
@@ -41,7 +42,7 @@ import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.j
 import { createSkillResolver } from '#lib/skill-resolver.js';
 import type { SkillResolver } from '#lib/skill-resolver.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
-import type { HeadlessImageService } from '#services/headless-image.service.js';
+import type { HeadlessImageJob, HeadlessImageService } from '#services/headless-image.service.js';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { agentHostWorkerBuild } from '#workers/agent-host.contract.js';
 import type { AgentHostProjectProvide, AgentHostProjectRebridge } from '#workers/agent-host.contract.js';
@@ -52,6 +53,7 @@ import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 type ProjectFileSystemBridge = Pick<
   FileSystemBridgeProxy,
+  | 'readMachineSettings'
   | 'readFile'
   | 'writeFile'
   | 'writeFileChecked'
@@ -358,7 +360,42 @@ const createRuntimeRpcClients = (options: {
   const runtime: RuntimeAgentClient = runtimeClient;
   return createRuntimeAgentClients({
     runtime,
-    exportImage: async (job) => options.imageService.export(job),
+    exportImage: async (job) => {
+      if (job.sourceFormat === 'svg') {
+        return options.imageService.export(job);
+      }
+      if (job.exportOptions.mode === 'single') {
+        const { camera } = job.exportOptions;
+        const exportOptions: Extract<HeadlessImageJob, { sourceFormat: 'glb'; format: 'webp' }>['exportOptions'] = {
+          ...job.exportOptions,
+          mode: 'single',
+          camera: {
+            framing: 'bounds',
+            direction: [camera.direction[0], camera.direction[1], camera.direction[2]],
+            up: [camera.up[0], camera.up[1], camera.up[2]],
+            margin: camera.margin,
+            projection: { kind: 'perspective', verticalFieldOfView: camera.projection.verticalFieldOfView },
+          },
+        };
+        return options.imageService.export({ ...job, exportOptions });
+      }
+      const exportOptions: Extract<HeadlessImageJob, { sourceFormat: 'glb'; format: 'webp' }>['exportOptions'] = {
+        ...job.exportOptions,
+        mode: 'batch',
+        views: job.exportOptions.views.map((view) => ({
+          id: view.id,
+          label: view.label,
+          camera: {
+            framing: 'bounds',
+            direction: [view.camera.direction[0], view.camera.direction[1], view.camera.direction[2]],
+            up: [view.camera.up[0], view.camera.up[1], view.camera.up[2]],
+            margin: view.camera.margin,
+            projection: { kind: 'orthographic' },
+          },
+        })),
+      };
+      return options.imageService.export({ ...job, exportOptions });
+    },
     mapRuntimeError: (error) => toRpcError(error),
   });
 };
@@ -456,11 +493,10 @@ const composeProjectHost = async (
       code: 'COMPUTE_AUTHORITY_INVALID',
     });
   }
-  let computeConnection = provide.computeStorePort ? connectComputeStoreChannel(provide.computeStorePort) : undefined;
+  const computeConnection = provide.computeStorePort ? connectComputeStoreChannel(provide.computeStorePort) : undefined;
   opened(() => computeConnection?.dispose());
-  const computeStore = computeConnection ? swappable(computeConnection.store) : undefined;
-  const compute = computeStore
-    ? ({ mode: 'durable', store: computeStore.view } as const)
+  const compute = computeConnection
+    ? ({ mode: 'durable', store: computeConnection.store } as const)
     : provide.computeMode === 'off'
       ? ({ mode: 'off' } as const)
       : ({ mode: 'memory' } as const);
@@ -509,7 +545,8 @@ const composeProjectHost = async (
     { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
   );
   /* One runtime client per project host, shared by every turn and chat of the project (RH-A6). */
-  const runtimeClient: AppRuntimeClient = createRuntimeClient(
+  // Agent tools select offered IDs at runtime; this host deliberately constructs the public dynamic client.
+  const runtimeClient: AppRuntimeClient = createRuntimeClient<AnyRuntimeDefinition>(
     createDefaultKernelOptions({
       fileSystem: fromFsLike(createRuntimeFsLike(agentView)),
       runtimeConfig,
@@ -527,14 +564,12 @@ const composeProjectHost = async (
     imageService.dispose();
   });
   const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
-  const geoSpecEngine = provide.geoSpecEngine ?? 'legacy';
   const revisions = provide.revisionsPort === undefined ? undefined : createPortRevisionsClient(provide.revisionsPort);
   opened(() => revisions?.close());
   const geoSpecClient = createGeoSpecWorkerRpcClient({
     openFileSystemBridge: () => createFileSystemBridgePort(agentView),
     runtimeConfig,
-    geoSpecEngine,
-    ...(geoSpecEngine !== 'native' || revisions === undefined
+    ...(revisions === undefined
       ? {}
       : {
           candidateSync: {
@@ -560,7 +595,7 @@ const composeProjectHost = async (
       },
       files: projectRoot,
       resolve: async ({ entry }, signal, resolution) => {
-        const result = await runtimeClient.resolveParameters({
+        const result = await runtimeClient.describe({
           source: { path: entry },
           ...(resolution === undefined ? {} : { resolution }),
           signal,
@@ -571,7 +606,7 @@ const composeProjectHost = async (
             { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
           );
         }
-        return result.data;
+        return result.parameters;
       },
     });
     parameterActors.set(targetFile, actor);
@@ -582,7 +617,10 @@ const composeProjectHost = async (
     parameterActorFor,
   });
   /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
-  const toolRegistryOver = (provider: FileSystemProvider): ToolRegistry => {
+  const toolRegistryOver = (
+    provider: FileSystemProvider,
+    preferences: Pick<ProjectFileSystemBridge, 'readMachineSettings'>,
+  ): ToolRegistry => {
     const view = composeView(
       { filesystem: provider },
       { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
@@ -600,8 +638,8 @@ const composeProjectHost = async (
       ...runtimeRpc,
       parameters,
       geospec: geoSpecClient,
-      geospecAuthoringMode: geoSpecEngine,
       machines: runtimeClient.machines,
+      machineSettings: preferences,
       print: {
         /* The `tau.json` id every print request from this project's agent names (blueprint D5). An attempt reads
          * its artifact from the checkout its placement granted. */
@@ -617,7 +655,7 @@ const composeProjectHost = async (
       testingEnabled: provide.testingEnabled ?? false,
     });
   };
-  const toolRegistry = toolRegistryOver(workspaceProvider);
+  const toolRegistry = toolRegistryOver(workspaceProvider, fileSystem);
   /* ponytail: an attempt's file tools read its checkout; the kernel, GeoSpec and parameter clients stay on the project
    * root until W8's candidate checkouts need them re-rooted. */
   const placedTools = (tools: TurnPlacementToolPort): ToolRegistry => {
@@ -626,7 +664,7 @@ const composeProjectHost = async (
     const opened = (async (): Promise<Readonly<{ registry: ToolRegistry } | { failure: unknown }>> => {
       try {
         const proxy = await createProjectFileSystemProxy(tools.port);
-        return { registry: toolRegistryOver(createRelayedFileSystemProvider(proxy)) };
+        return { registry: toolRegistryOver(createRelayedFileSystemProvider(proxy), proxy) };
       } catch (error) {
         return { failure: error };
       }
@@ -678,7 +716,19 @@ const composeProjectHost = async (
       build: agentHostWorkerBuild,
       log:
         opfs === undefined
-          ? { kind: 'provider', fileSystem: projectRoot, durability }
+          ? {
+              kind: 'provider',
+              fileSystem: {
+                exists: async (path) => projectRoot.exists(path),
+                readFile: async (path) => projectRoot.readFile(path),
+                writeFile: async (path, bytes) => projectRoot.writeFile(path, bytes),
+                appendFile: async (path, bytes) => projectRoot.appendFile(path, bytes),
+                unlink: async (path) => projectRoot.unlink(path),
+                // The durable rooted bridge owns canonical metadata; log allocation only needs size.
+                stat: async (path, options) => projectRoot.stat(path, options),
+              },
+              durability,
+            }
           : { kind: 'opfs', directory: opfs },
       visibility: worker.visibility,
     }),
@@ -735,11 +785,8 @@ const composeProjectHost = async (
         throw error;
       }
       const replaced = [fileSystemSlot.swap(next.fileSystem), projectRootSlot.swap(next.projectRoot)];
-      if (ports.computeStorePort !== undefined && computeStore !== undefined) {
-        const nextCompute = connectComputeStoreChannel(ports.computeStorePort);
-        computeStore.swap(nextCompute.store);
-        computeConnection?.dispose();
-        computeConnection = nextCompute;
+      if (ports.computeStorePort !== undefined && computeConnection !== undefined) {
+        computeConnection.rebind(ports.computeStorePort);
       } else {
         ports.computeStorePort?.close();
       }

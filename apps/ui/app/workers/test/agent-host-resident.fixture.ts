@@ -4,6 +4,7 @@
  */
 import { expect, vi } from 'vitest';
 import { OPFSProvider } from '@taucad/filesystem/backend';
+import { Topic } from '@taucad/events';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { createFileSystemBridgePort as createBridgePort } from '@taucad/fs-bridge';
 import { connectAgentWorkerChannel, serveTurnPlacementChannel } from '@taucad/agent-host/channel-client';
@@ -15,6 +16,37 @@ import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
 import { randomUuid } from '@taucad/utils/id';
 
 let provider: FileSystemProvider | undefined;
+
+/** The fixture's settlement feed, exposed so its cancellation boundaries can be checked without a worker. */
+export async function* placementFacts(
+  facts: readonly TurnPlacementFact[],
+  wakes: Topic<void>,
+  signal: AbortSignal,
+): AsyncGenerator<TurnPlacementFact> {
+  let next = 0;
+  while (!signal.aborted) {
+    while (next < facts.length) {
+      yield facts[next++]!;
+    }
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- The signal can abort while the generator is suspended at yield.
+    if (signal.aborted) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a listen waits for its next fact.
+    await new Promise<void>((resolve) => {
+      const unsubscribe = wakes.subscribe(() => {
+        signal.removeEventListener('abort', onAbort);
+        unsubscribe();
+        resolve();
+      });
+      const onAbort = (): void => {
+        unsubscribe();
+        resolve();
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+}
 
 /** The provider the last {@link opfsProject} opened, until {@link disposeOpfsProject}. */
 export const opfsProvider = (): FileSystemProvider => {
@@ -40,7 +72,7 @@ export const livePlacementPort = (
   createFileSystemBridgePort: typeof createBridgePort,
 ): MessagePort => {
   const facts: TurnPlacementFact[] = [];
-  const wakes = new Set<() => void>();
+  const wakes = new Topic<void>({ name: 'resident-placement.settlements' });
   const { port1, port2 } = new MessageChannel();
   serveTurnPlacementChannel({
     port: port2,
@@ -72,30 +104,13 @@ export const livePlacementPort = (
             runIds: [key.runId],
           },
         });
-        for (const wake of wakes) {
-          wake();
-        }
-        wakes.clear();
+        wakes.emit();
         return { requestId, status: 'applied' };
       },
       abandon: async ({ requestId }) => ({ requestId, status: 'applied' }),
       acknowledge: async ({ requestId }) => ({ requestId, status: 'applied' }),
       reconcile: async ({ requestId }) => ({ requestId, status: 'applied', held: [] }),
-      async *settlements({ signal }) {
-        let next = 0;
-        while (!signal.aborted) {
-          while (next < facts.length) {
-            yield facts[next++]!;
-          }
-          // oxlint-disable-next-line no-await-in-loop -- a listen waits for its next fact.
-          await new Promise<void>((resolve) => {
-            wakes.add(resolve);
-            signal.addEventListener('abort', () => {
-              resolve();
-            });
-          });
-        }
-      },
+      settlements: ({ signal }) => placementFacts(facts, wakes, signal),
     },
   });
   return port1;

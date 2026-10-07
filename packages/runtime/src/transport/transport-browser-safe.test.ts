@@ -6,7 +6,7 @@
  * footguns stay impossible:
  *
  *   - `@taucad/runtime/transport`           — author API only
- *     (`defineRuntimeTransport`, `runtimeProtocolSchemas`, types)
+ *     (`defineRuntimeTransport`, `runtimeDocumentProtocolSchemas`, types)
  *   - `@taucad/runtime/transport/in-process` — same-isolate transport
  *   - `@taucad/runtime/transport/web`       — browser `Worker` transport
  *   - `@taucad/runtime/transport/node`      — Node `worker_threads` transport
@@ -52,7 +52,11 @@ describe('transport subpath-isolation contract', () => {
   }
 
   it('the universal `/transport` barrel only exposes the author API + types + schemas', () => {
-    const expected = new Set(['defineRuntimeTransport', 'definePassthroughTransport', 'runtimeProtocolSchemas']);
+    const expected = new Set([
+      'defineRuntimeTransport',
+      'definePassthroughTransport',
+      'runtimeDocumentProtocolSchemas',
+    ]);
     const actual = new Set(
       Object.keys(runtimeTransport).filter((k) => (runtimeTransport as Record<string, unknown>)[k] !== undefined),
     );

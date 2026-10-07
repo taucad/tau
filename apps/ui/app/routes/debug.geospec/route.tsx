@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Geometry } from '@taucad/types';
+import type { Artifact } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
 import { ModelViewer } from '#components/model-viewer.js';
 import { pairedCaseVerdict } from '#routes/debug.geospec/paired-result.js';
@@ -81,7 +81,11 @@ function GeoSpecLab(): React.JSX.Element {
   const mtReady = mt !== undefined && verifiedMtReceipt === mt.receipt;
   const [mtStatus, setMtStatus] = useState('No qualified MT assets in this build.');
   const [includeScale, setIncludeScale] = useState(false);
-  const [preview, setPreview] = useState<Geometry>();
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof loadPreview>>>();
+  const previewArtifact = useMemo<Artifact | undefined>(
+    () => preview && { mimeType: 'model/gltf-binary', content: preview.content },
+    [preview],
+  );
   const [previewStatus, setPreviewStatus] = useState('No preview available for this fixture.');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
@@ -440,7 +444,8 @@ function GeoSpecLab(): React.JSX.Element {
             <div className='h-80 overflow-hidden rounded-md border bg-card'>
               {preview ? (
                 <ModelViewer
-                  geometry={preview}
+                  artifact={previewArtifact}
+                  artifactHash={preview.hash}
                   enablePan
                   enableZoom
                   graphicsOptions={{ enableGrid: true, enableAxes: true }}
@@ -530,12 +535,12 @@ function GeoSpecLab(): React.JSX.Element {
                             ) : engine === 'combined-mt' && !mt ? (
                               <span className='text-muted-foreground'>No qualified MT assets</span>
                             ) : cellError ? (
-                              <span role='alert' className='text-destructive'>
+                              <span role='alert' className='text-feature'>
                                 Error: {cellError}
                               </span>
                             ) : latest ? (
                               <>
-                                <strong className={hasUnexpectedMismatch ? 'text-destructive' : 'text-foreground'}>
+                                <strong className={hasUnexpectedMismatch ? 'text-feature' : 'text-foreground'}>
                                   {[...new Set(rows.map(({ status }) => status))].join(' / ')}
                                 </strong>
                                 <div className='font-mono text-xs text-muted-foreground'>
@@ -615,7 +620,7 @@ function GeoSpecLab(): React.JSX.Element {
           {busy ? `Running ${progress}…` : ''}
         </div>
         {error ? (
-          <p role='alert' className='text-sm text-destructive'>
+          <p role='alert' className='text-sm text-feature'>
             {error}
           </p>
         ) : null}

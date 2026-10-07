@@ -3,8 +3,9 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/ui",
   "projectType": "application",
-  "tags": ["scope:ui", "type:app", "layer:feature"],
+  "tags": ["scope:ui", "type:app", "layer:feature", "release:app"],
   "targets": {
+    "formal:lean": {},
     "render-calibration": {
       "executor": "nx:run-commands",
       "continuous": true,
@@ -289,15 +290,31 @@
     "typecheck": {
       "dependsOn": ["typegen"]
     },
+    "lint": {
+      "dependsOn": ["typegen"],
+      "options": {
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192"
+        }
+      }
+    },
     "test:e2e": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "The worker-tier browser suites the jsdom sweep excludes (OPFS, Web Locks, WebGPU): app/workers/agent-host.vitest.browser.config.ts. Named test:e2e so `nx affected -t test:e2e` selects it on the only CI lane that installs Chromium, exactly as apps/desktop-e2e does. G-ACP-REFUSE0's sole check lives here."
+        "description": "Chromium suites for worker capabilities and the CAD viewer's real Dockview, SVG and GPU resize interactions. Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium."
       },
       "dependsOn": ["copy-assets", "^copy-assets"],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts"
+        "commands": [
+          "../../node_modules/.bin/vitest run --config 'app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts'",
+          "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/svg/svg-viewer.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config app/workers/agent-host.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config app/components/panes/editor-layout.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts",
+          "../../node_modules/.bin/vitest run --config app/components/geometry/graphics/three/viewer-resize.vitest.browser.config.ts"
+        ],
+        "parallel": false
       }
     },
     "sourcemaps": {

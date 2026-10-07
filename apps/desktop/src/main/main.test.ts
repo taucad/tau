@@ -101,6 +101,8 @@ const app = {
   }),
   getPath: vi.fn((name: string) => (name === 'userData' ? state.userData : join(state.userData, name))),
   getVersion: vi.fn(() => 'test'),
+  /* No `package.json` here, so a packaged case boots locked, like a release. */
+  getAppPath: vi.fn(() => state.userData),
   getAppMetrics: vi.fn((): Array<{ pid: number; memory: { workingSetSize: number } }> => []),
   on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
     const listeners = state.appListeners.get(event) ?? [];
@@ -153,6 +155,7 @@ const dialog = {
 
 vi.mock('electron', () => ({
   app,
+  autoUpdater: { setFeedURL: vi.fn(), checkForUpdates: vi.fn(), quitAndInstall: vi.fn(), on: vi.fn() },
   BrowserWindow: Object.assign(
     vi.fn(function BrowserWindow() {
       return fakeWindow;
@@ -241,7 +244,9 @@ vi.mock('#main/diagnostics.js', () => ({
   forwardUtilityDiagnostics: vi.fn(),
   kernelUtilityDiagnostics: vi.fn(() => ({})),
 }));
-vi.mock('#main/environment.js', () => ({
+vi.mock('#main/environment.js', async (importOriginal) => ({
+  /* The packaged lock (`packagedOverridesEnabled`, `stripPackagedOverrides`) runs for real. */
+  ...(await importOriginal<Record<string, unknown>>()),
   clientEnvironment: vi.fn(() => ({})),
   desktopAgentGatewayBaseUrl: vi.fn(() => 'http://127.0.0.1:1'),
   desktopAgentSystemPrompt: vi.fn(() => 'test'),
@@ -701,6 +706,41 @@ describe('desktop main admission gates', () => {
   );
 
   it(
+    'ignores e2e switches and renderer overrides and disables DevTools in a locked packaged build',
+    async () => {
+      /* Widened: Electron's typings declare `ELECTRON_RENDERER_URL` read-only. */
+      const environment: Record<string, string | undefined> = process.env;
+      const names = ['TAU_E2E_HIDE_WINDOW', 'ELECTRON_RENDERER_URL'] as const;
+      const previous = Object.fromEntries(names.map((name) => [name, environment[name]]));
+      environment['TAU_E2E_HIDE_WINDOW'] = '1';
+      environment['ELECTRON_RENDERER_URL'] = 'https://attacker.example';
+      app.isPackaged = true;
+      try {
+        await boot();
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/');
+        });
+        const { BrowserWindow } = await import('electron');
+        const options = vi.mocked(BrowserWindow).mock.calls[0]?.[0];
+        expect(options?.webPreferences?.focusOnNavigation).toBe(true);
+        expect(options?.webPreferences?.devTools).toBe(false);
+        expect(fakeWindow.show).toHaveBeenCalled();
+        expect(environment['TAU_E2E_HIDE_WINDOW']).toBeUndefined();
+        expect(environment['ELECTRON_RENDERER_URL']).toBeUndefined();
+      } finally {
+        for (const name of names) {
+          if (previous[name] === undefined) {
+            Reflect.deleteProperty(environment, name);
+          } else {
+            environment[name] = previous[name];
+          }
+        }
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'restores the credential before the first page can request an authenticated origin',
     async () => {
       const restore = Promise.withResolvers<void>();
@@ -817,6 +857,71 @@ describe('desktop main deep links', () => {
   const listener = (event: string): ((...args: unknown[]) => void) => state.appListeners.get(event)!.at(-1)!;
 
   it(
+    'waits for the packaged Playwright bridge before creating the first window',
+    async () => {
+      const previous = process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'];
+      const previousRelease = Object.getOwnPropertyDescriptor(globalThis, '__playwright_run');
+      process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'] = '1';
+      try {
+        await boot();
+        const release: unknown = Reflect.get(globalThis, '__playwright_run');
+        await app.whenReady();
+        expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+        const isRelease = (value: unknown): value is () => void => typeof value === 'function';
+        if (!isRelease(release)) {
+          throw new TypeError('Packaged Playwright readiness callback was not installed');
+        }
+        release();
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/');
+        });
+      } finally {
+        if (previous === undefined) {
+          delete process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'];
+        } else {
+          process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'] = previous;
+        }
+        if (previousRelease) {
+          Object.defineProperty(globalThis, '__playwright_run', previousRelease);
+        } else {
+          Reflect.deleteProperty(globalThis, '__playwright_run');
+        }
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'preserves the development Playwright loader when a packaged wait flag is inherited',
+    async () => {
+      const previous = process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'];
+      const ready = Promise.withResolvers<void>();
+      state.ready = ready.promise;
+      const loaderRelease = vi.fn(() => {
+        ready.resolve();
+      });
+      vi.stubGlobal('__playwright_run', loaderRelease);
+      process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'] = '1';
+      try {
+        await boot();
+        expect(Reflect.get(globalThis, '__playwright_run')).toBe(loaderRelease);
+        expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+        loaderRelease();
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/');
+        });
+      } finally {
+        if (previous === undefined) {
+          delete process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'];
+        } else {
+          process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'] = previous;
+        }
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'registers the app as the tau scheme handler',
     async () => {
       await bootAndWait();
@@ -876,6 +981,7 @@ describe('desktop main deep links', () => {
         const { BrowserWindow } = await import('electron');
         const options = vi.mocked(BrowserWindow).mock.calls[0]?.[0];
         expect(options?.webPreferences?.focusOnNavigation).toBe(false);
+        expect(options?.webPreferences?.devTools).toBe(true);
         expect(fakeWindow.show).not.toHaveBeenCalled();
         listener('open-url')({ preventDefault: vi.fn() }, 'tau://i/github.com/taucad/tau-examples');
         await vi.waitFor(() => {

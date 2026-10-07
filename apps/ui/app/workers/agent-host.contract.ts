@@ -120,7 +120,6 @@ export type AgentHostProjectProvide = {
    */
   readonly model?: AgentHostModel | undefined;
   readonly runtimeConfig: UiRuntimeConfigInput;
-  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
   readonly testingEnabled?: boolean | undefined;
   /** The signed-in account the session cookie funds, which the host checks an attempt against (W11 GI-Q6). */
   readonly principal?: string | undefined;
@@ -378,7 +377,6 @@ const provideSchema = z.strictObject({
   ]),
   model: agentChannelModelSchema.optional(),
   runtimeConfig: z.strictObject({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() }),
-  geoSpecEngine: z.enum(['legacy', 'native']).optional(),
   testingEnabled: z.boolean().optional(),
   principal: nonEmptyString.optional(),
 });

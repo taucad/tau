@@ -22,10 +22,10 @@ import type {
   RevisionStatusProjection,
   RevisionTag,
 } from '@taucad/revisions';
+import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
 import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type {
   RevisionToast,
-  RevisionFileComparison,
   WorkerRevisionCommand,
   WorkerRevisionEvent,
   WorkerRevisionRequest,
@@ -81,7 +81,11 @@ export type RevisionClient = Readonly<{
   /** How far `head` and `base` have gone apart, counted by the port without listing either history. */
   divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
-  diff: (revisionId: string, from?: string) => Promise<readonly RevisionDiffEntry[]>;
+  diff: (
+    revisionId: string,
+    from?: string,
+    options?: Readonly<{ against?: 'checkout' }>,
+  ) => Promise<readonly RevisionDiffEntry[]>;
   /** Name one revision, or re-point an existing name (S31). */
   tag: (input: Readonly<{ name: string; revisionId: string; note?: string }>) => Promise<RevisionTag | undefined>;
   /** Remove one name. The revision it named stays. */
@@ -171,6 +175,26 @@ type ClientState = {
  */
 const clients = new Map<string, ClientState>();
 
+type ConnectionOperation = 'connect' | 'status' | 'open' | 'subscribe' | 'stream';
+
+/** One failed attachment shared by every caller waiting for its initialization. */
+class RevisionConnectionError extends Error {
+  public readonly code: string;
+  public readonly operation: ConnectionOperation;
+  public readonly generation: number;
+
+  public constructor(cause: unknown, operation: ConnectionOperation, generation: number) {
+    super(cause instanceof Error ? cause.message : 'The revision connection failed.', { cause });
+    this.name = 'RevisionConnectionError';
+    this.code =
+      typeof cause === 'object' && cause !== null && 'code' in cause && typeof cause.code === 'string'
+        ? cause.code
+        : 'REVISION_CONNECTION_FAILED';
+    this.operation = operation;
+    this.generation = generation;
+  }
+}
+
 /**
  * Read the host's answer to one *New branch* (P4): the checkout the registry made for it.
  *
@@ -205,6 +229,7 @@ export const createHostRevisionClient = (input: {
   let channel: AgentChannelClient | undefined;
   let opening: Promise<AgentChannelClient> | undefined;
   let streamAbort: AbortController | undefined;
+  let retireOpening: (() => void) | undefined;
   let connectionGeneration = 0;
 
   const staleConnection = (): Error & { readonly code: string } =>
@@ -237,82 +262,144 @@ export const createHostRevisionClient = (input: {
         workspaceRoot: await desktopWorkspaceRoot(input.projectId),
       }));
   const opened = async (): Promise<AgentChannelClient> => {
-    if (channel !== undefined) {
-      return channel;
-    }
     if (opening !== undefined) {
       return opening;
     }
-    const generation = connectionGeneration;
-    const pending = (async (): Promise<AgentChannelClient> => {
+    if (channel !== undefined) {
+      return channel;
+    }
+    const generation = ++connectionGeneration;
+    const abort = new AbortController();
+    const retired = Promise.withResolvers<never>();
+    let candidate: AgentChannelClient | undefined;
+    let closedCandidate: AgentChannelClient | undefined;
+    let iterator: ReturnType<ReturnType<AgentChannelClient['revisionEvents']>[typeof Symbol.asyncIterator]> | undefined;
+    let operation: ConnectionOperation = 'connect';
+    const dispose = (): void => {
+      abort.abort();
+      if (candidate !== undefined && closedCandidate !== candidate) {
+        closedCandidate = candidate;
+        candidate.close();
+      }
+      // oxlint-disable-next-line promise/prefer-await-to-then -- Best-effort stream teardown must not delay settling the shared opening.
+      void iterator?.return?.().catch(() => undefined);
+    };
+    const retire = (): void => {
+      retired.reject(staleConnection());
+      dispose();
+    };
+    retireOpening = retire;
+    const checkCurrent = (): void => {
+      if (generation !== connectionGeneration) {
+        dispose();
+        throw staleConnection();
+      }
+    };
+    const report = (error: RevisionConnectionError): void => {
+      toasts.emit({
+        type: 'error',
+        subject: 'connection',
+        code: error.code,
+        message: error.message,
+        generation: error.generation,
+        connectionOperation: error.operation,
+      });
+    };
+    const initialize = async (): Promise<AgentChannelClient> => {
       const next = await connect();
-      if (generation !== connectionGeneration) {
-        next.close();
-        throw staleConnection();
-      }
-      channel = next;
-      const initial = await next.revision({ command: 'status' });
-      if (generation !== connectionGeneration) {
-        throw staleConnection();
-      }
-      applyStatus(initial.status);
+      candidate = next;
+      checkCurrent();
+      operation = 'status';
+      const initial = await next.revision({ command: 'status' }, abort.signal);
+      checkCurrent();
       /* The desktop host keeps this project's root alive across renderer
        * reloads. Reattaching is therefore the open signal that makes the
        * retained scheduler fetch again before the client reads remote work. */
-      await next.revision({ command: 'open' });
-      const abort = new AbortController();
+      operation = 'open';
+      await next.revision({ command: 'open' }, abort.signal);
+      checkCurrent();
+      operation = 'subscribe';
+      iterator = next.revisionEvents(abort.signal)[Symbol.asyncIterator]();
+      /* The host replays its current status as its first event, acknowledging subscription even on an idle project. */
+      const first = await iterator.next();
+      checkCurrent();
+      if (first.done) {
+        throw new Error('The revision connection ended before its first projection.');
+      }
+      applyStatus(initial.status);
+      channel = next;
       streamAbort = abort;
+      const receive = (event: typeof first.value): void => {
+        if (event.kind === 'status') {
+          applyStatus(event.value);
+        } else if (event.kind === 'event') {
+          const projected = event.value as unknown as WorkerRevisionEvent;
+          if (projected.type === 'chats.projected') {
+            for (const chatId of projected.chatIds) {
+              projectedChatIds.add(chatId);
+            }
+          }
+          events.emit(projected);
+        } else {
+          toasts.emit(event.value as unknown as RevisionToast);
+        }
+      };
+      receive(first.value);
+      const stream = iterator;
       // async-iife: bootstrap -- the stream lives for the connection and reports through Topics.
       void (async (): Promise<void> => {
         try {
-          for await (const event of next.revisionEvents(abort.signal)) {
+          for await (const event of { [Symbol.asyncIterator]: () => stream }) {
             if (generation !== connectionGeneration) {
               break;
             }
-            if (event.kind === 'status') {
-              applyStatus(event.value);
-            } else if (event.kind === 'event') {
-              const projected = event.value as unknown as WorkerRevisionEvent;
-              if (projected.type === 'chats.projected') {
-                for (const chatId of projected.chatIds) {
-                  projectedChatIds.add(chatId);
-                }
-              }
-              events.emit(projected);
-            } else {
-              toasts.emit(event.value as unknown as RevisionToast);
-            }
+            receive(event);
           }
         } catch (error) {
-          if (!abort.signal.aborted) {
-            toasts.emit({
-              type: 'error',
-              subject: 'save',
-              message: error instanceof Error ? error.message : 'The revision connection failed.',
-            });
+          if (!abort.signal.aborted && generation === connectionGeneration) {
+            dispose();
+            channel = undefined;
+            status = undefined;
+            projectedChatIds.clear();
+            listeners.emit();
+            report(new RevisionConnectionError(error, 'stream', generation));
           }
         }
       })();
       return next;
+    };
+    const pending = (async (): Promise<AgentChannelClient> => {
+      try {
+        return await Promise.race([initialize(), retired.promise]);
+      } catch (error) {
+        dispose();
+        if (generation !== connectionGeneration) {
+          throw staleConnection();
+        }
+        channel = undefined;
+        status = undefined;
+        projectedChatIds.clear();
+        listeners.emit();
+        const failure = new RevisionConnectionError(error, operation, generation);
+        report(failure);
+        throw failure;
+      } finally {
+        if (generation === connectionGeneration) {
+          opening = undefined;
+          retireOpening = undefined;
+        }
+      }
     })();
     opening = pending;
-    try {
-      return await pending;
-    } catch (error) {
-      if (generation !== connectionGeneration) {
-        throw staleConnection();
-      }
-      throw error;
-    } finally {
-      if (opening === pending) {
-        opening = undefined;
-      }
-    }
+    return pending;
   };
   const ask = async (request: JsonValue): Promise<JsonValue> => {
+    const connected = await opened();
     const generation = connectionGeneration;
     try {
-      const connected = await opened();
+      if (connected !== channel) {
+        throw staleConnection();
+      }
       const response = await connected.revision(request);
       if (generation !== connectionGeneration) {
         throw staleConnection();
@@ -332,7 +419,7 @@ export const createHostRevisionClient = (input: {
       try {
         await ask(request as unknown as JsonValue);
       } catch (error) {
-        if (isStaleConnection(error)) {
+        if (isStaleConnection(error) || error instanceof RevisionConnectionError) {
           return;
         }
         toasts.emit({
@@ -345,6 +432,8 @@ export const createHostRevisionClient = (input: {
   };
   const close = (): void => {
     connectionGeneration += 1;
+    retireOpening?.();
+    retireOpening = undefined;
     opening = undefined;
     streamAbort?.abort();
     streamAbort = undefined;
@@ -363,7 +452,7 @@ export const createHostRevisionClient = (input: {
         try {
           await ask({ command: 'remoteCredential', ...credential });
         } catch (error) {
-          if (isStaleConnection(error)) {
+          if (isStaleConnection(error) || error instanceof RevisionConnectionError) {
             return;
           }
           toasts.emit({
@@ -400,10 +489,11 @@ export const createHostRevisionClient = (input: {
       })) as unknown as readonly RevisionRow[],
     divergence: async (head, base) =>
       (await ask({ command: 'divergence', head, base })) as unknown as RevisionDivergence,
-    diff: async (revisionId, from) =>
+    diff: async (revisionId, from, options) =>
       (await ask({
         command: 'diff',
         revisionId,
+        ...(options?.against === undefined ? {} : { against: options.against }),
         ...(from === undefined ? {} : { from }),
       })) as unknown as readonly RevisionDiffEntry[],
     tag: async (tagInput) => (await ask({ command: 'tag', ...tagInput })) as unknown as RevisionTag | undefined,
@@ -433,7 +523,7 @@ export const createHostRevisionClient = (input: {
         try {
           await opened();
         } catch (error) {
-          if (isStaleConnection(error)) {
+          if (isStaleConnection(error) || error instanceof RevisionConnectionError) {
             return;
           }
           toasts.emit({
@@ -857,10 +947,11 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       }
       return result.divergence;
     },
-    diff: async (revisionId, from) => {
+    diff: async (revisionId, from, options) => {
       const result = await ask({
         command: 'diff',
         revisionId,
+        ...(options?.against === undefined ? {} : { against: options.against }),
         ...(from === undefined ? {} : { from }),
       });
       return result.kind === 'diff' ? result.entries : [];
@@ -880,7 +971,12 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
         ...(options?.from === undefined ? {} : { from: options.from }),
         ...(options?.against === undefined ? {} : { against: options.against }),
       });
-      return result.kind === 'comparison' ? result.comparison : { original: '', modified: '' };
+      if (result.kind !== 'comparison') {
+        throw Object.assign(new Error('The revision root answered a comparison with something else.'), {
+          code: 'INVALID_REVISION_RESPONSE',
+        });
+      }
+      return result.comparison;
     },
     send: (command) => {
       post(command);

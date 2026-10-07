@@ -1,19 +1,25 @@
 import type { MockInstance } from 'vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
-import { act, render, screen, fireEvent } from '@testing-library/react';
-import { useSyncExternalStore } from 'react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { Profiler, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
+import { setLiveViewOptions } from '#workbench-records/live-view-options.js';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi } from 'dockview-react';
-import type { Geometry, GeometryComponentManifest } from '@taucad/types';
-import type { KernelIssue } from '@taucad/runtime';
+import type { GeometryComponentManifest } from '@taucad/types';
+import type { Artifact, Evaluation, KernelIssue, Rendering, ViewUpdateOutcome } from '@taucad/runtime';
+import { createMockRuntimeDocument } from '@taucad/runtime-testing';
+import type { MockRuntimeDocumentFixture } from '@taucad/runtime-testing';
 import { workbenchRecords } from '@taucad/workbench';
-import { defaultGraphicsSettings, defaultRenderTimeout } from '#constants/editor.constants.js';
+import { createEmptyGlb } from '@taucad/geometry-core';
+import { defaultGraphicsSettings, defaultOperationTimeout } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings, PinnedMeasurement } from '#constants/editor.constants.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
+import type { PartThumbnailService, PartThumbnailState } from '#services/part-thumbnail.service.js';
 const mockViewActions = vi.hoisted(() => ({
   edit: vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true),
   remove: vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true),
@@ -41,8 +47,36 @@ vi.mock('@xstate/react', () => ({
 const mockProjectSend = vi.fn();
 const mockEditorSend = vi.fn();
 const mockGraphicsSend = vi.fn();
+let mockGraphicsProjection: Readonly<{ artifact: Artifact | undefined; artifactKey: string | undefined }> = {
+  artifact: undefined,
+  artifactKey: undefined,
+};
+const mockGraphicsListeners = new Set<() => void>();
+const subscribeGraphics = (listener: () => void): (() => void) => {
+  mockGraphicsListeners.add(listener);
+  return () => {
+    mockGraphicsListeners.delete(listener);
+  };
+};
+const mockGltfPresentation: { presentedKey: string | undefined } = { presentedKey: undefined };
+const presentPreviewSource = (artifact: Artifact, key: string): void => {
+  mockGraphicsProjection = { artifact, artifactKey: key };
+  mockGltfPresentation.presentedKey = key;
+  for (const listener of mockGraphicsListeners) {
+    listener();
+  }
+};
+let mockCaptureRendering: (() => Promise<Rendering>) | undefined;
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
-let mockViewSettings: Record<string, { entryPath: string; graphicsSettings: GraphicsViewSettings }> = {};
+let mockViewSettings: Record<
+  string,
+  {
+    entryPath: string;
+    graphicsSettings: GraphicsViewSettings;
+    selectedKernelView?: string;
+    kernelViews?: Array<{ id: string; options?: Record<string, unknown>; authoredInstance?: string }>;
+  }
+> = {};
 let mockCameraSeed: unknown;
 /** A mounted provider is what acquires the view's camera session (R8). */
 let mockGraphicsProviderMounts = 0;
@@ -55,6 +89,8 @@ let mockSyncStatus: { readonly sync: { readonly state: 'checking' | 'backedUp' }
 };
 const mockSyncListeners = new Set<() => void>();
 let mockHoveredComponentId: string | undefined;
+let mockPreviewService: PartThumbnailService | undefined;
+let mockPreviewEnabled = false;
 let mockAreToolsRunning = false;
 let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
 let mockCadViewerProps:
@@ -63,17 +99,39 @@ let mockCadViewerProps:
       readonly eventSource?: unknown;
       readonly gizmoContainer?: HTMLElement | string;
       readonly secondaryMouseButtonMode?: string;
+      readonly artifactHash?: string;
     }
   | undefined;
 
 const helperEntryPath = 'helper.scad';
 const helperUnitId = `file:${helperEntryPath}`;
 const rightRimComponentId = 'component:right-rim';
-const mockGeometry = {
-  format: 'gltf',
+const mockArtifact = {
+  mimeType: 'model/gltf-binary',
   content: new Uint8Array([0x67, 0x6c, 0x54, 0x46]),
-  hash: 'test-geometry',
-} satisfies Geometry;
+} satisfies Artifact;
+const mockRendering: Rendering = {
+  success: true,
+  view: 'model',
+  artifact: mockArtifact,
+  hash: 'test-rendering',
+  requestId: 'test-request',
+  evaluationId: 'test-evaluation',
+  transient: false,
+  issues: [],
+};
+function successfulEvaluation(evaluation: Evaluation): Extract<Evaluation, { success: true }> {
+  if (!evaluation.success) {
+    throw new Error('Expected a successful mock evaluation');
+  }
+  return evaluation;
+}
+function successfulRendering(rendering: Rendering): Extract<Rendering, { success: true }> {
+  if (!rendering.success) {
+    throw new Error('Expected a successful mock rendering');
+  }
+  return rendering;
+}
 const componentCapabilities = {
   canHide: true,
   canIsolate: true,
@@ -117,6 +175,7 @@ function createManifest(): GeometryComponentManifest {
         meshNodeIndices: [0],
         primitiveIndices: [0],
         materialIndices: [0],
+        ...(mockPreviewEnabled ? { primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }] } : {}),
         capabilities: componentCapabilities,
       },
     },
@@ -144,28 +203,36 @@ function createModelInteractionContext(): ModelInteractionContext {
 }
 
 type MockCadActorOptions = {
-  readonly geometry?: Geometry;
-  readonly latestGeometryOutcome?: 'success' | 'failure';
+  readonly rendering?: Rendering;
+  readonly latestRenderingOutcome?: 'success' | 'failure';
   readonly kernelIssues?: Map<string, KernelIssue[]>;
   readonly tags?: ReadonlyArray<'cad-loading' | 'cad-runtime-error'>;
   readonly fileManagerReady?: boolean;
+  readonly runtime?: MockRuntimeDocumentFixture;
+  readonly evaluation?: Evaluation;
 };
 
 function createMockCadActor(options: MockCadActorOptions = {}): ActorRefFrom<typeof cadMachine> {
-  const geometry = 'geometry' in options ? options.geometry : mockGeometry;
+  const rendering = 'rendering' in options ? options.rendering : mockRendering;
+  const runtime = options.runtime ?? createMockRuntimeDocument();
+  if (!options.runtime && rendering) {
+    vi.mocked(runtime.view.rendering).mockResolvedValue({ superseded: false, rendering });
+  }
   const tags = new Set(options.tags);
 
   return {
     getSnapshot: vi.fn(() => ({
       context: {
         entryPath: helperEntryPath,
-        geometry,
+        rendering,
+        evaluation: options.evaluation ?? runtime.evaluation,
+        document: runtime.document,
         units: { length: 'mm' },
-        latestGeometryOutcome: options.latestGeometryOutcome,
+        latestRenderingOutcome: options.latestRenderingOutcome,
         kernelIssues: options.kernelIssues ?? new Map(),
         kernelClient: undefined,
         fileManagerRef: options.fileManagerReady ? {} : undefined,
-        renderTimeout: defaultRenderTimeout,
+        operationTimeout: defaultOperationTimeout,
         activeKernelId: undefined,
         capabilities: undefined,
       },
@@ -269,6 +336,8 @@ vi.mock('#hooks/use-project.js', () => ({
           version: 1,
           entryPath: settings.entryPath,
           fieldOfView: settings.graphicsSettings.cameraFovAngle,
+          selectedKernelView: settings.selectedKernelView,
+          kernelViews: settings.kernelViews,
           ...(settings.graphicsSettings.cameraView
             ? { camera: { kind: 'pose', ...settings.graphicsSettings.cameraView } }
             : {}),
@@ -280,6 +349,18 @@ vi.mock('#hooks/use-project.js', () => ({
     geometryUnits: mockGeometryUnits,
     mainEntryPath: mockMainEntryPath,
   }),
+}));
+
+vi.mock('#providers/part-thumbnail-provider.js', () => ({
+  useOptionalPartThumbnailService: () => mockPreviewService,
+}));
+
+const mockCanonicalPartPreviews = vi.hoisted(() =>
+  vi.fn(async () => ({ previews: [{ key: 'preview-key' }], visualKey: 'preview-key' })),
+);
+vi.mock('#services/part-thumbnail-visual.js', () => ({
+  canonicalPartPreviews: mockCanonicalPartPreviews,
+  sourceGlbDigest: async () => 'sha256:viewer-preview',
 }));
 
 vi.mock('#hooks/use-revision-status.js', () => ({
@@ -317,6 +398,7 @@ vi.mock('#components/geometry/cad/cad-viewer.js', () => ({
     gizmoContainer,
     onModelComponentSecondaryPointerCandidate,
     secondaryMouseButtonMode,
+    artifactHash,
   }: {
     readonly eventPrefix?: string;
     readonly eventSource?: unknown;
@@ -325,8 +407,9 @@ vi.mock('#components/geometry/cad/cad-viewer.js', () => ({
       target: { readonly unitId: string; readonly componentId: string } | undefined,
     ) => void;
     readonly secondaryMouseButtonMode?: string;
+    readonly artifactHash?: string;
   }) => {
-    mockCadViewerProps = { eventPrefix, eventSource, gizmoContainer, secondaryMouseButtonMode };
+    mockCadViewerProps = { eventPrefix, eventSource, gizmoContainer, secondaryMouseButtonMode, artifactHash };
 
     return (
       <div
@@ -361,8 +444,26 @@ vi.mock('#components/files/file-selector.js', () => ({
   ),
 }));
 
+// The issues list opens for a view notice; this stand-in shows the notice as the real list does.
 vi.mock('#routes/w.$workspace.$project/chat-stack-trace.js', () => ({
-  ChatStackTrace: () => <div data-testid='chat-stack-trace' />,
+  ViewerIssues: ({
+    notice,
+    children,
+  }: {
+    readonly notice?: { message: string; actionLabel: string; onAct: () => void };
+    readonly children: (parts: { segment: React.ReactNode; list: React.ReactNode }) => React.ReactNode;
+  }): React.ReactNode =>
+    children({
+      segment: <span data-testid='chat-stack-trace' />,
+      list: notice ? (
+        <div role='alert'>
+          {notice.message}
+          <button type='button' onClick={notice.onAct}>
+            {notice.actionLabel}
+          </button>
+        </div>
+      ) : null,
+    }),
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer-status.js', () => ({
@@ -370,7 +471,23 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-status.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
-  ChatViewerControls: () => <div role='group' aria-label='Viewer controls' />,
+  ChatViewerControls: ({
+    captureRendering,
+    leading,
+    aboveControls,
+  }: {
+    captureRendering: () => Promise<Rendering>;
+    leading?: React.ReactNode;
+    aboveControls?: React.ReactNode;
+  }) => {
+    mockCaptureRendering = captureRendering;
+    return (
+      <div role='group' aria-label='Viewer controls'>
+        {aboveControls}
+        {leading}
+      </div>
+    );
+  },
 }));
 
 vi.mock('#components/cad/ar-button.js', () => ({
@@ -386,21 +503,27 @@ vi.mock('#hooks/use-graphics.js', () => ({
     return <div>{children}</div>;
   },
   useGraphics: () => mockGraphicsActor,
-  useGraphicsSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
-    selector({
-      context: {
-        enableSurfaces: true,
-        enableLines: true,
-        enableGizmo: true,
-        enableGrid: true,
-        enableAxes: true,
-        enableMatcap: false,
-        upDirection: 'z',
-        isSectionViewActive: mockAreToolsRunning,
-        isMeasureActive: mockAreToolsRunning,
-        measurements: [],
-      },
-    }),
+  useGraphicsSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) => {
+    const selectSnapshot = () =>
+      selector({
+        context: {
+          enableSurfaces: true,
+          enableLines: true,
+          enableGizmo: true,
+          enableGrid: true,
+          enableAxes: true,
+          enableMatcap: false,
+          upDirection: 'z',
+          isSectionViewActive: mockAreToolsRunning,
+          isMeasureActive: mockAreToolsRunning,
+          measurements: [],
+          artifact: mockGraphicsProjection.artifact,
+          artifactKey: mockGraphicsProjection.artifactKey,
+          gltfPresentation: mockGltfPresentation,
+        },
+      });
+    return useSyncExternalStore(subscribeGraphics, selectSnapshot, selectSnapshot);
+  },
   useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
     selector({ context: createModelInteractionContext() }),
   useKinematicsSelector: (
@@ -415,6 +538,8 @@ const mockPanelApi = {
   updateParameters: vi.fn(),
 } as unknown as DockviewPanelApi;
 
+const renderViewer = (ui: React.ReactElement): ReturnType<typeof render> => render(ui, { wrapper: TooltipProvider });
+
 describe('ChatViewer reopen-renderer overlay', () => {
   let getBoundingClientRectSpy: MockInstance<typeof HTMLElement.prototype.getBoundingClientRect> | undefined;
 
@@ -422,6 +547,28 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockProjectSend.mockClear();
     mockEditorSend.mockClear();
     mockGraphicsSend.mockClear();
+    mockGraphicsProjection = { artifact: mockRendering.artifact, artifactKey: mockRendering.hash };
+    mockGltfPresentation.presentedKey = undefined;
+    mockGraphicsSend.mockImplementation((event: { type: string; artifact?: Artifact; hash?: string }) => {
+      if (event.type !== 'updateArtifact' && event.type !== 'clearArtifact') {
+        return;
+      }
+      const next =
+        event.type === 'clearArtifact'
+          ? { artifact: undefined, artifactKey: undefined }
+          : { artifact: event.artifact, artifactKey: event.hash };
+      if (
+        next.artifact === mockGraphicsProjection.artifact &&
+        next.artifactKey === mockGraphicsProjection.artifactKey
+      ) {
+        return;
+      }
+      mockGraphicsProjection = next;
+      for (const listener of mockGraphicsListeners) {
+        listener();
+      }
+    });
+    mockCaptureRendering = undefined;
     mockViewActions.edit.mockClear();
     mockViewActions.remove.mockClear();
     mockGeometryUnits = new Map();
@@ -435,6 +582,13 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockSyncListeners.clear();
     mockUnitSettings = {};
     mockHoveredComponentId = undefined;
+    mockPreviewService = undefined;
+    mockPreviewEnabled = false;
+    mockCanonicalPartPreviews.mockReset();
+    mockCanonicalPartPreviews.mockImplementation(async () => ({
+      previews: [{ key: 'preview-key' }],
+      visualKey: 'preview-key',
+    }));
     mockAreToolsRunning = false;
     mockCadViewerSecondaryPointerMode = 'component-hit';
     mockCadViewerProps = undefined;
@@ -456,15 +610,292 @@ describe('ChatViewer reopen-renderer overlay', () => {
     getBoundingClientRectSpy = undefined;
   });
 
+  it('opens, captures and closes the saved named projection without changing the CAD document', async () => {
+    const runtime = createMockRuntimeDocument();
+    const drawing: Rendering = {
+      ...runtime.rendering,
+      success: true,
+      view: 'drawing',
+      instance: 'sheet-1',
+      artifact: { mimeType: 'image/svg+xml', content: '<svg/>' },
+      hash: 'drawing',
+    };
+    vi.mocked(runtime.view.rendering).mockResolvedValue({ superseded: false, rendering: drawing });
+    const evaluation: Evaluation = {
+      ...successfulEvaluation(runtime.evaluation),
+      success: true,
+      views: [
+        { id: 'model', title: 'Model', mimeType: 'model/gltf-binary' },
+        { id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' },
+      ],
+    };
+    mockViewSettings = {
+      'view-1': {
+        entryPath: helperEntryPath,
+        graphicsSettings: defaultGraphicsSettings,
+        selectedKernelView: 'drawing',
+        kernelViews: [{ id: 'drawing', options: { quality: 'high' }, authoredInstance: 'sheet-1' }],
+      },
+    };
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime, evaluation, rendering: undefined }));
+
+    const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    expect(runtime.viewSpy).toHaveBeenCalledWith('drawing', {
+      options: { quality: 'high' },
+      instance: 'sheet-1',
+    });
+    expect(runtime.document.update).not.toHaveBeenCalled();
+    expect(runtime.document.close).not.toHaveBeenCalled();
+    await expect(mockCaptureRendering?.()).resolves.toBe(drawing);
+    const pending = Promise.withResolvers<ViewUpdateOutcome>();
+    vi.mocked(runtime.view.rendering).mockReturnValueOnce(pending.promise);
+    const capture = mockCaptureRendering?.();
+    mockViewSettings['view-1'] = { ...mockViewSettings['view-1']!, selectedKernelView: 'model' };
+    viewer.rerender(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    pending.resolve({ superseded: false, rendering: drawing });
+    await expect(capture).rejects.toThrow('The selected view changed during capture.');
+    viewer.unmount();
+    expect(runtime.view.close).toHaveBeenCalledTimes(2);
+    expect(runtime.document.close).not.toHaveBeenCalled();
+  });
+
+  it('re-renders the view from the options panel live draft before the record saves it', () => {
+    const runtime = createMockRuntimeDocument();
+    const evaluation: Evaluation = {
+      ...successfulEvaluation(runtime.evaluation),
+      views: [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }],
+    };
+    mockViewSettings = { 'view-1': { entryPath: helperEntryPath, graphicsSettings: defaultGraphicsSettings } };
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime, evaluation, rendering: undefined }));
+    const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    const coarse = { tessellation: { linearTolerance: 0.02, angularTolerance: 80 } };
+
+    // Each panel edit re-renders at once, with no record write in between.
+    act(() => {
+      setLiveViewOptions('view-1', { viewId: 'model', options: coarse });
+    });
+    expect(runtime.viewSpy).toHaveBeenLastCalledWith('model', { options: coarse });
+    act(() => {
+      setLiveViewOptions('view-1', {
+        viewId: 'model',
+        options: { tessellation: { ...coarse.tessellation, angularTolerance: 5 } },
+      });
+    });
+    expect(runtime.viewSpy).toHaveBeenLastCalledWith('model', {
+      options: { tessellation: { linearTolerance: 0.02, angularTolerance: 5 } },
+    });
+    const calls = runtime.viewSpy.mock.calls.length;
+
+    // The record catches up and the draft yields: the same options keep the same subscription.
+    mockViewSettings = {
+      'view-1': {
+        entryPath: helperEntryPath,
+        graphicsSettings: defaultGraphicsSettings,
+        kernelViews: [{ id: 'model', options: { tessellation: { linearTolerance: 0.02, angularTolerance: 5 } } }],
+      },
+    };
+    viewer.rerender(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    act(() => {
+      setLiveViewOptions('view-1', undefined);
+    });
+    expect(runtime.viewSpy).toHaveBeenCalledTimes(calls);
+
+    // A draft for another kernel view leaves this one alone.
+    act(() => {
+      setLiveViewOptions('view-1', { viewId: 'drawing', options: { scale: 2 } });
+    });
+    expect(runtime.viewSpy).toHaveBeenCalledTimes(calls);
+    act(() => {
+      setLiveViewOptions('view-1', undefined);
+    });
+    viewer.unmount();
+  });
+
+  it('switches a focused pane with digit keys but ignores editing controls', () => {
+    const runtime = createMockRuntimeDocument();
+    mockGeometryUnits.set(
+      helperEntryPath,
+      createMockCadActor({
+        runtime,
+        evaluation: {
+          ...successfulEvaluation(runtime.evaluation),
+          views: [
+            { id: 'model', title: 'Model', mimeType: 'model/gltf-binary' },
+            { id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' },
+          ],
+        },
+      }),
+    );
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    const pane = screen.getByTestId('chat-viewer-layout');
+    expect(screen.getByRole('button', { name: 'View: Model' })).toBeInTheDocument();
+    const canvas = screen.getByRole('application', { name: 'CAD canvas' });
+    canvas.focus();
+    fireEvent.keyDown(canvas, { key: '2' });
+    expect(mockViewActions.edit).toHaveBeenCalledWith('view-1', expect.any(Function));
+    const change = mockViewActions.edit.mock.lastCall?.[1] as (record: undefined) => { selectedKernelView?: string };
+    expect(change(undefined).selectedKernelView).toBe('drawing');
+
+    mockViewActions.edit.mockClear();
+    const input = document.createElement('input');
+    pane.append(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: '1' });
+    expect(mockViewActions.edit).not.toHaveBeenCalled();
+    fireEvent.keyDown(canvas, { key: '2', isComposing: true });
+    expect(mockViewActions.edit).not.toHaveBeenCalled();
+  });
+
+  it('keeps the prior picture through a pending and failed named-view switch', () => {
+    const runtime = createMockRuntimeDocument();
+    vi.mocked(runtime.view.rendering).mockImplementation(
+      async () =>
+        new Promise(() => {
+          /* Pending replacement. */
+        }),
+    );
+    const evaluation: Evaluation = {
+      ...successfulEvaluation(runtime.evaluation),
+      success: true,
+      views: [
+        { id: 'model', title: 'Model', mimeType: 'model/gltf-binary' },
+        { id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' },
+        { id: 'pcb', title: 'PCB', mimeType: 'image/svg+xml' },
+      ],
+    };
+    mockViewSettings = {
+      'view-1': {
+        entryPath: helperEntryPath,
+        graphicsSettings: defaultGraphicsSettings,
+        selectedKernelView: 'drawing',
+      },
+    };
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime, evaluation, rendering: undefined }));
+    const pane = renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    act(() => {
+      runtime.emitRendered({ ...successfulRendering(runtime.rendering), hash: 'drawing-picture', view: 'drawing' });
+    });
+    expect(mockCadViewerProps?.artifactHash).toBe('drawing-picture');
+
+    mockViewSettings = {
+      'view-1': { entryPath: helperEntryPath, graphicsSettings: defaultGraphicsSettings, selectedKernelView: 'pcb' },
+    };
+    pane.rerender(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile='shared' />);
+    expect(screen.queryByRole('button', { name: /^View:/ })).not.toBeInTheDocument();
+    expect(runtime.viewSpy).toHaveBeenLastCalledWith('pcb', { options: {} });
+    expect(mockCadViewerProps?.artifactHash).toBe('drawing-picture');
+    act(() => {
+      runtime.emitViewStatus('error');
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('The selected view is unavailable.');
+    act(() => {
+      runtime.emitRendered({
+        success: false,
+        requestId: 'pcb-failed',
+        evaluationId: evaluation.id,
+        transient: false,
+        issues: [{ message: 'PCB render failed', code: 'RUNTIME', type: 'runtime', severity: 'error' }],
+      });
+      runtime.emitViewStatus('error');
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('PCB render failed');
+    expect(mockCadViewerProps?.artifactHash).toBe('drawing-picture');
+    pane.unmount();
+  });
+
+  it('leaves a failed evaluation to the Issues card instead of a view alert', () => {
+    const runtime = createMockRuntimeDocument();
+    const issue = { message: 'Compile failed', code: 'RUNTIME', type: 'runtime', severity: 'error' } as const;
+    const evaluation: Evaluation = { id: 'failed-evaluation', success: false, transient: false, issues: [issue] };
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime, evaluation, rendering: undefined }));
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    act(() => {
+      runtime.emitRendered({
+        success: false,
+        requestId: 'default-failed',
+        evaluationId: evaluation.id,
+        transient: false,
+        issues: [issue],
+      });
+      runtime.emitViewStatus('error');
+    });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use default view' })).not.toBeInTheDocument();
+  });
+
+  it('preserves an unavailable saved projection until the user explicitly recovers', () => {
+    const runtime = createMockRuntimeDocument();
+    mockViewSettings = {
+      'view-1': {
+        entryPath: helperEntryPath,
+        graphicsSettings: defaultGraphicsSettings,
+        selectedKernelView: 'missing-drawing',
+      },
+    };
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime }));
+
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Saved view “missing-drawing” is unavailable');
+    expect(runtime.viewSpy).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Use default view' }));
+    expect(mockViewActions.edit).toHaveBeenCalledWith('view-1', expect.any(Function));
+  });
+
+  it('clears the displayed picture when an evaluation succeeds with no views', () => {
+    const runtime = createMockRuntimeDocument();
+    mockGeometryUnits.set(
+      helperEntryPath,
+      createMockCadActor({
+        runtime,
+        evaluation: { ...successfulEvaluation(runtime.evaluation), views: [] },
+        rendering: mockRendering,
+      }),
+    );
+
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+    expect(runtime.viewSpy).not.toHaveBeenCalled();
+  });
+
+  it('presents a successful Replicad empty GLB offer as an accessible empty model', async () => {
+    const runtime = createMockRuntimeDocument();
+    const emptyRendering: Rendering = {
+      ...mockRendering,
+      artifact: { mimeType: 'model/gltf-binary', content: createEmptyGlb() },
+      hash: 'empty-model',
+    };
+    vi.mocked(runtime.view.rendering).mockResolvedValue({ superseded: false, rendering: emptyRendering });
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime, rendering: emptyRendering }));
+
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole('status', { name: 'Empty model' })).toBeInTheDocument();
+    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+    expect(mockGraphicsSend).toHaveBeenCalledWith({ type: 'clearArtifact' });
+    expect(mockGraphicsSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'updateArtifact', hash: 'empty-model' }),
+    );
+  });
+
   it('renders the Reopen renderer button when the geometry unit is closed', () => {
     // `entryPath` is set, the file exists, but geometryUnits.get(entryPath) === undefined
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(screen.getByRole('button', { name: /reopen renderer/i })).toBeInTheDocument();
   });
 
   it('dispatches createGeometryUnit when Reopen renderer is clicked', () => {
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     fireEvent.click(screen.getByRole('button', { name: /reopen renderer/i }));
 
@@ -478,7 +909,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('does not render the overlay when a geometry unit exists for the entry path', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(screen.queryByRole('button', { name: /reopen renderer/i })).not.toBeInTheDocument();
   });
@@ -487,8 +918,8 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits.set(
       helperEntryPath,
       createMockCadActor({
-        geometry: undefined,
-        latestGeometryOutcome: 'failure',
+        rendering: undefined,
+        latestRenderingOutcome: 'failure',
         kernelIssues: new Map([
           [
             helperEntryPath,
@@ -498,7 +929,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
       }),
     );
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(screen.getByTestId('chat-stack-trace')).toBeInTheDocument();
     expect(screen.queryByRole('alert', { name: 'CAD runtime error' })).not.toBeInTheDocument();
@@ -510,7 +941,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits.set(
       helperEntryPath,
       createMockCadActor({
-        geometry: undefined,
+        rendering: undefined,
         kernelIssues: new Map([
           [
             '__connection__',
@@ -521,7 +952,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
       }),
     );
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(screen.getByTestId('chat-stack-trace')).toBeInTheDocument();
     expect(screen.queryByRole('alert', { name: 'CAD runtime error' })).not.toBeInTheDocument();
@@ -531,7 +962,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits.set(
       helperEntryPath,
       createMockCadActor({
-        latestGeometryOutcome: 'failure',
+        latestRenderingOutcome: 'failure',
         kernelIssues: new Map([
           [
             helperEntryPath,
@@ -541,7 +972,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
       }),
     );
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     expect(screen.getByTestId('chat-stack-trace')).toBeInTheDocument();
@@ -553,12 +984,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits.set(
       helperEntryPath,
       createMockCadActor({
-        latestGeometryOutcome: 'failure',
+        latestRenderingOutcome: 'failure',
         kernelIssues: new Map([[helperEntryPath, [{ message, code: 'RUNTIME', type: 'runtime', severity: 'error' }]]]),
       }),
     );
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile='shared' />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile='shared' />);
 
     expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     expect(screen.getByRole('alert', { name: 'CAD runtime error' })).toHaveTextContent(message);
@@ -569,23 +1000,23 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits.set(
       helperEntryPath,
       createMockCadActor({
-        latestGeometryOutcome: 'success',
+        latestRenderingOutcome: 'success',
         kernelIssues: new Map([
           [helperEntryPath, [{ message: 'warning sentinel', code: 'RUNTIME', type: 'runtime', severity: 'warning' }]],
         ]),
       }),
     );
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
     expect(screen.queryByRole('alert', { name: 'CAD runtime error' })).not.toBeInTheDocument();
   });
 
   it('uses the semantic loading tag while geometry is pending', () => {
-    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ geometry: undefined, tags: ['cad-loading'] }));
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ rendering: undefined, tags: ['cad-loading'] }));
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(screen.getByRole('status', { name: 'Loading geometry' })).toHaveAttribute('aria-busy', 'true');
   });
@@ -609,7 +1040,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     };
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(mockCameraSeed).toEqual({
       identity: helperEntryPath,
@@ -624,18 +1055,18 @@ describe('ChatViewer reopen-renderer overlay', () => {
       'view-1': { entryPath: helperEntryPath, graphicsSettings: { ...defaultGraphicsSettings } },
     };
 
-    const noFile = render(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
+    const noFile = renderViewer(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
     expect(mockGraphicsProviderMounts).toBe(0);
     noFile.unmount();
 
     mockFileTree = new Map([['src/parts/gear.scad', { type: 'file', name: 'gear.scad' }]]);
-    const directory = render(<ChatViewer viewId='view-1' entryPath='src/parts' panelApi={mockPanelApi} />);
+    const directory = renderViewer(<ChatViewer viewId='view-1' entryPath='src/parts' panelApi={mockPanelApi} />);
     expect(mockGraphicsProviderMounts).toBe(0);
     directory.unmount();
 
     mockFileTree = new Map();
     mockFileContent = { kind: 'orphaned' };
-    render(<ChatViewer viewId='view-1' entryPath='gone.scad' panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath='gone.scad' panelApi={mockPanelApi} />);
     expect(mockGraphicsProviderMounts).toBe(0);
     expect(mockCameraSeed).toBeUndefined();
   });
@@ -644,7 +1075,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockFileTree = new Map();
     mockFileContent = { kind: 'orphaned' };
     mockSyncStatus = { sync: { state: 'checking' } };
-    const viewer = render(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
+    const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
 
     expect(screen.getByRole('status')).toHaveTextContent('Checking synced files…');
     expect(screen.queryByText('File not found')).not.toBeInTheDocument();
@@ -666,7 +1097,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   });
 
   it('keeps a viewer on a user-selected file when the synced main file changes', () => {
-    const viewer = render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     mockMainEntryPath = 'bracket.scad';
     viewer.rerender(
@@ -679,7 +1110,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('recovers a missing file when its content arrives at the same path', () => {
     mockFileTree = new Map();
     mockFileContent = { kind: 'orphaned' };
-    const viewer = render(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
+    const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath='main.scad' panelApi={mockPanelApi} />);
     expect(screen.getByText('File not found')).toBeInTheDocument();
 
     mockFileTree = new Map([['main.scad', { type: 'file', name: 'main.scad' }]]);
@@ -703,24 +1134,24 @@ describe('ChatViewer reopen-renderer overlay', () => {
     const cadActor = createMockCadActor();
     mockGeometryUnits.set(helperEntryPath, cadActor);
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    expect(cadActor.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setRenderTimeout' }));
+    expect(cadActor.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setOperationTimeout' }));
 
     mockGeometryUnits.delete(helperEntryPath);
     mockProjectSend.mockClear();
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
     fireEvent.click(screen.getAllByRole('button', { name: /reopen renderer/i })[0]!);
 
     expect(mockProjectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: helperEntryPath,
-      renderTimeout: 30_000,
+      operationTimeout: 30_000,
     });
   });
 
   it('should switch a shared preview file without writing an editor view record', () => {
-    render(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} profile='shared' />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} profile='shared' />);
     fireEvent.click(screen.getByTestId('file-selector'));
     expect(mockPanelApi.updateParameters).toHaveBeenCalledWith({ entryPath: 'other.scad' });
     expect(mockViewActions.edit).not.toHaveBeenCalled();
@@ -770,7 +1201,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
         },
       },
     };
-    render(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Select another file' }));
 
@@ -798,7 +1229,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('should centre the bar on the last line of a strip that passes pointer events to the canvas, never past its left edge', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     const bar = screen.getByRole('group', { name: 'Viewer controls' });
     const strip = bar.parentElement!;
@@ -814,21 +1245,22 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(strip.lastElementChild).toBe(bar);
   });
 
-  it('should keep the issues card and the AR button on the line above the bar, so the bar never covers them', () => {
+  it('should keep the AR button on the line above the bar and the issues inside the bar', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    const line = screen.getByTestId('chat-stack-trace').parentElement!;
-    expect(line).toContainElement(screen.getByRole('button', { name: 'View in AR' }));
+    const line = screen.getByRole('button', { name: 'View in AR' }).parentElement!;
+    const bar = screen.getByRole('group', { name: 'Viewer controls' });
     expect(line).toHaveClass('[&>*]:pointer-events-auto');
-    expect(line.nextElementSibling).toBe(screen.getByRole('group', { name: 'Viewer controls' }));
+    expect(line.nextElementSibling).toBe(bar);
+    expect(bar).toContainElement(screen.getByTestId('chat-stack-trace'));
   });
 
   it('should make the viewer root the frame the shortcuts target and the container the bar sizes to', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     const root = screen.getByTestId('chat-viewer-layout');
     expect(root).toHaveAttribute('data-viewer-frame');
@@ -840,7 +1272,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockAreToolsRunning = true;
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(screen.getByRole('group', { name: 'Viewer controls' })).toBeInTheDocument();
     expect(screen.queryByText(/section view|measur/i)).not.toBeInTheDocument();
@@ -849,7 +1281,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('anchors the gizmo to the clipped canvas region', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
     expect(document.querySelector(mockCadViewerProps?.gizmoContainer as string)).toBe(canvasRegion);
@@ -860,7 +1292,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockHoveredComponentId = rightRimComponentId;
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     fireCanvasPointerMove(screen.getByTestId('cad-viewer-canvas-region'), { clientX: 74, clientY: 92 });
 
@@ -883,20 +1315,25 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('should place the hover badge on later pointer moves without re-rendering the viewer', () => {
     mockHoveredComponentId = rightRimComponentId;
     const cadActor = createMockCadActor();
+    const onRender = vi.fn();
     mockGeometryUnits.set(helperEntryPath, cadActor);
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    render(
+      <Profiler id='viewer' onRender={onRender}>
+        <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />
+      </Profiler>,
+    );
 
     const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
     fireCanvasPointerMove(canvasRegion, { clientX: 74, clientY: 92 });
 
-    // Each render of the viewer reads every cad subscription's snapshot, so a
-    // flat read count across pointer moves means no React commit happened.
-    const readsAfterFirstMove = vi.mocked(cadActor.getSnapshot).mock.calls.length;
+    // React can retry a render while bailing out a repeated state update.
+    // The profiler counts committed renders, which pointer movement must avoid.
+    const commitsAfterFirstMove = onRender.mock.calls.length;
     fireCanvasPointerMove(canvasRegion, { clientX: 120, clientY: 140 });
     fireCanvasPointerMove(canvasRegion, { clientX: 160, clientY: 180 });
 
-    expect(vi.mocked(cadActor.getSnapshot).mock.calls.length).toBe(readsAfterFirstMove);
+    expect(onRender.mock.calls.length).toBe(commitsAfterFirstMove);
     expect(screen.getByTestId('chat-viewer-layout')).toHaveStyle({
       '--viewer-hover-label-x': '150px',
       '--viewer-hover-label-y': '160px',
@@ -907,7 +1344,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockHoveredComponentId = rightRimComponentId;
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     // The viewer spans y 20–320; with three rows open the bottom controls start 150 px above its bottom edge.
     const bottomControls = screen.getByRole('group', { name: 'Viewer controls' }).parentElement!;
@@ -927,7 +1364,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockHoveredComponentId = rightRimComponentId;
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
     fireCanvasPointerMove(canvasRegion, { clientX: 74, clientY: 92 });
@@ -941,7 +1378,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('should not render the hovered component label when no component is hovered', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     fireCanvasPointerMove(screen.getByTestId('cad-viewer-canvas-region'), { clientX: 74, clientY: 92 });
 
@@ -952,7 +1389,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockHoveredComponentId = 'component:missing';
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     fireCanvasPointerMove(screen.getByTestId('cad-viewer-canvas-region'), { clientX: 74, clientY: 92 });
 
@@ -962,7 +1399,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('should not render the hovered component label when the geometry unit is closed', () => {
     mockHoveredComponentId = rightRimComponentId;
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     fireCanvasPointerMove(screen.getByTestId('cad-viewer-canvas-region'), { clientX: 74, clientY: 92 });
 
@@ -973,7 +1410,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('should open the model component action menu from a viewer right-click', async () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
     const canvas = screen.getByTestId('cad-viewer-canvas');
@@ -1018,10 +1455,148 @@ describe('ChatViewer reopen-renderer overlay', () => {
     });
   });
 
+  it('submits one manual preview request for each completed retry in the viewer menu', async () => {
+    mockPreviewEnabled = true;
+    presentPreviewSource(mockRendering.artifact, mockRendering.hash);
+    const requestForOwner = vi.fn();
+    const failedSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map([
+      [rightRimComponentId, { status: 'failed' }],
+    ]);
+    mockPreviewService = {
+      subscribe: () => () => undefined,
+      snapshot: () => failedSnapshot,
+      announcePresentedSource: vi.fn(),
+      releaseOwner: vi.fn(),
+      requestForOwner,
+      dispose: vi.fn(),
+    } as unknown as PartThumbnailService;
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    const openMenu = (): void => {
+      const canvas = screen.getByTestId('cad-viewer-canvas');
+      fireCanvasPointerEvent(canvas, 'pointerdown', { button: 2, pointerId: 31, clientX: 150, clientY: 180 });
+      fireCanvasPointerEvent(canvas, 'pointerup', { button: 2, pointerId: 31, clientX: 151, clientY: 181 });
+    };
+    openMenu();
+    await waitFor(() => {
+      expect(requestForOwner).toHaveBeenCalled();
+    });
+    for (const count of [1, 2]) {
+      // oxlint-disable-next-line no-await-in-loop -- The previous failed manual preview must settle before retrying again.
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry preview' }));
+      // oxlint-disable-next-line no-await-in-loop -- Count completed manual admissions in order.
+      await waitFor(() => {
+        expect(requestForOwner.mock.calls.filter((call) => call[3]?.manualPartId === rightRimComponentId)).toHaveLength(
+          count,
+        );
+      });
+      if (count === 1) {
+        openMenu();
+      }
+    }
+  });
+
+  it('resumes an unsubmitted retry for the same source and drops it after a source change', async () => {
+    mockPreviewEnabled = true;
+    presentPreviewSource(mockRendering.artifact, mockRendering.hash);
+    const requestForOwner = vi.fn();
+    const announcePresentedSource = vi.fn();
+    const failedSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map([
+      [rightRimComponentId, { status: 'failed' }],
+    ]);
+    mockPreviewService = {
+      subscribe: () => () => undefined,
+      snapshot: () => failedSnapshot,
+      announcePresentedSource,
+      releaseOwner: vi.fn(),
+      requestForOwner,
+      dispose: vi.fn(),
+    } as unknown as PartThumbnailService;
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+    const tree = (profile: 'editor' | 'shared' = 'editor') => (
+      <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile={profile} />
+    );
+    const view = render(tree());
+    const openMenu = (): void => {
+      const canvas = screen.getByTestId('cad-viewer-canvas');
+      fireCanvasPointerEvent(canvas, 'pointerdown', { button: 2, pointerId: 32, clientX: 150, clientY: 180 });
+      fireCanvasPointerEvent(canvas, 'pointerup', { button: 2, pointerId: 32, clientX: 151, clientY: 181 });
+    };
+    const manualCalls = () =>
+      requestForOwner.mock.calls.filter((call) => call[3]?.manualPartId === rightRimComponentId);
+    openMenu();
+    await waitFor(() => {
+      expect(requestForOwner).toHaveBeenCalled();
+    });
+
+    const canceled = Promise.withResolvers<{ previews: Array<{ key: string }>; visualKey: string }>();
+    const beforeRetry = mockCanonicalPartPreviews.mock.calls.length;
+    mockCanonicalPartPreviews.mockImplementation(async () => canceled.promise);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry preview' }));
+    await waitFor(() => {
+      expect(mockCanonicalPartPreviews.mock.calls.length).toBeGreaterThan(beforeRetry);
+    });
+    mockCanonicalPartPreviews.mockImplementation(async () => ({
+      previews: [{ key: 'preview-key' }],
+      visualKey: 'preview-key',
+    }));
+    act(() => {
+      presentPreviewSource({ ...mockArtifact }, mockRendering.hash);
+    });
+    view.rerender(tree('shared'));
+    await waitFor(() => {
+      expect(manualCalls()).toHaveLength(1);
+    });
+    await act(async () => {
+      canceled.resolve({ previews: [{ key: 'preview-key' }], visualKey: 'preview-key' });
+      await canceled.promise;
+    });
+    expect(manualCalls()).toHaveLength(1);
+
+    openMenu();
+    const stale = Promise.withResolvers<{ previews: Array<{ key: string }>; visualKey: string }>();
+    const beforeStaleRetry = mockCanonicalPartPreviews.mock.calls.length;
+    mockCanonicalPartPreviews.mockImplementation(async () => stale.promise);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry preview' }));
+    await waitFor(() => {
+      expect(mockCanonicalPartPreviews.mock.calls.length).toBeGreaterThan(beforeStaleRetry);
+    });
+    mockCanonicalPartPreviews.mockImplementation(async () => ({
+      previews: [{ key: 'preview-key' }],
+      visualKey: 'preview-key',
+    }));
+    act(() => {
+      presentPreviewSource({ ...mockArtifact }, 'new-source');
+    });
+    view.rerender(tree());
+    await act(async () => {
+      stale.resolve({ previews: [{ key: 'preview-key' }], visualKey: 'preview-key' });
+      await stale.promise;
+    });
+    expect(manualCalls()).toHaveLength(1);
+    view.rerender(tree());
+    expect(manualCalls()).toHaveLength(1);
+    const beforeReturn = announcePresentedSource.mock.calls.length;
+    act(() => {
+      presentPreviewSource({ ...mockArtifact }, mockRendering.hash);
+    });
+    view.rerender(tree('shared'));
+    await waitFor(() => {
+      expect(announcePresentedSource.mock.calls.length).toBeGreaterThan(beforeReturn);
+    });
+    expect(manualCalls()).toHaveLength(1);
+    openMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry preview' }));
+    await waitFor(() => {
+      expect(manualCalls()).toHaveLength(2);
+    });
+  });
+
   it('should keep a right-button drag as camera pan instead of opening model component actions', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     const canvas = screen.getByTestId('cad-viewer-canvas');
     fireCanvasPointerEvent(canvas, 'pointerdown', {
@@ -1051,7 +1626,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockCadViewerSecondaryPointerMode = 'suppressed';
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     const canvas = screen.getByTestId('cad-viewer-canvas');
     fireCanvasPointerEvent(canvas, 'pointerdown', {
@@ -1074,7 +1649,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('should suppress the browser context menu on the viewer surface without opening model actions', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     const contextMenuEvent = fireInspectableContextMenu(screen.getByTestId('cad-viewer-canvas-region'));
 

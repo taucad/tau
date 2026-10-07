@@ -11,6 +11,7 @@
  */
 
 import { z } from 'zod';
+import { machineTypeIdSchema } from '#machines/settings.js';
 
 const label = z.string().min(1).max(128);
 const identifier = z
@@ -46,8 +47,9 @@ export const machineActionDescriptorSchema = z.strictObject({
 
 /** Complete machine manifest. @public */
 export const machineManifestSchema = z.strictObject({
-  version: z.literal(1),
+  version: z.literal(2),
   identity: z.strictObject({
+    typeId: machineTypeIdSchema,
     vendor: label,
     model: identifier,
     displayName: label,

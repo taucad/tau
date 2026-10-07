@@ -44,11 +44,11 @@ describe('extractTypescriptApi over replicad', () => {
   });
 
   it('emits one entry per exported name, with no duplicates', () => {
-    // 201 is what `checker.getExportsOfModule` reports for replicad's bundle.
-    // The research document's 218 was the syntactic extractor's count, which
-    // included 17 bare `declare` statements that the module never exports.
-    expect(corpus.entries).toHaveLength(201);
-    expect(new Set(corpus.entries.map((entry) => entry.name)).size).toBe(201);
+    // 223 is what `checker.getExportsOfModule` reports for replicad 1.1's
+    // bundle; a syntactic count would add 17 bare `declare` statements that the
+    // module never exports.
+    expect(corpus.entries).toHaveLength(223);
+    expect(new Set(corpus.entries.map((entry) => entry.name)).size).toBe(223);
     expect(duplicateNames(corpus.entries)).toStrictEqual([]);
   });
 
@@ -57,9 +57,8 @@ describe('extractTypescriptApi over replicad', () => {
     // Names the syntactic extractor admitted through `ModifierFlags.Ambient`.
     const ambientOnly = [
       'ApproximationOptions',
-      'BooleanOptimisation',
+      'CartesianAxis',
       'CoordSystem',
-      'Direction',
       'FaceOrEdge',
       'Finder',
       'Finder3d',
@@ -67,14 +66,16 @@ describe('extractTypescriptApi over replicad', () => {
       'Offset2DConfig',
       'PhysicalProperties',
       'PlaneConfig',
+      'ShapeExtremumFilter',
       'SplineTangent',
       'StandardPlane',
       'StartSplineTangent',
-      'TopoEntity',
+      'TOPOLOGY_KINDS',
+      'TopologyKind',
       'UVBounds',
     ];
     for (const name of ambientOnly) {
-      expect(source).toMatch(new RegExp(`^declare (?:type|interface|class|abstract class) ${name}\\b`, 'mu'));
+      expect(source).toMatch(new RegExp(`^declare (?:type|interface|class|abstract class|const) ${name}\\b`, 'mu'));
     }
 
     const emitted = new Set(corpus.entries.map((entry) => entry.name));
@@ -198,6 +199,10 @@ describe('extractTypescriptApi over a source module', () => {
  * @param size - Edge length.
  * @param mode - How to combine it.
  * @deprecated Use makeSolidBox instead.
+ * @throws {@link Failure} when geometry cannot be exported or
+ * parsed, or when no engine is registered.
+ * @throws {RangeError} when size is negative.
+ * @throws When the input cannot be read.
  * @example <caption>A unit box</caption>
  * \`\`\`typescript
  * makeBox(1);
@@ -224,6 +229,30 @@ export const scale: {
   (factor: number): string;
   (x: number, y: number): string;
 } = (() => '') as never;
+
+export declare const suite: {
+  <T>(name: string, callback: () => T): T;
+  skip(name: string, callback?: () => void): void;
+  only(name: string, callback: () => void): void;
+};
+export type Matcher = {
+  toMatch(expected: string): boolean;
+  toMatch(expected: number): boolean;
+};
+export declare class Failure extends Error {
+  constructor(message: string);
+  constructor(code: number, message: string);
+}
+export declare function task<T>(callback: () => T): T;
+export declare namespace task {
+  function skip(callback?: () => void): void;
+  function only(callback: () => void): void;
+}
+export { task as first, task as second };
+export declare namespace cyclic {
+  export import self = cyclic;
+  export function read(): string;
+}
 `,
   );
 
@@ -256,6 +285,15 @@ export const scale: {
     expect(makeBox?.category).toBe('operations');
   });
 
+  it('should preserve throws links, types and multiline conditions', () => {
+    const makeBox = corpus.entries.find((entry) => entry.name === 'makeBox');
+    expect(makeBox?.docs?.throws).toEqual([
+      '{@link Failure} when geometry cannot be exported or\nparsed, or when no engine is registered.',
+      '{RangeError} when size is negative.',
+      'When the input cannot be read.',
+    ]);
+  });
+
   it('captures member visibility, static and hidden members', () => {
     const shape = corpus.entries.find((entry) => entry.name === 'Shape');
     expect(shape?.category).toBe('shapes');
@@ -272,5 +310,54 @@ export const scale: {
     const scale = corpus.entries.find((entry) => entry.name === 'scale');
     expect(scale?.kind).toBe('function');
     expect(scale?.signatures).toHaveLength(2);
+  });
+
+  it('should preserve generic callable members', () => {
+    const suite = corpus.entries.find((entry) => entry.name === 'suite');
+    expect(suite?.signatures?.[0]?.typeParameters).toEqual(['T']);
+    expect(suite?.signatures?.[0]?.returnType?.text).toBe('T');
+    expect(suite?.members?.map((member) => member.name)).toEqual(['skip', 'only']);
+    expect(suite?.members?.[0]?.id).toBe('typescript:suite.skip');
+    expect(suite?.members?.[0]?.signatures?.[0]?.parameters[1]?.optional).toBe(true);
+  });
+
+  it('should preserve addressable matcher overloads', () => {
+    const matcher = corpus.entries.find((entry) => entry.name === 'Matcher');
+    expect(matcher?.members?.[0]?.id).toBe('typescript:Matcher.toMatch');
+    expect(matcher?.members?.[0]?.kind).toBe('method');
+    expect(matcher?.members?.[0]?.signatures).toHaveLength(2);
+  });
+
+  it('should retain constructor overload parameters and constructed return type', () => {
+    const constructor = corpus.entries.find((entry) => entry.name === 'Failure')?.members?.[0];
+    expect(constructor?.kind).toBe('constructor');
+    expect(constructor?.signatures).toHaveLength(2);
+    expect(
+      constructor?.signatures?.map((signature) => signature.parameters.map((parameter) => parameter.name)),
+    ).toEqual([['message'], ['code', 'message']]);
+    expect(constructor?.signatures?.every((signature) => signature.returnType?.text === 'Failure')).toBe(true);
+  });
+
+  it('should preserve merged callable namespaces without losing their generic call', () => {
+    const task = corpus.entries.find((entry) => entry.name === 'task');
+    expect(task?.kind).toBe('function');
+    expect(task?.signatures?.[0]?.typeParameters).toEqual(['T']);
+    expect(task?.members?.map((member) => member.id)).toEqual(['typescript:task.skip', 'typescript:task.only']);
+  });
+
+  it('should retain members for each exported callable namespace alias', () => {
+    for (const name of ['first', 'second']) {
+      const entry = corpus.entries.find((candidate) => candidate.name === name);
+      expect(entry?.signatures?.[0]?.typeParameters).toEqual(['T']);
+      expect(entry?.members?.map((member) => member.id)).toEqual([
+        `typescript:${name}.skip`,
+        `typescript:${name}.only`,
+      ]);
+    }
+  });
+
+  it('should terminate namespace cycles while retaining noncyclic members', () => {
+    const cyclic = corpus.entries.find((entry) => entry.name === 'cyclic');
+    expect(cyclic?.members?.map((member) => member.id)).toEqual(['typescript:cyclic.read']);
   });
 });

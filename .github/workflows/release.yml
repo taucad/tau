@@ -1,0 +1,251 @@
+# Application releases: the standing release pull request and the GitHub
+# Releases its merge creates.
+#
+# Tau's deployable applications (projects tagged `release:app`: the UI, the API
+# and the desktop app) are versioned by `scripts/src/release-apps.ts` from the
+# conventional commits that touched each application's dependency closure since
+# its last `<project>@<version>` tag. npm packages are not released here: the
+# package train keeps Nx version plans and `publish.yml`, which CI no longer
+# triggers.
+#
+# Each application has its own standing release pull request, so each ships on
+# its own merge (docs/research/monorepo-app-release-practice.md, R2). On every
+# push to `main`:
+#   - A release commit (subject `chore(release): <project> v<version>`, the
+#     squash merge of one of those pull requests) creates the application's tag
+#     and GitHub Release. Creating the release is what starts
+#     `release-build.yml`, which builds and verifies what the release ships.
+#   - Then, for every application, the release commit is regenerated on
+#     `release/<project>` and one pull request titled with its subject is
+#     upserted. An application with nothing to release has its pull request
+#     closed and its branch deleted. A branch whose release commit would not
+#     change is left alone, so an unrelated push to `main` starts no CI on it.
+#
+# Merging a release pull request is the release act for that application.
+# Production is a separate, explicit act per application:
+# `deploy-production.yml`, dispatched from GitHub or the Command Center with a
+# `ui@` or `api@` release tag. A desktop release reaches installed apps through
+# its update feed once `release-build.yml` has packaged it.
+#
+# Modelled on taucad/nanoraster's `release-pr.yml`. Every write uses a minted
+# `tau-release-bot` token: the default GITHUB_TOKEN can neither trigger CI on the
+# pull request nor start `release-build.yml` from the releases it creates.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      release-commit: ${{ steps.subject.outputs.release-commit }}
+    steps:
+      - name: Classify the head commit
+        id: subject
+        env:
+          SUBJECT: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          first_line=${SUBJECT%%$'\n'*}
+          # The application release subject names a project before its version;
+          # the npm train's `chore(release): v<version>` does not match.
+          if [[ "$first_line" =~ ^chore\(release\):\ [a-z0-9-]+\ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "release-commit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release-commit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish-releases:
+    needs: classify
+    if: needs.classify.outputs.release-commit == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Create a tag and GitHub Release per application
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          TARGET: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/src/release-apps.ts tags > "$RUNNER_TEMP/tags.json"
+          count=$(jq length "$RUNNER_TEMP/tags.json")
+          if [ "$count" -eq 0 ]; then
+            echo "::warning::This release commit introduces no untagged application version."
+            exit 0
+          fi
+          for index in $(seq 0 $((count - 1))); do
+            tag=$(jq -r ".[$index].tag" "$RUNNER_TEMP/tags.json")
+            jq -r ".[$index].notes" "$RUNNER_TEMP/tags.json" > "$RUNNER_TEMP/notes.md"
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "$tag already has a GitHub Release"
+              continue
+            fi
+            # Only a desktop release becomes "latest", and only once
+            # release-build.yml has attached its assets: the desktop updater
+            # reads its feed from the latest release.
+            gh release create "$tag" --target "$TARGET" --title "$tag" \
+              --notes-file "$RUNNER_TEMP/notes.md" --latest=false
+            echo "Released $tag"
+          done
+
+  release-prs:
+    needs: [classify, publish-releases]
+    # Runs after a release commit's tags exist, so the released application's
+    # plan starts from its new tag; and on every other push too.
+    if: ${{ !cancelled() && needs.publish-releases.result != 'failure' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: main
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Upsert one release pull request per application
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+        run: |
+          set -euo pipefail
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git config user.name "tau-release-bot[bot]"
+          git config user.email "tau-release-bot[bot]@users.noreply.github.com"
+          base=$(git rev-parse HEAD)
+
+          # The combined `release/next` pull request is replaced by one per application.
+          legacy=$(gh pr list --base main --head release/next --state open --json number --jq '.[0].number // empty')
+          if [ -n "$legacy" ]; then
+            gh pr close "$legacy" --delete-branch \
+              --comment "Replaced by one release pull request per application (\`release/<project>\`)."
+          fi
+
+          node scripts/src/release-apps.ts apps > "$RUNNER_TEMP/apps.txt"
+          while IFS= read -r app; do
+            [ -n "$app" ] || continue
+            branch="release/$app"
+            git reset --quiet --hard "$base"
+            node scripts/src/release-apps.ts prepare "$app" > "$RUNNER_TEMP/plan.json"
+            subject=$(jq -r '.subject // empty' "$RUNNER_TEMP/plan.json")
+            pr_number=$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')
+
+            if [ -z "$subject" ]; then
+              if [ -n "$pr_number" ]; then
+                gh pr close "$pr_number" --comment "Nothing is left to release for $app on \`main\`." --delete-branch
+              else
+                git push "$remote" --delete "$branch" 2>/dev/null || true
+              fi
+              echo "$app: nothing to release"
+              continue
+            fi
+
+            # The release commit carries only this application's manifest version and changelog.
+            root=$(jq -r '.releases[0].root' "$RUNNER_TEMP/plan.json")
+            git add -- "$root/package.json" "$root/CHANGELOG.md"
+            unexpected=$( { git diff --name-only; git diff --cached --name-only; } \
+              | grep -Fvx -e "$root/package.json" -e "$root/CHANGELOG.md" || true)
+            if [ -n "$unexpected" ]; then
+              echo "::error::release generation for $app changed unexpected files: $unexpected"
+              exit 1
+            fi
+            # Contributor hooks (husky's commit-msg scope check, lint-staged) do
+            # not apply to this generated commit; `release` is not a project scope.
+            git commit --quiet --no-verify -m "$subject"
+
+            # Same release commit content as the open pull request: leave it, so
+            # its CI is not restarted. The main ruleset does not require a branch
+            # to be up to date, and the squash merge applies onto main's head.
+            current_change=""
+            if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+              current_change=$(git diff "origin/$branch~1" "origin/$branch" | git patch-id --stable | cut -d' ' -f1)
+            fi
+            new_change=$(git diff "$base" HEAD | git patch-id --stable | cut -d' ' -f1)
+            if [ -n "$pr_number" ] && [ "$current_change" = "$new_change" ] \
+              && [ "$(git log -1 --format=%s "origin/$branch")" = "$subject" ]; then
+              echo "$app: $subject is unchanged"
+              continue
+            fi
+            git push --force "$remote" "HEAD:refs/heads/$branch"
+
+            jq -r '.releases[] | "### \(.tag)\n\n" +
+              (if .bump == "first" then "First tracked release." else
+                "\(.bump) bump from \(.previousTag), \(.commits | length) commit(s):\n\n" +
+                ([.commits[] | "- \(.hash[0:9]) \(.subject)"] | .[0:60] | join("\n")) end) + "\n"' \
+              "$RUNNER_TEMP/plan.json" > "$RUNNER_TEMP/releases.md"
+            {
+              echo "Releases \`$app\`. Merging this pull request creates its tag and GitHub"
+              echo "Release, which start \`release-build.yml\`; it deploys nothing to production."
+              echo
+              cat "$RUNNER_TEMP/releases.md"
+              echo
+              echo "---"
+              echo
+              echo "- This pull request is **bot-managed**: it is regenerated on pushes to \`main\`"
+              echo "  and closes itself when nothing is left to release. Do not push to"
+              echo "  \`$branch\` or enable auto-merge."
+              echo "- Squash merge it with the title unchanged; the release workflow keys on it."
+              case "$app" in
+                ui|api) echo "- Production deploys this release with **Deploy release to production** (\`deploy-production.yml\`), from GitHub or the Command Center." ;;
+                desktop) echo "- The macOS build waits for a release manager's approval on the \`desktop\` environment; installed apps update once its assets are attached." ;;
+              esac
+            } > "$RUNNER_TEMP/body.md"
+
+            if [ -z "$pr_number" ]; then
+              gh pr create --base main --head "$branch" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
+            else
+              gh pr edit "$pr_number" --title "$subject" --body-file "$RUNNER_TEMP/body.md"
+            fi
+            echo "$app: $subject"
+          done < "$RUNNER_TEMP/apps.txt"

@@ -5,10 +5,13 @@ import type { FileProvenance } from '@taucad/types';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatEditorBreadcrumbs } from '#routes/w.$workspace.$project/chat-editor-breadcrumbs.js';
 
-const { send, useFileTreeEntry } = vi.hoisted(() => ({
+const { send, useFileTreeEntry, useFileReturn } = vi.hoisted(() => ({
   send: vi.fn(),
   useFileTreeEntry: vi.fn<() => { provenance: FileProvenance } | undefined>(),
+  useFileReturn: vi.fn<() => unknown>(),
 }));
+
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({ useFileReturn }));
 
 vi.mock('#hooks/use-file-tree.js', () => ({ useFileTreeEntry }));
 
@@ -41,6 +44,27 @@ describe('ChatEditorBreadcrumbs', () => {
   beforeEach(() => {
     send.mockClear();
     useFileTreeEntry.mockReset();
+    useFileReturn.mockReset();
+  });
+
+  it('should offer a way back only on the file a pane opened, and take it', () => {
+    const back = vi.fn();
+    useFileReturn.mockReturnValue({ returnTo: { path: '.tau/a/main.gcode.3mf', panel: 'print' }, back });
+    const { rerender } = render(
+      <TooltipProvider>
+        <ChatEditorBreadcrumbs filePath='.tau/a/main.gcode.3mf' />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Print' }));
+    expect(back).toHaveBeenCalledOnce();
+
+    rerender(
+      <TooltipProvider>
+        <ChatEditorBreadcrumbs filePath='main.ts' />
+      </TooltipProvider>,
+    );
+    expect(screen.queryByRole('button', { name: 'Back to Print' })).not.toBeInTheDocument();
   });
 
   it('should scroll breadcrumbs from vertical wheel input while preserving selection and child actions', () => {
@@ -71,6 +95,59 @@ describe('ChatEditorBreadcrumbs', () => {
 
     fireEvent.click(screen.getByTestId('selector-src/components'));
     expect(send).toHaveBeenCalledWith({ type: 'openFile', path: 'replacement.ts', source: 'user' });
+  });
+
+  it('should reveal the new filename on navigation without resetting an unrelated rerender', () => {
+    const observers: Array<{ observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public readonly observe = vi.fn();
+        public readonly disconnect = vi.fn();
+        public constructor() {
+          observers.push(this);
+        }
+      },
+    );
+    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(400);
+    let unmount: (() => void) | undefined;
+    try {
+      const rendered = render(<ChatEditorBreadcrumbs filePath='src/first.ts' />);
+      unmount = rendered.unmount;
+      const first = document.querySelector<HTMLElement>('[data-slot="omni-scroller"]');
+      if (!first) {
+        throw new Error('Editor breadcrumb scroller was missing.');
+      }
+      expect(first.scrollLeft).toBe(400);
+      expect(observers).toHaveLength(1);
+      first.scrollLeft = 37;
+
+      rendered.rerender(
+        <ChatEditorBreadcrumbs filePath='src/first.ts'>
+          <button type='button'>Action</button>
+        </ChatEditorBreadcrumbs>,
+      );
+      expect(first.scrollLeft).toBe(37);
+      expect(observers).toHaveLength(1);
+      expect(observers[0]?.disconnect).not.toHaveBeenCalled();
+
+      rendered.rerender(<ChatEditorBreadcrumbs filePath='src/second.ts' />);
+      const second = document.querySelector<HTMLElement>('[data-slot="omni-scroller"]');
+      if (!second) {
+        throw new Error('Navigated breadcrumb scroller was missing.');
+      }
+      expect(second.scrollLeft).toBe(400);
+      expect(observers).toHaveLength(2);
+      expect(observers[0]?.disconnect).toHaveBeenCalledOnce();
+      expect(observers[1]?.observe).toHaveBeenCalledWith(second);
+      rendered.unmount();
+      unmount = undefined;
+      expect(observers[1]?.disconnect).toHaveBeenCalledOnce();
+    } finally {
+      unmount?.();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('should render nothing without a file path', () => {

@@ -45,6 +45,7 @@ import type {
   FileSystemBridgeUnrootedCalls,
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';
+import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
 
 /** @public */
 export const filesystemBridgeConnectMessageType = 'tau:filesystem-bridge:connect';
@@ -562,7 +563,7 @@ const serializeBulkMoveResult = (result: BulkMoveResult): BulkMoveResult => ({
  *
  * Generic over `T extends StringKeyedObject` (not the mutating subset)
  * so partial handler shapes — e.g. `{ readFile: vi.fn() }` from tests
- * or {@link import('#types/runtime-kernel.types.js').RuntimeFileSystemBase}
+ * or `@taucad/runtime`'s `RuntimeFileSystemBase`
  * from kernel bridges — remain compatible. The proxy only intercepts a
  * mutating method name when that method actually exists on `target`.
  *
@@ -1424,10 +1425,19 @@ export function createFileSystemBridgeProxy(
     FileSystemBridgeHello
   >(resolvedBridge.port, {
     prepareCallArgs: cloneWriteArgsForTransfer,
+    /* Checked writes are compare-and-swap: a late original and a replacement
+     * can never both apply, so they wait for the authority's terminal answer
+     * rather than report a timeout while it may still write (Rule 32).
+     * Connection loss still settles them as potentially applied. */
     resolveCallTimeout: (method) =>
-      method === 'commitPendingProjectDirectory' ? pendingProjectCommitTimeout : undefined,
+      method === 'writeFileChecked' || method === 'deleteFileChecked'
+        ? 'none'
+        : method === 'commitPendingProjectDirectory'
+          ? pendingProjectCommitTimeout
+          : undefined,
     protocolSchemas: fileSystemBridgeSchemas,
   });
+  const connectionId = nextFileSystemBridgeConnectionId();
   let isDisposed = false;
 
   return new Proxy({} as FileSystemBridgeProxy, {
@@ -1484,13 +1494,20 @@ export function createFileSystemBridgeProxy(
           }
         }
         try {
-          const result = await call(property, args);
+          const result = await timeFileSystemBridgeCall(connectionId, property, async () => call(property, args));
           if (
             property === 'readdirWithStats' &&
             args[1] === undefined &&
             !exactComposedDirectoryRowsSchema.safeParse(result).success
           ) {
             throw new TypeError('Exact readdirWithStats response is missing required metadata.');
+          }
+          if (
+            property === 'stat' &&
+            args[1] === undefined &&
+            !fileSystemBridgeSchemas.calls.lstat.result.safeParse(result).success
+          ) {
+            throw new TypeError('Exact stat response is missing required metadata.');
           }
           return result;
         } catch (error) {

@@ -1,5 +1,5 @@
 import type * as ReactThreeFiber from '@react-three/fiber';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import type { JSX } from 'react';
 import { useEffect } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
@@ -13,6 +13,8 @@ import {
 } from 'three';
 import type { Camera } from 'three';
 
+import { WebglErrorBoundary } from '#components/geometry/cad/webgl-error-boundary.js';
+import { WebglErrorFallback } from '#components/geometry/cad/webgl-fallback.js';
 import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-canvas-instance.js';
 import {
   infiniteGridFadeEndVisibleSpans,
@@ -49,9 +51,24 @@ const rigCamera = new PerspectiveCamera();
 const orthographicCamera = new OrthographicCamera();
 const setClipPlanes = vi.fn();
 const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera, setClipPlanes };
+const enabledFeatures = vi.hoisted(() => new Set<string>());
+/** When set, the mocked renderer factory throws it, as three's `WebGLRenderer` does without a context. */
+const rendererFailure = vi.hoisted((): { error: Error | undefined } => ({ error: undefined }));
 
 vi.mock('#components/geometry/graphics/three/renderer.js', () => ({
-  createRenderer: async () => ({ coordinateSystem: WebGLCoordinateSystem }),
+  async createRenderer() {
+    if (rendererFailure.error) {
+      throw rendererFailure.error;
+    }
+    let pixelRatio = 1;
+    return {
+      coordinateSystem: WebGLCoordinateSystem,
+      getPixelRatio: () => pixelRatio,
+      setPixelRatio(value: number) {
+        pixelRatio = value;
+      },
+    };
+  },
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
@@ -148,7 +165,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
 });
 
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: () => false,
+  useFeature: (key: string) => enabledFeatures.has(key),
 }));
 
 vi.mock('#components/geometry/graphics/three/scene.js', () => ({
@@ -183,7 +200,7 @@ vi.mock('#components/geometry/graphics/three/grid.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/webgpu-inspector-overlay.js', () => ({
-  WebGpuInspectorOverlay: () => null,
+  WebGpuInspectorOverlay: () => <div data-testid='gpu-inspector' />,
 }));
 
 vi.mock('#components/geometry/graphics/three/actor-bridge.js', () => ({
@@ -200,6 +217,7 @@ function KeyedThreeCanvas({ canvasKey }: { readonly canvasKey: string }) {
 
 describe('ThreeCanvasInstance', () => {
   beforeEach(() => {
+    enabledFeatures.clear();
     fireLatestWebGlContextLost = undefined;
     latestCanvasEventPrefix = undefined;
     latestCanvasEventSource = undefined;
@@ -209,6 +227,50 @@ describe('ThreeCanvasInstance', () => {
     latestCanvasState = undefined;
     stubRootCamera = new PerspectiveCamera();
     setClipPlanes.mockClear();
+    rendererFailure.error = undefined;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should show the WebGL fallback instead of an unhandled rejection when the renderer cannot be created', async () => {
+    rendererFailure.error = new Error('Error creating WebGL context.');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    render(
+      <WebglErrorBoundary fallback={(errorProps) => <WebglErrorFallback {...errorProps} />}>
+        <ThreeCanvasInstance graphicsBackend='webgl' onRetry={() => undefined}>
+          {null}
+        </ThreeCanvasInstance>
+      </WebglErrorBoundary>,
+    );
+    const glFactory = latestCanvasGl;
+    if (typeof glFactory !== 'function') {
+      throw new TypeError('Expected the R3F renderer factory.');
+    }
+
+    await act(async () => {
+      // Never settles by design: R3F keeps waiting while the owner swaps in its fallback.
+      void glFactory({ canvas: document.createElement('canvas') });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText('3D rendering failed')).toBeInTheDocument();
+    expect(screen.getByText('Error creating WebGL context.')).toBeInTheDocument();
+    expect(screen.queryByTestId('stub-canvas')).not.toBeInTheDocument();
+  });
+
+  it('loads the inspector only on explicit demand while the lightweight debug bridge remains independent', async () => {
+    enabledFeatures.add('tauDebug');
+    const view = render(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('gpu-inspector')).not.toBeInTheDocument();
+    enabledFeatures.add('webGpuInspector');
+    view.rerender(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
+    expect(screen.getByTestId('gpu-inspector')).toBeInTheDocument();
   });
 
   it('shows Graphics context lost fallback when WebGL fires context loss', async () => {

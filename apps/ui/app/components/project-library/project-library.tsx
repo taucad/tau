@@ -240,7 +240,7 @@ export function ProjectLibrary(): React.JSX.Element {
         if (trashed) {
           if (announce) {
             toast.success(`Moved ${project.name} to Trash`, {
-              description: 'Its files remain on disk and can be restored from this browser profile.',
+              description: 'Its files remain on disk and can be restored from Trash.',
             });
           }
           return true;
@@ -445,7 +445,7 @@ export function ProjectLibrary(): React.JSX.Element {
         className='mb-6'
         action={
           <Button asChild>
-            <NavLink to='/'>
+            <NavLink to='/projects/new'>
               {({ isPending }) => (
                 <>
                   New project
@@ -598,7 +598,7 @@ export function ProjectLibrary(): React.JSX.Element {
       )}
 
       {listingError && projects.length > 0 ? (
-        <div className='mb-6 flex items-center justify-between gap-3 rounded-md border border-destructive/40 p-3'>
+        <div className='mb-6 flex items-center justify-between gap-3 rounded-md border border-feature/40 p-3'>
           <span className='text-sm'>Projects could not be refreshed.</span>
           <Button size='sm' variant='outline' onClick={async () => retry()}>
             Retry

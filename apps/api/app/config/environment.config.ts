@@ -73,21 +73,24 @@ const environmentSchemaBase = z.object({
   // and editing never require it (V6).
   MORPH_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
-  GOOGLE_VERTEX_AI_CREDENTIALS: jsonCodec(
-    z.object({
-      type: z.string(),
-      project_id: z.string(),
-      private_key_id: z.string(),
-      private_key: z.string(),
-      client_email: z.string(),
-      client_id: z.string(),
-      auth_uri: z.string(),
-      token_uri: z.string(),
-      auth_provider_x509_cert_url: z.string(),
-      client_x509_cert_url: z.string(),
-      universe_domain: z.string(),
-    }),
-  ).optional(),
+  // A copied `.env.example` leaves this empty; empty means unset, not malformed JSON.
+  GOOGLE_VERTEX_AI_CREDENTIALS: unsetWhenEmpty(
+    jsonCodec(
+      z.object({
+        type: z.string(),
+        project_id: z.string(),
+        private_key_id: z.string(),
+        private_key: z.string(),
+        client_email: z.string(),
+        client_id: z.string(),
+        auth_uri: z.string(),
+        token_uri: z.string(),
+        auth_provider_x509_cert_url: z.string(),
+        client_x509_cert_url: z.string(),
+        universe_domain: z.string(),
+      }),
+    ).optional(),
+  ),
   TAVILY_API_KEY: z.string().optional(),
   CEREBRAS_API_KEY: z.string().optional(),
   TOGETHER_API_KEY: z.string().optional(),
@@ -162,6 +165,12 @@ const environmentSchemaBase = z.object({
     .optional()
     .describe(
       'Development-only provider upstream origin. Every funded provider call keeps its path and is sent to this origin instead, so an e2e run can drive the real gateway against a local stub. Refused outside BILLING_ENVIRONMENT=development.',
+    ),
+  TAU_TRANSCRIPTION_UPSTREAM_URL: z
+    .url()
+    .optional()
+    .describe(
+      'Development-only dictation upstream origin. OpenAI transcription keeps its path and is sent to this origin, and dictation is offered without OPENAI_API_KEY, so an e2e run can drive the real voice route against a local stub. Refused under NODE_ENV=production.',
     ),
   BILLING_INVOCATION_DEADLINE: z.coerce
     .number()
@@ -275,6 +284,14 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       code: 'custom',
       message: 'TAU_LLM_PROVIDER_UPSTREAM_URL requires BILLING_ENVIRONMENT=development',
       path: ['TAU_LLM_PROVIDER_UPSTREAM_URL'],
+    });
+  }
+
+  if (data.TAU_TRANSCRIPTION_UPSTREAM_URL !== undefined && data.NODE_ENV === 'production') {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_TRANSCRIPTION_UPSTREAM_URL is refused under NODE_ENV=production',
+      path: ['TAU_TRANSCRIPTION_UPSTREAM_URL'],
     });
   }
 

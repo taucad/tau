@@ -6,6 +6,7 @@ import { PartThumbnailService } from '#services/part-thumbnail.service.js';
 
 class PartThumbnailRegistry {
   private readonly services = new Map<string, PartThumbnailService>();
+  // oxlint-disable-next-line typescript/parameter-properties -- The app's erasableSyntaxOnly compiler forbids parameter properties.
   private readonly imageService: ConstructorParameters<typeof PartThumbnailService>[0];
   public constructor(imageService: ConstructorParameters<typeof PartThumbnailService>[0]) {
     this.imageService = imageService;
@@ -31,21 +32,28 @@ const PartThumbnailContext = createContext<PartThumbnailRegistry | undefined>(un
 /** One project-scoped preview scheduler shared by Model and viewer menus. */
 export function PartThumbnailProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const project = useProject({ enableNoContext: true });
+  const projectId = project?.projectId;
   const imageService = useOptionalHeadlessImageService();
-  const [registry, setRegistry] = useState<PartThumbnailRegistry>();
+  const [registryRecord, setRegistryRecord] = useState<{ projectId: string; registry: PartThumbnailRegistry }>();
   useEffect(() => {
-    if (!imageService || !project) {
+    if (!imageService || !projectId) {
       return undefined;
     }
     const next = new PartThumbnailRegistry(imageService);
     // oxlint-disable-next-line react/set-state-in-effect -- This effect owns the StrictMode and project lifecycle.
-    setRegistry(next);
+    setRegistryRecord({ projectId, registry: next });
     return () => {
       next.dispose();
-      setRegistry((current) => (current === next ? undefined : current));
+      setRegistryRecord((current) => (current?.registry === next ? undefined : current));
     };
-  }, [imageService, project?.projectId]);
-  return <PartThumbnailContext.Provider value={registry}>{children}</PartThumbnailContext.Provider>;
+  }, [imageService, projectId]);
+  return (
+    <PartThumbnailContext.Provider
+      value={registryRecord && registryRecord.projectId === projectId ? registryRecord.registry : undefined}
+    >
+      {children}
+    </PartThumbnailContext.Provider>
+  );
 }
 
 export const useOptionalPartThumbnailService = (unitId: string): PartThumbnailService | undefined =>

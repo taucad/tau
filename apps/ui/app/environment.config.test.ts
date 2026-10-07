@@ -2,7 +2,13 @@
 import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ENV, getClientEnvironment, getEnvironment, resolveFrontendUrl } from '#environment.config.js';
+import {
+  ENV,
+  getClientEnvironment,
+  getEnvironment,
+  requireClientEnvironment,
+  resolveFrontendUrl,
+} from '#environment.config.js';
 import type { ClientEnvironment } from '#environment.config.js';
 
 const originalEnvironment = { ...process.env };
@@ -284,6 +290,8 @@ describe('getClientEnvironment', () => {
       'POSTHOG_ASSET_HOST',
       'POSTHOG_CLIENT_KEY',
       'POSTHOG_UI_HOST',
+      'SENTRY_DSN',
+      'SENTRY_ENVIRONMENT',
       'TAU_API_URL',
       'TAU_BILLING_ENVIRONMENT',
       'TAU_DEBUG',
@@ -296,6 +304,7 @@ describe('getClientEnvironment', () => {
 
 describe('window.ENV host contract', () => {
   afterEach(() => {
+    vi.unstubAllEnvs();
     if (originalProcessEnvironmentDescriptor) {
       Object.defineProperty(process, 'env', originalProcessEnvironmentDescriptor);
     }
@@ -309,6 +318,7 @@ describe('window.ENV host contract', () => {
   });
 
   it('uses the full pre-import injection without reading process.env', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
     const injectedEnvironment = {
       /* eslint-disable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
       TAU_API_URL: 'https://api.host.test',
@@ -322,6 +332,8 @@ describe('window.ENV host contract', () => {
       POSTHOG_UI_HOST: 'https://analytics.host.test',
       POSTHOG_ASSET_HOST: 'assets.host.test',
       POSTHOG_CLIENT_KEY: 'phc_host',
+      SENTRY_DSN: 'https://public@sentry.host.test/1',
+      SENTRY_ENVIRONMENT: 'staging',
       /* eslint-enable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
     } as const satisfies ClientEnvironment;
     Object.defineProperty(globalThis, 'window', {
@@ -350,6 +362,43 @@ describe('window.ENV host contract', () => {
 
     expect(resolvedEnvironment).toStrictEqual(injectedEnvironment);
     expect(processEnvironmentRead).not.toHaveBeenCalled();
+  });
+
+  it('should leave a desktop SPA unbootstrapped without reading server environment', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const processEnvironmentRead = vi.fn();
+    Object.defineProperty(process, 'env', {
+      configurable: true,
+      get: () => {
+        // Vitest resolves import.meta.env through process.env; the production
+        // build replaces the existing target helper with the build define.
+        if (!new Error('trace process.env access').stack?.includes('app/lib/build-target.ts')) {
+          processEnvironmentRead();
+        }
+        return originalEnvironment;
+      },
+    });
+
+    expect(ENV.TAU_DEBUG).toBeUndefined();
+    expect(() => ENV.TAU_API_URL).toThrow(/Missing TAU_API_URL/u);
+    expect(() => ENV.TAU_WEBSOCKET_URL).toThrow(/Missing TAU_WEBSOCKET_URL/u);
+    expect(() => requireClientEnvironment('TAU_FRONTEND_URL')).toThrow(/Missing TAU_FRONTEND_URL/u);
+    expect(processEnvironmentRead).not.toHaveBeenCalled();
+  });
+
+  it('should preserve strict web Node validation without an injected client environment', () => {
+    vi.stubEnv('TAU_TARGET', 'web');
+    process.env = {};
+
+    expect(() => ENV.TAU_DEBUG).toThrow('Invalid environment configuration');
+  });
+
+  it('should preserve strict explicit server parsing for the desktop target', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    process.env = {};
+
+    await expect(getEnvironment()).rejects.toThrow('Invalid environment configuration');
+    await expect(getClientEnvironment()).rejects.toThrow('Invalid environment configuration');
   });
 
   it('reads nothing in a worker, which has neither window nor process', async () => {

@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { cn } from '@taucad/ui/utils/cn';
 import { useSelector } from '@xstate/react';
 import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
 import type { ModelViewerGraphicsOptions, ModelViewerState } from '#components/model-viewer.js';
@@ -19,13 +20,15 @@ type CadPreviewViewerProps = {
   readonly initialVerticalFieldOfView?: number;
   readonly stageOptions?: StageOptions;
   readonly graphicsOptions?: CadPreviewGraphicsOptions;
+  /** A larger artifact is not handed to three.js; a notice asks to open the project instead. */
+  readonly maxArtifactBytes?: number;
 };
 
-const cadPreviewStatusToViewerState = (status: CadPreviewStatus, hasGeometry: boolean): ModelViewerState => {
+const cadPreviewStatusToViewerState = (status: CadPreviewStatus, hasArtifact: boolean): ModelViewerState => {
   // Keep the last settled frame visible during parameter re-renders; only
   // block the viewport with a full-screen loader on the initial load.
   if (status === 'loading') {
-    return hasGeometry ? 'ready' : 'loading';
+    return hasArtifact ? 'ready' : 'loading';
   }
 
   return 'ready';
@@ -55,8 +58,9 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
   initialVerticalFieldOfView,
   stageOptions,
   graphicsOptions,
+  maxArtifactBytes,
 }: CadPreviewViewerProps): React.JSX.Element {
-  const { geometry, graphicsRef, status, error } = useCadPreview();
+  const { artifact, artifactHash, graphicsRef, status, error } = useCadPreview();
   const enableLines = useSelector(graphicsRef, (state) => state.context.enableLines);
   const enableSurfaces = useSelector(graphicsRef, (state) => state.context.enableSurfaces);
   const enableMatcap = useSelector(graphicsRef, (state) => state.context.enableMatcap);
@@ -64,10 +68,22 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
   const enableGrid = useSelector(graphicsRef, (state) => state.context.enableGrid);
   const enableAxes = useSelector(graphicsRef, (state) => state.context.enableAxes);
 
+  if (artifact && maxArtifactBytes !== undefined && artifact.content.length > maxArtifactBytes) {
+    return (
+      <p
+        role='status'
+        className={cn('flex items-center justify-center p-4 text-center text-sm text-muted-foreground', className)}
+      >
+        Too large to preview. Open the project to view it.
+      </p>
+    );
+  }
+
   return (
     <ModelViewer
-      geometry={geometry}
-      viewerState={cadPreviewStatusToViewerState(status, Boolean(geometry))}
+      artifact={artifact}
+      artifactHash={artifactHash}
+      viewerState={cadPreviewStatusToViewerState(status, Boolean(artifact))}
       graphicsRef={graphicsRef}
       className={className}
       enablePan={enablePan}
@@ -101,5 +117,12 @@ type CadPreviewStatusProps = {
 export function CadPreviewStatus({ className }: CadPreviewStatusProps): React.ReactNode {
   const { status } = useCadPreview();
 
-  return <RuntimeStatusOverlay status={status === 'loading' ? 'rendering' : 'idle'} className={className} />;
+  return (
+    <RuntimeStatusOverlay
+      status={
+        status === 'loading' ? 'evaluating' : status === 'ready' ? 'ready' : status === 'error' ? 'error' : 'closed'
+      }
+      className={className}
+    />
+  );
 }

@@ -2,7 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient, RuntimeAgentImageExporter } from '#runtime/runtime-agent-clients.js';
-import type { ExportFile, HashedGeometryResult } from '@taucad/runtime/types';
+import type {
+  Description,
+  Evaluation,
+  ExportFile,
+  ExportResult,
+  Rendering,
+  RuntimeDocument,
+  UpdateOutcome,
+  ViewSubscription,
+  ViewUpdateOutcome,
+  WideViewRequest,
+} from '@taucad/runtime';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import type { ParameterSetActors, ParameterSetLoadInput } from '@taucad/parameters/set-machine';
@@ -18,54 +29,140 @@ const glb = (): Uint8Array<ArrayBuffer> => {
   return bytes;
 };
 
-const setup = (geometry: HashedGeometryResult, exportImage?: RuntimeAgentImageExporter) => {
-  const evaluate = vi.fn(async () => geometry);
-  const exportGeometry = vi.fn(async () => ({ success: true, data: [], issues: [] }) as const);
-  const runtime: RuntimeAgentClient = { evaluate, export: exportGeometry };
-  const exporter =
-    exportImage ??
-    vi.fn<RuntimeAgentImageExporter>(async () => [
-      {
-        name: 'render.webp',
-        mimeType: 'image/webp',
-        bytes: new Uint8Array([1]),
-      },
-    ]);
-  const clients = createRuntimeAgentClients({
-    runtime,
-    exportImage: exporter,
-    mapRuntimeError: (error) => ({
-      success: false,
-      errorCode: 'UNKNOWN',
-      message: String(error),
-    }),
+const evaluation = (views = [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }]): Evaluation => ({
+  success: true,
+  id: 'evaluation-1',
+  transient: false,
+  views,
+  exports: [],
+  issues: [],
+});
+const rendering = (
+  artifact: Extract<Rendering, { success: true }>['artifact'],
+  view = 'model',
+  hash = 'render-1',
+): Rendering => ({
+  success: true,
+  requestId: 'render-1',
+  evaluationId: 'evaluation-1',
+  transient: false,
+  view,
+  artifact,
+  hash,
+  issues: [],
+});
+const defaultExport: ExportResult = {
+  success: true,
+  exportId: 'mesh',
+  evaluationId: 'evaluation-1',
+  files: [{ name: 'model.stl', mimeType: 'model/stl', bytes: Uint8Array.of(1) }],
+  issues: [],
+};
+
+type RuntimeFixtureOptions = Readonly<{
+  evaluate?: (path: string) => Promise<Evaluation> | Evaluation;
+  render?: (path: string, view: string | undefined) => Promise<Rendering> | Rendering;
+  export?: (path: string, to: string) => Promise<ExportResult> | ExportResult;
+}>;
+
+const runtimeFixture = (options: RuntimeFixtureOptions = {}) => {
+  const documents: RuntimeDocument[] = [];
+  const documentFor = (path: string): RuntimeDocument => {
+    const view = (id?: string, request: WideViewRequest = {}): ViewSubscription => ({
+      view: id,
+      request,
+      on: () => () => undefined,
+      rendering: vi.fn(
+        async (): Promise<ViewUpdateOutcome> => ({
+          superseded: false,
+          rendering: await (options.render?.(path, id) ??
+            rendering({ mimeType: 'model/gltf-binary', content: glb() }, id)),
+        }),
+      ),
+      update: vi.fn(
+        async (): Promise<ViewUpdateOutcome> => ({
+          superseded: false,
+          rendering: await (options.render?.(path, id) ??
+            rendering({ mimeType: 'model/gltf-binary', content: glb() }, id)),
+        }),
+      ),
+      close: vi.fn(),
+    });
+    function documentView(): ViewSubscription<string, Readonly<{ options?: never; instance?: never; content?: never }>>;
+    function documentView<Id extends string>(id: Id, request?: WideViewRequest): ViewSubscription<Id>;
+    function documentView(id?: string, request?: WideViewRequest): ViewSubscription {
+      return view(id, request);
+    }
+    const document: RuntimeDocument = {
+      id: `document:${path}`,
+      view: documentView,
+      export: vi.fn(async (to: string) => options.export?.(path, to) ?? defaultExport),
+      evaluation: vi.fn(
+        async (): Promise<UpdateOutcome> => ({
+          superseded: false,
+          evaluation: await (options.evaluate?.(path) ?? evaluation()),
+        }),
+      ),
+      update: vi.fn(
+        async (): Promise<UpdateOutcome> => ({
+          superseded: false,
+          evaluation: await (options.evaluate?.(path) ?? evaluation()),
+        }),
+      ),
+      on: () => () => undefined,
+      close: vi.fn(),
+    };
+    documents.push(document);
+    return document;
+  };
+  const open = vi.fn<RuntimeAgentClient['open']>((input) => {
+    if (!('path' in input.source) || input.source.path === undefined) {
+      throw new TypeError('Agent fixture requires a filesystem source');
+    }
+    return documentFor(input.source.path);
   });
-  return { ...clients, evaluate, exportGeometry, exporter };
+  const runtime: RuntimeAgentClient = {
+    open,
+    describe: vi.fn(async (): Promise<Description> => ({ success: false, kernelId: undefined, issues: [] })),
+    capabilities: undefined,
+  };
+  return { runtime, open, documents };
+};
+
+const clientsFor = (
+  fixture: ReturnType<typeof runtimeFixture>,
+  exportImage: RuntimeAgentImageExporter = async () => [
+    { name: 'render.webp', mimeType: 'image/webp', bytes: Uint8Array.of(1) },
+  ],
+) => {
+  const exporter = vi.fn<RuntimeAgentImageExporter>(exportImage);
+  const clients = createRuntimeAgentClients({
+    runtime: fixture.runtime,
+    exportImage: exporter,
+    mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+  });
+  return { ...clients, ...fixture, exporter };
 };
 
 describe('createRuntimeAgentClients', () => {
-  it('should preserve an authentication issue through runtime, export, and capture results', async () => {
+  it('preserves authentication issues through evaluation, export and capture', async () => {
     const issue = {
       code: 'AUTHENTICATION_ERROR',
       message: 'Authentication timeout',
       type: 'connection',
       severity: 'error',
     } as const;
-    const clients = createRuntimeAgentClients({
-      runtime: {
-        evaluate: vi.fn(async (): Promise<HashedGeometryResult> => ({ success: false, issues: [issue] })),
-        export: vi.fn<RuntimeAgentClient['export']>(async () => ({ success: false, issues: [issue] })),
-      },
-      exportImage: vi.fn<RuntimeAgentImageExporter>(),
-      mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+    const fixture = runtimeFixture({
+      evaluate: () => ({ success: false, id: 'failed', transient: false, issues: [issue] }),
+      export: () => ({ success: false, issues: [issue] }),
     });
-
-    await expect(clients.kernelClient.getKernelResult('main.kcl')).resolves.toMatchObject({
+    const clients = clientsFor(fixture);
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.kcl' })).resolves.toMatchObject({
       success: true,
       status: 'error',
       kernelIssues: [issue],
     });
-    await expect(clients.graphics.exportGeometry({ targetFile: 'main.kcl', format: 'stl' })).resolves.toMatchObject({
+    await expect(clients.graphics.exportModel({ targetFile: 'main.kcl', to: 'stl' })).resolves.toMatchObject({
       success: false,
       errorCode: 'AUTHENTICATION_ERROR',
       message: 'Authentication timeout',
@@ -75,425 +172,223 @@ describe('createRuntimeAgentClients', () => {
       errorCode: 'AUTHENTICATION_ERROR',
       message: 'Authentication timeout',
     });
+    expect(fixture.documents).toHaveLength(3);
+    for (const document of fixture.documents) {
+      expect(document.close).toHaveBeenCalledOnce();
+    }
   });
 
-  it('should keep concurrent captures and exports source-scoped without cross-publishing', async () => {
-    const evaluated: string[] = [];
-    const previewEntered = Promise.withResolvers<void>();
-    const releasePreview = Promise.withResolvers<void>();
-    const runtime: RuntimeAgentClient = {
-      async evaluate(input) {
-        evaluated.push(input.source.path);
-        if (input.source.path === 'a.ts') {
-          previewEntered.resolve();
-          await releasePreview.promise;
+  it('should open every request-scoped document unwatched', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture);
+
+    await clients.kernelClient.evaluateModel({ targetFile: 'main.ts' });
+    await clients.graphics.exportModel({ targetFile: 'main.ts', to: 'stl' });
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single' });
+
+    expect(fixture.open).toHaveBeenCalledTimes(3);
+    for (const [input] of fixture.open.mock.calls) {
+      expect(input.watch).toBe(false);
+    }
+  });
+
+  it('keeps concurrent captures and exports scoped to their source documents', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const order: string[] = [];
+    const fixture = runtimeFixture({
+      render: async (path, view) => {
+        order.push(path);
+        if (path === 'a.ts') {
+          entered.resolve();
+          await release.promise;
         }
-        return {
-          success: true,
-          issues: [],
-          data: { format: 'gltf', content: glb(), hash: input.source.path },
-        };
+        return rendering({ mimeType: 'model/gltf-binary', content: glb() }, view, path);
       },
-      export: vi.fn<RuntimeAgentClient['export']>(async (format, { source }) => ({
+      export: (path, to) => ({
         success: true,
-        data: [
-          {
-            name: `${source.path}.${format}`,
-            mimeType: format === 'stl' ? 'model/stl' : 'image/svg+xml',
-            bytes: new Uint8Array([1]),
-          },
-        ],
+        exportId: to,
+        evaluationId: 'evaluation-1',
         issues: [],
-      })),
-    };
-    const exportImage = vi.fn<RuntimeAgentImageExporter>(async () => [
-      {
-        name: 'render.webp',
-        mimeType: 'image/webp',
-        bytes: new Uint8Array([1]),
-      },
-    ]);
-    const clients = createRuntimeAgentClients({
-      runtime,
-      exportImage,
-      mapRuntimeError: (error) => ({
-        success: false,
-        errorCode: 'UNKNOWN',
-        message: String(error),
+        files: [
+          { name: `${path}.${to}`, mimeType: to === 'stl' ? 'model/stl' : 'image/svg+xml', bytes: Uint8Array.of(1) },
+        ],
       }),
     });
-
-    const [blockedCapture, siblingCapture] = [
-      clients.images.captureImages({ targetFile: 'a.ts', mode: 'single' }),
-      clients.images.captureImages({ targetFile: 'b.ts', mode: 'single' }),
-    ] as const;
-    await previewEntered.promise;
-    const [meshExport, drawingExport] = await Promise.all([
-      clients.graphics.exportGeometry({ targetFile: 'mesh.ts', format: 'stl' }),
-      clients.graphics.exportGeometry({
-        targetFile: 'drawing.ts',
-        format: 'svg',
-      }),
+    const clients = clientsFor(fixture);
+    const blocked = clients.images.captureImages({ targetFile: 'a.ts', mode: 'single' });
+    const sibling = clients.images.captureImages({ targetFile: 'b.ts', mode: 'single' });
+    await entered.promise;
+    const [mesh, drawing] = await Promise.all([
+      clients.graphics.exportModel({ targetFile: 'mesh.ts', to: 'stl' }),
+      clients.graphics.exportModel({ targetFile: 'drawing.ts', to: 'svg' }),
     ]);
-
-    expect(meshExport).toMatchObject({
-      success: true,
-      files: [{ name: 'mesh.ts.stl' }],
-    });
-    expect(drawingExport).toMatchObject({
-      success: true,
-      files: [{ name: 'drawing.ts.svg' }],
-    });
-    expect(runtime.export).toHaveBeenCalledWith('stl', {
-      source: { path: 'mesh.ts' },
-      signal: undefined,
-    });
-    expect(runtime.export).toHaveBeenCalledWith('svg', {
-      source: { path: 'drawing.ts' },
-      signal: undefined,
-    });
-    await expect(siblingCapture).resolves.toMatchObject({
-      success: true,
-      images: [{ view: 'isometric' }],
-    });
-    expect(exportImage).toHaveBeenCalledWith(expect.objectContaining({ geometryHash: 'b.ts' }));
-
-    releasePreview.resolve();
-    await expect(blockedCapture).resolves.toMatchObject({
-      success: true,
-      images: [{ view: 'isometric' }],
-    });
-    expect(evaluated).toEqual(['a.ts', 'b.ts']);
-    expect(exportImage.mock.calls.map(([job]) => (job.sourceFormat === 'glb' ? job.geometryHash : undefined))).toEqual([
-      'b.ts',
-      'a.ts',
-    ]);
+    expect(mesh).toMatchObject({ success: true, files: [{ name: 'mesh.ts.stl' }] });
+    expect(drawing).toMatchObject({ success: true, files: [{ name: 'drawing.ts.svg' }] });
+    await expect(sibling).resolves.toMatchObject({ success: true, images: [{ view: 'model', angle: 'isometric' }] });
+    release.resolve();
+    await expect(blocked).resolves.toMatchObject({ success: true, images: [{ view: 'model', angle: 'isometric' }] });
+    expect(order).toEqual(['a.ts', 'b.ts']);
+    expect(clients.exporter.mock.calls.map(([job]) => job.sourcePath)).toEqual(['b.ts', 'a.ts']);
+    for (const document of fixture.documents) {
+      expect(document.close).toHaveBeenCalledOnce();
+    }
   });
 
-  it('should preserve invocation cancellation through evaluation, export and capture without starting later work', async () => {
+  it('propagates cancellation and does not start image execution after abort', async () => {
     const controller = new AbortController();
     const entered = Promise.withResolvers<void>();
-    const finish = Promise.withResolvers<HashedGeometryResult>();
-    const evaluate = vi.fn<RuntimeAgentClient['evaluate']>(async ({ source }) => {
-      if (source.path === 'cancel.ts') {
+    const release = Promise.withResolvers<void>();
+    const fixture = runtimeFixture({
+      render: async (_path, view) => {
         entered.resolve();
-        return finish.promise;
-      }
-      return {
-        success: true,
-        issues: [],
-        data: { format: 'gltf', content: glb(), hash: source.path },
-      };
-    });
-    const exportGeometry = vi.fn<RuntimeAgentClient['export']>(async () => ({
-      success: true,
-      data: [],
-      issues: [],
-    }));
-    const exportImage = vi.fn<RuntimeAgentImageExporter>(async () => [
-      {
-        name: 'render.webp',
-        mimeType: 'image/webp',
-        bytes: new Uint8Array([1]),
+        await release.promise;
+        return rendering({ mimeType: 'model/gltf-binary', content: glb() }, view);
       },
-    ]);
-    const clients = createRuntimeAgentClients({
-      runtime: { evaluate, export: exportGeometry },
-      exportImage,
-      mapRuntimeError: (error) => ({
-        success: false,
-        errorCode: 'UNKNOWN',
-        message: String(error),
-      }),
     });
-    const context = { signal: controller.signal };
-    const cancelled = clients.images.captureImages({ targetFile: 'cancel.ts', mode: 'single' }, context);
+    const clients = clientsFor(fixture);
+    const pending = clients.images.captureImages(
+      { targetFile: 'cancel.ts', mode: 'single' },
+      { signal: controller.signal },
+    );
     await entered.promise;
     controller.abort(new Error('stop capture'));
-    finish.resolve({
-      success: true,
-      issues: [],
-      data: { format: 'gltf', content: glb(), hash: 'cancelled' },
-    });
-    await expect(cancelled).resolves.toMatchObject({
-      success: false,
-      message: 'Error: stop capture',
-    });
-    expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
-    expect(exportImage).not.toHaveBeenCalled();
-
-    const sibling = new AbortController();
-    await expect(
-      clients.images.captureImages({ targetFile: 'sibling.ts', mode: 'single' }, { signal: sibling.signal }),
-    ).resolves.toMatchObject({ success: true });
-    expect(exportImage).toHaveBeenCalledWith(expect.objectContaining({ signal: sibling.signal }));
-    await clients.graphics.exportGeometry({ targetFile: 'sibling.ts', format: 'stl' }, { signal: sibling.signal });
-    expect(exportGeometry).toHaveBeenCalledWith('stl', {
-      source: { path: 'sibling.ts' },
-      signal: sibling.signal,
-    });
-
-    await clients.kernelClient.getKernelResult('never.ts', context);
-    await clients.graphics.exportGeometry({ targetFile: 'never.ts', format: 'stl' }, context);
-    expect(evaluate).toHaveBeenCalledTimes(2);
-    expect(exportGeometry).toHaveBeenCalledTimes(1);
+    release.resolve();
+    await expect(pending).resolves.toMatchObject({ success: false, message: 'Error: stop capture' });
+    expect(clients.exporter).not.toHaveBeenCalled();
+    expect(fixture.documents[0]?.close).toHaveBeenCalledOnce();
   });
 
-  it('should preserve SVG drawing annotations and refuse meaningless formats before image execution', async () => {
-    const svgExporter = vi.fn<RuntimeAgentImageExporter>(async () => [
-      {
-        name: 'drawing.png',
-        mimeType: 'image/png',
-        bytes: new Uint8Array([1]),
-      },
+  it('uses a declared SVG view, keeps annotations, and permits unitless drawing capture', async () => {
+    const exporter = vi.fn<RuntimeAgentImageExporter>(async () => [
+      { name: 'drawing.png', mimeType: 'image/png', bytes: Uint8Array.of(1) },
     ]);
-    const svg = setup(
-      {
-        success: true,
-        issues: [],
-        data: {
-          format: 'svg',
-          content: '<svg></svg>',
-          hash: 'svg-hash',
-          units: { length: 'cm' },
-        },
-      },
-      svgExporter,
-    );
-    await expect(svg.images.captureImages({ targetFile: 'drawing.ts', mode: 'single' })).resolves.toMatchObject({
+    const fixture = runtimeFixture({
+      evaluate: () => evaluation([{ id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' }]),
+      render: (_path, view) =>
+        rendering(
+          {
+            mimeType: 'image/svg+xml',
+            content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+            units: { length: 'cm' },
+          },
+          view,
+          'svg-hash',
+        ),
+    });
+    const clients = clientsFor(fixture, exporter);
+    await expect(
+      clients.images.captureImages({ targetFile: 'drawing.ts', mode: 'single', view: 'drawing' }),
+    ).resolves.toMatchObject({
       success: true,
       images: [{ view: 'drawing' }],
     });
-    const svgJob = svgExporter.mock.calls[0]?.[0];
-    expect(svgJob?.sourceFormat).toBe('svg');
-    if (svgJob?.sourceFormat !== 'svg') {
-      throw new Error('Expected SVG capture job');
-    }
-    expect(svgJob.exportOptions).toMatchObject({
-      axes: true,
-      scaleBar: true,
-      lengthSymbol: 'cm',
+    expect(clients.exporter.mock.calls[0]?.[0]).toMatchObject({
+      sourceFormat: 'svg',
+      exportOptions: { axes: false, scaleBar: true, lengthSymbol: 'cm' },
     });
     await expect(
-      svg.images.captureImages({
-        targetFile: 'drawing.ts',
-        mode: 'multi_angle',
+      clients.images.captureImages({ targetFile: 'drawing.ts', mode: 'multi_angle', view: 'drawing' }),
+    ).resolves.toEqual({ success: true, images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }] });
+    expect(clients.exporter).toHaveBeenCalledTimes(2);
+    const unitless = clientsFor(
+      runtimeFixture({
+        evaluate: () => evaluation([{ id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' }]),
+        render: (_path, view) =>
+          rendering({ mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' }, view),
       }),
-    ).resolves.toMatchObject({
-      success: false,
-      message: 'Planar SVG drawings have one canonical view',
-    });
-    expect(svgExporter).toHaveBeenCalledTimes(1);
-
-    const withoutUnits = createRuntimeAgentClients({
-      runtime: {
-        evaluate: vi.fn(
-          async (): Promise<HashedGeometryResult> => ({
-            success: true,
-            issues: [],
-            data: { format: 'svg', content: '<svg></svg>', hash: 'svg-hash' },
-          }),
-        ),
-        export: vi.fn(async () => ({ success: true, data: [], issues: [] })),
-      },
-      exportImage: svgExporter,
-      mapRuntimeError: (error) => ({
-        success: false,
-        errorCode: 'UNKNOWN',
-        message: String(error),
-      }),
-    });
-    await expect(
-      withoutUnits.images.captureImages({
-        targetFile: 'drawing.ts',
-        mode: 'single',
-      }),
-    ).resolves.toMatchObject({
-      success: false,
-      message: 'Annotated SVG capture requires the artifact coordinate length unit',
-    });
-    expect(svgExporter).toHaveBeenCalledTimes(1);
-
-    const malformed = setup({
+      exporter,
+    );
+    await expect(unitless.images.captureImages({ targetFile: 'drawing.ts', mode: 'multi_angle' })).resolves.toEqual({
       success: true,
-      issues: [],
-      data: {
-        format: 'gltf',
-        content: new TextEncoder().encode('{}'),
-        hash: 'json-gltf',
-      },
+      images: [{ view: 'drawing', dataUrl: 'data:image/png;base64,AQ==' }],
     });
-    await expect(malformed.images.captureImages({ targetFile: 'bad.ts', mode: 'single' })).resolves.toMatchObject({
-      success: false,
+    expect(unitless.exporter.mock.calls[2]?.[0]).toMatchObject({
+      exportOptions: { axes: false, scaleBar: false },
     });
-    expect(malformed.exporter).not.toHaveBeenCalled();
-
-    const webrtc = setup({
-      success: true,
-      issues: [],
-      data: { format: 'webrtc', stream: new EventTarget(), hash: 'live' },
-    });
-    await expect(webrtc.images.captureImages({ targetFile: 'live.ts', mode: 'single' })).resolves.toMatchObject({
-      success: false,
-      message: 'Live WebRTC geometry cannot be captured headlessly',
-    });
-    expect(webrtc.exporter).not.toHaveBeenCalled();
+    expect(unitless.exporter.mock.calls[2]?.[0].exportOptions).not.toHaveProperty('lengthSymbol');
   });
 
-  it('should pass exact GLB bytes and validate the complete ordered batch', async () => {
-    const bytes = glb();
-    const exportImage = vi.fn<RuntimeAgentImageExporter>(async () =>
-      ['front', 'back', 'right', 'left', 'top', 'bottom'].map((name) => ({
-        name: `render-${name}.webp`,
-        mimeType: 'image/webp',
-        bytes: new Uint8Array([1]),
-      })),
-    );
-    const clients = setup(
-      {
-        success: true,
-        issues: [],
-        data: { format: 'gltf', content: bytes, hash: 'mesh' },
-      },
-      exportImage,
-    );
-    const result = await clients.images.captureImages({
-      targetFile: 'mesh.ts',
-      mode: 'multi_angle',
-    });
+  it('rejects malformed or unknown display artifacts before image execution', async () => {
+    for (const artifact of [
+      { mimeType: 'model/gltf-binary', content: new TextEncoder().encode('{}') },
+      { mimeType: 'application/x-webrtc', content: Uint8Array.of(1) },
+    ] as const) {
+      const clients = clientsFor(runtimeFixture({ render: (_path, view) => rendering(artifact, view) }));
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each artifact has an isolated document and exporter.
+      await expect(clients.images.captureImages({ targetFile: 'bad.ts', mode: 'single' })).resolves.toMatchObject({
+        success: false,
+      });
+      expect(clients.exporter).not.toHaveBeenCalled();
+    }
+  });
 
-    expect(exportImage.mock.calls[0]?.[0]).toMatchObject({
+  it('passes exact GLB bytes and validates the complete ordered multi-angle batch', async () => {
+    const bytes = glb();
+    const names = ['front', 'back', 'right', 'left', 'top', 'bottom'] as const;
+    const fixture = runtimeFixture({
+      render: (_path, view) => rendering({ mimeType: 'model/gltf-binary', content: bytes }, view, 'mesh'),
+    });
+    const clients = clientsFor(fixture, async () =>
+      names.map((name) => ({ name: `render-${name}.webp`, mimeType: 'image/webp', bytes: Uint8Array.of(1) })),
+    );
+    const result = await clients.images.captureImages({ targetFile: 'mesh.ts', mode: 'multi_angle' });
+    expect(clients.exporter.mock.calls[0]?.[0]).toMatchObject({
       content: bytes,
       sourceFormat: 'glb',
       geometryHash: 'mesh',
     });
-    expect(result).toMatchObject({
-      success: true,
-      images: [
-        { view: 'front' },
-        { view: 'back' },
-        { view: 'right' },
-        { view: 'left' },
-        { view: 'top' },
-        { view: 'bottom' },
-      ],
-    });
-
-    const invalidFiles: ReadonlyArray<readonly ExportFile[]> = [
-      [],
-      [
-        {
-          name: 'wrong.png',
-          mimeType: 'image/png',
-          bytes: new Uint8Array([1]),
-        },
-      ],
+    expect(result).toMatchObject({ success: true, images: names.map((angle) => ({ view: 'model', angle })) });
+    for (const files of [
+      [] as ExportFile[],
+      [{ name: 'wrong.png', mimeType: 'image/png', bytes: Uint8Array.of(1) }],
       [{ name: 'empty.webp', mimeType: 'image/webp', bytes: new Uint8Array() }],
-    ];
-    await Promise.all(
-      invalidFiles.map(async (files) => {
-        const invalid = setup(
-          {
-            success: true,
-            issues: [],
-            data: { format: 'gltf', content: glb(), hash: 'mesh' },
-          },
-          vi.fn<RuntimeAgentImageExporter>(async () => files),
-        );
-        const invalidResult = await invalid.images.captureImages({
-          targetFile: 'mesh.ts',
-          mode: 'single',
-        });
-        expect(invalidResult.success).toBe(false);
-        if (invalidResult.success) {
-          throw new Error('Expected invalid capture result');
-        }
-        expect(invalidResult.message).toContain('Image capture expected');
-      }),
-    );
-
-    for (const names of [
-      [
-        'render-back.webp',
-        'render-front.webp',
-        'render-right.webp',
-        'render-left.webp',
-        'render-top.webp',
-        'render-bottom.webp',
-      ],
-      [
-        'render-front.webp',
-        'render-front.webp',
-        'render-right.webp',
-        'render-left.webp',
-        'render-top.webp',
-        'render-bottom.webp',
-      ],
-      [
-        'render-front.webp',
-        'render-back.webp',
-        'render-right.webp',
-        'render-left.webp',
-        'render-top.webp',
-        'render-oblique.webp',
-      ],
+      names.map((name, i) => ({
+        name: `render-${i === 0 ? 'back' : name}.webp`,
+        mimeType: 'image/webp',
+        bytes: Uint8Array.of(1),
+      })),
     ]) {
-      const invalid = setup(
-        {
-          success: true,
-          issues: [],
-          data: { format: 'gltf', content: glb(), hash: 'mesh' },
-        },
-        vi.fn<RuntimeAgentImageExporter>(async () =>
-          names.map((name) => ({
-            name,
-            mimeType: 'image/webp',
-            bytes: new Uint8Array([1]),
-          })),
-        ),
-      );
-      // oxlint-disable-next-line eslint/no-await-in-loop -- each table row verifies its own exporter invocation.
-      const invalidResult = await invalid.images.captureImages({
-        targetFile: 'mesh.ts',
-        mode: 'multi_angle',
-      });
-      expect(invalidResult.success).toBe(false);
-      if (invalidResult.success) {
-        throw new Error('Expected invalid view identity result');
+      const invalid = clientsFor(fixture, async () => files);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each table row verifies a distinct invalid batch.
+      const outcome = await invalid.images.captureImages({ targetFile: 'mesh.ts', mode: 'multi_angle' });
+      expect(outcome.success).toBe(false);
+      if (!outcome.success) {
+        expect(outcome.message).toContain('Image capture expected');
       }
-      expect(invalidResult.message).toContain('Image capture expected');
     }
-
-    await Promise.all(
+    for (const [malformed, expectedMessage] of [
+      [new Uint8Array(), 'GLB artifact content must be nonempty Uint8Array bytes.'],
       [
         (() => {
           const value = glb();
           new DataView(value.buffer).setUint32(4, 1, true);
           return value;
         })(),
+        'not a GLB 2 container',
+      ],
+      [
         (() => {
           const value = glb();
           new DataView(value.buffer).setUint32(8, 24, true);
           return value;
         })(),
-      ].map(async (malformed) => {
-        const invalid = setup({
-          success: true,
-          issues: [],
-          data: { format: 'gltf', content: malformed, hash: 'mesh' },
-        });
-        const invalidResult = await invalid.images.captureImages({
-          targetFile: 'mesh.ts',
-          mode: 'single',
-        });
-        expect(invalidResult.success).toBe(false);
-        if (invalidResult.success) {
-          throw new Error('Expected malformed GLB result');
-        }
-        expect(invalidResult.message).toContain('not a GLB 2 container');
-        expect(invalid.exporter).not.toHaveBeenCalled();
-      }),
-    );
+        'not a GLB 2 container',
+      ],
+    ] as const) {
+      const invalid = clientsFor(
+        runtimeFixture({
+          render: (_path, view) => rendering({ mimeType: 'model/gltf-binary', content: malformed }, view),
+        }),
+      );
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each malformed GLB has an isolated document.
+      const outcome = await invalid.images.captureImages({ targetFile: 'mesh.ts', mode: 'single' });
+      expect(outcome.success).toBe(false);
+      if (!outcome.success) {
+        expect(outcome.message).toContain(expectedMessage);
+      }
+      expect(invalid.exporter).not.toHaveBeenCalled();
+    }
   });
 });
 
@@ -614,31 +509,27 @@ describe('createRuntimeParameterAgentClient', () => {
 
   it('should evaluate an immediate kernel result after the parameter write settles', async () => {
     const { actor, adapter, request, persisted } = await fixture();
-    const evaluate = vi.fn<RuntimeAgentClient['evaluate']>(async () => {
+    const evaluate = vi.fn(async (): Promise<Evaluation> => {
       const width = persisted().entry.groups['default']?.values['width'];
       if (typeof width !== 'number') {
         throw new TypeError('Expected the settled width to be numeric');
       }
       return {
         success: true,
-        data: { format: 'gltf', content: glb(), hash: `width:${width}` },
+        id: `width:${width}`,
+        transient: false,
+        views: [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }],
+        exports: [],
         issues: [{ type: 'runtime', code: 'RUNTIME', severity: 'error', message: `width:${width}` }],
       };
     });
-    const clients = createRuntimeAgentClients({
-      runtime: {
-        evaluate,
-        export: vi.fn(async () => ({ success: true, data: [], issues: [] })),
-      },
-      exportImage: vi.fn(async () => undefined),
-      mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
-    });
+    const clients = clientsFor(runtimeFixture({ evaluate }));
 
     await expect(adapter.applyParameterOperation(request)).resolves.toMatchObject({
       success: true,
       outcome: { status: 'committed' },
     });
-    await expect(clients.kernelClient.getKernelResult('main.py')).resolves.toMatchObject({
+    await expect(clients.kernelClient.evaluateModel({ targetFile: 'main.py' })).resolves.toMatchObject({
       success: true,
       status: 'ready',
       kernelIssues: [{ message: 'width:5' }],

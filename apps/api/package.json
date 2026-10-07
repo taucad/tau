@@ -10,6 +10,7 @@
     "@aws-sdk/lib-storage": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
     "@pyroscope/nodejs": "catalog:",
+    "@sentry/node": "catalog:",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/billing": "workspace:*",
     "@taucad/chat": "workspace:*",
@@ -27,12 +28,15 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@gltf-transform/core": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
+    "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/vite": "workspace:*",
-    "geospec": "workspace:*"
+    "geospec": "workspace:*",
+    "pino-pretty": "catalog:"
   },
   "imports": {
     "#*.js": "./app/*.ts",

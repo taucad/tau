@@ -18,6 +18,18 @@
 import { randomUuid } from '@taucad/utils/id';
 import type { TelemetryOrigin, TelemetrySpanRecord } from '@taucad/runtime';
 
+// Geometry objects and their immutable content remain weakly owned by the CAD/viewer lifecycle.
+const geometryReceipts = new WeakMap<Uint8Array<ArrayBuffer>, number>();
+
+/** Mark one runtime result at the dispatch boundary, before its CAD machine processes it. */
+export const markGeometryReceipt = (content: Uint8Array<ArrayBuffer>): void => {
+  geometryReceipts.set(content, performance.now());
+};
+
+/** The runtime receipt in this realm, absent for imported or test-only geometry. */
+export const geometryReceiptAt = (content: Uint8Array<ArrayBuffer>): number | undefined =>
+  geometryReceipts.get(content);
+
 /**
  * Renderer spans retained before the oldest are dropped.
  *

@@ -1,8 +1,10 @@
 name: Publish Packages
 
+# CI does not publish npm packages on its own: a pushed `v*.*.*` tag no longer
+# starts this workflow. It remains a manual, operator-dispatched path on a
+# package release tag; application releases go through release.yml instead.
 on:
-  push:
-    tags: ['v*.*.*']
+  workflow_dispatch:
 
 env:
   pnpm_config_verify_deps_before_run: warn
@@ -166,7 +168,7 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
-          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24' }}
+          node-version: ${{ needs.plan.outputs.geospec-required == 'true' && '24.10.0' || '24.20.0' }}
 
       - name: Download same-run GeoSpec transport
         if: needs.plan.outputs.geospec-required == 'true'

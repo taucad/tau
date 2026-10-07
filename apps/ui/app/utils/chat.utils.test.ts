@@ -422,6 +422,37 @@ describe('serializeMessage', () => {
         '<tool_call name="arrange_workbench">\narrange_workbench(open, lanes)\n</tool_call>\n<tool_result>\n-> .tau/workbench/layout.json\n</tool_result>',
       );
     });
+    it('serializes the questions with lettered options and the answers with their source', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-ask_questions',
+          toolCallId: 'ask-1',
+          state: 'output-available',
+          input: {
+            chatId: 'chat_a',
+            questions: [
+              {
+                id: 'form',
+                header: 'Form',
+                question: 'Which form?',
+                options: [
+                  { label: 'Ribbon', description: 'Prints without supports.' },
+                  { label: 'Gem', description: 'Crisp facets.' },
+                ],
+              },
+            ],
+          },
+          output: {
+            status: 'defaulted',
+            path: '.tau/chats/chat_a/questions.yaml',
+            answers: [{ id: 'form', answer: 'Ribbon', source: 'recommended' }],
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="ask_questions">\nWhich form?\n  A. Ribbon\n  B. Gem\n</tool_call>\n<tool_result>\nform: Ribbon (recommended, no reply)\n</tool_result>',
+      );
+    });
     it('serializes tool-web_search output-available', () => {
       const message = baseMessage([
         {
@@ -616,10 +647,10 @@ describe('serializeMessage', () => {
       );
     });
 
-    it('serializes tool-get_kernel_result output-available', () => {
+    it('serializes tool-evaluate_model output-available', () => {
       const message = baseMessage([
         {
-          type: 'tool-get_kernel_result',
+          type: 'tool-evaluate_model',
           toolCallId: 'c1',
           state: 'output-available',
           input: { targetFile: 'main.kcl' },
@@ -630,7 +661,7 @@ describe('serializeMessage', () => {
         },
       ]);
       expect(serializeMessage(message)).toBe(
-        '<tool_call name="get_kernel_result">\ntargetFile: main.kcl\n</tool_call>\n<tool_result>\nStatus: error\nIssues:\n  - Syntax error\n</tool_result>',
+        '<tool_call name="evaluate_model">\ntargetFile: main.kcl\n</tool_call>\n<tool_result>\nStatus: error\nIssues:\n  - Syntax error\n</tool_result>',
       );
     });
 

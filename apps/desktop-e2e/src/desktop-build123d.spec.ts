@@ -1,13 +1,13 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@taucad/runtime-testing';
 
-import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
+import { authenticatePackagedDesktop, desktopDescendants, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { desktopE2ECompletedArtifact } from '#support/config.js';
 import {
@@ -230,6 +230,41 @@ const picogkWorkers = (): readonly NativeWorker[] => {
     }
     return [{ pid: Number(pid), temporaryRoot: dirname(workspace) }];
   });
+};
+
+const capturePicoGkFiles = (root: string, destination: string, artifacts: boolean): unknown[] => {
+  if (!existsSync(root)) {
+    return [];
+  }
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry): unknown[] => {
+    const path = join(root, entry.name);
+    const output = join(destination, entry.name);
+    if (entry.isDirectory() && !['.git', '.tau', 'node_modules'].includes(entry.name)) {
+      return capturePicoGkFiles(path, output, artifacts);
+    }
+    if (!entry.isFile() || (!artifacts && !entry.name.endsWith('.cs') && entry.name !== 'tau.json')) {
+      return [];
+    }
+    const bytes = readFileSync(path);
+    mkdirSync(dirname(output), { recursive: true });
+    writeFileSync(output, bytes);
+    const glb = bytes.length >= 20 && bytes.toString('ascii', 0, 4) === 'glTF';
+    return [
+      {
+        path,
+        byteLength: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        ...(glb ? { glb: JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12))) as unknown } : {}),
+      },
+    ];
+  });
+};
+
+const ownedPicoGkWorkers = (electronPid: number | undefined): readonly NativeWorker[] => {
+  const result = spawnSync('ps', ['-axww', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' });
+  expect(result.status, result.stderr).toBe(0);
+  const owned = new Set(desktopDescendants(electronPid, result.stdout).map(({ pid }) => pid));
+  return picogkWorkers().filter(({ pid }) => owned.has(pid));
 };
 
 const exportToProject = async (page: Page, projectRoot: string, extension: 'glb' | 'stl'): Promise<string> => {
@@ -549,7 +584,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     return;
   }
-  const existingWorkerPids = new Set(picogkWorkers().map(({ pid }) => pid));
+  let observedProjectRoot: string | undefined;
   const account = tauTestAccount('picogk');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
@@ -588,6 +623,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const slug = await submitPrompt(page, 'Create the asymmetric PicoGK assembly.');
     const sourcePath = await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.cs' });
     const projectRoot = join(session.pickedDirectory, slug);
+    observedProjectRoot = projectRoot;
     await expect.poll(() => readFileSync(sourcePath, 'utf8'), { timeout: 120_000 }).toBe(picogkSource);
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
     await expectCount(page.getByText('Native code enabled', { exact: true }), 0);
@@ -620,8 +656,8 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await expectRenderCycleSince(page, beforeParameter);
 
     await page.keyboard.press('Control+a');
-    const body = page.getByRole('button', { name: 'group-0-object-1', exact: true });
-    const sphere = page.getByRole('button', { name: 'group-1-object-2', exact: true });
+    const body = page.locator('[data-model-component-row]').getByRole('button', { name: 'Shape 1', exact: true });
+    const sphere = page.locator('[data-model-component-row]').getByRole('button', { name: 'Shape 2', exact: true });
     await expectVisible(body, 60_000);
     await expectVisible(sphere, 60_000);
     const bodyMaterial = await body.locator('[data-slot="material-swatch"]').getAttribute('style');
@@ -655,17 +691,22 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       capture();
     });
     writeFileSync(sourcePath, multiStepPicogkSource, 'utf8');
-    /* The row's own observer is the barrier: the lifecycle it records is
-     * exactly the sequence asserted below, so no second witness is needed. */
+    /* Document evaluation and view rendering may each produce a cycle.
+     * The observer must retain only complete busy-to-ready cycles. */
     await expect
       .poll(
         async () =>
-          page.evaluate(
-            () => (globalThis as typeof globalThis & { __tauPicoGkStates?: string[] }).__tauPicoGkStates ?? [],
-          ),
+          page.evaluate(() => {
+            const states = (globalThis as typeof globalThis & { __tauPicoGkStates?: string[] }).__tauPicoGkStates ?? [];
+            return (
+              states.length >= 2 &&
+              states.at(-1) === 'idle' &&
+              states.every((state, index) => state === (index % 2 === 0 ? 'rendering...' : 'idle'))
+            );
+          }),
         { timeout: 120_000 },
       )
-      .toEqual(['buffering...', 'rendering...', 'idle']);
+      .toBe(true);
     const multiStepStates = await page.evaluate(() => {
       const target = globalThis as typeof globalThis & {
         __tauPicoGkStates?: string[];
@@ -674,7 +715,9 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       target.__tauPicoGkObserver?.disconnect();
       return target.__tauPicoGkStates ?? [];
     });
-    expect(multiStepStates).toEqual(['buffering...', 'rendering...', 'idle']);
+    expect(multiStepStates.length).toBeGreaterThanOrEqual(2);
+    expect(multiStepStates).toEqual(multiStepStates.map((_, index) => (index % 2 === 0 ? 'rendering...' : 'idle')));
+    expect(multiStepStates.at(-1)).toBe('idle');
 
     // Observe a fresh lifecycle before restoring bytes: the previous scene is
     // already idle, and its material remains visible while native work runs.
@@ -738,12 +781,16 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       picogkHelperSource(3).replace('radius * scale', 'MissingPicoGkSymbol * scale'),
       'utf8',
     );
-    const compileFailure = page.getByText("The name 'MissingPicoGkSymbol' does not exist in the current context", {
+    const issues = page.locator('[data-slot="collapsible"]').filter({
+      has: page.getByRole('button', { name: /^Issues/u }),
+    });
+    const compileFailure = issues.getByText("The name 'MissingPicoGkSymbol' does not exist in the current context", {
       exact: true,
     });
     await expectVisible(compileFailure, 120_000);
+    await expectCount(issues, 1);
     await expectCount(compileFailure, 1);
-    await expectCount(page.getByText(/ShapeFactory\.cs:\d+:\d+/u), 1);
+    await expectCount(issues.getByRole('button', { name: /^ShapeFactory\.cs:\d+:\d+$/u }), 1);
     const card = await openFirstProjectCardPreview(page);
     await expectAlertText(card, 'MissingPicoGkSymbol');
     writeFileSync(join(projectRoot, 'ShapeFactory.cs'), picogkHelperSource(3), 'utf8');
@@ -755,8 +802,9 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
 
     writeFileSync(sourcePath, failingPicogkRuntimeSource, 'utf8');
-    const runtimeFailure = page.getByText(picogkRuntimeFailure, { exact: true });
+    const runtimeFailure = issues.getByText(picogkRuntimeFailure, { exact: true });
     await expectVisible(runtimeFailure, 120_000);
+    await expectCount(issues, 1);
     await expectCount(runtimeFailure, 1);
     writeFileSync(sourcePath, picogkSource, 'utf8');
     await expectCount(runtimeFailure, 0, 120_000);
@@ -765,7 +813,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const stlPath = await exportToProject(page, projectRoot, 'stl');
     expect(readFileSync(stlPath).byteLength).toBeGreaterThan(84);
 
-    const workersBeforeReload = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
+    const workersBeforeReload = ownedPicoGkWorkers(session.application.process().pid);
     expect(workersBeforeReload).not.toHaveLength(0);
     const renderingStatus = page.getByText('rendering...', { exact: true });
     await expectCount(renderingStatus, 0, 120_000);
@@ -783,11 +831,37 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       })
       .toBe(true);
     expect(session.application.windows()).toHaveLength(1);
-    expect(spawnSync('ps', ['-axo', 'command='], { encoding: 'utf8' }).stdout).not.toMatch(/PicoGK.*Viewer/u);
+    const processes = spawnSync('ps', ['-axww', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' });
+    expect(processes.status, processes.stderr).toBe(0);
+    expect(
+      desktopDescendants(session.application.process().pid, processes.stdout)
+        .map(({ command }) => command)
+        .join('\n'),
+    ).not.toMatch(/PicoGK.*Viewer/u);
     expect(rendererErrors.some((message) => message.includes('unsafe-eval'))).toBe(false);
 
-    await session.capture('picogk-packaged-success');
-    const workers = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
+    const captureDirectory = await session.capture('picogk-packaged-success');
+    const electronProcess = session.application.process();
+    const workers = ownedPicoGkWorkers(electronProcess.pid);
+    writeFileSync(
+      join(captureDirectory, 'picogk-shutdown-owners.json'),
+      JSON.stringify({ electronPid: electronProcess.pid, workers }, null, 2),
+    );
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const shell = globalThis as typeof globalThis & { tau?: { quit?: { isReady(): boolean } } };
+            return shell.tau?.quit?.isReady() ?? false;
+          }),
+        { timeout: 120_000 },
+      )
+      .toBe(true);
+    await session.application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).toBe(0);
+    expect(electronProcess.signalCode).toBeNull();
     await session.close();
     session = undefined;
     await expect
@@ -799,7 +873,57 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       .poll(() => workers.every(({ temporaryRoot }) => !existsSync(temporaryRoot)), { timeout: 15_000 })
       .toBe(true);
   } catch (error) {
-    await session?.capture('picogk-packaged-failure');
+    if (session) {
+      const activeSession = session;
+      try {
+        const captureDirectory = await activeSession.capture('picogk-packaged-failure');
+        const electronPid = activeSession.application.process().pid;
+        if (electronPid === undefined) {
+          throw new Error('Electron PID unavailable; refusing worker filesystem capture.');
+        }
+        const workers = ownedPicoGkWorkers(electronPid);
+        const visibleParameters = await page.getByRole('spinbutton').evaluateAll((inputs: HTMLInputElement[]) =>
+          inputs
+            .filter((input) => input.checkVisibility())
+            .map((input) => ({
+              label: input.getAttribute('aria-label'),
+              value: input.value,
+            })),
+        );
+        writeFileSync(
+          join(captureDirectory, 'picogk-input-artifacts.json'),
+          JSON.stringify(
+            {
+              electronPid,
+              requestParameters: 'unavailable',
+              actorMetadata: 'unavailable',
+              workerResponseDescriptors: 'unavailable; only existing artifact files are captured',
+              visibleParameters,
+              project: observedProjectRoot
+                ? capturePicoGkFiles(observedProjectRoot, join(captureDirectory, 'project'), false)
+                : [],
+              workers: workers.map((worker) => ({
+                ...worker,
+                workspace: capturePicoGkFiles(
+                  join(worker.temporaryRoot, 'workspace'),
+                  join(captureDirectory, `worker-${worker.pid}`, 'workspace'),
+                  false,
+                ),
+                artifacts: capturePicoGkFiles(
+                  join(worker.temporaryRoot, 'artifacts'),
+                  join(captureDirectory, `worker-${worker.pid}`, 'artifacts'),
+                  true,
+                ),
+              })),
+            },
+            null,
+            2,
+          ),
+        );
+      } catch (captureError) {
+        console.error('PicoGK failure evidence capture failed:', captureError);
+      }
+    }
     throw error;
   }
 }, 900_000);

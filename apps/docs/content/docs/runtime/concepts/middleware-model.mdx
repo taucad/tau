@@ -9,11 +9,11 @@ Middleware in `@taucad/runtime` uses the onion model: each layer wraps the next,
 
 ## Context and Motivation
 
-Kernel operations (`getParameters`, `createGeometry`, `exportGeometry`) often need cross-cutting behavior: caching results, transforming coordinates, adding edge data for rendering. Hard-coding these into each kernel would duplicate logic and couple kernels to UI concerns. Middleware composes such behavior declaratively at one interception point -- and because the model is an onion, even short-circuited results flow back through outer layers for consistent post-processing.
+Kernel operations (`describe`, `evaluate`, `render`, `export`) often need cross-cutting behavior: caching results, transforming coordinates, adding edge data for rendering. Hard-coding these into each kernel would duplicate logic and couple kernels to UI concerns. Middleware composes such behavior declaratively at one interception point -- and because the model is an onion, even short-circuited results flow back through outer layers for consistent post-processing.
 
 ## How It Works
 
-A middleware defines wrap-style hooks: `wrapGetParameters`, `wrapCreateGeometry`, and `wrapExportGeometry`. A hook receives `(input, handler, runtime)` and calls `handler(input)` to continue the chain. Code before `handler()` runs on the way down; code after runs on the way back up.
+A middleware defines wrap-style hooks: `wrapDescribe`, `wrapEvaluate`, `wrapRender`, and `wrapExport`. A hook receives `(input, next, services)` and calls `next(input)` to continue the chain. Code before `next(input)` runs on the way down; code after runs on the way back up.
 
 ```mermaid
 flowchart TB
@@ -40,34 +40,41 @@ flowchart TB
     S2 --> S1
 ```
 
-The hooks wrap geometry creation, parameter extraction, and export respectively. Implement any subset; an absent hook passes through.
+The hooks wrap parameter description, evaluation, selected-view rendering, and selected-export writing respectively. Implement any subset; an absent hook passes through.
 
-### Parameters at the create boundary
+### Parameters at the evaluation boundary
 
-A render, export, or evaluation request's `parameters` are caller overrides. A unit-bound numeric field accepts either a number in the unit declared by the kernel or unit-bearing text such as `"20 in"`. Middleware may place stored values below those overrides, but it does not convert units or fill kernel defaults. The runtime converts unit-bearing text and fills defaults once, after the create middleware chain and immediately before calling the kernel.
+An evaluation request's `parameters` are caller overrides. Views and exports project its retained handle. A unit-bound numeric field accepts either a number in the unit declared by the kernel or unit-bearing text such as `"20 in"`. Middleware may place stored values below those overrides, but it does not convert units or fill kernel defaults. The runtime converts unit-bearing text and fills defaults once, after the evaluation middleware chain and immediately before calling the kernel.
 
 The resulting precedence is: kernel defaults, then stored values, then caller overrides.
 
 ### Middleware dependencies
 
-`getDependencies` declares extra watched paths independently of wrap hooks. Every declaration includes the operations it invalidates:
+`resolve` declares extra watched paths independently of wrap hooks. Every declaration includes the operations it invalidates:
 
 ```typescript
-getDependencies({ entryPath }) {
-  return [{ path: `${entryPath}.metadata.json`, affects: ['createGeometry'] }];
-}
+import { defineMiddleware } from '@taucad/runtime/middleware';
+
+export const metadataFiles = defineMiddleware({
+  id: 'metadata-files',
+  name: 'Metadata files',
+  resolve({ entryPath }) {
+    return [{ path: `${entryPath}.metadata.json`, affects: ['evaluate'] }];
+  },
+});
 ```
 
-Valid operations are `getParameters`, `createGeometry`, `meshGeometry`, and `exportGeometry`. The runtime hashes and watches a declaration only for the listed operations; it never infers dependency scope from the middleware's wrap hooks.
+Valid operations are `describe`, `evaluate`, `render`, and `export`. The runtime hashes and watches a declaration only for the listed operations; it never infers dependency scope from the middleware's wrap hooks.
 
-### KernelMiddlewareRuntime
+### KernelMiddlewareServices
 
-Every hook receives a `KernelMiddlewareRuntime` as its third argument:
+Every hook receives a `KernelMiddlewareServices` as its third argument:
 
 - `signal` -- operation-scoped cancellation signal, shared with the active kernel call
 - `logger` -- logger with the middleware name pre-configured
 - `tracer` -- span tracer for middleware-authored instrumentation
 - `filesystem` -- [runtime filesystem](../api/filesystem) for file I/O such as cache files
+- `compute` -- runtime-owned reuse capability; it may be off
 - `state` -- type-safe `MiddlewareState<T>` with `.value` and `.update(partial)`, validated against `stateSchema`
 - `options` -- resolved options: `optionsSchema` defaults merged with caller overrides
 - `dependencies` -- read-only `Dependency` array for the current operation
@@ -80,12 +87,12 @@ A middleware that persists data during an operation declares `stateSchema` (a Zo
 ## Key Relationships
 
 - **Ordering:** first registered is outermost. Put caches early so they wrap expensive computation.
-- **Parameter values:** create middleware receives caller overrides and outer middleware values; defaults arrive at the kernel boundary.
+- **Parameter values:** evaluation middleware receives caller overrides and outer middleware values; defaults arrive at the kernel boundary.
 
 ## Implications
 
-- **Short-circuiting** -- a cache hit can return without calling `handler()`. The result still flows through outer post-processing, so coordinate transforms and edge detection apply to cached results too.
-- **No shared mutable state** -- state is per-operation. Cross-operation caches belong in the filesystem or an external store.
+- **Short-circuiting** -- a cache hit can return without calling `next(input)`. The result still flows through outer post-processing, so coordinate transforms and edge detection apply to cached results too.
+- **No shared mutable state** -- state is per-operation. Cross-operation reuse belongs to the runtime-managed cache or a declared compute capability.
 - **Error handling** -- a throwing middleware is caught by the framework and surfaced as a structured error; outer post-processing does not run on that path.
 
 ## Further Reading

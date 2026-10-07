@@ -34,6 +34,7 @@ import {
 } from '#lib/share-providers.js';
 import type { GithubGistConnectionStatus } from '#lib/share-providers.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 export type ProjectSharePanelProps = {
   readonly projectId: string;
@@ -535,7 +536,11 @@ function PortableShareBody({
             <SvgIcon id='github' className='mt-0.5 size-5' aria-hidden />
           )}
           <div className='min-w-0 text-sm'>
-            <p className='font-medium'>{encrypted ? 'Password-encrypted in your browser' : 'No upload through Tau'}</p>
+            <p className='font-medium'>
+              {encrypted
+                ? `Password-encrypted ${isDesktopTarget() ? 'on your computer' : 'in your browser'}`
+                : 'No upload through Tau'}
+            </p>
             <p className='mt-1 text-muted-foreground'>
               {encrypted
                 ? 'The password can travel in the link or be shared separately. Files remain in memory until download or remix.'
@@ -648,9 +653,7 @@ function PortableShareBody({
         </div>
       ) : null}
       {error ? (
-        <div className='rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive'>
-          {error}
-        </div>
+        <div className='rounded-md border border-feature/40 bg-feature/10 px-3 py-2 text-sm text-feature'>{error}</div>
       ) : null}
       {warnings.length > 0 ? (
         <div className='rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm'>
@@ -1230,10 +1233,10 @@ function PublishErrorCallout({
       role='alert'
       className={cn(
         'rounded-md border px-3 py-2 text-sm',
-        signInRequired ? 'border-feature/30 bg-feature/10' : 'border-destructive/40 bg-destructive/10',
+        signInRequired ? 'border-feature/30 bg-feature/10' : 'border-feature/40 bg-feature/10',
       )}
     >
-      <div className={cn('font-medium', signInRequired ? 'text-feature dark:text-feature/70' : 'text-destructive')}>
+      <div className={cn('font-medium', signInRequired ? 'text-feature dark:text-feature/70' : 'text-feature')}>
         {message}
       </div>
       {signInRequired ? (

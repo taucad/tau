@@ -7,12 +7,16 @@
  * workflow drifts the moment a package is added, renamed, or retired — and Nx
  * selectors fail open, so the drift is silent.
  *
+ * A shell or expression value (`"$SHARD"`, `${{ matrix.project }}`) is a
+ * selector too, for projects and targets alike: the plan job computes it from
+ * the graph at run time, so it cannot drift the way a hand-written name does.
+ *
  * Two exemptions, both structural rather than convenient:
  * - `nx run <project>:<target>` is allowed when the project carries
  *   `type:tool`. The gate umbrellas (`scripts:validate`, `scripts:release-gate`)
  *   are tools, not package surface: nothing about them changes when a package
  *   is added.
- * - Deployment workflows (`deploy.yml`, `review.yml`, …) are topology, not
+ * - Deployment workflows (`deploy.yml`, `deploy-ui.yml`, …) are topology, not
  *   package surface, and are out of scope — see {@link workflowPaths}.
  *
  * Every target a workflow names must exist on at least one project, because a
@@ -35,6 +39,8 @@ export const workflowPaths = [
   '.github/workflows/ci.yml',
   '.github/workflows/publish.yml',
   '.github/workflows/formal-nightly.yml',
+  '.github/workflows/e2e-nightly.yml',
+  '.github/workflows/desktop-tooling.yml',
 ] as const;
 
 export type WorkflowFile = { readonly path: string; readonly text: string };
@@ -70,8 +76,11 @@ const subcommands = new Set([
   'list',
 ]);
 
+/** A shell or expression value, computed at run time rather than written here. */
+const isComputed = (value: string): boolean => /^["']?\$/u.test(value);
+
 /** A value that resolves through the graph rather than naming a project. */
-const isSelector = (value: string): boolean => value.startsWith('tag:') || value.includes('*');
+const isSelector = (value: string): boolean => value.startsWith('tag:') || value.includes('*') || isComputed(value);
 
 /**
  * Split a `run:` script into the shell commands it runs.
@@ -158,7 +167,7 @@ export const validateWorkflows = (
     }
 
     for (const value of referenced) {
-      if (!known.has(value)) {
+      if (!known.has(value) && !isComputed(value)) {
         violations.push(`${file} (job ${job}): target \`${value}\` exists on no project`);
       }
     }

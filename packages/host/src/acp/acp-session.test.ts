@@ -9,8 +9,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { flush } from '@taucad/xstate-testing/clock';
 import { createFakeCallbackActors, createFakeParent } from '@taucad/xstate-testing/fakes';
 
-import { provideAcpSession } from '#acp/acp-session.js';
-import type { AcpLentSeams } from '#acp/acp-session.js';
+import { provideAcpSession } from '#acp/acp-session-logic.js';
+import type { AcpLentSeams } from '#acp/acp-session-logic.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import { protocolVersion } from '#acp/session.js';
 

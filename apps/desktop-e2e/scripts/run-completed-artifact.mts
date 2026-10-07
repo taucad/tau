@@ -12,13 +12,14 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
+import { z } from 'zod';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const desktopE2ERoot = resolve(import.meta.dirname, '..');
@@ -125,7 +126,9 @@ const main = async (): Promise<void> => {
           healthcheck: { test: ['CMD', 'redis-cli', 'ping'], interval: '1s', timeout: '3s', retries: 30 },
         },
         minio: {
-          image: 'quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z',
+          // Same pinned community MinIO image as infra/docker-compose.yml, which pulls it.
+          image:
+            'pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372',
           pull_policy: 'never',
           command: ['server', '/data'],
           environment: { MINIO_ROOT_USER: storageUser, MINIO_ROOT_PASSWORD: storagePassword },
@@ -133,7 +136,8 @@ const main = async (): Promise<void> => {
           healthcheck: { test: ['CMD', 'mc', 'ready', 'local'], interval: '1s', timeout: '3s', retries: 30 },
         },
         storage_bootstrap: {
-          image: 'quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z',
+          image:
+            'pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372',
           pull_policy: 'never',
           depends_on: { minio: { condition: 'service_healthy' } },
           environment: { MINIO_ROOT_USER: storageUser, MINIO_ROOT_PASSWORD: storagePassword },
@@ -216,7 +220,7 @@ const main = async (): Promise<void> => {
     if (databaseAddress.endsWith(':5432')) {
       throw new Error('Disposable Postgres must not use the shared development database port.');
     }
-    const databaseIdentity = run(composeCommand, [
+    const databaseQueryArguments = [
       ...composeArguments,
       'exec',
       '-T',
@@ -228,8 +232,10 @@ const main = async (): Promise<void> => {
       'desktop_e2e',
       '-At',
       '-c',
-      "select current_setting('cluster_name') || '|' || current_database() || '|' || current_user",
-    ]);
+    ];
+    const databaseIdentityQuery =
+      "select current_setting('cluster_name') || '|' || current_database() || '|' || current_user";
+    const databaseIdentity = run(composeCommand, [...databaseQueryArguments, databaseIdentityQuery]);
     if (databaseIdentity !== `${project}|desktop_e2e|desktop_e2e`) {
       throw new Error('Disposable database ownership verification failed.');
     }
@@ -276,6 +282,7 @@ const main = async (): Promise<void> => {
       TAU_E2E_API_URL: apiUrl,
       TAU_E2E_API_CWD: directory,
       TAU_E2E_COMPLETED_ARTIFACT: 'true',
+      TAU_E2E_ACP_PACKAGED: 'true',
       TAU_E2E_COMPOSE_PROJECT: project,
       ...(isolatedCloudGateway
         ? {
@@ -305,11 +312,70 @@ const main = async (): Promise<void> => {
       TAU_S3_REGION: 'us-east-1',
       TAU_S3_SECRET_ACCESS_KEY: storagePassword,
     };
-    run('pnpm', ['--config.verify-deps-before-run=warn', 'nx', 'run', 'api:db-migrate'], {
-      ...environment,
-      BILLING_DATABASE_URL: environment.DATABASE_URL,
-      BILLING_ENVIRONMENT: 'development',
+    const migration = spawnSync('pnpm', ['--config.verify-deps-before-run=warn', 'nx', 'run', 'api:db-migrate'], {
+      cwd: workspaceRoot,
+      env: {
+        ...environment,
+        BILLING_DATABASE_URL: environment.DATABASE_URL,
+        BILLING_ENVIRONMENT: 'development',
+      },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
+    const migrationTranscript = `${migration.stdout}\n${migration.stderr}`
+      .replaceAll(databasePassword, '[redacted]')
+      .replaceAll(storageUser, '[redacted]')
+      .replaceAll(storagePassword, '[redacted]')
+      .replaceAll(environment.AUTH_SECRET, '[redacted]')
+      .replaceAll(environment.TAU_VIEW_COOKIE_SECRET, '[redacted]');
+    console.info(`Migration command status ${String(migration.status)}:\n${migrationTranscript}`);
+    if (migration.error !== undefined || migration.status !== 0) {
+      throw new Error(`api:db-migrate failed with status ${String(migration.status)}.`, { cause: migration.error });
+    }
+
+    // Global setup rebuilds the API and removes this entry; retain the migration's consumed bytes first.
+    const checkpointDirectory = resolve(workspaceRoot, 'out/test-results/desktop-e2e/migration-checkpoint', project);
+    mkdirSync(checkpointDirectory, { recursive: true });
+    const billingEntry = readFileSync(resolve(workspaceRoot, 'apps/api/dist/billing-command.js'));
+    const migrationJournal = readFileSync(resolve(workspaceRoot, 'apps/api/dist/migrations/meta/_journal.json'));
+    for (const [name, bytes] of [
+      ['billing-command.js', billingEntry],
+      ['_journal.json', migrationJournal],
+    ] as const) {
+      writeFileSync(join(checkpointDirectory, name), bytes, { flag: 'wx' });
+      console.info(
+        `Migration input ${name}: ${String(bytes.byteLength)} bytes, SHA256 ${createHash('sha256').update(bytes).digest('hex')}`,
+      );
+    }
+    const journal = z
+      .object({ entries: z.array(z.object({ tag: z.string().min(1), when: z.number().int().positive() })).min(1) })
+      .parse(JSON.parse(migrationJournal.toString('utf8')));
+    const head = journal.entries.at(-1);
+    if (!head) {
+      throw new Error('Migration journal is empty.');
+    }
+    const migratedIdentity = run(composeCommand, [...databaseQueryArguments, databaseIdentityQuery]);
+    if (migratedIdentity !== databaseIdentity) {
+      throw new Error('Disposable database ownership changed during migration.');
+    }
+    const markerPresent = run(composeCommand, [
+      ...databaseQueryArguments,
+      "select to_regclass('drizzle.__drizzle_migrations') is not null",
+    ]);
+    const applied =
+      markerPresent === 't'
+        ? run(composeCommand, [
+            ...databaseQueryArguments,
+            "select count(*)::int || '|' || coalesce(max(created_at), 0)::text from drizzle.__drizzle_migrations",
+          ])
+        : '0|0';
+    const expected = `${String(journal.entries.length)}|${String(head.when)}`;
+    console.info(
+      `Migration checkpoint ${migratedIdentity}: applied ${applied}, expected ${expected} through ${head.tag}.`,
+    );
+    if (applied !== expected) {
+      throw new Error('Disposable database migration checkpoint does not match the consumed journal.');
+    }
     const vitest = spawn(
       resolve(workspaceRoot, 'node_modules/.bin/vitest'),
       [
@@ -323,6 +389,9 @@ const main = async (): Promise<void> => {
         'src/desktop-ephemeral-isolation.spec.ts',
         'src/desktop-image-geospec.spec.ts',
         'src/desktop-geometry-host.spec.ts',
+        'src/desktop-chat-replay.spec.ts',
+        'src/desktop-chat-in-project.spec.ts',
+        'src/desktop-chat-acp.spec.ts',
         'src/desktop-measurement-exact.spec.ts',
         'src/desktop-thumbnail-lifecycle.spec.ts',
         'src/desktop-native-payload.spec.ts',

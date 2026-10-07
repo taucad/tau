@@ -327,4 +327,6 @@ test.skipIf(!enabled).each(selected)(
       throw error;
     }
   },
+  // The turn alone may take the 20-minute poll above, plus launch and sign-in.
+  1_500_000,
 );

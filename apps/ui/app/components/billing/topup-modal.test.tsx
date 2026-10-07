@@ -355,6 +355,7 @@ describe('TopupModal', () => {
       expect(toast.warning).toHaveBeenCalledWith('This payment can no longer be cancelled.');
     });
     expect(await screen.findByText('Credits added')).toBeInTheDocument();
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing'] });
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
 

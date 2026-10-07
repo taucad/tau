@@ -21,7 +21,7 @@ const waitCopy: PendingPaymentCopy = {
   copy: 'A payment is still being processed. Closing waits for it; try again in a minute.',
   held: false,
 };
-const settledCopy: PendingPaymentCopy = { copy: 'That payment has just finished. Try again.', held: false };
+const settledCopy: PendingPaymentCopy = { copy: 'That payment is no longer pending. Try again.', held: false };
 /** Copy per wire state of the pending payment; `held` adds the support link where only support can clear it. */
 const pendingPaymentCopy = new Map<string, PendingPaymentCopy>([
   ['prepared', { copy: 'Discard or finish your pending top-up quote first.', held: false }],
@@ -38,7 +38,6 @@ const pendingPaymentCopy = new Map<string, PendingPaymentCopy>([
   ],
   // The refusal raced a payment that settled or was cancelled meanwhile; the next attempt goes through.
   ['fulfilled', settledCopy],
-  ['completed', settledCopy],
   ['canceled', settledCopy],
   ['failed', settledCopy],
 ]);

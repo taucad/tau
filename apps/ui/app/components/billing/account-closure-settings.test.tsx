@@ -111,7 +111,7 @@ describe('AccountClosureSettings', () => {
     renderClosure();
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: 'Prepare account closure' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('That payment has just finished. Try again.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('That payment is no longer pending. Try again.');
     expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
   });
 

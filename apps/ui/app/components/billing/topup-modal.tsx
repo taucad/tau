@@ -285,6 +285,9 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the modal may have moved on during the GET
           if (current !== undefined && scopeRef.current.value === startedGeneration) {
             setAction(current);
+            if (current.state === 'fulfilled') {
+              void queryClient.invalidateQueries({ queryKey: ['billing'] });
+            }
           }
         } else {
           toast.warning(

@@ -2069,7 +2069,8 @@ describe('billing payments PostgreSQL foundation', () => {
         .select()
         .from(billingStripeSource)
         .where(and(eq(billingStripeSource.sourceType, 'invoice'), eq(billingStripeSource.sourceId, invoiceId)));
-      expect(settled).toMatchObject({ state: 'done', generation: 1n });
+      // Inserted at 0, queued to 1 by markStripeSourcePending, claimed inline to 2; the claim's finish never resets it.
+      expect(settled).toMatchObject({ state: 'done', generation: 2n });
       // A second recover answers the terminal action without touching the settled source.
       const stripeRequests = requests.length;
       await expect(payments.recoverAction(pro.userId, pro.action.actionId)).resolves.toMatchObject({
@@ -2080,7 +2081,7 @@ describe('billing payments PostgreSQL foundation', () => {
         .select()
         .from(billingStripeSource)
         .where(and(eq(billingStripeSource.sourceType, 'invoice'), eq(billingStripeSource.sourceId, invoiceId)));
-      expect(unchanged).toMatchObject({ state: 'done', generation: 1n });
+      expect(unchanged).toMatchObject({ state: 'done', generation: 2n });
     });
 
     it('should grant Pro from a paid subscription Checkout through the sweep and keep it idempotent', async () => {

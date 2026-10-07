@@ -3876,13 +3876,10 @@ export class BillingPaymentsService {
   }
 
   /**
-   * Queues one Stripe object for reconciliation, as a delivered webhook does and as hosted-session recovery
-   * does when no webhook arrived. Due on the database clock, so a caller's own claim right after sees it due.
-   */
-  /**
-   * Queues a Stripe object for the source reconciler. A delivered event revives even a `done` source (a later
-   * event for the same object, a refund say, must be reconciled again); `reviveDone: false` queues only a source
-   * the reconciler has not settled, for a caller that merely wants to be sure it was queued once.
+   * Queues a Stripe object for the source reconciler, due on the database clock so a caller's own claim right
+   * after sees it due. A delivered event revives even a `done` source (a later event for the same object, a refund
+   * say, must be reconciled again); `reviveDone: false` never re-queues a settled source, while a `pending` or
+   * `processing` one is still rewritten as due (the claim fences make a displaced worker's writes no-ops).
    */
   private async markStripeSourcePending(
     sourceType: string,

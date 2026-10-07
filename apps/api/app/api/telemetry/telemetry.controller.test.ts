@@ -10,6 +10,13 @@ function createMockMetrics() {
     kernelExecutionDuration: { record: vi.fn() },
     kernelExecutions: { add: vi.fn() },
     kernelExportDuration: { record: vi.fn() },
+    agentSessions: { add: vi.fn() },
+    agentTurns: { add: vi.fn() },
+    agentTurnDuration: { record: vi.fn() },
+    agentTimeToFirstUpdate: { record: vi.fn() },
+    agentToolCalls: { add: vi.fn() },
+    agentTokens: { add: vi.fn() },
+    agentErrors: { add: vi.fn() },
   };
 }
 
@@ -91,6 +98,97 @@ describe('TelemetryController', () => {
     });
   });
 
+  describe('agent usage entries', () => {
+    const codex = { [AttributeKey.AGENT_ID]: 'codex', [AttributeKey.AGENT_PLACEMENT]: 'daemon' };
+
+    it('should record a completed Codex turn with tools and only the token types it reported', () => {
+      controller.ingest({
+        entries: [
+          {
+            name: IngestEntryName.AGENT_TURN,
+            duration: 12_000,
+            detail: {
+              agentId: 'codex',
+              placement: 'daemon',
+              outcome: 'completed',
+              timeToFirstUpdate: 1500,
+              toolCalls: [{ kind: 'execute', status: 'completed', count: 2 }],
+              tokens: { input: 100, output: 20, cacheRead: 50, cacheWrite: 0 },
+            },
+          },
+        ],
+      });
+
+      const turn = { ...codex, [AttributeKey.AGENT_OUTCOME]: 'completed' };
+      expect(mockMetrics.agentTurns.add).toHaveBeenCalledWith(1, turn);
+      expect(mockMetrics.agentTurnDuration.record).toHaveBeenCalledWith(12, turn);
+      expect(mockMetrics.agentTimeToFirstUpdate.record).toHaveBeenCalledWith(1.5, codex);
+      expect(mockMetrics.agentToolCalls.add).toHaveBeenCalledWith(2, {
+        [AttributeKey.AGENT_ID]: 'codex',
+        [AttributeKey.AGENT_TOOL_KIND]: 'execute',
+        [AttributeKey.AGENT_TOOL_STATUS]: 'completed',
+      });
+      expect(mockMetrics.agentTokens.add.mock.calls).toEqual([
+        [100, { [AttributeKey.AGENT_ID]: 'codex', [AttributeKey.AGENT_TOKEN_TYPE]: 'input' }],
+        [20, { [AttributeKey.AGENT_ID]: 'codex', [AttributeKey.AGENT_TOKEN_TYPE]: 'output' }],
+        [50, { [AttributeKey.AGENT_ID]: 'codex', [AttributeKey.AGENT_TOKEN_TYPE]: 'cache_read' }],
+      ]);
+      expect(mockMetrics.agentErrors.add).not.toHaveBeenCalled();
+    });
+
+    it('should count a refused turn as an error once and record no tokens', () => {
+      controller.ingest({
+        entries: [
+          {
+            name: IngestEntryName.AGENT_TURN,
+            duration: 30,
+            detail: {
+              agentId: 'tau',
+              placement: 'browser',
+              outcome: 'refused',
+              errorCode: 'CHAT_PLACEMENT_UNAVAILABLE',
+            },
+          },
+          {
+            name: IngestEntryName.AGENT_SESSION,
+            duration: 0,
+            detail: { agentId: 'tau', placement: 'browser', outcome: 'refused' },
+          },
+        ],
+      });
+
+      expect(mockMetrics.agentErrors.add).toHaveBeenCalledExactlyOnceWith(1, {
+        [AttributeKey.AGENT_ID]: 'tau',
+        [AttributeKey.AGENT_ERROR_CODE]: 'CHAT_PLACEMENT_UNAVAILABLE',
+      });
+      expect(mockMetrics.agentSessions.add).toHaveBeenCalledWith(1, {
+        [AttributeKey.AGENT_ID]: 'tau',
+        [AttributeKey.AGENT_PLACEMENT]: 'browser',
+        [AttributeKey.AGENT_OUTCOME]: 'refused',
+      });
+      expect(mockMetrics.agentTokens.add).not.toHaveBeenCalled();
+      expect(mockMetrics.agentTimeToFirstUpdate.record).not.toHaveBeenCalled();
+    });
+
+    it('should record an agent outside the known set as other', () => {
+      controller.ingest({
+        entries: [
+          {
+            name: IngestEntryName.AGENT_SESSION,
+            duration: 0,
+            detail: { agentId: 'my-agent', placement: 'daemon', outcome: 'started' },
+          },
+        ],
+      });
+
+      expect(mockMetrics.agentSessions.add).toHaveBeenCalledWith(1, {
+        [AttributeKey.AGENT_ID]: 'other',
+        [AttributeKey.AGENT_PLACEMENT]: 'daemon',
+        [AttributeKey.AGENT_OUTCOME]: 'started',
+      });
+    });
+  });
+
   describe('IngestPayloadDto validation (via ZodValidationPipe)', () => {
     const pipe = new ZodValidationPipe();
 
@@ -108,6 +206,46 @@ describe('TelemetryController', () => {
       expect(() =>
         // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- pipe.transform return type is any from NestJS ValidationPipe
         pipe.transform({ entries: [] }, { type: 'body', metatype: IngestPayloadDto }),
+      ).toThrow();
+    });
+
+    it('should clamp an out-of-range token count instead of dropping the turn', () => {
+      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- pipe.transform return type is any from NestJS ValidationPipe
+      const parsed: IngestPayloadDto = pipe.transform(
+        {
+          entries: [
+            {
+              name: IngestEntryName.AGENT_TURN,
+              duration: 1e12,
+              detail: {
+                agentId: 'codex',
+                placement: 'daemon',
+                outcome: 'completed',
+                tokens: { input: 1e12, output: 1, cacheRead: 0, cacheWrite: 0 },
+              },
+            },
+          ],
+        },
+        { type: 'body', metatype: IngestPayloadDto },
+      );
+
+      expect(parsed.entries[0]).toMatchObject({
+        duration: 86_400_000,
+        detail: { tokens: { input: 100_000_000, output: 1 } },
+      });
+    });
+
+    it.each([
+      ['an unbounded agent id', { agentId: 'Some User Text', placement: 'daemon', outcome: 'completed' }],
+      ['an unknown placement', { agentId: 'codex', placement: 'mars', outcome: 'completed' }],
+      ['a free-text error code', { agentId: 'codex', placement: 'daemon', outcome: 'error', errorCode: 'oops: x' }],
+    ])('should reject an agent turn with %s', (_label, detail) => {
+      expect(() =>
+        // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- pipe.transform return type is any from NestJS ValidationPipe
+        pipe.transform(
+          { entries: [{ name: IngestEntryName.AGENT_TURN, duration: 1, detail }] },
+          { type: 'body', metatype: IngestPayloadDto },
+        ),
       ).toThrow();
     });
   });

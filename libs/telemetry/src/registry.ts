@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- OTEL attribute names use dot-notation */
 import { z } from 'zod';
 import { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from '#define-metric.js';
+import { agentPlacements, agentToolKinds } from '#ingest.js';
 
 /**
  * Canonical metric registry for Tau.
@@ -728,6 +729,85 @@ export const TauMetrics = {
     attributes: z.object({
       'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
       'tau.billing.capacity_pool': z.enum(['primary', 'helper']),
+    }),
+  }),
+
+  // --- Client-reported: agent usage for every agent (Tau, Claude Code, Codex over ACP) — W36-C ---
+  // Each key maps to the Prometheus label W36's dashboards query (`agent.id` → `agent_id`); see `AttributeKey`.
+
+  agentSessions: defineCounter({
+    name: 'tau.agent.sessions',
+    unit: '{session}',
+    description: 'Agent sessions a client started, ended or was refused, by agent and placement (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+      outcome: z.enum(['started', 'ended', 'refused']),
+    }),
+  }),
+
+  agentTurns: defineCounter({
+    name: 'tau.agent.turns',
+    unit: '{turn}',
+    description: 'Settled agent turns by agent, placement and outcome (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+      outcome: z.enum(['completed', 'cancelled', 'error', 'refused']),
+    }),
+  }),
+
+  agentTurnDuration: defineHistogram({
+    name: 'tau.agent.turn.duration',
+    unit: 's',
+    description: 'Agent turn wall time from admission to its terminal row (reported by client)',
+    buckets: [1, 2.5, 5, 10, 20, 30, 60, 120, 300, 600, 1800, 3600],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+      outcome: z.enum(['completed', 'cancelled', 'error', 'refused']),
+    }),
+  }),
+
+  agentTimeToFirstUpdate: defineHistogram({
+    name: 'tau.agent.time_to_first_update',
+    unit: 's',
+    description: 'Agent turn admission to its first content update (reported by client)',
+    buckets: [0.25, 0.5, 1, 2, 3, 5, 10, 20, 30, 60, 120],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'agent.placement': z.enum(agentPlacements),
+    }),
+  }),
+
+  agentToolCalls: defineCounter({
+    name: 'tau.agent.tool_calls',
+    unit: '{call}',
+    description: 'Agent tool calls by ACP tool kind and terminal status (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'tool.kind': z.enum(agentToolKinds),
+      status: z.enum(['completed', 'failed']),
+    }),
+  }),
+
+  agentTokens: defineCounter({
+    name: 'tau.agent.tokens',
+    unit: '{token}',
+    description: 'Tokens an agent reported for its turns; absent when the agent reports no usage (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'token.type': z.enum(['input', 'output', 'cache_read', 'cache_write']),
+    }),
+  }),
+
+  agentErrors: defineCounter({
+    name: 'tau.agent.errors',
+    unit: '{error}',
+    description: 'Agent refusals and failed turns by bounded error code (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'error.code': z.string(),
     }),
   }),
 } as const;

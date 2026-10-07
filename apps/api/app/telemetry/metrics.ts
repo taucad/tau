@@ -383,6 +383,45 @@ export class MetricsService {
       unit: TauMetrics.billingFundedOperationRecoveryProviderExecutions.unit,
     },
   );
+
+  // --- Client-reported: agent usage (W36-C) ---
+
+  public readonly agentSessions = this.clientMeter.createCounter(TauMetrics.agentSessions.name, {
+    description: TauMetrics.agentSessions.description,
+    unit: TauMetrics.agentSessions.unit,
+  });
+
+  public readonly agentTurns = this.clientMeter.createCounter(TauMetrics.agentTurns.name, {
+    description: TauMetrics.agentTurns.description,
+    unit: TauMetrics.agentTurns.unit,
+  });
+
+  public readonly agentTurnDuration = this.clientMeter.createHistogram(TauMetrics.agentTurnDuration.name, {
+    description: TauMetrics.agentTurnDuration.description,
+    unit: TauMetrics.agentTurnDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.agentTurnDuration.buckets] },
+  });
+
+  public readonly agentTimeToFirstUpdate = this.clientMeter.createHistogram(TauMetrics.agentTimeToFirstUpdate.name, {
+    description: TauMetrics.agentTimeToFirstUpdate.description,
+    unit: TauMetrics.agentTimeToFirstUpdate.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.agentTimeToFirstUpdate.buckets] },
+  });
+
+  public readonly agentToolCalls = this.clientMeter.createCounter(TauMetrics.agentToolCalls.name, {
+    description: TauMetrics.agentToolCalls.description,
+    unit: TauMetrics.agentToolCalls.unit,
+  });
+
+  public readonly agentTokens = this.clientMeter.createCounter(TauMetrics.agentTokens.name, {
+    description: TauMetrics.agentTokens.description,
+    unit: TauMetrics.agentTokens.unit,
+  });
+
+  public readonly agentErrors = this.clientMeter.createCounter(TauMetrics.agentErrors.name, {
+    description: TauMetrics.agentErrors.description,
+    unit: TauMetrics.agentErrors.unit,
+  });
 }
 
 /** `ws.gateway` on the `ws.*` connection series: one value per upgrade route. */

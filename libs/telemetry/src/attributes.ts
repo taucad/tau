@@ -5,6 +5,15 @@
  * @public
  */
 export const AttributeKey = {
+  /* Agent usage (W36-C): each maps to its Prometheus label exactly (`agent.id` → `agent_id`). `outcome` and
+   * `status` are bare by contract — W36's dashboards query those label names. */
+  AGENT_ID: 'agent.id',
+  AGENT_PLACEMENT: 'agent.placement',
+  AGENT_OUTCOME: 'outcome',
+  AGENT_TOOL_KIND: 'tool.kind',
+  AGENT_TOOL_STATUS: 'status',
+  AGENT_TOKEN_TYPE: 'token.type',
+  AGENT_ERROR_CODE: 'error.code',
   KERNEL_STATUS: 'kernel.status',
   EXPORT_FORMAT: 'export.format',
   RPC_METHOD: 'rpc.method',

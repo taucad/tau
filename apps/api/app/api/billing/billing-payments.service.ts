@@ -233,6 +233,9 @@ export type BillingRecoveryNoticeTransport = {
   }): Promise<{ readonly receipt: string }>;
 };
 
+/** Wire states with nothing left to recover; a repeated recover answers them without reading Stripe. */
+const terminalActionStates = new Set<WirePaymentAction['state']>(['fulfilled', 'completed', 'canceled', 'failed']);
+
 @Injectable()
 export class BillingPaymentsService {
   public constructor(
@@ -985,6 +988,10 @@ export class BillingPaymentsService {
       (hosted?.kind === 'checkout_payment' || hosted?.kind === 'checkout_subscription') &&
       hosted.providerObjectId !== null
     ) {
+      // A terminal action has nothing left to recover: answering it here keeps a repeated recover from reading
+      // Stripe and taking the provider leg's lease on every call.
+      const current = await this.getAction(userId, actionId);
+      if (terminalActionStates.has(current.state)) return current;
       const session = await this.sourceStripe.checkout.sessions.retrieve(hosted.providerObjectId);
       if (session.status === 'expired') await this.closeExpiredCheckout(hosted, session, 'canceled');
       if (session.status === 'complete') await this.settleHostedCheckout(hosted, session);
@@ -2083,6 +2090,14 @@ export class BillingPaymentsService {
     const remoteSubscriptionId =
       typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
     if (leg.subscriptionId !== null && remoteSubscriptionId !== null && remoteSubscriptionId !== undefined) {
+      const [current] = await this.databaseService.database
+        .select({ stripeSubscriptionId: subscription.stripeSubscriptionId })
+        .from(subscription)
+        .where(and(eq(subscription.id, leg.subscriptionId), eq(subscription.accountId, leg.accountId)))
+        .limit(1);
+      // A linked subscription had its first invoice queued with the link; a repeated recover must not force that
+      // source back to pending under the worker.
+      if (current !== undefined && current.stripeSubscriptionId !== null) return;
       // The first invoice grants the plan; queue it as its `invoice.paid` webhook would. The link below ends
       // this leg's sweep, so the invoice is queued first: a failed write leaves both to the next pass.
       const invoiceId = stripeObjectId(session.invoice);
@@ -2104,9 +2119,13 @@ export class BillingPaymentsService {
   }
 
   /**
-   * Runs the provider-leg sweep's steps for a returning customer's completed Checkout. A sweep pass leaves its
-   * 30 s lease on every hosted leg it re-reads, so this takes the lease outright: the lease fences
-   * (`assertProviderLegClaim`, the lease-token link) let the newest holder win and a concurrent pass fail closed.
+   * Settles a returning customer's completed Checkout the way the provider-leg sweep would: it takes the leg's
+   * 30 s lease outright (a sweep pass leaves its lease on every hosted leg it re-reads), links the session,
+   * reconciles the purchase or queues the first invoice, and claims that invoice inline. The lease fences
+   * (`assertProviderLegClaim`, the lease-token link) let the newest holder win and a concurrent pass fail closed;
+   * two recovers in the same millisecond mint the same token, and it is the account lock inside
+   * `reconcilePurchase`, not the token, that serialises them. A failed link releases the claim with its error
+   * code and returns normally: the customer sees the unchanged action and the next sweep pass retries it.
    */
   private async settleHostedCheckout(
     leg: typeof billingProviderLeg.$inferSelect,
@@ -2114,7 +2133,10 @@ export class BillingPaymentsService {
   ): Promise<void> {
     const [lease] = await this.databaseService.database
       .update(billingProviderLeg)
-      .set({ nextAttemptAt: sql`date_trunc('milliseconds', clock_timestamp()) + interval '30 seconds'` })
+      .set({
+        errorCode: null,
+        nextAttemptAt: sql`date_trunc('milliseconds', clock_timestamp()) + interval '30 seconds'`,
+      })
       .where(and(eq(billingProviderLeg.id, leg.id), eq(billingProviderLeg.state, leg.state)))
       .returning({ leaseUntil: billingProviderLeg.nextAttemptAt });
     if (lease === undefined) return;
@@ -4554,7 +4576,7 @@ export class BillingPaymentsService {
     }
     const paymentSource = await retrieveStripePaymentEvidence(this.sourceStripe, paymentIntentId);
     // Without a delivered success event, a hosted Checkout is accepted at its settled charge's own time.
-    // Saved-card and automatic charges keep waiting for the event.
+    // Saved-card and automatic charges (a leg whose request names a payment method) keep waiting for the event.
     const qualification = qualifyManualPayment({
       offer,
       customerId: binding.stripeCustomerId,
@@ -4565,7 +4587,9 @@ export class BillingPaymentsService {
       checkout,
       sourceAcceptance:
         claim?.sourceAcceptedAt === undefined
-          ? checkout !== undefined && paymentSource.latestCharge !== undefined
+          ? checkout !== undefined &&
+            expected.expectedPaymentMethodId === undefined &&
+            paymentSource.latestCharge !== undefined
             ? { type: 'charge', createdAt: new Date(paymentSource.latestCharge.created * 1000) }
             : undefined
           : { type: 'payment_intent.succeeded', createdAt: claim.sourceAcceptedAt },

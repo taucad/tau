@@ -1915,8 +1915,11 @@ describe('billing payments PostgreSQL foundation', () => {
         state: 'fulfilled',
         receipt: { grantedCreditAtoms: '5370000' },
       });
+      // A terminal action is answered from the database: no Stripe read, no new lease.
+      const stripeRequests = requests.length;
       const second = await payments.recoverAction(topup.userId, topup.actionId);
       expect(second).toMatchObject({ state: 'fulfilled', receipt: first.receipt });
+      expect(requests.length).toBe(stripeRequests);
       const grants = await database
         .select()
         .from(creditTransaction)
@@ -1929,6 +1932,53 @@ describe('billing payments PostgreSQL foundation', () => {
       await expect(payments.recoverAction(topup.userId, topup.actionId)).resolves.toMatchObject({
         state: 'redirect_required',
         redirectUrl: topup.session['url'],
+      });
+    });
+
+    it('should keep a saved-card charge waiting for its event although its charge has settled', async () => {
+      const userId = randomUUID();
+      await database
+        .insert(user)
+        .values({ id: userId, name: 'Saved Card Waits', email: `${userId}@test.invalid`, emailVerified: true });
+      const prepared = await payments.prepareTopup(userId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+        amountMinor: '537',
+        method: 'saved_card',
+      });
+      const [leg] = await database
+        .select()
+        .from(billingProviderLeg)
+        .where(eq(billingProviderLeg.purchaseId, prepared.actionId));
+      const [binding] = await database
+        .select()
+        .from(billingStripeCustomer)
+        .where(eq(billingStripeCustomer.id, leg?.customerBindingId ?? ''));
+      if (leg === undefined || binding?.stripeCustomerId === null || binding?.stripeCustomerId === undefined) {
+        throw new Error('Saved-card fixture is incomplete');
+      }
+      const suffix = randomUUID().replaceAll('-', '');
+      paymentFixture = {
+        purchaseId: prepared.actionId,
+        providerLegId: leg.id,
+        customerBindingId: leg.customerBindingId,
+        customerId: binding.stripeCustomerId,
+      };
+      paymentIntentFixtureId = `pi_saved_${suffix}`;
+      paymentChargeFixtureId = `ch_saved_${suffix}`;
+      await payments.confirmAction(userId, prepared.actionId);
+      // Stripe has settled the charge, but a saved-card leg takes no charge-time acceptance: only the event does.
+      await onlyDue(leg.id);
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(swept.failed, (await legError(leg.id)) ?? '').toEqual([]);
+      const waiting = await payments.getAction(userId, prepared.actionId);
+      expect(waiting.state).not.toBe('fulfilled');
+      await deliverLater('payment_intent.succeeded', { id: paymentIntentFixtureId, object: 'payment_intent' });
+      const delivered = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(delivered.failed, JSON.stringify(requests.slice(-20))).toEqual([]);
+      await expect(payments.getAction(userId, prepared.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+        receipt: { grantedCreditAtoms: '5370000' },
       });
     });
 

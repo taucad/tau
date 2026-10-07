@@ -69,7 +69,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
       "targets": [
         {
-          "expr": "(1 - (sum(rate(http_server_duration_count{service_name=~\"$service\",http_status_code=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_server_duration_count{service_name=~\"$service\"}[5m])), 1e-10)) * 100",
+          "expr": "(1 - (sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[5m])), 1e-10)) * 100",
           "legendFormat": "availability"
         }
       ],
@@ -94,7 +94,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
       "targets": [
         {
-          "expr": "(sum(rate(http_server_duration_count{service_name=~\"$service\",http_status_code=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_server_duration_count{service_name=~\"$service\"}[5m])), 1e-10) * 100"
+          "expr": "(sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[5m])), 1e-10) * 100"
         }
       ],
       "fieldConfig": {
@@ -191,7 +191,7 @@
       "gridPos": { "h": 7, "w": 8, "x": 0, "y": 6 },
       "targets": [
         {
-          "expr": "sum(rate(http_server_duration_count{service_name=~\"$service\"}[5m]))",
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\"}[5m]))",
           "legendFormat": "req/s"
         }
       ],
@@ -247,11 +247,11 @@
       "gridPos": { "h": 7, "w": 6, "x": 0, "y": 14 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(http_server_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(http_server_request_duration_bucket{service_name=~\"$service\"}[5m])) by (le))",
           "legendFormat": "HTTP p95"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
     },
     {
       "title": "RPC p95",
@@ -267,17 +267,15 @@
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
     },
     {
-      "title": "DB p95",
+      "title": "PostgreSQL Transactions",
       "description": "PostgreSQL query latency (95th percentile)",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 6, "x": 12, "y": 14 },
       "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum(rate(db_client_operation_duration_bucket{service_name=~\"$service\",db_system=\"postgresql\"}[5m])) by (le))",
-          "legendFormat": "DB p95"
-        }
+        { "expr": "sum(rate(postgresql_commits_total[5m]))", "legendFormat": "commits" },
+        { "expr": "sum(rate(postgresql_rollbacks_total[5m]))", "legendFormat": "rollbacks" }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
+      "fieldConfig": { "defaults": { "unit": "ops" } }
     },
     {
       "title": "LLM p95",
@@ -306,7 +304,7 @@
       "gridPos": { "h": 7, "w": 12, "x": 0, "y": 22 },
       "targets": [
         {
-          "expr": "sum(rate(http_server_duration_count{service_name=~\"$service\",http_status_code=~\"5..\"}[5m])) or vector(0)",
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[5m])) or vector(0)",
           "legendFormat": "HTTP 5xx"
         },
         {
@@ -366,8 +364,8 @@
       "gridPos": { "h": 7, "w": 8, "x": 8, "y": 30 },
       "targets": [
         {
-          "expr": "sum(rate(gen_ai_tool_invocations_total{service_name=~\"$service\"}[5m])) by (gen_ai_tool_name)",
-          "legendFormat": "{{gen_ai_tool_name}}"
+          "expr": "sum by (agent_id, tool_kind) (rate(tau_agent_tool_calls_total{service_name=~\"$service\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{tool_kind}}"
         }
       ],
       "fieldConfig": {
@@ -416,19 +414,17 @@
       }
     },
     {
-      "title": "DB Query Latency (p95)",
+      "title": "Object Storage p95 by Operation",
       "description": "PostgreSQL and Redis query p95 latency",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 8, "x": 8, "y": 38 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(db_client_operation_duration_bucket{service_name=~\"$service\",db_system=\"postgresql\"}[5m])) by (le))",
-          "legendFormat": "PostgreSQL p95"
+          "expr": "histogram_quantile(0.95, sum by (le, tau_storage_operation) (rate(tau_storage_operation_duration_bucket{service_name=~\"$service\"}[5m])))",
+          "legendFormat": "{{tau_storage_operation}}"
         }
       ],
-      "fieldConfig": {
-        "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } }
-      }
+      "fieldConfig": { "defaults": { "unit": "s" } }
     },
     {
       "title": "Event Loop Utilization",
@@ -470,7 +466,9 @@
           "type": "logs",
           "gridPos": { "h": 8, "w": 24, "x": 0, "y": 46 },
           "datasource": { "type": "loki", "uid": "loki" },
-          "targets": [{ "expr": "{service_name=~\"$service\"} |= \"level\" | json | level = \"error\"", "refId": "A" }],
+          "targets": [
+            { "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }
+          ],
           "options": {
             "showTime": true,
             "showLabels": true,

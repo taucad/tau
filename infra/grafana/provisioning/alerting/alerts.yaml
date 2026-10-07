@@ -122,8 +122,8 @@ groups:
               to: 0
             model:
               expr: >
-                sum(rate(http_server_duration_count{service_name="tau-api",http_status_code=~"5.."}[5m]))
-                / sum(rate(http_server_duration_count{service_name="tau-api"}[5m])) > 0.05
+                (sum(rate(http_server_request_duration_count{service_name="tau-api",http_response_status_code=~"5.."}[5m])) or vector(0))
+                / sum(rate(http_server_request_duration_count{service_name="tau-api"}[5m])) > 0.05
               intervalMs: 15000
               maxDataPoints: 20
         for: 5m

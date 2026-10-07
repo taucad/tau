@@ -50,7 +50,7 @@
           },
           "datasourceUid": "loki",
           "model": {
-            "expr": "sum(count_over_time({service_name=\"tau-api\"} |~ \"Database (connectivity probe|migration) failed\" [5m]))",
+            "expr": "sum(count_over_time({service_name=\"tau-api\"} |~ \"Database (connectivity probe|schema compatibility check) failed\" [5m]))",
             "intervalMs": 15000,
             "maxDataPoints": 43200,
             "queryType": "range",
@@ -103,7 +103,7 @@
       "execErrState": "Error",
       "for": "0s",
       "annotations": {
-        "summary": "Database probe or migration failed during API startup. Inspect Loki for `Database connectivity probe failed` / `Database migration failed` lines and act on the structured `hint` field (paused provider, DNS, TCP timeout, role rotation, pooler exhaustion, privilege).",
+        "summary": "Database probe or schema compatibility check failed during API startup. Inspect Loki for `Database connectivity probe failed` / `Database schema compatibility check failed` lines and act on the structured `hint` field (paused provider, DNS, TCP timeout, role rotation, pooler exhaustion, privilege).",
         "runbook_url": "docs/handbooks/cloud/playbooks/postgres-saturation.md"
       },
       "labels": {

@@ -41,13 +41,12 @@
       ]
     },
     {
-      "title": "DB Query Rate",
+      "title": "Transactions per Second",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "targets": [
         {
-          "expr": "sum(rate(db_client_operation_duration_count{service_name=~\"$service\"}[5m])) by (db_operation_name)",
-          "legendFormat": "{{db_operation_name}}"
+          "expr": "sum(rate(postgresql_commits_total[5m])) + sum(rate(postgresql_rollbacks_total[5m]))"
         }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" } }
@@ -66,16 +65,16 @@
       ]
     },
     {
-      "title": "DB Query Latency (p95)",
+      "title": "Row Operations by Kind",
       "type": "timeseries",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(db_client_operation_duration_bucket{service_name=~\"$service\"}[5m])) by (le, db_operation_name))",
-          "legendFormat": "{{db_operation_name}}"
+          "expr": "sum by (operation) (rate(postgresql_operations_total[5m]))",
+          "legendFormat": "{{operation}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s" } }
+      "fieldConfig": { "defaults": { "unit": "ops" } }
     },
     {
       "title": "Deadlocks",
@@ -133,23 +132,29 @@
       ]
     },
     {
-      "title": "DB Pending Requests",
+      "title": "PostgreSQL Connections Used",
       "type": "stat",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 20 },
-      "targets": [
-        {
-          "expr": "db_client_connection_pending_requests{service_name=~\"$service\"}",
-          "legendFormat": "pending"
+      "targets": [{ "expr": "sum(postgresql_backends) / max(postgresql_connection_max)" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 0.7, "color": "yellow" },
+              { "value": 0.9, "color": "red" }
+            ]
+          }
         }
-      ],
-      "fieldConfig": { "defaults": { "unit": "short" } }
+      }
     },
     {
       "title": "Error Logs",
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} |= \"level\" | json | level = \"error\"", "refId": "A" }],
+      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
       "options": {
         "showTime": true,
         "showLabels": true,

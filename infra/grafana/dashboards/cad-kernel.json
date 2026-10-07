@@ -95,7 +95,7 @@
       "type": "logs",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 100 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [{ "expr": "{service_name=~\"$service\"} |= \"level\" | json | level = \"error\"", "refId": "A" }],
+      "targets": [{ "expr": "{service_name=~\"$service\"} | detected_level=~\"error|fatal|critical\"", "refId": "A" }],
       "options": {
         "showTime": true,
         "showLabels": true,

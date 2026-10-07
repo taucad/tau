@@ -183,9 +183,16 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
     void (async () => {
       try {
         const items = await getUnresolvedPaymentActions(currentBinding, 'manual_topup');
+        // A prepared automatic reload purchase blocks closure and new top-ups just the same, so it is shown here
+        // when no manual one exists; its quote can be discarded like any other.
+        const automatic = items.some((item) => item.purpose === 'manual_topup')
+          ? []
+          : await getUnresolvedPaymentActions(currentBinding, 'automatic_topup');
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- cleanup can flip active while the GET is pending
         if (active) {
-          const owned = items.find((item) => item.purpose === 'manual_topup');
+          const owned =
+            items.find((item) => item.purpose === 'manual_topup') ??
+            automatic.find((item) => item.purpose === 'automatic_topup');
           actionGenerationRef.current = generationValue;
           setAction(owned);
         }
@@ -284,6 +291,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           const current = await getPaymentAction(visibleBinding!, visibleAction.actionId).catch(() => undefined);
           // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the modal may have moved on during the GET
           if (current !== undefined && scopeRef.current.value === startedGeneration) {
+            actionGenerationRef.current = startedGeneration;
             setAction(current);
             if (current.state === 'fulfilled') {
               void queryClient.invalidateQueries({ queryKey: ['billing'] });

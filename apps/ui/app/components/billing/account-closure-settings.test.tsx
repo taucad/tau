@@ -25,13 +25,13 @@ vi.mock('#lib/billing-lifecycle-client.js', () => ({
 vi.mock('#lib/billing-payment-client.js', () => ({ createPaymentRequestId: () => 'request-a' }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: { deleteUser } }));
 const binding = { apiBaseUrl: 'https://api.tau.new', environment: 'development', ownerId: 'user-a' } as const;
-const renderClosure = (activeBinding = binding) => {
+const renderClosure = (activeBinding = binding, onReviewPayment?: () => void) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = (nextBinding: PaymentActionBinding) => (
     <QueryClientProvider client={queryClient}>
       <FinancialSessionProvider>
         <FinancialSessionScope identity={nextBinding}>
-          <AccountClosureSettings binding={nextBinding} />
+          <AccountClosureSettings binding={nextBinding} onReviewPayment={onReviewPayment} />
         </FinancialSessionScope>
       </FinancialSessionProvider>
     </QueryClientProvider>
@@ -67,11 +67,16 @@ describe('AccountClosureSettings', () => {
 
   it('should ask the customer to finish or cancel a pending payment when closure is refused for it', async () => {
     prepare.mockRejectedValue(Object.assign(new PaymentPending(), { action: { state: 'redirect_required' } }));
-    renderClosure();
+    const review = vi.fn();
+    renderClosure(binding, review);
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: 'Prepare account closure' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Finish or cancel your pending payment first.');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Finish or cancel your pending payment first.');
     expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
+    // The sentence names an action, and the control reaches it: the owner opens the top-up dialog.
+    await userEvent.click(within(alert).getByRole('button', { name: 'Review payment' }));
+    expect(review).toHaveBeenCalledOnce();
   });
 
   it('should point a held payment at support instead of asking for an action the customer cannot take', async () => {
@@ -98,12 +103,14 @@ describe('AccountClosureSettings', () => {
 
   it('should hold closure for received funds whose credits have not landed and offer support', async () => {
     prepare.mockRejectedValue(Object.assign(new PaymentPending(), { action: { state: 'funds_received' } }));
-    renderClosure();
+    renderClosure(binding, vi.fn());
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: 'Prepare account closure' }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Your payment was received and its credits are still being added.');
     expect(within(alert).getByRole('link', { name: 'Contact support' })).toBeInTheDocument();
+    // Nothing the customer can finish here, so no control that pretends otherwise.
+    expect(screen.queryByRole('button', { name: 'Review payment' })).not.toBeInTheDocument();
   });
 
   it('should ask for a plain retry when the refusal raced a payment that just finished', async () => {

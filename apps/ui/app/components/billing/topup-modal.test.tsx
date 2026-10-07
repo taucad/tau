@@ -359,6 +359,19 @@ describe('TopupModal', () => {
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
 
+  it('shows a prepared automatic reload purchase when no manual top-up is pending', async () => {
+    client.getUnresolvedPaymentActions.mockImplementation(async (_binding: unknown, purpose: string) =>
+      purpose === 'automatic_topup' ? [{ ...wireAction('prepared'), purpose: 'automatic_topup' }] : [],
+    );
+    renderModal();
+    expect(await screen.findByRole('button', { name: 'Discard quote' })).toBeInTheDocument();
+    expect(client.getUnresolvedPaymentActions).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerId: 'user-a' }),
+      'automatic_topup',
+    );
+    client.getUnresolvedPaymentActions.mockReset();
+  });
+
   it('resumes an owned Checkout only after the user clicks', async () => {
     const redirect = {
       ...wireAction('redirect_required'),

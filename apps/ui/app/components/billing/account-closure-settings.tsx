@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { WireAccountClosure } from '@taucad/billing';
+import type { WireAccountClosure, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { SettingsSectionCard } from '#components/settings/settings-item.js';
@@ -16,31 +16,29 @@ import { useFinancialSession } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
-type PendingPaymentCopy = { readonly copy: string; readonly held: boolean };
+/** `held` adds the support link where only support can clear it; `review` offers the top-up dialog where the customer can. */
+type PendingPaymentCopy = { readonly copy: string; readonly held: boolean; readonly review?: boolean };
 const waitCopy: PendingPaymentCopy = {
   copy: 'A payment is still being processed. Closing waits for it; try again in a minute.',
   held: false,
 };
 const settledCopy: PendingPaymentCopy = { copy: 'That payment is no longer pending. Try again.', held: false };
-/** Copy per wire state of the pending payment; `held` adds the support link where only support can clear it. */
-const pendingPaymentCopy = new Map<string, PendingPaymentCopy>([
-  ['prepared', { copy: 'Discard or finish your pending top-up quote first.', held: false }],
-  ['redirect_required', { copy: 'Finish or cancel your pending payment first.', held: false }],
-  ['creating', waitCopy],
-  ['processing', waitCopy],
+/** Copy per wire state of the pending payment; not exhaustive, so a miss falls to `heldCopy`. */
+const pendingPaymentCopy: Partial<Record<WirePaymentAction['state'], PendingPaymentCopy>> = {
+  prepared: { copy: 'Discard or finish your pending top-up quote first.', held: false, review: true },
+  redirect_required: { copy: 'Finish or cancel your pending payment first.', held: false, review: true },
+  creating: waitCopy,
+  processing: waitCopy,
   // Captured cash awaiting its grant: the sweep normally lands it, and only support can when it does not.
-  [
-    'funds_received',
-    {
-      copy: 'Your payment was received and its credits are still being added. Closing waits for them; contact support if they do not arrive.',
-      held: true,
-    },
-  ],
+  funds_received: {
+    copy: 'Your payment was received and its credits are still being added. Closing waits for them; contact support if they do not arrive.',
+    held: true,
+  },
   // The refusal raced a payment that settled or was cancelled meanwhile; the next attempt goes through.
-  ['fulfilled', settledCopy],
-  ['canceled', settledCopy],
-  ['failed', settledCopy],
-]);
+  fulfilled: settledCopy,
+  canceled: settledCopy,
+  failed: settledCopy,
+};
 // Not only `attention_required`: also a refusal that carried no action (an adapter without `describeAction`, or a
 // projection that failed), so the map is not exhaustive and this is the safe reading of anything else.
 const heldCopy: PendingPaymentCopy = {
@@ -59,8 +57,11 @@ function SupportLink(): React.JSX.Element {
 /** Prepares the durable financial tombstone before invoking Better Auth deletion. */
 export function AccountClosureSettings({
   binding,
+  onReviewPayment,
 }: {
   readonly binding: PaymentActionBinding | undefined;
+  /** Opens the top-up dialog, where a pending quote or Checkout can be finished or ended. */
+  readonly onReviewPayment?: () => void;
 }): React.JSX.Element {
   const financial = useFinancialSession();
   const requestId = useRef(createPaymentRequestId());
@@ -68,6 +69,7 @@ export function AccountClosureSettings({
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string>();
   const [heldPayment, setHeldPayment] = useState(false);
+  const [reviewPayment, setReviewPayment] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -94,6 +96,8 @@ export function AccountClosureSettings({
       } catch {
         if (token.isCurrent()) {
           setError('Could not check account closure status.');
+          setHeldPayment(false);
+          setReviewPayment(false);
         }
       }
     })();
@@ -104,14 +108,17 @@ export function AccountClosureSettings({
     setBusy(true);
     setError(undefined);
     setHeldPayment(false);
+    setReviewPayment(false);
     try {
       await operation();
     } catch (error_) {
       if (guard.isCurrent()) {
         const pending = error_ instanceof AccountClosurePaymentPending ? error_ : undefined;
-        const refusal = pending ? (pendingPaymentCopy.get(pending.action?.state ?? '') ?? heldCopy) : undefined;
+        const mapped = pending?.action === undefined ? undefined : pendingPaymentCopy[pending.action.state];
+        const refusal = pending ? (mapped ?? heldCopy) : undefined;
         setError(refusal ? refusal.copy : 'Could not continue account closure. Try again.');
         setHeldPayment(refusal?.held ?? false);
+        setReviewPayment(refusal?.review === true && onReviewPayment !== undefined);
       }
     } finally {
       if (guard.isCurrent()) {
@@ -209,6 +216,11 @@ export function AccountClosureSettings({
           <div className='flex flex-col gap-1 text-warning' role='alert'>
             <p>{error}</p>
             {heldPayment ? <SupportLink /> : undefined}
+            {reviewPayment ? (
+              <Button className='self-start' variant='outline' onClick={onReviewPayment}>
+                Review payment
+              </Button>
+            ) : undefined}
           </div>
         ) : undefined}
       </CardContent>

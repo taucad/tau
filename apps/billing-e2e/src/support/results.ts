@@ -10,8 +10,7 @@ export type Priority = 'P0' | 'P1' | 'P2';
 /**
  * What a row observed. `defect` names the finding (F-nn) or harness issue behind a fail or block. Harness issues:
  * H-01 the Pay click never submits from this host; H-02 the Stripe read key cannot see the staging endpoint;
- * H-03 an earlier row left no state for this one; H-04 the harness does not pay the subscription Checkout;
- * H-05 the sign-in burst spread across API processes without filling any one's window.
+ * H-03 an earlier row left no state for this one; H-04 the harness does not pay the subscription Checkout.
  */
 export type Verdict = { readonly outcome: Outcome; readonly defect?: string; readonly evidence: readonly string[] };
 
@@ -34,7 +33,7 @@ export const runId = configuredRunId;
 /** Retained run output (tool-output policy): results.json, results-matrix.md, screenshots and traces. */
 export const runDirectory = resolve(import.meta.dirname, '../../../../out/test-results/billing-e2e', runId);
 
-/** A staging account the run could not delete or fully clean up, and why; an operator sweeps it by `userId`. */
+/** A staging account the run could not delete, and why; an operator sweeps it by `userId`. */
 export type Orphan = {
   readonly caseId: string;
   readonly email: string;
@@ -103,8 +102,8 @@ const renderMatrix = ({ rows, orphans }: Results): string => {
     ...(orphans.length === 0
       ? []
       : [
-          `Accounts the run could not delete or fully clean up, for an operator to sweep: ${orphans
-            .map(({ email, userId, caseId, reason }) => `\`${email}\` (user ${userId}, row ${caseId}: ${reason})`)
+          `Accounts the run could not delete, for an operator to sweep: ${orphans
+            .map(({ email, userId, caseId, reason }) => `\`${email}\` (user ${userId}, row ${caseId}: ${cell(reason)})`)
             .join(', ')}.`,
           '',
         ]),
@@ -121,6 +120,15 @@ const writeResults = async (results: Results): Promise<void> => {
 export const recordRow = async (row: Row): Promise<void> => {
   if ((row.outcome === 'fail' || row.outcome === 'blocked') && row.defect === undefined) {
     throw new Error(`${row.id}: a ${row.outcome} row must name its finding (F-nn) or harness issue (H-nn)`);
+  }
+  // `blocked` is for a row that could not look (H-nn); a product finding (F-nn) always fails the row, so an unattended
+  // run never stays green on one.
+  const defect = row.defect ?? 'nothing';
+  if (row.outcome === 'blocked' && !defect.startsWith('H-')) {
+    throw new Error(`${row.id}: a blocked row names a harness issue (H-nn), not ${defect}`);
+  }
+  if (row.outcome === 'fail' && !(defect.startsWith('F-') || defect === 'unclassified')) {
+    throw new Error(`${row.id}: a failed row names a finding (F-nn) or is unclassified, not ${defect}`);
   }
   await serialized(async () => {
     const previous = await readResults();
@@ -144,10 +152,11 @@ export const recordOrphan = async (orphan: Orphan): Promise<void> => {
 
 /**
  * Runs one matrix row as a test body and records it with its duration and the API calls it made.
- * A thrown error is recorded as `fail (unclassified)` for review to number; a `fail` verdict fails the test.
+ * A thrown error is recorded as `fail (unclassified)` for review to number, keeping whatever evidence the body had
+ * pushed into `gathered` by then; a `fail` verdict fails the test.
  */
 export const matrixRow =
-  (id: string, p: Priority, body: () => Promise<Verdict>): (() => Promise<void>) =>
+  (id: string, p: Priority, body: (gathered: string[]) => Promise<Verdict>): (() => Promise<void>) =>
   async () => {
     const started = Date.now();
     const firstCall = apiCalls.length;
@@ -156,14 +165,15 @@ export const matrixRow =
       const requestIds = calls.flatMap(({ requestId }) => (requestId === undefined ? [] : [requestId]));
       await recordRow({ id, p, ...verdict, requestIds, calls, durationMs: Date.now() - started });
     };
+    const gathered: string[] = [];
     let verdict: Verdict;
     try {
-      verdict = await body();
+      verdict = await body(gathered);
     } catch (error) {
       await record({
         outcome: 'fail',
         defect: 'unclassified',
-        evidence: [error instanceof Error ? error.message : String(error)],
+        evidence: [...gathered, error instanceof Error ? error.message : String(error)],
       });
       throw error;
     }

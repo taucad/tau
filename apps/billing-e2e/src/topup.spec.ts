@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Page } from 'playwright';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { wireBalanceExplanationSchema, wirePaymentActionSchema } from '@taucad/billing';
+import { formatCreditAtoms, wireBalanceExplanationSchema, wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { closeAccount, createAccount } from '#support/account.js';
 import type { Account } from '#support/account.js';
@@ -26,31 +26,6 @@ const returnPath = '/?settings=billing';
 const settlingStates = new Set<string>(['redirect_required', 'processing', 'funds_received']);
 /** The return page re-checks a settling action 10 × 2 s (root-billing.cloud.tsx); a later grant is never announced. */
 const uiRecheckSeconds = 20;
-
-/**
- * What a settled 4242 payment got wrong, if anything: the grant, the balance, and the toast. `creditsToast` is what
- * the page showed, '' when it showed none, and undefined when the page could not have seen the grant.
- */
-const grantProblems = (
-  settled: WirePaymentAction,
-  available: string | undefined,
-  creditsToast: string | undefined,
-): string[] => [
-  ...(settled.state === 'fulfilled'
-    ? []
-    : [
-        `action ${settled.state} after a 4242 payment${
-          settled.attention === null ? '' : ` (${JSON.stringify(settled.attention)})`
-        }, expected fulfilled`,
-      ]),
-  ...(settled.receipt?.grantedCreditAtoms === '5000000'
-    ? []
-    : [`receipt granted ${settled.receipt?.grantedCreditAtoms ?? 'nothing'}, expected 5000000 atoms`]),
-  ...(available === '5000000' ? [] : ['available is not 5000000 atoms']),
-  ...(creditsToast === undefined || creditsToast.includes('500 credits added.')
-    ? []
-    : [`no "500 credits added." toast within the page's ${uiRecheckSeconds} s re-check`]),
-];
 
 /** Settings → Billing → Add credits → amount → Review: the prepared quote and its request id. */
 const reviewTopup = async (
@@ -164,7 +139,7 @@ describe('paid top-up', () => {
 
   it(
     'should add 500 credits after a US$5 hosted Checkout payment [TU-01 P0]',
-    matrixRow('TU-01', 'P0', async () =>
+    matrixRow('TU-01', 'P0', async (evidence) =>
       withBrowser(account, async ({ page }): Promise<Verdict> => {
         const { action } = await reviewTopup(page, '5');
         await page.getByRole('button', { name: 'Continue to secure Checkout' }).click();
@@ -181,6 +156,9 @@ describe('paid top-up', () => {
             ],
           };
         }
+        // From here the row gathers into matrixRow's list, so a throw during the poll or the reads below still
+        // leaves the paid session and everything seen since in the record.
+        evidence.push(`${payment.sessionId} paid with 4242`);
         // Poll the action every 2 s until it leaves the settling states or 60 s pass: a slow but healthy webhook
         // then shows as its settle time instead of being misread as F-01.
         const returned = Date.now();
@@ -206,17 +184,18 @@ describe('paid top-up', () => {
           : undefined;
         const credits = ok(await account.api.request('GET', '/v1/billing/credits'), wireBalanceExplanationSchema);
         paid = { actionId: action.actionId, state: settled.state };
-        const evidence = [
-          `${payment.sessionId} paid with 4242`,
-          `action ${action.actionId} ${settled.state} ${settleSeconds} s after return`,
+        evidence.push(
+          `action ${action.actionId} ${settled.state}${
+            settled.attention === null ? '' : ` ${JSON.stringify(settled.attention)}`
+          } ${settleSeconds} s after return`,
           `toasts ${JSON.stringify(await toasts(page))}`,
           ...(settled.state === 'fulfilled' && !announceable
             ? [`granted after the page's ${uiRecheckSeconds} s re-check: no credits toast expected`]
             : []),
           `available ${credits.balance?.eligibleAvailableCreditAtoms ?? 'unavailable'} atoms`,
           await screenshot(page, 'tu-01-return'),
-        ];
-        // The row evaluated the payment, so these fail the run; `blocked` is for rows that could not look (H-nn).
+        );
+        // The row evaluated the payment, so these fail the run (recordRow holds `blocked` to the H-nn rows).
         if (settled.state === 'redirect_required') {
           // Nothing accepted the payment in 60 s: no webhook, and no sweep settled the session.
           return { outcome: 'fail', defect: 'F-01', evidence };
@@ -225,14 +204,12 @@ describe('paid top-up', () => {
           // The payment was accepted (processing, or funds received) but the grant did not follow in 60 s.
           return { outcome: 'fail', defect: 'F-24', evidence };
         }
-        // Asserted into the verdict rather than through expect, so a failure keeps the toasts and screenshot above.
-        const problems = grantProblems(
-          settled,
-          credits.balance?.eligibleAvailableCreditAtoms,
-          announceable ? (creditsToast ?? '') : undefined,
-        );
-        if (problems.length > 0) {
-          return { outcome: 'fail', defect: 'unclassified', evidence: [...evidence, ...problems] };
+        expect(settled.state).toBe('fulfilled');
+        expect(settled.receipt?.grantedCreditAtoms).toBe('5000000');
+        expect(credits.balance?.eligibleAvailableCreditAtoms).toBe('5000000');
+        if (announceable) {
+          // The exact sentence the page builds from the receipt, so a wrong amount cannot pass as a substring.
+          expect(creditsToast).toBe(`${formatCreditAtoms(5_000_000n)} credits added.`);
         }
         return { outcome: 'pass', evidence };
       }),
@@ -267,10 +244,12 @@ describe('paid top-up', () => {
       }
       const canceled = await account.api.request('POST', `${path}/cancel`);
       return {
-        outcome: 'blocked',
+        outcome: 'fail',
         defect: 'F-02',
         evidence: [
-          `paid action ${paid.actionId}: recover ${recovered.status} ${failure(recovered).code}, cancel ${canceled.status} ${failure(canceled).code}`,
+          `paid action ${paid.actionId}: recover ${recovered.status} ${failure(recovered).code}, cancel ${canceled.status} ${
+            canceled.status === 200 ? 'canceled' : failure(canceled).code
+          }`,
           'the refused recover of a paid Checkout is F-02 (WP-4); its credits then arrive only by webhook',
         ],
       };

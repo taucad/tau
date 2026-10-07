@@ -19,7 +19,8 @@ const refuseProduction = (value: string): string => {
 
 /**
  * Seconds a 429 asks us to wait: a numeric `x-retry-after` or `Retry-After`, else 10; never more than 30. The clamp
- * is a retry budget that AU-09 also waits on, so it must cover better-auth's 10 s window (apps/api/app/config/auth.ts).
+ * is a retry budget that covers better-auth's built-in sign-in rule (3 per 10 s); its mail endpoints use a 60 s
+ * window, which the harness only reaches through the browser.
  */
 export const retryAfterSeconds = (headers: Headers): number => {
   const raw = (headers.get('x-retry-after') ?? headers.get('retry-after') ?? '').trim();

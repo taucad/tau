@@ -16,6 +16,7 @@ import { chunksSince } from '#machines/chat-projection.logic.js';
 import { agentPlacementOf } from '#lib/agent-host-placement.js';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
 import { requireClientEnvironmentUrl } from '#environment.config.js';
+import { parseErrorForPersistence } from '#utils/error.utils.js';
 
 type AgentTurnDetail = Extract<ClientMetricEntry, { name: 'agent.turn' }>['detail'];
 type AgentSessionDetail = Extract<ClientMetricEntry, { name: 'agent.session' }>['detail'];
@@ -303,7 +304,8 @@ export const reportRefusedAgentTurn = ({
   duration,
   report = defaultReport,
 }: Readonly<{ identity: AgentIdentity; error: unknown; duration: number; report?: AgentTelemetryReport }>): void => {
-  const code = isRecord(error) && typeof error['code'] === 'string' ? error['code'] : undefined;
+  /* The same reading the chat's error card uses: a code thrown on the error, or one inside its structured message. */
+  const code = error instanceof Error ? parseErrorForPersistence(error).code : undefined;
   report({
     name: IngestEntryName.AGENT_TURN,
     duration: Math.max(0, duration),

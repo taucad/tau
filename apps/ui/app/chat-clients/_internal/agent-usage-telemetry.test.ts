@@ -269,9 +269,18 @@ describe('agent sessions and refusals', () => {
       report,
     });
     reportRefusedAgentTurn({ identity: codex, error: new Error('free text'), duration: 3, report });
+    /* The credit preflight throws the gateway's structured 402 payload as its message. */
+    const credits = JSON.stringify({
+      category: 'credits',
+      title: 'Credits',
+      message: 'Add credits',
+      code: 'INSUFFICIENT_CREDIT',
+    });
+    reportRefusedAgentTurn({ identity: codex, error: new Error(credits), duration: 4, report });
     expect(report.mock.calls.map(([entry]) => entry.detail)).toEqual([
       { ...codex, outcome: 'refused', errorCode: 'CHAT_PLACEMENT_UNAVAILABLE' },
       { ...codex, outcome: 'refused', errorCode: 'ADMISSION_FAILED' },
+      { ...codex, outcome: 'refused', errorCode: 'INSUFFICIENT_CREDIT' },
     ]);
   });
 });

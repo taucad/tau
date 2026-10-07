@@ -23,7 +23,7 @@
 # It needs no signing secrets and publishes nothing: it only reads the
 # artifact and the checked-out sources.
 name: Verify desktop macOS archive
-run-name: Verify desktop macOS archive from run ${{ inputs.run-id }} on ${{ inputs.runner }}${{ inputs.extension-entitlements && format(' with {0}', inputs.extension-entitlements) || '' }}
+run-name: Verify desktop macOS archive from run ${{ inputs.run-id }} on ${{ inputs.runner }}${{ inputs.extension-entitlements && format(' with {0}{1}', inputs.extension-entitlements, !inputs.hardened-runtime && ' (no hardened runtime)' || '') || '' }}
 
 on:
   workflow_dispatch:
@@ -122,6 +122,6 @@ jobs:
             sleep 2
           done
           /usr/bin/log show --last 3m --info --style compact --predicate 'subsystem == "com.taucad.tau.desktop" OR process BEGINSWITH "TauQuickLook" OR process == "pkd" OR (process == "kernel" AND eventMessage CONTAINS "Sandbox") OR eventMessage CONTAINS[c] "TauQuickLook"' \
-            | grep -E 'Sandbox|com.taucad.tau.desktop:|TauQuickLookError|terminated' | tail -100
+            | grep -E 'Sandbox|com.taucad.tau.desktop:|TauQuickLookError|terminated' | tail -100 || true
           if [ "$status" = 0 ]; then echo "THUMBNAIL OK"; sips -g pixelWidth -g pixelHeight "$work/thumbnail.png"; else echo "THUMBNAIL FAILED"; fi
           exit "$status"

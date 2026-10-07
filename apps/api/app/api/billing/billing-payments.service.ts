@@ -20,6 +20,7 @@ import type { BillingPolicyService } from '#api/billing/billing-policy.service.j
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
 import type { QualifiedCashTaxCorrection } from '#api/billing/billing-tax.service.js';
 import {
+  activePurchaseStates,
   cashOccurredAt,
   checkoutExpiryEvidenceSchema,
   exactPaymentOfferTotals,
@@ -500,16 +501,7 @@ export class BillingPaymentsService {
         .select({ id: billingPurchase.id })
         .from(billingPurchase)
         .where(
-          and(
-            eq(billingPurchase.accountId, owner.accountId),
-            or(
-              eq(billingPurchase.state, 'prepared'),
-              eq(billingPurchase.state, 'creating'),
-              eq(billingPurchase.state, 'pending'),
-              eq(billingPurchase.state, 'attention'),
-              eq(billingPurchase.state, 'paid_unfulfilled'),
-            ),
-          ),
+          and(eq(billingPurchase.accountId, owner.accountId), inArray(billingPurchase.state, activePurchaseStates)),
         )
         .limit(1);
       if (active[0] !== undefined) return;
@@ -955,6 +947,9 @@ export class BillingPaymentsService {
             eq(billingPurchase.id, actionId),
             eq(billingPurchase.accountId, owner.accountId),
             eq(billingPurchase.state, 'prepared'),
+            // An automatic reload purchase belongs to its worker: cancelled by hand it would stay immutable without a
+            // terminal outcome, holding the account's one pending slot (billing_purchase_automatic_pending) forever.
+            or(isNull(billingPurchase.purpose), ne(billingPurchase.purpose, 'automatic')),
           ),
         )
         .returning({ id: billingPurchase.id });
@@ -4370,6 +4365,9 @@ export class BillingPaymentsService {
       await this.cash.assertNewCollectionScope(accountId, tx);
       const purchase = await this.ownedPurchase(accountId, actionId, tx);
       if (purchase.state !== 'prepared') return undefined;
+      // An automatic reload purchase is confirmed by its worker from the consent; its leg holds the worker's envelope,
+      // not a bare request, and the customer's dialog has nothing to confirm.
+      if (purchase.purpose === 'automatic') throw new ConflictException({ code: 'action_not_confirmable' });
       const rows = await tx
         .select()
         .from(billingProviderLeg)
@@ -5254,18 +5252,7 @@ export class BillingPaymentsService {
     const rows = await this.databaseService.database
       .select()
       .from(billingPurchase)
-      .where(
-        and(
-          eq(billingPurchase.accountId, accountId),
-          or(
-            eq(billingPurchase.state, 'prepared'),
-            eq(billingPurchase.state, 'creating'),
-            eq(billingPurchase.state, 'pending'),
-            eq(billingPurchase.state, 'attention'),
-            eq(billingPurchase.state, 'paid_unfulfilled'),
-          ),
-        ),
-      )
+      .where(and(eq(billingPurchase.accountId, accountId), inArray(billingPurchase.state, activePurchaseStates)))
       .limit(1);
     return rows[0];
   }

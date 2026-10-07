@@ -26,7 +26,28 @@ from typing import Any
 
 # Kinds keyed by how the object presents itself. Modules re-exported by a star
 # import (os, sys, json, ...) are not the package's API and are dropped.
-_DUNDER_KEPT = {"__init__"}
+# Dunders are kept only where they are authoring syntax: the constructor, the
+# builder context manager, and the algebra/selector operators. Each operator
+# maps to the expression it enables, which the signature carries as a comment.
+_BINARY = {
+    "__add__": "+",
+    "__iadd__": "+=",
+    "__sub__": "-",
+    "__and__": "&",
+    "__mul__": "*",
+    "__matmul__": "@",
+    "__mod__": "%",
+    "__xor__": "^",
+    "__or__": "|",
+    "__truediv__": "/",
+    "__pow__": "**",
+    "__lshift__": "<<",
+    "__rshift__": ">>",
+    "__gt__": ">",
+    "__lt__": "<",
+}
+_REFLECTED = {"__radd__": "+", "__rmul__": "*"}
+_DUNDER_KEPT = {"__init__", "__enter__", "__exit__", "__neg__", "__getitem__", *_BINARY, *_REFLECTED}
 
 _SECTION = re.compile(
     r"^(Args|Arguments|Parameters|Returns|Yields|Raises|Attributes|Example|Examples|Note|Notes|Warning|Warnings|See Also)\s*:$"
@@ -203,9 +224,20 @@ def _signature(function: Any, display_name: str, descriptions: dict[str, str]) -
     parameters: list[dict[str, Any]] = []
     kinds: dict[str, str] = {}
     rendered: list[str] = []
+    previous = None
     for parameter in signature.parameters.values():
         if parameter.name in {"self", "cls"}:
             continue
+        # `/` closes the positional-only run and a bare `*` opens the keyword-only
+        # one, so `Axis(origin, *, end_point)` stays distinct from `Axis(origin, direction)`.
+        if previous is inspect.Parameter.POSITIONAL_ONLY and parameter.kind is not previous:
+            rendered.append("/")
+        if parameter.kind is inspect.Parameter.KEYWORD_ONLY and previous not in {
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.VAR_POSITIONAL,
+        }:
+            rendered.append("*")
+        previous = parameter.kind
         annotation = annotations.get(parameter.name) or _annotation_text(parameter.annotation)
         if annotation is None and parameter.name in hints:
             annotation = _annotation_text(hints[parameter.name])
@@ -233,6 +265,8 @@ def _signature(function: Any, display_name: str, descriptions: dict[str, str]) -
             + (f" = {default}" if default is not None else "")
         )
 
+    if previous is inspect.Parameter.POSITIONAL_ONLY:
+        rendered.append("/")
     returns = None if node is None or node.returns is None else ast.unparse(node.returns)
     if returns is None:
         returns = _annotation_text(signature.return_annotation) or _annotation_text(hints.get("return"))
@@ -319,22 +353,51 @@ def _describe(entry: dict[str, Any], descriptions: dict[str, str]) -> None:
                 parameter["description"] = descriptions[parameter["name"]]
 
 
+def _property_entry(raw: property, name: str, path: str) -> dict[str, Any]:
+    docs, _ = _docs(raw)
+    node = _source_node(raw.fget) if raw.fget is not None else None
+    entry: dict[str, Any] = {"name": name, "kind": "property", "path": path}
+    if node is not None and node.returns is not None:
+        entry["type"] = ast.unparse(node.returns)
+    if docs:
+        entry["docs"] = docs
+    return entry
+
+
+def _operator_form(name: str, owner: str, signature: dict[str, Any]) -> str | None:
+    """The expression a kept dunder enables, e.g. ``Location * other``."""
+    operand = signature["parameters"][0]["name"] if signature["parameters"] else "other"
+    if name in _BINARY:
+        return f"{owner} {_BINARY[name]} {operand}"
+    if name in _REFLECTED:
+        return f"{operand} {_REFLECTED[name]} {owner}"
+    if name == "__neg__":
+        return f"-{owner}"
+    if name == "__getitem__":
+        return f"{owner}[{operand}]"
+    if name == "__enter__":
+        return f"with {owner}(...) as {owner.lower()}:"
+    return None
+
+
 def _members(cls: type, class_args: dict[str, str]) -> list[dict[str, Any]]:
-    """Members the class itself declares. Inherited ones live on their own class."""
+    """Members the class itself declares. Inherited ones live on their own class.
+
+    Package-owned metaclass properties (``Axis.X``, ``Plane.XY``) read as class
+    attributes, so they are listed here; the metaclass itself is not API.
+    """
     path = f"{getattr(cls, '__module__', '')}.{cls.__name__}".strip(".")
     entries: list[dict[str, Any]] = []
+    metaclass = type(cls)
+    if metaclass.__module__.split(".")[0] == cls.__module__.split(".")[0]:
+        for name, raw in vars(metaclass).items():
+            if not name.startswith("_") and name not in vars(cls) and isinstance(raw, property):
+                entries.append(_property_entry(raw, name, path))
     for name, raw in vars(cls).items():
         if name.startswith("_") and name not in _DUNDER_KEPT:
             continue
         if isinstance(raw, property):
-            docs, _ = _docs(raw)
-            node = _source_node(raw.fget) if raw.fget is not None else None
-            entry: dict[str, Any] = {"name": name, "kind": "property", "path": path}
-            if node is not None and node.returns is not None:
-                entry["type"] = ast.unparse(node.returns)
-            if docs:
-                entry["docs"] = docs
-            entries.append(entry)
+            entries.append(_property_entry(raw, name, path))
             continue
         value = getattr(cls, name, None)
         if value is None or not (inspect.isroutine(value) or isinstance(value, types.MethodType)):
@@ -354,6 +417,18 @@ def _members(cls: type, class_args: dict[str, str]) -> list[dict[str, Any]]:
             if getattr(value, "__doc__", None) is None:
                 entry.pop("docs", None)
             _describe(entry, class_args)
+        signatures = entry.get("signatures", [])
+        if name in _BINARY and signatures and all(
+            signature["parameters"][:1] and signature["parameters"][0]["name"].startswith("_") for signature in signatures
+        ):
+            # An operand named `_other` is declared unused: the operator is a guard
+            # that rejects the expression (`Builder + x`), not authoring syntax.
+            continue
+        for signature in signatures:
+            form = _operator_form(name, cls.__name__, signature)
+            if form is not None:
+                # A trailing comment keeps the declaration valid Python.
+                signature["text"] += f"  # {form}"
         entries.append(entry)
     return entries
 
@@ -366,6 +441,9 @@ def _class_entry(cls: type, name: str) -> dict[str, Any]:
         entry: dict[str, Any] = {"name": name, "kind": "enum", "members": members}
     else:
         entry = {"name": name, "kind": "class", "members": _members(cls, class_args)}
+    # The class line names its bases, which is where inherited members are documented.
+    bases = ", ".join(base.__name__ for base in cls.__bases__ if base is not object)
+    entry["signatures"] = [{"parameters": [], "text": f"class {name}({bases})" if bases else f"class {name}"}]
     if path:
         entry["path"] = path
     if docs:
@@ -392,11 +470,29 @@ def _top_level(module: types.ModuleType, name: str) -> dict[str, Any] | None:
 def main() -> int:
     package_name = sys.argv[1] if len(sys.argv) > 1 else "build123d"
     module = importlib.import_module(package_name)
-    names = sorted({*getattr(module, "__all__", ()), *(name for name in dir(module) if not name.startswith("_"))})
+    # `__all__` is the package's declared API. Unioning `dir()` would re-export
+    # every OCP and stdlib name a star import leaked (1,821 OCP symbols for
+    # build123d), so `dir()` is only the fallback for a package without one.
+    exported = getattr(module, "__all__", None)
+    names = sorted(set(exported) if exported is not None else {n for n in dir(module) if not n.startswith("_")})
+    # Inherited members are documented once, on the package-owned base that
+    # declares them (Shape, Mixin3D, Builder, ...), even when that base is not
+    # exported; each class line names its bases. Repeating them on every
+    # subclass would copy Shape's surface onto ~70 classes.
+    objects = {name: getattr(module, name, None) for name in names}
+    exported_classes = {id(obj) for obj in objects.values() if inspect.isclass(obj)}
+    bases: dict[str, type] = {}
+    for obj in objects.values():
+        for base in getattr(obj, "__mro__", ())[1:] if inspect.isclass(obj) else ():
+            if id(base) not in exported_classes and base.__module__.split(".")[0] == package_name:
+                bases.setdefault(f"{base.__module__}.{base.__qualname__}", base)
     entries = []
-    for name in names:
+    for name in [*names, *bases]:
         try:
-            entry = _top_level(module, name)
+            if name in bases:
+                entry = _class_entry(bases[name], bases[name].__name__)
+            else:
+                entry = _top_level(module, name)
         except Exception as error:  # noqa: BLE001 - one hostile symbol must not lose the corpus.
             entry = {"name": name, "kind": "type", "docs": {"summary": f"Not introspectable: {error}"}}
         if entry is not None:

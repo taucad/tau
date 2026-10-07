@@ -60,14 +60,18 @@ const discardAccount = async (account: Account, problem?: string): Promise<void>
     : undefined;
   if (deleted?.status === 200) {
     await deleteMailbox(account.mailbox).catch(() => undefined);
-    return;
+    if (problem === undefined) {
+      return;
+    }
   }
-  const reason = [
-    problem,
-    hasSession(account) ? `delete-user answered ${deleted?.status ?? 'nothing'}` : 'no session to delete with',
-  ]
-    .filter((part): part is string => part !== undefined)
-    .join('; ');
+  // A deleted account still gets a line when cleanup left something behind, such as an open Checkout at Stripe.
+  let deletion = 'no session to delete with';
+  if (deleted?.status === 200) {
+    deletion = 'the user was deleted';
+  } else if (hasSession(account)) {
+    deletion = `delete-user answered ${deleted?.status ?? 'nothing'}`;
+  }
+  const reason = [problem, deletion].filter((part): part is string => part !== undefined).join('; ');
   await recordOrphan({ caseId: account.caseId, email: account.email, userId: account.userId, reason }).catch(
     () => undefined,
   );
@@ -126,8 +130,10 @@ export const closeAccount = async (account: Account): Promise<void> => {
       await verifyAccount(account);
     }
     const listed = await account.api.request('GET', '/v1/billing/payment-actions');
-    const actions: WirePaymentAction[] =
-      listed.status === 200 ? z.array(wirePaymentActionSchema).parse(listed.body) : [];
+    if (listed.status !== 200) {
+      throw new Error(`payment actions list answered ${listed.status}: open actions were not cancelled`);
+    }
+    const actions: WirePaymentAction[] = z.array(wirePaymentActionSchema).parse(listed.body);
     const open = actions.filter(({ state }) => state === 'prepared' || state === 'redirect_required');
     const cancels = await Promise.all(
       open.map(async ({ actionId }) => {

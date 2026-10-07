@@ -27,6 +27,31 @@ const settlingStates = new Set<string>(['redirect_required', 'processing', 'fund
 /** The return page re-checks a settling action 10 × 2 s (root-billing.cloud.tsx); a later grant is never announced. */
 const uiRecheckSeconds = 20;
 
+/**
+ * What a settled 4242 payment got wrong, if anything: the grant, the balance, and the toast. `creditsToast` is what
+ * the page showed, '' when it showed none, and undefined when the page could not have seen the grant.
+ */
+const grantProblems = (
+  settled: WirePaymentAction,
+  available: string | undefined,
+  creditsToast: string | undefined,
+): string[] => [
+  ...(settled.state === 'fulfilled'
+    ? []
+    : [
+        `action ${settled.state} after a 4242 payment${
+          settled.attention === null ? '' : ` (${JSON.stringify(settled.attention)})`
+        }, expected fulfilled`,
+      ]),
+  ...(settled.receipt?.grantedCreditAtoms === '5000000'
+    ? []
+    : [`receipt granted ${settled.receipt?.grantedCreditAtoms ?? 'nothing'}, expected 5000000 atoms`]),
+  ...(available === '5000000' ? [] : ['available is not 5000000 atoms']),
+  ...(creditsToast === undefined || creditsToast.includes('500 credits added.')
+    ? []
+    : [`no "500 credits added." toast within the page's ${uiRecheckSeconds} s re-check`]),
+];
+
 /** Settings → Billing → Add credits → amount → Review: the prepared quote and its request id. */
 const reviewTopup = async (
   page: Page,
@@ -174,9 +199,8 @@ describe('paid top-up', () => {
         const settleSeconds = Math.round((Date.now() - returned) / 1000);
         // The page announces its first read, which can beat the webhook ("Checkout is ready to continue."), and
         // re-checks for only uiRecheckSeconds; the credits toast is the verdict only when the page could still have
-        // seen the grant, and a receipt is what it announces. Every toast shown stays in the evidence either way.
-        const announceable =
-          settled.state === 'fulfilled' && settled.receipt !== null && settleSeconds <= uiRecheckSeconds;
+        // seen the grant. Every toast shown stays in the evidence either way.
+        const announceable = settled.state === 'fulfilled' && settleSeconds <= uiRecheckSeconds;
         const creditsToast = announceable
           ? await waitForToast(page, /credits added/u, 10_000).catch(() => undefined)
           : undefined;
@@ -187,26 +211,28 @@ describe('paid top-up', () => {
           `action ${action.actionId} ${settled.state} ${settleSeconds} s after return`,
           `toasts ${JSON.stringify(await toasts(page))}`,
           ...(settled.state === 'fulfilled' && !announceable
-            ? [
-                `granted after the page's ${uiRecheckSeconds} s re-check or without a receipt: no credits toast expected`,
-              ]
+            ? [`granted after the page's ${uiRecheckSeconds} s re-check: no credits toast expected`]
             : []),
           `available ${credits.balance?.eligibleAvailableCreditAtoms ?? 'unavailable'} atoms`,
           await screenshot(page, 'tu-01-return'),
         ];
+        // The row evaluated the payment, so these fail the run; `blocked` is for rows that could not look (H-nn).
         if (settled.state === 'redirect_required') {
           // Nothing accepted the payment in 60 s: no webhook, and no sweep settled the session.
-          return { outcome: 'blocked', defect: 'F-01', evidence };
+          return { outcome: 'fail', defect: 'F-01', evidence };
         }
         if (settlingStates.has(settled.state)) {
           // The payment was accepted (processing, or funds received) but the grant did not follow in 60 s.
-          return { outcome: 'blocked', defect: 'F-24', evidence };
+          return { outcome: 'fail', defect: 'F-24', evidence };
         }
-        expect(settled.state).toBe('fulfilled');
-        expect(settled.receipt?.grantedCreditAtoms).toBe('5000000');
-        expect(credits.balance?.eligibleAvailableCreditAtoms).toBe('5000000');
-        if (announceable) {
-          expect(creditsToast).toContain('500 credits added.');
+        // Asserted into the verdict rather than through expect, so a failure keeps the toasts and screenshot above.
+        const problems = grantProblems(
+          settled,
+          credits.balance?.eligibleAvailableCreditAtoms,
+          announceable ? (creditsToast ?? '') : undefined,
+        );
+        if (problems.length > 0) {
+          return { outcome: 'fail', defect: 'unclassified', evidence: [...evidence, ...problems] };
         }
         return { outcome: 'pass', evidence };
       }),

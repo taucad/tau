@@ -10,7 +10,8 @@ export type Priority = 'P0' | 'P1' | 'P2';
 /**
  * What a row observed. `defect` names the finding (F-nn) or harness issue behind a fail or block. Harness issues:
  * H-01 the Pay click never submits from this host; H-02 the Stripe read key cannot see the staging endpoint;
- * H-03 an earlier row left no state for this one; H-04 the harness does not pay the subscription Checkout.
+ * H-03 an earlier row left no state for this one; H-04 the harness does not pay the subscription Checkout;
+ * H-05 the sign-in burst spread across API processes without filling any one's window.
  */
 export type Verdict = { readonly outcome: Outcome; readonly defect?: string; readonly evidence: readonly string[] };
 
@@ -33,7 +34,7 @@ export const runId = configuredRunId;
 /** Retained run output (tool-output policy): results.json, results-matrix.md, screenshots and traces. */
 export const runDirectory = resolve(import.meta.dirname, '../../../../out/test-results/billing-e2e', runId);
 
-/** A staging account the run could not delete, and why; an operator sweeps it by `userId`. */
+/** A staging account the run could not delete or fully clean up, and why; an operator sweeps it by `userId`. */
 export type Orphan = {
   readonly caseId: string;
   readonly email: string;
@@ -102,7 +103,7 @@ const renderMatrix = ({ rows, orphans }: Results): string => {
     ...(orphans.length === 0
       ? []
       : [
-          `Accounts the run could not delete, for an operator to sweep: ${orphans
+          `Accounts the run could not delete or fully clean up, for an operator to sweep: ${orphans
             .map(({ email, userId, caseId, reason }) => `\`${email}\` (user ${userId}, row ${caseId}: ${reason})`)
             .join(', ')}.`,
           '',

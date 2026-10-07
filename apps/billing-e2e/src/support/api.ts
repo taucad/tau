@@ -17,7 +17,10 @@ const refuseProduction = (value: string): string => {
   return url.origin;
 };
 
-/** Seconds a 429 asks us to wait: a numeric `x-retry-after` or `Retry-After`, else 10; never more than 30. */
+/**
+ * Seconds a 429 asks us to wait: a numeric `x-retry-after` or `Retry-After`, else 10; never more than 30. The clamp
+ * is a retry budget that AU-09 also waits on, so it must cover better-auth's 10 s window (apps/api/app/config/auth.ts).
+ */
 export const retryAfterSeconds = (headers: Headers): number => {
   const raw = (headers.get('x-retry-after') ?? headers.get('retry-after') ?? '').trim();
   const seconds = raw === '' ? Number.NaN : Number(raw);

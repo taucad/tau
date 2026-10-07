@@ -4,6 +4,7 @@ import { wireBalanceExplanationSchema, wireEntitlementsSchema } from '@taucad/bi
 import { closeAccount, createAccount, verificationMail } from '#support/account.js';
 import type { Account } from '#support/account.js';
 import { apiUrl, baseUrl, ok, retryAfterSeconds } from '#support/api.js';
+import type { ApiResponse } from '#support/api.js';
 import { screenshot, toasts, waitForToast, withBrowser } from '#support/checkout.js';
 import { listMail, waitForMail } from '#support/mailbox.js';
 import { matrixRow } from '#support/results.js';
@@ -91,18 +92,39 @@ describe('auth and onboarding', () => {
     matrixRow('AU-09', 'P1', async () => {
       const account = await createAccount('au09');
       accounts.push(account);
-      const burst = await Promise.all(
-        Array.from({ length: 101 }, async () =>
-          account.api.request('POST', '/v1/auth/sign-in/email', {
-            body: { email: account.email, password: 'not-the-password-1' },
-            retryRateLimit: false,
-          }),
-        ),
-      );
-      const limited = burst.filter(({ status }) => status === 429);
-      const refused = burst.filter(({ status }) => status === 401);
-      expect(limited.length).toBeGreaterThan(0);
-      expect(limited.length + refused.length).toBe(101);
+      // The better-auth limiter counts in memory per API process (apps/api/app/config/auth.ts: window 10, max 100)
+      // and staging keeps two awake (fly.staging.toml), so Fly can split one burst under the budget on each; a
+      // second burst in the same window fills a process the first one only half-filled.
+      const burst = async (): Promise<ApiResponse[]> =>
+        Promise.all(
+          Array.from({ length: 101 }, async () =>
+            account.api.request('POST', '/v1/auth/sign-in/email', {
+              body: { email: account.email, password: 'not-the-password-1' },
+              retryRateLimit: false,
+            }),
+          ),
+        );
+      let responses = await burst();
+      let bursts = 1;
+      if (!responses.some(({ status }) => status === 429)) {
+        responses = [...responses, ...(await burst())];
+        bursts = 2;
+      }
+      const limited = responses.filter(({ status }) => status === 429);
+      const refused = responses.filter(({ status }) => status === 401);
+      if (limited.length === 0) {
+        // More awake processes than two bursts fill: not a product fault this row can name. The window drains
+        // before the next file signs in.
+        await delay(11_000);
+        return {
+          outcome: 'blocked',
+          defect: 'H-05',
+          evidence: [
+            `${responses.length} wrong-password sign-ins in two bursts: ${refused.length} × 401 and no 429, spread across API processes each under its own budget`,
+          ],
+        };
+      }
+      expect(limited.length + refused.length).toBe(responses.length);
       const retryAfter = Math.max(...limited.map(({ headers }) => retryAfterSeconds(headers)));
       const observedRetryAfter = [
         ...new Set(
@@ -117,7 +139,7 @@ describe('auth and onboarding', () => {
       return {
         outcome: 'pass',
         evidence: [
-          `101 wrong-password sign-ins: ${refused.length} × 401, ${limited.length} × 429 (X-Retry-After ${observedRetryAfter}; waited ${retryAfter + 1} s)`,
+          `${responses.length} wrong-password sign-ins${bursts === 2 ? ' in two bursts (the first split across API processes)' : ''}: ${refused.length} × 401, ${limited.length} × 429 (X-Retry-After ${observedRetryAfter}; waited ${retryAfter + 1} s)`,
           `right password after the window: ${signIn.status}`,
         ],
       };

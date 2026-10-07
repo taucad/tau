@@ -262,8 +262,9 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
     visibleAction?.state === 'fulfilled' || visibleAction?.state === 'failed' || visibleAction?.state === 'canceled';
   const amountIsValid = amountCents >= minCents && amountCents <= maxCents;
 
+  // Ends a quote or an open hosted Checkout; the server expires the Checkout session so nothing can be paid later.
   const discardQuote = async (): Promise<void> => {
-    if (visibleAction?.state !== 'prepared') {
+    if (visibleAction?.state !== 'prepared' && visibleAction?.state !== 'redirect_required') {
       return;
     }
     const startedGeneration = generationValue;
@@ -277,7 +278,11 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
       startNew();
     } catch {
       if (scopeRef.current.value === startedGeneration) {
-        toast.warning('Could not discard the quote. Try again.');
+        toast.warning(
+          visibleAction.state === 'prepared'
+            ? 'Could not discard the quote. Try again.'
+            : 'Could not cancel the payment. Try again.',
+        );
       }
     } finally {
       if (scopeRef.current.value === startedGeneration) {
@@ -453,7 +458,14 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           {visibleAction?.state === 'redirect_required' ? (
             <div className='flex flex-col gap-2 text-sm'>
               <p>Checkout is ready. Continue when you are ready.</p>
-              <Button onClick={() => followPaymentRedirect(visibleAction)}>Resume Checkout</Button>
+              <div className='flex gap-2'>
+                <Button className='flex-1' onClick={() => followPaymentRedirect(visibleAction)}>
+                  Resume Checkout
+                </Button>
+                <Button variant='outline' disabled={visibleBusy} onClick={discardQuote}>
+                  Cancel payment
+                </Button>
+              </div>
             </div>
           ) : undefined}
           {visibleAction && settlingStates.has(visibleAction.state) ? (

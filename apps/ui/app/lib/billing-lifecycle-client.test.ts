@@ -52,6 +52,15 @@ describe('billing lifecycle client', () => {
     );
     vi.stubGlobal('fetch', refuse('payment_action_pending'));
     await expect(prepareAccountClosure(binding, 'request-a')).rejects.toBeInstanceOf(AccountClosurePaymentPending);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: 'payment_action_pending', state: 'attention', statusCode: 409 }), {
+          status: 409,
+        }),
+      ),
+    );
+    await expect(prepareAccountClosure(binding, 'request-a')).rejects.toMatchObject({ state: 'attention' });
     vi.stubGlobal('fetch', refuse('automatic_reload_unavailable'));
     await expect(prepareReloadConsent(binding, { requestId: 'request-a', returnPath: '/' })).rejects.toThrow(
       'Billing lifecycle request failed with 409',

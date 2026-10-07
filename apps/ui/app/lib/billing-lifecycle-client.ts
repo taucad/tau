@@ -14,9 +14,13 @@ export class BillingAddressRequired extends Error {
 
 /** Account closure waits until no payment action can still settle; the customer finishes or cancels it first. */
 export class AccountClosurePaymentPending extends Error {
-  public constructor() {
+  /** The pending purchase's state when the API reported one: `prepared`/`pending` can be ended; `attention` waits. */
+  public readonly state: string | undefined;
+
+  public constructor(state?: string) {
     super('payment_action_pending');
     this.name = 'AccountClosurePaymentPending';
+    this.state = state;
   }
 }
 
@@ -30,11 +34,12 @@ const parseConflictRefusal = async (
     .clone()
     .json()
     .catch(() => undefined);
-  const code = body && typeof body === 'object' ? (body as { code?: unknown }).code : undefined;
+  const refusal = body && typeof body === 'object' ? (body as { code?: unknown; state?: unknown }) : undefined;
+  const code = refusal?.code;
   return code === 'customer_tax_location_invalid'
     ? new BillingAddressRequired()
     : code === 'payment_action_pending'
-      ? new AccountClosurePaymentPending()
+      ? new AccountClosurePaymentPending(typeof refusal?.state === 'string' ? refusal.state : undefined)
       : undefined;
 };
 

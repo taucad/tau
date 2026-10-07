@@ -16,6 +16,15 @@ import { useFinancialSession } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
+/** Purchase states the customer can end from Billing; anything else is processing or under review. */
+const endablePurchaseStates = new Set(['prepared', 'creating', 'pending']);
+const pendingPaymentCopy = (state: string | undefined): string =>
+  state === 'prepared'
+    ? 'Discard or finish your pending top-up first.'
+    : endablePurchaseStates.has(state ?? '')
+      ? 'Finish or cancel your pending payment first.'
+      : 'A payment is still in progress or under review. Closing waits for it; contact support if it does not clear.';
+
 /** Prepares the durable financial tombstone before invoking Better Auth deletion. */
 export function AccountClosureSettings({
   binding,
@@ -27,6 +36,7 @@ export function AccountClosureSettings({
   const [closure, setClosure] = useState<WireAccountClosure>();
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string>();
+  const [heldPayment, setHeldPayment] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -62,15 +72,14 @@ export function AccountClosureSettings({
     const guard = financial.capture();
     setBusy(true);
     setError(undefined);
+    setHeldPayment(false);
     try {
       await operation();
     } catch (error_) {
       if (guard.isCurrent()) {
-        setError(
-          error_ instanceof AccountClosurePaymentPending
-            ? 'Finish or cancel your pending payment first.'
-            : 'Could not continue account closure. Try again.',
-        );
+        const pending = error_ instanceof AccountClosurePaymentPending ? error_ : undefined;
+        setError(pending ? pendingPaymentCopy(pending.state) : 'Could not continue account closure. Try again.');
+        setHeldPayment(pending !== undefined && !endablePurchaseStates.has(pending.state ?? ''));
       }
     } finally {
       if (guard.isCurrent()) {
@@ -168,7 +177,16 @@ export function AccountClosureSettings({
             Delete my account
           </Button>
         ) : undefined}
-        {error ? <p className='text-warning'>{error}</p> : undefined}
+        {error ? (
+          <p className='text-warning' role='alert'>
+            {error}
+          </p>
+        ) : undefined}
+        {heldPayment ? (
+          <a className='underline' href='mailto:support@tau.new'>
+            Contact support
+          </a>
+        ) : undefined}
       </CardContent>
     </SettingsSectionCard>
   );

@@ -10,7 +10,12 @@ const prepare = vi.hoisted(() => vi.fn());
 const current = vi.hoisted(() => vi.fn());
 const getClosure = vi.hoisted(() => vi.fn());
 const deleteUser = vi.hoisted(() => vi.fn());
-const PaymentPending = vi.hoisted(() => class extends Error {});
+const PaymentPending = vi.hoisted(
+  () =>
+    class extends Error {
+      public state: string | undefined;
+    },
+);
 vi.mock('#lib/billing-lifecycle-client.js', () => ({
   AccountClosurePaymentPending: PaymentPending,
   prepareAccountClosure: prepare,
@@ -61,11 +66,21 @@ describe('AccountClosureSettings', () => {
   });
 
   it('should ask the customer to finish or cancel a pending payment when closure is refused for it', async () => {
-    prepare.mockRejectedValue(new PaymentPending());
+    prepare.mockRejectedValue(Object.assign(new PaymentPending(), { state: 'pending' }));
     renderClosure();
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: 'Prepare account closure' }));
-    expect(await screen.findByText('Finish or cancel your pending payment first.')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('Finish or cancel your pending payment first.');
+    expect(screen.queryByRole('link', { name: 'Contact support' })).not.toBeInTheDocument();
+  });
+
+  it('should point a held payment at support instead of asking for an action the customer cannot take', async () => {
+    prepare.mockRejectedValue(Object.assign(new PaymentPending(), { state: 'attention' }));
+    renderClosure();
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: 'Prepare account closure' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('contact support if it does not clear');
+    expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute('href', 'mailto:support@tau.new');
   });
 
   it('invokes Better Auth only for a deletion-ready closure', async () => {

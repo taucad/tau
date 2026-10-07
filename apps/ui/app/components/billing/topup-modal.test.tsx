@@ -328,6 +328,16 @@ describe('TopupModal', () => {
     }
   });
 
+  it('cancels an owned Checkout from the modal without following its redirect', async () => {
+    const redirect = { ...wireAction('redirect_required'), redirectUrl: 'https://checkout.example/resume' };
+    client.getUnresolvedPaymentActions.mockResolvedValue([redirect]);
+    client.cancelPaymentAction.mockResolvedValue(wireAction('canceled'));
+    renderModal();
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel payment' }));
+    expect(client.cancelPaymentAction).toHaveBeenCalledWith(expect.objectContaining({ ownerId: 'user-a' }), 'topup_1');
+    expect(client.followPaymentRedirect).not.toHaveBeenCalled();
+  });
+
   it('resumes an owned Checkout only after the user clicks', async () => {
     const redirect = {
       ...wireAction('redirect_required'),

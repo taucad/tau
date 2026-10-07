@@ -310,12 +310,12 @@
       }
     },
     {
-      "uid": "billing-worker-restarting",
-      "title": "P1: Billing Worker Restarting",
-      "condition": "worker_restarting",
+      "uid": "tau-process-restarting",
+      "title": "P1: Tau Process Crash-Looping",
+      "condition": "process_restarting",
       "data": [
         {
-          "refId": "worker_restarting",
+          "refId": "process_restarting",
           "queryType": "",
           "relativeTimeRange": {
             "from": 600,
@@ -323,10 +323,10 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "sum by (app, tau_worker) (resets(tau_billing_worker_passes_total{service_name=\"tau-api\"}[30m])) > 2",
+            "expr": "sum by (app, instance, tau_process) (resets(process_uptime{service_name=\"tau-api\"}[30m])) > 2",
             "intervalMs": 15000,
             "maxDataPoints": 20,
-            "refId": "worker_restarting"
+            "refId": "process_restarting"
           }
         }
       ],
@@ -335,12 +335,12 @@
       "for": "0s",
       "annotations": {
         "runbook_url": "docs/handbooks/cloud/playbooks/paid-not-credited.md",
-        "summary": "A billing worker's pass counter reset more than twice in 30 min: the process is crash-looping (F-10: billing-operations OOM-kills on a 256 MB Machine). A deploy resets it once."
+        "summary": "A Tau process (app or billing worker) restarted more than twice in 30 min: it is crash-looping (F-10: billing-operations OOM-kills on a 256 MB Machine, before its first pass completes). Reads process_uptime, which exists from the first scrape. A deploy restarts it once."
       },
       "labels": {
         "severity": "warning",
         "service": "tau-api",
-        "component": "billing"
+        "component": "runtime"
       }
     }
   ]

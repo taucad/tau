@@ -21,6 +21,10 @@ const byteLength = (value: unknown): number | undefined => {
  * Every Tau object-storage call (Tau Sync packs and manifests, LFS, publications, content) goes
  * through one `S3Client` per storage account, so one middleware covers R2 in the cloud and MinIO
  * locally. Presigned URLs are signed here but transferred by the client, so they are not counted.
+ *
+ * Byte counts are approximate in two ways: an upload whose `Body` is a stream with no
+ * `ContentLength` is not counted, and a `GetObject` counts the response's `ContentLength` before the
+ * body is read, so a caller that abandons the stream is counted in full.
  */
 export const instrumentStorageClient = (
   client: S3Client,

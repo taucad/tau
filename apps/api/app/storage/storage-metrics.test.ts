@@ -49,3 +49,4 @@ describe('instrumentStorageClient', () => {
     expect(metrics.storageTransferBytes.add).not.toHaveBeenCalled();
   });
 });
+/* eslint-enable @typescript-eslint/naming-convention -- end of the AWS SDK PascalCase scope */

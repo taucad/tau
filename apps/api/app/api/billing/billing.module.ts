@@ -1,5 +1,5 @@
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
-import { recoverAndCancelStripeClosure } from '#api/billing/billing-account-closure-stripe.js';
+import { createStripeClosureAdapter } from '#api/billing/billing-account-closure-stripe.js';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Stripe } from 'stripe';
@@ -104,21 +104,17 @@ const providerUpstreamFetch =
         const environment = parsed.success ? parsed.data : 'development';
         return new BillingAccountClosureService(
           database,
-          {
-            describeAction: async (input) => payments.getAction(input.authUserId, input.actionId),
-            recoverAndCancel: async (input) =>
-              recoverAndCancelStripeClosure(
-                {
-                  database: database.database,
-                  sourceStripe,
-                  protectedStripe,
-                  environment,
-                  stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
-                  livemode: config.get('STRIPE_LIVEMODE', { infer: true }),
-                },
-                input,
-              ),
-          },
+          createStripeClosureAdapter(
+            {
+              database: database.database,
+              sourceStripe,
+              protectedStripe,
+              environment,
+              stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
+              livemode: config.get('STRIPE_LIVEMODE', { infer: true }),
+            },
+            payments,
+          ),
           environment,
         );
       },

@@ -27,10 +27,7 @@ export type ClosureCancellationResult =
 
 export type ClosureCancellationAdapter = {
   /** The pending payment as its owner sees it, for the closure refusal; absent where no customer reads it. */
-  readonly describeAction?: (input: {
-    readonly authUserId: string;
-    readonly actionId: string;
-  }) => Promise<WirePaymentAction>;
+  describeAction?(input: { readonly authUserId: string; readonly actionId: string }): Promise<WirePaymentAction>;
   recoverAndCancel(input: {
     readonly closureId: string;
     readonly accountId: string;
@@ -148,11 +145,12 @@ export class BillingAccountClosureService {
       if (!(error instanceof PendingPurchaseRefusal)) throw error;
       // Object form, like the payments service's `action_already_pending`: the HTTP filter forwards only `code`
       // and a valid `action` of a structured 409, and the wire action is what the customer sees and can act on.
-      // Projected after the transaction: the owner-scoped read needs nothing the account lock protects.
-      const action = await this.cancellation.describeAction?.({
-        authUserId: input.authUserId,
-        actionId: error.purchaseId,
-      });
+      // Projected after the transaction: the owner-scoped read needs nothing the account lock protects. A projection
+      // that fails (the purchase settled or was cancelled meanwhile, a legacy snapshot) must not turn the refusal
+      // into a 404 or a 500: the bare code still refuses, and the UI then shows its held-payment copy.
+      const action = await this.cancellation
+        .describeAction?.({ authUserId: input.authUserId, actionId: error.purchaseId })
+        .catch(() => undefined);
       throw new ConflictException({ code: 'payment_action_pending', ...(action === undefined ? {} : { action }) });
     }
   }

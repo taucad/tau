@@ -1,8 +1,10 @@
+import { HttpException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { mock, mockDeep } from 'vitest-mock-extended';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import type { WireAccountClosure } from '@taucad/billing';
+import { createStripeClosureAdapter } from '#api/billing/billing-account-closure-stripe.js';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import type {
   ClosureCancellationAdapter,
@@ -449,12 +451,20 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
         mockDeep<CreditLedgerService>(),
         mockDeep<BillingCashQualification>(),
       );
+      // The module's own adapter, so the projection the browser depends on is the one wired in production.
       const service = new BillingAccountClosureService(
         { database },
-        {
-          recoverAndCancel: vi.fn(),
-          describeAction: async (input) => payments.getAction(input.authUserId, input.actionId),
-        },
+        createStripeClosureAdapter(
+          {
+            database,
+            sourceStripe: stripe,
+            protectedStripe: stripe,
+            environment: 'development',
+            stripeAccountId: 'acct_fixture',
+            livemode: false,
+          },
+          payments,
+        ),
         'development',
       );
 
@@ -471,6 +481,24 @@ describe.runIf(databaseUrl !== undefined)('account closure PostgreSQL lease foun
       const [binding] = await client`select revoked_at as "revokedAt" from billing.billing_owner_binding
         where account_id=${accountId}`;
       expect(binding).toMatchObject({ revokedAt: null });
+      // The race window: the purchase settles or is cancelled between the probe and the projection. The refusal
+      // keeps its code, without an action, rather than becoming the projection's 404.
+      const unprojected = new BillingAccountClosureService(
+        { database },
+        {
+          recoverAndCancel: vi.fn(),
+          describeAction: async () => {
+            throw new NotFoundException('payment_action_not_found');
+          },
+        },
+        'development',
+      );
+      const refusal: unknown = await unprojected
+        .prepare({ authUserId: userId, requestId })
+        .catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(HttpException);
+      expect((refusal as HttpException).getStatus()).toBe(409);
+      expect((refusal as HttpException).getResponse()).toEqual({ code: 'payment_action_pending' });
       // The refusal changed nothing, so the still-bound owner cancels the action and retries the same request.
       await expect(payments.cancelAction(userId, purchaseId)).resolves.toMatchObject({ state: 'canceled' });
       await expect(service.prepare({ authUserId: userId, requestId })).resolves.toMatchObject({

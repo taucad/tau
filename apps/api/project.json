@@ -126,6 +126,26 @@
         "command": "bash apps/api/scripts/sync-grafana-dashboards.sh"
       }
     },
+    "grafana:check": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "List Grafana panels whose queries return no data (GRAFANA_URL, default http://localhost:6100)."
+      },
+      "options": {
+        "command": "node apps/api/scripts/check-grafana-panels.mts"
+      }
+    },
+    "observability:exercise": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Drive every instrumented part of the LOCAL API (auth, telemetry ingest, Tau Sync, publications, Haiku 4.5 via the gateway, WebSockets) so the Grafana dashboards fill. Spends real Anthropic credit, capped by the harness user's promotional credit."
+      },
+      "options": {
+        "command": "node apps/api/scripts/exercise-observability.mts"
+      }
+    },
     "test:billing-foundation": {
       "executor": "nx:run-commands",
       "cache": false,

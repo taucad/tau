@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import type { WireAccountClosure, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
@@ -16,37 +17,64 @@ import { useFinancialSession } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
-/** `held` adds the support link where only support can clear it; `review` offers the top-up dialog where the customer can. */
-type PendingPaymentCopy = { readonly copy: string; readonly held: boolean; readonly review?: boolean };
-const waitCopy: PendingPaymentCopy = {
-  copy: 'A payment is still being processed. Closing waits for it; try again in a minute.',
-  held: false,
+/**
+ * What the card says after a failure and the one step it offers: `support` where only support can clear it, `review`
+ * where the owner can finish or end the payment in the Add credits dialog.
+ */
+type Notice = { readonly copy: string; readonly next?: 'support' | 'review' };
+const statusFailed: Notice = { copy: 'Could not check account closure status.' };
+const closureFailed: Notice = { copy: 'Could not continue account closure. Try again.' };
+const waitNotice: Notice = { copy: 'A payment is still being processed. Closing waits for it; try again in a minute.' };
+const reloadNotice: Notice = {
+  copy: 'An automatic reload is in progress. It finishes or clears on its own in a few minutes; try again then.',
 };
-const settledCopy: PendingPaymentCopy = { copy: 'That payment is no longer pending. Try again.', held: false };
-/** Copy per wire state of the pending payment; not exhaustive, so a miss falls to `heldCopy`. */
-const pendingPaymentCopy = new Map<WirePaymentAction['state'], PendingPaymentCopy>([
-  ['prepared', { copy: 'Discard or finish your pending top-up quote first.', held: false, review: true }],
-  ['redirect_required', { copy: 'Finish or cancel your pending payment first.', held: false, review: true }],
-  ['creating', waitCopy],
-  ['processing', waitCopy],
+const checkoutNotice: Notice = { copy: 'Finish your pending payment in Checkout first.', next: 'review' };
+// The refusal raced a payment that settled or was cancelled meanwhile; the next attempt goes through.
+const settledNotice: Notice = { copy: 'That payment is no longer pending. Try again.' };
+// Also a refusal that carried no action (an adapter without `describeAction`, or a projection that failed): the safe
+// reading of anything the owner cannot finish from here.
+const heldNotice: Notice = {
+  copy: 'A payment needs attention before this account can close. Contact support if you cannot finish it.',
+  next: 'support',
+};
+/** Copy per wire state of a pending manual payment; not exhaustive, so a miss falls to `heldNotice`. */
+const manualNotice = new Map<WirePaymentAction['state'], Notice>([
+  ['prepared', { copy: 'Discard or finish your pending top-up quote first.', next: 'review' }],
+  ['redirect_required', { copy: 'Finish or cancel your pending payment first.', next: 'review' }],
+  ['creating', waitNotice],
+  ['processing', waitNotice],
   // Captured cash awaiting its grant: the sweep normally lands it, and only support can when it does not.
   [
     'funds_received',
     {
       copy: 'Your payment was received and its credits are still being added. Closing waits for them; contact support if they do not arrive.',
-      held: true,
+      next: 'support',
     },
   ],
-  // The refusal raced a payment that settled or was cancelled meanwhile; the next attempt goes through.
-  ['fulfilled', settledCopy],
-  ['canceled', settledCopy],
-  ['failed', settledCopy],
+  ['fulfilled', settledNotice],
+  ['completed', settledNotice],
+  ['canceled', settledNotice],
+  ['failed', settledNotice],
 ]);
-// Not only `attention_required`: also a refusal that carried no action (an adapter without `describeAction`, or a
-// projection that failed), so the map is not exhaustive and this is the safe reading of anything else.
-const heldCopy: PendingPaymentCopy = {
-  copy: 'A payment needs attention before this account can close. Contact support if you cannot finish it.',
-  held: true,
+/** An automatic reload's own states: nothing for the owner to do but wait for its worker. */
+const reloadStates: ReadonlySet<WirePaymentAction['state']> = new Set(['prepared', 'creating', 'processing']);
+
+/** The notice for the payment a closure was refused for. */
+const refusalNotice = (action: WirePaymentAction | undefined): Notice => {
+  if (action === undefined) {
+    return heldNotice;
+  }
+  if (action.purpose === 'automatic_topup' && reloadStates.has(action.state)) {
+    return reloadNotice;
+  }
+  if (action.state === 'attention_required') {
+    // The dialog can finish a hosted continuation; a wait is a wait; anything else is support's.
+    if (action.attention?.action === 'continue_hosted') {
+      return checkoutNotice;
+    }
+    return action.attention?.action === 'wait' ? waitNotice : heldNotice;
+  }
+  return manualNotice.get(action.state) ?? heldNotice;
 };
 
 function SupportLink(): React.JSX.Element {
@@ -63,16 +91,14 @@ export function AccountClosureSettings({
   onReviewPayment,
 }: {
   readonly binding: PaymentActionBinding | undefined;
-  /** Opens the top-up dialog, where a pending quote or Checkout can be finished or ended. */
-  readonly onReviewPayment?: () => void;
+  /** Opens the Add credits dialog, where a pending quote or Checkout can be finished or ended. */
+  readonly onReviewPayment: () => void;
 }): React.JSX.Element {
   const financial = useFinancialSession();
   const requestId = useRef(createPaymentRequestId());
   const [closure, setClosure] = useState<WireAccountClosure>();
   const [confirmed, setConfirmed] = useState(false);
-  const [error, setError] = useState<string>();
-  const [heldPayment, setHeldPayment] = useState(false);
-  const [reviewPayment, setReviewPayment] = useState(false);
+  const [notice, setNotice] = useState<Notice>();
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -98,9 +124,7 @@ export function AccountClosureSettings({
         }
       } catch {
         if (token.isCurrent()) {
-          setError('Could not check account closure status.');
-          setHeldPayment(false);
-          setReviewPayment(false);
+          setNotice(statusFailed);
         }
       }
     })();
@@ -109,19 +133,12 @@ export function AccountClosureSettings({
   const run = async (operation: () => Promise<void>): Promise<void> => {
     const guard = financial.capture();
     setBusy(true);
-    setError(undefined);
-    setHeldPayment(false);
-    setReviewPayment(false);
+    setNotice(undefined);
     try {
       await operation();
     } catch (error_) {
       if (guard.isCurrent()) {
-        const pending = error_ instanceof AccountClosurePaymentPending ? error_ : undefined;
-        const mapped = pending?.action === undefined ? undefined : pendingPaymentCopy.get(pending.action.state);
-        const refusal = pending ? (mapped ?? heldCopy) : undefined;
-        setError(refusal ? refusal.copy : 'Could not continue account closure. Try again.');
-        setHeldPayment(refusal?.held ?? false);
-        setReviewPayment(refusal?.review === true && onReviewPayment !== undefined);
+        setNotice(error_ instanceof AccountClosurePaymentPending ? refusalNotice(error_.action) : closureFailed);
       }
     } finally {
       if (guard.isCurrent()) {
@@ -215,13 +232,23 @@ export function AccountClosureSettings({
             Delete my account
           </Button>
         ) : undefined}
-        {error ? (
-          <div className='flex flex-col gap-1 text-warning' role='alert'>
-            <p>{error}</p>
-            {heldPayment ? <SupportLink /> : undefined}
-            {reviewPayment ? (
-              <Button className='self-start' variant='outline' onClick={onReviewPayment}>
-                Review payment
+        {notice ? (
+          <div className='flex flex-col items-start gap-1'>
+            {/* The live region holds the sentence alone; colour marks only the glyph, and the step sits outside it. */}
+            <p role='alert' aria-label='Account closure notice' className='flex items-start gap-1.5'>
+              <AlertTriangle aria-hidden className='mt-0.5 size-4 shrink-0 text-warning' strokeWidth={1.5} />
+              <span>{notice.copy}</span>
+            </p>
+            {notice.next === 'support' ? <SupportLink /> : undefined}
+            {notice.next === 'review' ? (
+              <Button
+                variant='outline'
+                onClick={() => {
+                  setNotice(undefined);
+                  onReviewPayment();
+                }}
+              >
+                Open Add credits
               </Button>
             ) : undefined}
           </div>

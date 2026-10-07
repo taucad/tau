@@ -183,16 +183,9 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
     void (async () => {
       try {
         const items = await getUnresolvedPaymentActions(currentBinding, 'manual_topup');
-        // A prepared automatic reload purchase blocks closure and new top-ups just the same, so it is shown here
-        // when no manual one exists; its quote can be discarded like any other.
-        const automatic = items.some((item) => item.purpose === 'manual_topup')
-          ? []
-          : await getUnresolvedPaymentActions(currentBinding, 'automatic_topup');
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- cleanup can flip active while the GET is pending
         if (active) {
-          const owned =
-            items.find((item) => item.purpose === 'manual_topup') ??
-            automatic.find((item) => item.purpose === 'automatic_topup');
+          const owned = items.find((item) => item.purpose === 'manual_topup');
           actionGenerationRef.current = generationValue;
           setAction(owned);
         }
@@ -267,6 +260,8 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
   const frozen = visibleAction?.frozen;
   const terminal =
     visibleAction?.state === 'fulfilled' || visibleAction?.state === 'failed' || visibleAction?.state === 'canceled';
+  // Reached only through a refused top-up that carried it: its worker confirms or closes it, never this dialog.
+  const automatic = visibleAction?.purpose === 'automatic_topup';
   const amountIsValid = amountCents >= minCents && amountCents <= maxCents;
 
   // Ends a quote or an open hosted Checkout; the server expires the Checkout session so nothing can be paid later.
@@ -452,7 +447,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
               {frozen.paymentMethod ? (
                 <div className='flex items-center justify-between rounded-md border px-3 py-2 text-sm'>
                   <PaymentMethod method={frozen.paymentMethod} />
-                  {visibleAction.state === 'prepared' ? (
+                  {visibleAction.state === 'prepared' && !automatic ? (
                     <span className='text-xs text-muted-foreground'>Discard this quote to change the card.</span>
                   ) : undefined}
                 </div>
@@ -460,7 +455,12 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
             </>
           ) : undefined}
 
-          {visibleAction?.state === 'prepared' ? (
+          {visibleAction?.state === 'prepared' && automatic ? (
+            <p className='text-sm' role='status'>
+              Automatic reload is handling this purchase. It finishes or clears on its own.
+            </p>
+          ) : undefined}
+          {visibleAction?.state === 'prepared' && !automatic ? (
             <div className='flex gap-2'>
               <Button
                 className='flex-1'

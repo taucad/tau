@@ -359,17 +359,20 @@ describe('TopupModal', () => {
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
 
-  it('shows a prepared automatic reload purchase when no manual top-up is pending', async () => {
-    client.getUnresolvedPaymentActions.mockImplementation(async (_binding: unknown, purpose: string) =>
-      purpose === 'automatic_topup' ? [{ ...wireAction('prepared'), purpose: 'automatic_topup' }] : [],
+  it('should show an automatic reload purchase that refused a top-up without quote controls', async () => {
+    client.prepareTopup.mockRejectedValue(
+      new PaymentConflict({ ...wireAction('prepared'), purpose: 'automatic_topup' }),
     );
     renderModal();
-    expect(await screen.findByRole('button', { name: 'Discard quote' })).toBeInTheDocument();
-    expect(client.getUnresolvedPaymentActions).toHaveBeenCalledWith(
-      expect.objectContaining({ ownerId: 'user-a' }),
-      'automatic_topup',
-    );
-    client.getUnresolvedPaymentActions.mockReset();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeEnabled();
+    });
+    await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Automatic reload is handling this purchase.');
+    expect(screen.queryByRole('button', { name: 'Confirm quote' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Discard quote' })).not.toBeInTheDocument();
+    // The dialog's own bootstrap reads only manual top-ups; a reload surfaces through the refusal it causes.
+    expect(client.getUnresolvedPaymentActions).not.toHaveBeenCalledWith(expect.anything(), 'automatic_topup');
   });
 
   it('resumes an owned Checkout only after the user clicks', async () => {

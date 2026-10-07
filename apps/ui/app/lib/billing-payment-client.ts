@@ -21,6 +21,8 @@ const paymentConflictCodes = [
   'customer_tax_location_invalid',
   // The Checkout is no longer open (paid, expired or already ended); retrying the cancel cannot help.
   'action_not_cancelable',
+  // An automatic reload purchase, which its worker confirms; the dialog shows it and offers nothing.
+  'action_not_confirmable',
 ] as const;
 type PaymentConflictCode = (typeof paymentConflictCodes)[number];
 

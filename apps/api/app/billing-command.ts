@@ -350,6 +350,7 @@ async function main(): Promise<void> {
         try {
           while (!shutdown.signal.aborted) {
             let failed = 0;
+            let batchThrew = false;
             let fullBatch = false;
             for (const pool of ['primary', 'helper'] as const) {
               const startedAt = Date.now();
@@ -420,6 +421,7 @@ async function main(): Promise<void> {
                 );
               } catch (error) {
                 failed += 1;
+                batchThrew = true;
                 metrics.billingFundedOperationRecoveries.add(1, {
                   ...attributes,
                   'tau.billing.recovery.outcome': 'failed',
@@ -441,6 +443,10 @@ async function main(): Promise<void> {
               }
             }
             consecutiveFailures = failed === 0 ? 0 : consecutiveFailures + 1;
+            /* F-10: the per-pass gauges keep exporting their last value, so a stalled worker is only visible here.
+               A pass is `error` only when a batch threw: one operation that keeps failing recovery is counted
+               by `recoveries{failed}`, and must not make a live worker read as stalled. */
+            metrics.billingWorkerPasses.add(1, { 'tau.worker': 'recovery', outcome: batchThrew ? 'error' : 'ok' });
             if (fullBatch && failed === 0) {
               continue;
             }
@@ -553,6 +559,7 @@ async function main(): Promise<void> {
         const purchaseScans = new BillingPurchaseReconciliationService(database, sourceStripe, sourceConfig);
         const supplier = new BillingSupplierReconciliationService(database, sourceConfig);
         // Each scheduled job owns its failure: one provider or data fault must not stop the others.
+        let passFailed = false;
         const runJob = async (event: string, run: () => Promise<unknown>): Promise<void> => {
           const jobStartedAt = Date.now();
           try {
@@ -564,6 +571,7 @@ async function main(): Promise<void> {
               ),
             );
           } catch (error) {
+            passFailed = true;
             console.error(
               JSON.stringify({
                 event,
@@ -593,6 +601,7 @@ async function main(): Promise<void> {
         try {
           while (!shutdown.signal.aborted) {
             const startedAt = Date.now();
+            passFailed = false;
             try {
               // oxlint-disable-next-line no-await-in-loop -- one worker serializes provider recovery on one DB connection
               const recovered = await payments.recoverPayments({ environment: billingEnvironment, limit });
@@ -607,6 +616,7 @@ async function main(): Promise<void> {
                 }),
               );
             } catch (error) {
+              passFailed = true;
               console.error(
                 JSON.stringify({
                   event: 'billing.payment_recovery_batch',
@@ -632,6 +642,7 @@ async function main(): Promise<void> {
                   }),
                 );
               } catch (error) {
+                passFailed = true;
                 console.error(
                   JSON.stringify({
                     event: 'billing.journal_reconciliation',
@@ -752,6 +763,11 @@ async function main(): Promise<void> {
                 return { scanId, cash, purchases: purchase.status };
               });
             }
+            // F-10: one count per completed pass is the heartbeat a stalled or thrashing worker stops sending.
+            caseMetrics.billingWorkerPasses.add(1, {
+              'tau.worker': 'operations',
+              outcome: passFailed ? 'error' : 'ok',
+            });
             try {
               // oxlint-disable-next-line no-await-in-loop -- the continuous worker deliberately sleeps between polls
               await wait(pollMilliseconds, undefined, { signal: shutdown.signal });

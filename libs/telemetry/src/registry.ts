@@ -626,10 +626,13 @@ export const TauMetrics = {
   billingProviderAccountRefusals: defineCounter({
     name: 'tau.billing.provider_account.refusals',
     unit: '{refusal}',
-    description: 'Supplier-account refusals (no credit or not billable) by provider',
+    description:
+      "Supplier-account refusals by provider and reason: credit exhausted, or Tau's own credential rejected (401/403)",
     attributes: z.object({
       'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
       providerId: z.string(),
+      /* Through the funded gateway the upstream key is always Tau's, so an upstream 401/403 is a supplier-account failure. */
+      reason: z.enum(['credit_exhausted', 'credential_rejected']),
     }),
   }),
 
@@ -791,6 +794,110 @@ export const TauMetrics = {
     attributes: z.object({
       'agent.id': z.string(),
       'error.code': z.string(),
+    }),
+  }),
+
+  // --- Tau Sync (git smart HTTP + LFS) ---
+
+  syncOperations: defineCounter({
+    name: 'tau.sync.operations',
+    unit: '{operation}',
+    description:
+      'Tau Sync requests by operation and outcome. A push git refused in its report-status (HTTP 200) is ref_rejected, not ok',
+    attributes: z.object({
+      'tau.sync.operation': z.enum(['push', 'fetch', 'lfs_upload', 'lfs_download']),
+      outcome: z.enum(['ok', 'ref_rejected', 'quota_refused', 'conflict', 'unauthorized', 'error']),
+    }),
+  }),
+
+  syncOperationDuration: defineHistogram({
+    name: 'tau.sync.operation.duration',
+    unit: 's',
+    description: 'Whole Tau Sync request latency, lease hydrate and commit included',
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120],
+    attributes: z.object({
+      'tau.sync.operation': z.enum(['push', 'fetch', 'lfs_upload', 'lfs_download']),
+      outcome: z.enum(['ok', 'ref_rejected', 'quota_refused', 'conflict', 'unauthorized', 'error']),
+    }),
+  }),
+
+  syncPackBytes: defineHistogram({
+    name: 'tau.sync.pack.bytes',
+    unit: 'By',
+    description: 'Pack bytes a push received or a fetch sent',
+    buckets: [1024, 16_384, 65_536, 262_144, 1_048_576, 4_194_304, 16_777_216, 67_108_864, 268_435_456, 1_073_741_824],
+    attributes: z.object({
+      'tau.sync.operation': z.enum(['push', 'fetch']),
+    }),
+  }),
+
+  syncLeaseDuration: defineHistogram({
+    name: 'tau.sync.lease.duration',
+    unit: 's',
+    description: 'Repository lease phase latency: hydrate from object storage, or commit packs and manifest',
+    buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+    attributes: z.object({
+      'tau.sync.lease.phase': z.enum(['hydrate', 'commit']),
+    }),
+  }),
+
+  syncManifestConflicts: defineCounter({
+    name: 'tau.sync.manifest_conflicts',
+    unit: '{conflict}',
+    description: 'Manifest commits that lost the conditional (If-Match) write to another writer',
+    attributes: z.object({}),
+  }),
+
+  syncSweeps: defineCounter({
+    name: 'tau.sync.sweeps',
+    unit: '{sweep}',
+    description: 'Post-compaction repository sweeps by outcome',
+    attributes: z.object({
+      outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  syncClientAttempts: defineCounter({
+    name: 'tau.sync.client.attempts',
+    unit: '{attempt}',
+    description: 'Client-reported sync attempts by direction, outcome and agent placement',
+    attributes: z.object({
+      direction: z.enum(['push', 'pull']),
+      outcome: z.enum(['ok', 'retry', 'quota_refused', 'offline', 'error']),
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+    }),
+  }),
+
+  syncClientLag: defineHistogram({
+    name: 'tau.sync.client.lag',
+    unit: 's',
+    description: 'Client-reported time from the first unsynced mint to the server acknowledging it',
+    buckets: [0.5, 1, 2, 3, 5, 10, 30, 60, 300, 900, 3600],
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+    }),
+  }),
+
+  syncClientPending: defineHistogram({
+    name: 'tau.sync.client.pending',
+    unit: '{revision}',
+    description: 'Client-reported sync-pending queue depth when a push starts',
+    buckets: [0, 1, 2, 5, 10, 25, 50, 100, 500],
+    attributes: z.object({
+      'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
+    }),
+  }),
+
+  // --- Billing workers (F-10) ---
+
+  billingWorkerPasses: defineCounter({
+    name: 'tau.billing.worker.passes',
+    unit: '{pass}',
+    description:
+      'Completed billing-worker passes; a gauge keeps exporting its last value, so this is the liveness signal',
+    attributes: z.object({
+      'tau.worker': z.enum(['recovery', 'operations']),
+      outcome: z.enum(['ok', 'error']),
     }),
   }),
 } as const;

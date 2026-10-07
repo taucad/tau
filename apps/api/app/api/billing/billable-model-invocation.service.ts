@@ -501,6 +501,15 @@ export class BillableModelInvocationService {
           'provider_account_exhausted',
         );
       }
+      /* F-11: the upstream key is always Tau's here, so a 401/403 is Tau's supplier account
+         failing, never the caller's request. The supplier's sentence stays in the log above. */
+      if (response.status === 401 || response.status === 403) {
+        this.metrics?.billingProviderAccountRefusals.add(1, {
+          'deployment.environment': intent.environment,
+          providerId: qualification.providerId,
+          reason: 'credential_rejected',
+        });
+      }
       const retryAfterSeconds = upstreamRetryAfterSeconds(response.headers);
       const classification = classifyUpstreamRefusal({
         status: response.status,
@@ -1028,6 +1037,7 @@ export class BillableModelInvocationService {
     this.metrics?.billingProviderAccountRefusals.add(1, {
       'deployment.environment': intent.environment,
       providerId,
+      reason: 'credit_exhausted',
     });
     this.logger.warn(
       `Supplier account exhausted on ${providerId} (${refusal.providerCode ?? 'no code'}) in ${intent.environment}: ${refusal.message}`,

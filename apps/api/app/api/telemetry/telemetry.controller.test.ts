@@ -17,6 +17,9 @@ function createMockMetrics() {
     agentToolCalls: { add: vi.fn() },
     agentTokens: { add: vi.fn() },
     agentErrors: { add: vi.fn() },
+    syncClientAttempts: { add: vi.fn() },
+    syncClientLag: { record: vi.fn() },
+    syncClientPending: { record: vi.fn() },
   };
 }
 
@@ -95,6 +98,42 @@ describe('TelemetryController', () => {
       expect(mockMetrics.kernelExecutionDuration.record).toHaveBeenCalledTimes(2);
       expect(mockMetrics.kernelExecutions.add).toHaveBeenCalledTimes(2);
       expect(mockMetrics.kernelExportDuration.record).toHaveBeenCalledTimes(1);
+    });
+
+    it('should record a client sync attempt, its lag and its queue depth by placement, clamped', () => {
+      controller.ingest({
+        entries: [
+          {
+            name: IngestEntryName.SYNC_ATTEMPT,
+            duration: 120,
+            detail: { direction: 'push', outcome: 'ok', placement: 'browser', lagMilliseconds: 2500, pending: 3 },
+          },
+          {
+            name: IngestEntryName.SYNC_ATTEMPT,
+            duration: 50,
+            detail: { direction: 'push', outcome: 'retry', placement: 'daemon', lagMilliseconds: 1e12, pending: 1e9 },
+          },
+          {
+            name: IngestEntryName.SYNC_ATTEMPT,
+            duration: 0,
+            detail: { direction: 'pull', outcome: 'offline', placement: 'desktop' },
+          },
+        ],
+      });
+
+      expect(mockMetrics.syncClientAttempts.add.mock.calls).toEqual([
+        [1, { direction: 'push', outcome: 'ok', 'agent.placement': 'browser' }],
+        [1, { direction: 'push', outcome: 'retry', 'agent.placement': 'daemon' }],
+        [1, { direction: 'pull', outcome: 'offline', 'agent.placement': 'desktop' }],
+      ]);
+      expect(mockMetrics.syncClientLag.record.mock.calls).toEqual([
+        [2.5, { 'agent.placement': 'browser' }],
+        [86_400, { 'agent.placement': 'daemon' }],
+      ]);
+      expect(mockMetrics.syncClientPending.record.mock.calls).toEqual([
+        [3, { 'agent.placement': 'browser' }],
+        [10_000, { 'agent.placement': 'daemon' }],
+      ]);
     });
   });
 
@@ -197,6 +236,21 @@ describe('TelemetryController', () => {
         // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- pipe.transform return type is any from NestJS ValidationPipe
         pipe.transform(
           { entries: [{ name: 'unknown.metric', duration: 100 }] },
+          { type: 'body', metatype: IngestPayloadDto },
+        ),
+      ).toThrow();
+    });
+
+    it.each([
+      ['an unknown outcome', { direction: 'push', outcome: 'mystery', placement: 'browser' }],
+      ['an unknown placement', { direction: 'push', outcome: 'ok', placement: 'mars' }],
+      ['a fractional queue depth', { direction: 'push', outcome: 'ok', placement: 'browser', pending: 1.5 }],
+      ['a negative lag', { direction: 'push', outcome: 'ok', placement: 'browser', lagMilliseconds: -1 }],
+    ])('should reject a sync attempt with %s', (_label, detail) => {
+      expect(() =>
+        // oxlint-disable-next-line @typescript-eslint/no-unsafe-return -- pipe.transform return type is any from NestJS ValidationPipe
+        pipe.transform(
+          { entries: [{ name: IngestEntryName.SYNC_ATTEMPT, duration: 1, detail }] },
           { type: 'body', metatype: IngestPayloadDto },
         ),
       ).toThrow();

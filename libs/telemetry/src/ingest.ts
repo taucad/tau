@@ -14,6 +14,7 @@ export const IngestEntryName = {
   INDEXEDDB_OPERATION: 'observability.indexeddbOperation',
   AGENT_SESSION: 'agent.session',
   AGENT_TURN: 'agent.turn',
+  SYNC_ATTEMPT: 'observability.syncAttempt',
 } as const;
 /* eslint-enable @typescript-eslint/naming-convention -- end OTEL constants block */
 
@@ -183,6 +184,21 @@ const agentTurnEntrySchema = z.object({
   }),
 });
 
+/** One Tau Sync push or pull a client's `sync.machine` settled; `duration` is the attempt's own time. */
+const syncAttemptEntrySchema = z.object({
+  name: z.literal(IngestEntryName.SYNC_ATTEMPT),
+  duration: z.number().nonnegative(),
+  detail: z.object({
+    direction: z.enum(['push', 'pull']),
+    outcome: z.enum(['ok', 'retry', 'quota_refused', 'offline', 'error']),
+    placement: z.enum(['browser', 'desktop', 'daemon']),
+    /** First unsynced mint to the server's ack, on an acknowledged push only. */
+    lagMilliseconds: z.number().nonnegative().optional(),
+    /** `.git/sync-pending` depth when the push started. */
+    pending: z.number().int().nonnegative().optional(),
+  }),
+});
+
 /**
  * Discriminated union of all client metric entry shapes.
  * Used for validating individual entries in the ingest payload.
@@ -197,6 +213,7 @@ export const clientMetricEntrySchema = z.discriminatedUnion('name', [
   indexeddbOperationEntrySchema,
   agentSessionEntrySchema,
   agentTurnEntrySchema,
+  syncAttemptEntrySchema,
 ]);
 
 /**

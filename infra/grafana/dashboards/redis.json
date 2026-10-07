@@ -8,12 +8,13 @@
     "list": [
       {
         "name": "service",
-        "type": "query",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(process_uptime, service_name)",
-        "multi": true,
-        "includeAll": true,
-        "current": { "text": "All", "value": "$__all" }
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
+        "current": { "text": "tau-api", "value": "tau-api" },
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
       },
       {
         "name": "instance",

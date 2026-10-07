@@ -9,12 +9,13 @@
     "list": [
       {
         "name": "service",
-        "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(process_uptime, service_name)",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
         "current": { "text": "tau-api", "value": "tau-api" },
-        "includeAll": false,
-        "refresh": 1
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
       },
       {
         "name": "app",
@@ -147,8 +148,24 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (status_class) (label_replace(rate(http_server_request_duration_count{service_name=~\"$service\"}[5m]), \"status_class\", \"${1}xx\", \"http_response_status_code\", \"(.)..\"))",
-          "legendFormat": "{{status_class}}"
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"2..\"}[5m])) or vector(0)",
+          "legendFormat": "2xx",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"3..\"}[5m])) or vector(0)",
+          "legendFormat": "3xx",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"4..\"}[5m])) or vector(0)",
+          "legendFormat": "4xx",
+          "refId": "C"
+        },
+        {
+          "expr": "sum(rate(http_server_request_duration_count{service_name=~\"$service\",http_response_status_code=~\"5..\"}[5m])) or vector(0)",
+          "legendFormat": "5xx",
+          "refId": "D"
         }
       ],
       "fieldConfig": {

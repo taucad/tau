@@ -10,12 +10,13 @@
     "list": [
       {
         "name": "service",
-        "type": "query",
-        "datasource": "Prometheus",
-        "query": "label_values(process_uptime, service_name)",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Tau runs one service. A constant, so panels never lose their filter when the API's own series go stale during an outage.",
         "current": { "text": "tau-api", "value": "tau-api" },
-        "includeAll": false,
-        "refresh": 1
+        "options": [{ "text": "tau-api", "value": "tau-api", "selected": true }],
+        "includeAll": false
       },
       {
         "name": "instance",
@@ -256,7 +257,7 @@
     },
     {
       "title": "PostgreSQL Transactions",
-      "description": "PostgreSQL query latency (95th percentile)",
+      "description": "Commits and rollbacks per second across every database (PostgreSQL receiver)",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 6, "x": 12, "y": 14 },
       "targets": [
@@ -399,7 +400,7 @@
     },
     {
       "title": "Object Storage p95 by Operation",
-      "description": "PostgreSQL and Redis query p95 latency",
+      "description": "R2 / MinIO request latency by S3 operation (95th percentile)",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 8, "x": 8, "y": 38 },
       "targets": [

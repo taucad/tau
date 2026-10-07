@@ -24,21 +24,24 @@ const waitCopy: PendingPaymentCopy = {
 };
 const settledCopy: PendingPaymentCopy = { copy: 'That payment is no longer pending. Try again.', held: false };
 /** Copy per wire state of the pending payment; not exhaustive, so a miss falls to `heldCopy`. */
-const pendingPaymentCopy: Partial<Record<WirePaymentAction['state'], PendingPaymentCopy>> = {
-  prepared: { copy: 'Discard or finish your pending top-up quote first.', held: false, review: true },
-  redirect_required: { copy: 'Finish or cancel your pending payment first.', held: false, review: true },
-  creating: waitCopy,
-  processing: waitCopy,
+const pendingPaymentCopy = new Map<WirePaymentAction['state'], PendingPaymentCopy>([
+  ['prepared', { copy: 'Discard or finish your pending top-up quote first.', held: false, review: true }],
+  ['redirect_required', { copy: 'Finish or cancel your pending payment first.', held: false, review: true }],
+  ['creating', waitCopy],
+  ['processing', waitCopy],
   // Captured cash awaiting its grant: the sweep normally lands it, and only support can when it does not.
-  funds_received: {
-    copy: 'Your payment was received and its credits are still being added. Closing waits for them; contact support if they do not arrive.',
-    held: true,
-  },
+  [
+    'funds_received',
+    {
+      copy: 'Your payment was received and its credits are still being added. Closing waits for them; contact support if they do not arrive.',
+      held: true,
+    },
+  ],
   // The refusal raced a payment that settled or was cancelled meanwhile; the next attempt goes through.
-  fulfilled: settledCopy,
-  canceled: settledCopy,
-  failed: settledCopy,
-};
+  ['fulfilled', settledCopy],
+  ['canceled', settledCopy],
+  ['failed', settledCopy],
+]);
 // Not only `attention_required`: also a refusal that carried no action (an adapter without `describeAction`, or a
 // projection that failed), so the map is not exhaustive and this is the safe reading of anything else.
 const heldCopy: PendingPaymentCopy = {
@@ -114,7 +117,7 @@ export function AccountClosureSettings({
     } catch (error_) {
       if (guard.isCurrent()) {
         const pending = error_ instanceof AccountClosurePaymentPending ? error_ : undefined;
-        const mapped = pending?.action === undefined ? undefined : pendingPaymentCopy[pending.action.state];
+        const mapped = pending?.action === undefined ? undefined : pendingPaymentCopy.get(pending.action.state);
         const refusal = pending ? (mapped ?? heldCopy) : undefined;
         setError(refusal ? refusal.copy : 'Could not continue account closure. Try again.');
         setHeldPayment(refusal?.held ?? false);

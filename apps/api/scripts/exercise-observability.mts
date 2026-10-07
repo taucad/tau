@@ -35,9 +35,16 @@ const { values } = parseArgs({
     email: { type: 'string', default: 'w36-harness@example.test' },
   },
 });
-const aiCalls = Number(values['ai-calls']);
-const { rounds: roundsOption } = values;
-const rounds = Number(roundsOption);
+/** A count flag as a whole number of at least `minimum`; `--ai-calls=x` must not run zero calls and report clean. */
+function count(flag: string, value: string, minimum: number): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum) {
+    throw new Error(`--${flag} must be a whole number of at least ${String(minimum)} (got "${value}")`);
+  }
+  return parsed;
+}
+const aiCalls = count('ai-calls', values['ai-calls'], 0);
+const rounds = count('rounds', values.rounds, 1);
 const skip = new Set(values.skip.split(',').filter(Boolean));
 const api = new URL(process.env['TAU_EXERCISE_API'] ?? 'http://localhost:4000');
 const wsOrigin = process.env['TAU_EXERCISE_WS'] ?? `ws://${api.hostname}:${Number(api.port || 80) + 1}`;
@@ -294,18 +301,28 @@ await run('sync', async () => {
   const git = (args: string[], cwd = join(directory, 'work')): string => {
     // The operator's own signing config must not prompt for a key in an unattended run, and the bearer is
     // scoped to the API: sent to a presigned object-store URL as well, S3 refuses the second auth mechanism.
-    const config = [
-      'commit.gpgsign=false',
-      'tag.gpgsign=false',
-      'user.name=W36 harness',
-      `user.email=${email}`,
-      `http.${api.origin}/.extraHeader=Authorization: Bearer ${token}`,
+    // Passed as GIT_CONFIG_* (read by git and git-lfs alike) rather than `-c`, so the token is not on argv.
+    const config: Array<[string, string]> = [
+      ['commit.gpgsign', 'false'],
+      ['tag.gpgsign', 'false'],
+      ['user.name', 'W36 harness'],
+      ['user.email', email],
+      [`http.${api.origin}/.extraHeader`, `Authorization: Bearer ${token}`],
     ];
-    const result = spawnSync('git', [...config.flatMap((entry) => ['-c', entry]), ...args], {
+    const result = spawnSync('git', args, {
       cwd,
       encoding: 'utf8',
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the child env excludes API-required ambient variables
-      env: gitEnvironment as NodeJS.ProcessEnv,
+      env: {
+        ...gitEnvironment,
+        GIT_CONFIG_COUNT: String(config.length),
+        ...Object.fromEntries(
+          config.flatMap(([key, value], index) => [
+            [`GIT_CONFIG_KEY_${String(index)}`, key],
+            [`GIT_CONFIG_VALUE_${String(index)}`, value],
+          ]),
+        ),
+      } as unknown as NodeJS.ProcessEnv,
     });
     check(result.status === 0, `git ${args.join(' ')}: ${result.stderr.trim().split('\n').slice(-3).join(' | ')}`);
     return result.stdout.trim();

@@ -4,16 +4,22 @@
  * through Grafana's own query API (so Prometheus, Loki, Tempo, Pyroscope, Redis and PostgreSQL panels
  * are judged the way the panel would render them).
  *
+ * Template variables built by `label_values(...)` are run too: one that resolves empty blanks every
+ * panel filtering on it.
+ *
  * Optional env: GRAFANA_URL (default http://localhost:6100), GRAFANA_API_KEY (else anonymous/admin).
- * Usage: node apps/api/scripts/check-grafana-panels.mts [--from=now-1h] [--dashboard=<uid>]
- * Exit codes: 0 every panel has data, 1 at least one panel is empty or failed.
+ * Usage: node apps/api/scripts/check-grafana-panels.mts [--from=now-1h] [--dashboard=<uid>] [--baseline=<file>]
+ * `--baseline` names known-empty panels, one `Dashboard › Panel` per line, so the check can gate new gaps
+ * while instrumentation is still landing; baseline lines that now have data are reported as stale.
+ * Exit codes: 0 every panel and variable has data (or is in the baseline), 1 otherwise.
  */
 /* oxlint-disable no-await-in-loop -- one query at a time keeps a local Grafana responsive */
+import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 
 const { values } = parseArgs({
-  options: { from: { type: 'string', default: 'now-1h' }, dashboard: { type: 'string' } },
+  options: { from: { type: 'string', default: 'now-1h' }, dashboard: { type: 'string' }, baseline: { type: 'string' } },
 });
 const grafana = process.env['GRAFANA_URL'] ?? 'http://localhost:6100';
 const headers: Record<string, string> = {
@@ -26,6 +32,7 @@ const variables: Record<string, string> = { service: 'tau-api', instance: '.*', 
 type Target = Record<string, unknown> & { refId?: string; datasource?: unknown; hide?: boolean };
 type Panel = { title?: string; type: string; datasource?: unknown; targets?: Target[]; panels?: Panel[] };
 type Datasource = { uid: string; name: string; type: string; isDefault: boolean };
+type Variable = { name: string; type: string; query?: unknown; datasource?: unknown };
 
 async function get<T>(path: string): Promise<T> {
   const response = await fetch(`${grafana}${path}`, { headers });
@@ -59,10 +66,38 @@ const hasData = (result: unknown): boolean =>
   ).some(({ frames = [] }) => frames.some(({ data }) => (data?.values ?? []).some((column) => column.length > 0)));
 
 const dashboards = await get<Array<{ uid: string; title: string }>>('/api/search?type=dash-db');
-const empty: string[] = [];
+const baseline = new Set(
+  values.baseline
+    ? readFileSync(values.baseline, 'utf8')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+    : [],
+);
+// Keyed `Dashboard › Panel` (or `Dashboard › $variable`), the form a baseline line takes.
+const empty = new Map<string, string>();
 let checked = 0;
 for (const { uid, title } of dashboards.filter(({ uid: id }) => !values.dashboard || id === values.dashboard)) {
-  const { dashboard } = await get<{ dashboard: { panels: Panel[] } }>(`/api/dashboards/uid/${uid}`);
+  const { dashboard } = await get<{ dashboard: { panels: Panel[]; templating?: { list?: Variable[] } } }>(
+    `/api/dashboards/uid/${uid}`,
+  );
+  for (const variable of dashboard.templating?.list ?? []) {
+    const match =
+      variable.type === 'query' && typeof variable.query === 'string'
+        ? /^label_values\((?<selector>.+),\s*(?<label>\w+)\)$/u.exec(variable.query)?.groups
+        : undefined;
+    if (match?.['selector'] === undefined || match['label'] === undefined) {
+      continue;
+    }
+    checked += 1;
+    const search = new URLSearchParams({ 'match[]': String(substitute(match['selector'])) });
+    const { data } = await get<{ data: string[] }>(
+      `/api/datasources/proxy/uid/${resolve(variable.datasource)?.uid ?? ''}/api/v1/label/${match['label']}/values?${search.toString()}`,
+    );
+    if (data.length === 0) {
+      empty.set(`${title} › $${variable.name}`, 'variable has no values');
+    }
+  }
   const panels = dashboard.panels.flatMap((panel) => (panel.type === 'row' ? (panel.panels ?? []) : [panel]));
   for (const panel of panels) {
     const targets = (panel.targets ?? []).filter((target) => !target.hide);
@@ -90,14 +125,20 @@ for (const { uid, title } of dashboards.filter(({ uid: id }) => !values.dashboar
     });
     const body: unknown = await response.json().catch(() => ({}));
     if (!response.ok || !hasData(body)) {
-      const reason = response.ok ? 'no data' : `HTTP ${response.status} ${JSON.stringify(body).slice(0, 160)}`;
-      empty.push(`${title} › ${panel.title ?? '(untitled)'} — ${reason}`);
+      empty.set(
+        `${title} › ${panel.title ?? '(untitled)'}`,
+        response.ok ? 'no data' : `HTTP ${response.status} ${JSON.stringify(body).slice(0, 160)}`,
+      );
     }
   }
 }
 
-console.log(`${checked - empty.length}/${checked} panels have data`);
-for (const line of empty) {
-  console.log(`  ✗ ${line}`);
+console.log(`${checked - empty.size}/${checked} panels and variables have data`);
+const unexpected = [...empty].filter(([key]) => !baseline.has(key));
+for (const [key, reason] of empty) {
+  console.log(`  ${baseline.has(key) ? '·' : '✗'} ${key} — ${reason}`);
 }
-process.exit(empty.length === 0 ? 0 : 1);
+for (const key of [...baseline].filter((line) => !empty.has(line))) {
+  console.log(`  ↑ ${key} — has data now; drop it from the baseline`);
+}
+process.exit(unexpected.length === 0 ? 0 : 1);

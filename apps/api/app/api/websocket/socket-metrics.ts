@@ -1,20 +1,7 @@
 import { WebSocket } from 'ws';
 import type { RawData } from 'ws';
 
-import type { WsGateway } from '#lifecycle/upgrade-router.js';
-import type { MetricsService } from '#telemetry/metrics.js';
-
-/** `ws.close.reason`; mirrored by the `z.enum` on `TauMetrics.wsDisconnections`. */
-export type WsCloseReason =
-  | 'normal'
-  | 'going_away'
-  | 'server_shutdown'
-  | 'auth_failed'
-  | 'policy_violation'
-  | 'unavailable'
-  | 'replaced'
-  | 'error'
-  | 'other';
+import type { MetricsService, WsCloseReason, WsGateway } from '#telemetry/metrics.js';
 
 /**
  * Bounded `ws.close.reason` for a close code, so the label never carries the

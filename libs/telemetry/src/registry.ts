@@ -47,7 +47,8 @@ export const TauMetrics = {
   wsDisconnections: defineCounter({
     name: 'ws.disconnections',
     unit: '{connection}',
-    description: 'Total WebSocket disconnections by reason',
+    description:
+      'Total WebSocket disconnections by close-code class. On the kernels gateway a self-hosted Zoo proxy forwards the upstream close code, so auth_failed there can mean Zoo refused the operator key.',
     attributes: z.object({
       'ws.gateway': z.enum(['hosts', 'kernels']).optional(),
       'ws.close.reason': z
@@ -81,7 +82,7 @@ export const TauMetrics = {
     name: 'ws.upgrade.rejections',
     unit: '{connection}',
     description:
-      'WebSocket upgrades refused by the upgrade router or the gateway admission checks (session, device credential, route). Service-level refusals after admission appear under ws.disconnections policy_violation (1008), which also counts invalid-frame closes.',
+      'WebSocket upgrades refused by the upgrade router or the gateway admission checks (session, device credential, route). Refusals after admission appear only under ws.disconnections.',
     attributes: z.object({
       'ws.gateway': z.enum(['hosts', 'kernels', 'none']),
       reason: z.enum(['unauthenticated', 'forbidden', 'auth_error', 'unknown_route', 'server_shutdown']),

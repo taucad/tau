@@ -16,6 +16,7 @@ import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
 import { absorbSocketErrors } from '#api/websocket/socket-error.js';
 import { trackSocket } from '#api/websocket/socket-metrics.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import type { WsUpgradeRejection } from '#telemetry/metrics.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
@@ -67,7 +68,10 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
     trackSocket(this.metrics, 'kernels', socket);
     const verdict = await this.authorizeZooConnection(request);
     if (!verdict.ok) {
-      this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': 'kernels', reason: verdict.rejection });
+      this.metrics.wsUpgradeRejections.add(1, {
+        'ws.gateway': 'kernels',
+        reason: verdict.rejection,
+      } satisfies WsUpgradeRejection);
       this.logger.warn(`Zoo proxy connection rejected (${verdict.code}): ${verdict.reason}`);
       socket.close(verdict.code, verdict.reason);
       return;
@@ -114,7 +118,7 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
         code: number;
         reason: string;
         /** `ws.upgrade.rejections` reason; kept apart from the client-facing `reason` text. */
-        rejection: 'unauthenticated' | 'forbidden' | 'auth_error';
+        rejection: WsUpgradeRejection['reason'];
       }
   > {
     try {

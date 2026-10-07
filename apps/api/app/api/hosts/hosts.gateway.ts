@@ -18,6 +18,7 @@ import { trackSocket } from '#api/websocket/socket-metrics.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import type { WsUpgradeRejection } from '#telemetry/metrics.js';
 
 const controlPath = '/v1/agents/control';
 const sessionPathPrefix = '/v1/agents/sessions/';
@@ -162,7 +163,10 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     if (pathname === controlPath) {
       const device = await this.hostsService.authenticateDevice(request.headers.authorization);
       if (!device) {
-        this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': 'hosts', reason: 'unauthenticated' });
+        this.metrics.wsUpgradeRejections.add(1, {
+          'ws.gateway': 'hosts',
+          reason: 'unauthenticated',
+        } satisfies WsUpgradeRejection);
         socket.close(4401, 'device credential rejected');
         return;
       }
@@ -183,7 +187,10 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       (side !== 'browser' && side !== 'host') ||
       (route !== 'runtime' && route !== 'fs' && route !== 'agent')
     ) {
-      this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': 'hosts', reason: 'unknown_route' });
+      this.metrics.wsUpgradeRejections.add(1, {
+        'ws.gateway': 'hosts',
+        reason: 'unknown_route',
+      } satisfies WsUpgradeRejection);
       socket.close(1008, 'unknown host route');
       return;
     }
@@ -198,7 +205,10 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
     }
     const session = await this.auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
     if (!session) {
-      this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': 'hosts', reason: 'unauthenticated' });
+      this.metrics.wsUpgradeRejections.add(1, {
+        'ws.gateway': 'hosts',
+        reason: 'unauthenticated',
+      } satisfies WsUpgradeRejection);
       socket.close(4401, 'browser session required');
       return;
     }

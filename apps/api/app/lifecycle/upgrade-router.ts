@@ -4,20 +4,15 @@ import type { Duplex } from 'node:stream';
 import { Injectable, Optional } from '@nestjs/common';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import type { WsGateway, WsUpgradeRejection } from '#telemetry/metrics.js';
 
 // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer
 export type UpgradeHandler = (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
 
-/** One value per upgrade route; the `ws.gateway` label on every `ws.*` series. */
-export type WsGateway = 'hosts' | 'kernels';
-
-/** `ws.gateway` on `ws.upgrade.rejections`: a path no route claims has no gateway. */
-export type WsGatewayLabel = WsGateway | 'none';
-
 export type UpgradeRoute = {
   /** The `ws.gateway` label for refusals on this route. */
   readonly gateway: WsGateway;
-  /** Whether this route owns a request path. */
+  /** Whether this route owns a request path. Also runs on upgrades refused during shutdown, so it must be cheap and side-effect free. */
   readonly matches: (pathname: string) => boolean;
   /** Takes over the socket. */
   readonly handle: UpgradeHandler;
@@ -90,8 +85,8 @@ export class UpgradeRouter {
     return this.#routes.find((candidate) => candidate.matches(pathname));
   }
 
-  #reject(gateway: WsGatewayLabel, reason: 'server_shutdown' | 'unknown_route'): void {
-    this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': gateway, reason });
+  #reject(gateway: WsUpgradeRejection['ws.gateway'], reason: 'server_shutdown' | 'unknown_route'): void {
+    this.metrics.wsUpgradeRejections.add(1, { 'ws.gateway': gateway, reason } satisfies WsUpgradeRejection);
   }
 
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Node's `upgrade` event hands the handler a Buffer

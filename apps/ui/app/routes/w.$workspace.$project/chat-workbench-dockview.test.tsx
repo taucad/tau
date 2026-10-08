@@ -2,7 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { isValidElement } from 'react';
+import { isValidElement, useEffect, useState, StrictMode, Fragment } from 'react';
+import { MemoryRouter } from 'react-router';
+import { KeyboardProvider } from '#hooks/use-keyboard.js';
 import { createPortal } from 'react-dom';
 import { Printer } from 'lucide-react';
 import type {
@@ -157,6 +159,7 @@ const editorMachineSnapshot = {
     fileSidebars: {} as Record<string, number>,
     panelState: { desktopLayout: { workbenchOpen: true } },
   },
+  matches: () => true,
   status: 'active',
   output: undefined,
   error: undefined,
@@ -179,6 +182,7 @@ const publishOpenFiles = (openFiles: typeof editorMachineSnapshot.context.openFi
 };
 
 const mockEditorRef = {
+  on: () => ({ unsubscribe: () => undefined }),
   send: vi.fn(),
   getSnapshot: () => currentEditorSnapshot,
   subscribe: (listener: EditorListener) => {
@@ -337,6 +341,10 @@ const {
   PrintWorkbenchPanel,
   ExportWorkbenchPanel,
 } = await import('#routes/w.$workspace.$project/chat-workbench-dockview.js');
+
+const actualWorkspace = await vi.importActual<typeof ProjectWorkspaceContext>(
+  '#routes/w.$workspace.$project/project-workspace-context.js',
+);
 
 describe('hidden workbench operation panels', () => {
   it.each([
@@ -1429,6 +1437,92 @@ describe('Workbench file reconciliation', () => {
     );
     expect(close).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    'opens the real Files shell from one context command across delayed connection (connected=%s, strict=%s)',
+    async (connected, strict) => {
+      const launcher = panel('delayed-files-launcher', { mode: 'launcher' });
+      const dockview = createTestDockview([launcher]);
+      Object.assign(dockview.api, { activePanel: launcher });
+      Object.assign(launcher.api, { id: launcher.id, group: dockview.group });
+
+      function MountedWorkbench(): React.JSX.Element {
+        const workspace = actualWorkspace.useProjectWorkspace();
+        const [mounted, setMounted] = useState(connected);
+        const [parameters, setParameters] = useState({
+          mode: 'launcher' as 'launcher' | 'open-file',
+          filesOpen: false,
+        });
+        launcher.api.updateParameters.mockImplementation((patch: typeof parameters) => {
+          Object.assign(launcher.params, patch);
+          setParameters((current) => ({ ...current, ...patch }));
+        });
+        useEffect(() => {
+          if (!mounted) {
+            return;
+          }
+          return workspace.connectWorkbench((id) => {
+            if (id === 'files') {
+              openWorkbenchFiles({ api: dockview.api });
+            }
+          });
+        }, [mounted, workspace]);
+        return (
+          <>
+            <button
+              type='button'
+              onClick={() => {
+                workspace.openPanel('files');
+              }}
+            >
+              Request Files once
+            </button>
+            <button
+              type='button'
+              onClick={() => {
+                setMounted(true);
+              }}
+            >
+              Mount workbench
+            </button>
+            {mounted ? (
+              <WorkbenchPlaceholderPanel
+                api={launcher.api as unknown as IDockviewPanelProps['api']}
+                containerApi={dockview.api}
+                params={parameters}
+              />
+            ) : undefined}
+          </>
+        );
+      }
+
+      const Lifecycle = strict ? StrictMode : Fragment;
+      render(
+        <Lifecycle>
+          <MemoryRouter>
+            <KeyboardProvider>
+              <actualWorkspace.ProjectWorkspaceProvider>
+                <MountedWorkbench />
+              </actualWorkspace.ProjectWorkspaceProvider>
+            </KeyboardProvider>
+          </MemoryRouter>
+        </Lifecycle>,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Request Files once' }));
+      if (!connected) {
+        expect(screen.queryByRole('region', { name: 'Files for Open file' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Mount workbench' }));
+      }
+      expect(await screen.findByRole('region', { name: 'Files for Open file' })).toBeVisible();
+      expect(screen.getByTestId('file-tree')).toBeInTheDocument();
+      expect(launcher.api.setTitle).toHaveBeenCalledWith('Open file');
+    },
+  );
 
   it('should render Open file inside the same pane-owned Files shell', () => {
     const placeholder = panel('open-file-pane', { mode: 'open-file', filesOpen: true, filesWidth: 280 });

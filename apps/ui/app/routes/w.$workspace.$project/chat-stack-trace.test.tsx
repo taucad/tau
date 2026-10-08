@@ -289,6 +289,15 @@ describe('ViewerIssues — disclosure', () => {
     expect(screen.queryByRole('region', { name: 'Issues' })).not.toBeInTheDocument();
   });
 
+  it('leaves the running phase to the top pill: no segment while the build renders', () => {
+    mockKernelIssues = new Map();
+    mockCadTags = new Set(['cad-loading']);
+    render(<ViewerIssuesHost />);
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Issues/ })).not.toBeInTheDocument();
+  });
+
   it('lists errors first, then warnings, then notes', () => {
     renderOpen();
 

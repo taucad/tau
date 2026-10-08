@@ -146,16 +146,9 @@ jobs:
           echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
 
-      # Native kernel workers run inside the operating-system sandbox, which needs
-      # Bubblewrap and capability-bearing user namespaces (ci.yml's test lanes do the
-      # same). `desktop-e2e:test:e2e` depends on desktop:prepare-build123d-python,
-      # which resolves its wheels with uv on a cache miss.
-      - name: Install Linux sandbox prerequisites
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          command -v uv || pipx install uv
-          uv --version
+      # Sandboxed native kernel workers, and uv for desktop-e2e's build123d wheels.
+      - name: Setup Linux sandbox prerequisites
+        uses: ./.github/actions/setup-linux-sandbox
 
       # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
       # `BILLING_*` development values; without them it refuses to start.

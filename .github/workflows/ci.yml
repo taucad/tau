@@ -325,19 +325,9 @@ jobs:
         if: needs.plan.outputs.geospec-required == 'true'
         run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
 
-      # Native kernel workers run inside the operating-system sandbox on every host,
-      # including CI; a Linux runner needs the Bubblewrap toolchain and capability-bearing
-      # user namespaces, which Ubuntu 24.04 restricts through AppArmor by default.
-      - name: Install Linux sandbox prerequisites
+      - name: Setup Linux sandbox prerequisites
         if: startsWith(matrix.lane, 'test-')
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          # build123d:test depends on desktop:prepare-build123d-python, which resolves
-          # its wheels with uv (as release-build.yml installs it). A cache hit never
-          # needs it; a full-graph miss does.
-          command -v uv || pipx install uv
-          uv --version
+        uses: ./.github/actions/setup-linux-sandbox
 
       # The PR gate documented in docs/policy/release-policy.md: under version plans,
       # a touched release project with no plan is an unreleased change. Base and head

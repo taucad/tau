@@ -236,6 +236,8 @@ export const serializeInvocationEvidence = (
             quantity: item.quantity.toString(),
           })),
   });
+/** Source revision of the zero-cost final supplier evidence a refusal with a status proves. */
+export const rejectedSupplierSourceRevision = 'provider_rejected_v1';
 export const invocationEvidenceDigest = (evidence: z.infer<typeof persistedInvocationEvidenceSchema>): string => {
   const payload = JSON.stringify(evidence);
   if (Buffer.byteLength(payload) > 32_768) {
@@ -1930,6 +1932,79 @@ export class CreditLedgerService {
       throw new Error('Qualified final supplier evidence not found');
     }
     return this.finalizeSupplier({ ...input, evidenceId: evidence.id });
+  }
+
+  /**
+   * Finalizes at zero the supplier side of operations a supplier refused before running them.
+   *
+   * Until the collector kept a refusal's own kind, a refused call was absorbed as cost-unknown
+   * and left `unresolved`, which the supplier sweep turned into a route-pausing case a day
+   * later. A refusal with a status proves zero cost, so each such operation gets the same final
+   * zero evidence the live path records now, and the next sweep closes its case. Idempotent:
+   * a replay finds the retained proof and the already-final operation.
+   */
+  public async finalizeRejectedSupplierLiabilities(input: {
+    environment: BillingEnvironment;
+    limit: number;
+  }): Promise<{ readonly repaired: number }> {
+    const operations = await this.databaseService.database
+      .select()
+      .from(creditOperation)
+      .where(
+        and(
+          eq(creditOperation.environment, input.environment),
+          eq(creditOperation.supplierState, 'unresolved'),
+          eq(creditOperation.customerState, 'absorbed'),
+          eq(creditOperation.meteringStatus, 'unavailable'),
+          sql`${creditOperation.normalizationEvidence}->>'terminalReason' = 'provider_rejected'`,
+        ),
+      )
+      .orderBy(asc(creditOperation.id))
+      .limit(input.limit);
+    let repaired = 0;
+    for (const operation of operations) {
+      const outcome = await this.appendSupplierEvidence({
+        operationId: operation.id,
+        environment: input.environment,
+        provider: operation.providerId ?? 'undispatched',
+        credentialAccount: operation.invocation?.credentialAccount ?? 'undispatched',
+        sourceObjectId: operation.id,
+        sourceRevision: rejectedSupplierSourceRevision,
+        payloadDigest: createHash('sha256').update(`provider-rejected:${operation.id}`).digest('hex'),
+        currency: 'usd',
+        numerator: 0n,
+        denominator: 1n,
+        completeness: 'complete',
+        finality: 'final',
+        receivedAt: new Date(),
+      });
+      if (outcome === 'conflict') {
+        throw new Error('Conflicting refusal proof');
+      }
+      const [evidence] = await this.databaseService.database
+        .select({ id: supplierCostEvidence.id })
+        .from(supplierCostEvidence)
+        .where(
+          and(
+            eq(supplierCostEvidence.operationId, operation.id),
+            eq(supplierCostEvidence.sourceRevision, rejectedSupplierSourceRevision),
+          ),
+        );
+      if (!evidence) {
+        throw new Error('Refusal proof was not retained');
+      }
+      const state = await this.finalizeSupplier({
+        evidenceId: evidence.id,
+        operationId: operation.id,
+        accountId: operation.accountId,
+        requestDigest: operation.requestDigest,
+        expectedGeneration: operation.generation,
+      });
+      if (state === 'final') {
+        repaired += 1;
+      }
+    }
+    return { repaired };
   }
 
   /** Applies qualified supplier finality independently of the customer receipt. */

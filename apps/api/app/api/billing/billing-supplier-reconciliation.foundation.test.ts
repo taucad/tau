@@ -374,6 +374,46 @@ describe('supplier usage reconciliation foundation', () => {
     expect(required(cases[0], 'unresolved case').evidence['oldestEvidenceAt']).toEqual(expect.any(String));
   });
 
+  /* The staging Haiku 4.5 pause of 2026-10-08: a refused call absorbed as cost-unknown stayed
+   * `unresolved`, the sweep cased it, and the case paused the route; closing the case alone cannot
+   * hold, because the sweep reopens it while the operation stays unresolved. */
+  it('finalizes a refused operation at zero so its route-pausing case closes and stays closed', async () => {
+    const fixture = await createFixture();
+    const refused = await terminalOperation(fixture, `refused-${randomUUID()}`);
+    await database
+      .update(creditOperation)
+      .set({
+        customerState: 'absorbed',
+        supplierState: 'unresolved',
+        meteringStatus: 'unavailable',
+        normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_rejected', fields: {} },
+      })
+      .where(eq(creditOperation.id, refused.operationId));
+    await sweepAll(0);
+    expect(await casesFor('supplier_state_unresolved', refused.operationId)).toMatchObject([{ state: 'open' }]);
+
+    const repair = await ledger.finalizeRejectedSupplierLiabilities({ environment: 'development', limit: 1000 });
+    expect(repair.repaired).toBeGreaterThanOrEqual(1);
+    const [operation] = await database
+      .select()
+      .from(creditOperation)
+      .where(eq(creditOperation.id, refused.operationId));
+    expect(required(operation, 'repaired operation').supplierState).toBe('final');
+    const proof = await database
+      .select()
+      .from(supplierCostEvidence)
+      .where(eq(supplierCostEvidence.operationId, refused.operationId));
+    expect(proof).toMatchObject([
+      { sourceRevision: 'provider_rejected_v1', numerator: 0n, completeness: 'complete', finality: 'final' },
+    ]);
+    // A second pass finds the retained proof and the final operation, and changes nothing.
+    await ledger.finalizeRejectedSupplierLiabilities({ environment: 'development', limit: 1000 });
+
+    await sweepAll(0);
+    expect(await casesFor('supplier_state_unresolved', refused.operationId)).toMatchObject([{ state: 'resolved' }]);
+    expect(await casesFor('supplier_evidence_missing', refused.operationId)).toHaveLength(0);
+  });
+
   it('reconciles an aggregate invoice total without allocating cost to any account', async () => {
     const fixture = await createFixture();
     await terminalOperation(fixture, `invoice-a-${randomUUID()}`, { numerator: 3n });

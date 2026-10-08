@@ -394,6 +394,7 @@ const creditAtomsPerUsd = 1_000_000;
  * reconcile. Both the live terminal and recovery's settlement call this; the labels are the
  * operation's pinned model, provider, surface and activity, so cardinality stays that of admission.
  */
+// eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one settled operation
 export const recordSettledGenAiUsage = (
   metrics: Pick<MetricsService, 'genAiCost' | 'genAiTokenUsage'> | undefined,
   attributes: Record<'gen_ai.request.model' | 'gen_ai.provider.name' | 'tau.surface' | 'tau.activity', string>,

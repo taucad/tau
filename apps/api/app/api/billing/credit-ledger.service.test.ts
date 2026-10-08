@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { recordSettledGenAiUsage } from '#api/billing/credit-ledger.service.js';
+import type { MetricsService } from '#telemetry/metrics.js';
 
 const attributes = {
   'gen_ai.request.model': 'model-a',
@@ -14,7 +15,7 @@ describe('recordSettledGenAiUsage', () => {
     const metrics = meters();
 
     recordSettledGenAiUsage(
-      metrics as never,
+      metrics as unknown as MetricsService,
       attributes,
       {
         kind: 'final_usage',
@@ -39,7 +40,7 @@ describe('recordSettledGenAiUsage', () => {
     const metrics = meters();
 
     recordSettledGenAiUsage(
-      metrics as never,
+      metrics as unknown as MetricsService,
       attributes,
       { kind: 'absorbed_unknown', meterItems: [{ dimension: 'output', tier: null, quantity: 9n }] },
       7n,

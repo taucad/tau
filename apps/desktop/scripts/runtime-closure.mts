@@ -11,7 +11,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { cp, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, dirname, parse, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -199,32 +199,6 @@ export const copyTree = async (source: string, target: string, keep?: (path: str
   if (keep) {
     await prune(target, source, keep);
   }
-};
-
-/**
- * Stage GeoSpec's runtime-loaded native subpath; the engine itself is bundled.
- * The generated factory, glue and WASM must stay adjacent, without shipping
- * the native build tree or duplicating the bundled engine's dependencies.
- * @param source - Installed GeoSpec engine package root.
- * @param modulesRoot - Packaged app's node_modules directory.
- */
-export const copyGeoSpecNative = async (source: string, modulesRoot: string): Promise<void> => {
-  const manifest = JSON.parse(await readFile(resolve(source, 'package.json'), 'utf8')) as {
-    readonly name: string;
-    readonly version: string;
-  };
-  const target = resolve(modulesRoot, manifest.name);
-  await copyTree(resolve(source, 'native/opencascade/dist'), resolve(target, 'native'));
-  await cp(resolve(source, 'LICENSE'), resolve(target, 'LICENSE'));
-  await writeFile(
-    resolve(target, 'package.json'),
-    JSON.stringify({
-      name: manifest.name,
-      version: manifest.version,
-      type: 'module',
-      exports: { './native/opencascade/single': './native/init.js' },
-    }),
-  );
 };
 
 /** `<name>@<version>` for one package directory. */

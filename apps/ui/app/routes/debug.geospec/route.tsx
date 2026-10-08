@@ -32,9 +32,8 @@ import type {
 } from '../../../../../packages/geospec-engine/experiments/performance-lab/performance-lab-runner.js';
 /* oxlint-enable no-restricted-imports */
 
-const engines = ['legacy-wasm', 'combined-st', 'combined-mt', 'native-desktop'] as const;
+const engines = ['combined-st', 'combined-mt', 'native-desktop'] as const;
 const label = {
-  'legacy-wasm': 'Legacy WASM',
   'combined-st': 'Combined WASM ST',
   'combined-mt': 'Combined WASM MT',
   'native-desktop': 'Desktop native',
@@ -195,11 +194,7 @@ function GeoSpecLab(): React.JSX.Element {
     const runNumber = runSequence.current++;
     const selectedCombined: Engine[] =
       wasmMode === 'compare' ? ['combined-st', 'combined-mt'] : [wasmMode === 'mt' ? 'combined-mt' : 'combined-st'];
-    const available: Engine[] = [
-      'legacy-wasm',
-      ...selectedCombined,
-      ...(desktop ? (['native-desktop'] as Engine[]) : []),
-    ];
+    const available: Engine[] = [...selectedCombined, ...(desktop ? (['native-desktop'] as Engine[]) : [])];
     const offset = runNumber % available.length;
     const engineOrder =
       wasmMode === 'compare' ? available : [...available.slice(offset), ...available.slice(0, offset)];
@@ -463,9 +458,8 @@ function GeoSpecLab(): React.JSX.Element {
           <div className='min-w-0 space-y-2 xl:col-span-3'>
             <h2 className='text-lg font-medium'>Matcher comparison</h2>
             <p className='text-xs text-muted-foreground'>
-              Startup includes module import and eager initialization. Legacy kernels initialize lazily during admission
-              or evaluation, so compare engine and UI totals across engines. Admission is shared by every selected
-              matcher; UI wall includes worker transport.
+              Startup includes module import and eager initialization. Admission is shared by every selected matcher; UI
+              wall includes worker transport.
             </p>
             <div className='overflow-x-auto rounded-md border'>
               <table className='w-full min-w-[52rem] border-collapse text-left text-sm'>

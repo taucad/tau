@@ -118,7 +118,6 @@ describe('runTauGeoSpecTests', () => {
     );
     const running = runTauGeoSpecTests({
       filesystem,
-      projectPath: '',
       entryPaths: ['late.geospec.ts'],
       testTimeout: 5,
       renderer: async () => {
@@ -158,7 +157,6 @@ describe('runTauGeoSpecTests', () => {
     try {
       const result = await runTauGeoSpecTests({
         filesystem,
-        projectPath: '',
         entryPaths: ['cleanup.geospec.ts'],
         renderer: async () => createGeometrySource(1),
       });
@@ -178,7 +176,6 @@ describe('runTauGeoSpecTests', () => {
   it('uses shared missing-file accounting', async () => {
     const result = await runTauGeoSpecTests({
       filesystem: new MemoryFileSystem(),
-      projectPath: '',
       entryPaths: [],
       renderer: async () => createGeometrySource(1),
     });
@@ -203,7 +200,6 @@ describe('runTauGeoSpecTests', () => {
     ] as const;
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '',
       entryPaths: ['failure.geospec.ts'],
       renderer: async () => {
         throw new GeoSpecModelLoadError(diagnostics);
@@ -240,7 +236,6 @@ describe('runTauGeoSpecTests', () => {
     const geometry = await createGeometrySource(800, 600, 750);
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       renderer: async () => geometry,
     });
@@ -320,7 +315,6 @@ describe('runTauGeoSpecTests', () => {
 
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       testNamePattern: 'width$',
       renderer: async () => createGeometrySource(800, 600, 750),
@@ -355,7 +349,6 @@ describe('runTauGeoSpecTests', () => {
 
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       testNamePattern: '^(?!.*no meshing interference).*',
       renderer: async (input) => {
@@ -394,7 +387,6 @@ describe('runTauGeoSpecTests', () => {
 
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       testNamePattern: 'height',
       renderer: async () => createGeometrySource(800),
@@ -444,7 +436,6 @@ describe('runTauGeoSpecTests', () => {
     const [first, second] = await Promise.all([
       runTauGeoSpecTests({
         filesystem,
-        projectPath: '',
         entryPaths: ['first.geospec.ts'],
         renderer: async (input) => {
           await Promise.resolve();
@@ -454,7 +445,6 @@ describe('runTauGeoSpecTests', () => {
       }),
       runTauGeoSpecTests({
         filesystem,
-        projectPath: '',
         entryPaths: ['second.geospec.ts'],
         renderer: async (input) => {
           expect(input.parameters).toEqual({ width: 20 });
@@ -492,7 +482,6 @@ describe('runTauGeoSpecTests', () => {
     const rendererCalls: Array<{ file: string; format?: string }> = [];
     const result = await runTauGeoSpecTests({
       filesystem,
-      projectPath: '',
       entryPaths: ['main.geospec.ts'],
       renderer: async (input) => {
         rendererCalls.push(input);

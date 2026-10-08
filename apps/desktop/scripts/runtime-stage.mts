@@ -14,7 +14,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { acpAgentProfiles } from '@taucad/host';
 
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
-import { copyGeoSpecNative, copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
+import { copyRuntimeClosure, copyTree } from './runtime-closure.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 /** A `<platform>-<arch>` the desktop app is packaged for. */
@@ -84,7 +84,6 @@ export type ResolvedRuntimePackages = Readonly<{
   sandboxRuntime: InstalledPackage;
   bundledImports: readonly InstalledPackage[];
   acpAdapters: readonly InstalledPackage[];
-  geospecEngine: string;
 }>;
 
 const readJson = async <Value extends NonNullable<unknown>>(path: string): Promise<Value> =>
@@ -171,7 +170,6 @@ export const resolveRuntimePackages = async (
     sandboxRuntime,
     bundledImports,
     acpAdapters,
-    geospecEngine: await realpath(resolve(desktopRoot, 'node_modules/@taucad/geospec-engine')),
   };
 };
 
@@ -267,7 +265,6 @@ export const stageRuntimePackages = async (
     copyRuntimePackage(platform.libassimp, packages.libassimpPlatform),
     copyRuntimePackage('nanoraster', packages.nanoraster.source),
     copyRuntimePackage(platform.nanoraster, packages.nanorasterPlatform),
-    copyGeoSpecNative(packages.geospecEngine, resolve(stageRoot, 'node_modules')),
     writeFile(
       resolve(stageRoot, 'package.json'),
       `${JSON.stringify(

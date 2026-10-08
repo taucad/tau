@@ -3,7 +3,7 @@ import * as schema from '#database/schema.js';
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -144,7 +144,9 @@ describe('billing database protections and real command', () => {
     });
     try {
       const [chunk] = (await once(child.stdout, 'data')) as unknown[];
-      expect(JSON.parse(String(chunk))).toMatchObject({
+      // One pass logs a line per capacity pool, and both can arrive in the same chunk.
+      const [firstBatch = ''] = String(chunk).split('\n');
+      expect(JSON.parse(firstBatch)).toMatchObject({
         event: 'billing.llm_recovery_batch',
         environment: 'prod-eu',
         failed: 0,
@@ -428,86 +430,6 @@ describe('billing database protections and real command', () => {
     }
   });
 
-  it('should provision an exact supplier budget proposal idempotently and reject drift', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'tau-billing-budgets-'));
-    const file = join(directory, 'budgets.json');
-    const proposal = {
-      schemaVersion: 1,
-      environment: 'prod-eu',
-      funding: [
-        { id: 'command-spend-funding', kind: 'spend', scope: 'command', fundedLifetime: '500000000000000' },
-        { id: 'command-risk-funding', kind: 'risk', scope: 'command', fundedLifetime: '500000000000000' },
-      ],
-      budgets: [
-        {
-          id: 'command-spend',
-          fundingId: 'command-spend-funding',
-          kind: 'spend',
-          scope: 'command',
-          periodStart: '2026-01-01T00:00:00.000Z',
-          periodEnd: '2030-01-01T00:00:00.000Z',
-          quantum: 'pico_usd',
-          approvedCap: '500000000000000',
-        },
-        {
-          id: 'command-risk',
-          fundingId: 'command-risk-funding',
-          kind: 'risk',
-          scope: 'command',
-          periodStart: '2026-01-01T00:00:00.000Z',
-          periodEnd: '2030-01-01T00:00:00.000Z',
-          quantum: 'pico_usd',
-          approvedCap: '500000000000000',
-        },
-      ],
-    };
-    const environment = Object.fromEntries([
-      ['PATH', process.env['PATH']],
-      ['BILLING_DATABASE_URL', databaseUrl],
-      ['BILLING_ENVIRONMENT', 'prod-eu'],
-      ['TAU_CLOUD_ENABLED', 'true'],
-    ]);
-    const run = () =>
-      spawnSync(
-        process.execPath,
-        [
-          resolve(import.meta.dirname, '../../dist/billing-command.js'),
-          'provision-budgets',
-          '--environment',
-          'prod-eu',
-          '--file',
-          file,
-        ],
-        {
-          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the child receives only string variables
-          env: environment as NodeJS.ProcessEnv,
-          encoding: 'utf8',
-        },
-      );
-    try {
-      writeFileSync(file, JSON.stringify(proposal));
-      expect(run()).toMatchObject({ status: 0, stderr: '' });
-      expect(JSON.parse(run().stdout)).toEqual({
-        environment: 'prod-eu',
-        budgets: ['command-spend', 'command-risk'],
-      });
-      writeFileSync(
-        file,
-        JSON.stringify({
-          ...proposal,
-          budgets: proposal.budgets.map((budget) =>
-            budget.kind === 'spend' ? { ...budget, approvedCap: '499999999999999' } : budget,
-          ),
-        }),
-      );
-      const drift = run();
-      expect(drift.status).toBe(1);
-      expect(drift.stderr).toContain('Existing billing budget differs from proposal: command-spend');
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
   it('should enforce financial constraints and deny runtime mutation of immutable facts', async () => {
     const account = randomUUID();
     const otherAccount = randomUUID();
@@ -519,33 +441,16 @@ describe('billing database protections and real command', () => {
       VALUES (${policy},'prod-us',${policy},1,${policy},'{}')`;
     await client`INSERT INTO billing.billing_policy_activation(id,environment,policy_id,job_key,request_hash,announced_at,effective_at)
       VALUES (${activation},'prod-us',${policy},${activation},${activation},now(),now())`;
-    const spendHold = randomUUID();
-    const riskHold = randomUUID();
-    await client.begin(async (transaction) => {
-      await Promise.all(
-        ['spend', 'risk'].map(async (kind) => {
-          const funding = `${operation}-${kind}-funding`;
-          const budget = `${operation}-${kind}-budget`;
-          await transaction`INSERT INTO billing.billing_budget_funding(id,environment,kind,scope,funded_lifetime)
-          VALUES (${funding},'prod-us',${kind},${operation},0)`;
-          await transaction`INSERT INTO billing.billing_budget(id,environment,funding_id,kind,scope,period_start,period_end,quantum,approved_cap)
-          VALUES (${budget},'prod-us',${funding},${kind},${operation},now(),now()+interval '1 day','pico_usd',0)`;
-        }),
-      );
-      await transaction`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,request_key_version,
+    // An operation needs no supplier holds: admission reserves the customer's credit only.
+    await client`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,request_key_version,
       category,model_id,sku,pinned_tariff,maximum_quantities,activity,policy_id,activation_id,meter_contract_id,authorized_atoms,promo_held_atoms,plan_held_atoms,
-      purchased_held_atoms,spend_budget_hold_id,risk_budget_hold_id,due_at)
+      purchased_held_atoms,due_at)
       VALUES (${operation},${account},'prod-us','fixture',${operation},'digest',1,'llm','fixture','fixture','[]','[]','test',${policy},${activation},
-      'fixture',0,0,0,0,${spendHold},${riskHold},now())`;
-
-      await transaction`INSERT INTO billing.billing_budget_hold(id,budget_id,operation_id,initial_bound,remaining_held)
-        VALUES (${spendHold},${`${operation}-spend-budget`},${operation},0,0),(${riskHold},${`${operation}-risk-budget`},${operation},0,0)`;
-    });
-    await expect(client`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,request_key_version,
-      category,model_id,sku,pinned_tariff,maximum_quantities,activity,policy_id,activation_id,meter_contract_id,authorized_atoms,promo_held_atoms,plan_held_atoms,
-      purchased_held_atoms,spend_budget_hold_id,risk_budget_hold_id,due_at)
-      VALUES (${randomUUID()},${account},'prod-us','fixture','wrong-holds','digest',1,'llm','fixture','fixture','[]','[]','test',${policy},${activation},
-      'fixture',0,0,0,0,${spendHold},${riskHold},now())`).rejects.toMatchObject({ code: '23503' });
+      'fixture',0,0,0,0,now())`;
+    // A pending operation carries no supplier cost; only its terminal receipt does.
+    await expect(
+      client`UPDATE billing.credit_operation SET supplier_cost_pico_usd=0 WHERE id=${operation}`,
+    ).rejects.toMatchObject({ code: '23514' });
     await expect(client`UPDATE billing.credit_account SET promo_atoms=-1 WHERE id=${account}`).rejects.toMatchObject({
       code: '23514',
     });
@@ -608,6 +513,116 @@ describe('billing database protections and real command', () => {
     } finally {
       await runtime.end();
     }
+  });
+
+  it('should install supplier-free protections on the fresh schema', async () => {
+    const [state] = await client`SELECT
+      NOT EXISTS (SELECT FROM pg_trigger WHERE tgname IN ('require_operation_holds', 'protect_budget_hold')) AS "holdTriggersGone",
+      to_regprocedure('billing.require_operation_holds()') IS NULL AND to_regprocedure('billing.protect_budget_hold()') IS NULL
+        AS "holdFunctionsGone",
+      EXISTS (SELECT FROM pg_trigger WHERE tgname = 'protect_route_pause') AS "pauseProtected",
+      has_table_privilege('tau_billing_runtime', 'billing.billing_route_pause', 'SELECT') AS "pauseReadable",
+      has_table_privilege('tau_billing_runtime', 'billing.billing_route_pause', 'INSERT')
+        OR has_table_privilege('tau_billing_runtime', 'billing.billing_route_pause', 'UPDATE')
+        OR has_table_privilege('tau_billing_runtime', 'billing.billing_route_pause', 'DELETE') AS "pauseWritable",
+      has_table_privilege('tau_billing_runtime', 'billing.credit_attempt_void', 'INSERT') AS "attemptVoidWritable",
+      has_table_privilege('tau_billing_runtime', 'billing.billing_budget_hold', 'INSERT')
+        OR has_table_privilege('tau_billing_runtime', 'billing.supplier_cost_evidence', 'INSERT') AS "supplierEvidenceWritable",
+      has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_cost_pico_usd', 'UPDATE')
+        AND has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_cost_unpriced_reason', 'UPDATE')
+        AS "supplierCostWritable",
+      has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_state', 'UPDATE')
+        AS "supplierStateWritable",
+      has_table_privilege('tau_billing_runtime', 'billing.billing_budget', 'SELECT')
+        AND has_column_privilege('tau_billing_runtime', 'billing.billing_budget', 'consumed', 'UPDATE') AS "promotionBudgetUsable"`;
+    expect(state).toEqual({
+      holdTriggersGone: true,
+      holdFunctionsGone: true,
+      pauseProtected: true,
+      pauseReadable: true,
+      pauseWritable: false,
+      attemptVoidWritable: true,
+      supplierEvidenceWritable: false,
+      supplierCostWritable: true,
+      supplierStateWritable: false,
+      promotionBudgetUsable: true,
+    });
+    // A pause is resumed once, and nothing else about it ever changes.
+    const pause = randomUUID();
+    await client`INSERT INTO billing.billing_route_pause(id, environment, sku, actor, reason)
+      VALUES (${pause}, 'prod-us', ${`model:protected-${pause}`}, 'operator', 'protection fixture')`;
+    await expect(
+      client`UPDATE billing.billing_route_pause SET reason = 'rewritten' WHERE id = ${pause}`,
+    ).rejects.toMatchObject({ code: '23514' });
+    await client`UPDATE billing.billing_route_pause SET resumed_at = now(), resumed_by = 'operator', resume_reason = 'done'
+      WHERE id = ${pause}`;
+    await expect(
+      client`UPDATE billing.billing_route_pause SET resumed_by = 'someone else' WHERE id = ${pause}`,
+    ).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('should leave no hold trigger on a database that carried the pre-charter protections', async () => {
+    // What the protections script installed before supplier holds were retired.
+    await client.unsafe(`CREATE OR REPLACE FUNCTION billing.require_operation_holds() RETURNS trigger
+      LANGUAGE plpgsql SET search_path = pg_catalog AS $$ BEGIN
+        IF NEW.spend_budget_hold_id = NEW.risk_budget_hold_id OR
+          NOT EXISTS (SELECT FROM billing.billing_budget_hold h JOIN billing.billing_budget b ON b.id = h.budget_id
+            WHERE h.id = NEW.spend_budget_hold_id AND h.operation_id = NEW.id AND b.environment = NEW.environment AND b.kind = 'spend') OR
+          NOT EXISTS (SELECT FROM billing.billing_budget_hold h JOIN billing.billing_budget b ON b.id = h.budget_id
+            WHERE h.id = NEW.risk_budget_hold_id AND h.operation_id = NEW.id AND b.environment = NEW.environment AND b.kind = 'risk')
+        THEN RAISE EXCEPTION 'operation requires its own spend and risk holds' USING ERRCODE = '23503'; END IF;
+        RETURN NEW;
+      END $$`);
+    await client.unsafe(`CREATE OR REPLACE FUNCTION billing.protect_budget_hold() RETURNS trigger
+      LANGUAGE plpgsql SET search_path = pg_catalog AS $$ BEGIN
+        IF TG_OP = 'DELETE' OR ROW(OLD.id,OLD.budget_id,OLD.operation_id,OLD.initial_bound)
+          IS DISTINCT FROM ROW(NEW.id,NEW.budget_id,NEW.operation_id,NEW.initial_bound)
+        THEN RAISE EXCEPTION 'immutable budget hold cause' USING ERRCODE = '23514'; END IF;
+        RETURN NEW;
+      END $$`);
+    try {
+      await client.unsafe(`CREATE CONSTRAINT TRIGGER require_operation_holds AFTER INSERT ON billing.credit_operation
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.require_operation_holds()`);
+      await client.unsafe(`CREATE TRIGGER protect_budget_hold BEFORE UPDATE OR DELETE ON billing.billing_budget_hold
+        FOR EACH ROW EXECUTE FUNCTION billing.protect_budget_hold()`);
+      await client.unsafe(
+        `GRANT INSERT ON billing.billing_route_pause, billing.billing_budget_hold TO tau_billing_runtime`,
+      );
+      await client.unsafe(`GRANT UPDATE (supplier_state) ON billing.credit_operation TO tau_billing_runtime`);
+      // The expand migration's own hand-authored drops, exactly as an upgraded database runs them.
+      const migration = readFileSync(
+        resolve(import.meta.dirname, '../database/migrations/0049_supplier_simplification.sql'),
+        'utf8',
+      );
+      const drops = migration
+        .split('--> statement-breakpoint')
+        .map((statement) => statement.replaceAll(/^-->.*$/gmu, '').trim())
+        .filter((statement) => /^DROP (TRIGGER|FUNCTION) IF EXISTS /u.test(statement));
+      expect(drops).toHaveLength(4);
+      for (const statement of drops) {
+        // oxlint-disable-next-line no-await-in-loop -- DDL applies in the migration's own order
+        await client.unsafe(statement);
+      }
+      await installBillingProtections(client);
+    } finally {
+      await client.unsafe(`DROP TRIGGER IF EXISTS require_operation_holds ON billing.credit_operation`);
+      await client.unsafe(`DROP TRIGGER IF EXISTS protect_budget_hold ON billing.billing_budget_hold`);
+    }
+    const [state] = await client`SELECT
+      NOT EXISTS (SELECT FROM pg_trigger WHERE tgname IN ('require_operation_holds', 'protect_budget_hold')) AS "holdTriggersGone",
+      to_regprocedure('billing.require_operation_holds()') IS NULL AS "holdFunctionGone",
+      has_table_privilege('tau_billing_runtime', 'billing.billing_route_pause', 'INSERT') AS "pauseWritable",
+      has_table_privilege('tau_billing_runtime', 'billing.billing_budget_hold', 'INSERT') AS "holdWritable",
+      has_column_privilege('tau_billing_runtime', 'billing.credit_operation', 'supplier_state', 'UPDATE') AS "supplierStateWritable",
+      has_table_privilege('tau_billing_runtime', 'billing.credit_attempt_void', 'INSERT') AS "attemptVoidWritable"`;
+    expect(state).toEqual({
+      holdTriggersGone: true,
+      holdFunctionGone: true,
+      pauseWritable: false,
+      holdWritable: false,
+      supplierStateWritable: false,
+      attemptVoidWritable: true,
+    });
   });
 
   it('should constrain policy observation and cancellation to protected role capabilities', async () => {
@@ -759,8 +774,6 @@ describe('funded LLM recovery worker under a mid-run database outage', () => {
     const policy = randomUUID();
     const activation = randomUUID();
     const operation = randomUUID();
-    const spendHold = `${operation}-spend-hold`;
-    const riskHold = `${operation}-risk-hold`;
     const childEnvironment: Record<string, string | undefined> = {};
     childEnvironment['PATH'] = process.env['PATH'];
     childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
@@ -812,25 +825,11 @@ describe('funded LLM recovery worker under a mid-run database outage', () => {
         VALUES (${policy},'prod-eu',${policy},1,${policy},'{}')`;
       await client`INSERT INTO billing.billing_policy_activation(id,environment,policy_id,job_key,request_hash,announced_at,effective_at)
         VALUES (${activation},'prod-eu',${policy},${activation},${activation},now(),now())`;
-      await client.begin(async (transaction) => {
-        await Promise.all(
-          ['spend', 'risk'].map(async (kind) => {
-            const funding = `${operation}-${kind}-funding`;
-            const budget = `${operation}-${kind}-budget`;
-            await transaction`INSERT INTO billing.billing_budget_funding(id,environment,kind,scope,funded_lifetime)
-              VALUES (${funding},'prod-eu',${kind},${operation},0)`;
-            await transaction`INSERT INTO billing.billing_budget(id,environment,funding_id,kind,scope,period_start,period_end,quantum,approved_cap)
-              VALUES (${budget},'prod-eu',${funding},${kind},${operation},now(),now()+interval '1 day','pico_usd',0)`;
-          }),
-        );
-        await transaction`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,request_key_version,
-          category,model_id,sku,pinned_tariff,maximum_quantities,activity,policy_id,activation_id,meter_contract_id,authorized_atoms,promo_held_atoms,plan_held_atoms,
-          purchased_held_atoms,spend_budget_hold_id,risk_budget_hold_id,due_at)
-          VALUES (${operation},${account},'prod-eu','fixture',${operation},'digest',1,'llm','fixture','fixture','[]','[]','test',${policy},${activation},
-          'fixture',0,0,0,0,${spendHold},${riskHold},now())`;
-        await transaction`INSERT INTO billing.billing_budget_hold(id,budget_id,operation_id,initial_bound,remaining_held)
-          VALUES (${spendHold},${`${operation}-spend-budget`},${operation},0,0),(${riskHold},${`${operation}-risk-budget`},${operation},0,0)`;
-      });
+      await client`INSERT INTO billing.credit_operation(id,account_id,environment,surface,attempt_key,request_digest,request_key_version,
+        category,model_id,sku,pinned_tariff,maximum_quantities,activity,policy_id,activation_id,meter_contract_id,authorized_atoms,promo_held_atoms,plan_held_atoms,
+        purchased_held_atoms,due_at)
+        VALUES (${operation},${account},'prod-eu','fixture',${operation},'digest',1,'llm','fixture','fixture','[]','[]','test',${policy},${activation},
+        'fixture',0,0,0,0,now())`;
 
       // The worker survives the outage, reports every failed batch and never hot-loops.
       await settle('four failed recovery batches', () => {
@@ -888,9 +887,14 @@ describe('funded LLM recovery worker under a mid-run database outage', () => {
         planHeldAtoms: '0',
         purchasedHeldAtoms: '0',
       });
-      const supplier =
-        await client`SELECT source_revision FROM billing.supplier_cost_evidence WHERE operation_id = ${operation}`;
-      expect(supplier.map((row) => String(row['source_revision']))).toEqual(['proved_no_dispatch_v1']);
+      // An undispatched operation cost the supplier nothing: a known zero on its receipt, and no evidence row.
+      const [supplierCost] =
+        await client`SELECT supplier_cost_pico_usd AS "picoUsd", supplier_cost_unpriced_reason AS "unpricedReason",
+          supplier_state AS "supplierState" FROM billing.credit_operation WHERE id = ${operation}`;
+      expect(supplierCost).toEqual({ picoUsd: '0', unpricedReason: null, supplierState: null });
+      expect(
+        await client`SELECT id FROM billing.supplier_cost_evidence WHERE operation_id = ${operation}`,
+      ).toHaveLength(0);
       const healthy = batches('stdout');
       expect(healthy.every(({ batch }) => batch['providerExecutions'] === 0)).toBe(true);
       expect(healthy.reduce((total, { batch }) => total + Number(batch['resolved'] ?? 0), 0)).toBe(1);

@@ -306,6 +306,19 @@ export class MetricsService {
     },
   );
 
+  public readonly billingSupplierCostPicoUsd = this.apiMeter.createCounter(TauMetrics.billingSupplierCostPicoUsd.name, {
+    description: TauMetrics.billingSupplierCostPicoUsd.description,
+    unit: TauMetrics.billingSupplierCostPicoUsd.unit,
+  });
+
+  public readonly billingSupplierUnpricedOperations = this.apiMeter.createGauge(
+    TauMetrics.billingSupplierUnpricedOperations.name,
+    {
+      description: TauMetrics.billingSupplierUnpricedOperations.description,
+      unit: TauMetrics.billingSupplierUnpricedOperations.unit,
+    },
+  );
+
   public readonly billingProviderAccountRefusals = this.apiMeter.createCounter(
     TauMetrics.billingProviderAccountRefusals.name,
     {

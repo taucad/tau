@@ -30,7 +30,6 @@ export const journalBlockingFinancialCaseKinds: readonly string[] = [
   'journal_resolution_drift',
   'journal_missing_cause',
   'journal_revision_conflict',
-  'journal_budget_residual',
 ];
 
 export type JournalReconciliationReport = {
@@ -62,7 +61,6 @@ const differenceSchema = z.object({
   missingCause: count,
   duplicateRevisions: count,
   revisionAhead: z.boolean(),
-  residualBudgetHolds: count,
   oldestEvidence: z.coerce.date(),
 });
 type Difference = z.infer<typeof differenceSchema>;
@@ -459,14 +457,6 @@ function findingsOf(difference: Difference): readonly Finding[] {
       },
     });
   }
-  if (difference.residualBudgetHolds > 0) {
-    findings.push({
-      kind: 'journal_budget_residual',
-      driftAtoms: 0n,
-      nextStep: 'release_supplier_final_budget_holds',
-      evidence: { residualBudgetHolds: difference.residualBudgetHolds },
-    });
-  }
   return findings;
 }
 
@@ -474,8 +464,8 @@ function findingsOf(difference: Difference): readonly Finding[] {
  * Reads every per-account comparison for the batch in one statement.
  *
  * The four source sums, the pending-operation hold sums and the resolution counts keep the
- * shape of the C09-I3 load-harness invariant queries; held refund intents, uncaused movements,
- * revision conflicts and residual supplier-final budget holds extend them. Per-account,
+ * shape of the C09-I3 load-harness invariant queries; held refund intents, uncaused movements
+ * and revision conflicts extend them. Per-account,
  * per-source comparison is what the internal total cannot do: two opposite missing effects
  * cancel in a global sum and survive here.
  */
@@ -502,7 +492,6 @@ async function readDifferences(
       cause.total::text as "missingCause",
       rev.duplicates::text as "duplicateRevisions",
       (rev.maximum > a.revision) as "revisionAhead",
-      budget.total::text as "residualBudgetHolds",
       coalesce(j.oldest, transaction_timestamp()) as "oldestEvidence"
     from billing.credit_account a
     join lateral (select coalesce(sum(t.promo_delta_atoms), 0) as promo,
@@ -535,10 +524,6 @@ async function readDifferences(
     join lateral (select count(*) - count(distinct t.revision) as duplicates,
         coalesce(max(t.revision), 0) as maximum
       from billing.credit_transaction t where t.account_id = a.id) rev on true
-    join lateral (select count(*) as total from billing.billing_budget_hold bh
-      join billing.credit_operation o on o.id = bh.operation_id
-      where o.account_id = a.id and o.supplier_state in ('final', 'funded_exception')
-        and bh.remaining_held <> 0) budget on true
     where a.environment = ${environment} and a.id in (${identifiers})
     order by a.id`);
   return rows.map((row) => differenceSchema.parse(row));

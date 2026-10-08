@@ -1,7 +1,5 @@
 import { countBillableModelInput } from '#api/billing/billable-model-input-count.js';
-import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
 import { maximumModelRequestBytes } from '#api/billing/billable-model-request.js';
-import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
 import { createHmac } from 'node:crypto';
 import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -10,8 +8,14 @@ import {
   classifyFundedLlmCapacity,
   CreditLedgerService,
 } from '#api/billing/credit-ledger.service.js';
-import { and, eq, inArray } from 'drizzle-orm';
-import { billingAccountClosedError, isBillingAccountClosed, LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import {
+  billingAccountClosedError,
+  billingAccountRestrictedError,
+  isBillingAccountClosed,
+  isBillingAccountRestricted,
+  LlmGatewayError,
+  modelRoutePausedError,
+} from '#api/llm/llm-gateway.error.js';
 import { cloudProviderAccountMessage, recognizeProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
 import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
 import {
@@ -26,9 +30,6 @@ import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stre
 import type { ProviderTerminalFailure } from '#api/llm/provider-account-stream.js';
 import { isGatewayProviderId } from '#api/providers/provider-gateway.js';
 import type { GatewayProviderId } from '#api/providers/provider-gateway.js';
-import { supplierBlockingFinancialCaseKinds } from '#api/billing/billing-supplier-reconciliation.service.js';
-import { billingFinancialCase, creditOperation } from '#database/schema.js';
-import { DatabaseService } from '#database/database.service.js';
 import { billableModelQualificationResolverKey } from '#api/billing/billable-model-invocation.types.js';
 import type {
   BillableInvocationEvidenceCollector,
@@ -36,25 +37,14 @@ import type {
   BillableInvocationResult,
   BillableModelQualificationResolver,
   QualifiedBillableInvocation,
-  SupplierFinalityClassification,
 } from '#api/billing/billable-model-invocation.types.js';
 import type { AdmissionDenied } from '#api/billing/credit-ledger.service.js';
-import type {
-  BillingEnvironment,
-  QualifiedAdmissionInput,
-  TerminalEvidence,
-} from '#api/billing/credit-ledger.types.js';
+import type { QualifiedAdmissionInput, TerminalEvidence, TerminalReceipt } from '#api/billing/credit-ledger.types.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
 type InvocationRow = NonNullable<Awaited<ReturnType<CreditLedgerService['getOperationForAttempt']>>>;
 const requestKeyVersion = 1;
-const environment = (value: string): BillingEnvironment => {
-  if (value === 'development' || value === 'staging' || value === 'prod-us' || value === 'prod-eu') {
-    return value;
-  }
-  throw new Error('Stored billing environment is invalid');
-};
 const requestTooLarge = (): LlmGatewayError =>
   new LlmGatewayError(HttpStatus.PAYLOAD_TOO_LARGE, 'REQUEST_TOO_LARGE', 'Model request is larger than Tau accepts.', {
     maximumBytes: maximumModelRequestBytes,
@@ -164,13 +154,6 @@ export class BillableModelInvocationService {
     private readonly config: ConfigService,
     // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
     @Optional() private readonly metrics?: MetricsService,
-    /* Ponytail: optional so the C05 child harness keeps its three-argument
-     * construction; Nest always supplies it, and the route pause is skipped
-     * only where no database is wired at all. */
-    // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
-    @Optional()
-    @Inject(DatabaseService)
-    private readonly database?: Pick<DatabaseService, 'database'>,
     // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
     @Optional() private readonly shutdown?: ShutdownService,
   ) {}
@@ -180,7 +163,7 @@ export class BillableModelInvocationService {
       return await this.invokeBound(suppliedIntent);
     } catch (error) {
       if (isBillingAccountClosed(error)) {
-        throw billingAccountClosedError();
+        throw isBillingAccountRestricted(error) ? billingAccountRestrictedError() : billingAccountClosedError();
       }
       throw error;
     }
@@ -234,7 +217,6 @@ export class BillableModelInvocationService {
     startedAt: number,
   ): Promise<BillableInvocationResult> {
     let qualification = resolved;
-    await this.assertRouteNotPaused(intent, qualification);
     const selectedCount = qualification.inputCount;
     let countSignal: AbortSignal | undefined;
     if (selectedCount !== undefined && !selectedCount.capability) {
@@ -262,17 +244,6 @@ export class BillableModelInvocationService {
           replica: qualification.replica,
           executionTimeout: qualification.invocation.executionTimeout,
           minimumOutput: qualification.maximumQuantities.find((meter) => meter.dimension === 'output')!.quantity,
-          minimumSupplierPicoUsd: maximumMeterCharge(
-            qualification.invocation.supplierRates.map((rate) => ({
-              dimension: rate.dimension,
-              quantity:
-                rate.dimension === 'output'
-                  ? qualification.maximumQuantities.find((meter) => meter.dimension === 'output')!.quantity
-                  : 0n,
-              numerator: BigInt(rate.numeratorPicoUsd),
-              denominator: BigInt(rate.denominatorUnits),
-            })),
-          ),
         };
         let eligible = await this.ledger.inputCountEligibility(eligibilityInput);
         if (eligible.status === 'denied' && eligible.reason === 'concurrency_unavailable') {
@@ -317,17 +288,6 @@ export class BillableModelInvocationService {
         qualification = {
           ...qualification,
           maximumQuantities,
-          supplierMaximumPicoUsd: maximumMeterCharge(
-            qualification.invocation.supplierRates.map((rate) => ({
-              dimension: rate.dimension,
-              quantity: maximumQuantities.find(
-                (meter) => meter.dimension === rate.dimension && meter.tier === rate.tier,
-              )!.quantity,
-              numerator: BigInt(rate.numeratorPicoUsd),
-              denominator: BigInt(rate.denominatorUnits),
-            })),
-            jointInputMaximum,
-          ),
           invocation: {
             ...qualification.invocation,
             jointInputMaximum,
@@ -368,7 +328,6 @@ export class BillableModelInvocationService {
       activity: intent.activity,
       sku: qualification.sku,
       maximumQuantities: qualification.maximumQuantities,
-      supplierMaximumPicoUsd: qualification.supplierMaximumPicoUsd,
       replica: qualification.replica,
       invocation: {
         ...qualification.invocation,
@@ -773,21 +732,6 @@ export class BillableModelInvocationService {
             ? 'none'
             : 'other',
     });
-    const finality = qualification.adapter.classifyFinality({
-      qualification,
-      evidence,
-    });
-    await this.recordSupplierEvidence(row, qualification, finality);
-    if (finality.state === 'final' && finality.supplierEvidence?.completeness === 'complete') {
-      await this.ledger.finalizeRecordedSupplierEvidence({
-        operationId: row.id,
-        accountId: row.accountId,
-        requestDigest: row.requestDigest,
-        expectedGeneration: generation,
-        payloadDigest: finality.supplierEvidence.payloadDigest,
-        sourceRevision: finality.supplierEvidence.sourceRevision,
-      });
-    }
     if (evidence.kind === 'absorbed_unknown' && !cutByStop) {
       return;
     }
@@ -798,28 +742,36 @@ export class BillableModelInvocationService {
       expectedGeneration: generation,
       evidence,
       resolvedAt: new Date(),
-      // Recovery's own reason for expiring an absorbed hold: no supplier evidence is coming.
-      ...(cutByStop ? { expireSpendHold: true } : {}),
     });
-    this.recordSettledUsage(qualification, row, evidence, receipt.chargedAtoms);
+    this.recordSettledUsage(qualification, row, evidence, receipt);
   }
 
   /**
-   * Records the tokens and charged USD of one operation this service settled, written together so
-   * the two series reconcile. An operation left pending for recovery records neither here, and
-   * recovery's own settlement is not recorded either (a known gap in both series).
+   * Records the tokens, charged USD and estimated supplier cost of one operation this service
+   * settled, written together so the series reconcile: the supplier counter carries the same model
+   * and provider labels as the charge, so their ratio is the route's margin. An operation left
+   * pending for recovery records none of them here, and recovery's own settlement is not recorded
+   * either (a known gap; the unpriced-operations gauge reads the receipts themselves).
    */
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one settled operation
   private recordSettledUsage(
     qualification: QualifiedBillableInvocation,
     row: InvocationRow,
     evidence: TerminalEvidence,
-    chargedAtoms: bigint,
+    receipt: Pick<TerminalReceipt, 'chargedAtoms' | 'supplierCostPicoUsd'>,
   ): void {
-    this.metrics?.genAiCost.add(Number(chargedAtoms) / creditAtomsPerUsd, {
+    this.metrics?.genAiCost.add(Number(receipt.chargedAtoms) / creditAtomsPerUsd, {
       ...genAiAttributes(qualification),
       'tau.activity': row.activity,
     });
+    // A refusal or an undispatched call cost nothing, and an unpriced one is counted by the gauge instead.
+    if (receipt.supplierCostPicoUsd !== null && receipt.supplierCostPicoUsd > 0n) {
+      this.metrics?.billingSupplierCostPicoUsd.add(Number(receipt.supplierCostPicoUsd), {
+        'gen_ai.request.model': qualification.modelId,
+        'gen_ai.provider.name': qualification.providerId,
+        'deployment.environment': row.environment,
+      });
+    }
     // A stop-cut absorbed turn settles at zero; its partial meters are not usage it was charged for.
     const meterItems =
       evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
@@ -849,35 +801,6 @@ export class BillableModelInvocationService {
       ...genAiAttributes(qualification),
       'error.type': errorType,
     });
-  }
-
-  private async recordSupplierEvidence(
-    row: InvocationRow,
-    qualification: QualifiedBillableInvocation,
-    finality: SupplierFinalityClassification,
-  ): Promise<void> {
-    if (!finality.supplierEvidence) {
-      return;
-    }
-    const evidence = finality.supplierEvidence;
-    const outcome = await this.ledger.appendSupplierEvidence({
-      operationId: row.id,
-      environment: environment(row.environment),
-      provider: qualification.providerId,
-      credentialAccount: qualification.invocation.credentialAccount,
-      sourceObjectId: row.id,
-      sourceRevision: evidence.sourceRevision,
-      payloadDigest: evidence.payloadDigest,
-      currency: evidence.currency,
-      numerator: BigInt(evidence.numerator),
-      denominator: BigInt(evidence.denominator),
-      completeness: evidence.completeness,
-      finality: finality.state === 'final' ? 'final' : 'preliminary',
-      receivedAt: new Date(),
-    });
-    if (outcome === 'conflict') {
-      throw new Error('Conflicting supplier evidence');
-    }
   }
 
   private async operation(intent: BillableInvocationIntent): ReturnType<CreditLedgerService['getOperationForAttempt']> {
@@ -971,61 +894,6 @@ export class BillableModelInvocationService {
       });
       throw this.recoveryUnavailable();
     }
-  }
-
-  /**
-   * Refuses a route whose supplier evidence an operator still owns (B7 R7, S3).
-   *
-   * Only the three operation-scoped supplier case kinds name a route, and they
-   * name it through the case's own source operation rather than its evidence
-   * JSON, so `source_type = 'credit_operation'` is what separates them from the
-   * aggregate `supplier_charge_unmatched` and the environment-level
-   * `supplier_invoice_total_mismatch` — neither of which is a route fault.
-   *
-   * @param intent - The invocation being admitted.
-   * @param qualification - Its resolved route.
-   */
-  private async assertRouteNotPaused(
-    intent: BillableInvocationIntent,
-    qualification: QualifiedBillableInvocation,
-  ): Promise<void> {
-    if (!this.database) {
-      return;
-    }
-    const [paused] = await this.database.database
-      .select({ id: billingFinancialCase.id })
-      .from(billingFinancialCase)
-      .innerJoin(creditOperation, eq(creditOperation.id, billingFinancialCase.sourceId))
-      .where(
-        and(
-          eq(billingFinancialCase.environment, intent.environment),
-          eq(billingFinancialCase.sourceType, 'credit_operation'),
-          inArray(billingFinancialCase.kind, supplierBlockingFinancialCaseKinds),
-          inArray(billingFinancialCase.state, ['open', 'attention']),
-          eq(creditOperation.environment, intent.environment),
-          // A pause covers the whole route: its base sku and its `:long-context` sibling.
-          inArray(creditOperation.sku, routeSkuFamily(qualification.sku)),
-        ),
-      )
-      .limit(1);
-    if (!paused) {
-      return;
-    }
-    const { pool } = classifyFundedLlmCapacity(intent.activity);
-    this.metrics?.billingFundedOperationDenials.add(1, {
-      'deployment.environment': intent.environment,
-      'tau.billing.capacity_pool': pool,
-      'tau.billing.denial.reason': 'supplier_route_paused',
-    });
-    this.logger.warn(`Funded admission denied: supplier_route_paused for ${qualification.sku} by case ${paused.id}`);
-    throw classified(
-      new LlmGatewayError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        'PROVIDER_UNAVAILABLE',
-        'This model route is paused while Tau reconciles its supplier evidence.',
-      ),
-      'route_paused',
-    );
   }
 
   /**
@@ -1139,6 +1007,18 @@ export class BillableModelInvocationService {
         'ATTEMPT_VOIDED',
         'This model request was abandoned by its client and will not run.',
       );
+    }
+    if (reason === 'route_paused') {
+      const { pool } = classifyFundedLlmCapacity(intent.activity);
+      this.metrics?.billingFundedOperationDenials.add(1, {
+        'deployment.environment': intent.environment,
+        'tau.billing.capacity_pool': pool,
+        'tau.billing.denial.reason': 'operator_route_paused',
+      });
+      return modelRoutePausedError(routeId);
+    }
+    if (reason === 'account_restricted') {
+      return billingAccountRestrictedError();
     }
     if (reason === 'concurrency_unavailable') {
       const { pool } = classifyFundedLlmCapacity(intent.activity);

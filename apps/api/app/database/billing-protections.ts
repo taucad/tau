@@ -24,8 +24,21 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await transaction`GRANT SELECT ON billing.billing_policy, billing.billing_policy_activation,
       billing.billing_policy_activation_cancellation, billing.billing_policy_head TO tau_billing_policy_publisher`;
     await transaction`GRANT INSERT ON billing.credit_account, billing.billing_owner_binding, billing.credit_operation,
-      billing.credit_transaction, billing.credit_attempt_void, billing.billing_budget_hold, billing.supplier_cost_evidence, billing.billing_invocation_evidence, billing.billing_operation_exception,
-      billing.billing_route_pause, billing.billing_purchase, billing.billing_period, billing.billing_promotion_issuance, billing.billing_reversal_case TO tau_billing_runtime`;
+      billing.credit_transaction, billing.credit_attempt_void, billing.billing_invocation_evidence, billing.billing_operation_exception,
+      billing.billing_purchase, billing.billing_period, billing.billing_promotion_issuance, billing.billing_reversal_case TO tau_billing_runtime`;
+    /* The runtime only reads route pauses (owner-identity commands write them) and no longer writes supplier
+     * holds, supplier evidence or supplier finality. Grants persist across script runs, so an upgraded database
+     * revokes what earlier versions of this script granted; the guards keep it valid once the tables are dropped. */
+    await transaction`REVOKE INSERT, UPDATE, DELETE ON billing.billing_route_pause FROM tau_billing_runtime`;
+    await transaction`REVOKE UPDATE (supplier_state) ON billing.credit_operation FROM tau_billing_runtime`;
+    await transaction`DO $$ BEGIN
+      IF to_regclass('billing.billing_budget_hold') IS NOT NULL THEN
+        REVOKE INSERT, UPDATE ON billing.billing_budget_hold FROM tau_billing_runtime;
+      END IF;
+      IF to_regclass('billing.supplier_cost_evidence') IS NOT NULL THEN
+        REVOKE INSERT ON billing.supplier_cost_evidence FROM tau_billing_runtime;
+      END IF;
+    END $$`;
     await transaction`GRANT INSERT ON billing.billing_stripe_customer, billing.billing_provider_leg,
       billing.stripe_event_inbox, billing.billing_stripe_source TO tau_billing_runtime`;
     await transaction`GRANT INSERT ON billing.billing_reload_consent, billing.billing_reload_work,
@@ -89,12 +102,12 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
       ON billing.credit_account TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (revoked_at) ON billing.billing_owner_binding TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (consumed, held) ON billing.billing_budget, billing.billing_budget_funding TO tau_billing_runtime`;
-    await transaction`GRANT UPDATE (remaining_held, consumed, finality_state) ON billing.billing_budget_hold TO tau_billing_runtime`;
     await transaction`GRANT UPDATE (net_applied_atoms) ON billing.billing_reversal_case TO tau_billing_runtime`;
-    await transaction`GRANT UPDATE (dispatch_state, customer_state, supplier_state, generation, lease_until,
+    await transaction`GRANT UPDATE (dispatch_state, customer_state, generation, lease_until,
       due_at, usage_occurred_at, resolved_at, terminal_revision, base_transaction_id, charged_atoms, actual_retail_atoms,
       meter_items, input_tokens, output_tokens, dispatch_intent_at, evidence_occurred_at,
-      execution_status, metering_status, reasoning_tokens, normalization_evidence, cancellation_requested_at) ON billing.credit_operation TO tau_billing_runtime`;
+      execution_status, metering_status, reasoning_tokens, normalization_evidence, cancellation_requested_at,
+      supplier_cost_pico_usd, supplier_cost_unpriced_reason) ON billing.credit_operation TO tau_billing_runtime`;
     await transaction`GRANT INSERT ON billing.billing_policy, billing.billing_policy_activation,
       billing.billing_policy_activation_cancellation TO tau_billing_policy_publisher`;
     await transaction`REVOKE ALL ON billing.billing_policy_head FROM tau_billing_runtime, tau_billing_policy_publisher`;
@@ -230,17 +243,19 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
         END IF;
         IF OLD.cancellation_requested_at IS NOT NULL AND NEW.cancellation_requested_at IS DISTINCT FROM OLD.cancellation_requested_at
         THEN RAISE EXCEPTION 'immutable cancellation intent' USING ERRCODE = '23514'; END IF;
-        IF (to_jsonb(OLD) - ARRAY['cancellation_requested_at','dispatch_state','customer_state','supplier_state','generation','lease_until','due_at',
+        IF (to_jsonb(OLD) - ARRAY['cancellation_requested_at','dispatch_state','customer_state','generation','lease_until','due_at',
              'usage_occurred_at','dispatch_intent_at','evidence_occurred_at','execution_status','metering_status',
-             'reasoning_tokens','normalization_evidence','resolved_at','terminal_revision','base_transaction_id','charged_atoms','actual_retail_atoms','meter_items','input_tokens','output_tokens'])
+             'reasoning_tokens','normalization_evidence','resolved_at','terminal_revision','base_transaction_id','charged_atoms','actual_retail_atoms','meter_items','input_tokens','output_tokens',
+             'supplier_cost_pico_usd','supplier_cost_unpriced_reason'])
           IS DISTINCT FROM
-           (to_jsonb(NEW) - ARRAY['cancellation_requested_at','dispatch_state','customer_state','supplier_state','generation','lease_until','due_at',
+           (to_jsonb(NEW) - ARRAY['cancellation_requested_at','dispatch_state','customer_state','generation','lease_until','due_at',
              'usage_occurred_at','dispatch_intent_at','evidence_occurred_at','execution_status','metering_status',
-             'reasoning_tokens','normalization_evidence','resolved_at','terminal_revision','base_transaction_id','charged_atoms','actual_retail_atoms','meter_items','input_tokens','output_tokens'])
+             'reasoning_tokens','normalization_evidence','resolved_at','terminal_revision','base_transaction_id','charged_atoms','actual_retail_atoms','meter_items','input_tokens','output_tokens',
+             'supplier_cost_pico_usd','supplier_cost_unpriced_reason'])
         THEN RAISE EXCEPTION 'immutable operation admission' USING ERRCODE = '23514'; END IF;
         IF OLD.customer_state <> 'pending' AND
-          (to_jsonb(OLD) - ARRAY['supplier_state','generation','lease_until','due_at']) IS DISTINCT FROM
-          (to_jsonb(NEW) - ARRAY['supplier_state','generation','lease_until','due_at'])
+          (to_jsonb(OLD) - ARRAY['generation','lease_until','due_at']) IS DISTINCT FROM
+          (to_jsonb(NEW) - ARRAY['generation','lease_until','due_at'])
         THEN RAISE EXCEPTION 'immutable terminal receipt' USING ERRCODE = '23514'; END IF;
         IF NEW.generation < OLD.generation THEN RAISE EXCEPTION 'stale operation generation' USING ERRCODE = '23514'; END IF;
         RETURN NEW;
@@ -261,30 +276,18 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await transaction`CREATE TRIGGER protect_owner_binding BEFORE UPDATE ON billing.billing_owner_binding
       FOR EACH ROW EXECUTE FUNCTION billing.protect_owner_binding()`;
     await transaction`REVOKE ALL ON FUNCTION billing.protect_owner_binding() FROM PUBLIC`;
-    await transaction`CREATE OR REPLACE FUNCTION billing.require_operation_holds() RETURNS trigger
+    await transaction`CREATE OR REPLACE FUNCTION billing.protect_route_pause() RETURNS trigger
       LANGUAGE plpgsql SET search_path = pg_catalog AS $$ BEGIN
-        IF NEW.spend_budget_hold_id = NEW.risk_budget_hold_id OR
-          NOT EXISTS (SELECT FROM billing.billing_budget_hold h JOIN billing.billing_budget b ON b.id = h.budget_id
-            WHERE h.id = NEW.spend_budget_hold_id AND h.operation_id = NEW.id AND b.environment = NEW.environment AND b.kind = 'spend') OR
-          NOT EXISTS (SELECT FROM billing.billing_budget_hold h JOIN billing.billing_budget b ON b.id = h.budget_id
-            WHERE h.id = NEW.risk_budget_hold_id AND h.operation_id = NEW.id AND b.environment = NEW.environment AND b.kind = 'risk')
-        THEN RAISE EXCEPTION 'operation requires its own spend and risk holds' USING ERRCODE = '23503'; END IF;
+        IF OLD.resumed_at IS NOT NULL OR NEW.resumed_at IS NULL OR NEW.resumed_by IS NULL OR NEW.resume_reason IS NULL
+          OR (to_jsonb(OLD) - ARRAY['resumed_at','resumed_by','resume_reason'])
+            IS DISTINCT FROM (to_jsonb(NEW) - ARRAY['resumed_at','resumed_by','resume_reason'])
+        THEN RAISE EXCEPTION 'a route pause is only ever resumed, once' USING ERRCODE = '23514'; END IF;
         RETURN NEW;
       END $$`;
-    await transaction`DROP TRIGGER IF EXISTS require_operation_holds ON billing.credit_operation`;
-    await transaction`CREATE CONSTRAINT TRIGGER require_operation_holds AFTER INSERT ON billing.credit_operation
-      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION billing.require_operation_holds()`;
-    await transaction`CREATE OR REPLACE FUNCTION billing.protect_budget_hold() RETURNS trigger
-      LANGUAGE plpgsql SET search_path = pg_catalog AS $$ BEGIN
-        IF TG_OP = 'DELETE' OR ROW(OLD.id,OLD.budget_id,OLD.operation_id,OLD.initial_bound)
-          IS DISTINCT FROM ROW(NEW.id,NEW.budget_id,NEW.operation_id,NEW.initial_bound)
-        THEN RAISE EXCEPTION 'immutable budget hold cause' USING ERRCODE = '23514'; END IF;
-        RETURN NEW;
-      END $$`;
-    await transaction`DROP TRIGGER IF EXISTS protect_budget_hold ON billing.billing_budget_hold`;
-    await transaction`CREATE TRIGGER protect_budget_hold BEFORE UPDATE OR DELETE ON billing.billing_budget_hold
-      FOR EACH ROW EXECUTE FUNCTION billing.protect_budget_hold()`;
-    await transaction`REVOKE ALL ON FUNCTION billing.require_operation_holds(), billing.protect_budget_hold() FROM PUBLIC`;
+    await transaction`DROP TRIGGER IF EXISTS protect_route_pause ON billing.billing_route_pause`;
+    await transaction`CREATE TRIGGER protect_route_pause BEFORE UPDATE ON billing.billing_route_pause
+      FOR EACH ROW EXECUTE FUNCTION billing.protect_route_pause()`;
+    await transaction`REVOKE ALL ON FUNCTION billing.protect_route_pause() FROM PUBLIC`;
     await transaction`REVOKE ALL ON FUNCTION billing.reject_immutable_change(), billing.protect_operation() FROM PUBLIC`;
     await transaction`DROP TRIGGER IF EXISTS immutable_billing_fact ON billing.billing_period`;
     await transaction`CREATE OR REPLACE FUNCTION billing.protect_payment_identity() RETURNS trigger

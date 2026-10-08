@@ -85,6 +85,27 @@ describe('@taucad/mcp', () => {
     expect(new Set(ids).size).toBe(2);
   });
 
+  it('captures a single isometric image when an MCP client omits screenshot mode', async () => {
+    const calls: unknown[] = [];
+    const server = createTauMcpServer({
+      dispatch: async (call) => {
+        calls.push(call);
+        return { success: false, errorCode: 'RENDER_TIMEOUT', message: 'Renderer did not settle.' };
+      },
+    });
+    const client = new Client({ name: 'tau-mcp-test', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      await client.callTool({ name: toolName.screenshot, arguments: { targetFile: 'main.ts', view: 'model' } });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+
+    expect(calls).toMatchObject([{ args: { targetFile: 'main.ts', mode: 'single' } }]);
+  });
+
   it('maps export requests to the canonical RPC and forwards cancellation metadata', async () => {
     const dispatchMock = vi.fn();
     const dispatch: TauMcpDispatch = async (call, options) => {

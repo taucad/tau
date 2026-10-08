@@ -16,6 +16,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { financialEnvironmentSchema } from '@taucad/billing';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { BillingRecoveryScheduler } from '#api/billing/billing-recovery.scheduler.js';
 import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
 import {
   BillingCashReconciliationService,
@@ -346,107 +347,21 @@ async function main(): Promise<void> {
         };
         process.once('SIGINT', stop);
         process.once('SIGTERM', stop);
+        // The same pass the API's in-process scheduler runs, metrics included: this worker is optional scale-out.
+        const recovery = new BillingRecoveryScheduler(ledger, metrics, {
+          environment: billingEnvironment,
+          intervalMilliseconds: pollMilliseconds,
+          limit,
+        });
         let consecutiveFailures = 0;
         try {
           while (!shutdown.signal.aborted) {
-            let failed = 0;
-            let batchThrew = false;
-            let fullBatch = false;
-            for (const pool of ['primary', 'helper'] as const) {
-              const startedAt = Date.now();
-              const attributes = {
-                'deployment.environment': billingEnvironment,
-                'tau.billing.capacity_pool': pool,
-              } as const;
-              metrics.billingFundedOperationRecoveries.add(1, {
-                ...attributes,
-                'tau.billing.recovery.outcome': 'attempted',
-              });
-              try {
-                // oxlint-disable-next-line no-await-in-loop -- the two disjoint capacity pools share one bounded DB connection
-                const result = await ledger.recoverDueLlmOperations({
-                  environment: billingEnvironment,
-                  limit,
-                  pool,
-                });
-                failed += result.failedOperationIds.length;
-                fullBatch ||= result.claimed === limit;
-                if (result.claimed > 0) {
-                  metrics.billingFundedOperationRecoveries.add(result.claimed, {
-                    ...attributes,
-                    'tau.billing.recovery.outcome': 'claimed',
-                  });
-                }
-                if (result.resolved > 0) {
-                  metrics.billingFundedOperationRecoveries.add(result.resolved, {
-                    ...attributes,
-                    'tau.billing.recovery.outcome': 'resolved',
-                  });
-                }
-                if (result.failedOperationIds.length > 0) {
-                  metrics.billingFundedOperationRecoveries.add(result.failedOperationIds.length, {
-                    ...attributes,
-                    'tau.billing.recovery.outcome': 'failed',
-                  });
-                }
-                metrics.billingFundedOperationCurrent.record(result.pending, {
-                  ...attributes,
-                  'tau.billing.pending.state': 'pending',
-                });
-                metrics.billingFundedOperationCurrent.record(result.remainingDue, {
-                  ...attributes,
-                  'tau.billing.pending.state': 'due',
-                });
-                metrics.billingFundedOperationOldestDueAge.record(result.oldestDueAgeMilliseconds ?? 0, attributes);
-                metrics.billingFundedOperationRecoveryProviderExecutions.record(0, attributes);
-                metrics.billingFundedOperationRecoveryBatchDuration.record((Date.now() - startedAt) / 1000, {
-                  ...attributes,
-                  'tau.billing.recovery.batch.outcome': result.failedOperationIds.length === 0 ? 'succeeded' : 'failed',
-                });
-                console.log(
-                  JSON.stringify({
-                    event: 'billing.llm_recovery_batch',
-                    environment,
-                    pool,
-                    claimed: result.claimed,
-                    resolved: result.resolved,
-                    pending: result.pending,
-                    remainingDue: result.remainingDue,
-                    leasedDue: result.leasedDue,
-                    oldestDueAgeMilliseconds: result.oldestDueAgeMilliseconds,
-                    failed: result.failedOperationIds.length,
-                    providerExecutions: 0,
-                    durationMilliseconds: Date.now() - startedAt,
-                  }),
-                );
-              } catch (error) {
-                failed += 1;
-                batchThrew = true;
-                metrics.billingFundedOperationRecoveries.add(1, {
-                  ...attributes,
-                  'tau.billing.recovery.outcome': 'failed',
-                });
-                metrics.billingFundedOperationRecoveryBatchDuration.record((Date.now() - startedAt) / 1000, {
-                  ...attributes,
-                  'tau.billing.recovery.batch.outcome': 'failed',
-                });
-                console.error(
-                  JSON.stringify({
-                    event: 'billing.llm_recovery_batch',
-                    environment,
-                    pool,
-                    outcome: 'failed',
-                    failureKind: error instanceof Error ? error.name : 'UnknownError',
-                    durationMilliseconds: Date.now() - startedAt,
-                  }),
-                );
-              }
+            // oxlint-disable-next-line no-await-in-loop -- the continuous worker runs one pass at a time
+            const { failed, fullBatch, batches } = await recovery.runOnce();
+            for (const batch of batches) {
+              (batch.outcome === 'failed' ? console.error : console.log)(JSON.stringify(batch));
             }
             consecutiveFailures = failed === 0 ? 0 : consecutiveFailures + 1;
-            /* F-10: the per-pass gauges keep exporting their last value, so a stalled worker is only visible here.
-               A pass is `error` only when a batch threw: one operation that keeps failing recovery is counted
-               by `recoveries{failed}`, and must not make a live worker read as stalled. */
-            metrics.billingWorkerPasses.add(1, { 'tau.worker': 'recovery', outcome: batchThrew ? 'error' : 'ok' });
             if (fullBatch && failed === 0) {
               continue;
             }
@@ -678,6 +593,12 @@ async function main(): Promise<void> {
             );
             if (Date.now() - lastScanAt >= scanIntervalMilliseconds) {
               lastScanAt = Date.now();
+              // Refused calls recorded as cost-unknown before the collector kept their kind: finalized
+              // at zero first, so the sweep closes their route-pausing cases instead of reopening them.
+              // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+              await runJob('billing.rejected_supplier_repair', async () =>
+                ledger.finalizeRejectedSupplierLiabilities({ environment: billingEnvironment, limit: 100 }),
+              );
               // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
               await runJob('billing.supplier_sweep', async () =>
                 supplier.sweepSupplierUsage({ pageSize: 100, unresolvedMaximumAge: dayMilliseconds }),

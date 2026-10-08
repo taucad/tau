@@ -184,7 +184,9 @@ const environmentSchemaBase = z.object({
     .int()
     .min(1000)
     .max(300_000)
-    .default(30_000)
+    // 5 s, the poll of the retired `billing-recovery` worker: this is now the only deployed clock, and the
+    // recovery SLO (oldest due operation under 30 s) cannot hold if a pass can be 30 s away.
+    .default(5000)
     .describe('Milliseconds between in-process funded-operation recovery passes; every API replica polls'),
   BILLING_EXACT_INPUT_COUNT: z
     .enum(['true', 'false'])

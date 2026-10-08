@@ -1019,9 +1019,10 @@ const ViewerContent = memo(function ({
         }));
       }}
     >
-      {/* Status overlays. In the editor the view menus, the build status and a view notice live in the bottom bar. */}
-      <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
-        <ChatViewerStatus shouldShowLoading={profile !== 'editor'} />
+      {/* Status overlays: the running build phase at the top, in the bar's skin, so the bar below never moves for it.
+          In the editor the view menus, the failure and a view notice live in the bottom bar. */}
+      <div className='absolute top-2 right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
+        <ChatViewerStatus />
         {unavailable && profile !== 'editor' ? (
           <div role='alert' className='rounded-md border border-border bg-background/95 p-3 text-sm shadow-sm'>
             <p>{unavailable}</p>

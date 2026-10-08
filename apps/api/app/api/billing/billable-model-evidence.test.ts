@@ -429,6 +429,23 @@ describe('createBillableModelEvidenceCollector', () => {
       },
     });
   });
+  /* A supplier that answered with a status ran nothing: the refusal keeps its own kind and settles
+   * released at zero, instead of waiting on supplier evidence that can never come and pausing the
+   * route a day later (the staging Haiku 4.5 pause of 2026-10-08). */
+  it('should settle a provider refusal as rejected rather than absorbing it', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'anthropic',
+      new Set(['uncached_input', 'cache_read', 'cache_write', 'output']),
+      'anthropic',
+    );
+
+    expect(collector.failed('provider_rejected')).toEqual({
+      kind: 'provider_rejected',
+      executionStatus: 'rejected',
+      normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_rejected', fields: {} },
+    });
+  });
+
   /* B7 I3 / R8 + W4: `executionStatus` alone cannot separate a ceiling cut from an abort. */
   it.each([
     ['authorized_exhausted', 'authorized_exhausted'],

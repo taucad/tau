@@ -1,6 +1,6 @@
 ---
 name: regen-sprite
-description: Regenerates the checked-in UI SVG sprite and icon-id declaration from raw SVG icons. Use after changing UI icons, including composition by add-logo.
+description: Regenerates the checked-in UI SVG sprite and icon-id declaration from raw SVG icons. Use after changing UI icons, including composition by create-logo.
 ---
 
 # Regenerate UI SVG Sprite

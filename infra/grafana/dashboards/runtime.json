@@ -39,7 +39,7 @@
     {
       "title": "Processes Up",
       "type": "stat",
-      "description": "Scrape health of each Tau process: the local stand-in for Fly's health checks. Expected 3 (app, billing-recovery, billing-operations).",
+      "description": "Scrape health of each Tau process: the local stand-in for Fly's health checks. Expected 2 (app, billing-operations), 3 if the optional billing-recovery target runs.",
       "targets": [{ "expr": "count(process_uptime{service_name=~\"$service\"}) or vector(0)" }],
       "gridPos": { "h": 5, "w": 4, "x": 0, "y": 1 }
     },

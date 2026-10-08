@@ -3058,7 +3058,11 @@ describe('credit operation model (GI-S2, GI-A4)', () => {
   });
 
   /** One seeded sequence on a fresh owner, so the account's held total and the sweep see only this row. */
-  const runSequence = async (fixture: Fixture, seed: number): Promise<void> => {
+  const runSequence = async (
+    fixture: Fixture,
+    seed: number,
+    pinned?: readonly OracleCommand[],
+  ): ReturnType<typeof observe> => {
     const next = random(seed);
     const authUserId = `model-${seed}-${randomUUID()}`;
     await firstDatabase
@@ -3068,7 +3072,8 @@ describe('credit operation model (GI-S2, GI-A4)', () => {
     await firstDatabase.update(creditAccount).set({ purchasedAtoms: 1000n }).where(eq(creditAccount.id, accountId));
     const request = { ...admission(fixture, `model-${seed}`, BigInt(oracleAuthorizedAtoms)), authUserId };
     const sequence = { environment: fixture.environment, accountId, request };
-    const commands = Array.from({ length: 4 + Math.floor(next() * 10) }, () => commandFor(next));
+    const commands = pinned ?? Array.from({ length: 4 + Math.floor(next() * 10) }, () => commandFor(next));
+    expect(commands, `seed ${seed}: an empty sequence checks nothing`).not.toHaveLength(0);
     let model = initialOracleState;
     for (const [index, command] of commands.entries()) {
       const expected = step(model, command);
@@ -3085,7 +3090,23 @@ describe('credit operation model (GI-S2, GI-A4)', () => {
       expect(await observe(accountId), context).toEqual(expectedOf(expected.state));
       model = expected.state;
     }
+    return observe(accountId);
   };
+
+  it('should release a recovered turn whose only stored observation is a provider rejection', async () => {
+    // Seed 68058 on main after #407: the oracle absorbed a stored rejection the ledger releases.
+    const fixture = await createFixture();
+    const { heldAtoms, row } = await runSequence(fixture, 68_058, [
+      { kind: 'admit' },
+      { kind: 'accept', stale: false },
+      { kind: 'evidence', evidence: 'rejected' },
+      { kind: 'intent', stale: false },
+      { kind: 'tick', minutes: 5 },
+      { kind: 'recover' },
+    ]);
+    expect(heldAtoms).toBe(0);
+    expect(row).toMatchObject({ customer: 'released', dispatch: 'recovery_required', evidence: ['rejected'] });
+  });
 
   it('should match the transition oracle on random command sequences', async () => {
     const fixture = await createFixture();

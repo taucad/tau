@@ -1188,7 +1188,8 @@ describe('BillableModelInvocationService', () => {
    * settles as provider_rejected, so the customer is charged nothing for it. */
   it('should refuse with the opaque provider-account code when the supplier account is exhausted before the stream', async () => {
     const qualified = qualification();
-    const failed = vi.fn(() => ({ kind: 'absorbed_unknown' }) as const);
+    const rejected = { kind: 'provider_rejected', executionStatus: 'rejected' } as const;
+    const failed = vi.fn(() => rejected);
     qualified.adapter.createEvidenceCollector = () => ({
       accept: vi.fn(),
       complete: () => ({ kind: 'absorbed_unknown' }),
@@ -1220,8 +1221,10 @@ describe('BillableModelInvocationService', () => {
       });
     }
     expect(failed).toHaveBeenCalledWith('provider_rejected');
-    expect(ledger.recordInvocationEvidence).toHaveBeenCalledWith(
-      expect.objectContaining({ evidence: { kind: 'absorbed_unknown' } }),
+    expect(ledger.recordInvocationEvidence).toHaveBeenCalledWith(expect.objectContaining({ evidence: rejected }));
+    // A refusal is settled now, not left to recovery: nothing can price a call that never ran.
+    expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ evidence: rejected }),
     );
     // W7: the refusal is counted by provider, never by customer or sentence.
     expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledWith(1, {
@@ -1232,9 +1235,10 @@ describe('BillableModelInvocationService', () => {
   });
 
   /* F-11: through the funded gateway the upstream key is Tau's, so a 401 is a supplier-account
-   * failure that pages, while the caller still sees only the opaque unavailable answer. */
+   * failure that pages, while the caller sees the same opaque supplier-account answer as an
+   * exhausted account: resuming cannot change it, so the host never offers to. */
   it.each([401, 403])(
-    'should count an upstream %i as a credential_rejected supplier refusal and answer PROVIDER_UNAVAILABLE',
+    'should count an upstream %i as a credential_rejected supplier refusal and answer PROVIDER_ACCOUNT_EXHAUSTED',
     async (status) => {
       const qualified = qualification();
       qualified.adapter.executeOnce = vi.fn(
@@ -1252,7 +1256,12 @@ describe('BillableModelInvocationService', () => {
       expect((error as LlmGatewayError).getStatus()).toBe(503);
       expect((error as LlmGatewayError).getResponse()).toEqual({
         type: 'error',
-        error: { type: 'PROVIDER_UNAVAILABLE', message: expect.not.stringContaining('x-api-key') as unknown },
+        error: {
+          type: 'PROVIDER_ACCOUNT_EXHAUSTED',
+          // The supplier's own sentence never leaves the API.
+          message: "The model provider's account is unavailable.",
+          details: { providerId: 'openai', providerCode: 'credential_rejected', accountOwner: 'tau' },
+        },
       });
       expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledOnce();
       expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledWith(1, {

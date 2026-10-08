@@ -242,6 +242,140 @@ describe('channel stream flow control', () => {
     }
   });
 
+  it('snapshots own record values before recursively charging nested getters', async () => {
+    const { server, client } = startPair(channel);
+    const order: string[] = [];
+    const nested = {
+      get c() {
+        order.push('nested');
+        return 'x';
+      },
+    };
+    const value = {
+      get a() {
+        order.push('a');
+        return nested;
+      },
+      get b() {
+        order.push('b');
+        return 'y';
+      },
+    };
+    const streamFlowControl = { initialCredits: 1, maxFrameBytes: 5, maxOwnedBytes: 5 };
+    serverHandle = createChannelServer({
+      port: server,
+      sessionKey: 'record-snapshot',
+      streamFlowControl,
+      impl: {
+        call: async () => null,
+        async *listen() {
+          yield value;
+        },
+      },
+    });
+    const clientChannel = createChannelClient({ port: client, sessionKey: 'record-snapshot', streamFlowControl });
+    await clientChannel.ready;
+    const iterator = clientChannel.listen('values')[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: { a: { c: 'x' }, b: 'y' } });
+    expect(order.slice(0, 3)).toEqual(['a', 'b', 'nested']);
+    await iterator.return?.();
+  });
+
+  it('includes a later key made enumerable by an earlier getter before posting a charged frame', async () => {
+    const { server, client } = startPair(channel);
+    const frames: ObservedFrame[] = [];
+    const value = {
+      get a() {
+        Object.defineProperty(value, 'b', { enumerable: true });
+        return { c: 'x' };
+      },
+    };
+    Object.defineProperty(value, 'b', { configurable: true, enumerable: false, value: 'y' });
+    // Charge a + c + x + b + y = 5. The server must refuse before posting, not rely on receiver charging.
+    const streamFlowControl = { initialCredits: 1, maxFrameBytes: 4, maxOwnedBytes: 4 };
+    serverHandle = createChannelServer({
+      port: record(server, frames),
+      sessionKey: 'mutating-enumerability',
+      streamFlowControl,
+      impl: {
+        call: async () => null,
+        async *listen() {
+          yield value;
+        },
+      },
+    });
+    const clientChannel = createChannelClient({
+      port: client,
+      sessionKey: 'mutating-enumerability',
+      streamFlowControl,
+    });
+    await clientChannel.ready;
+    const iterator = clientChannel.listen('values')[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toThrow('stream frame exceeds 4 bytes');
+    expect(frames.filter(({ data }) => (data as { k?: string }).k === 'sn')).toHaveLength(0);
+  });
+
+  const ownershipGraphs: ReadonlyArray<{ label: string; bytes: number; create: () => unknown }> = [
+    {
+      label: 'aliased object',
+      bytes: 19,
+      create: () => {
+        const shared = { text: '😀' };
+        return { first: shared, second: shared };
+      },
+    },
+    {
+      label: 'cyclic record',
+      bytes: 11,
+      create: () => {
+        const value: { label: string; self?: unknown } = { label: 'é' };
+        value.self = value;
+        return value;
+      },
+    },
+    {
+      label: 'shared backing buffer',
+      bytes: 16,
+      create: () => {
+        const buffer = new ArrayBuffer(8);
+        return { a: new Uint8Array(buffer, 1, 2), b: new DataView(buffer), buffer };
+      },
+    },
+    {
+      label: 'Map and Set aliases',
+      bytes: 13,
+      create: () => {
+        const shared = { text: '😀' };
+        return new Map<unknown, unknown>([
+          [shared, shared],
+          ['x', new Set([shared, true])],
+        ]);
+      },
+    },
+  ];
+  it.each(ownershipGraphs)('preserves exact shared ownership charging for $label', async ({ create, bytes }) => {
+    const { server, client } = startPair(channel);
+    const value = create();
+    const streamFlowControl = { initialCredits: 1, maxFrameBytes: bytes, maxOwnedBytes: bytes };
+    serverHandle = createChannelServer({
+      port: server,
+      sessionKey: 'ownership-graph',
+      streamFlowControl,
+      impl: {
+        call: async () => null,
+        async *listen() {
+          yield value;
+          yield [value, 'x'];
+        },
+      },
+    });
+    const clientChannel = createChannelClient({ port: client, sessionKey: 'ownership-graph', streamFlowControl });
+    await clientChannel.ready;
+    const iterator = clientChannel.listen('values')[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toEqual({ done: false, value });
+    await expect(iterator.next()).rejects.toThrow(`stream frame exceeds ${String(bytes)} bytes`);
+  });
+
   it('rejects a producer frame larger than the configured frame maximum', async () => {
     const { server, client } = startPair(channel);
     serverHandle = createChannelServer({

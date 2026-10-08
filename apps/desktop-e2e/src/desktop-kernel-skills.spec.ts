@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { latestCompletedRun } from '#support/acp-evidence.js';
+import { currentRun, latestCompletedRun } from '#support/acp-evidence.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   activeChatId,
@@ -113,6 +113,14 @@ const kernelCases = [
 const selected = kernelCases.filter((control) =>
   only === undefined ? !('blockedBy' in control) : only.includes(control.kernel.toLowerCase()),
 );
+const unknownKernels = (only ?? []).filter(
+  (name) => !kernelCases.some((control) => control.kernel.toLowerCase() === name),
+);
+if (unknownKernels.length > 0) {
+  throw new Error(
+    `TAU_E2E_KERNEL_SKILLS_ONLY names no case: ${unknownKernels.join(', ')}. Cases: ${kernelCases.map(({ kernel }) => kernel).join(', ')}`,
+  );
+}
 
 const codexAvailable = ((): boolean => {
   try {
@@ -279,8 +287,12 @@ test.skipIf(!enabled).each(selected)(
       const eventsPath = join(projectRoot, '.tau/chats', activeChatId(page), 'events.jsonl');
       const read = (): string => (existsSync(eventsPath) ? readFileSync(eventsPath, 'utf8') : '');
       // A cancelled or failed run never completes; stop waiting instead of spending the whole poll.
-      const halted = (): string | undefined =>
-        /"type":"run\.lifecycle","state":"(?:cancelled|failed)"[^\n]*/u.exec(read())?.[0];
+      const halted = (): string | undefined => {
+        const run = currentRun(read());
+        return run?.lifecycle === 'cancelled' || run?.lifecycle === 'failed'
+          ? `run ${run.runId} ${run.lifecycle}`
+          : undefined;
+      };
       await expect
         .poll(
           () => {

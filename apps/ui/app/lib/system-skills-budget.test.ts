@@ -20,9 +20,15 @@ const packageSkills = systemSkillsCatalog.filter(({ slug }) => slug !== 'create-
 
 /** Doctrine plus the generated Core API section and reference map (`maxSkillBodyTokens` in api-extractor). */
 const kernelSkillBodyTokens = 6000;
+/** A skill without a generated Core API section is doctrine alone and keeps the original ceiling. */
+const doctrineSkillBodyTokens = 800;
 const maxBodyLines = 500;
 
-const assertSkillBudget = (skillName: string, skillMarkdown: string, maxBodyTokens = kernelSkillBodyTokens): void => {
+const assertSkillBudget = (
+  skillName: string,
+  skillMarkdown: string,
+  maxBodyTokens = skillMarkdown.includes('\n## Core API\n') ? kernelSkillBodyTokens : doctrineSkillBodyTokens,
+): void => {
   const description = /^description:\s*(.+)$/m.exec(skillMarkdown)?.[1]?.trim();
   if (!description) {
     throw new Error(`${skillName} has invalid frontmatter`);
@@ -105,13 +111,23 @@ describe('progressive-disclosure system skill budgets', () => {
 
   it('should reject a deliberately oversized fixture body', () => {
     const maxBodyCharacters = kernelSkillBodyTokens * 4;
-    const fixture = `---\nname: oversized-fixture\ndescription: Budget guard fixture.\n---\n\n${'x'.repeat(
-      maxBodyCharacters + 1,
+    const fixture = `---\nname: oversized-fixture\ndescription: Budget guard fixture.\n---\n\n## Core API\n${'x'.repeat(
+      maxBodyCharacters,
     )}`;
 
     expect(() => {
       assertSkillBudget('oversized-fixture', fixture);
     }).toThrow(`body exceeds ${kernelSkillBodyTokens} estimated tokens`);
+  });
+
+  it('should hold a skill without a Core API section to the doctrine ceiling', () => {
+    const fixture = `---\nname: doctrine-fixture\ndescription: Budget guard fixture.\n---\n\n${'x'.repeat(
+      doctrineSkillBodyTokens * 4 + 1,
+    )}`;
+
+    expect(() => {
+      assertSkillBudget('doctrine-fixture', fixture);
+    }).toThrow(`body exceeds ${doctrineSkillBodyTokens} estimated tokens`);
   });
 
   it('should reject a fixture body over the policy line ceiling', () => {

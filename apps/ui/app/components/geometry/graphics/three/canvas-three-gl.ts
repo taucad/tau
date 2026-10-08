@@ -25,10 +25,11 @@ export function createTauR3fGlProp(
   cameras: readonly ThreeCamera[] = [],
   onCreateError?: (error: Error) => void,
 ): CanvasProps['gl'] {
-  return async (defaults) => {
+  let initialization: Promise<FiberCompatibleGl> | undefined;
+  const initialize = async (canvas: HTMLCanvasElement): Promise<FiberCompatibleGl> => {
     let renderer: RendererInstance;
     try {
-      renderer = await createRenderer('viewport', graphicsBackend, defaults.canvas as HTMLCanvasElement);
+      renderer = await createRenderer('viewport', graphicsBackend, canvas);
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error));
       console.warn('[createTauR3fGlProp] Renderer creation failed:', failure);
@@ -56,6 +57,12 @@ export function createTauR3fGlProp(
       camera.updateProjectionMatrix();
     }
     return renderer as FiberCompatibleGl;
+  };
+  // R3F can reenter configure before this async factory settles. One canvas/backend
+  // mount must share the complete setup; a new keyed factory owns a fresh retry.
+  return async (defaults) => {
+    initialization ??= initialize(defaults.canvas as HTMLCanvasElement);
+    return initialization;
   };
 }
 /* oxlint-enable unicorn-js/prevent-abbreviations */

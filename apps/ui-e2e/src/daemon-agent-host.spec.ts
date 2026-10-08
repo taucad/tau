@@ -64,10 +64,17 @@ const createProject = async (origin: string): Promise<void> => {
 
 const agentTrigger = selectors.getByRole('button', { name: /^Agent and model: /u });
 
-/** Open the agent sheet and wait for the daemon's segment under *Runs on*. */
+const agentSettings = selectors.getByRole('button', { name: /^Settings/u });
+
+/** Open the agent sheet and its Settings, and wait for the daemon's segment under *Runs on*. */
 const openRunsOn = async (workspace: string) => {
   await target.expectVisible(agentTrigger, 60_000);
   await target.click(agentTrigger);
+  // Settings remembers whether it was open, so open it only when it is closed.
+  await target.expectVisible(agentSettings, 10_000);
+  if ((await target.getAttribute(agentSettings, 'aria-expanded')) !== 'true') {
+    await target.click(agentSettings);
+  }
   const descriptor = await target.evaluate(async () => {
     const response = await fetch('/.well-known/tau-host');
     if (!response.ok) {
@@ -77,7 +84,7 @@ const openRunsOn = async (workspace: string) => {
   });
   expect(descriptor.workspaceRoot).toBe(workspace);
   const tauHostSegment = selectors
-    .getByRole('tablist', { name: 'Where Tau runs' })
+    .getByRole('tablist', { name: 'Runs on' })
     .getByRole('tab', { name: descriptor.label, exact: true });
   await target.expectVisible(tauHostSegment, 60_000);
   return tauHostSegment;

@@ -105,9 +105,6 @@ catalogs:
     '@lhncbc/ucum-lhc':
       specifier: 7.1.9
       version: 7.1.9
-    '@libcascade/toolchain':
-      specifier: 3.0.2
-      version: 3.0.2
     '@modelcontextprotocol/sdk':
       specifier: ^1.29.0
       version: 1.30.0
@@ -3533,9 +3530,6 @@ importers:
 
   packages/geospec-engine:
     dependencies:
-      '@gltf-transform/core':
-        specifier: 'catalog:'
-        version: 4.5.1
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../plugins/assimp
@@ -3545,9 +3539,6 @@ importers:
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../plugins/esbuild
-      '@taucad/geometry-core':
-        specifier: workspace:*
-        version: link:../core/geometry
       '@taucad/geospec-engine-native':
         specifier: workspace:*
         version: link:../geospec-engine-native
@@ -3566,9 +3557,6 @@ importers:
       '@taucad/middleware':
         specifier: workspace:*
         version: link:../plugins/middleware
-      '@taucad/occt-core':
-        specifier: workspace:*
-        version: link:../core/occt
       '@taucad/opencascade':
         specifier: workspace:*
         version: link:../plugins/opencascade
@@ -3593,25 +3581,10 @@ importers:
       geospec:
         specifier: workspace:*
         version: link:../geospec
-      manifold-3d:
-        specifier: 'catalog:'
-        version: 3.4.1(@gltf-transform/core@4.5.1)(@gltf-transform/extensions@4.5.1)(@gltf-transform/functions@4.5.1(@types/node@26.3.0))(esbuild-wasm@0.28.2)
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
-      '@libcascade/toolchain':
-        specifier: 'catalog:'
-        version: 3.0.2
       '@taucad/picogk':
         specifier: workspace:*
         version: link:../plugins/picogk
-      '@taucad/tau-examples':
-        specifier: workspace:*
-        version: link:../../libs/tau-examples
-      '@vitest/browser-playwright':
-        specifier: 'catalog:'
-        version: 4.1.11(playwright@1.62.1)(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))(vitest@4.1.11)
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.3.0)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.10(@types/node@26.3.0)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
@@ -8733,10 +8706,6 @@ packages:
 
   '@lhncbc/ucum-lhc@7.1.9':
     resolution: {integrity: sha512-LgA+ElIlKrtmogYvk4n3PhExF25WZq0THkHF/UtW4SWct/pxt8ZpXGG1QwQiSs1JWUVpAsgRvyK931FZ1URiow==}
-
-  '@libcascade/toolchain@3.0.2':
-    resolution: {integrity: sha512-ko2ZS9vJ2xX6Rjc5+8NRyTL5Vr1COH6S3SyCHkxrUQpJ6BO1gVRH5N/3v/tLWIkXBsR+1WwCFLUVxJojWg+6Tg==}
-    engines: {node: '>=22'}
 
   '@loaderkit/resolve@1.0.6':
     resolution: {integrity: sha512-G8FdIoF5CypfwmD9rl8BXod5HDn8JqB0CCNBXDTaRZ+yRYhARrrSToX1zg1zy9jX3zLqigsELwhT4gNtkdQAUg==}
@@ -30624,11 +30593,6 @@ snapshots:
       stream-transform: 0.1.2
       string-to-stream: 1.1.1
       xmldoc: 0.4.0
-
-  '@libcascade/toolchain@3.0.2':
-    dependencies:
-      jiti: 2.7.0
-      yaml: 2.9.0
 
   '@loaderkit/resolve@1.0.6':
     dependencies:

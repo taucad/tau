@@ -1,30 +1,47 @@
 /**
  * The code that runs INSIDE a pool worker.
  *
- * One resource scope owns worker cleanup on shutdown. Authored model loads
- * are never memoized across shards: every load retains its own fresh source,
- * variant and opaque subject through the canonical loader owner.
- *
- * Native subjects are the exception: every shard and collection pass releases
- * them before it settles (per-load freshness), because the engine retains at
- * most 32 subjects and one large STEP subject holds hundreds of megabytes.
+ * Authored model loads are never memoized across shards: every load retains
+ * its own fresh source, variant and opaque subject through the native model
+ * loader. Every shard and collection pass releases those subjects before it
+ * settles (per-load freshness), because the engine retains at most 32 subjects
+ * and one large STEP subject holds hundreds of megabytes.
  *
  * @module
  */
 
-import type {
-  GeoSpecPoolHostMessage,
-  GeoSpecPoolWorkerHostOptions,
-  GeoSpecPoolWorkerMessage,
-} from 'geospec/runner/worker';
+import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage, GeoSpecRunnerOptions } from 'geospec/runner/worker';
 import type { GeoSpecModuleBundleCache } from 'geospec/runner';
-import { getGeoSpecEngineProtocol } from 'geospec/engine';
-import { forensicSpanAsync, forwardProtocolForensicMeasurement } from '#runner/forensic.js';
+import type { ManagedGeoSpecNativeModelLoader } from 'geospec/runner/native';
+import { forensicSpanAsync } from '#runner/forensic.js';
 import type { ForensicSink } from '#runner/forensic.js';
 import { sanitizePoolResult } from '#runner/pool/transport.js';
-import { createSerialRunContext, executeGeoSpecFile } from '#runner/serial.js';
+import { executeGeoSpecFile } from '#runner/serial.js';
 import type { GeoSpecRunResult } from '#runner/types.js';
-import { setOpenCascadeCompiledModule } from '#native/opencascade-module.js';
+
+/**
+ * Options accepted by {@link startGeoSpecPoolWorkerHost}.
+ *
+ * @public
+ */
+export type GeoSpecPoolWorkerHostOptions = {
+  /** Filesystem containing the project and test modules. */
+  filesystem: GeoSpecRunnerOptions['filesystem'];
+  /** Native assertion client shared with this worker's model admissions. */
+  nativeAssertions: GeoSpecRunnerOptions['nativeAssertions'];
+  /** Managed native admissions, released after every shard and collection pass and before shutdown. */
+  nativeModelLoader: ManagedGeoSpecNativeModelLoader;
+  /** Additional in-memory modules made available to the VM. */
+  builtinModules?: GeoSpecRunnerOptions['builtinModules'];
+  /** Post a message to the pool host. */
+  postMessage: (message: GeoSpecPoolWorkerMessage) => void;
+  /** Subscribe to pool-host messages. */
+  onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void;
+  /** Sample this worker's resident memory in bytes (R15 telemetry); optional. */
+  measureMemoryBytes?: () => number | undefined;
+  /** Release platform resources on shutdown, after the native subjects are released. */
+  onShutdown?: () => Promise<void> | void;
+};
 
 /** One place where an unknown throw becomes a message the host can read. */
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -35,22 +52,19 @@ const collectedNames = (result: GeoSpecRunResult): string[] =>
 /**
  * Serve shards until the host says shutdown.
  *
- * @param options - Worker filesystem, loaders, and message plumbing.
+ * @param options - Worker filesystem, native engine, and message plumbing.
  * @public
  */
 export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions): void => {
-  const runner = {
+  const runner: GeoSpecRunnerOptions = {
     filesystem: options.filesystem,
-    ...(options.modelLoader ? { modelLoader: options.modelLoader } : {}),
-    ...(options.nativeAssertions ? { nativeAssertions: options.nativeAssertions } : {}),
-    ...(options.nativeModelLoader ? { nativeModelLoader: options.nativeModelLoader } : {}),
-    ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
+    nativeAssertions: options.nativeAssertions,
+    nativeModelLoader: options.nativeModelLoader,
     ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
   };
-  const context = createSerialRunContext(runner);
   const bundleCache: GeoSpecModuleBundleCache = new Map();
   const releaseNativeSubjects = async (): Promise<void> => {
-    await options.nativeModelLoader?.releaseAll();
+    await options.nativeModelLoader.releaseAll();
   };
   /**
    * Release a pass's native subjects, then post its one settlement. Released after the settlement, a
@@ -82,7 +96,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
 
   // Shards arrive one at a time, but the host may post the next one before the
   // previous reply is observed; the chain keeps execution strictly serial
-  // inside the worker (the OCCT heap is shared).
+  // inside the worker (the worker owns one native engine).
   let chain: Promise<void> = Promise.resolve();
   const enqueue = (work: () => Promise<void>): void => {
     const predecessor = chain;
@@ -107,14 +121,7 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
 
   const handle = async (message: GeoSpecPoolHostMessage): Promise<void> => {
     if (message.type === 'initialize') {
-      try {
-        if (message.compiledWasmModule) {
-          setOpenCascadeCompiledModule(message.compiledWasmModule);
-        }
-        options.postMessage({ type: 'initialized' });
-      } catch (error) {
-        options.postMessage({ type: 'initialization-error', message: errorMessage(error) });
-      }
+      options.postMessage({ type: 'initialized' });
       return;
     }
     if (message.type === 'shutdown') {
@@ -122,7 +129,6 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
       let failed = false;
       let failure: unknown;
       try {
-        await context.resourceScope.dispose();
         await releaseNativeSubjects();
       } catch (error) {
         failed = true;
@@ -140,10 +146,8 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
         options.postMessage({ type: 'initialization-error', message: errorMessage(failure) });
         return;
       }
-      if (options.nativeAssertions) {
-        // Native-only cleanup acknowledgement over the existing worker wire.
-        options.postMessage({ type: 'initialized' });
-      }
+      // Cleanup acknowledgement over the existing worker wire.
+      options.postMessage({ type: 'initialized' });
       return;
     }
 
@@ -158,7 +162,6 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
       try {
         const result = await executeGeoSpecFile({
           runner,
-          context,
           file: message.file,
           collectOnly: true,
           bundleCache,
@@ -183,14 +186,6 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
           }
         : undefined;
     const startedAt = performance.now();
-    const unsubscribe =
-      message.forensic === true
-        ? getGeoSpecEngineProtocol()?.on('forensic-span', (event) => {
-            forwardProtocolForensicMeasurement(event.payload, ({ name, value, unit }) => {
-              options.postMessage({ type: 'forensic', shardId: shard.id, name, value, unit });
-            });
-          })
-        : undefined;
     const shardFailed = (error: unknown): GeoSpecPoolWorkerMessage => ({
       type: 'shard-error',
       shardId: shard.id,
@@ -204,7 +199,6 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
         async () =>
           executeGeoSpecFile({
             runner,
-            context,
             file: shard.file,
             bundleCache,
             // A split shard's own pattern wins: it names exactly one test.
@@ -231,8 +225,6 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
       };
     } catch (error) {
       reply = shardFailed(error);
-    } finally {
-      unsubscribe?.();
     }
     await releaseAndSettle(reply, shardFailed);
   };

@@ -442,10 +442,6 @@ const config = [
       // opt-in benchmark reaching runtime-internal seams through a loader
       // hook; `.mts` files outside the project tsconfig.
       'apps/runtime-e2e/src/compute-baseline/harness/**',
-      // Same class: a frozen matcher-performance POC whose `#mesh/*` modules moved
-      // out in the engine extraction, so it no longer resolves; kept as the artifact
-      // docs/research/geospec-matcher-performance-poc.md cites.
-      'packages/geospec-engine/experiments/matcher-performance/**',
     ],
   },
 

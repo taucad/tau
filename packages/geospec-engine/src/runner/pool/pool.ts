@@ -16,8 +16,8 @@
  *   is a correct run in declared order.
  * - **The wire is data.** Live subjects and code strings are elided by
  *   {@link import('#runner/pool/transport.js').sanitizePoolResult} before a
- *   result is posted; workers share warm evidence through the
- *   content-addressed cache, never through messages.
+ *   result is posted; each worker admits its own subjects into its own
+ *   engine, and nothing but results crosses a message.
  *
  * A worker that dies mid-shard fails that shard (an infrastructure failure is
  * still a failure) and is not respawned: the remaining workers drain the queue.
@@ -35,7 +35,7 @@ import type {
 } from 'geospec/runner/worker';
 import { createNoMatchingGeoSpecTestsIssue } from 'geospec/runner/worker';
 import { assertRootedPath } from '@taucad/runtime/kernel';
-import type { ShardTimings } from '#cache/timings.js';
+import type { ShardTimings } from '#runner/pool/timings.js';
 import type { GeoSpecRunResult } from '#runner/types.js';
 import { accumulateFileResult } from '#runner/serial.js';
 import { createRunnerEventChannel } from '#runner/events.js';

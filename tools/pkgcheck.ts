@@ -482,15 +482,10 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
       'node/default platform swap for the Bambu Studio engine, pinned by src/slicer.plugin.test.ts',
   },
   '@taucad/geospec-engine': {
-    '#cache/node-evidence-store.js':
-      'browser/default platform swap for the evidence store, pinned by src/browser-import-graph.test.ts',
-    '#model/default-runtime-client.js':
-      'browser/default platform swap for the private model runtime fallback, pinned by src/browser-import-graph.test.ts',
     // The canonical map reaches `src/` only, and `.oxlintrc.json` ("no-restricted-imports",
-    // regex `^\.`) bans the relative import that would replace these workspace-wide — so a
+    // regex `^\.`) bans the relative import that would replace it workspace-wide — so a
     // directory outside `src/` can only be reached through a key of its own.
-    '#e2e/*.js': 'browser-engine harness outside src/; relative imports are banned workspace-wide',
-    '#experiments/*.js': 'load-path experiments outside src/; relative imports are banned workspace-wide',
+    '#experiments/*.js': 'performance-lab experiments outside src/; relative imports are banned workspace-wide',
   },
   '@taucad/geospec-engine-native': {
     '#native-binding':

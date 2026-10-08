@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { openShardTimings } from '#cache/timings.js';
+import { openShardTimings } from '#runner/pool/timings.js';
 import type { PlannedShard } from '#runner/pool/shard-planner.js';
 import {
   autoWorkerCount,

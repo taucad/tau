@@ -241,13 +241,39 @@ const readSemanticManifest = (json: GlbJson) => {
 };
 
 describe('OpenRSCADKernel', () => {
-  it('matches OpenRSCAD normal render quality while retaining explicit export quality', () => {
+  it('leaves render and export tessellation to the model unless the caller sets it', () => {
     expect(openrscadRenderSchema.parse({}).tessellation).toEqual({});
-    expect(openrscadExportSchemas.glb.parse({}).tessellation).toEqual({
-      segments: 32,
-      minimumAngle: 12,
-      minimumSize: 2,
+    expect(openrscadExportSchemas.glb.parse({}).tessellation).toEqual({});
+    expect(openrscadExportSchemas['3mf'].parse({}).tessellation).toEqual({});
+  });
+
+  it('exports with the model $fa/$fs when no tessellation is requested, and honours an explicit one', async () => {
+    const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
+    const runtime = createRuntime({
+      'project/model.scad': '$fa = 2; $fs = 0.4; cylinder(h = 1, r = 50);',
     });
+    const context = await definition.initialize({}, runtime);
+    const created = await definition.evaluate(
+      { entryPath: 'project/model.scad', parameters: {}, options: {} },
+      runtime,
+      context,
+    );
+    const exportTriangles = async (tessellation?: { segments: number }): Promise<number> => {
+      const options = openrscadExportSchemas.glb.parse({
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+        ...(tessellation === undefined ? {} : { tessellation }),
+      });
+      const exported = await definition.export!({ exportId: 'glb', handle: created.handle, options }, runtime, context);
+      const json = readGlbJson(exported.files[0].bytes);
+      return (json.meshes ?? [])
+        .flatMap((mesh) => mesh.primitives)
+        .reduce((count, primitive) => count + (json.accessors?.[primitive.indices ?? -1]?.count ?? 0) / 3, 0);
+    };
+
+    // A prism with n fragments has 2n side and 2(n - 2) cap triangles. `$fa = 2` gives 180 fragments.
+    await expect(exportTriangles()).resolves.toBe(4 * 180 - 4);
+    await expect(exportTriangles({ segments: 32 })).resolves.toBe(4 * 32 - 4);
   });
 
   it('reuses the authored-quality preview for a public default model view', async () => {

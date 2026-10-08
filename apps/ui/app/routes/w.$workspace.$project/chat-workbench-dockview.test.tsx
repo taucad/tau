@@ -312,7 +312,19 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
 }));
 
 vi.mock('#components/files/file-selector.js', () => ({
-  FileSelector: () => <div data-testid='file-selector' />,
+  FileSelector: ({
+    onSelect,
+    placeholder,
+  }: {
+    readonly onSelect?: (path: string) => void;
+    readonly placeholder?: string;
+  }) => (
+    <div data-testid='file-selector'>
+      <button type='button' aria-label={placeholder} onClick={() => onSelect?.('src/peer.ts')}>
+        Select peer file
+      </button>
+    </div>
+  ),
 }));
 
 const {
@@ -662,6 +674,51 @@ describe('FileEditor routing', () => {
     expect(screen.getAllByTestId('file-selector')).toHaveLength(2);
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
   });
+
+  it.each(['Select peer file', 'Select file to edit…'])(
+    'keeps the original pane identity until a picker selection is materialized (%s)',
+    async (selector) => {
+      const original = panel('pane-original', { filePath: 'src/original.ts', paneId: 'pane-original' });
+      const dockview = createTestDockview([original]);
+      original.api.updateParameters.mockImplementation((parameters: Record<string, unknown>) => {
+        Object.assign(original.params, parameters);
+      });
+      editorMachineSnapshot.context.openFiles = [openFile('pane-original', 'src/original.ts')];
+      mockUseFileContent.mockReturnValue({ kind: 'orphaned' });
+      render(
+        <FileEditor
+          paneId='pane-original'
+          filePath='src/original.ts'
+          panelApi={original.api as unknown as IDockviewPanelProps['api']}
+        />,
+      );
+
+      const picker = screen.getAllByRole('button', { name: selector });
+      expect(picker).toHaveLength(selector === 'Select peer file' ? 2 : 1);
+      await userEvent.click(picker[0]!);
+      expect(mockEditorRef.send).toHaveBeenCalledWith({ type: 'openFile', path: 'src/peer.ts', source: 'user' });
+      // The machine has not published the selected file while its model acquisition is pending.
+      expect(original.params['filePath']).toBe('src/original.ts');
+      expect(original.api.setTitle).not.toHaveBeenCalled();
+      expect(dockview.panels).toHaveLength(1);
+
+      const materialized = [openFile('pane-original', 'src/original.ts'), openFile('pane-peer', 'src/peer.ts')];
+      act(() => {
+        publishOpenFiles(materialized);
+      });
+      const pending = reconcileWorkbenchFiles({
+        api: dockview.api,
+        openFiles: materialized,
+        activePaneId: 'pane-peer',
+        isMobile: false,
+        pendingUserFilePath: 'src/peer.ts',
+        pendingFilePlacements: new Map(),
+      });
+      expect(pending).toBeUndefined();
+      expect(dockview.panels.find((candidate) => candidate.id === 'pane-peer')?.api.setActive).toHaveBeenCalledOnce();
+      expect(original.params['filePath']).toBe('src/original.ts');
+    },
+  );
 
   it('should keep the same editor body while unavailable observation offers Retry', async () => {
     const content = new TextEncoder().encode('unsaved edit');

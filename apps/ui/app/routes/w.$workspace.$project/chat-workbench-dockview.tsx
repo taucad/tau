@@ -1269,11 +1269,8 @@ export const FileEditor = memo(function ({
   const handleFileSelectorSelect = useCallback(
     (path: string) => {
       editorRef.send({ type: 'openFile', path, source: 'user' });
-      panelApi.updateParameters({ filePath: path });
-      const fileName = path.split('/').pop() ?? path;
-      panelApi.setTitle(fileName);
     },
-    [editorRef, panelApi],
+    [editorRef],
   );
 
   const handleForceOpenBinary = useCallback(() => {

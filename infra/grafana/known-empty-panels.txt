@@ -1,7 +1,7 @@
 # Panels api:grafana:check may find empty locally, one `Dashboard › Panel` per line. Each depends only
 # on series the exercise harness cannot produce: Fly's own metrics, SSE (no producer yet), and the
 # gen_ai_* token, spend and terminal-evidence series, which need a funded call that succeeds (a local
-# route paused by an open supplier case answers 503). Agent panels fill from the harness's synthetic
+# call without a supplier key or a funded account answers 503). Agent panels fill from the harness's synthetic
 # agent ingest, which validates the ingest path, not agent execution. Delete a line when it fills; the
 # checker reports lines that have data again.
 

@@ -143,16 +143,24 @@ const isVertexFinalUsageEvent = (value: unknown): boolean => {
 type FailureReason = Parameters<BillableInvocationEvidenceCollector['failed']>[0];
 
 /**
- * The terminal kind of each failure that ends without complete usage. Exhaustive on purpose: a
- * reason added without a row here fails to compile rather than silently absorbing the turn.
+ * The terminal kind of each failure that ends without complete usage; a refusal settles before
+ * this is asked. Exhaustive on purpose: a reason added without a case here fails to compile
+ * rather than silently absorbing the turn.
  */
-const incompleteKindOf = {
-  client_abort: 'absorbed_unknown',
-  deadline: 'absorbed_unknown',
-  malformed_response: 'absorbed_unknown',
-  provider_rejected: 'provider_rejected',
-  authorized_exhausted: 'authorized_exhausted',
-} as const satisfies Record<FailureReason, TerminalEvidence['kind']>;
+const incompleteKindOf = (
+  failure: Exclude<FailureReason, 'provider_rejected'>,
+): 'absorbed_unknown' | 'authorized_exhausted' => {
+  switch (failure) {
+    case 'authorized_exhausted': {
+      return 'authorized_exhausted';
+    }
+    case 'client_abort':
+    case 'deadline':
+    case 'malformed_response': {
+      return 'absorbed_unknown';
+    }
+  }
+};
 
 /** Creates an exact protocol usage collector over preserved provider response bytes. */
 export const createBillableModelEvidenceCollector = (
@@ -278,7 +286,7 @@ export const createBillableModelEvidenceCollector = (
     }
     /* A cut at the authorized ceiling is the designed outcome of an in-stream control (R8),
      * not a fault, so it keeps its own terminal kind instead of absorbing the turn at zero. */
-    const incompleteKind = failure === undefined ? 'absorbed_unknown' : incompleteKindOf[failure];
+    const incompleteKind = failure === undefined ? 'absorbed_unknown' : incompleteKindOf(failure);
     if (
       latest?.input === undefined ||
       latest.output === undefined ||

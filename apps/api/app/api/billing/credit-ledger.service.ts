@@ -1974,62 +1974,6 @@ export class CreditLedgerService {
     return { repaired, failedOperationIds };
   }
 
-  /**
-   * Retains final zero-cost supplier evidence for an operation the supplier never ran, and
-   * finalizes the supplier side on it. Idempotent: a retained proof is found again, and an
-   * operation already final replays.
-   */
-  private async finalizeZeroSupplierCost(
-    operation: Pick<
-      typeof creditOperation.$inferSelect,
-      'id' | 'accountId' | 'requestDigest' | 'providerId' | 'invocation'
-    >,
-    input: {
-      environment: BillingEnvironment;
-      expectedGeneration: bigint;
-      sourceRevision: string;
-      payloadDigest: string;
-    },
-  ): Promise<'final' | 'unresolved' | 'replay'> {
-    const outcome = await this.appendSupplierEvidence({
-      operationId: operation.id,
-      environment: input.environment,
-      provider: operation.providerId ?? 'undispatched',
-      credentialAccount: operation.invocation?.credentialAccount ?? 'undispatched',
-      sourceObjectId: operation.id,
-      sourceRevision: input.sourceRevision,
-      payloadDigest: input.payloadDigest,
-      currency: 'usd',
-      numerator: 0n,
-      denominator: 1n,
-      completeness: 'complete',
-      finality: 'final',
-      receivedAt: new Date(),
-    });
-    if (outcome === 'conflict') {
-      throw new Error(`Conflicting ${input.sourceRevision} proof`);
-    }
-    const [evidence] = await this.databaseService.database
-      .select({ id: supplierCostEvidence.id })
-      .from(supplierCostEvidence)
-      .where(
-        and(
-          eq(supplierCostEvidence.operationId, operation.id),
-          eq(supplierCostEvidence.sourceRevision, input.sourceRevision),
-        ),
-      );
-    if (!evidence) {
-      throw new Error(`${input.sourceRevision} proof was not retained`);
-    }
-    return this.finalizeSupplier({
-      evidenceId: evidence.id,
-      operationId: operation.id,
-      accountId: operation.accountId,
-      requestDigest: operation.requestDigest,
-      expectedGeneration: input.expectedGeneration,
-    });
-  }
-
   /** Applies qualified supplier finality independently of the customer receipt. */
   public async finalizeSupplier(input: SupplierFinalityInput): Promise<'final' | 'unresolved' | 'replay'> {
     const context = await this.discoverOperationContext(input.operationId);
@@ -3336,6 +3280,62 @@ export class CreditLedgerService {
       debt -= repayment;
     }
     return { assets: next, debtAtoms: debt };
+  }
+
+  /**
+   * Retains final zero-cost supplier evidence for an operation the supplier never ran, and
+   * finalizes the supplier side on it. Idempotent: a retained proof is found again, and an
+   * operation already final replays.
+   */
+  private async finalizeZeroSupplierCost(
+    operation: Pick<
+      typeof creditOperation.$inferSelect,
+      'id' | 'accountId' | 'requestDigest' | 'providerId' | 'invocation'
+    >,
+    input: {
+      environment: BillingEnvironment;
+      expectedGeneration: bigint;
+      sourceRevision: string;
+      payloadDigest: string;
+    },
+  ): Promise<'final' | 'unresolved' | 'replay'> {
+    const outcome = await this.appendSupplierEvidence({
+      operationId: operation.id,
+      environment: input.environment,
+      provider: operation.providerId ?? 'undispatched',
+      credentialAccount: operation.invocation?.credentialAccount ?? 'undispatched',
+      sourceObjectId: operation.id,
+      sourceRevision: input.sourceRevision,
+      payloadDigest: input.payloadDigest,
+      currency: 'usd',
+      numerator: 0n,
+      denominator: 1n,
+      completeness: 'complete',
+      finality: 'final',
+      receivedAt: new Date(),
+    });
+    if (outcome === 'conflict') {
+      throw new Error(`Conflicting ${input.sourceRevision} proof`);
+    }
+    const [evidence] = await this.databaseService.database
+      .select({ id: supplierCostEvidence.id })
+      .from(supplierCostEvidence)
+      .where(
+        and(
+          eq(supplierCostEvidence.operationId, operation.id),
+          eq(supplierCostEvidence.sourceRevision, input.sourceRevision),
+        ),
+      );
+    if (!evidence) {
+      throw new Error(`${input.sourceRevision} proof was not retained`);
+    }
+    return this.finalizeSupplier({
+      evidenceId: evidence.id,
+      operationId: operation.id,
+      accountId: operation.accountId,
+      requestDigest: operation.requestDigest,
+      expectedGeneration: input.expectedGeneration,
+    });
   }
 
   /** Charges what a hold still reserves to its budget; capacity is never handed back on absorption. */

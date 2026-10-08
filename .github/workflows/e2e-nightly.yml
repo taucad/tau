@@ -146,6 +146,17 @@ jobs:
           echo "91903ff19f1b1d4db4129797c7e18f71212990d7394fcff1787719aebf04e372  $RUNNER_TEMP/pandoc.deb" | sha256sum --check --quiet
           sudo dpkg -i "$RUNNER_TEMP/pandoc.deb"
 
+      # Native kernel workers run inside the operating-system sandbox, which needs
+      # Bubblewrap and capability-bearing user namespaces (ci.yml's test lanes do the
+      # same). `desktop-e2e:test:e2e` depends on desktop:prepare-build123d-python,
+      # which resolves its wheels with uv on a cache miss.
+      - name: Install Linux sandbox prerequisites
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          command -v uv || pipx install uv
+          uv --version
+
       # `desktop-e2e:test:e2e` boots a real API, which reads this file for its
       # `BILLING_*` development values; without them it refuses to start.
       - name: Prepare API env file
@@ -160,25 +171,28 @@ jobs:
       # `--parallel=1`: the suites' ui:build, ui:build:serve and ui:build:desktop
       # prerequisites each peak near 10 GB, so building them together loses the runner.
       # A step-level bound: a hung suite otherwise holds the job for the 6 h default
-      # with no logs, while this still runs the always() diagnostics below.
+      # with no logs, while this still runs the always() diagnostics below. Streamed,
+      # because Nx holds a task's output until it ends and a timed-out step loses it.
       - name: Run the end-to-end suite
         timeout-minutes: 120
         env:
           TAU_E2E_WEBGPU_PROFILE: software
           PROJECT: ${{ matrix.suite.project }}
           TARGET: ${{ matrix.suite.target }}
-        run: xvfb-run --auto-servernum pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1
+        run: xvfb-run --auto-servernum pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1 --outputStyle=stream
 
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.
+      # `test:e2e:non-isolated` runs only PicoVoxel specs, which open no chat, so it
+      # never captures a log for the empty-capture rule to find.
       - name: Setup formal toolchains
-        if: always()
+        if: always() && matrix.suite.target != 'test:e2e:non-isolated'
         uses: ./.github/actions/setup-formal
         with:
           tools: tlc
 
       - name: Validate captured chat logs
-        if: always()
+        if: always() && matrix.suite.target != 'test:e2e:non-isolated'
         env:
           PROJECT: ${{ matrix.suite.project }}
         run: pnpm nx run-many -t formal:logs --projects "$PROJECT"

@@ -24,7 +24,6 @@ type Files = Readonly<{
 
 const closingViews = new Set<string>();
 const viewLifetimes = new Map<string, object>();
-const lifetimeOwners = new WeakMap<object, number>();
 const activeWrites = new Map<string, Set<Promise<CheckedFileWriteResult>>>();
 
 /** Stop a closed view's owners and wait for checked writes before deleting its file. */
@@ -127,17 +126,8 @@ export function createWorkbenchViewStore(
   const path = `${input.root}/${workbenchPaths.view(input.viewId)}`;
   const viewEpoch = viewLifetimes.get(path) ?? {};
   viewLifetimes.set(path, viewEpoch);
-  let registered = false;
-  const closed = (): boolean => {
-    if (disposed || closingViews.has(path) || viewLifetimes.get(path) !== viewEpoch) {
-      return true;
-    }
-    if (!registered) {
-      lifetimeOwners.set(viewEpoch, (lifetimeOwners.get(viewEpoch) ?? 0) + 1);
-      registered = true;
-    }
-    return false;
-  };
+  // Ordinary owner replacement shares the logical view lifetime; explicit close alone retires it.
+  const closed = (): boolean => disposed || closingViews.has(path) || viewLifetimes.get(path) !== viewEpoch;
   let state: ViewRecordState = {
     record: undefined,
     bytes: null,
@@ -646,13 +636,6 @@ export function createWorkbenchViewStore(
       disposed = true;
       generation++;
       health.dispose();
-      if (registered) {
-        const remaining = (lifetimeOwners.get(viewEpoch) ?? 1) - 1;
-        if (remaining === 0 && viewLifetimes.get(path) === viewEpoch) {
-          viewLifetimes.delete(path);
-        }
-        lifetimeOwners.set(viewEpoch, remaining);
-      }
       if (retryTimer) {
         clearTimeout(retryTimer);
         retryTimer = undefined;

@@ -2,10 +2,10 @@
 /* oxlint-disable typescript/no-restricted-types -- Checked filesystem absence uses null. */
 /* oxlint-disable eslint/no-await-in-loop -- Interleaving cases intentionally run in sequence. */
 import { describe, expect, it, vi } from 'vitest';
-import { workbenchRecords } from '@taucad/workbench';
+import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
-import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
+import { createWorkbenchViewStore, fenceClosedView, finishClosedView } from '#workbench-records/view-store.js';
 import type { ViewRecordPatch, ViewRecordState } from '#workbench-records/view-store.js';
 
 const encoder = new TextEncoder();
@@ -73,6 +73,70 @@ const makeStore = (data: ReturnType<typeof memory>) =>
   });
 
 describe('workbench view checked store', () => {
+  it('keeps an ordinary replacement readable and writable before its first acknowledged read', async () => {
+    const data = memory();
+    const input = {
+      root: '/replacement-lifetime',
+      viewId: 'v-c1e20001',
+      files: data.files,
+      onChange: vi.fn(),
+      onError: vi.fn(),
+    };
+    const prior = createWorkbenchViewStore(input);
+    await prior.read();
+    const replacement = createWorkbenchViewStore(input);
+    prior.dispose();
+    try {
+      expect(await replacement.read()).toBe(true);
+      expect(await replacement.retryRead()).toBe(true);
+      expect(await replacement.edit({ ...seed(), name: 'Replacement person edit' })).toBe(true);
+      expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+        status: 'current',
+        record: { name: 'Replacement person edit' },
+      });
+      expect(data.writes).toHaveBeenCalledOnce();
+    } finally {
+      prior.dispose();
+      replacement.dispose();
+    }
+  });
+
+  it('keeps explicit close fencing earlier owners while a reopened view obtains a fresh lifetime', async () => {
+    const data = memory();
+    const input = {
+      root: '/closed-lifetime',
+      viewId: 'v-c1e20002',
+      files: data.files,
+      onChange: vi.fn(),
+      onError: vi.fn(),
+    };
+    const prior = createWorkbenchViewStore(input);
+    await prior.read();
+    const waiting = createWorkbenchViewStore(input);
+    const path = `${input.root}/${workbenchPaths.view(input.viewId)}`;
+    await fenceClosedView(path);
+    finishClosedView(path);
+    const reopened = createWorkbenchViewStore(input);
+    try {
+      expect(await prior.edit({ ...seed(), name: 'Retired edit' })).toBe(false);
+      expect(await waiting.read()).toBe(false);
+      expect(await waiting.retryRead()).toBe(false);
+      expect(await reopened.read()).toBe(true);
+      prior.dispose();
+      waiting.dispose();
+      expect(await reopened.edit({ ...seed(), name: 'Reopened person edit' })).toBe(true);
+      expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
+        status: 'current',
+        record: { name: 'Reopened person edit' },
+      });
+      expect(data.writes).toHaveBeenCalledOnce();
+    } finally {
+      prior.dispose();
+      waiting.dispose();
+      reopened.dispose();
+    }
+  });
+
   it('fences internal publication immediately when its source invalidates during a read', async () => {
     const data = memory();
     const entered = Promise.withResolvers<void>();

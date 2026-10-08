@@ -40,11 +40,11 @@ StepGeom_Polyline: declare class StepGeom_Polyline extends StepGeom_BoundedCurve
 
 StepGeom_PreferredSurfaceCurveRepresentation: typeof StepGeom_PreferredSurfaceCurveRepresentation[keyof typeof StepGeom_PreferredSurfaceCurveRepresentation]
 
-  StepGeom_pscrCurve3d: 'StepGeom_pscrCurve3d'
+  readonly StepGeom_pscrCurve3d: 'StepGeom_pscrCurve3d'
 
-  StepGeom_pscrPcurveS1: 'StepGeom_pscrPcurveS1'
+  readonly StepGeom_pscrPcurveS1: 'StepGeom_pscrPcurveS1'
 
-  StepGeom_pscrPcurveS2: 'StepGeom_pscrPcurveS2'
+  readonly StepGeom_pscrPcurveS2: 'StepGeom_pscrPcurveS2'
 
 StepGeom_QuasiUniformCurve: declare class StepGeom_QuasiUniformCurve extends StepGeom_BSplineCurve
 
@@ -843,13 +843,13 @@ StepGeom_ToroidalSurface: declare class StepGeom_ToroidalSurface extends StepGeo
 
 StepGeom_TransitionCode: typeof StepGeom_TransitionCode[keyof typeof StepGeom_TransitionCode]
 
-  StepGeom_tcDiscontinuous: 'StepGeom_tcDiscontinuous'
+  readonly StepGeom_tcDiscontinuous: 'StepGeom_tcDiscontinuous'
 
-  StepGeom_tcContinuous: 'StepGeom_tcContinuous'
+  readonly StepGeom_tcContinuous: 'StepGeom_tcContinuous'
 
-  StepGeom_tcContSameGradient: 'StepGeom_tcContSameGradient'
+  readonly StepGeom_tcContSameGradient: 'StepGeom_tcContSameGradient'
 
-  StepGeom_tcContSameGradientSameCurvature: 'StepGeom_tcContSameGradientSameCurvature'
+  readonly StepGeom_tcContSameGradientSameCurvature: 'StepGeom_tcContSameGradientSameCurvature'
 
 StepGeom_TrimmedCurve: declare class StepGeom_TrimmedCurve extends StepGeom_BoundedCurve
 
@@ -938,11 +938,11 @@ StepGeom_TrimmingMember: declare class StepGeom_TrimmingMember extends StepData_
 
 StepGeom_TrimmingPreference: typeof StepGeom_TrimmingPreference[keyof typeof StepGeom_TrimmingPreference]
 
-  StepGeom_tpCartesian: 'StepGeom_tpCartesian'
+  readonly StepGeom_tpCartesian: 'StepGeom_tpCartesian'
 
-  StepGeom_tpParameter: 'StepGeom_tpParameter'
+  readonly StepGeom_tpParameter: 'StepGeom_tpParameter'
 
-  StepGeom_tpUnspecified: 'StepGeom_tpUnspecified'
+  readonly StepGeom_tpUnspecified: 'StepGeom_tpUnspecified'
 
 StepGeom_TrimmingSelect: declare class StepGeom_TrimmingSelect extends StepData_SelectType
 

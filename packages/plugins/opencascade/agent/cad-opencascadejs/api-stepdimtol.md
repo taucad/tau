@@ -24,11 +24,11 @@ StepDimTol_AngularityTolerance: declare class StepDimTol_AngularityTolerance ext
 
 StepDimTol_AreaUnitType: typeof StepDimTol_AreaUnitType[keyof typeof StepDimTol_AreaUnitType]
 
-  StepDimTol_Circular: 'StepDimTol_Circular'
+  readonly StepDimTol_Circular: 'StepDimTol_Circular'
 
-  StepDimTol_Rectangular: 'StepDimTol_Rectangular'
+  readonly StepDimTol_Rectangular: 'StepDimTol_Rectangular'
 
-  StepDimTol_Square: 'StepDimTol_Square'
+  readonly StepDimTol_Square: 'StepDimTol_Square'
 
 StepDimTol_CircularRunoutTolerance: declare class StepDimTol_CircularRunoutTolerance extends StepDimTol_GeometricToleranceWithDatumReference
 
@@ -307,13 +307,13 @@ StepDimTol_DatumReferenceModifier: declare class StepDimTol_DatumReferenceModifi
 
 StepDimTol_DatumReferenceModifierType: typeof StepDimTol_DatumReferenceModifierType[keyof typeof StepDimTol_DatumReferenceModifierType]
 
-  StepDimTol_CircularOrCylindrical: 'StepDimTol_CircularOrCylindrical'
+  readonly StepDimTol_CircularOrCylindrical: 'StepDimTol_CircularOrCylindrical'
 
-  StepDimTol_Distance: 'StepDimTol_Distance'
+  readonly StepDimTol_Distance: 'StepDimTol_Distance'
 
-  StepDimTol_Projected: 'StepDimTol_Projected'
+  readonly StepDimTol_Projected: 'StepDimTol_Projected'
 
-  StepDimTol_Spherical: 'StepDimTol_Spherical'
+  readonly StepDimTol_Spherical: 'StepDimTol_Spherical'
 
 StepDimTol_DatumReferenceModifierWithValue: declare class StepDimTol_DatumReferenceModifierWithValue extends Standard_Transient
 
@@ -820,35 +820,35 @@ StepDimTol_GeometricTolerance: declare class StepDimTol_GeometricTolerance exten
 
 StepDimTol_GeometricToleranceModifier: typeof StepDimTol_GeometricToleranceModifier[keyof typeof StepDimTol_GeometricToleranceModifier]
 
-  StepDimTol_GTMAnyCrossSection: 'StepDimTol_GTMAnyCrossSection'
+  readonly StepDimTol_GTMAnyCrossSection: 'StepDimTol_GTMAnyCrossSection'
 
-  StepDimTol_GTMCommonZone: 'StepDimTol_GTMCommonZone'
+  readonly StepDimTol_GTMCommonZone: 'StepDimTol_GTMCommonZone'
 
-  StepDimTol_GTMEachRadialElement: 'StepDimTol_GTMEachRadialElement'
+  readonly StepDimTol_GTMEachRadialElement: 'StepDimTol_GTMEachRadialElement'
 
-  StepDimTol_GTMFreeState: 'StepDimTol_GTMFreeState'
+  readonly StepDimTol_GTMFreeState: 'StepDimTol_GTMFreeState'
 
-  StepDimTol_GTMLeastMaterialRequirement: 'StepDimTol_GTMLeastMaterialRequirement'
+  readonly StepDimTol_GTMLeastMaterialRequirement: 'StepDimTol_GTMLeastMaterialRequirement'
 
-  StepDimTol_GTMLineElement: 'StepDimTol_GTMLineElement'
+  readonly StepDimTol_GTMLineElement: 'StepDimTol_GTMLineElement'
 
-  StepDimTol_GTMMajorDiameter: 'StepDimTol_GTMMajorDiameter'
+  readonly StepDimTol_GTMMajorDiameter: 'StepDimTol_GTMMajorDiameter'
 
-  StepDimTol_GTMMaximumMaterialRequirement: 'StepDimTol_GTMMaximumMaterialRequirement'
+  readonly StepDimTol_GTMMaximumMaterialRequirement: 'StepDimTol_GTMMaximumMaterialRequirement'
 
-  StepDimTol_GTMMinorDiameter: 'StepDimTol_GTMMinorDiameter'
+  readonly StepDimTol_GTMMinorDiameter: 'StepDimTol_GTMMinorDiameter'
 
-  StepDimTol_GTMNotConvex: 'StepDimTol_GTMNotConvex'
+  readonly StepDimTol_GTMNotConvex: 'StepDimTol_GTMNotConvex'
 
-  StepDimTol_GTMPitchDiameter: 'StepDimTol_GTMPitchDiameter'
+  readonly StepDimTol_GTMPitchDiameter: 'StepDimTol_GTMPitchDiameter'
 
-  StepDimTol_GTMReciprocityRequirement: 'StepDimTol_GTMReciprocityRequirement'
+  readonly StepDimTol_GTMReciprocityRequirement: 'StepDimTol_GTMReciprocityRequirement'
 
-  StepDimTol_GTMSeparateRequirement: 'StepDimTol_GTMSeparateRequirement'
+  readonly StepDimTol_GTMSeparateRequirement: 'StepDimTol_GTMSeparateRequirement'
 
-  StepDimTol_GTMStatisticalTolerance: 'StepDimTol_GTMStatisticalTolerance'
+  readonly StepDimTol_GTMStatisticalTolerance: 'StepDimTol_GTMStatisticalTolerance'
 
-  StepDimTol_GTMTangentPlane: 'StepDimTol_GTMTangentPlane'
+  readonly StepDimTol_GTMTangentPlane: 'StepDimTol_GTMTangentPlane'
 
 StepDimTol_GeometricToleranceRelationship: declare class StepDimTol_GeometricToleranceRelationship extends Standard_Transient
 

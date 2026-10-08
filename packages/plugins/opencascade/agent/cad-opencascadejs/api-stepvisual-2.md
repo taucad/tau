@@ -507,19 +507,19 @@ StepVisual_MarkerSelect: declare class StepVisual_MarkerSelect extends StepData_
 
 StepVisual_MarkerType: typeof StepVisual_MarkerType[keyof typeof StepVisual_MarkerType]
 
-  StepVisual_mtDot: 'StepVisual_mtDot'
+  readonly StepVisual_mtDot: 'StepVisual_mtDot'
 
-  StepVisual_mtX: 'StepVisual_mtX'
+  readonly StepVisual_mtX: 'StepVisual_mtX'
 
-  StepVisual_mtPlus: 'StepVisual_mtPlus'
+  readonly StepVisual_mtPlus: 'StepVisual_mtPlus'
 
-  StepVisual_mtAsterisk: 'StepVisual_mtAsterisk'
+  readonly StepVisual_mtAsterisk: 'StepVisual_mtAsterisk'
 
-  StepVisual_mtRing: 'StepVisual_mtRing'
+  readonly StepVisual_mtRing: 'StepVisual_mtRing'
 
-  StepVisual_mtSquare: 'StepVisual_mtSquare'
+  readonly StepVisual_mtSquare: 'StepVisual_mtSquare'
 
-  StepVisual_mtTriangle: 'StepVisual_mtTriangle'
+  readonly StepVisual_mtTriangle: 'StepVisual_mtTriangle'
 
 StepVisual_MechanicalDesignGeometricPresentationArea: declare class StepVisual_MechanicalDesignGeometricPresentationArea extends StepVisual_PresentationArea
 
@@ -563,7 +563,7 @@ StepVisual_MechanicalDesignGeometricPresentationRepresentation: declare class St
 
 StepVisual_NullStyle: typeof StepVisual_NullStyle[keyof typeof StepVisual_NullStyle]
 
-  StepVisual_Null: 'StepVisual_Null'
+  readonly StepVisual_Null: 'StepVisual_Null'
 
 StepVisual_NullStyleMember: declare class StepVisual_NullStyleMember extends StepData_SelectInt
 
@@ -1338,13 +1338,13 @@ StepVisual_RepositionedTessellatedItem: declare class StepVisual_RepositionedTes
 
 StepVisual_ShadingSurfaceMethod: typeof StepVisual_ShadingSurfaceMethod[keyof typeof StepVisual_ShadingSurfaceMethod]
 
-  StepVisual_ssmConstantShading: 'StepVisual_ssmConstantShading'
+  readonly StepVisual_ssmConstantShading: 'StepVisual_ssmConstantShading'
 
-  StepVisual_ssmColourShading: 'StepVisual_ssmColourShading'
+  readonly StepVisual_ssmColourShading: 'StepVisual_ssmColourShading'
 
-  StepVisual_ssmDotShading: 'StepVisual_ssmDotShading'
+  readonly StepVisual_ssmDotShading: 'StepVisual_ssmDotShading'
 
-  StepVisual_ssmNormalShading: 'StepVisual_ssmNormalShading'
+  readonly StepVisual_ssmNormalShading: 'StepVisual_ssmNormalShading'
 
 StepVisual_StyleContextSelect: declare class StepVisual_StyleContextSelect extends StepData_SelectType
 

@@ -6,99 +6,99 @@
 // JSX element <schematicsection> with SchematicSectionProps, required name
 <schematicsection>: SchematicSectionProps
 
-  displayName: string
+  displayName?: string
 
   name: string
 
-  sectionTitleFontSize: number | string
+  sectionTitleFontSize?: number | string
 
 // Category: Schematic drawing
 // JSX element <schematicsheet> with SchematicSheetProps
 <schematicsheet>: SchematicSheetProps
 
-  name: string
+  name?: string
 
-  displayName: string
+  displayName?: string
 
-  sheetIndex: number
+  sheetIndex?: number
 
   // Sheet size used to render the schematic
-  sheetSize: SchematicSheetSize
+  sheetSize?: SchematicSheetSize
 
   // Explicit schematic sheet width
-  sheetWidth: Distance
+  sheetWidth?: Distance
 
   // Explicit schematic sheet height
-  sheetHeight: Distance
+  sheetHeight?: Distance
 
-  children: any
+  children?: any
 
 // Category: Schematic drawing
 // JSX element <schematicgraphic> with SchematicGraphicProps
 <schematicgraphic>: SchematicGraphicProps
 
   // URL or static-file import for the canonical source SVG asset
-  imageUrl: string
+  imageUrl?: string
 
   // Complete SVG markup, including its dimensions or viewBox
-  svgContent: string
+  svgContent?: string
 
   // Optional rendered width of the graphic
-  width: Distance
+  width?: Distance
 
   // Optional rendered height of the graphic
-  height: Distance
+  height?: Distance
 
 // Category: Schematic drawing
 // JSX element <schematicbox> with SchematicBoxProps
 <schematicbox>: SchematicBoxProps
 
-  name: string
+  name?: string
 
-  chipRef: string
+  chipRef?: string
 
-  pinLabels: PinLabelsProp
+  pinLabels?: PinLabelsProp
 
-  schPinArrangement: SchematicPinArrangement
+  schPinArrangement?: SchematicPinArrangement
 
   // Per-pin schematic margin overrides keyed by pin number or label
-  schPinStyle: SchematicPinStyle
+  schPinStyle?: SchematicPinStyle
 
-  schX: Distance
+  schX?: Distance
 
-  schY: Distance
+  schY?: Distance
 
-  schSectionName: string
+  schSectionName?: string
 
-  schSheetName: string
+  schSheetName?: string
 
-  width: Distance
+  width?: Distance
 
-  height: Distance
+  height?: Distance
 
-  overlay: string[]
+  overlay?: string[]
 
-  padding: Distance
+  padding?: Distance
 
-  paddingLeft: Distance
+  paddingLeft?: Distance
 
-  paddingRight: Distance
+  paddingRight?: Distance
 
-  paddingTop: Distance
+  paddingTop?: Distance
 
-  paddingBottom: Distance
+  paddingBottom?: Distance
 
-  title: string
+  title?: string
 
-  titleAlignment: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"
+  titleAlignment?: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"
 
-  titleColor: string
+  titleColor?: string
 
-  titleFontSize: Distance
+  titleFontSize?: Distance
 
-  titleInside: boolean
+  titleInside?: boolean
 
-  strokeStyle: "solid" | "dashed"
+  strokeStyle?: "solid" | "dashed"
 
 // Category: Schematic drawing
 // JSX element <schematicsymbol> with SchematicSymbolProps, required name, symbolName
@@ -108,26 +108,26 @@
   name: string
 
   // Optional human-facing name shown in the schematic
-  displayName: string
+  displayName?: string
 
   // Selector for the physical component represented by this symbol
-  chipRef: string
+  chipRef?: string
 
   // Name of the symbol from the schematic-symbol library
   symbolName: string
 
   // Maps symbol port labels to physical component port selectors
-  connections: Connections
+  connections?: Connections
 
-  schX: Distance
+  schX?: Distance
 
-  schY: Distance
+  schY?: Distance
 
-  schRotation: number | string
+  schRotation?: number | string
 
-  schSectionName: string
+  schSectionName?: string
 
-  schSheetName: string
+  schSheetName?: string
 
 // Category: Schematic drawing
 // JSX element <schematicline> with SchematicLineProps, required x1, y1, x2, y2
@@ -141,39 +141,39 @@
 
   y2: Distance
 
-  strokeWidth: Distance
+  strokeWidth?: Distance
 
-  color: string
+  color?: string
 
-  isDashed: boolean
+  isDashed?: boolean
 
-  dashLength: Distance
+  dashLength?: Distance
 
-  dashGap: Distance
+  dashGap?: Distance
 
 // Category: Schematic drawing
 // JSX element <schematicrect> with SchematicRectProps, required width, height
 <schematicrect>: SchematicRectProps
 
-  schX: Distance
+  schX?: Distance
 
-  schY: Distance
+  schY?: Distance
 
   width: Distance
 
   height: Distance
 
-  rotation: number | string
+  rotation?: number | string
 
-  strokeWidth: Distance
+  strokeWidth?: Distance
 
-  color: string
+  color?: string
 
-  isFilled: boolean
+  isFilled?: boolean
 
-  fillColor: string
+  fillColor?: string
 
-  isDashed: boolean
+  isDashed?: boolean
 
 // Category: Schematic drawing
 // JSX element <schematicarc> with SchematicArcProps, required center, radius, startAngleDegrees, endAngleDegrees
@@ -187,13 +187,13 @@
 
   endAngleDegrees: number | string
 
-  direction: "clockwise" | "counterclockwise"
+  direction?: "clockwise" | "counterclockwise"
 
-  strokeWidth: Distance
+  strokeWidth?: Distance
 
-  color: string
+  color?: string
 
-  isDashed: boolean
+  isDashed?: boolean
 
 // Category: Schematic drawing
 // JSX element <schematiccircle> with SchematicCircleProps, required center, radius
@@ -203,96 +203,96 @@
 
   radius: Distance
 
-  strokeWidth: Distance
+  strokeWidth?: Distance
 
-  color: string
+  color?: string
 
-  isFilled: boolean
+  isFilled?: boolean
 
-  fillColor: string
+  fillColor?: string
 
-  isDashed: boolean
+  isDashed?: boolean
 
 // Category: Schematic drawing
 // JSX element <schematicpath> with SchematicPathProps
 <schematicpath>: SchematicPathProps
 
-  points: Point[]
+  points?: Point[]
 
-  svgPath: string
+  svgPath?: string
 
-  strokeWidth: Distance
+  strokeWidth?: Distance
 
-  strokeColor: string
+  strokeColor?: string
 
-  dashLength: Distance
+  dashLength?: Distance
 
-  dashGap: Distance
+  dashGap?: Distance
 
-  isFilled: boolean
+  isFilled?: boolean
 
-  fillColor: string
+  fillColor?: string
 
 // Category: Schematic drawing
 // JSX element <schematictext> with SchematicTextProps, required text
 <schematictext>: SchematicTextProps
 
-  schX: Distance
+  schX?: Distance
 
-  schY: Distance
+  schY?: Distance
 
   text: string
 
-  fontSize: number
+  fontSize?: number
 
-  anchor: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right" | "left" | "right" | "top" | "bottom"
+  anchor?: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right" | "left" | "right" | "top" | "bottom"
 
-  color: string
+  color?: string
 
-  schRotation: number | string
+  schRotation?: number | string
 
 // Category: Schematic drawing
 // JSX element <schematictable> with SchematicTableProps
 <schematictable>: SchematicTableProps
 
-  schX: number | string
+  schX?: number | string
 
-  schY: number | string
+  schY?: number | string
 
-  children: any
+  children?: any
 
-  cellPadding: number | string
+  cellPadding?: number | string
 
-  borderWidth: number | string
+  borderWidth?: number | string
 
-  anchor: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"
+  anchor?: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"
 
-  fontSize: number | string
+  fontSize?: number | string
 
 // Category: Schematic drawing
 // JSX element <schematicrow> with SchematicRowProps
 <schematicrow>: SchematicRowProps
 
-  children: any
+  children?: any
 
-  height: number | string
+  height?: number | string
 
 // Category: Schematic drawing
 // JSX element <schematiccell> with SchematicCellProps
 <schematiccell>: SchematicCellProps
 
-  children: string
+  children?: string
 
-  horizontalAlign: "left" | "center" | "right"
+  horizontalAlign?: "left" | "center" | "right"
 
-  verticalAlign: "top" | "middle" | "bottom"
+  verticalAlign?: "top" | "middle" | "bottom"
 
-  fontSize: number | string
+  fontSize?: number | string
 
-  rowSpan: number
+  rowSpan?: number
 
-  colSpan: number
+  colSpan?: number
 
-  width: number | string
+  width?: number | string
 
-  text: string
+  text?: string

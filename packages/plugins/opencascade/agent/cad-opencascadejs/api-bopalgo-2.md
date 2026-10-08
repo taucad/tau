@@ -54,17 +54,17 @@ BOPAlgo_MakerVolume: declare class BOPAlgo_MakerVolume extends BOPAlgo_Builder
 
 BOPAlgo_Operation: typeof BOPAlgo_Operation[keyof typeof BOPAlgo_Operation]
 
-  BOPAlgo_COMMON: 'BOPAlgo_COMMON'
+  readonly BOPAlgo_COMMON: 'BOPAlgo_COMMON'
 
-  BOPAlgo_FUSE: 'BOPAlgo_FUSE'
+  readonly BOPAlgo_FUSE: 'BOPAlgo_FUSE'
 
-  BOPAlgo_CUT: 'BOPAlgo_CUT'
+  readonly BOPAlgo_CUT: 'BOPAlgo_CUT'
 
-  BOPAlgo_CUT21: 'BOPAlgo_CUT21'
+  readonly BOPAlgo_CUT21: 'BOPAlgo_CUT21'
 
-  BOPAlgo_SECTION: 'BOPAlgo_SECTION'
+  readonly BOPAlgo_SECTION: 'BOPAlgo_SECTION'
 
-  BOPAlgo_UNKNOWN: 'BOPAlgo_UNKNOWN'
+  readonly BOPAlgo_UNKNOWN: 'BOPAlgo_UNKNOWN'
 
 BOPAlgo_Options: declare class BOPAlgo_Options
 

@@ -230,9 +230,9 @@ NCollection_Buffer: declare class NCollection_Buffer extends Standard_Transient
 
 NCollection_CellFilter_Action: typeof NCollection_CellFilter_Action[keyof typeof NCollection_CellFilter_Action]
 
-  CellFilter_Keep: 'CellFilter_Keep'
+  readonly CellFilter_Keep: 'CellFilter_Keep'
 
-  CellFilter_Purge: 'CellFilter_Purge'
+  readonly CellFilter_Purge: 'CellFilter_Purge'
 
 NCollection_ForwardRangeSentinel: declare class NCollection_ForwardRangeSentinel
 
@@ -313,15 +313,15 @@ NCollection_IncAllocator_IBlock: interface NCollection_IncAllocator_IBlock
 
 NCollection_IncAllocator_IBlockSizeLevel: typeof NCollection_IncAllocator_IBlockSizeLevel[keyof typeof NCollection_IncAllocator_IBlockSizeLevel]
 
-  Min: 'Min'
+  readonly Min: 'Min'
 
-  Small: 'Small'
+  readonly Small: 'Small'
 
-  Medium: 'Medium'
+  readonly Medium: 'Medium'
 
-  Large: 'Large'
+  readonly Large: 'Large'
 
-  Max: 'Max'
+  readonly Max: 'Max'
 
 NCollection_SparseArrayBase: declare class NCollection_SparseArrayBase
 

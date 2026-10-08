@@ -83,11 +83,11 @@ Hatch_Line: declare class Hatch_Line
 
 Hatch_LineForm: typeof Hatch_LineForm[keyof typeof Hatch_LineForm]
 
-  Hatch_XLINE: 'Hatch_XLINE'
+  readonly Hatch_XLINE: 'Hatch_XLINE'
 
-  Hatch_YLINE: 'Hatch_YLINE'
+  readonly Hatch_YLINE: 'Hatch_YLINE'
 
-  Hatch_ANYLINE: 'Hatch_ANYLINE'
+  readonly Hatch_ANYLINE: 'Hatch_ANYLINE'
 
 Hatch_Parameter: declare class Hatch_Parameter
 

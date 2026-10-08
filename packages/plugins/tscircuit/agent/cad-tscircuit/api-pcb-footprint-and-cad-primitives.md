@@ -6,27 +6,27 @@
 // JSX element <via> with ViaProps
 <via>: ViaProps extends CommonLayoutProps
 
-  name: string
+  name?: string
 
-  fromLayer: LayerRefInput
+  fromLayer?: LayerRefInput
 
-  toLayer: LayerRefInput
+  toLayer?: LayerRefInput
 
-  layers: LayerRefInput[]
+  layers?: LayerRefInput[]
 
-  holeDiameter: number | string
+  holeDiameter?: number | string
 
-  outerDiameter: number | string
+  outerDiameter?: number | string
 
-  connectsTo: string | string[]
+  connectsTo?: string | string[]
 
-  netIsAssignable: boolean
+  netIsAssignable?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <smtpad> with SmtPadProps, required shape
 <smtpad>: SmtPadProps extends Omit<PcbLayoutProps, "pcbRotation">
 
-  name: string
+  name?: string
 
   shape: "rect"
 
@@ -34,25 +34,25 @@
 
   height: Distance
 
-  rectBorderRadius: Distance
+  rectBorderRadius?: Distance
 
-  cornerRadius: Distance
+  cornerRadius?: Distance
 
-  portHints: PortHints
+  portHints?: PortHints
 
-  coveredWithSolderMask: boolean
+  coveredWithSolderMask?: boolean
 
-  solderMaskMargin: Distance
+  solderMaskMargin?: Distance
 
-  solderMaskMarginLeft: Distance
+  solderMaskMarginLeft?: Distance
 
-  solderMaskMarginRight: Distance
+  solderMaskMarginRight?: Distance
 
-  solderMaskMarginTop: Distance
+  solderMaskMarginTop?: Distance
 
-  solderMaskMarginBottom: Distance
+  solderMaskMarginBottom?: Distance
 
-  solderPasteMargin: Distance
+  solderPasteMargin?: Distance
 
   radius: Distance
 
@@ -64,9 +64,9 @@
 // JSX element <platedhole> with PlatedHoleProps, required shape
 <platedhole>: PlatedHoleProps extends Omit<PcbLayoutProps, "layer">
 
-  name: string
+  name?: string
 
-  connectsTo: string | string[]
+  connectsTo?: string | string[]
 
   shape: "circle"
 
@@ -74,13 +74,13 @@
 
   outerDiameter: number | string
 
-  padDiameter: number | string
+  padDiameter?: number | string
 
-  portHints: PortHints
+  portHints?: PortHints
 
-  solderMaskMargin: Distance
+  solderMaskMargin?: Distance
 
-  coveredWithSolderMask: boolean
+  coveredWithSolderMask?: boolean
 
   outerWidth: number | string
 
@@ -90,21 +90,21 @@
 
   holeHeight: number | string
 
-  rectPad: boolean
+  rectPad?: boolean
 
-  holeOffsetX: number | string
+  holeOffsetX?: number | string
 
-  holeOffsetY: number | string
+  holeOffsetY?: number | string
 
   rectPadWidth: number | string
 
   rectPadHeight: number | string
 
-  rectBorderRadius: number | string
+  rectBorderRadius?: number | string
 
-  holeShape: "circle"
+  holeShape?: "circle"
 
-  padShape: "rect"
+  padShape?: "rect"
 
   padOutline: Point[]
 
@@ -116,9 +116,9 @@
 
   radius: string | number
 
-  layers: ("top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; })[]
+  layers?: ("top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; })[]
 
-  excludeRefs: string[]
+  excludeRefs?: string[]
 
   width: string | number
 
@@ -128,17 +128,17 @@
 // JSX element <hole> with HoleProps
 <hole>: HoleProps extends PcbLayoutProps
 
-  name: string
+  name?: string
 
-  shape: "circle"
+  shape?: "circle"
 
-  diameter: Distance
+  diameter?: Distance
 
-  radius: Distance
+  radius?: Distance
 
-  solderMaskMargin: Distance
+  solderMaskMargin?: Distance
 
-  coveredWithSolderMask: boolean
+  coveredWithSolderMask?: boolean
 
   width: Distance
 
@@ -150,78 +150,78 @@
 
   modelUrl: string
 
-  stepUrl: string
+  stepUrl?: string
 
-  pcbX: Distance
+  pcbX?: Distance
 
-  pcbY: Distance
+  pcbY?: Distance
 
-  pcbLeftEdgeX: Distance
+  pcbLeftEdgeX?: Distance
 
-  pcbRightEdgeX: Distance
+  pcbRightEdgeX?: Distance
 
-  pcbTopEdgeY: Distance
+  pcbTopEdgeY?: Distance
 
-  pcbBottomEdgeY: Distance
+  pcbBottomEdgeY?: Distance
 
-  pcbOffsetX: Distance
+  pcbOffsetX?: Distance
 
-  pcbOffsetY: Distance
+  pcbOffsetY?: Distance
 
-  pcbZ: Distance
+  pcbZ?: Distance
 
-  rotationOffset: number | {x: number | string; y: number | string; z: number | string; }
+  rotationOffset?: number | {x: number | string; y: number | string; z: number | string; }
 
-  positionOffset: {x: number | string; y: number | string; z: number | string; }
+  positionOffset?: {x: number | string; y: number | string; z: number | string; }
 
-  modelOriginPosition: {x: number | string; y: number | string; z: number | string; }
+  modelOriginPosition?: {x: number | string; y: number | string; z: number | string; }
 
   // Axis-aligned extent of the model measured in its own coordinate frame, the same frame as `modelOriginPosition`
-  modelBounds: {min: {x: number | string; y: number | string; z: number | string; }; max: {x: number | string; y: number | string; z: number | string; }; }
+  modelBounds?: {min: {x: number | string; y: number | string; z: number | string; }; max: {x: number | string; y: number | string; z: number | string; }; }
 
-  size: {x: number | string; y: number | string; z: number | string; }
+  size?: {x: number | string; y: number | string; z: number | string; }
 
-  modelUnitToMmScale: Distance
+  modelUnitToMmScale?: Distance
 
-  modelBoardNormalDirection: CadModelAxisDirection
+  modelBoardNormalDirection?: CadModelAxisDirection
 
-  pcbRotationOffset: number
+  pcbRotationOffset?: number
 
-  zOffsetFromSurface: Distance
+  zOffsetFromSurface?: Distance
 
-  showAsTranslucentModel: boolean
+  showAsTranslucentModel?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <cadassembly> with CadAssemblyProps
 <cadassembly>: CadAssemblyProps
 
   // The layer that the CAD assembly is designed for
-  originalLayer: LayerRef
+  originalLayer?: LayerRef
 
-  children: any
+  children?: any
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <footprint> with FootprintProps & {name?
 <footprint>: FootprintProps & {name?: string; }
 
-  children: any
+  children?: any
 
-  name: string
+  name?: string
 
   // The layer that the footprint is designed for
-  originalLayer: LayerRef
+  originalLayer?: LayerRef
 
   // Serialized circuit JSON describing a precompiled footprint
-  circuitJson: any[]
+  circuitJson?: any[]
 
   // Can be a footprint or kicad string
-  src: FootprintProp
+  src?: FootprintProp
 
   // Direction a cable or mating part is attached from, in the footprint's own frame -- the same frame its pads are drawn in
-  insertionDirection: FootprintInsertionDirection
+  insertionDirection?: FootprintInsertionDirection
 
   // Direction the part's enclosure opening faces, named the same way as `insertionDirection` and in the same unrotated part frame
-  cutoutApertureDirection: FootprintInsertionDirection
+  cutoutApertureDirection?: FootprintInsertionDirection
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <silkscreentext> with SilkscreenTextProps, required text
@@ -229,25 +229,25 @@
 
   text: string
 
-  font: "tscircuit2024"
+  font?: "tscircuit2024"
 
-  layers: ("top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; })[]
+  layers?: ("top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; })[]
 
-  fontSize: string | number
+  fontSize?: string | number
 
-  anchorAlignment: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"
+  anchorAlignment?: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"
 
-  isKnockout: boolean
+  isKnockout?: boolean
 
-  knockoutPadding: string | number
+  knockoutPadding?: string | number
 
-  knockoutPaddingLeft: string | number
+  knockoutPaddingLeft?: string | number
 
-  knockoutPaddingRight: string | number
+  knockoutPaddingRight?: string | number
 
-  knockoutPaddingTop: string | number
+  knockoutPaddingTop?: string | number
 
-  knockoutPaddingBottom: string | number
+  knockoutPaddingBottom?: string | number
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <silkscreengraphic> with SilkscreenGraphicProps, required imageUrl, width, height
@@ -268,23 +268,23 @@
 
   text: string
 
-  font: "tscircuit2024"
+  font?: "tscircuit2024"
 
-  layers: ("top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; })[]
+  layers?: ("top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; })[]
 
-  fontSize: string | number
+  fontSize?: string | number
 
-  anchorAlignment: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"
+  anchorAlignment?: "top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right"
 
-  knockout: boolean
+  knockout?: boolean
 
-  mirrored: boolean
+  mirrored?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <cutout> with CutoutProps, required shape
 <cutout>: CutoutProps extends Omit<PcbLayoutProps, "pcbRotation" | "layer">
 
-  name: string
+  name?: string
 
   shape: "rect"
 
@@ -302,35 +302,35 @@
 
   route: {x: string | number; y: string | number; via?: boolean | undefined; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; trace_width?: string | number | undefined; }[]
 
-  layer: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; }
+  layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; }
 
-  pcbPositionAnchor: string
+  pcbPositionAnchor?: string
 
-  pcbPositionMode: "relative_to_group_anchor" | "auto" | "relative_to_board_anchor" | "relative_to_component_anchor"
+  pcbPositionMode?: "relative_to_group_anchor" | "auto" | "relative_to_board_anchor" | "relative_to_component_anchor"
 
-  shouldBeOnEdgeOfBoard: boolean
+  shouldBeOnEdgeOfBoard?: boolean
 
-  pcbMarginTop: string | number
+  pcbMarginTop?: string | number
 
-  pcbMarginRight: string | number
+  pcbMarginRight?: string | number
 
-  pcbMarginBottom: string | number
+  pcbMarginBottom?: string | number
 
-  pcbMarginLeft: string | number
+  pcbMarginLeft?: string | number
 
-  pcbMarginX: string | number
+  pcbMarginX?: string | number
 
-  pcbMarginY: string | number
+  pcbMarginY?: string | number
 
-  pcbStyle: {silkscreenFontSize?: string | number | undefined; viaPadDiameter?: string | number | undefined; viaHoleDiameter?: string | number | undefined; silkscreenTextPosition?: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; } | undefined; silkscreenTextVisibility?: "hidden" | "visible" | "inherit" | undefined; }
+  pcbStyle?: {silkscreenFontSize?: string | number | undefined; viaPadDiameter?: string | number | undefined; viaHoleDiameter?: string | number | undefined; silkscreenTextPosition?: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; } | undefined; silkscreenTextVisibility?: "hidden" | "visible" | "inherit" | undefined; }
 
-  pcbSx: PcbSx
+  pcbSx?: PcbSx
 
-  pcbRelative: boolean
+  pcbRelative?: boolean
 
-  relative: boolean
+  relative?: boolean
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <silkscreenline> with SilkscreenLineProps, required strokeWidth, x1, y1, x2, y2
@@ -346,41 +346,41 @@
 
   y2: string | number
 
-  layer: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; }
+  layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; }
 
-  pcbLeftEdgeX: string | number
+  pcbLeftEdgeX?: string | number
 
-  pcbRightEdgeX: string | number
+  pcbRightEdgeX?: string | number
 
-  pcbTopEdgeY: string | number
+  pcbTopEdgeY?: string | number
 
-  pcbBottomEdgeY: string | number
+  pcbBottomEdgeY?: string | number
 
-  pcbPositionAnchor: string
+  pcbPositionAnchor?: string
 
-  pcbPositionMode: "relative_to_group_anchor" | "auto" | "relative_to_board_anchor" | "relative_to_component_anchor"
+  pcbPositionMode?: "relative_to_group_anchor" | "auto" | "relative_to_board_anchor" | "relative_to_component_anchor"
 
-  shouldBeOnEdgeOfBoard: boolean
+  shouldBeOnEdgeOfBoard?: boolean
 
-  pcbMarginTop: string | number
+  pcbMarginTop?: string | number
 
-  pcbMarginRight: string | number
+  pcbMarginRight?: string | number
 
-  pcbMarginBottom: string | number
+  pcbMarginBottom?: string | number
 
-  pcbMarginLeft: string | number
+  pcbMarginLeft?: string | number
 
-  pcbMarginX: string | number
+  pcbMarginX?: string | number
 
-  pcbMarginY: string | number
+  pcbMarginY?: string | number
 
-  pcbStyle: {silkscreenFontSize?: string | number | undefined; viaPadDiameter?: string | number | undefined; viaHoleDiameter?: string | number | undefined; silkscreenTextPosition?: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; } | undefined; silkscreenTextVisibility?: "hidden" | "visible" | "inherit" | undefined; }
+  pcbStyle?: {silkscreenFontSize?: string | number | undefined; viaPadDiameter?: string | number | undefined; viaHoleDiameter?: string | number | undefined; silkscreenTextPosition?: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; } | undefined; silkscreenTextVisibility?: "hidden" | "visible" | "inherit" | undefined; }
 
-  pcbSx: PcbSx
+  pcbSx?: PcbSx
 
-  pcbRelative: boolean
+  pcbRelative?: boolean
 
-  relative: boolean
+  relative?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <silkscreenrect> with SilkscreenRectProps, required width, height
@@ -390,13 +390,13 @@
 
   height: string | number
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
-  cornerRadius: string | number
+  cornerRadius?: string | number
 
-  filled: boolean
+  filled?: boolean
 
-  stroke: "none" | "dashed" | "solid"
+  stroke?: "none" | "dashed" | "solid"
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <silkscreencircle> with SilkscreenCircleProps, required radius
@@ -404,11 +404,11 @@
 
   radius: string | number
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
-  isFilled: boolean
+  isFilled?: boolean
 
-  isOutline: boolean
+  isOutline?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <courtyardcircle> with CourtyardCircleProps, required radius
@@ -422,41 +422,41 @@
 
   outline: {x: string | number; y: string | number; }[]
 
-  layer: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; }
+  layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; }
 
-  pcbPositionAnchor: string
+  pcbPositionAnchor?: string
 
-  pcbPositionMode: "relative_to_group_anchor" | "auto" | "relative_to_board_anchor" | "relative_to_component_anchor"
+  pcbPositionMode?: "relative_to_group_anchor" | "auto" | "relative_to_board_anchor" | "relative_to_component_anchor"
 
-  shouldBeOnEdgeOfBoard: boolean
+  shouldBeOnEdgeOfBoard?: boolean
 
-  pcbMarginTop: string | number
+  pcbMarginTop?: string | number
 
-  pcbMarginRight: string | number
+  pcbMarginRight?: string | number
 
-  pcbMarginBottom: string | number
+  pcbMarginBottom?: string | number
 
-  pcbMarginLeft: string | number
+  pcbMarginLeft?: string | number
 
-  pcbMarginX: string | number
+  pcbMarginX?: string | number
 
-  pcbMarginY: string | number
+  pcbMarginY?: string | number
 
-  pcbStyle: {silkscreenFontSize?: string | number | undefined; viaPadDiameter?: string | number | undefined; viaHoleDiameter?: string | number | undefined; silkscreenTextPosition?: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; } | undefined; silkscreenTextVisibility?: "hidden" | "visible" | "inherit" | undefined; }
+  pcbStyle?: {silkscreenFontSize?: string | number | undefined; viaPadDiameter?: string | number | undefined; viaHoleDiameter?: string | number | undefined; silkscreenTextPosition?: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; } | undefined; silkscreenTextVisibility?: "hidden" | "visible" | "inherit" | undefined; }
 
-  pcbSx: PcbSx
+  pcbSx?: PcbSx
 
-  pcbRelative: boolean
+  pcbRelative?: boolean
 
-  relative: boolean
+  relative?: boolean
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
-  color: string
+  color?: string
 
-  isStrokeDashed: boolean
+  isStrokeDashed?: boolean
 
-  isClosed: boolean
+  isClosed?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <courtyardrect> with CourtyardRectProps, required width, height
@@ -466,15 +466,15 @@
 
   height: string | number
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
-  color: string
+  color?: string
 
-  isFilled: boolean
+  isFilled?: boolean
 
-  hasStroke: boolean
+  hasStroke?: boolean
 
-  isStrokeDashed: boolean
+  isStrokeDashed?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <fabricationnoterect> with FabricationNoteRectProps, required width, height
@@ -484,17 +484,17 @@
 
   height: string | number
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
-  cornerRadius: string | number
+  cornerRadius?: string | number
 
-  color: string
+  color?: string
 
-  isFilled: boolean
+  isFilled?: boolean
 
-  hasStroke: boolean
+  hasStroke?: boolean
 
-  isStrokeDashed: boolean
+  isStrokeDashed?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <pcbnoteline> with PcbNoteLineProps, required x1, y1, x2, y2
@@ -508,41 +508,41 @@
 
   y2: string | number
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
-  color: string
+  color?: string
 
-  isDashed: boolean
+  isDashed?: boolean
 
-  pcbStyle: PcbStyle
+  pcbStyle?: PcbStyle
 
-  pcbPositionAnchor: string
+  pcbPositionAnchor?: string
 
-  pcbPositionMode: PcbPositionMode
+  pcbPositionMode?: PcbPositionMode
 
-  shouldBeOnEdgeOfBoard: boolean
+  shouldBeOnEdgeOfBoard?: boolean
 
-  pcbMarginTop: string | number
+  pcbMarginTop?: string | number
 
-  pcbMarginRight: string | number
+  pcbMarginRight?: string | number
 
-  pcbMarginBottom: string | number
+  pcbMarginBottom?: string | number
 
-  pcbMarginLeft: string | number
+  pcbMarginLeft?: string | number
 
-  pcbMarginX: string | number
+  pcbMarginX?: string | number
 
-  pcbMarginY: string | number
+  pcbMarginY?: string | number
 
-  pcbSx: PcbSx
+  pcbSx?: PcbSx
 
-  layer: LayerRefInput
+  layer?: LayerRefInput
 
   // If true, both pcb and schematic coordinates will be interpreted relative to the parent group
-  relative: boolean
+  relative?: boolean
 
   // If true, pcbX/pcbY will be interpreted relative to the parent group
-  pcbRelative: boolean
+  pcbRelative?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <pcbnoterect> with PcbNoteRectProps, required width, height
@@ -552,17 +552,17 @@
 
   height: string | number
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
-  isFilled: boolean
+  isFilled?: boolean
 
-  hasStroke: boolean
+  hasStroke?: boolean
 
-  isStrokeDashed: boolean
+  isStrokeDashed?: boolean
 
-  color: string
+  color?: string
 
-  cornerRadius: string | number
+  cornerRadius?: string | number
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <pcbnotetext> with PcbNoteTextProps, required text
@@ -570,13 +570,13 @@
 
   text: string
 
-  anchorAlignment: "center" | "top_left" | "top_right" | "bottom_left" | "bottom_right"
+  anchorAlignment?: "center" | "top_left" | "top_right" | "bottom_left" | "bottom_right"
 
-  font: "tscircuit2024"
+  font?: "tscircuit2024"
 
-  fontSize: string | number
+  fontSize?: string | number
 
-  color: string
+  color?: string
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <pcbnotepath> with PcbNotePathProps, required route
@@ -584,39 +584,39 @@
 
   route: RouteHintPointInput[]
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
-  color: string
+  color?: string
 
-  pcbStyle: PcbStyle
+  pcbStyle?: PcbStyle
 
-  pcbPositionAnchor: string
+  pcbPositionAnchor?: string
 
-  pcbPositionMode: PcbPositionMode
+  pcbPositionMode?: PcbPositionMode
 
-  shouldBeOnEdgeOfBoard: boolean
+  shouldBeOnEdgeOfBoard?: boolean
 
-  pcbMarginTop: string | number
+  pcbMarginTop?: string | number
 
-  pcbMarginRight: string | number
+  pcbMarginRight?: string | number
 
-  pcbMarginBottom: string | number
+  pcbMarginBottom?: string | number
 
-  pcbMarginLeft: string | number
+  pcbMarginLeft?: string | number
 
-  pcbMarginX: string | number
+  pcbMarginX?: string | number
 
-  pcbMarginY: string | number
+  pcbMarginY?: string | number
 
-  pcbSx: PcbSx
+  pcbSx?: PcbSx
 
-  layer: LayerRefInput
+  layer?: LayerRefInput
 
   // If true, both pcb and schematic coordinates will be interpreted relative to the parent group
-  relative: boolean
+  relative?: boolean
 
   // If true, pcbX/pcbY will be interpreted relative to the parent group
-  pcbRelative: boolean
+  pcbRelative?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <pcbnotedimension> with PcbNoteDimensionProps, required from, to
@@ -626,55 +626,55 @@
 
   to: string | Point
 
-  text: string
+  text?: string
 
-  offset: string | number
+  offset?: string | number
 
-  font: "tscircuit2024"
+  font?: "tscircuit2024"
 
-  fontSize: string | number
+  fontSize?: string | number
 
-  color: string
+  color?: string
 
-  arrowSize: string | number
+  arrowSize?: string | number
 
-  units: "in" | "mm"
+  units?: "in" | "mm"
 
-  outerEdgeToEdge: true
+  outerEdgeToEdge?: true
 
-  centerToCenter: true
+  centerToCenter?: true
 
-  innerEdgeToEdge: true
+  innerEdgeToEdge?: true
 
-  pcbStyle: PcbStyle
+  pcbStyle?: PcbStyle
 
-  pcbPositionAnchor: string
+  pcbPositionAnchor?: string
 
-  pcbPositionMode: PcbPositionMode
+  pcbPositionMode?: PcbPositionMode
 
-  shouldBeOnEdgeOfBoard: boolean
+  shouldBeOnEdgeOfBoard?: boolean
 
-  pcbMarginTop: string | number
+  pcbMarginTop?: string | number
 
-  pcbMarginRight: string | number
+  pcbMarginRight?: string | number
 
-  pcbMarginBottom: string | number
+  pcbMarginBottom?: string | number
 
-  pcbMarginLeft: string | number
+  pcbMarginLeft?: string | number
 
-  pcbMarginX: string | number
+  pcbMarginX?: string | number
 
-  pcbMarginY: string | number
+  pcbMarginY?: string | number
 
-  pcbSx: PcbSx
+  pcbSx?: PcbSx
 
-  layer: LayerRefInput
+  layer?: LayerRefInput
 
   // If true, both pcb and schematic coordinates will be interpreted relative to the parent group
-  relative: boolean
+  relative?: boolean
 
   // If true, pcbX/pcbY will be interpreted relative to the parent group
-  pcbRelative: boolean
+  pcbRelative?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <fabricationnotetext> with FabricationNoteTextProps, required text
@@ -682,13 +682,13 @@
 
   text: string
 
-  anchorAlignment: "center" | "top_left" | "top_right" | "bottom_left" | "bottom_right"
+  anchorAlignment?: "center" | "top_left" | "top_right" | "bottom_left" | "bottom_right"
 
-  font: "tscircuit2024"
+  font?: "tscircuit2024"
 
-  fontSize: string | number
+  fontSize?: string | number
 
-  color: string
+  color?: string
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <fabricationnotepath> with FabricationNotePathProps, required route
@@ -696,37 +696,37 @@
 
   route: {x: string | number; y: string | number; via?: boolean | undefined; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; trace_width?: string | number | undefined; }[]
 
-  layer: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; }
+  layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; }
 
-  pcbPositionAnchor: string
+  pcbPositionAnchor?: string
 
-  pcbPositionMode: "relative_to_group_anchor" | "auto" | "relative_to_board_anchor" | "relative_to_component_anchor"
+  pcbPositionMode?: "relative_to_group_anchor" | "auto" | "relative_to_board_anchor" | "relative_to_component_anchor"
 
-  shouldBeOnEdgeOfBoard: boolean
+  shouldBeOnEdgeOfBoard?: boolean
 
-  pcbMarginTop: string | number
+  pcbMarginTop?: string | number
 
-  pcbMarginRight: string | number
+  pcbMarginRight?: string | number
 
-  pcbMarginBottom: string | number
+  pcbMarginBottom?: string | number
 
-  pcbMarginLeft: string | number
+  pcbMarginLeft?: string | number
 
-  pcbMarginX: string | number
+  pcbMarginX?: string | number
 
-  pcbMarginY: string | number
+  pcbMarginY?: string | number
 
-  pcbStyle: {silkscreenFontSize?: string | number | undefined; viaPadDiameter?: string | number | undefined; viaHoleDiameter?: string | number | undefined; silkscreenTextPosition?: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; } | undefined; silkscreenTextVisibility?: "hidden" | "visible" | "inherit" | undefined; }
+  pcbStyle?: {silkscreenFontSize?: string | number | undefined; viaPadDiameter?: string | number | undefined; viaHoleDiameter?: string | number | undefined; silkscreenTextPosition?: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; } | undefined; silkscreenTextVisibility?: "hidden" | "visible" | "inherit" | undefined; }
 
-  pcbSx: PcbSx
+  pcbSx?: PcbSx
 
-  pcbRelative: boolean
+  pcbRelative?: boolean
 
-  relative: boolean
+  relative?: boolean
 
-  strokeWidth: string | number
+  strokeWidth?: string | number
 
-  color: string
+  color?: string
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <fabricationnotedimension> with FabricationNoteDimensionProps, required from, to
@@ -736,81 +736,81 @@
 
   to: string | Point
 
-  text: string
+  text?: string
 
-  offset: string | number
+  offset?: string | number
 
-  font: "tscircuit2024"
+  font?: "tscircuit2024"
 
-  fontSize: string | number
+  fontSize?: string | number
 
-  color: string
+  color?: string
 
-  arrowSize: string | number
+  arrowSize?: string | number
 
-  units: "in" | "mm"
+  units?: "in" | "mm"
 
-  outerEdgeToEdge: true
+  outerEdgeToEdge?: true
 
-  centerToCenter: true
+  centerToCenter?: true
 
-  innerEdgeToEdge: true
+  innerEdgeToEdge?: true
 
-  pcbStyle: PcbStyle
+  pcbStyle?: PcbStyle
 
-  pcbPositionAnchor: string
+  pcbPositionAnchor?: string
 
-  pcbPositionMode: PcbPositionMode
+  pcbPositionMode?: PcbPositionMode
 
-  shouldBeOnEdgeOfBoard: boolean
+  shouldBeOnEdgeOfBoard?: boolean
 
-  pcbMarginTop: string | number
+  pcbMarginTop?: string | number
 
-  pcbMarginRight: string | number
+  pcbMarginRight?: string | number
 
-  pcbMarginBottom: string | number
+  pcbMarginBottom?: string | number
 
-  pcbMarginLeft: string | number
+  pcbMarginLeft?: string | number
 
-  pcbMarginX: string | number
+  pcbMarginX?: string | number
 
-  pcbMarginY: string | number
+  pcbMarginY?: string | number
 
-  pcbSx: PcbSx
+  pcbSx?: PcbSx
 
-  layer: LayerRefInput
+  layer?: LayerRefInput
 
   // If true, both pcb and schematic coordinates will be interpreted relative to the parent group
-  relative: boolean
+  relative?: boolean
 
   // If true, pcbX/pcbY will be interpreted relative to the parent group
-  pcbRelative: boolean
+  pcbRelative?: boolean
 
 // Category: PCB, footprint and CAD primitives
 // JSX element <copperpour> with CopperPourProps, required layer, connectsTo
 <copperpour>: CopperPourProps
 
-  name: string
+  name?: string
 
   layer: LayerRefInput
 
   connectsTo: string
 
   // Reserves the pour region during autorouting so unrelated traces do not split it
-  unbroken: boolean
+  unbroken?: boolean
 
-  padMargin: Distance
+  padMargin?: Distance
 
-  traceMargin: Distance
+  traceMargin?: Distance
 
-  clearance: Distance
+  clearance?: Distance
 
-  boardEdgeMargin: Distance
+  boardEdgeMargin?: Distance
 
-  cutoutMargin: Distance
+  cutoutMargin?: Distance
 
-  useThermalReliefs: boolean
+  useThermalReliefs?: boolean
 
-  outline: Point[]
+  outline?: Point[]
 
-  coveredWithSolderMask: boolean
+  coveredWithSolderMask?: boolean

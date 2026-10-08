@@ -45,27 +45,27 @@ BRepGraph_NodeId: declare class BRepGraph_NodeId
 
 BRepGraph_NodeId_Kind: typeof BRepGraph_NodeId_Kind[keyof typeof BRepGraph_NodeId_Kind]
 
-  Solid: 'Solid'
+  readonly Solid: 'Solid'
 
-  Shell: 'Shell'
+  readonly Shell: 'Shell'
 
-  Face: 'Face'
+  readonly Face: 'Face'
 
-  Wire: 'Wire'
+  readonly Wire: 'Wire'
 
-  Edge: 'Edge'
+  readonly Edge: 'Edge'
 
-  Vertex: 'Vertex'
+  readonly Vertex: 'Vertex'
 
-  Compound: 'Compound'
+  readonly Compound: 'Compound'
 
-  CompSolid: 'CompSolid'
+  readonly CompSolid: 'CompSolid'
 
-  CoEdge: 'CoEdge'
+  readonly CoEdge: 'CoEdge'
 
-  Product: 'Product'
+  readonly Product: 'Product'
 
-  Occurrence: 'Occurrence'
+  readonly Occurrence: 'Occurrence'
 
 BRepGraph_OccurrenceId: declare class BRepGraph_OccurrenceId
 
@@ -344,17 +344,17 @@ BRepGraph_ParentExplorer: declare class BRepGraph_ParentExplorer
 
 BRepGraph_ParentExplorer_LinkKind: typeof BRepGraph_ParentExplorer_LinkKind[keyof typeof BRepGraph_ParentExplorer_LinkKind]
 
-  None: 'None'
+  readonly None: 'None'
 
-  Reference: 'Reference'
+  readonly Reference: 'Reference'
 
-  Structural: 'Structural'
+  readonly Structural: 'Structural'
 
 BRepGraph_ParentExplorer_TraversalMode: typeof BRepGraph_ParentExplorer_TraversalMode[keyof typeof BRepGraph_ParentExplorer_TraversalMode]
 
-  Recursive: 'Recursive'
+  readonly Recursive: 'Recursive'
 
-  DirectParents: 'DirectParents'
+  readonly DirectParents: 'DirectParents'
 
 BRepGraph_ChildRefId: declare class BRepGraph_ChildRefId
 
@@ -498,19 +498,19 @@ BRepGraph_RefId: declare class BRepGraph_RefId
 
 BRepGraph_RefId_Kind: typeof BRepGraph_RefId_Kind[keyof typeof BRepGraph_RefId_Kind]
 
-  Shell: 'Shell'
+  readonly Shell: 'Shell'
 
-  Face: 'Face'
+  readonly Face: 'Face'
 
-  Wire: 'Wire'
+  readonly Wire: 'Wire'
 
-  Vertex: 'Vertex'
+  readonly Vertex: 'Vertex'
 
-  Solid: 'Solid'
+  readonly Solid: 'Solid'
 
-  Child: 'Child'
+  readonly Child: 'Child'
 
-  Occurrence: 'Occurrence'
+  readonly Occurrence: 'Occurrence'
 
 BRepGraph_ShellRefId: declare class BRepGraph_ShellRefId
 

@@ -130,11 +130,11 @@ StepFEA_ConstantSurface3dElementCoordinateSystem: declare class StepFEA_Constant
 
 StepFEA_CoordinateSystemType: typeof StepFEA_CoordinateSystemType[keyof typeof StepFEA_CoordinateSystemType]
 
-  StepFEA_Cartesian: 'StepFEA_Cartesian'
+  readonly StepFEA_Cartesian: 'StepFEA_Cartesian'
 
-  StepFEA_Cylindrical: 'StepFEA_Cylindrical'
+  readonly StepFEA_Cylindrical: 'StepFEA_Cylindrical'
 
-  StepFEA_Spherical: 'StepFEA_Spherical'
+  readonly StepFEA_Spherical: 'StepFEA_Spherical'
 
 StepFEA_Curve3dElementProperty: declare class StepFEA_Curve3dElementProperty extends Standard_Transient
 
@@ -240,7 +240,7 @@ StepFEA_Curve3dElementRepresentation: declare class StepFEA_Curve3dElementRepres
 
 StepFEA_CurveEdge: typeof StepFEA_CurveEdge[keyof typeof StepFEA_CurveEdge]
 
-  StepFEA_ElementEdge: 'StepFEA_ElementEdge'
+  readonly StepFEA_ElementEdge: 'StepFEA_ElementEdge'
 
 StepFEA_CurveElementEndCoordinateSystem: declare class StepFEA_CurveElementEndCoordinateSystem extends StepData_SelectType
 
@@ -667,23 +667,23 @@ StepFEA_ElementRepresentation: declare class StepFEA_ElementRepresentation exten
 
 StepFEA_ElementVolume: typeof StepFEA_ElementVolume[keyof typeof StepFEA_ElementVolume]
 
-  StepFEA_Volume: 'StepFEA_Volume'
+  readonly StepFEA_Volume: 'StepFEA_Volume'
 
 StepFEA_EnumeratedDegreeOfFreedom: typeof StepFEA_EnumeratedDegreeOfFreedom[keyof typeof StepFEA_EnumeratedDegreeOfFreedom]
 
-  StepFEA_XTranslation: 'StepFEA_XTranslation'
+  readonly StepFEA_XTranslation: 'StepFEA_XTranslation'
 
-  StepFEA_YTranslation: 'StepFEA_YTranslation'
+  readonly StepFEA_YTranslation: 'StepFEA_YTranslation'
 
-  StepFEA_ZTranslation: 'StepFEA_ZTranslation'
+  readonly StepFEA_ZTranslation: 'StepFEA_ZTranslation'
 
-  StepFEA_XRotation: 'StepFEA_XRotation'
+  readonly StepFEA_XRotation: 'StepFEA_XRotation'
 
-  StepFEA_YRotation: 'StepFEA_YRotation'
+  readonly StepFEA_YRotation: 'StepFEA_YRotation'
 
-  StepFEA_ZRotation: 'StepFEA_ZRotation'
+  readonly StepFEA_ZRotation: 'StepFEA_ZRotation'
 
-  StepFEA_Warp: 'StepFEA_Warp'
+  readonly StepFEA_Warp: 'StepFEA_Warp'
 
 StepFEA_FeaAreaDensity: declare class StepFEA_FeaAreaDensity extends StepFEA_FeaMaterialPropertyRepresentationItem
 

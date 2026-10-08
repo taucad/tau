@@ -306,15 +306,15 @@ declare class TopExp_Explorer
   [Symbol.dispose](): void;
 
 TopAbs_ShapeEnum: typeof TopAbs_ShapeEnum[keyof typeof TopAbs_ShapeEnum]
-  TopAbs_COMPOUND: 'TopAbs_COMPOUND'
-  TopAbs_COMPSOLID: 'TopAbs_COMPSOLID'
-  TopAbs_SOLID: 'TopAbs_SOLID'
-  TopAbs_SHELL: 'TopAbs_SHELL'
-  TopAbs_FACE: 'TopAbs_FACE'
-  TopAbs_WIRE: 'TopAbs_WIRE'
-  TopAbs_EDGE: 'TopAbs_EDGE'
-  TopAbs_VERTEX: 'TopAbs_VERTEX'
-  TopAbs_SHAPE: 'TopAbs_SHAPE'
+  readonly TopAbs_COMPOUND: 'TopAbs_COMPOUND'
+  readonly TopAbs_COMPSOLID: 'TopAbs_COMPSOLID'
+  readonly TopAbs_SOLID: 'TopAbs_SOLID'
+  readonly TopAbs_SHELL: 'TopAbs_SHELL'
+  readonly TopAbs_FACE: 'TopAbs_FACE'
+  readonly TopAbs_WIRE: 'TopAbs_WIRE'
+  readonly TopAbs_EDGE: 'TopAbs_EDGE'
+  readonly TopAbs_VERTEX: 'TopAbs_VERTEX'
+  readonly TopAbs_SHAPE: 'TopAbs_SHAPE'
 
 declare class TopExp
   static FirstVertex(E: TopoDS_Edge, CumOri?: boolean): TopoDS_Vertex;

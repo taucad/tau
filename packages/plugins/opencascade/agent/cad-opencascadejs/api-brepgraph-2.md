@@ -166,17 +166,17 @@ BRepGraph_LayerDeferred: declare class BRepGraph_LayerDeferred extends BRepGraph
 
 BRepGraph_LayerDeferred_RepresentationKind: typeof BRepGraph_LayerDeferred_RepresentationKind[keyof typeof BRepGraph_LayerDeferred_RepresentationKind]
 
-  Unknown: 'Unknown'
+  readonly Unknown: 'Unknown'
 
-  Geometry: 'Geometry'
+  readonly Geometry: 'Geometry'
 
-  Mesh: 'Mesh'
+  readonly Mesh: 'Mesh'
 
-  Topology: 'Topology'
+  readonly Topology: 'Topology'
 
-  Assembly: 'Assembly'
+  readonly Assembly: 'Assembly'
 
-  Parametric: 'Parametric'
+  readonly Parametric: 'Parametric'
 
 BRepGraph_LayerDeferred_Entry: declare class BRepGraph_LayerDeferred_Entry
 
@@ -375,13 +375,13 @@ BRepGraph_LayerHistory: declare class BRepGraph_LayerHistory extends BRepGraph_L
 
 BRepGraph_LayerHistory_Kind: typeof BRepGraph_LayerHistory_Kind[keyof typeof BRepGraph_LayerHistory_Kind]
 
-  Modified: 'Modified'
+  readonly Modified: 'Modified'
 
-  Generated: 'Generated'
+  readonly Generated: 'Generated'
 
-  Deleted: 'Deleted'
+  readonly Deleted: 'Deleted'
 
-  Replaced: 'Replaced'
+  readonly Replaced: 'Replaced'
 
 BRepGraph_LayerIterator: declare class BRepGraph_LayerIterator
 
@@ -529,23 +529,23 @@ BRepGraph_LayerParametric: declare class BRepGraph_LayerParametric extends BRepG
 
 BRepGraph_LayerParametric_GenerationFlag: typeof BRepGraph_LayerParametric_GenerationFlag[keyof typeof BRepGraph_LayerParametric_GenerationFlag]
 
-  Topology: 'Topology'
+  readonly Topology: 'Topology'
 
-  Geometry: 'Geometry'
+  readonly Geometry: 'Geometry'
 
-  Mesh: 'Mesh'
+  readonly Mesh: 'Mesh'
 
 BRepGraph_LayerParametric_MeshQuality: typeof BRepGraph_LayerParametric_MeshQuality[keyof typeof BRepGraph_LayerParametric_MeshQuality]
 
-  VeryCoarse: 'VeryCoarse'
+  readonly VeryCoarse: 'VeryCoarse'
 
-  Coarse: 'Coarse'
+  readonly Coarse: 'Coarse'
 
-  Medium: 'Medium'
+  readonly Medium: 'Medium'
 
-  Fine: 'Fine'
+  readonly Fine: 'Fine'
 
-  VeryFine: 'VeryFine'
+  readonly VeryFine: 'VeryFine'
 
 BRepGraph_LayerRegistry: declare class BRepGraph_LayerRegistry
 
@@ -689,21 +689,21 @@ BRepGraph_LayerTopoSupplement: declare class BRepGraph_LayerTopoSupplement exten
 
 BRepGraph_LayerTopoSupplement_AttachmentKind: typeof BRepGraph_LayerTopoSupplement_AttachmentKind[keyof typeof BRepGraph_LayerTopoSupplement_AttachmentKind]
 
-  VertexSupplementShape: 'VertexSupplementShape'
+  readonly VertexSupplementShape: 'VertexSupplementShape'
 
-  EdgeInternalVertex: 'EdgeInternalVertex'
+  readonly EdgeInternalVertex: 'EdgeInternalVertex'
 
-  FaceDirectVertex: 'FaceDirectVertex'
+  readonly FaceDirectVertex: 'FaceDirectVertex'
 
-  SolidAuxShape: 'SolidAuxShape'
+  readonly SolidAuxShape: 'SolidAuxShape'
 
-  ShellAuxShape: 'ShellAuxShape'
+  readonly ShellAuxShape: 'ShellAuxShape'
 
-  CompSolidAuxShape: 'CompSolidAuxShape'
+  readonly CompSolidAuxShape: 'CompSolidAuxShape'
 
-  CompoundAuxShape: 'CompoundAuxShape'
+  readonly CompoundAuxShape: 'CompoundAuxShape'
 
-  GenericSupplementShape: 'GenericSupplementShape'
+  readonly GenericSupplementShape: 'GenericSupplementShape'
 
 BRepGraph_MeshView: declare class BRepGraph_MeshView
 

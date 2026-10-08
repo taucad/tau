@@ -450,19 +450,19 @@ BRepMesh_Deflection: declare class BRepMesh_Deflection extends Standard_Transien
 
 BRepMesh_DegreeOfFreedom: typeof BRepMesh_DegreeOfFreedom[keyof typeof BRepMesh_DegreeOfFreedom]
 
-  BRepMesh_Free: 'BRepMesh_Free'
+  readonly BRepMesh_Free: 'BRepMesh_Free'
 
-  BRepMesh_InVolume: 'BRepMesh_InVolume'
+  readonly BRepMesh_InVolume: 'BRepMesh_InVolume'
 
-  BRepMesh_OnSurface: 'BRepMesh_OnSurface'
+  readonly BRepMesh_OnSurface: 'BRepMesh_OnSurface'
 
-  BRepMesh_OnCurve: 'BRepMesh_OnCurve'
+  readonly BRepMesh_OnCurve: 'BRepMesh_OnCurve'
 
-  BRepMesh_Fixed: 'BRepMesh_Fixed'
+  readonly BRepMesh_Fixed: 'BRepMesh_Fixed'
 
-  BRepMesh_Frontier: 'BRepMesh_Frontier'
+  readonly BRepMesh_Frontier: 'BRepMesh_Frontier'
 
-  BRepMesh_Deleted: 'BRepMesh_Deleted'
+  readonly BRepMesh_Deleted: 'BRepMesh_Deleted'
 
 BRepMesh_DelabellaBaseMeshAlgo: declare class BRepMesh_DelabellaBaseMeshAlgo extends BRepMesh_CustomBaseMeshAlgo
 
@@ -805,17 +805,17 @@ BRepMesh_GeomTool: declare class BRepMesh_GeomTool
 
 BRepMesh_GeomTool_IntFlag: typeof BRepMesh_GeomTool_IntFlag[keyof typeof BRepMesh_GeomTool_IntFlag]
 
-  NoIntersection: 'NoIntersection'
+  readonly NoIntersection: 'NoIntersection'
 
-  Cross: 'Cross'
+  readonly Cross: 'Cross'
 
-  EndPointTouch: 'EndPointTouch'
+  readonly EndPointTouch: 'EndPointTouch'
 
-  PointOnSegment: 'PointOnSegment'
+  readonly PointOnSegment: 'PointOnSegment'
 
-  Glued: 'Glued'
+  readonly Glued: 'Glued'
 
-  Same: 'Same'
+  readonly Same: 'Same'
 
 BRepMesh_IncrementalMesh: declare class BRepMesh_IncrementalMesh extends BRepMesh_DiscretRoot
 

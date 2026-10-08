@@ -85,23 +85,23 @@ ExtremaPC_Result: declare class ExtremaPC_Result
 
 ExtremaPC_SearchMode: typeof ExtremaPC_SearchMode[keyof typeof ExtremaPC_SearchMode]
 
-  MinMax: 'MinMax'
+  readonly MinMax: 'MinMax'
 
-  Min: 'Min'
+  readonly Min: 'Min'
 
-  Max: 'Max'
+  readonly Max: 'Max'
 
 ExtremaPC_Status: typeof ExtremaPC_Status[keyof typeof ExtremaPC_Status]
 
-  OK: 'OK'
+  readonly OK: 'OK'
 
-  NotDone: 'NotDone'
+  readonly NotDone: 'NotDone'
 
-  InfiniteSolutions: 'InfiniteSolutions'
+  readonly InfiniteSolutions: 'InfiniteSolutions'
 
-  NoSolution: 'NoSolution'
+  readonly NoSolution: 'NoSolution'
 
-  NumericalError: 'NumericalError'
+  readonly NumericalError: 'NumericalError'
 
 ExtremaPC_BSplineCurve: declare class ExtremaPC_BSplineCurve
 
@@ -305,9 +305,9 @@ ExtremaPC_GridEvaluator: declare class ExtremaPC_GridEvaluator
 
 ExtremaPC_GridEvaluator_CandidateType: typeof ExtremaPC_GridEvaluator_CandidateType[keyof typeof ExtremaPC_GridEvaluator_CandidateType]
 
-  SignChange: 'SignChange'
+  readonly SignChange: 'SignChange'
 
-  NearZero: 'NearZero'
+  readonly NearZero: 'NearZero'
 
 ExtremaPC_Hyperbola: declare class ExtremaPC_Hyperbola
 

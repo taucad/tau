@@ -42,13 +42,13 @@ Mesh: export declare class Mesh
   tolerance: number
 
   // Number of triangles
-  numTri
+  readonly numTri: number
 
   // Number of property vertices
-  numVert
+  readonly numVert: number
 
   // Number of triangle runs
-  numRun
+  readonly numRun: number
 
   // Updates the mergeFromVert and mergeToVert vectors in order to create a manifold solid
   // Remarks: There is no guarantee the result will be manifold - this is a best-effort helper function designed primarily to aid in the case where a manifold multi-material MeshGL was produced, but its merge vectors were lost due to a round-trip through a file format. Constructing a Manifold from the result will report a Status if it is not manifold.
@@ -84,11 +84,11 @@ Mesh: export declare class Mesh
 // Remarks: These nodes contain models that will be exported into the final GLTF document. They have not been converted into Manifold objects and cannot be modified. They can only be transformed (rotation, scale, translation) or displayed. This is useful for viewing ManifoldCAD models in the context of a larger assembly. GLTF objects meeting the `manifold-gltf` extension will still be manifold when exported.
 VisualizationGLTFNode: export declare class VisualizationGLTFNode extends BaseGLTFNode
 
-  node: GLTFTransform.Node
+  node?: GLTFTransform.Node
 
-  document: GLTFTransform.Document
+  document?: GLTFTransform.Document
 
-  uri: string
+  uri?: string
 
   // VisualizationGLTFNode.constructor (constructor)
   constructor(parent?: BaseGLTFNode);

@@ -481,13 +481,13 @@ IntPatch_WLine: declare class IntPatch_WLine extends IntPatch_PointLine
 
 IntPatch_WLine_IntPatch_WLType: typeof IntPatch_WLine_IntPatch_WLType[keyof typeof IntPatch_WLine_IntPatch_WLType]
 
-  IntPatch_WLUnknown: 'IntPatch_WLUnknown'
+  readonly IntPatch_WLUnknown: 'IntPatch_WLUnknown'
 
-  IntPatch_WLImpImp: 'IntPatch_WLImpImp'
+  readonly IntPatch_WLImpImp: 'IntPatch_WLImpImp'
 
-  IntPatch_WLImpPrm: 'IntPatch_WLImpPrm'
+  readonly IntPatch_WLImpPrm: 'IntPatch_WLImpPrm'
 
-  IntPatch_WLPrmPrm: 'IntPatch_WLPrmPrm'
+  readonly IntPatch_WLPrmPrm: 'IntPatch_WLPrmPrm'
 
 IntPatch_WLineTool: declare class IntPatch_WLineTool
 

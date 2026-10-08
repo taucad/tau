@@ -96,11 +96,11 @@ MathLin_QRResult: declare class MathLin_QRResult
 
 MathLin_LeastSquaresMethod: typeof MathLin_LeastSquaresMethod[keyof typeof MathLin_LeastSquaresMethod]
 
-  NormalEquations: 'NormalEquations'
+  readonly NormalEquations: 'NormalEquations'
 
-  QR: 'QR'
+  readonly QR: 'QR'
 
-  SVD: 'SVD'
+  readonly SVD: 'SVD'
 
 MathLin_LeastSquaresResult: declare class MathLin_LeastSquaresResult
 

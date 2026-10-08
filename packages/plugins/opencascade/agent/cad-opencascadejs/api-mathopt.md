@@ -4,13 +4,13 @@
 
 MathOpt_ConjugateGradientFormula: typeof MathOpt_ConjugateGradientFormula[keyof typeof MathOpt_ConjugateGradientFormula]
 
-  FletcherReeves: 'FletcherReeves'
+  readonly FletcherReeves: 'FletcherReeves'
 
-  PolakRibiere: 'PolakRibiere'
+  readonly PolakRibiere: 'PolakRibiere'
 
-  HestenesStiefel: 'HestenesStiefel'
+  readonly HestenesStiefel: 'HestenesStiefel'
 
-  DaiYuan: 'DaiYuan'
+  readonly DaiYuan: 'DaiYuan'
 
 MathOpt_FRPRConfig: declare class MathOpt_FRPRConfig extends MathUtils_Config
 
@@ -56,13 +56,13 @@ MathOpt_GlobalConfig: declare class MathOpt_GlobalConfig extends MathUtils_NDimC
 
 MathOpt_GlobalStrategy: typeof MathOpt_GlobalStrategy[keyof typeof MathOpt_GlobalStrategy]
 
-  PSO: 'PSO'
+  readonly PSO: 'PSO'
 
-  MultiStart: 'MultiStart'
+  readonly MultiStart: 'MultiStart'
 
-  PSOHybrid: 'PSOHybrid'
+  readonly PSOHybrid: 'PSOHybrid'
 
-  DifferentialEvolution: 'DifferentialEvolution'
+  readonly DifferentialEvolution: 'DifferentialEvolution'
 
 MathOpt_NewtonConfig: declare class MathOpt_NewtonConfig extends MathUtils_Config
 
@@ -82,11 +82,11 @@ MathOpt_NewtonConfig: declare class MathOpt_NewtonConfig extends MathUtils_Confi
 
 MathOpt_PSOBoundaryMode: typeof MathOpt_PSOBoundaryMode[keyof typeof MathOpt_PSOBoundaryMode]
 
-  Clamp: 'Clamp'
+  readonly Clamp: 'Clamp'
 
-  Reflect: 'Reflect'
+  readonly Reflect: 'Reflect'
 
-  Wrap: 'Wrap'
+  readonly Wrap: 'Wrap'
 
 MathOpt_PSOConfig: declare class MathOpt_PSOConfig extends MathUtils_NDimConfig
 
@@ -136,17 +136,17 @@ MathOpt_PSOConfig: declare class MathOpt_PSOConfig extends MathUtils_NDimConfig
 
 MathOpt_PSOInertiaSchedule: typeof MathOpt_PSOInertiaSchedule[keyof typeof MathOpt_PSOInertiaSchedule]
 
-  Constant: 'Constant'
+  readonly Constant: 'Constant'
 
-  LinearDecay: 'LinearDecay'
+  readonly LinearDecay: 'LinearDecay'
 
 MathOpt_PSOInitMode: typeof MathOpt_PSOInitMode[keyof typeof MathOpt_PSOInitMode]
 
-  RandomOnly: 'RandomOnly'
+  readonly RandomOnly: 'RandomOnly'
 
-  SeededOnly: 'SeededOnly'
+  readonly SeededOnly: 'SeededOnly'
 
-  SeededPlusRandom: 'SeededPlusRandom'
+  readonly SeededPlusRandom: 'SeededPlusRandom'
 
 MathOpt_PSOSeedParticle: declare class MathOpt_PSOSeedParticle
 

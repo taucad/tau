@@ -481,25 +481,25 @@ GeomFill_TgtOnCoons: declare class GeomFill_TgtOnCoons extends GeomFill_TgtField
 
 GeomFill_Trihedron: typeof GeomFill_Trihedron[keyof typeof GeomFill_Trihedron]
 
-  GeomFill_IsCorrectedFrenet: 'GeomFill_IsCorrectedFrenet'
+  readonly GeomFill_IsCorrectedFrenet: 'GeomFill_IsCorrectedFrenet'
 
-  GeomFill_IsFixed: 'GeomFill_IsFixed'
+  readonly GeomFill_IsFixed: 'GeomFill_IsFixed'
 
-  GeomFill_IsFrenet: 'GeomFill_IsFrenet'
+  readonly GeomFill_IsFrenet: 'GeomFill_IsFrenet'
 
-  GeomFill_IsConstantNormal: 'GeomFill_IsConstantNormal'
+  readonly GeomFill_IsConstantNormal: 'GeomFill_IsConstantNormal'
 
-  GeomFill_IsDarboux: 'GeomFill_IsDarboux'
+  readonly GeomFill_IsDarboux: 'GeomFill_IsDarboux'
 
-  GeomFill_IsGuideAC: 'GeomFill_IsGuideAC'
+  readonly GeomFill_IsGuideAC: 'GeomFill_IsGuideAC'
 
-  GeomFill_IsGuidePlan: 'GeomFill_IsGuidePlan'
+  readonly GeomFill_IsGuidePlan: 'GeomFill_IsGuidePlan'
 
-  GeomFill_IsGuideACWithContact: 'GeomFill_IsGuideACWithContact'
+  readonly GeomFill_IsGuideACWithContact: 'GeomFill_IsGuideACWithContact'
 
-  GeomFill_IsGuidePlanWithContact: 'GeomFill_IsGuidePlanWithContact'
+  readonly GeomFill_IsGuidePlanWithContact: 'GeomFill_IsGuidePlanWithContact'
 
-  GeomFill_IsDiscreteTrihedron: 'GeomFill_IsDiscreteTrihedron'
+  readonly GeomFill_IsDiscreteTrihedron: 'GeomFill_IsDiscreteTrihedron'
 
 GeomFill_TrihedronLaw: declare class GeomFill_TrihedronLaw extends Standard_Transient
 

@@ -433,17 +433,17 @@ BRepGraph_ChildExplorer: declare class BRepGraph_ChildExplorer
 
 BRepGraph_ChildExplorer_LinkKind: typeof BRepGraph_ChildExplorer_LinkKind[keyof typeof BRepGraph_ChildExplorer_LinkKind]
 
-  None: 'None'
+  readonly None: 'None'
 
-  Reference: 'Reference'
+  readonly Reference: 'Reference'
 
-  Structural: 'Structural'
+  readonly Structural: 'Structural'
 
 BRepGraph_ChildExplorer_TraversalMode: typeof BRepGraph_ChildExplorer_TraversalMode[keyof typeof BRepGraph_ChildExplorer_TraversalMode]
 
-  Recursive: 'Recursive'
+  readonly Recursive: 'Recursive'
 
-  DirectChildren: 'DirectChildren'
+  readonly DirectChildren: 'DirectChildren'
 
 BRepGraph_Compact: declare class BRepGraph_Compact
 
@@ -474,9 +474,9 @@ BRepGraph_Compact_Options: declare class BRepGraph_Compact_Options
 
 BRepGraph_Compact_Options_CachePolicy: typeof BRepGraph_Compact_Options_CachePolicy[keyof typeof BRepGraph_Compact_Options_CachePolicy]
 
-  Drop: 'Drop'
+  readonly Drop: 'Drop'
 
-  CopyFresh: 'CopyFresh'
+  readonly CopyFresh: 'CopyFresh'
 
 BRepGraph_Copy: declare class BRepGraph_Copy
 
@@ -494,25 +494,25 @@ BRepGraph_Copy: declare class BRepGraph_Copy
 
 BRepGraph_Copy_GeomPolicy: typeof BRepGraph_Copy_GeomPolicy[keyof typeof BRepGraph_Copy_GeomPolicy]
 
-  Copy: 'Copy'
+  readonly Copy: 'Copy'
 
-  Share: 'Share'
+  readonly Share: 'Share'
 
-  Drop: 'Drop'
+  readonly Drop: 'Drop'
 
 BRepGraph_Copy_MeshPolicy: typeof BRepGraph_Copy_MeshPolicy[keyof typeof BRepGraph_Copy_MeshPolicy]
 
-  Copy: 'Copy'
+  readonly Copy: 'Copy'
 
-  Share: 'Share'
+  readonly Share: 'Share'
 
-  Drop: 'Drop'
+  readonly Drop: 'Drop'
 
 BRepGraph_Copy_CachePolicy: typeof BRepGraph_Copy_CachePolicy[keyof typeof BRepGraph_Copy_CachePolicy]
 
-  Drop: 'Drop'
+  readonly Drop: 'Drop'
 
-  CopyFresh: 'CopyFresh'
+  readonly CopyFresh: 'CopyFresh'
 
 BRepGraph_CopyRemap: declare class BRepGraph_CopyRemap
 
@@ -564,15 +564,15 @@ BRepGraph_CopyRemap: declare class BRepGraph_CopyRemap
 
 BRepGraph_CopyRemap_Mode: typeof BRepGraph_CopyRemap_Mode[keyof typeof BRepGraph_CopyRemap_Mode]
 
-  Copy: 'Copy'
+  readonly Copy: 'Copy'
 
-  Compact: 'Compact'
+  readonly Compact: 'Compact'
 
 BRepGraph_CopyRemap_MappingKind: typeof BRepGraph_CopyRemap_MappingKind[keyof typeof BRepGraph_CopyRemap_MappingKind]
 
-  Explicit: 'Explicit'
+  readonly Explicit: 'Explicit'
 
-  Identity: 'Identity'
+  readonly Identity: 'Identity'
 
 BRepGraph_Data: declare class BRepGraph_Data
 
@@ -1229,11 +1229,11 @@ BRepGraph_ItemId: declare class BRepGraph_ItemId
 
 BRepGraph_ItemId_Domain: typeof BRepGraph_ItemId_Domain[keyof typeof BRepGraph_ItemId_Domain]
 
-  None: 'None'
+  readonly None: 'None'
 
-  Node: 'Node'
+  readonly Node: 'Node'
 
-  Reference: 'Reference'
+  readonly Reference: 'Reference'
 
 BRepGraph_ItemUID: declare class BRepGraph_ItemUID
 
@@ -1284,11 +1284,11 @@ BRepGraph_ItemUID: declare class BRepGraph_ItemUID
 
 BRepGraph_ItemUID_Domain: typeof BRepGraph_ItemUID_Domain[keyof typeof BRepGraph_ItemUID_Domain]
 
-  None: 'None'
+  readonly None: 'None'
 
-  Node: 'Node'
+  readonly Node: 'Node'
 
-  Reference: 'Reference'
+  readonly Reference: 'Reference'
 
 BRepGraph_RootProductIterator: declare class BRepGraph_RootProductIterator
 

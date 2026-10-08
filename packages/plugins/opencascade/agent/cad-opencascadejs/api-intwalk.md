@@ -4,17 +4,17 @@
 
 IntWalk_StatusDeflection: typeof IntWalk_StatusDeflection[keyof typeof IntWalk_StatusDeflection]
 
-  IntWalk_PasTropGrand: 'IntWalk_PasTropGrand'
+  readonly IntWalk_PasTropGrand: 'IntWalk_PasTropGrand'
 
-  IntWalk_StepTooSmall: 'IntWalk_StepTooSmall'
+  readonly IntWalk_StepTooSmall: 'IntWalk_StepTooSmall'
 
-  IntWalk_PointConfondu: 'IntWalk_PointConfondu'
+  readonly IntWalk_PointConfondu: 'IntWalk_PointConfondu'
 
-  IntWalk_ArretSurPointPrecedent: 'IntWalk_ArretSurPointPrecedent'
+  readonly IntWalk_ArretSurPointPrecedent: 'IntWalk_ArretSurPointPrecedent'
 
-  IntWalk_ArretSurPoint: 'IntWalk_ArretSurPoint'
+  readonly IntWalk_ArretSurPoint: 'IntWalk_ArretSurPoint'
 
-  IntWalk_OK: 'IntWalk_OK'
+  readonly IntWalk_OK: 'IntWalk_OK'
 
 IntWalk_TheInt2S: declare class IntWalk_TheInt2S
 

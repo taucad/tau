@@ -39,21 +39,21 @@ GCPnts_AbscissaPoint: declare class GCPnts_AbscissaPoint
 
 GCPnts_AbscissaType: typeof GCPnts_AbscissaType[keyof typeof GCPnts_AbscissaType]
 
-  GCPnts_LengthParametrized: 'GCPnts_LengthParametrized'
+  readonly GCPnts_LengthParametrized: 'GCPnts_LengthParametrized'
 
-  GCPnts_Parametrized: 'GCPnts_Parametrized'
+  readonly GCPnts_Parametrized: 'GCPnts_Parametrized'
 
-  GCPnts_AbsComposite: 'GCPnts_AbsComposite'
+  readonly GCPnts_AbsComposite: 'GCPnts_AbsComposite'
 
 GCPnts_DeflectionType: typeof GCPnts_DeflectionType[keyof typeof GCPnts_DeflectionType]
 
-  GCPnts_Linear: 'GCPnts_Linear'
+  readonly GCPnts_Linear: 'GCPnts_Linear'
 
-  GCPnts_Circular: 'GCPnts_Circular'
+  readonly GCPnts_Circular: 'GCPnts_Circular'
 
-  GCPnts_Curved: 'GCPnts_Curved'
+  readonly GCPnts_Curved: 'GCPnts_Curved'
 
-  GCPnts_DefComposite: 'GCPnts_DefComposite'
+  readonly GCPnts_DefComposite: 'GCPnts_DefComposite'
 
 GCPnts_DistFunctionMV: declare class GCPnts_DistFunctionMV extends math_MultipleVarFunction
 

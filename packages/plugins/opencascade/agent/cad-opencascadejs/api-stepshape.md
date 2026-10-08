@@ -44,11 +44,11 @@ StepShape_AdvancedFace: declare class StepShape_AdvancedFace extends StepShape_F
 
 StepShape_AngleRelator: typeof StepShape_AngleRelator[keyof typeof StepShape_AngleRelator]
 
-  StepShape_Equal: 'StepShape_Equal'
+  readonly StepShape_Equal: 'StepShape_Equal'
 
-  StepShape_Large: 'StepShape_Large'
+  readonly StepShape_Large: 'StepShape_Large'
 
-  StepShape_Small: 'StepShape_Small'
+  readonly StepShape_Small: 'StepShape_Small'
 
 StepShape_AngularLocation: declare class StepShape_AngularLocation extends StepShape_DimensionalLocation
 
@@ -201,11 +201,11 @@ StepShape_BooleanOperand: declare class StepShape_BooleanOperand
 
 StepShape_BooleanOperator: typeof StepShape_BooleanOperator[keyof typeof StepShape_BooleanOperator]
 
-  StepShape_boDifference: 'StepShape_boDifference'
+  readonly StepShape_boDifference: 'StepShape_boDifference'
 
-  StepShape_boIntersection: 'StepShape_boIntersection'
+  readonly StepShape_boIntersection: 'StepShape_boIntersection'
 
-  StepShape_boUnion: 'StepShape_boUnion'
+  readonly StepShape_boUnion: 'StepShape_boUnion'
 
 StepShape_BooleanResult: declare class StepShape_BooleanResult extends StepGeom_GeometricRepresentationItem
 

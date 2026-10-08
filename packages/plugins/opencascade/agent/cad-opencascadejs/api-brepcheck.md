@@ -298,79 +298,79 @@ BRepCheck_Solid: declare class BRepCheck_Solid extends BRepCheck_Result
 
 BRepCheck_Status: typeof BRepCheck_Status[keyof typeof BRepCheck_Status]
 
-  BRepCheck_NoError: 'BRepCheck_NoError'
+  readonly BRepCheck_NoError: 'BRepCheck_NoError'
 
-  BRepCheck_InvalidPointOnCurve: 'BRepCheck_InvalidPointOnCurve'
+  readonly BRepCheck_InvalidPointOnCurve: 'BRepCheck_InvalidPointOnCurve'
 
-  BRepCheck_InvalidPointOnCurveOnSurface: 'BRepCheck_InvalidPointOnCurveOnSurface'
+  readonly BRepCheck_InvalidPointOnCurveOnSurface: 'BRepCheck_InvalidPointOnCurveOnSurface'
 
-  BRepCheck_InvalidPointOnSurface: 'BRepCheck_InvalidPointOnSurface'
+  readonly BRepCheck_InvalidPointOnSurface: 'BRepCheck_InvalidPointOnSurface'
 
-  BRepCheck_No3DCurve: 'BRepCheck_No3DCurve'
+  readonly BRepCheck_No3DCurve: 'BRepCheck_No3DCurve'
 
-  BRepCheck_Multiple3DCurve: 'BRepCheck_Multiple3DCurve'
+  readonly BRepCheck_Multiple3DCurve: 'BRepCheck_Multiple3DCurve'
 
-  BRepCheck_Invalid3DCurve: 'BRepCheck_Invalid3DCurve'
+  readonly BRepCheck_Invalid3DCurve: 'BRepCheck_Invalid3DCurve'
 
-  BRepCheck_NoCurveOnSurface: 'BRepCheck_NoCurveOnSurface'
+  readonly BRepCheck_NoCurveOnSurface: 'BRepCheck_NoCurveOnSurface'
 
-  BRepCheck_InvalidCurveOnSurface: 'BRepCheck_InvalidCurveOnSurface'
+  readonly BRepCheck_InvalidCurveOnSurface: 'BRepCheck_InvalidCurveOnSurface'
 
-  BRepCheck_InvalidCurveOnClosedSurface: 'BRepCheck_InvalidCurveOnClosedSurface'
+  readonly BRepCheck_InvalidCurveOnClosedSurface: 'BRepCheck_InvalidCurveOnClosedSurface'
 
-  BRepCheck_InvalidSameRangeFlag: 'BRepCheck_InvalidSameRangeFlag'
+  readonly BRepCheck_InvalidSameRangeFlag: 'BRepCheck_InvalidSameRangeFlag'
 
-  BRepCheck_InvalidSameParameterFlag: 'BRepCheck_InvalidSameParameterFlag'
+  readonly BRepCheck_InvalidSameParameterFlag: 'BRepCheck_InvalidSameParameterFlag'
 
-  BRepCheck_InvalidDegeneratedFlag: 'BRepCheck_InvalidDegeneratedFlag'
+  readonly BRepCheck_InvalidDegeneratedFlag: 'BRepCheck_InvalidDegeneratedFlag'
 
-  BRepCheck_FreeEdge: 'BRepCheck_FreeEdge'
+  readonly BRepCheck_FreeEdge: 'BRepCheck_FreeEdge'
 
-  BRepCheck_InvalidMultiConnexity: 'BRepCheck_InvalidMultiConnexity'
+  readonly BRepCheck_InvalidMultiConnexity: 'BRepCheck_InvalidMultiConnexity'
 
-  BRepCheck_InvalidRange: 'BRepCheck_InvalidRange'
+  readonly BRepCheck_InvalidRange: 'BRepCheck_InvalidRange'
 
-  BRepCheck_EmptyWire: 'BRepCheck_EmptyWire'
+  readonly BRepCheck_EmptyWire: 'BRepCheck_EmptyWire'
 
-  BRepCheck_RedundantEdge: 'BRepCheck_RedundantEdge'
+  readonly BRepCheck_RedundantEdge: 'BRepCheck_RedundantEdge'
 
-  BRepCheck_SelfIntersectingWire: 'BRepCheck_SelfIntersectingWire'
+  readonly BRepCheck_SelfIntersectingWire: 'BRepCheck_SelfIntersectingWire'
 
-  BRepCheck_NoSurface: 'BRepCheck_NoSurface'
+  readonly BRepCheck_NoSurface: 'BRepCheck_NoSurface'
 
-  BRepCheck_InvalidWire: 'BRepCheck_InvalidWire'
+  readonly BRepCheck_InvalidWire: 'BRepCheck_InvalidWire'
 
-  BRepCheck_RedundantWire: 'BRepCheck_RedundantWire'
+  readonly BRepCheck_RedundantWire: 'BRepCheck_RedundantWire'
 
-  BRepCheck_IntersectingWires: 'BRepCheck_IntersectingWires'
+  readonly BRepCheck_IntersectingWires: 'BRepCheck_IntersectingWires'
 
-  BRepCheck_InvalidImbricationOfWires: 'BRepCheck_InvalidImbricationOfWires'
+  readonly BRepCheck_InvalidImbricationOfWires: 'BRepCheck_InvalidImbricationOfWires'
 
-  BRepCheck_EmptyShell: 'BRepCheck_EmptyShell'
+  readonly BRepCheck_EmptyShell: 'BRepCheck_EmptyShell'
 
-  BRepCheck_RedundantFace: 'BRepCheck_RedundantFace'
+  readonly BRepCheck_RedundantFace: 'BRepCheck_RedundantFace'
 
-  BRepCheck_InvalidImbricationOfShells: 'BRepCheck_InvalidImbricationOfShells'
+  readonly BRepCheck_InvalidImbricationOfShells: 'BRepCheck_InvalidImbricationOfShells'
 
-  BRepCheck_UnorientableShape: 'BRepCheck_UnorientableShape'
+  readonly BRepCheck_UnorientableShape: 'BRepCheck_UnorientableShape'
 
-  BRepCheck_NotClosed: 'BRepCheck_NotClosed'
+  readonly BRepCheck_NotClosed: 'BRepCheck_NotClosed'
 
-  BRepCheck_NotConnected: 'BRepCheck_NotConnected'
+  readonly BRepCheck_NotConnected: 'BRepCheck_NotConnected'
 
-  BRepCheck_SubshapeNotInShape: 'BRepCheck_SubshapeNotInShape'
+  readonly BRepCheck_SubshapeNotInShape: 'BRepCheck_SubshapeNotInShape'
 
-  BRepCheck_BadOrientation: 'BRepCheck_BadOrientation'
+  readonly BRepCheck_BadOrientation: 'BRepCheck_BadOrientation'
 
-  BRepCheck_BadOrientationOfSubshape: 'BRepCheck_BadOrientationOfSubshape'
+  readonly BRepCheck_BadOrientationOfSubshape: 'BRepCheck_BadOrientationOfSubshape'
 
-  BRepCheck_InvalidPolygonOnTriangulation: 'BRepCheck_InvalidPolygonOnTriangulation'
+  readonly BRepCheck_InvalidPolygonOnTriangulation: 'BRepCheck_InvalidPolygonOnTriangulation'
 
-  BRepCheck_InvalidToleranceValue: 'BRepCheck_InvalidToleranceValue'
+  readonly BRepCheck_InvalidToleranceValue: 'BRepCheck_InvalidToleranceValue'
 
-  BRepCheck_EnclosedRegion: 'BRepCheck_EnclosedRegion'
+  readonly BRepCheck_EnclosedRegion: 'BRepCheck_EnclosedRegion'
 
-  BRepCheck_CheckFail: 'BRepCheck_CheckFail'
+  readonly BRepCheck_CheckFail: 'BRepCheck_CheckFail'
 
 BRepCheck_Vertex: declare class BRepCheck_Vertex extends BRepCheck_Result
 

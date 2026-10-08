@@ -198,14 +198,14 @@ GccInt_Bisec: declare class GccInt_Bisec extends Standard_Transient
 
 GccInt_IType: typeof GccInt_IType[keyof typeof GccInt_IType]
 
-  GccInt_Lin: 'GccInt_Lin'
+  readonly GccInt_Lin: 'GccInt_Lin'
 
-  GccInt_Cir: 'GccInt_Cir'
+  readonly GccInt_Cir: 'GccInt_Cir'
 
-  GccInt_Ell: 'GccInt_Ell'
+  readonly GccInt_Ell: 'GccInt_Ell'
 
-  GccInt_Par: 'GccInt_Par'
+  readonly GccInt_Par: 'GccInt_Par'
 
-  GccInt_Hpr: 'GccInt_Hpr'
+  readonly GccInt_Hpr: 'GccInt_Hpr'
 
-  GccInt_Pnt: 'GccInt_Pnt'
+  readonly GccInt_Pnt: 'GccInt_Pnt'

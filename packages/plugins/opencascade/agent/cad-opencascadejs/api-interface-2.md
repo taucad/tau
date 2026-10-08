@@ -148,27 +148,27 @@ Interface_ParamSet: declare class Interface_ParamSet extends Standard_Transient
 
 Interface_ParamType: typeof Interface_ParamType[keyof typeof Interface_ParamType]
 
-  Interface_ParamMisc: 'Interface_ParamMisc'
+  readonly Interface_ParamMisc: 'Interface_ParamMisc'
 
-  Interface_ParamInteger: 'Interface_ParamInteger'
+  readonly Interface_ParamInteger: 'Interface_ParamInteger'
 
-  Interface_ParamReal: 'Interface_ParamReal'
+  readonly Interface_ParamReal: 'Interface_ParamReal'
 
-  Interface_ParamIdent: 'Interface_ParamIdent'
+  readonly Interface_ParamIdent: 'Interface_ParamIdent'
 
-  Interface_ParamVoid: 'Interface_ParamVoid'
+  readonly Interface_ParamVoid: 'Interface_ParamVoid'
 
-  Interface_ParamText: 'Interface_ParamText'
+  readonly Interface_ParamText: 'Interface_ParamText'
 
-  Interface_ParamEnum: 'Interface_ParamEnum'
+  readonly Interface_ParamEnum: 'Interface_ParamEnum'
 
-  Interface_ParamLogical: 'Interface_ParamLogical'
+  readonly Interface_ParamLogical: 'Interface_ParamLogical'
 
-  Interface_ParamSub: 'Interface_ParamSub'
+  readonly Interface_ParamSub: 'Interface_ParamSub'
 
-  Interface_ParamHexa: 'Interface_ParamHexa'
+  readonly Interface_ParamHexa: 'Interface_ParamHexa'
 
-  Interface_ParamBinary: 'Interface_ParamBinary'
+  readonly Interface_ParamBinary: 'Interface_ParamBinary'
 
 Interface_Protocol: declare class Interface_Protocol extends Standard_Transient
 

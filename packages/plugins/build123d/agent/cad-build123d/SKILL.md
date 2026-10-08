@@ -87,14 +87,13 @@ class BuildSketch(Builder)
   BuildSketch(*workplanes: Face | Plane | Location, mode: Mode = Mode.ADD)
   # Get the builder's object
   sketch_local: Sketch | None
-  # The global version of the sketch - may contain multiple sketches
-  sketch
   # solids() not implemented
   solids(*args)
   # solid() not implemented
   solid(*args)
   # Unify pending edges into one or more Wires
   consolidate_edges() -> Wire | list[Wire]
+  # … 1 more members in the API reference
 ```
 
 ### objects_part
@@ -124,6 +123,14 @@ class Hole(BasePartObject)
 # Part Operation
 class CounterBoreHole(BasePartObject)
   CounterBoreHole(radius: float, counter_bore_radius: float, counter_bore_depth: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
+
+# Part Object
+class Sphere(BasePartObject)
+  Sphere(radius: float, arc_size1: float = -90, arc_size2: float = 90, arc_size3: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
+
+# Part Object
+class Torus(BasePartObject)
+  Torus(major_radius: float, minor_radius: float, minor_start_angle: float = 0, minor_end_angle: float = 360, major_angle: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
 ```
 
 ### objects_sketch
@@ -268,6 +275,9 @@ class Intrinsic(Enum)
 # Location Context
 class Locations(LocationList)
   Locations(*pts: VectorLike | Vertex | Location | Face | Plane | Axis | Iterable[VectorLike | Vertex | Location | Face | Plane | Axis])
+
+# Return Edges
+edges(select: Select = Select.ALL) -> ShapeList[Edge]
 ```
 
 ### operations_part
@@ -333,6 +343,22 @@ class Shape(NodeMixin, Generic)
   # Return the Wire
   wire() -> Wire
   # … 65 more members in the API reference
+
+# Subclass of list with custom filter and sort methods appropriate to CAD
+class ShapeList(list)
+  # The average of the center of objects within the ShapeList
+  center() -> Vector
+  # edges - all the edges in this ShapeList
+  edges() -> ShapeList[Edge]
+  # filter by
+  filter_by(filter_by: Callable[[T], bool] | Axis | Plane | GeomType | property, reverse: bool = False, tolerance: float = 1e-05) -> ShapeList[T]
+  # Return the Shell
+  shell() -> Shell
+  # solids - all the solids in this ShapeList
+  solids() -> ShapeList[Solid]
+  # vertices - all the vertices in this ShapeList
+  vertices() -> ShapeList[Vertex]
+  # … 27 more members in the API reference
 ```
 
 ### three_d
@@ -361,18 +387,6 @@ class Transition(Enum)
   RIGHT
   ROUND
   TRANSFORMED
-
-# Additional methods to add to 3D Shape classes
-class Mixin3D(Shape)
-  # Unused - only here because Mixin1D is a subclass of Shape
-  extrude(obj: Shape, direction: VectorLike) -> Edge | Face | Shell | Solid | Compound
-  # Chamfer
-  chamfer(length: float, length2: float | None, edge_list: Iterable[Edge], face: Face | None = None) -> Solid | Part
-  # Fillet
-  fillet(radius: float, edge_list: Iterable[Edge]) -> Solid | Part
-  # Shell
-  offset_3d(openings: Iterable[Face] | None, thickness: float, tolerance: float = 0.0001, kind: Kind = Kind.ARC) -> Solid
-  # … 8 more members in the API reference
 ```
 
 ### two_d

@@ -17,32 +17,32 @@ AutocompleteString<T extends string>: T | (string & {})
 // Category: Prop types
 AutorouterConfig: interface AutorouterConfig
 
-  serverUrl: string
+  serverUrl?: string
 
-  inputFormat: "simplified" | "circuit-json"
+  inputFormat?: "simplified" | "circuit-json"
 
-  serverMode: "job" | "solve-endpoint"
+  serverMode?: "job" | "solve-endpoint"
 
-  serverCacheEnabled: boolean
+  serverCacheEnabled?: boolean
 
-  cache: PcbRouteCache
+  cache?: PcbRouteCache
 
-  traceClearance: Distance
+  traceClearance?: Distance
 
-  availableJumperTypes: Array<"1206x4" | "0603">
+  availableJumperTypes?: Array<"1206x4" | "0603">
 
-  allowViaInPad: boolean
+  allowViaInPad?: boolean
 
-  groupMode: "sequential_trace" | "subcircuit" | "sequential-trace"
+  groupMode?: "sequential_trace" | "subcircuit" | "sequential-trace"
 
-  local: boolean
+  local?: boolean
 
-  algorithmFn: (simpleRouteJson: any) => Promise<any>
+  algorithmFn?: (simpleRouteJson: any) => Promise<any>
 
   // Override the solver used to place implicit breakout points
-  implicitBreakoutPointSolverFn: ImplicitBreakoutPointSolverFn
+  implicitBreakoutPointSolverFn?: ImplicitBreakoutPointSolverFn
 
-  preset: "sequential_trace" | "subcircuit" | "default" | "auto" | "auto_local" | "auto_cloud" | "auto_jumper" | "tscircuit_beta" | "krt" | "freerouting" | "simplify" | "laser_prefab" | "single_layer_fanout" | "fanout" | "auto-jumper" | "sequential-trace" | "auto-local" | "auto-cloud"
+  preset?: "sequential_trace" | "subcircuit" | "default" | "auto" | "auto_local" | "auto_cloud" | "auto_jumper" | "tscircuit_beta" | "krt" | "freerouting" | "simplify" | "laser_prefab" | "single_layer_fanout" | "fanout" | "auto-jumper" | "sequential-trace" | "auto-local" | "auto-cloud"
 
 // Category: Prop types
 AutorouterPreset: "sequential_trace" | "subcircuit" | "default" | "auto" | "auto_local" | "auto_cloud" | "auto_jumper" | "tscircuit_beta" | "krt" | "freerouting" | "simplify" | "laser_prefab" | "single_layer_fanout" | "fanout" | "auto-jumper" | "sequential-trace" | "auto-local" | "auto-cloud"
@@ -65,11 +65,11 @@ BoardColorPreset: "not_specified" | "green" | "red" | "blue" | "purple" | "black
 // Category: Prop types
 Border: interface Border
 
-  strokeWidth: Distance
+  strokeWidth?: Distance
 
-  dashed: boolean
+  dashed?: boolean
 
-  solid: boolean
+  solid?: boolean
 
 // Category: Prop types
 BusFanoutDirection: BusFanoutDirectionLiteral | {direction: BusFanoutDirectionLiteral; }
@@ -86,28 +86,28 @@ CadModelAxisDirection: "x+" | "x-" | "y+" | "y-" | "z+" | "z-"
 // Category: Prop types
 CadModelBase: interface CadModelBase
 
-  rotationOffset: number | {x: number | string; y: number | string; z: number | string; }
+  rotationOffset?: number | {x: number | string; y: number | string; z: number | string; }
 
-  positionOffset: {x: number | string; y: number | string; z: number | string; }
+  positionOffset?: {x: number | string; y: number | string; z: number | string; }
 
-  modelOriginPosition: {x: number | string; y: number | string; z: number | string; }
+  modelOriginPosition?: {x: number | string; y: number | string; z: number | string; }
 
   // Axis-aligned extent of the model measured in its own coordinate frame, the same frame as `modelOriginPosition`
-  modelBounds: {min: {x: number | string; y: number | string; z: number | string; }; max: {x: number | string; y: number | string; z: number | string; }; }
+  modelBounds?: {min: {x: number | string; y: number | string; z: number | string; }; max: {x: number | string; y: number | string; z: number | string; }; }
 
-  size: {x: number | string; y: number | string; z: number | string; }
+  size?: {x: number | string; y: number | string; z: number | string; }
 
-  modelUnitToMmScale: Distance
+  modelUnitToMmScale?: Distance
 
-  modelBoardNormalDirection: CadModelAxisDirection
+  modelBoardNormalDirection?: CadModelAxisDirection
 
-  pcbRotationOffset: number
+  pcbRotationOffset?: number
 
-  zOffsetFromSurface: Distance
+  zOffsetFromSurface?: Distance
 
-  showAsTranslucentModel: boolean
+  showAsTranslucentModel?: boolean
 
-  stepUrl: string
+  stepUrl?: string
 
 // Category: Prop types
 // A Footprinter string used to procedurally generate the component's CAD model, independently of the component's PCB footprint
@@ -137,7 +137,7 @@ CadModelObj: interface CadModelObj extends CadModelBase
 
   objUrl: string
 
-  mtlUrl: string
+  mtlUrl?: string
 
 // Category: Prop types
 CadModelProp: null | ReactElement | CadModelFootprinterString | CadModelStl | CadModelObj | CadModelGltf | CadModelGlb | CadModelStep | CadModelWrl | CadModelJscad
@@ -225,13 +225,13 @@ DiodePinLabelsProp<PinLabel extends string = string>: Partial<Record<DiodePinLab
 // Category: Prop types
 DirectionalFanoutBoundaryPadding: interface DirectionalFanoutBoundaryPadding
 
-  top: Distance
+  top?: Distance
 
-  right: Distance
+  right?: Distance
 
-  bottom: Distance
+  bottom?: Distance
 
-  left: Distance
+  left?: Distance
 
 // Category: Prop types
 Distance: number | string
@@ -281,7 +281,7 @@ ImplicitBreakoutBus: interface ImplicitBreakoutBus
   connectionIds: readonly string[]
 
   // Ordered candidate layers that the solver may distribute this bus over
-  targetLayers: readonly string[]
+  targetLayers?: readonly string[]
 
 // Category: Prop types
 // Required connectionId, endpoints
@@ -300,7 +300,7 @@ ImplicitBreakoutConnectionEndpoint: interface ImplicitBreakoutConnectionEndpoint
   position: ImplicitBreakoutPoint
 
   // Optional PCB world-space routing destination, in millimeters, beyond this breakout region
-  externalDestination: ImplicitBreakoutPoint
+  externalDestination?: ImplicitBreakoutPoint
 
 // Category: Prop types
 ImplicitBreakoutConnectionOrDifferentialPair: ImplicitBreakoutConnection | ImplicitBreakoutDifferentialPair
@@ -375,7 +375,7 @@ InternalCircuitElement: ReactElement<InternalCircuitProps, "internalcircuit">
 // Props for a semantic container that groups the functional components inside a physical chip package
 InternalCircuitProps: interface InternalCircuitProps
 
-  children: ReactNode
+  children?: ReactNode
 
 // Category: Prop types
 JlcpcbAutocompleteStringPath: AutocompleteString<`jlcpcb:${JlcpcbKnownPartNumber}`>
@@ -388,7 +388,7 @@ KicadAt: interface KicadAt
 
   y: number | string
 
-  rotation: number | string
+  rotation?: number | string
 
 // Category: Prop types
 KicadAutocompleteStringPath: AutocompleteString<`kicad:${KicadPath}`>
@@ -396,48 +396,48 @@ KicadAutocompleteStringPath: AutocompleteString<`kicad:${KicadPath}`>
 // Category: Prop types
 KicadEffects: interface KicadEffects
 
-  font: KicadFont
+  font?: KicadFont
 
 // Category: Prop types
 KicadFont: interface KicadFont
 
-  size: {x: number | string; y: number | string; }
+  size?: {x: number | string; y: number | string; }
 
-  thickness: number | string
+  thickness?: number | string
 
 // Category: Prop types
 KicadFootprintAttributes: interface KicadFootprintAttributes
 
-  through_hole: boolean
+  through_hole?: boolean
 
-  smd: boolean
+  smd?: boolean
 
-  exclude_from_pos_files: boolean
+  exclude_from_pos_files?: boolean
 
-  exclude_from_bom: boolean
+  exclude_from_bom?: boolean
 
 // Category: Prop types
 KicadFootprintMetadata: interface KicadFootprintMetadata
 
-  footprintName: string
+  footprintName?: string
 
-  version: number | string
+  version?: number | string
 
-  generator: string
+  generator?: string
 
-  generatorVersion: number | string
+  generatorVersion?: number | string
 
-  layer: string
+  layer?: string
 
-  properties: KicadFootprintProperties
+  properties?: KicadFootprintProperties
 
-  attributes: KicadFootprintAttributes
+  attributes?: KicadFootprintAttributes
 
-  pads: KicadFootprintPad[]
+  pads?: KicadFootprintPad[]
 
-  embeddedFonts: boolean
+  embeddedFonts?: boolean
 
-  model: KicadFootprintModel
+  model?: KicadFootprintModel
 
 // Category: Prop types
 // Required path
@@ -445,11 +445,11 @@ KicadFootprintModel: interface KicadFootprintModel
 
   path: string
 
-  offset: {x: number | string; y: number | string; z: number | string; }
+  offset?: {x: number | string; y: number | string; z: number | string; }
 
-  scale: {x: number | string; y: number | string; z: number | string; }
+  scale?: {x: number | string; y: number | string; z: number | string; }
 
-  rotate: {x: number | string; y: number | string; z: number | string; }
+  rotate?: {x: number | string; y: number | string; z: number | string; }
 
 // Category: Prop types
 // Required name, type
@@ -459,30 +459,30 @@ KicadFootprintPad: interface KicadFootprintPad
 
   type: string
 
-  shape: string
+  shape?: string
 
-  at: KicadAt
+  at?: KicadAt
 
-  size: {x: number | string; y: number | string; }
+  size?: {x: number | string; y: number | string; }
 
-  drill: number | string
+  drill?: number | string
 
-  layers: string[]
+  layers?: string[]
 
-  removeUnusedLayers: boolean
+  removeUnusedLayers?: boolean
 
-  uuid: string
+  uuid?: string
 
 // Category: Prop types
 KicadFootprintProperties: interface KicadFootprintProperties
 
-  Reference: KicadProperty
+  Reference?: KicadProperty
 
-  Value: KicadProperty
+  Value?: KicadProperty
 
-  Datasheet: KicadProperty
+  Datasheet?: KicadProperty
 
-  Description: KicadProperty
+  Description?: KicadProperty
 
 // Category: Prop types
 // Required value
@@ -490,74 +490,74 @@ KicadProperty: interface KicadProperty
 
   value: string
 
-  at: KicadAt
+  at?: KicadAt
 
-  layer: string
+  layer?: string
 
-  uuid: string
+  uuid?: string
 
-  hide: boolean
+  hide?: boolean
 
-  effects: KicadEffects
+  effects?: KicadEffects
 
 // Category: Prop types
 KicadSymbolEffects: interface KicadSymbolEffects
 
-  font: KicadFont
+  font?: KicadFont
 
-  justify: string | string[]
+  justify?: string | string[]
 
-  hide: boolean
+  hide?: boolean
 
 // Category: Prop types
 KicadSymbolMetadata: interface KicadSymbolMetadata
 
-  symbolName: string
+  symbolName?: string
 
-  extends: string
+  extends?: string
 
-  pinNumbers: KicadSymbolPinNumbers
+  pinNumbers?: KicadSymbolPinNumbers
 
-  pinNames: KicadSymbolPinNames
+  pinNames?: KicadSymbolPinNames
 
-  excludeFromSim: boolean
+  excludeFromSim?: boolean
 
-  inBom: boolean
+  inBom?: boolean
 
-  onBoard: boolean
+  onBoard?: boolean
 
-  properties: KicadSymbolProperties
+  properties?: KicadSymbolProperties
 
-  embeddedFonts: boolean
+  embeddedFonts?: boolean
 
 // Category: Prop types
 KicadSymbolPinNames: interface KicadSymbolPinNames
 
-  offset: number | string
+  offset?: number | string
 
-  hide: boolean
+  hide?: boolean
 
 // Category: Prop types
 KicadSymbolPinNumbers: interface KicadSymbolPinNumbers
 
-  hide: boolean
+  hide?: boolean
 
 // Category: Prop types
 KicadSymbolProperties: interface KicadSymbolProperties
 
-  Reference: KicadSymbolProperty
+  Reference?: KicadSymbolProperty
 
-  Value: KicadSymbolProperty
+  Value?: KicadSymbolProperty
 
-  Footprint: KicadSymbolProperty
+  Footprint?: KicadSymbolProperty
 
-  Datasheet: KicadSymbolProperty
+  Datasheet?: KicadSymbolProperty
 
-  Description: KicadSymbolProperty
+  Description?: KicadSymbolProperty
 
-  ki_keywords: KicadSymbolProperty
+  ki_keywords?: KicadSymbolProperty
 
-  ki_fp_filters: KicadSymbolProperty
+  ki_fp_filters?: KicadSymbolProperty
 
 // Category: Prop types
 // Required value
@@ -565,78 +565,78 @@ KicadSymbolProperty: interface KicadSymbolProperty
 
   value: string
 
-  id: number | string
+  id?: number | string
 
-  at: KicadAt
+  at?: KicadAt
 
-  effects: KicadSymbolEffects
+  effects?: KicadSymbolEffects
 
 // Category: Prop types
 LayoutConfig: interface LayoutConfig
 
-  layoutMode: "grid" | "flex" | "match-adapt" | "relative" | "none"
+  layoutMode?: "grid" | "flex" | "match-adapt" | "relative" | "none"
 
-  position: "absolute" | "relative"
+  position?: "absolute" | "relative"
 
-  grid: boolean
+  grid?: boolean
 
-  gridCols: number | string
+  gridCols?: number | string
 
-  gridRows: number | string
+  gridRows?: number | string
 
-  gridTemplateRows: string
+  gridTemplateRows?: string
 
-  gridTemplateColumns: string
+  gridTemplateColumns?: string
 
-  gridTemplate: string
+  gridTemplate?: string
 
-  gridGap: number | string
+  gridGap?: number | string
 
-  gridRowGap: number | string
+  gridRowGap?: number | string
 
-  gridColumnGap: number | string
+  gridColumnGap?: number | string
 
-  flex: boolean | string
+  flex?: boolean | string
 
-  flexDirection: "row" | "column"
+  flexDirection?: "row" | "column"
 
-  alignItems: "start" | "center" | "end" | "stretch"
+  alignItems?: "start" | "center" | "end" | "stretch"
 
-  justifyContent: "start" | "center" | "end" | "stretch" | "space-between" | "space-around" | "space-evenly"
+  justifyContent?: "start" | "center" | "end" | "stretch" | "space-between" | "space-around" | "space-evenly"
 
-  flexRow: boolean
+  flexRow?: boolean
 
-  flexColumn: boolean
+  flexColumn?: boolean
 
-  gap: number | string
+  gap?: number | string
 
-  pack: boolean
+  pack?: boolean
 
-  packOrderStrategy: "largest_to_smallest" | "first_to_last" | "highest_to_lowest_pin_count"
+  packOrderStrategy?: "largest_to_smallest" | "first_to_last" | "highest_to_lowest_pin_count"
 
-  packPlacementStrategy: "shortest_connection_along_outline"
+  packPlacementStrategy?: "shortest_connection_along_outline"
 
-  padding: Distance
+  padding?: Distance
 
-  paddingLeft: Distance
+  paddingLeft?: Distance
 
-  paddingRight: Distance
+  paddingRight?: Distance
 
-  paddingTop: Distance
+  paddingTop?: Distance
 
-  paddingBottom: Distance
+  paddingBottom?: Distance
 
-  paddingX: Distance
+  paddingX?: Distance
 
-  paddingY: Distance
+  paddingY?: Distance
 
-  width: Distance
+  width?: Distance
 
-  height: Distance
+  height?: Distance
 
-  matchAdapt: boolean
+  matchAdapt?: boolean
 
-  matchAdaptTemplate: any
+  matchAdaptTemplate?: any
 
 // Category: Prop types
 ManualEditsFileInput: { pcb_placements?: { center: { x: string | number; y: string | number; }; selector: string; relative_to?: string; }[]; manual_trace_hints?: { pcb_port_selector: string; offsets: { x: string | number; y: string | number; via?: boolean; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | { name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; }; trace_width?: string | number; }[]; }[]; schematic_placements?: { center: { x: string | number; y: string | number; }; selector: string; relative_to?: string; }[]; }
@@ -663,11 +663,11 @@ PcbPath: Array<PcbPathPoint | string>
 // Category: Prop types
 PcbPathPoint: interface PcbPathPoint extends Point
 
-  via: boolean
+  via?: boolean
 
-  fromLayer: LayerRefInput
+  fromLayer?: LayerRefInput
 
-  toLayer: LayerRefInput
+  toLayer?: LayerRefInput
 
 // Category: Prop types
 PcbPositionMode: "relative_to_group_anchor" | "auto" | "relative_to_board_anchor" | "relative_to_component_anchor"
@@ -683,15 +683,15 @@ PcbRouteCache: interface PcbRouteCache
 // Category: Prop types
 PcbStyle: interface PcbStyle
 
-  silkscreenFontSize: string | number
+  silkscreenFontSize?: string | number
 
-  viaPadDiameter: string | number
+  viaPadDiameter?: string | number
 
-  viaHoleDiameter: string | number
+  viaHoleDiameter?: string | number
 
-  silkscreenTextPosition: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; }
+  silkscreenTextPosition?: "centered" | "outside" | "none" | {offsetX: number; offsetY: number; }
 
-  silkscreenTextVisibility: "hidden" | "visible" | "inherit"
+  silkscreenTextVisibility?: "hidden" | "visible" | "inherit"
 
 // Category: Prop types
 PcbSx: PcbSxBase & {[K in PcbSxSelector]?: PcbSxValue; }
@@ -705,68 +705,68 @@ PcbSxSelector: "& footprint[src^='kicad:'] silkscreentext" | "& footprint[src^='
 // Category: Prop types
 PcbSxValue: interface PcbSxValue
 
-  fontSize: string | number
+  fontSize?: string | number
 
-  pcbX: string | number
+  pcbX?: string | number
 
-  pcbY: string | number
+  pcbY?: string | number
 
-  visibility: "hidden" | "visible" | "inherit"
+  visibility?: "hidden" | "visible" | "inherit"
 
 // Category: Prop types
 PinAttributeMap: interface PinAttributeMap
 
-  capabilities: Array<PinCapability>
+  capabilities?: Array<PinCapability>
 
-  activeCapabilities: Array<PinCapability>
+  activeCapabilities?: Array<PinCapability>
 
-  activeCapability: PinCapability
+  activeCapability?: PinCapability
 
-  providesPower: boolean
+  providesPower?: boolean
 
-  requiresPower: boolean
+  requiresPower?: boolean
 
-  providesGround: boolean
+  providesGround?: boolean
 
-  requiresGround: boolean
+  requiresGround?: boolean
 
-  providesVoltage: string | number
+  providesVoltage?: string | number
 
-  requiresVoltage: string | number
+  requiresVoltage?: string | number
 
-  doNotConnect: boolean
+  doNotConnect?: boolean
 
-  includeInBoardPinout: boolean
+  includeInBoardPinout?: boolean
 
-  highlightColor: string
+  highlightColor?: string
 
-  mustBeConnected: boolean
+  mustBeConnected?: boolean
 
-  canUseInternalPullup: boolean
+  canUseInternalPullup?: boolean
 
-  isUsingInternalPullup: boolean
+  isUsingInternalPullup?: boolean
 
-  needsExternalPullup: boolean
+  needsExternalPullup?: boolean
 
-  canUseInternalPulldown: boolean
+  canUseInternalPulldown?: boolean
 
-  isUsingInternalPulldown: boolean
+  isUsingInternalPulldown?: boolean
 
-  needsExternalPulldown: boolean
+  needsExternalPulldown?: boolean
 
-  canUseOpenDrain: boolean
+  canUseOpenDrain?: boolean
 
-  isUsingOpenDrain: boolean
+  isUsingOpenDrain?: boolean
 
-  canUsePushPull: boolean
+  canUsePushPull?: boolean
 
-  isUsingPushPull: boolean
+  isUsingPushPull?: boolean
 
-  shouldHaveDecouplingCapacitor: boolean
+  shouldHaveDecouplingCapacitor?: boolean
 
-  recommendedDecouplingCapacitorCapacitance: string | number
+  recommendedDecouplingCapacitorCapacitance?: string | number
 
-  isGpio: boolean
+  isGpio?: boolean
 
 // Category: Prop types
 PinCapability: "i2c_sda" | "i2c_scl" | "spi_cs" | "spi_sck" | "spi_mosi" | "spi_miso" | "uart_tx" | "uart_rx"
@@ -774,9 +774,9 @@ PinCapability: "i2c_sda" | "i2c_scl" | "spi_cs" | "spi_sck" | "spi_mosi" | "spi_
 // Category: Prop types
 PinCompatibleVariant: interface PinCompatibleVariant
 
-  manufacturerPartNumber: string
+  manufacturerPartNumber?: string
 
-  supplierPartNumber: SupplierPartNumbers
+  supplierPartNumber?: SupplierPartNumbers
 
 // Category: Prop types
 PinLabelsProp<PinNumber extends string = string, PinLabel extends string = string>: Record<PinNumber, PinLabel | readonly PinLabel[] | PinLabel[]>
@@ -832,35 +832,35 @@ SchematicPortArrangement: interface SchematicPortArrangement extends SchematicPo
 // Specifies the number of pins on each side of the schematic box component
 SchematicPortArrangementWithPinCounts: interface SchematicPortArrangementWithPinCounts
 
-  leftPinCount: number
+  leftPinCount?: number
 
-  topPinCount: number
+  topPinCount?: number
 
-  rightPinCount: number
+  rightPinCount?: number
 
-  bottomPinCount: number
+  bottomPinCount?: number
 
 // Category: Prop types
 SchematicPortArrangementWithSides: interface SchematicPortArrangementWithSides
 
-  leftSide: PinSideDefinitionInput
+  leftSide?: PinSideDefinitionInput
 
-  topSide: PinSideDefinitionInput
+  topSide?: PinSideDefinitionInput
 
-  rightSide: PinSideDefinitionInput
+  rightSide?: PinSideDefinitionInput
 
-  bottomSide: PinSideDefinitionInput
+  bottomSide?: PinSideDefinitionInput
 
 // Category: Prop types
 SchematicPortArrangementWithSizes: interface SchematicPortArrangementWithSizes
 
-  leftSize: number
+  leftSize?: number
 
-  topSize: number
+  topSize?: number
 
-  rightSize: number
+  rightSize?: number
 
-  bottomSize: number
+  bottomSize?: number
 
 // Category: Prop types
 SchematicSheetSize: "A4" | "ANSI_B"
@@ -871,9 +871,9 @@ SchematicSymbolSize: string | number
 // Category: Prop types
 SchStyle: interface SchStyle
 
-  defaultPassiveSize: "xs" | "sm" | "md" | string | number
+  defaultPassiveSize?: "xs" | "sm" | "md" | string | number
 
-  defaultCapacitorOrientation: "vertical" | "none"
+  defaultCapacitorOrientation?: "vertical" | "none"
 
 // Category: Prop types
 SelectionResult: SelectionResultComponent | SelectionResultPort | SelectionResultNet
@@ -913,18 +913,18 @@ SpiceModelProps: interface SpiceModelProps
 
   source: string
 
-  spicePinMapping: Record<string, string>
+  spicePinMapping?: Record<string, string>
 
 // Category: Prop types
 SpiceOptions: interface SpiceOptions
 
-  method: "trap" | "gear"
+  method?: "trap" | "gear"
 
-  reltol: number | string
+  reltol?: number | string
 
-  abstol: number | string
+  abstol?: number | string
 
-  vntol: number | string
+  vntol?: number | string
 
 // Category: Prop types
 SupplierName: "jlcpcb" | "macrofab" | "pcbway" | "digikey" | "mouser" | "lcsc"

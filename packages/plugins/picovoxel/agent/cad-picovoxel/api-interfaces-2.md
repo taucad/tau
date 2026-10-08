@@ -29,7 +29,7 @@ Slice: interface Slice
   contours: SliceContour[]
 
   // Value provenance of the sliced voxels (`'exact'` or absent = exact
-  lane: 'exact' | 'fast'
+  lane?: 'exact' | 'fast'
 
 SliceContour: interface SliceContour
 
@@ -50,38 +50,38 @@ SliceStack: interface SliceStack
     }
 
   // Value provenance (`'exact'` or absent = exact)
-  lane: 'exact' | 'fast'
+  lane?: 'exact' | 'fast'
 
 SliceVoxelsOptions: interface SliceVoxelsOptions
 
   // Layer height in mm
-  layerHeight: number
+  layerHeight?: number
 
   // Keep absolute XY coordinates instead of the bbox-relative default
-  useAbsoluteXY: boolean
+  useAbsoluteXY?: boolean
 
   // Monotonic 0→1
-  onProgress: (fraction: number) => void
+  onProgress?: (fraction: number) => void
 
 ToCliOptions: interface ToCliOptions
 
   // Units in mm per CLI unit (1 = mm, upstream default)
-  units: number
+  units?: number
 
   // Emit an intentionally-empty first layer so readers can infer layer height
-  emptyFirstLayer: boolean
+  emptyFirstLayer?: boolean
 
   // Header date string
-  date: string
+  date?: string
 
-  onProgress: (fraction: number) => void
+  onProgress?: (fraction: number) => void
 
 ToSvgOptions: interface ToSvgOptions
 
   // Filled single-path rendering (holes via winding) instead of stroked outlines
-  solid: boolean
+  solid?: boolean
 
-  strokeWidth: number
+  strokeWidth?: number
 
   // Override the viewBox [minX, minY, width, height]
-  viewBox: readonly [number, number, number, number]
+  viewBox?: readonly [number, number, number, number]

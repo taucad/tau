@@ -176,17 +176,17 @@ XCAFDoc_AssemblyGraph: declare class XCAFDoc_AssemblyGraph extends Standard_Tran
 
 XCAFDoc_AssemblyGraph_NodeType: typeof XCAFDoc_AssemblyGraph_NodeType[keyof typeof XCAFDoc_AssemblyGraph_NodeType]
 
-  NodeType_UNDEFINED: 'NodeType_UNDEFINED'
+  readonly NodeType_UNDEFINED: 'NodeType_UNDEFINED'
 
-  NodeType_AssemblyRoot: 'NodeType_AssemblyRoot'
+  readonly NodeType_AssemblyRoot: 'NodeType_AssemblyRoot'
 
-  NodeType_Subassembly: 'NodeType_Subassembly'
+  readonly NodeType_Subassembly: 'NodeType_Subassembly'
 
-  NodeType_Occurrence: 'NodeType_Occurrence'
+  readonly NodeType_Occurrence: 'NodeType_Occurrence'
 
-  NodeType_Part: 'NodeType_Part'
+  readonly NodeType_Part: 'NodeType_Part'
 
-  NodeType_Subshape: 'NodeType_Subshape'
+  readonly NodeType_Subshape: 'NodeType_Subshape'
 
 XCAFDoc_AssemblyGraph_Iterator: declare class XCAFDoc_AssemblyGraph_Iterator
 
@@ -640,11 +640,11 @@ XCAFDoc_ColorTool: declare class XCAFDoc_ColorTool extends TDataStd_GenericEmpty
 
 XCAFDoc_ColorType: typeof XCAFDoc_ColorType[keyof typeof XCAFDoc_ColorType]
 
-  XCAFDoc_ColorGen: 'XCAFDoc_ColorGen'
+  readonly XCAFDoc_ColorGen: 'XCAFDoc_ColorGen'
 
-  XCAFDoc_ColorSurf: 'XCAFDoc_ColorSurf'
+  readonly XCAFDoc_ColorSurf: 'XCAFDoc_ColorSurf'
 
-  XCAFDoc_ColorCurv: 'XCAFDoc_ColorCurv'
+  readonly XCAFDoc_ColorCurv: 'XCAFDoc_ColorCurv'
 
 XCAFDoc_Datum: declare class XCAFDoc_Datum extends TDF_Attribute
 

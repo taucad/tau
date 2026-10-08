@@ -228,13 +228,13 @@ Transfer_TransientProcess: declare class Transfer_TransientProcess extends Trans
 
 Transfer_UndefMode: typeof Transfer_UndefMode[keyof typeof Transfer_UndefMode]
 
-  Transfer_UndefIgnore: 'Transfer_UndefIgnore'
+  readonly Transfer_UndefIgnore: 'Transfer_UndefIgnore'
 
-  Transfer_UndefFailure: 'Transfer_UndefFailure'
+  readonly Transfer_UndefFailure: 'Transfer_UndefFailure'
 
-  Transfer_UndefContent: 'Transfer_UndefContent'
+  readonly Transfer_UndefContent: 'Transfer_UndefContent'
 
-  Transfer_UndefUser: 'Transfer_UndefUser'
+  readonly Transfer_UndefUser: 'Transfer_UndefUser'
 
 Transfer_VoidBinder: declare class Transfer_VoidBinder extends Transfer_Binder
 

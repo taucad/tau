@@ -115,13 +115,13 @@ IGESData_SpecificModule: declare class IGESData_SpecificModule extends Standard_
 
 IGESData_Status: typeof IGESData_Status[keyof typeof IGESData_Status]
 
-  IGESData_EntityOK: 'IGESData_EntityOK'
+  readonly IGESData_EntityOK: 'IGESData_EntityOK'
 
-  IGESData_EntityError: 'IGESData_EntityError'
+  readonly IGESData_EntityError: 'IGESData_EntityError'
 
-  IGESData_ReferenceError: 'IGESData_ReferenceError'
+  readonly IGESData_ReferenceError: 'IGESData_ReferenceError'
 
-  IGESData_TypeError: 'IGESData_TypeError'
+  readonly IGESData_TypeError: 'IGESData_TypeError'
 
 IGESData_ToolLocation: declare class IGESData_ToolLocation extends Standard_Transient
 

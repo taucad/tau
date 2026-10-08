@@ -32,14 +32,14 @@ LDOMBasicString: declare class LDOMBasicString
 
 LDOMBasicString_StringType: typeof LDOMBasicString_StringType[keyof typeof LDOMBasicString_StringType]
 
-  LDOM_NULL: 'LDOM_NULL'
+  readonly LDOM_NULL: 'LDOM_NULL'
 
-  LDOM_Integer: 'LDOM_Integer'
+  readonly LDOM_Integer: 'LDOM_Integer'
 
-  LDOM_AsciiFree: 'LDOM_AsciiFree'
+  readonly LDOM_AsciiFree: 'LDOM_AsciiFree'
 
-  LDOM_AsciiDoc: 'LDOM_AsciiDoc'
+  readonly LDOM_AsciiDoc: 'LDOM_AsciiDoc'
 
-  LDOM_AsciiDocClear: 'LDOM_AsciiDocClear'
+  readonly LDOM_AsciiDocClear: 'LDOM_AsciiDocClear'
 
-  LDOM_AsciiHashed: 'LDOM_AsciiHashed'
+  readonly LDOM_AsciiHashed: 'LDOM_AsciiHashed'

@@ -32,9 +32,9 @@ export default function main(p = defaultParams): GLTFNode {
   const body = Manifold.cube([p.width, p.depth, p.height], true);
   const hole = Manifold.cylinder(p.height + 2, p.holeRadius, -1, 64, true);
   const solid = body.subtract(Manifold.union([hole.translate([-20, 0, 0]), hole.translate([20, 0, 0])]));
-  // One mesh run with flat normals, named on the material: GeoSpec and screenshots read both.
+  // Flat normals, named on the material, so screenshots shade the mesh.
   const node = new GLTFNode();
-  node.manifold = solid.asOriginal().calculateNormals(0, 60);
+  node.manifold = solid.calculateNormals(0, 60);
   node.material = { attributes: ['NORMAL'] };
   return node;
 }
@@ -46,7 +46,7 @@ Check missing imports, undefined returns, invalid boolean inputs, and non-positi
 
 - Wrong: `Manifold.cylinder(radius, height)`. Correct: height first: `Manifold.cylinder(height, radiusLow, radiusHigh, segments, center)`; pass `-1` for `radiusHigh` to match `radiusLow`.
 - Wrong: chaining `a.add(b).add(c)…` over many parts. Correct: `Manifold.union([a, b, c])` once.
-- Wrong: returning a boolean result as it is. Correct: finish with `.asOriginal().calculateNormals(0, 60)` in a `GLTFNode` whose material names `['NORMAL']`, as above. Otherwise GeoSpec mesh checks fail with "Material shells require exactly two oppositely directed triangles per exact edge" (each boolean input stays a separate mesh run) and screenshots fail with "TRIANGLES primitive missing NORMAL".
+- Wrong: returning a boolean result as it is. Correct: finish with `.calculateNormals(0, 60)` in a `GLTFNode` whose material names `['NORMAL']`, as above. Otherwise screenshots fail with "TRIANGLES primitive missing NORMAL".
 
 ## Core API
 
@@ -121,8 +121,8 @@ export declare class CrossSection
 
 // Position a manifold model for later export
 export declare class GLTFNode extends BaseGLTFNode
-  manifold: Manifold
-  material: GLTFMaterial
+  manifold?: Manifold
+  material?: GLTFMaterial
   clone(newParent?: BaseGLTFNode): GLTFNode;
   // Does this node have any geometry that needs to be converted on export?
   isEmpty(): boolean;
@@ -130,37 +130,37 @@ export declare class GLTFNode extends BaseGLTFNode
 // Define a material using the glTF metallic-roughness physically-based rendering model
 export declare interface GLTFMaterial
   // Every vertex in a glTF Mesh has a set of attributes
-  attributes: GLTFAttribute[]
+  attributes?: GLTFAttribute[]
   // Roughness of the material
-  roughness: number
+  roughness?: number
   // Metallic property of the material
-  metallic: number
+  metallic?: number
   // Base colour of the material
-  baseColorFactor: [number, number, number]
+  baseColorFactor?: [number, number, number]
   // Transparency of the material
-  alpha: number
+  alpha?: number
   // Render model as unlit or shadeless, as opposed to physically based rendering
-  unlit: boolean
+  unlit?: boolean
   // Material name
-  name: string
+  name?: string
   // If set, this material is a copy of another material on an in-memory glTF…
-  sourceMaterial: GLTFTransform.Material
+  sourceMaterial?: GLTFTransform.Material
   // If set, this material is a copy of another material on an in-memory glTF…
-  sourceRunID: number
+  sourceRunID?: number
   // Treat this material as double sided
-  doubleSided: boolean
+  doubleSided?: boolean
 
 GLTFAttribute: 'POSITION' | 'NORMAL' | 'TANGENT' | 'TEXCOORD_0' | 'TEXCOORD_1' | 'COLOR_0' | 'JOINTS_0' | 'WEIGHTS_0' | 'SKIP_1' | 'SKIP_2' | 'SKIP_3' | 'SKIP_4'
 
 // The abstract class from which other classes inherit
 export declare abstract class BaseGLTFNode
-  name: string
-  translation: Vec3 | ((t: number) => Vec3)
+  name?: string
+  translation?: Vec3 | ((t: number) => Vec3)
   // From the reference frame of the model being rotated, rotations are applied in *z-y'-x"*…
-  rotation: Vec3 | ((t: number) => Vec3)
-  scale: Vec3 | ((t: number) => Vec3)
+  rotation?: Vec3 | ((t: number) => Vec3)
+  scale?: Vec3 | ((t: number) => Vec3)
   constructor(parent?: BaseGLTFNode);
-  parent
+  readonly parent: BaseGLTFNode | undefined
   // Does this node have any geometry that needs to be converted on export?
   isEmpty(): boolean;
 ```

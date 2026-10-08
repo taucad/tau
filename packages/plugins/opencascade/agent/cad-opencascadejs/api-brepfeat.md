@@ -340,15 +340,15 @@ BRepFeat_MakeRevol: declare class BRepFeat_MakeRevol extends BRepFeat_Form
 
 BRepFeat_PerfSelection: typeof BRepFeat_PerfSelection[keyof typeof BRepFeat_PerfSelection]
 
-  BRepFeat_NoSelection: 'BRepFeat_NoSelection'
+  readonly BRepFeat_NoSelection: 'BRepFeat_NoSelection'
 
-  BRepFeat_SelectionFU: 'BRepFeat_SelectionFU'
+  readonly BRepFeat_SelectionFU: 'BRepFeat_SelectionFU'
 
-  BRepFeat_SelectionU: 'BRepFeat_SelectionU'
+  readonly BRepFeat_SelectionU: 'BRepFeat_SelectionU'
 
-  BRepFeat_SelectionSh: 'BRepFeat_SelectionSh'
+  readonly BRepFeat_SelectionSh: 'BRepFeat_SelectionSh'
 
-  BRepFeat_SelectionShU: 'BRepFeat_SelectionShU'
+  readonly BRepFeat_SelectionShU: 'BRepFeat_SelectionShU'
 
 BRepFeat_RibSlot: declare class BRepFeat_RibSlot extends BRepBuilderAPI_MakeShape
 
@@ -436,66 +436,66 @@ BRepFeat_SplitShape: declare class BRepFeat_SplitShape extends BRepBuilderAPI_Ma
 
 BRepFeat_Status: typeof BRepFeat_Status[keyof typeof BRepFeat_Status]
 
-  BRepFeat_NoError: 'BRepFeat_NoError'
+  readonly BRepFeat_NoError: 'BRepFeat_NoError'
 
-  BRepFeat_InvalidPlacement: 'BRepFeat_InvalidPlacement'
+  readonly BRepFeat_InvalidPlacement: 'BRepFeat_InvalidPlacement'
 
-  BRepFeat_HoleTooLong: 'BRepFeat_HoleTooLong'
+  readonly BRepFeat_HoleTooLong: 'BRepFeat_HoleTooLong'
 
 BRepFeat_StatusError: typeof BRepFeat_StatusError[keyof typeof BRepFeat_StatusError]
 
-  BRepFeat_OK: 'BRepFeat_OK'
+  readonly BRepFeat_OK: 'BRepFeat_OK'
 
-  BRepFeat_BadDirect: 'BRepFeat_BadDirect'
+  readonly BRepFeat_BadDirect: 'BRepFeat_BadDirect'
 
-  BRepFeat_BadIntersect: 'BRepFeat_BadIntersect'
+  readonly BRepFeat_BadIntersect: 'BRepFeat_BadIntersect'
 
-  BRepFeat_EmptyBaryCurve: 'BRepFeat_EmptyBaryCurve'
+  readonly BRepFeat_EmptyBaryCurve: 'BRepFeat_EmptyBaryCurve'
 
-  BRepFeat_EmptyCutResult: 'BRepFeat_EmptyCutResult'
+  readonly BRepFeat_EmptyCutResult: 'BRepFeat_EmptyCutResult'
 
-  BRepFeat_FalseSide: 'BRepFeat_FalseSide'
+  readonly BRepFeat_FalseSide: 'BRepFeat_FalseSide'
 
-  BRepFeat_IncDirection: 'BRepFeat_IncDirection'
+  readonly BRepFeat_IncDirection: 'BRepFeat_IncDirection'
 
-  BRepFeat_IncSlidFace: 'BRepFeat_IncSlidFace'
+  readonly BRepFeat_IncSlidFace: 'BRepFeat_IncSlidFace'
 
-  BRepFeat_IncParameter: 'BRepFeat_IncParameter'
+  readonly BRepFeat_IncParameter: 'BRepFeat_IncParameter'
 
-  BRepFeat_IncTypes: 'BRepFeat_IncTypes'
+  readonly BRepFeat_IncTypes: 'BRepFeat_IncTypes'
 
-  BRepFeat_IntervalOverlap: 'BRepFeat_IntervalOverlap'
+  readonly BRepFeat_IntervalOverlap: 'BRepFeat_IntervalOverlap'
 
-  BRepFeat_InvFirstShape: 'BRepFeat_InvFirstShape'
+  readonly BRepFeat_InvFirstShape: 'BRepFeat_InvFirstShape'
 
-  BRepFeat_InvOption: 'BRepFeat_InvOption'
+  readonly BRepFeat_InvOption: 'BRepFeat_InvOption'
 
-  BRepFeat_InvShape: 'BRepFeat_InvShape'
+  readonly BRepFeat_InvShape: 'BRepFeat_InvShape'
 
-  BRepFeat_LocOpeNotDone: 'BRepFeat_LocOpeNotDone'
+  readonly BRepFeat_LocOpeNotDone: 'BRepFeat_LocOpeNotDone'
 
-  BRepFeat_LocOpeInvNotDone: 'BRepFeat_LocOpeInvNotDone'
+  readonly BRepFeat_LocOpeInvNotDone: 'BRepFeat_LocOpeInvNotDone'
 
-  BRepFeat_NoExtFace: 'BRepFeat_NoExtFace'
+  readonly BRepFeat_NoExtFace: 'BRepFeat_NoExtFace'
 
-  BRepFeat_NoFaceProf: 'BRepFeat_NoFaceProf'
+  readonly BRepFeat_NoFaceProf: 'BRepFeat_NoFaceProf'
 
-  BRepFeat_NoGluer: 'BRepFeat_NoGluer'
+  readonly BRepFeat_NoGluer: 'BRepFeat_NoGluer'
 
-  BRepFeat_NoIntersectF: 'BRepFeat_NoIntersectF'
+  readonly BRepFeat_NoIntersectF: 'BRepFeat_NoIntersectF'
 
-  BRepFeat_NoIntersectU: 'BRepFeat_NoIntersectU'
+  readonly BRepFeat_NoIntersectU: 'BRepFeat_NoIntersectU'
 
-  BRepFeat_NoParts: 'BRepFeat_NoParts'
+  readonly BRepFeat_NoParts: 'BRepFeat_NoParts'
 
-  BRepFeat_NoProjPt: 'BRepFeat_NoProjPt'
+  readonly BRepFeat_NoProjPt: 'BRepFeat_NoProjPt'
 
-  BRepFeat_NotInitialized: 'BRepFeat_NotInitialized'
+  readonly BRepFeat_NotInitialized: 'BRepFeat_NotInitialized'
 
-  BRepFeat_NotYetImplemented: 'BRepFeat_NotYetImplemented'
+  readonly BRepFeat_NotYetImplemented: 'BRepFeat_NotYetImplemented'
 
-  BRepFeat_NullRealTool: 'BRepFeat_NullRealTool'
+  readonly BRepFeat_NullRealTool: 'BRepFeat_NullRealTool'
 
-  BRepFeat_NullToolF: 'BRepFeat_NullToolF'
+  readonly BRepFeat_NullToolF: 'BRepFeat_NullToolF'
 
-  BRepFeat_NullToolU: 'BRepFeat_NullToolU'
+  readonly BRepFeat_NullToolU: 'BRepFeat_NullToolU'

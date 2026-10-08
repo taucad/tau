@@ -42,15 +42,15 @@ CDM_Application: declare class CDM_Application extends Standard_Transient
 
 CDM_CanCloseStatus: typeof CDM_CanCloseStatus[keyof typeof CDM_CanCloseStatus]
 
-  CDM_CCS_OK: 'CDM_CCS_OK'
+  readonly CDM_CCS_OK: 'CDM_CCS_OK'
 
-  CDM_CCS_NotOpen: 'CDM_CCS_NotOpen'
+  readonly CDM_CCS_NotOpen: 'CDM_CCS_NotOpen'
 
-  CDM_CCS_UnstoredReferenced: 'CDM_CCS_UnstoredReferenced'
+  readonly CDM_CCS_UnstoredReferenced: 'CDM_CCS_UnstoredReferenced'
 
-  CDM_CCS_ModifiedReferenced: 'CDM_CCS_ModifiedReferenced'
+  readonly CDM_CCS_ModifiedReferenced: 'CDM_CCS_ModifiedReferenced'
 
-  CDM_CCS_ReferenceRejection: 'CDM_CCS_ReferenceRejection'
+  readonly CDM_CCS_ReferenceRejection: 'CDM_CCS_ReferenceRejection'
 
 CDM_Document: declare class CDM_Document extends Standard_Transient
 

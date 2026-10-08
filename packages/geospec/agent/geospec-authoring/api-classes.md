@@ -6,7 +6,7 @@
 GeoSpecModelLoadError: export declare class GeoSpecModelLoadError extends Error
 
   // Structured diagnostics explaining why model loading failed
-  diagnostics: readonly GeometryDiagnostic[]
+  readonly diagnostics: readonly GeometryDiagnostic[]
 
   // GeoSpecModelLoadError.constructor (constructor)
   constructor(diagnostics: readonly GeometryDiagnostic[]);

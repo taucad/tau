@@ -77,13 +77,13 @@ Draft_EdgeInfo: declare class Draft_EdgeInfo
 
 Draft_ErrorStatus: typeof Draft_ErrorStatus[keyof typeof Draft_ErrorStatus]
 
-  Draft_NoError: 'Draft_NoError'
+  readonly Draft_NoError: 'Draft_NoError'
 
-  Draft_FaceRecomputation: 'Draft_FaceRecomputation'
+  readonly Draft_FaceRecomputation: 'Draft_FaceRecomputation'
 
-  Draft_EdgeRecomputation: 'Draft_EdgeRecomputation'
+  readonly Draft_EdgeRecomputation: 'Draft_EdgeRecomputation'
 
-  Draft_VertexRecomputation: 'Draft_VertexRecomputation'
+  readonly Draft_VertexRecomputation: 'Draft_VertexRecomputation'
 
 Draft_FaceInfo: declare class Draft_FaceInfo
 

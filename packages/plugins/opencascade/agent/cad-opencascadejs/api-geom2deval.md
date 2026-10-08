@@ -339,11 +339,11 @@ Geom2dEval_RepCurveDesc_Base: declare class Geom2dEval_RepCurveDesc_Base extends
 
 Geom2dEval_RepCurveDesc_Base_Kind: typeof Geom2dEval_RepCurveDesc_Base_Kind[keyof typeof Geom2dEval_RepCurveDesc_Base_Kind]
 
-  Full: 'Full'
+  readonly Full: 'Full'
 
-  DerivBounded: 'DerivBounded'
+  readonly DerivBounded: 'DerivBounded'
 
-  Mapped: 'Mapped'
+  readonly Mapped: 'Mapped'
 
 Geom2dEval_RepCurveDesc_DerivBounded: declare class Geom2dEval_RepCurveDesc_DerivBounded extends Geom2dEval_RepCurveDesc_Base
 

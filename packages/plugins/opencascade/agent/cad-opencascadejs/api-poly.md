@@ -446,23 +446,23 @@ Poly_MakeLoops: declare class Poly_MakeLoops
 
 Poly_MakeLoops_LinkFlag: typeof Poly_MakeLoops_LinkFlag[keyof typeof Poly_MakeLoops_LinkFlag]
 
-  LF_None: 'LF_None'
+  readonly LF_None: 'LF_None'
 
-  LF_Fwd: 'LF_Fwd'
+  readonly LF_Fwd: 'LF_Fwd'
 
-  LF_Rev: 'LF_Rev'
+  readonly LF_Rev: 'LF_Rev'
 
-  LF_Both: 'LF_Both'
+  readonly LF_Both: 'LF_Both'
 
-  LF_Reversed: 'LF_Reversed'
+  readonly LF_Reversed: 'LF_Reversed'
 
 Poly_MakeLoops_ResultCode: typeof Poly_MakeLoops_ResultCode[keyof typeof Poly_MakeLoops_ResultCode]
 
-  RC_LoopsDone: 'RC_LoopsDone'
+  readonly RC_LoopsDone: 'RC_LoopsDone'
 
-  RC_HangingLinks: 'RC_HangingLinks'
+  readonly RC_HangingLinks: 'RC_HangingLinks'
 
-  RC_Failure: 'RC_Failure'
+  readonly RC_Failure: 'RC_Failure'
 
 Poly_MakeLoops2D_Helper: declare class Poly_MakeLoops2D_Helper extends Poly_MakeLoops_Helper
 

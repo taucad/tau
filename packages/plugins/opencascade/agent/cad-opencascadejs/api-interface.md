@@ -334,17 +334,17 @@ Interface_CheckIterator: declare class Interface_CheckIterator
 
 Interface_CheckStatus: typeof Interface_CheckStatus[keyof typeof Interface_CheckStatus]
 
-  Interface_CheckOK: 'Interface_CheckOK'
+  readonly Interface_CheckOK: 'Interface_CheckOK'
 
-  Interface_CheckWarning: 'Interface_CheckWarning'
+  readonly Interface_CheckWarning: 'Interface_CheckWarning'
 
-  Interface_CheckFail: 'Interface_CheckFail'
+  readonly Interface_CheckFail: 'Interface_CheckFail'
 
-  Interface_CheckAny: 'Interface_CheckAny'
+  readonly Interface_CheckAny: 'Interface_CheckAny'
 
-  Interface_CheckMessage: 'Interface_CheckMessage'
+  readonly Interface_CheckMessage: 'Interface_CheckMessage'
 
-  Interface_CheckNoFail: 'Interface_CheckNoFail'
+  readonly Interface_CheckNoFail: 'Interface_CheckNoFail'
 
 Interface_CheckTool: declare class Interface_CheckTool
 
@@ -479,19 +479,19 @@ Interface_CopyTool: declare class Interface_CopyTool
 
 Interface_DataState: typeof Interface_DataState[keyof typeof Interface_DataState]
 
-  Interface_StateOK: 'Interface_StateOK'
+  readonly Interface_StateOK: 'Interface_StateOK'
 
-  Interface_LoadWarning: 'Interface_LoadWarning'
+  readonly Interface_LoadWarning: 'Interface_LoadWarning'
 
-  Interface_LoadFail: 'Interface_LoadFail'
+  readonly Interface_LoadFail: 'Interface_LoadFail'
 
-  Interface_DataWarning: 'Interface_DataWarning'
+  readonly Interface_DataWarning: 'Interface_DataWarning'
 
-  Interface_DataFail: 'Interface_DataFail'
+  readonly Interface_DataFail: 'Interface_DataFail'
 
-  Interface_StateUnloaded: 'Interface_StateUnloaded'
+  readonly Interface_StateUnloaded: 'Interface_StateUnloaded'
 
-  Interface_StateUnknown: 'Interface_StateUnknown'
+  readonly Interface_StateUnknown: 'Interface_StateUnknown'
 
 Interface_EntityCluster: declare class Interface_EntityCluster extends Standard_Transient
 

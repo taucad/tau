@@ -4,19 +4,19 @@
 
 ChFiDS_ChamfMethod: typeof ChFiDS_ChamfMethod[keyof typeof ChFiDS_ChamfMethod]
 
-  ChFiDS_Sym: 'ChFiDS_Sym'
+  readonly ChFiDS_Sym: 'ChFiDS_Sym'
 
-  ChFiDS_TwoDist: 'ChFiDS_TwoDist'
+  readonly ChFiDS_TwoDist: 'ChFiDS_TwoDist'
 
-  ChFiDS_DistAngle: 'ChFiDS_DistAngle'
+  readonly ChFiDS_DistAngle: 'ChFiDS_DistAngle'
 
 ChFiDS_ChamfMode: typeof ChFiDS_ChamfMode[keyof typeof ChFiDS_ChamfMode]
 
-  ChFiDS_ClassicChamfer: 'ChFiDS_ClassicChamfer'
+  readonly ChFiDS_ClassicChamfer: 'ChFiDS_ClassicChamfer'
 
-  ChFiDS_ConstThroatChamfer: 'ChFiDS_ConstThroatChamfer'
+  readonly ChFiDS_ConstThroatChamfer: 'ChFiDS_ConstThroatChamfer'
 
-  ChFiDS_ConstThroatWithPenetrationChamfer: 'ChFiDS_ConstThroatWithPenetrationChamfer'
+  readonly ChFiDS_ConstThroatWithPenetrationChamfer: 'ChFiDS_ConstThroatWithPenetrationChamfer'
 
 ChFiDS_ChamfSpine: declare class ChFiDS_ChamfSpine extends ChFiDS_Spine
 
@@ -291,15 +291,15 @@ ChFiDS_ElSpine: declare class ChFiDS_ElSpine extends Adaptor3d_Curve
 
 ChFiDS_ErrorStatus: typeof ChFiDS_ErrorStatus[keyof typeof ChFiDS_ErrorStatus]
 
-  ChFiDS_Ok: 'ChFiDS_Ok'
+  readonly ChFiDS_Ok: 'ChFiDS_Ok'
 
-  ChFiDS_Error: 'ChFiDS_Error'
+  readonly ChFiDS_Error: 'ChFiDS_Error'
 
-  ChFiDS_WalkingFailure: 'ChFiDS_WalkingFailure'
+  readonly ChFiDS_WalkingFailure: 'ChFiDS_WalkingFailure'
 
-  ChFiDS_StartsolFailure: 'ChFiDS_StartsolFailure'
+  readonly ChFiDS_StartsolFailure: 'ChFiDS_StartsolFailure'
 
-  ChFiDS_TwistedSurface: 'ChFiDS_TwistedSurface'
+  readonly ChFiDS_TwistedSurface: 'ChFiDS_TwistedSurface'
 
 ChFiDS_FaceInterference: declare class ChFiDS_FaceInterference
 
@@ -681,19 +681,19 @@ ChFiDS_Spine: declare class ChFiDS_Spine extends Standard_Transient
 
 ChFiDS_State: typeof ChFiDS_State[keyof typeof ChFiDS_State]
 
-  ChFiDS_OnSame: 'ChFiDS_OnSame'
+  readonly ChFiDS_OnSame: 'ChFiDS_OnSame'
 
-  ChFiDS_OnDiff: 'ChFiDS_OnDiff'
+  readonly ChFiDS_OnDiff: 'ChFiDS_OnDiff'
 
-  ChFiDS_AllSame: 'ChFiDS_AllSame'
+  readonly ChFiDS_AllSame: 'ChFiDS_AllSame'
 
-  ChFiDS_BreakPoint: 'ChFiDS_BreakPoint'
+  readonly ChFiDS_BreakPoint: 'ChFiDS_BreakPoint'
 
-  ChFiDS_FreeBoundary: 'ChFiDS_FreeBoundary'
+  readonly ChFiDS_FreeBoundary: 'ChFiDS_FreeBoundary'
 
-  ChFiDS_Closed: 'ChFiDS_Closed'
+  readonly ChFiDS_Closed: 'ChFiDS_Closed'
 
-  ChFiDS_Tangent: 'ChFiDS_Tangent'
+  readonly ChFiDS_Tangent: 'ChFiDS_Tangent'
 
 ChFiDS_Stripe: declare class ChFiDS_Stripe extends Standard_Transient
 
@@ -1047,17 +1047,17 @@ ChFiDS_SurfData: declare class ChFiDS_SurfData extends Standard_Transient
 
 ChFiDS_TypeOfConcavity: typeof ChFiDS_TypeOfConcavity[keyof typeof ChFiDS_TypeOfConcavity]
 
-  ChFiDS_Concave: 'ChFiDS_Concave'
+  readonly ChFiDS_Concave: 'ChFiDS_Concave'
 
-  ChFiDS_Convex: 'ChFiDS_Convex'
+  readonly ChFiDS_Convex: 'ChFiDS_Convex'
 
-  ChFiDS_Tangential: 'ChFiDS_Tangential'
+  readonly ChFiDS_Tangential: 'ChFiDS_Tangential'
 
-  ChFiDS_FreeBound: 'ChFiDS_FreeBound'
+  readonly ChFiDS_FreeBound: 'ChFiDS_FreeBound'
 
-  ChFiDS_Other: 'ChFiDS_Other'
+  readonly ChFiDS_Other: 'ChFiDS_Other'
 
-  ChFiDS_Mixed: 'ChFiDS_Mixed'
+  readonly ChFiDS_Mixed: 'ChFiDS_Mixed'
 
 ChFiDS_HData: NCollection_HSequence_handle_ChFiDS_SurfData
 

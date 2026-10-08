@@ -15,7 +15,7 @@
  */
 
 import type { ApiCorpus, ApiEntry } from '#model/api-corpus.types.js';
-import { nativeComments } from '#render/render-reference.js';
+import { labelledDeclaration, nativeComments } from '#render/render-reference.js';
 import { estimateTokens } from '#render/shard-plan.js';
 
 /** One symbol's combined usage score, as the collector commits it. @public */
@@ -118,7 +118,7 @@ const declarationText = (entry: ApiEntry): string => {
     return entry.name;
   }
   // A declared type that already names the symbol (`export declare class Solid …`) needs no `Solid:` label.
-  return declaresName(entry.type.text, entry.name) ? entry.type.text : `${entry.name}: ${entry.type.text}`;
+  return declaresName(entry.type.text, entry.name) ? entry.type.text : labelledDeclaration(entry);
 };
 
 /**
@@ -335,7 +335,8 @@ export const renderCoreApi = (
   const { ordered, pinnedMembers, allMembers } = orderCandidates(index, total, options);
 
   const chooseMembers = (entry: ApiEntry): readonly ApiEntry[] => {
-    const members = entry.members ?? [];
+    // A member with no type or signature would print as a bare name and say nothing.
+    const members = (entry.members ?? []).filter((member) => hasDeclaration(member));
     if (allMembers.has(entry.id) || memberWeight(entry) <= smallContainerTokens) {
       return members;
     }
@@ -344,6 +345,8 @@ export const renderCoreApi = (
   };
 
   const shown = new Set<string>();
+  /** Interfaces a shown class implements or extends: the class block already lists their used members. */
+  const coveredByClass = new Set<string>();
   const groups = new Map<string, { readonly fence: string; readonly blocks: string[] }>();
   const header = ['## Core API', ''];
   const intro =
@@ -358,7 +361,8 @@ export const renderCoreApi = (
     const groupCost =
       group === undefined ? estimateTokens(`### ${candidate.group}\n\n\`\`\`${candidate.fence}\n\`\`\`\n`) : 0;
     const cost = estimateTokens(block) + 1 + groupCost;
-    const blockLines = block.split('\n').length + 1 + (group === undefined ? 5 : 0);
+    // A new group adds its heading, a blank line, both fences and a trailing blank; a later block adds one blank.
+    const blockLines = block.split('\n').length + (group === undefined ? 5 : 1);
     if (tokens + cost > options.budgetTokens || lineCount + blockLines > budgetLines) {
       return false;
     }
@@ -372,6 +376,11 @@ export const renderCoreApi = (
     for (const id of [entry.id, ...members.map((member) => member.id)]) {
       shown.add(id);
     }
+    if (entry.kind === 'class') {
+      for (const name of heritageNames(entry)) {
+        coveredByClass.add(name);
+      }
+    }
     return true;
   };
 
@@ -383,36 +392,47 @@ export const renderCoreApi = (
         (target): target is Candidate =>
           target !== undefined && !shown.has(target.entry.id) && isRecordKind(target.entry),
       )
-      .filter((target, index, all) => all.indexOf(target) === index)
       .filter(
         (target) =>
           estimateTokens(renderEntry(target.entry, target.entry.members ?? []).join('\n')) <= smallReferencedTokens,
       );
 
-  /** Interfaces an offered class implements or extends: the class block already lists their used members. */
-  const inherited = new Set(
-    ordered
-      .filter((candidate) => candidate.entry.kind === 'class')
-      .flatMap((candidate) => heritageNames(candidate.entry)),
-  );
-  for (const candidate of ordered) {
-    if (
-      shown.has(candidate.entry.id) ||
-      (candidate.entry.kind === 'interface' && inherited.has(candidate.entry.name))
-    ) {
-      continue;
-    }
+  const offer = (candidate: Candidate): void => {
     const members = chooseMembers(candidate.entry);
     if (!add(candidate, candidate.entry, members)) {
-      continue;
+      return;
     }
     // Two levels: `toHaveCircularHole(expected)` brings its expectation type, which brings the axis type it names.
     let level = referenced(renderEntry(candidate.entry, members).join('\n'));
     for (let depth = 0; depth < 2 && level.length > 0; depth += 1) {
       const added = level
-        .filter((target) => !inherited.has(target.entry.name) && !shown.has(target.entry.id))
+        .filter((target) => !coveredByClass.has(target.entry.name) && !shown.has(target.entry.id))
         .filter((target) => add({ ...target, group: candidate.group }, target.entry, target.entry.members ?? []));
       level = added.flatMap((target) => referenced(renderEntry(target.entry, target.entry.members ?? []).join('\n')));
+    }
+  };
+
+  /** Interfaces an offered class implements: offered after the classes, and only if no shown class covers them. */
+  const implementedByOffered = new Set(
+    ordered
+      .filter((candidate) => candidate.entry.kind === 'class')
+      .flatMap((candidate) => heritageNames(candidate.entry)),
+  );
+  const deferred: Candidate[] = [];
+  for (const candidate of ordered) {
+    const isInterface = candidate.entry.kind === 'interface';
+    if (shown.has(candidate.entry.id) || (isInterface && coveredByClass.has(candidate.entry.name))) {
+      continue;
+    }
+    if (isInterface && implementedByOffered.has(candidate.entry.name)) {
+      deferred.push(candidate);
+      continue;
+    }
+    offer(candidate);
+  }
+  for (const candidate of deferred) {
+    if (!shown.has(candidate.entry.id) && !coveredByClass.has(candidate.entry.name)) {
+      offer(candidate);
     }
   }
 

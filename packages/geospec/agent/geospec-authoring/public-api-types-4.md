@@ -13,16 +13,16 @@ GeoSpecTauProjectDescriptor: {
     readonly parameters?: Readonly<Record<string, JSONValue>>;
 }
 
-  kind: 'tau-project'
+  readonly kind: 'tau-project'
 
   // Normalized project-relative POSIX path identifying the imported manifest
-  manifestPath: string
+  readonly manifestPath: string
 
-  manifest: Readonly<Record<string, JSONValue>>
+  readonly manifest: Readonly<Record<string, JSONValue>>
 
-  format: 'step' | 'glb'
+  readonly format: 'step' | 'glb'
 
-  parameters: Readonly<Record<string, JSONValue>>
+  readonly parameters?: Readonly<Record<string, JSONValue>>
 
 // Resolved file identity and validated configuration data
 LoadedGeoSpecConfig: {
@@ -30,9 +30,9 @@ LoadedGeoSpecConfig: {
     readonly options: GeoSpecConfig;
 }
 
-  configPath: string
+  readonly configPath?: string
 
-  options: GeoSpecConfig
+  readonly options: GeoSpecConfig
 
 // Options for one trusted Node configuration load
 LoadGeoSpecConfigOptions: {
@@ -43,10 +43,10 @@ LoadGeoSpecConfigOptions: {
     readonly overrides?: GeoSpecConfig;
 }
 
-  projectPath: string
+  readonly projectPath: string
 
   // Explicit file, resolved relative to the project unless absolute
-  configPath: string
+  readonly configPath?: string
 
   // Own defined fields override configuration without deep merging
-  overrides: GeoSpecConfig
+  readonly overrides?: GeoSpecConfig

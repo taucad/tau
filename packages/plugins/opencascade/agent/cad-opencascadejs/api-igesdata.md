@@ -106,15 +106,15 @@ IGESData_ColorEntity: declare class IGESData_ColorEntity extends IGESData_IGESEn
 
 IGESData_DefList: typeof IGESData_DefList[keyof typeof IGESData_DefList]
 
-  IGESData_DefNone: 'IGESData_DefNone'
+  readonly IGESData_DefNone: 'IGESData_DefNone'
 
-  IGESData_DefOne: 'IGESData_DefOne'
+  readonly IGESData_DefOne: 'IGESData_DefOne'
 
-  IGESData_DefSeveral: 'IGESData_DefSeveral'
+  readonly IGESData_DefSeveral: 'IGESData_DefSeveral'
 
-  IGESData_ErrorOne: 'IGESData_ErrorOne'
+  readonly IGESData_ErrorOne: 'IGESData_ErrorOne'
 
-  IGESData_ErrorSeveral: 'IGESData_ErrorSeveral'
+  readonly IGESData_ErrorSeveral: 'IGESData_ErrorSeveral'
 
 IGESData_DefSwitch: declare class IGESData_DefSwitch
 
@@ -144,17 +144,17 @@ IGESData_DefSwitch: declare class IGESData_DefSwitch
 
 IGESData_DefType: typeof IGESData_DefType[keyof typeof IGESData_DefType]
 
-  IGESData_DefVoid: 'IGESData_DefVoid'
+  readonly IGESData_DefVoid: 'IGESData_DefVoid'
 
-  IGESData_DefValue: 'IGESData_DefValue'
+  readonly IGESData_DefValue: 'IGESData_DefValue'
 
-  IGESData_DefReference: 'IGESData_DefReference'
+  readonly IGESData_DefReference: 'IGESData_DefReference'
 
-  IGESData_DefAny: 'IGESData_DefAny'
+  readonly IGESData_DefAny: 'IGESData_DefAny'
 
-  IGESData_ErrorVal: 'IGESData_ErrorVal'
+  readonly IGESData_ErrorVal: 'IGESData_ErrorVal'
 
-  IGESData_ErrorRef: 'IGESData_ErrorRef'
+  readonly IGESData_ErrorRef: 'IGESData_ErrorRef'
 
 IGESData_DefaultGeneral: declare class IGESData_DefaultGeneral extends IGESData_GeneralModule
 
@@ -1329,12 +1329,12 @@ IGESData_Protocol: declare class IGESData_Protocol extends Interface_Protocol
 
 IGESData_ReadStage: typeof IGESData_ReadStage[keyof typeof IGESData_ReadStage]
 
-  IGESData_ReadDir: 'IGESData_ReadDir'
+  readonly IGESData_ReadDir: 'IGESData_ReadDir'
 
-  IGESData_ReadOwn: 'IGESData_ReadOwn'
+  readonly IGESData_ReadOwn: 'IGESData_ReadOwn'
 
-  IGESData_ReadAssocs: 'IGESData_ReadAssocs'
+  readonly IGESData_ReadAssocs: 'IGESData_ReadAssocs'
 
-  IGESData_ReadProps: 'IGESData_ReadProps'
+  readonly IGESData_ReadProps: 'IGESData_ReadProps'
 
-  IGESData_ReadEnd: 'IGESData_ReadEnd'
+  readonly IGESData_ReadEnd: 'IGESData_ReadEnd'

@@ -254,11 +254,11 @@ BRepTools_History: declare class BRepTools_History extends Standard_Transient
 
 BRepTools_History_TRelationType: typeof BRepTools_History_TRelationType[keyof typeof BRepTools_History_TRelationType]
 
-  TRelationType_Removed: 'TRelationType_Removed'
+  readonly TRelationType_Removed: 'TRelationType_Removed'
 
-  TRelationType_Generated: 'TRelationType_Generated'
+  readonly TRelationType_Generated: 'TRelationType_Generated'
 
-  TRelationType_Modified: 'TRelationType_Modified'
+  readonly TRelationType_Modified: 'TRelationType_Modified'
 
 BRepTools_Modification: declare class BRepTools_Modification extends Standard_Transient
 

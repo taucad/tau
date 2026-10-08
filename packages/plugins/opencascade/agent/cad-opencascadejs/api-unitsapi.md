@@ -120,8 +120,8 @@ UnitsAPI: declare class UnitsAPI
 
 UnitsAPI_SystemUnits: typeof UnitsAPI_SystemUnits[keyof typeof UnitsAPI_SystemUnits]
 
-  UnitsAPI_DEFAULT: 'UnitsAPI_DEFAULT'
+  readonly UnitsAPI_DEFAULT: 'UnitsAPI_DEFAULT'
 
-  UnitsAPI_SI: 'UnitsAPI_SI'
+  readonly UnitsAPI_SI: 'UnitsAPI_SI'
 
-  UnitsAPI_MDTV: 'UnitsAPI_MDTV'
+  readonly UnitsAPI_MDTV: 'UnitsAPI_MDTV'

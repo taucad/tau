@@ -52,15 +52,15 @@ GccEnt_BadQualifier: declare class GccEnt_BadQualifier extends Standard_DomainEr
 
 GccEnt_Position: typeof GccEnt_Position[keyof typeof GccEnt_Position]
 
-  GccEnt_unqualified: 'GccEnt_unqualified'
+  readonly GccEnt_unqualified: 'GccEnt_unqualified'
 
-  GccEnt_enclosing: 'GccEnt_enclosing'
+  readonly GccEnt_enclosing: 'GccEnt_enclosing'
 
-  GccEnt_enclosed: 'GccEnt_enclosed'
+  readonly GccEnt_enclosed: 'GccEnt_enclosed'
 
-  GccEnt_outside: 'GccEnt_outside'
+  readonly GccEnt_outside: 'GccEnt_outside'
 
-  GccEnt_noqualifier: 'GccEnt_noqualifier'
+  readonly GccEnt_noqualifier: 'GccEnt_noqualifier'
 
 GccEnt_QualifiedCirc: declare class GccEnt_QualifiedCirc
 

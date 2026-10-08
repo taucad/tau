@@ -12,11 +12,11 @@ expansions
 
   ExpandOptions: export interface ExpandOptions
 
-    delta: number
+    delta?: number
 
-    corners: Corners
+    corners?: Corners
 
-    segments: number
+    segments?: number
 
   // expansions.offset (function)
   declare function offset<T extends Geometry>(options: OffsetOptions, geometry: T): T
@@ -24,8 +24,8 @@ expansions
 
   OffsetOptions: export interface OffsetOptions
 
-    delta: number
+    delta?: number
 
-    corners: 'edge' | 'chamfer' | 'round'
+    corners?: 'edge' | 'chamfer' | 'round'
 
-    segments: number
+    segments?: number

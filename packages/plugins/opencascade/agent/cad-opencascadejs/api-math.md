@@ -1167,15 +1167,15 @@ math_SingularMatrix: declare class math_SingularMatrix extends Standard_Failure
 
 math_Status: typeof math_Status[keyof typeof math_Status]
 
-  math_OK: 'math_OK'
+  readonly math_OK: 'math_OK'
 
-  math_TooManyIterations: 'math_TooManyIterations'
+  readonly math_TooManyIterations: 'math_TooManyIterations'
 
-  math_FunctionError: 'math_FunctionError'
+  readonly math_FunctionError: 'math_FunctionError'
 
-  math_DirectionSearchError: 'math_DirectionSearchError'
+  readonly math_DirectionSearchError: 'math_DirectionSearchError'
 
-  math_NotBracketed: 'math_NotBracketed'
+  readonly math_NotBracketed: 'math_NotBracketed'
 
 math_TrigonometricEquationFunction: declare class math_TrigonometricEquationFunction extends math_FunctionWithDerivative
 

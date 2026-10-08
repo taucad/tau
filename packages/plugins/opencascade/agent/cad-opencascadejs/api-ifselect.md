@@ -454,17 +454,17 @@ IFSelect_Dispatch: declare class IFSelect_Dispatch extends Standard_Transient
 
 IFSelect_EditValue: typeof IFSelect_EditValue[keyof typeof IFSelect_EditValue]
 
-  IFSelect_Optional: 'IFSelect_Optional'
+  readonly IFSelect_Optional: 'IFSelect_Optional'
 
-  IFSelect_Editable: 'IFSelect_Editable'
+  readonly IFSelect_Editable: 'IFSelect_Editable'
 
-  IFSelect_EditProtected: 'IFSelect_EditProtected'
+  readonly IFSelect_EditProtected: 'IFSelect_EditProtected'
 
-  IFSelect_EditComputed: 'IFSelect_EditComputed'
+  readonly IFSelect_EditComputed: 'IFSelect_EditComputed'
 
-  IFSelect_EditRead: 'IFSelect_EditRead'
+  readonly IFSelect_EditRead: 'IFSelect_EditRead'
 
-  IFSelect_EditDynamic: 'IFSelect_EditDynamic'
+  readonly IFSelect_EditDynamic: 'IFSelect_EditDynamic'
 
 IFSelect_Editor: declare class IFSelect_Editor extends Standard_Transient
 
@@ -890,51 +890,51 @@ IFSelect_ParamEditor: declare class IFSelect_ParamEditor extends IFSelect_Editor
 
 IFSelect_PrintCount: typeof IFSelect_PrintCount[keyof typeof IFSelect_PrintCount]
 
-  IFSelect_ItemsByEntity: 'IFSelect_ItemsByEntity'
+  readonly IFSelect_ItemsByEntity: 'IFSelect_ItemsByEntity'
 
-  IFSelect_CountByItem: 'IFSelect_CountByItem'
+  readonly IFSelect_CountByItem: 'IFSelect_CountByItem'
 
-  IFSelect_ShortByItem: 'IFSelect_ShortByItem'
+  readonly IFSelect_ShortByItem: 'IFSelect_ShortByItem'
 
-  IFSelect_ListByItem: 'IFSelect_ListByItem'
+  readonly IFSelect_ListByItem: 'IFSelect_ListByItem'
 
-  IFSelect_EntitiesByItem: 'IFSelect_EntitiesByItem'
+  readonly IFSelect_EntitiesByItem: 'IFSelect_EntitiesByItem'
 
-  IFSelect_CountSummary: 'IFSelect_CountSummary'
+  readonly IFSelect_CountSummary: 'IFSelect_CountSummary'
 
-  IFSelect_GeneralInfo: 'IFSelect_GeneralInfo'
+  readonly IFSelect_GeneralInfo: 'IFSelect_GeneralInfo'
 
-  IFSelect_Mapping: 'IFSelect_Mapping'
+  readonly IFSelect_Mapping: 'IFSelect_Mapping'
 
-  IFSelect_ResultCount: 'IFSelect_ResultCount'
+  readonly IFSelect_ResultCount: 'IFSelect_ResultCount'
 
 IFSelect_PrintFail: typeof IFSelect_PrintFail[keyof typeof IFSelect_PrintFail]
 
-  IFSelect_FailOnly: 'IFSelect_FailOnly'
+  readonly IFSelect_FailOnly: 'IFSelect_FailOnly'
 
-  IFSelect_FailAndWarn: 'IFSelect_FailAndWarn'
+  readonly IFSelect_FailAndWarn: 'IFSelect_FailAndWarn'
 
 IFSelect_RemainMode: typeof IFSelect_RemainMode[keyof typeof IFSelect_RemainMode]
 
-  IFSelect_RemainForget: 'IFSelect_RemainForget'
+  readonly IFSelect_RemainForget: 'IFSelect_RemainForget'
 
-  IFSelect_RemainCompute: 'IFSelect_RemainCompute'
+  readonly IFSelect_RemainCompute: 'IFSelect_RemainCompute'
 
-  IFSelect_RemainDisplay: 'IFSelect_RemainDisplay'
+  readonly IFSelect_RemainDisplay: 'IFSelect_RemainDisplay'
 
-  IFSelect_RemainUndo: 'IFSelect_RemainUndo'
+  readonly IFSelect_RemainUndo: 'IFSelect_RemainUndo'
 
 IFSelect_ReturnStatus: typeof IFSelect_ReturnStatus[keyof typeof IFSelect_ReturnStatus]
 
-  IFSelect_RetVoid: 'IFSelect_RetVoid'
+  readonly IFSelect_RetVoid: 'IFSelect_RetVoid'
 
-  IFSelect_RetDone: 'IFSelect_RetDone'
+  readonly IFSelect_RetDone: 'IFSelect_RetDone'
 
-  IFSelect_RetError: 'IFSelect_RetError'
+  readonly IFSelect_RetError: 'IFSelect_RetError'
 
-  IFSelect_RetFail: 'IFSelect_RetFail'
+  readonly IFSelect_RetFail: 'IFSelect_RetFail'
 
-  IFSelect_RetStop: 'IFSelect_RetStop'
+  readonly IFSelect_RetStop: 'IFSelect_RetStop'
 
 IFSelect_SelectAnyList: declare class IFSelect_SelectAnyList extends IFSelect_SelectDeduct
 

@@ -105,35 +105,35 @@ BRepGraph_RelatedIterator: declare class BRepGraph_RelatedIterator
 
 BRepGraph_RelatedIterator_RelationKind: typeof BRepGraph_RelatedIterator_RelationKind[keyof typeof BRepGraph_RelatedIterator_RelationKind]
 
-  BoundaryEdge: 'BoundaryEdge'
+  readonly BoundaryEdge: 'BoundaryEdge'
 
-  AdjacentFace: 'AdjacentFace'
+  readonly AdjacentFace: 'AdjacentFace'
 
-  OuterWire: 'OuterWire'
+  readonly OuterWire: 'OuterWire'
 
-  ReferencedByFace: 'ReferencedByFace'
+  readonly ReferencedByFace: 'ReferencedByFace'
 
-  IncidentVertex: 'IncidentVertex'
+  readonly IncidentVertex: 'IncidentVertex'
 
-  WireCoEdge: 'WireCoEdge'
+  readonly WireCoEdge: 'WireCoEdge'
 
-  OwningFace: 'OwningFace'
+  readonly OwningFace: 'OwningFace'
 
-  IncidentEdge: 'IncidentEdge'
+  readonly IncidentEdge: 'IncidentEdge'
 
-  ParentEdge: 'ParentEdge'
+  readonly ParentEdge: 'ParentEdge'
 
-  SeamPair: 'SeamPair'
+  readonly SeamPair: 'SeamPair'
 
 BRepGraph_RelatedIterator_Stage: typeof BRepGraph_RelatedIterator_Stage[keyof typeof BRepGraph_RelatedIterator_Stage]
 
-  First: 'First'
+  readonly First: 'First'
 
-  Second: 'Second'
+  readonly Second: 'Second'
 
-  Third: 'Third'
+  readonly Third: 'Third'
 
-  Finished: 'Finished'
+  readonly Finished: 'Finished'
 
 BRepGraph_CoEdgesOfEdge: declare class BRepGraph_CoEdgesOfEdge
 
@@ -826,11 +826,11 @@ BRepGraph_ShapesView: declare class BRepGraph_ShapesView
 
 BRepGraph_ShapesView_AddStatus: typeof BRepGraph_ShapesView_AddStatus[keyof typeof BRepGraph_ShapesView_AddStatus]
 
-  Success: 'Success'
+  readonly Success: 'Success'
 
-  SuccessWithWarnings: 'SuccessWithWarnings'
+  readonly SuccessWithWarnings: 'SuccessWithWarnings'
 
-  Failed: 'Failed'
+  readonly Failed: 'Failed'
 
 BRepGraph_ShapesView_Result: declare class BRepGraph_ShapesView_Result
 

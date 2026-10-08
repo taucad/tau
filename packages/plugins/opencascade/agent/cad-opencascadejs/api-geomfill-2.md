@@ -113,11 +113,11 @@ GeomFill_Filling: declare class GeomFill_Filling
 
 GeomFill_FillingStyle: typeof GeomFill_FillingStyle[keyof typeof GeomFill_FillingStyle]
 
-  GeomFill_StretchStyle: 'GeomFill_StretchStyle'
+  readonly GeomFill_StretchStyle: 'GeomFill_StretchStyle'
 
-  GeomFill_CoonsStyle: 'GeomFill_CoonsStyle'
+  readonly GeomFill_CoonsStyle: 'GeomFill_CoonsStyle'
 
-  GeomFill_CurvedStyle: 'GeomFill_CurvedStyle'
+  readonly GeomFill_CurvedStyle: 'GeomFill_CurvedStyle'
 
 GeomFill_Fixed: declare class GeomFill_Fixed extends GeomFill_TrihedronLaw
 
@@ -349,65 +349,65 @@ GeomFill_Gordon: declare class GeomFill_Gordon
 
 GeomFill_Gordon_ResultStatus: typeof GeomFill_Gordon_ResultStatus[keyof typeof GeomFill_Gordon_ResultStatus]
 
-  NotStarted: 'NotStarted'
+  readonly NotStarted: 'NotStarted'
 
-  Done: 'Done'
+  readonly Done: 'Done'
 
-  InvalidInput: 'InvalidInput'
+  readonly InvalidInput: 'InvalidInput'
 
-  ConversionFailed: 'ConversionFailed'
+  readonly ConversionFailed: 'ConversionFailed'
 
-  IntersectionFailed: 'IntersectionFailed'
+  readonly IntersectionFailed: 'IntersectionFailed'
 
-  OrderingFailed: 'OrderingFailed'
+  readonly OrderingFailed: 'OrderingFailed'
 
-  ReparametrizationFailed: 'ReparametrizationFailed'
+  readonly ReparametrizationFailed: 'ReparametrizationFailed'
 
-  CompatibilityFailed: 'CompatibilityFailed'
+  readonly CompatibilityFailed: 'CompatibilityFailed'
 
-  CurveCompatibilityFailed: 'CurveCompatibilityFailed'
+  readonly CurveCompatibilityFailed: 'CurveCompatibilityFailed'
 
-  RationalReparametrizationFailed: 'RationalReparametrizationFailed'
+  readonly RationalReparametrizationFailed: 'RationalReparametrizationFailed'
 
-  SkinningFailed: 'SkinningFailed'
+  readonly SkinningFailed: 'SkinningFailed'
 
-  ReferenceSurfaceFailed: 'ReferenceSurfaceFailed'
+  readonly ReferenceSurfaceFailed: 'ReferenceSurfaceFailed'
 
-  KnotAlignmentFailed: 'KnotAlignmentFailed'
+  readonly KnotAlignmentFailed: 'KnotAlignmentFailed'
 
-  RationalDegreeOverflow: 'RationalDegreeOverflow'
+  readonly RationalDegreeOverflow: 'RationalDegreeOverflow'
 
-  RationalConstructionFailed: 'RationalConstructionFailed'
+  readonly RationalConstructionFailed: 'RationalConstructionFailed'
 
-  PeriodicityFailed: 'PeriodicityFailed'
+  readonly PeriodicityFailed: 'PeriodicityFailed'
 
-  ApproximationFailed: 'ApproximationFailed'
+  readonly ApproximationFailed: 'ApproximationFailed'
 
-  ConstructionFailed: 'ConstructionFailed'
+  readonly ConstructionFailed: 'ConstructionFailed'
 
 GeomFill_Gordon_ApproximationMode: typeof GeomFill_Gordon_ApproximationMode[keyof typeof GeomFill_Gordon_ApproximationMode]
 
-  ExactOnly: 'ExactOnly'
+  readonly ExactOnly: 'ExactOnly'
 
-  AllowApproximateFallback: 'AllowApproximateFallback'
+  readonly AllowApproximateFallback: 'AllowApproximateFallback'
 
 GeomFill_Gordon_BuildStage: typeof GeomFill_Gordon_BuildStage[keyof typeof GeomFill_Gordon_BuildStage]
 
-  NotStarted: 'NotStarted'
+  readonly NotStarted: 'NotStarted'
 
-  InputConversion: 'InputConversion'
+  readonly InputConversion: 'InputConversion'
 
-  ContactDiscovery: 'ContactDiscovery'
+  readonly ContactDiscovery: 'ContactDiscovery'
 
-  NetworkOrdering: 'NetworkOrdering'
+  readonly NetworkOrdering: 'NetworkOrdering'
 
-  Reparametrization: 'Reparametrization'
+  readonly Reparametrization: 'Reparametrization'
 
-  ExactConstruction: 'ExactConstruction'
+  readonly ExactConstruction: 'ExactConstruction'
 
-  Validation: 'Validation'
+  readonly Validation: 'Validation'
 
-  Approximation: 'Approximation'
+  readonly Approximation: 'Approximation'
 
 GeomFill_GuideTrihedronAC: declare class GeomFill_GuideTrihedronAC extends GeomFill_TrihedronWithGuide
 
@@ -902,27 +902,27 @@ GeomFill_NetworkSurface: declare class GeomFill_NetworkSurface
 
 GeomFill_NetworkSurface_ResultStatus: typeof GeomFill_NetworkSurface_ResultStatus[keyof typeof GeomFill_NetworkSurface_ResultStatus]
 
-  NotStarted: 'NotStarted'
+  readonly NotStarted: 'NotStarted'
 
-  Done: 'Done'
+  readonly Done: 'Done'
 
-  InvalidInput: 'InvalidInput'
+  readonly InvalidInput: 'InvalidInput'
 
-  CurveCompatibilityFailed: 'CurveCompatibilityFailed'
+  readonly CurveCompatibilityFailed: 'CurveCompatibilityFailed'
 
-  SkinningFailed: 'SkinningFailed'
+  readonly SkinningFailed: 'SkinningFailed'
 
-  ReferenceSurfaceFailed: 'ReferenceSurfaceFailed'
+  readonly ReferenceSurfaceFailed: 'ReferenceSurfaceFailed'
 
-  KnotAlignmentFailed: 'KnotAlignmentFailed'
+  readonly KnotAlignmentFailed: 'KnotAlignmentFailed'
 
-  RationalDegreeOverflow: 'RationalDegreeOverflow'
+  readonly RationalDegreeOverflow: 'RationalDegreeOverflow'
 
-  RationalConstructionFailed: 'RationalConstructionFailed'
+  readonly RationalConstructionFailed: 'RationalConstructionFailed'
 
-  ConstructionFailed: 'ConstructionFailed'
+  readonly ConstructionFailed: 'ConstructionFailed'
 
-  PeriodicityFailed: 'PeriodicityFailed'
+  readonly PeriodicityFailed: 'PeriodicityFailed'
 
 GeomFill_Pipe: declare class GeomFill_Pipe
 
@@ -979,13 +979,13 @@ GeomFill_Pipe: declare class GeomFill_Pipe
 
 GeomFill_PipeError: typeof GeomFill_PipeError[keyof typeof GeomFill_PipeError]
 
-  GeomFill_PipeOk: 'GeomFill_PipeOk'
+  readonly GeomFill_PipeOk: 'GeomFill_PipeOk'
 
-  GeomFill_PipeNotOk: 'GeomFill_PipeNotOk'
+  readonly GeomFill_PipeNotOk: 'GeomFill_PipeNotOk'
 
-  GeomFill_PlaneNotIntersectGuide: 'GeomFill_PlaneNotIntersectGuide'
+  readonly GeomFill_PlaneNotIntersectGuide: 'GeomFill_PlaneNotIntersectGuide'
 
-  GeomFill_ImpossibleContact: 'GeomFill_ImpossibleContact'
+  readonly GeomFill_ImpossibleContact: 'GeomFill_ImpossibleContact'
 
 GeomFill_PlanFunc: declare class GeomFill_PlanFunc extends math_FunctionWithDerivative
 

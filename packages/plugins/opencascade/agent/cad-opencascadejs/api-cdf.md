@@ -347,36 +347,36 @@ CDF_StoreList: declare class CDF_StoreList extends Standard_Transient
 
 CDF_StoreSetNameStatus: typeof CDF_StoreSetNameStatus[keyof typeof CDF_StoreSetNameStatus]
 
-  CDF_SSNS_OK: 'CDF_SSNS_OK'
+  readonly CDF_SSNS_OK: 'CDF_SSNS_OK'
 
-  CDF_SSNS_ReplacingAnExistentDocument: 'CDF_SSNS_ReplacingAnExistentDocument'
+  readonly CDF_SSNS_ReplacingAnExistentDocument: 'CDF_SSNS_ReplacingAnExistentDocument'
 
-  CDF_SSNS_OpenDocument: 'CDF_SSNS_OpenDocument'
+  readonly CDF_SSNS_OpenDocument: 'CDF_SSNS_OpenDocument'
 
 CDF_SubComponentStatus: typeof CDF_SubComponentStatus[keyof typeof CDF_SubComponentStatus]
 
-  CDF_SCS_Consistent: 'CDF_SCS_Consistent'
+  readonly CDF_SCS_Consistent: 'CDF_SCS_Consistent'
 
-  CDF_SCS_Unconsistent: 'CDF_SCS_Unconsistent'
+  readonly CDF_SCS_Unconsistent: 'CDF_SCS_Unconsistent'
 
-  CDF_SCS_Stored: 'CDF_SCS_Stored'
+  readonly CDF_SCS_Stored: 'CDF_SCS_Stored'
 
-  CDF_SCS_Modified: 'CDF_SCS_Modified'
+  readonly CDF_SCS_Modified: 'CDF_SCS_Modified'
 
 CDF_TryStoreStatus: typeof CDF_TryStoreStatus[keyof typeof CDF_TryStoreStatus]
 
-  CDF_TS_OK: 'CDF_TS_OK'
+  readonly CDF_TS_OK: 'CDF_TS_OK'
 
-  CDF_TS_NoCurrentDocument: 'CDF_TS_NoCurrentDocument'
+  readonly CDF_TS_NoCurrentDocument: 'CDF_TS_NoCurrentDocument'
 
-  CDF_TS_NoDriver: 'CDF_TS_NoDriver'
+  readonly CDF_TS_NoDriver: 'CDF_TS_NoDriver'
 
-  CDF_TS_NoSubComponentDriver: 'CDF_TS_NoSubComponentDriver'
+  readonly CDF_TS_NoSubComponentDriver: 'CDF_TS_NoSubComponentDriver'
 
 CDF_TypeOfActivation: typeof CDF_TypeOfActivation[keyof typeof CDF_TypeOfActivation]
 
-  CDF_TOA_New: 'CDF_TOA_New'
+  readonly CDF_TOA_New: 'CDF_TOA_New'
 
-  CDF_TOA_Modified: 'CDF_TOA_Modified'
+  readonly CDF_TOA_Modified: 'CDF_TOA_Modified'
 
-  CDF_TOA_Unchanged: 'CDF_TOA_Unchanged'
+  readonly CDF_TOA_Unchanged: 'CDF_TOA_Unchanged'

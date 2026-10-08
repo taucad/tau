@@ -176,13 +176,24 @@ export const nativeComments = (
 ): readonly string[] =>
   language === 'python' ? lines.map((line) => line.replace(/^(\s*)\/\/( |$)/u, '$1#$2')) : lines;
 
+/**
+ * A non-callable entry as its declaration reads: modifiers, name, `?` when optional, then the type.
+ *
+ * @param entry - A property, constant or type without signatures.
+ * @returns `static readonly name?: Type`, with each part only when it applies.
+ * @public
+ */
+export const labelledDeclaration = (entry: ApiEntry): string =>
+  `${entry.static === true ? 'static ' : ''}${entry.readonly === true ? 'readonly ' : ''}${entry.name}${
+    entry.optional === true ? '?' : ''
+  }${entry.type === undefined ? '' : `: ${entry.type.text}`}`;
+
 const renderEntryBody = (entry: ApiEntry, depth: number, parentCategory?: string): readonly string[] => {
   const indent = '  '.repeat(depth);
   const lines: string[] = [...annotationLines(entry, indent, parentCategory)];
 
   if (entry.signatures === undefined || entry.signatures.length === 0) {
-    const rendered = `${entry.name}${entry.type === undefined ? '' : `: ${entry.type.text}`}`;
-    lines.push(...sourceLines(rendered, indent));
+    lines.push(...sourceLines(labelledDeclaration(entry), indent));
   } else {
     const name = entry.path === undefined ? entry.name : `${entry.path}.${entry.name}`;
     lines.push(`${indent}// ${name} (${entry.kind})`);

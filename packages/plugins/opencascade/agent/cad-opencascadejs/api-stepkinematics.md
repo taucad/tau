@@ -4,13 +4,13 @@
 
 StepKinematics_ActuatedDirection: typeof StepKinematics_ActuatedDirection[keyof typeof StepKinematics_ActuatedDirection]
 
-  StepKinematics_adBidirectional: 'StepKinematics_adBidirectional'
+  readonly StepKinematics_adBidirectional: 'StepKinematics_adBidirectional'
 
-  StepKinematics_adPositiveOnly: 'StepKinematics_adPositiveOnly'
+  readonly StepKinematics_adPositiveOnly: 'StepKinematics_adPositiveOnly'
 
-  StepKinematics_adNegativeOnly: 'StepKinematics_adNegativeOnly'
+  readonly StepKinematics_adNegativeOnly: 'StepKinematics_adNegativeOnly'
 
-  StepKinematics_adNotActuated: 'StepKinematics_adNotActuated'
+  readonly StepKinematics_adNotActuated: 'StepKinematics_adNotActuated'
 
 StepKinematics_ActuatedKinPairAndOrderKinPair: declare class StepKinematics_ActuatedKinPairAndOrderKinPair extends StepKinematics_KinematicPair
 

@@ -226,6 +226,7 @@ const propertyEntry = (property: ts.Symbol, extraction: Extraction): ApiEntryDra
     name: property.name,
     kind: 'property',
     type: { text },
+    ...(isOptional(property) ? { optional: true } : {}),
     ...(summary === '' ? {} : { docs: { summary } }),
     ...(declaration === undefined ? {} : { source: sourceOf(declaration) }),
     languageSpecific: typescript,

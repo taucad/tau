@@ -369,11 +369,11 @@ IntSurf_QuadricTool: declare class IntSurf_QuadricTool
 
 IntSurf_Situation: typeof IntSurf_Situation[keyof typeof IntSurf_Situation]
 
-  IntSurf_Inside: 'IntSurf_Inside'
+  readonly IntSurf_Inside: 'IntSurf_Inside'
 
-  IntSurf_Outside: 'IntSurf_Outside'
+  readonly IntSurf_Outside: 'IntSurf_Outside'
 
-  IntSurf_Unknown: 'IntSurf_Unknown'
+  readonly IntSurf_Unknown: 'IntSurf_Unknown'
 
 IntSurf_Transition: declare class IntSurf_Transition
 
@@ -407,13 +407,13 @@ IntSurf_Transition: declare class IntSurf_Transition
 
 IntSurf_TypeTrans: typeof IntSurf_TypeTrans[keyof typeof IntSurf_TypeTrans]
 
-  IntSurf_In: 'IntSurf_In'
+  readonly IntSurf_In: 'IntSurf_In'
 
-  IntSurf_Out: 'IntSurf_Out'
+  readonly IntSurf_Out: 'IntSurf_Out'
 
-  IntSurf_Touch: 'IntSurf_Touch'
+  readonly IntSurf_Touch: 'IntSurf_Touch'
 
-  IntSurf_Undecided: 'IntSurf_Undecided'
+  readonly IntSurf_Undecided: 'IntSurf_Undecided'
 
 IntSurf_ListOfPntOn2S: NCollection_List_IntSurf_PntOn2S
 

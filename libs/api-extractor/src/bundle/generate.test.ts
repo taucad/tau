@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { TauSkillsManifest } from '#bundle/bundle.types.js';
 import { skillsManifestFile } from '#bundle/bundle.types.js';
-import { bundleOwners, generateBundles } from '#bundle/generate.js';
+import { bundleOwners, generateBundles, usageRanking } from '#bundle/generate.js';
 import {
   maxSkillBodyTokens,
   maxSkillDescriptionChars,
@@ -349,6 +349,22 @@ describe('every committed bundle', () => {
     expect(serialized).not.toContain('"description":');
     expect(serialized).not.toMatch(/"deprecated":"/u);
   }, 120_000);
+});
+
+describe('committed usage rankings', () => {
+  // A re-extraction that renames ids would otherwise drop their scores without a signal.
+  it.each(bundleOwners.filter((owner) => owner.core !== undefined).map((owner) => [owner.slug, owner] as const))(
+    '%s names only symbols its corpora still declare',
+    (slug, owner) => {
+      const corpora = [owner.corpus?.(), owner.supplementalApi?.corpus()].filter((corpus) => corpus !== undefined);
+      const declared = new Set(corpora.flatMap((corpus) => addressableEntries(corpus).map(({ id }) => id)));
+      const missing = usageRanking(slug)
+        .symbols.map(({ id }) => id)
+        .filter((id) => !declared.has(id));
+      expect(missing).toEqual([]);
+    },
+    120_000,
+  );
 });
 
 describe('skill declarations', () => {

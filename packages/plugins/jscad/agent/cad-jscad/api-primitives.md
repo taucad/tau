@@ -9,119 +9,119 @@ primitives
 
   ArcOptions: export interface ArcOptions
 
-    center: Vec2
+    center?: Vec2
 
-    radius: number
+    radius?: number
 
-    startAngle: number
+    startAngle?: number
 
-    endAngle: number
+    endAngle?: number
 
-    segments: number
+    segments?: number
 
-    makeTangent: boolean
+    makeTangent?: boolean
 
   // primitives.circle (function)
   declare function circle(options?: CircleOptions): Geom2
 
   CircleOptions: export interface CircleOptions
 
-    center: Vec2
+    center?: Vec2
 
-    radius: number
+    radius?: number
 
-    startAngle: number
+    startAngle?: number
 
-    endAngle: number
+    endAngle?: number
 
-    segments: number
+    segments?: number
 
   // primitives.cube (function)
   declare function cube(options?: CubeOptions): Geom3
 
   CubeOptions: export interface CubeOptions
 
-    center: Vec3
+    center?: Vec3
 
-    size: number
+    size?: number
 
   // primitives.cuboid (function)
   declare function cuboid(options?: CuboidOptions): Geom3
 
   CuboidOptions: export interface CuboidOptions
 
-    center: Vec3
+    center?: Vec3
 
-    size: Vec3
+    size?: Vec3
 
   // primitives.cylinder (function)
   declare function cylinder(options?: CylinderOptions): Geom3
 
   CylinderOptions: export interface CylinderOptions
 
-    center: Vec3
+    center?: Vec3
 
-    height: number
+    height?: number
 
-    radius: number
+    radius?: number
 
-    segments: number
+    segments?: number
 
   // primitives.cylinderElliptic (function)
   declare function cylinderElliptic(options?: CylinderEllipticOptions): Geom3
 
   CylinderEllipticOptions: export interface CylinderEllipticOptions
 
-    center: Vec3
+    center?: Vec3
 
-    height: number
+    height?: number
 
-    startRadius: [number, number]
+    startRadius?: [number, number]
 
-    startAngle: number
+    startAngle?: number
 
-    endRadius: [number, number]
+    endRadius?: [number, number]
 
-    endAngle: number
+    endAngle?: number
 
-    segments: number
+    segments?: number
 
   // primitives.ellipse (function)
   declare function ellipse(options?: EllipseOptions): Geom2
 
   EllipseOptions: export interface EllipseOptions
 
-    center: Vec2
+    center?: Vec2
 
-    radius: Vec2
+    radius?: Vec2
 
-    startAngle: number
+    startAngle?: number
 
-    endAngle: number
+    endAngle?: number
 
-    segments: number
+    segments?: number
 
   // primitives.ellipsoid (function)
   declare function ellipsoid(options?: EllipsoidOptions): Geom3
 
   EllipsoidOptions: export interface EllipsoidOptions
 
-    center: Vec3
+    center?: Vec3
 
-    radius: Vec3
+    radius?: Vec3
 
-    segments: number
+    segments?: number
 
-    axes: Vec3
+    axes?: Vec3
 
   // primitives.geodesicSphere (function)
   declare function geodesicSphere(options?: GeodesicSphereOptions): Geom3
 
   GeodesicSphereOptions: export interface GeodesicSphereOptions
 
-    radius: number
+    radius?: number
 
-    frequency: number
+    frequency?: number
 
   // primitives.line (function)
   declare function line(points: Array<Vec2>): Path2
@@ -133,9 +133,9 @@ primitives
 
     points: Array<Vec2> | Array<Array<Vec2>>
 
-    paths: Array<number> | Array<Array<number>>
+    paths?: Array<number> | Array<Array<number>>
 
-    orientation: 'counterclockwise' | 'clockwise'
+    orientation?: 'counterclockwise' | 'clockwise'
 
   // primitives.polyhedron (function)
   declare function polyhedron(options: PolyhedronOptions): Geom3
@@ -146,123 +146,123 @@ primitives
 
     faces: Array<Array<number>>
 
-    colors: Array<RGB | RGBA>
+    colors?: Array<RGB | RGBA>
 
-    orientation: 'outward' | 'inward'
+    orientation?: 'outward' | 'inward'
 
   // primitives.rectangle (function)
   declare function rectangle(options?: RectangleOptions): Geom2
 
   RectangleOptions: export interface RectangleOptions
 
-    center: Vec2
+    center?: Vec2
 
-    size: Vec2
+    size?: Vec2
 
   // primitives.roundedCuboid (function)
   declare function roundedCuboid(options?: RoundedCuboidOptions): Geom3
 
   RoundedCuboidOptions: export interface RoundedCuboidOptions
 
-    center: Vec3
+    center?: Vec3
 
-    size: Vec3
+    size?: Vec3
 
-    roundRadius: number
+    roundRadius?: number
 
-    segments: number
+    segments?: number
 
   // primitives.roundedCylinder (function)
   declare function roundedCylinder(options?: RoundedCylinderOptions): Geom3
 
   RoundedCylinderOptions: export interface RoundedCylinderOptions
 
-    center: Vec3
+    center?: Vec3
 
-    height: number
+    height?: number
 
-    radius: number
+    radius?: number
 
-    roundRadius: number
+    roundRadius?: number
 
-    segments: number
+    segments?: number
 
   // primitives.roundedRectangle (function)
   declare function roundedRectangle(options?: RoundedRectangleOptions): Geom2
 
   RoundedRectangleOptions: export interface RoundedRectangleOptions
 
-    center: Vec2
+    center?: Vec2
 
-    size: Vec2
+    size?: Vec2
 
-    roundRadius: number
+    roundRadius?: number
 
-    segments: number
+    segments?: number
 
   // primitives.sphere (function)
   declare function sphere(options?: SphereOptions): Geom3
 
   SphereOptions: export interface SphereOptions
 
-    center: Vec3
+    center?: Vec3
 
-    radius: number
+    radius?: number
 
-    segments: number
+    segments?: number
 
-    axes: Vec3
+    axes?: Vec3
 
   // primitives.square (function)
   declare function square(options?: SquareOptions): Geom2
 
   SquareOptions: export interface SquareOptions
 
-    center: Vec2
+    center?: Vec2
 
-    size: number
+    size?: number
 
   // primitives.star (function)
   declare function star(options?: StarOptions): Geom2
 
   StarOptions: export interface StarOptions
 
-    center: Vec2
+    center?: Vec2
 
-    vertices: number
+    vertices?: number
 
-    density: number
+    density?: number
 
-    outerRadius: number
+    outerRadius?: number
 
-    innerRadius: number
+    innerRadius?: number
 
-    startAngle: number
+    startAngle?: number
 
   // primitives.torus (function)
   declare function torus(options?: TorusOptions): Geom3
 
   TorusOptions: export interface TorusOptions
 
-    innerRadius: number
+    innerRadius?: number
 
-    outerRadius: number
+    outerRadius?: number
 
-    innerSegments: number
+    innerSegments?: number
 
-    outerSegments: number
+    outerSegments?: number
 
-    innerRotation: number
+    innerRotation?: number
 
-    outerRotation: number
+    outerRotation?: number
 
-    startAngle: number
+    startAngle?: number
 
   // primitives.triangle (function)
   declare function triangle(options?: TriangleOptions): Geom2
 
   TriangleOptions: export interface TriangleOptions
 
-    type: 'AAA' | 'AAS' | 'ASA' | 'SAS' | 'SSA' | 'SSS'
+    type?: 'AAA' | 'AAS' | 'ASA' | 'SAS' | 'SSA' | 'SSS'
 
-    values: [number, number, number]
+    values?: [number, number, number]

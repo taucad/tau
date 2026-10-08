@@ -6,68 +6,68 @@
 // JSX element <analogsimulation> with AnalogSimulationProps
 <analogsimulation>: AnalogSimulationProps
 
-  name: string
+  name?: string
 
-  simulationType: "spice_transient_analysis"
+  simulationType?: "spice_transient_analysis"
 
-  duration: number | string
+  duration?: number | string
 
-  startTime: number | string
+  startTime?: number | string
 
-  timePerStep: number | string
+  timePerStep?: number | string
 
-  spiceEngine: AutocompleteString<"spicey" | "ngspice">
+  spiceEngine?: AutocompleteString<"spicey" | "ngspice">
 
-  spiceOptions: SpiceOptions
+  spiceOptions?: SpiceOptions
 
-  graphIndependentAxes: boolean
+  graphIndependentAxes?: boolean
 
 // Category: Simulation
 // JSX element <analogtransientsimulation> with AnalogTransientSimulationProps
 <analogtransientsimulation>: AnalogTransientSimulationProps
 
   // Simulation duration
-  duration: number | string
+  duration?: number | string
 
   // Time at which recording starts
-  startTime: number | string
+  startTime?: number | string
 
   // Maximum simulation timestep
-  timePerStep: number | string
+  timePerStep?: number | string
 
   // Stable identity for the simulation experiment
-  name: string
+  name?: string
 
   // SPICE implementation used to run this analysis
-  spiceEngine: AutocompleteString<"spicey" | "ngspice">
+  spiceEngine?: AutocompleteString<"spicey" | "ngspice">
 
   // Numerical solver settings forwarded to the selected SPICE engine
-  spiceOptions: SpiceOptions
+  spiceOptions?: SpiceOptions
 
   // Render each probe with an independent vertical graph scale
-  graphIndependentAxes: boolean
+  graphIndependentAxes?: boolean
 
   // Optional nested sweep parameter for repeated analysis runs
-  children: ReactNode
+  children?: ReactNode
 
 // Category: Simulation
 // JSX element <analogdcoperatingpointsimulation> with AnalogDcOperatingPointSimulationProps
 <analogdcoperatingpointsimulation>: AnalogDcOperatingPointSimulationProps
 
   // Stable identity for the simulation experiment
-  name: string
+  name?: string
 
   // SPICE implementation used to run this analysis
-  spiceEngine: AutocompleteString<"spicey" | "ngspice">
+  spiceEngine?: AutocompleteString<"spicey" | "ngspice">
 
   // Numerical solver settings forwarded to the selected SPICE engine
-  spiceOptions: SpiceOptions
+  spiceOptions?: SpiceOptions
 
   // Render each probe with an independent vertical graph scale
-  graphIndependentAxes: boolean
+  graphIndependentAxes?: boolean
 
   // Optional nested sweep parameter for repeated analysis runs
-  children: ReactNode
+  children?: ReactNode
 
 // Category: Simulation
 // JSX element <analogdcsweepsimulation> with AnalogDcSweepSimulationProps, required sweepSource, sweepStart, sweepStop, sweepStep
@@ -86,19 +86,19 @@
   sweepStep: number | string
 
   // Stable identity for the simulation experiment
-  name: string
+  name?: string
 
   // SPICE implementation used to run this analysis
-  spiceEngine: AutocompleteString<"spicey" | "ngspice">
+  spiceEngine?: AutocompleteString<"spicey" | "ngspice">
 
   // Numerical solver settings forwarded to the selected SPICE engine
-  spiceOptions: SpiceOptions
+  spiceOptions?: SpiceOptions
 
   // Render each probe with an independent vertical graph scale
-  graphIndependentAxes: boolean
+  graphIndependentAxes?: boolean
 
   // Optional nested sweep parameter for repeated analysis runs
-  children: ReactNode
+  children?: ReactNode
 
 // Category: Simulation
 // JSX element <analogacsweepsimulation> with AnalogAcSweepSimulationProps, required sweepType, startFrequency, stopFrequency
@@ -114,25 +114,25 @@
   stopFrequency: number | string
 
   // Samples per decade or octave
-  samplesPerInterval: number
+  samplesPerInterval?: number
 
   // Total samples
-  sampleCount: number
+  sampleCount?: number
 
   // Stable identity for the simulation experiment
-  name: string
+  name?: string
 
   // SPICE implementation used to run this analysis
-  spiceEngine: AutocompleteString<"spicey" | "ngspice">
+  spiceEngine?: AutocompleteString<"spicey" | "ngspice">
 
   // Numerical solver settings forwarded to the selected SPICE engine
-  spiceOptions: SpiceOptions
+  spiceOptions?: SpiceOptions
 
   // Render each probe with an independent vertical graph scale
-  graphIndependentAxes: boolean
+  graphIndependentAxes?: boolean
 
   // Optional nested sweep parameter for repeated analysis runs
-  children: ReactNode
+  children?: ReactNode
 
 // Category: Simulation
 // JSX element <analogsweepparameter> with AnalogSweepParameterProps, required parameterType
@@ -144,19 +144,19 @@
   resistorRef: string
 
   // Stable identity for this sweep parameter
-  name: string
+  name?: string
 
   // Explicit parameter coordinates
-  values: Array<number | string>
+  values?: Array<number | string>
 
   // First generated parameter coordinate
-  start: number | string
+  start?: number | string
 
   // Last generated parameter coordinate
-  stop: number | string
+  stop?: number | string
 
   // Nonzero parameter increment directed from start toward stop
-  step: number | string
+  step?: number | string
 
   // Selector for the capacitor whose simulation-only capacitance is swept
   capacitorRef: string
@@ -176,4 +176,4 @@
 
   source: string
 
-  spicePinMapping: Record<string, string>
+  spicePinMapping?: Record<string, string>

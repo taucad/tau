@@ -32,40 +32,40 @@ TopAbs: declare class TopAbs
 
 TopAbs_Orientation: typeof TopAbs_Orientation[keyof typeof TopAbs_Orientation]
 
-  TopAbs_FORWARD: 'TopAbs_FORWARD'
+  readonly TopAbs_FORWARD: 'TopAbs_FORWARD'
 
-  TopAbs_REVERSED: 'TopAbs_REVERSED'
+  readonly TopAbs_REVERSED: 'TopAbs_REVERSED'
 
-  TopAbs_INTERNAL: 'TopAbs_INTERNAL'
+  readonly TopAbs_INTERNAL: 'TopAbs_INTERNAL'
 
-  TopAbs_EXTERNAL: 'TopAbs_EXTERNAL'
+  readonly TopAbs_EXTERNAL: 'TopAbs_EXTERNAL'
 
 TopAbs_ShapeEnum: typeof TopAbs_ShapeEnum[keyof typeof TopAbs_ShapeEnum]
 
-  TopAbs_COMPOUND: 'TopAbs_COMPOUND'
+  readonly TopAbs_COMPOUND: 'TopAbs_COMPOUND'
 
-  TopAbs_COMPSOLID: 'TopAbs_COMPSOLID'
+  readonly TopAbs_COMPSOLID: 'TopAbs_COMPSOLID'
 
-  TopAbs_SOLID: 'TopAbs_SOLID'
+  readonly TopAbs_SOLID: 'TopAbs_SOLID'
 
-  TopAbs_SHELL: 'TopAbs_SHELL'
+  readonly TopAbs_SHELL: 'TopAbs_SHELL'
 
-  TopAbs_FACE: 'TopAbs_FACE'
+  readonly TopAbs_FACE: 'TopAbs_FACE'
 
-  TopAbs_WIRE: 'TopAbs_WIRE'
+  readonly TopAbs_WIRE: 'TopAbs_WIRE'
 
-  TopAbs_EDGE: 'TopAbs_EDGE'
+  readonly TopAbs_EDGE: 'TopAbs_EDGE'
 
-  TopAbs_VERTEX: 'TopAbs_VERTEX'
+  readonly TopAbs_VERTEX: 'TopAbs_VERTEX'
 
-  TopAbs_SHAPE: 'TopAbs_SHAPE'
+  readonly TopAbs_SHAPE: 'TopAbs_SHAPE'
 
 TopAbs_State: typeof TopAbs_State[keyof typeof TopAbs_State]
 
-  TopAbs_IN: 'TopAbs_IN'
+  readonly TopAbs_IN: 'TopAbs_IN'
 
-  TopAbs_OUT: 'TopAbs_OUT'
+  readonly TopAbs_OUT: 'TopAbs_OUT'
 
-  TopAbs_ON: 'TopAbs_ON'
+  readonly TopAbs_ON: 'TopAbs_ON'
 
-  TopAbs_UNKNOWN: 'TopAbs_UNKNOWN'
+  readonly TopAbs_UNKNOWN: 'TopAbs_UNKNOWN'

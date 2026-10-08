@@ -660,15 +660,15 @@ BRepGraph_Validate: declare class BRepGraph_Validate
 
 BRepGraph_Validate_Severity: typeof BRepGraph_Validate_Severity[keyof typeof BRepGraph_Validate_Severity]
 
-  Warning: 'Warning'
+  readonly Warning: 'Warning'
 
-  Error: 'Error'
+  readonly Error: 'Error'
 
 BRepGraph_Validate_Mode: typeof BRepGraph_Validate_Mode[keyof typeof BRepGraph_Validate_Mode]
 
-  Lightweight: 'Lightweight'
+  readonly Lightweight: 'Lightweight'
 
-  Audit: 'Audit'
+  readonly Audit: 'Audit'
 
 BRepGraph_Validate_Options: declare class BRepGraph_Validate_Options
 
@@ -754,11 +754,11 @@ BRepGraph_VersionStamp: declare class BRepGraph_VersionStamp
 
 BRepGraph_VersionStamp_Domain: typeof BRepGraph_VersionStamp_Domain[keyof typeof BRepGraph_VersionStamp_Domain]
 
-  None: 'None'
+  readonly None: 'None'
 
-  Node: 'Node'
+  readonly Node: 'Node'
 
-  Reference: 'Reference'
+  readonly Reference: 'Reference'
 
 BRepGraph_CoEdgeCurve2DRepId: declare class BRepGraph_CoEdgeCurve2DRepId
 
@@ -977,19 +977,19 @@ BRepGraph_RepId: declare class BRepGraph_RepId
 
 BRepGraph_RepId_Kind: typeof BRepGraph_RepId_Kind[keyof typeof BRepGraph_RepId_Kind]
 
-  EdgeCurve3D: 'EdgeCurve3D'
+  readonly EdgeCurve3D: 'EdgeCurve3D'
 
-  EdgePolygon3D: 'EdgePolygon3D'
+  readonly EdgePolygon3D: 'EdgePolygon3D'
 
-  CoEdgeCurve2D: 'CoEdgeCurve2D'
+  readonly CoEdgeCurve2D: 'CoEdgeCurve2D'
 
-  CoEdgePolygon2D: 'CoEdgePolygon2D'
+  readonly CoEdgePolygon2D: 'CoEdgePolygon2D'
 
-  CoEdgePolygonOnTri: 'CoEdgePolygonOnTri'
+  readonly CoEdgePolygonOnTri: 'CoEdgePolygonOnTri'
 
-  FaceSurface: 'FaceSurface'
+  readonly FaceSurface: 'FaceSurface'
 
-  FaceTriangulation: 'FaceTriangulation'
+  readonly FaceTriangulation: 'FaceTriangulation'
 
 BRepGraph_ChildExplorer_Config: interface BRepGraph_ChildExplorer_Config
 

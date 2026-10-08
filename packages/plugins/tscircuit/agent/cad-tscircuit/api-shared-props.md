@@ -8,405 +8,405 @@ CommonComponentProps: interface CommonComponentProps extends CommonLayoutProps
 
   name: string
 
-  displayName: string
+  displayName?: string
 
-  datasheetUrl: string
+  datasheetUrl?: string
 
-  pinAttributes: Record<PinLabel, PinAttributeMap>
+  pinAttributes?: Record<PinLabel, PinAttributeMap>
 
-  supplierPartNumbers: SupplierPartNumbers
+  supplierPartNumbers?: SupplierPartNumbers
 
-  cadModel: CadModelProp
+  cadModel?: CadModelProp
 
-  kicadFootprintMetadata: KicadFootprintMetadata
+  kicadFootprintMetadata?: KicadFootprintMetadata
 
-  kicadSymbolMetadata: KicadSymbolMetadata
+  kicadSymbolMetadata?: KicadSymbolMetadata
 
-  children: any
+  children?: any
 
-  symbolName: string
+  symbolName?: string
 
-  doNotPlace: boolean
+  doNotPlace?: boolean
 
   // Allows the PCB component to hang off the board (e.g
-  allowOffBoard: boolean
+  allowOffBoard?: boolean
 
   // Does this component take up all the space within its bounds on a layer
-  obstructsWithinBounds: boolean
+  obstructsWithinBounds?: boolean
 
   // Whether to show this component's CAD model as translucent in the 3D viewer
-  showAsTranslucentModel: boolean
+  showAsTranslucentModel?: boolean
 
-  mfn: string
+  mfn?: string
 
-  manufacturerPartNumber: string
+  manufacturerPartNumber?: string
 
   // This component will be drawn as part of this section e.g
-  schSectionName: string
+  schSectionName?: string
 
   // This component will be drawn as part of this sheet e.g
-  schSheetName: string
+  schSheetName?: string
 
 // Category: Shared props
 // Props every element extending SubcircuitGroupProps accepts
 SubcircuitGroupProps: interface SubcircuitGroupProps extends BaseGroupProps
 
-  manualEdits: ManualEditsFileInput
+  manualEdits?: ManualEditsFileInput
 
-  routingDisabled: boolean
+  routingDisabled?: boolean
 
   // Skip the PCB placement design rule checks for this subcircuit
-  placementDrcChecksDisabled: boolean
+  placementDrcChecksDisabled?: boolean
 
-  bomDisabled: boolean
+  bomDisabled?: boolean
 
-  defaultTraceWidth: Distance
+  defaultTraceWidth?: Distance
 
-  pcbRouteCache: PcbRouteCache
+  pcbRouteCache?: PcbRouteCache
 
-  autorouter: AutorouterProp
+  autorouter?: AutorouterProp
 
-  autorouterEffortLevel: "1x" | "2x" | "5x" | "10x" | "100x"
+  autorouterEffortLevel?: "1x" | "2x" | "5x" | "10x" | "100x"
 
   // Selects the local autorouting pipeline
-  autorouterVersion: "beta_pipeline1" | "beta_pipeline3" | "beta_pipeline4" | "beta_pipeline5" | "beta_pipeline7" | "beta_pipeline9" | "latest" | (string & {})
+  autorouterVersion?: "beta_pipeline1" | "beta_pipeline3" | "beta_pipeline4" | "beta_pipeline5" | "beta_pipeline7" | "beta_pipeline9" | "latest" | (string & {})
 
   // Serialized circuit JSON describing a precompiled subcircuit
-  circuitJson: any[]
+  circuitJson?: any[]
 
   // Nets from this subcircuit that should be exposed to parent circuits
-  exposedNets: string[]
+  exposedNets?: string[]
 
   // If true, all nets defined within this subcircuit are exposed to parent circuits
-  exposeNets: boolean
+  exposeNets?: boolean
 
   // If true, we'll automatically layout the schematic for this group
-  schAutoLayoutEnabled: boolean
+  schAutoLayoutEnabled?: boolean
 
   // If true, net labels will automatically be created for complex traces
-  schTraceAutoLabelEnabled: boolean
+  schTraceAutoLabelEnabled?: boolean
 
   // Maximum length a trace can span on the schematic
-  schMaxTraceDistance: Distance
+  schMaxTraceDistance?: Distance
 
-  partsEngine: PartsEngine
+  partsEngine?: PartsEngine
 
   // When autosizing, the board will be made square
-  square: boolean
+  square?: boolean
 
   // Desired empty area of the board e.g
-  emptyArea: string
+  emptyArea?: string
 
   // Desired filled area of the board e.g
-  filledArea: string
+  filledArea?: string
 
-  outline: Point[]
+  outline?: Point[]
 
-  outlineOffsetX: number | string
+  outlineOffsetX?: number | string
 
-  outlineOffsetY: number | string
+  outlineOffsetY?: number | string
 
-  minViaHoleEdgeToViaHoleEdgeClearance: Distance
+  minViaHoleEdgeToViaHoleEdgeClearance?: Distance
 
-  minPlatedHoleDrillEdgeToDrillEdgeClearance: Distance
+  minPlatedHoleDrillEdgeToDrillEdgeClearance?: Distance
 
-  minTraceToPadEdgeClearance: Distance
+  minTraceToPadEdgeClearance?: Distance
 
-  minPadEdgeToPadEdgeClearance: Distance
+  minPadEdgeToPadEdgeClearance?: Distance
 
-  minBoardEdgeClearance: Distance
+  minBoardEdgeClearance?: Distance
 
-  minViaEdgeToPadEdgeClearance: Distance
+  minViaEdgeToPadEdgeClearance?: Distance
 
-  minViaHoleDiameter: Distance
+  minViaHoleDiameter?: Distance
 
-  minViaPadDiameter: Distance
+  minViaPadDiameter?: Distance
 
 // Category: Shared props
 // Props every element extending BaseGroupProps accepts
 BaseGroupProps: interface BaseGroupProps extends CommonLayoutProps
 
-  name: string
+  name?: string
 
-  children: any
+  children?: any
 
   // Title to display above this group in the schematic view
-  schTitle: string
+  schTitle?: string
 
   // This group will be drawn as part of this sheet e.g
-  schSheetName: string
+  schSheetName?: string
 
   // If true, render this group as a single schematic box
-  showAsSchematicBox: boolean
+  showAsSchematicBox?: boolean
 
   // Mapping of external pin names to internal connection targets
-  connections: Connections
+  connections?: Connections
 
   // Arrangement for pins when rendered as a schematic box
-  schPinArrangement: SchematicPinArrangement
+  schPinArrangement?: SchematicPinArrangement
 
   // Styles to apply to individual pins in the schematic box representation
-  schPinStyle: SchematicPinStyle
+  schPinStyle?: SchematicPinStyle
 
-  pcbWidth: Distance
+  pcbWidth?: Distance
 
-  pcbHeight: Distance
+  pcbHeight?: Distance
 
-  minTraceWidth: Distance
+  minTraceWidth?: Distance
 
-  nominalTraceWidth: Distance
+  nominalTraceWidth?: Distance
 
-  schWidth: Distance
+  schWidth?: Distance
 
-  schHeight: Distance
+  schHeight?: Distance
 
-  pcbLayout: LayoutConfig
+  pcbLayout?: LayoutConfig
 
-  schLayout: LayoutConfig
+  schLayout?: LayoutConfig
 
-  cellBorder: Border | null
+  cellBorder?: Border | null
 
-  border: Border | null
+  border?: Border | null
 
-  schPadding: Distance
+  schPadding?: Distance
 
-  schPaddingLeft: Distance
+  schPaddingLeft?: Distance
 
-  schPaddingRight: Distance
+  schPaddingRight?: Distance
 
-  schPaddingTop: Distance
+  schPaddingTop?: Distance
 
-  schPaddingBottom: Distance
+  schPaddingBottom?: Distance
 
-  pcbPadding: Distance
+  pcbPadding?: Distance
 
-  pcbPaddingLeft: Distance
+  pcbPaddingLeft?: Distance
 
-  pcbPaddingRight: Distance
+  pcbPaddingRight?: Distance
 
-  pcbPaddingTop: Distance
+  pcbPaddingTop?: Distance
 
-  pcbPaddingBottom: Distance
+  pcbPaddingBottom?: Distance
 
   // Anchor to use when interpreting pcbX/pcbY/pcbOffsetX/pcbOffsetY relative to pcbPosition
-  pcbAnchorAlignment: AutocompleteString<"top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right">
+  pcbAnchorAlignment?: AutocompleteString<"top_left" | "top_center" | "top_right" | "center_left" | "center" | "center_right" | "bottom_left" | "bottom_center" | "bottom_right">
 
-  pcbGrid: boolean
+  pcbGrid?: boolean
 
-  pcbGridCols: number | string
+  pcbGridCols?: number | string
 
-  pcbGridRows: number | string
+  pcbGridRows?: number | string
 
-  pcbGridTemplateRows: string
+  pcbGridTemplateRows?: string
 
-  pcbGridTemplateColumns: string
+  pcbGridTemplateColumns?: string
 
-  pcbGridTemplate: string
+  pcbGridTemplate?: string
 
-  pcbGridGap: number | string
+  pcbGridGap?: number | string
 
-  pcbGridRowGap: number | string
+  pcbGridRowGap?: number | string
 
-  pcbGridColumnGap: number | string
+  pcbGridColumnGap?: number | string
 
-  pcbFlex: boolean | string
+  pcbFlex?: boolean | string
 
-  pcbFlexGap: number | string
+  pcbFlexGap?: number | string
 
-  pcbFlexDirection: "row" | "column"
+  pcbFlexDirection?: "row" | "column"
 
-  pcbAlignItems: "start" | "center" | "end" | "stretch"
+  pcbAlignItems?: "start" | "center" | "end" | "stretch"
 
-  pcbJustifyContent: "start" | "center" | "end" | "stretch" | "space-between" | "space-around" | "space-evenly"
+  pcbJustifyContent?: "start" | "center" | "end" | "stretch" | "space-between" | "space-around" | "space-evenly"
 
-  pcbFlexRow: boolean
+  pcbFlexRow?: boolean
 
-  pcbFlexColumn: boolean
+  pcbFlexColumn?: boolean
 
-  pcbGap: number | string
+  pcbGap?: number | string
 
-  pcbPack: boolean
+  pcbPack?: boolean
 
-  pcbPackGap: number | string
+  pcbPackGap?: number | string
 
-  schGrid: boolean
+  schGrid?: boolean
 
-  schGridCols: number | string
+  schGridCols?: number | string
 
-  schGridRows: number | string
+  schGridRows?: number | string
 
-  schGridTemplateRows: string
+  schGridTemplateRows?: string
 
-  schGridTemplateColumns: string
+  schGridTemplateColumns?: string
 
-  schGridTemplate: string
+  schGridTemplate?: string
 
-  schGridGap: number | string
+  schGridGap?: number | string
 
-  schGridRowGap: number | string
+  schGridRowGap?: number | string
 
-  schGridColumnGap: number | string
+  schGridColumnGap?: number | string
 
-  schFlex: boolean | string
+  schFlex?: boolean | string
 
-  schFlexGap: number | string
+  schFlexGap?: number | string
 
-  schFlexDirection: "row" | "column"
+  schFlexDirection?: "row" | "column"
 
-  schAlignItems: "start" | "center" | "end" | "stretch"
+  schAlignItems?: "start" | "center" | "end" | "stretch"
 
-  schJustifyContent: "start" | "center" | "end" | "stretch" | "space-between" | "space-around" | "space-evenly"
+  schJustifyContent?: "start" | "center" | "end" | "stretch" | "space-between" | "space-around" | "space-evenly"
 
-  schFlexRow: boolean
+  schFlexRow?: boolean
 
-  schFlexColumn: boolean
+  schFlexColumn?: boolean
 
-  schGap: number | string
+  schGap?: number | string
 
-  schPack: boolean
+  schPack?: boolean
 
-  schMatchAdapt: boolean
+  schMatchAdapt?: boolean
 
-  layoutMode: "grid" | "flex" | "match-adapt" | "relative" | "none"
+  layoutMode?: "grid" | "flex" | "match-adapt" | "relative" | "none"
 
-  position: "absolute" | "relative"
+  position?: "absolute" | "relative"
 
-  gridCols: number | string
+  gridCols?: number | string
 
-  gridRows: number | string
+  gridRows?: number | string
 
-  gridTemplateRows: string
+  gridTemplateRows?: string
 
-  gridTemplateColumns: string
+  gridTemplateColumns?: string
 
-  gridTemplate: string
+  gridTemplate?: string
 
-  gridGap: number | string
+  gridGap?: number | string
 
-  gridRowGap: number | string
+  gridRowGap?: number | string
 
-  gridColumnGap: number | string
+  gridColumnGap?: number | string
 
-  flexDirection: "row" | "column"
+  flexDirection?: "row" | "column"
 
-  alignItems: "start" | "center" | "end" | "stretch"
+  alignItems?: "start" | "center" | "end" | "stretch"
 
-  justifyContent: "start" | "center" | "end" | "stretch" | "space-between" | "space-around" | "space-evenly"
+  justifyContent?: "start" | "center" | "end" | "stretch" | "space-between" | "space-around" | "space-evenly"
 
-  flexRow: boolean
+  flexRow?: boolean
 
-  flexColumn: boolean
+  flexColumn?: boolean
 
-  gap: number | string
+  gap?: number | string
 
-  pack: boolean
+  pack?: boolean
 
-  packOrderStrategy: "largest_to_smallest" | "first_to_last" | "highest_to_lowest_pin_count"
+  packOrderStrategy?: "largest_to_smallest" | "first_to_last" | "highest_to_lowest_pin_count"
 
-  packPlacementStrategy: "shortest_connection_along_outline"
+  packPlacementStrategy?: "shortest_connection_along_outline"
 
-  padding: Distance
+  padding?: Distance
 
-  paddingLeft: Distance
+  paddingLeft?: Distance
 
-  paddingRight: Distance
+  paddingRight?: Distance
 
-  paddingTop: Distance
+  paddingTop?: Distance
 
-  paddingBottom: Distance
+  paddingBottom?: Distance
 
-  paddingX: Distance
+  paddingX?: Distance
 
-  paddingY: Distance
+  paddingY?: Distance
 
-  width: Distance
+  width?: Distance
 
-  height: Distance
+  height?: Distance
 
-  matchAdapt: boolean
+  matchAdapt?: boolean
 
-  matchAdaptTemplate: any
+  matchAdaptTemplate?: any
 
 // Category: Shared props
 // Props every element extending CommonLayoutProps accepts
 CommonLayoutProps: interface CommonLayoutProps extends PcbLayoutProps
 
-  schMarginTop: string | number
+  schMarginTop?: string | number
 
-  schMarginRight: string | number
+  schMarginRight?: string | number
 
-  schMarginBottom: string | number
+  schMarginBottom?: string | number
 
-  schMarginLeft: string | number
+  schMarginLeft?: string | number
 
-  schMarginX: string | number
+  schMarginX?: string | number
 
-  schMarginY: string | number
+  schMarginY?: string | number
 
-  schX: string | number
+  schX?: string | number
 
-  schY: string | number
+  schY?: string | number
 
-  schRotation: string | number
+  schRotation?: string | number
 
-  footprint: FootprintProp
+  footprint?: FootprintProp
 
-  symbol: SymbolProp
+  symbol?: SymbolProp
 
-  schStyle: SchStyle
+  schStyle?: SchStyle
 
   // If true, schX/schY will be interpreted relative to the parent group
-  schRelative: boolean
+  schRelative?: boolean
 
 // Category: Shared props
 // Props every element extending PcbLayoutProps accepts
 PcbLayoutProps: interface PcbLayoutProps
 
-  pcbX: string | number
+  pcbX?: string | number
 
-  pcbY: string | number
+  pcbY?: string | number
 
   // Position the left, right, top, or bottom edge of the component
-  pcbLeftEdgeX: string | number
+  pcbLeftEdgeX?: string | number
 
-  pcbRightEdgeX: string | number
+  pcbRightEdgeX?: string | number
 
-  pcbTopEdgeY: string | number
+  pcbTopEdgeY?: string | number
 
-  pcbBottomEdgeY: string | number
+  pcbBottomEdgeY?: string | number
 
-  pcbOffsetX: string | number
+  pcbOffsetX?: string | number
 
-  pcbOffsetY: string | number
+  pcbOffsetY?: string | number
 
-  pcbRotation: string | number
+  pcbRotation?: string | number
 
-  pcbPositionAnchor: string
+  pcbPositionAnchor?: string
 
-  pcbPositionMode: PcbPositionMode
+  pcbPositionMode?: PcbPositionMode
 
-  shouldBeOnEdgeOfBoard: boolean
+  shouldBeOnEdgeOfBoard?: boolean
 
-  layer: LayerRefInput
+  layer?: LayerRefInput
 
-  pcbMarginTop: string | number
+  pcbMarginTop?: string | number
 
-  pcbMarginRight: string | number
+  pcbMarginRight?: string | number
 
-  pcbMarginBottom: string | number
+  pcbMarginBottom?: string | number
 
-  pcbMarginLeft: string | number
+  pcbMarginLeft?: string | number
 
-  pcbMarginX: string | number
+  pcbMarginX?: string | number
 
-  pcbMarginY: string | number
+  pcbMarginY?: string | number
 
-  pcbStyle: PcbStyle
+  pcbStyle?: PcbStyle
 
-  pcbSx: PcbSx
+  pcbSx?: PcbSx
 
   // If true, pcbX/pcbY will be interpreted relative to the parent group
-  pcbRelative: boolean
+  pcbRelative?: boolean
 
   // If true, both pcb and schematic coordinates will be interpreted relative to the parent group
-  relative: boolean
+  relative?: boolean

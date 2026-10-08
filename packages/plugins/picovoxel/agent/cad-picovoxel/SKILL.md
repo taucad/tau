@@ -63,7 +63,7 @@ The symbols real Tau models use most, as verbatim declarations. Anything not sho
 
 ```ts
 interface Pico
-  voxelSize: number
+  readonly voxelSize: number
   createVoxels(options: CreateVoxelsOptions): Voxels;
   // Builds a mesh from vertex/triangle data via the bulk imports (two crossings)
   createMesh(options: {
@@ -78,7 +78,7 @@ interface Pico
   // Opens .vdb bytes as a container for field-level access
   openVdb(bytes: Uint8Array): VdbFile;
   // Escape hatch
-  handle: bigint
+  readonly handle: bigint
   // Deterministic teardown
   dispose(): void;
   // … 14 more members in the API reference
@@ -95,17 +95,17 @@ interface Lattice
   addBeam(options: AddBeamOptions): void;
   // Renders the lattice into a fresh voxel field
   toVoxels(): Voxels;
-  memUsage: number
+  readonly memUsage: number
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
   // Optional
   dispose(): void;
   [Symbol.dispose](): void;
 
 CreateScalarFieldOptions: {
   from: Voxels
-  value: number
-  sdThreshold: number
+  value?: number
+  sdThreshold?: number
 }
 
 interface ScalarField extends FieldBase
@@ -133,8 +133,8 @@ interface ScalarField extends FieldBase
 
 CreateVectorFieldOptions: {
   from: Voxels
-  value: Vec3
-  sdThreshold: number
+  value?: Vec3
+  sdThreshold?: number
 }
 
 interface VectorField extends FieldBase
@@ -146,7 +146,7 @@ interface VectorField extends FieldBase
   clone(): VectorField;
 
 interface VdbFile
-  fieldCount: number
+  readonly fieldCount: number
   // Name + type of every field, index order
   fields(): Array<{
       name: string;
@@ -162,7 +162,7 @@ interface VdbFile
       acceptLane?: 'fast';
     }): Uint8Array;
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
   // Optional
   dispose(): void;
   [Symbol.dispose](): void;
@@ -174,11 +174,11 @@ interface AddBeamOptions
   start: Vec3
   end: Vec3
   // Uniform radius
-  radius: number
-  startRadius: number
-  endRadius: number
+  radius?: number
+  startRadius?: number
+  endRadius?: number
   // Hemispherical end caps (default true, as upstream)
-  roundCap: boolean
+  roundCap?: boolean
 
 // A 3D coordinate or direction, `[x, y, z]`, in millimetres unless noted
 Vec3: readonly [number, number, number]
@@ -237,7 +237,7 @@ interface Voxels
       sdf: SdfFunction | SdfExpression;
     }): Voxels;
   // Volume in mm³ from the raw grid — fast but approximate after booleans (use…
-  volume: number
+  readonly volume: number
   // Volume (mm³), surface area (mm²) and bounds free of boolean residue, from one native…
   properties(): {
       volume: number;
@@ -247,9 +247,9 @@ interface Voxels
   // Bounding box via the intermediate mesh (the only accurate way)
   bounds(): Bounds;
   toMesh(): Mesh;
-  metadata: Metadata
+  readonly metadata: Metadata
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
   // Optional
   dispose(): void;
   // … 24 more members in the API reference
@@ -262,7 +262,7 @@ SdfExpression: number | 'x' | 'y' | 'z' | readonly [SdfOperator, ...SdfExpressio
 
 interface Metadata
   // Number of entries in the table
-  count: number
+  readonly count: number
   // Every entry name, index order
   names(): string[];
   typeOf(name: string): MetadataType;
@@ -273,7 +273,7 @@ interface Metadata
   // The reserved-name guard applies here too
   remove(name: string): void;
   // Raw ABI handle — escape hatch
-  handle: bigint
+  readonly handle: bigint
   // Optional
   dispose(): void;
   [Symbol.dispose](): void;
@@ -283,10 +283,6 @@ SdfOperator: '+' | '-' | '*' | '/' | 'abs' | 'sqrt' | 'sin' | 'cos' | 'floor' | 
 MetadataType: 'string' | 'float' | 'vector' | 'unknown'
 
 MetadataValue: string | number | Vec3
-
-declare class PicoError extends Error
-  code: PicoErrorCode
-  constructor(code: PicoErrorCode, message: string, options?: ErrorOptions);
 ```
 
 ### `picovoxel/shapekernel`
@@ -307,20 +303,20 @@ declare class BaseBox extends BaseShape implements MeshBaseShape, SurfaceBaseSha
 // A rigid transform stored as explicit axes (C# `PicoGK.Shapes.Frame3d`)
 interface Frame
   // Origin of the frame in world coordinates (C# `vecPos`)
-  pos: Vec3
+  readonly pos: Vec3
   // Local X axis in world coordinates (C# `vecLx`)
-  lx: Vec3
+  readonly lx: Vec3
   // Local Y axis in world coordinates (C# `vecLy`)
-  ly: Vec3
+  readonly ly: Vec3
   // Local Z axis in world coordinates (C# `vecLz`)
-  lz: Vec3
+  readonly lz: Vec3
 
 // Gyroid pattern with a wall-thickness ratio (C# `ImplicitGyroid`)
 declare class ImplicitGyroid implements Implicit
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
   constructor(unitSize: number, thicknessRatio: number);
   // Thickness ratio for a target wall thickness in mm (C# `fGetThicknessRatio`)
   static thicknessRatio(wallThickness: number, unitSize: number): number;
@@ -328,45 +324,42 @@ declare class ImplicitGyroid implements Implicit
 // ShapeKernel `LocalFrame` construction helpers over the numerics `Frame`
 localFrame: {
   // World-aligned frame at the origin (C# `LocalFrame()`)
-  identity: Frame
+  readonly identity: Frame
   // World-aligned axes at a position (C# `LocalFrame(vecPos)`)
-  create: (pos: Vec3) => Frame
-  // Same axes as the base frame at a new position (C# `LocalFrame(oBaseFrame, vecNewPos)`)
-  at: (base: Frame, newPos: Vec3) => Frame
+  readonly create: (pos: Vec3) => Frame
   // Position + local Z
-  createZ: (pos: Vec3, localZ: Vec3) => Frame
+  readonly createZ: (pos: Vec3, localZ: Vec3) => Frame
   // Position + local Z + local X
-  createZX: (pos: Vec3, localZ: Vec3, localX: Vec3) => Frame
+  readonly createZX: (pos: Vec3, localZ: Vec3, localX: Vec3) => Frame
   // Translated frame, axes unchanged (C# `oTranslate` / `oGetTranslatedFrame`)
-  translated: (f: Frame, delta: Vec3) => Frame
+  readonly translated: (f: Frame, delta: Vec3) => Frame
   // All axes rotated about an axis, position unchanged (C# `oRotate` / `oGetRotatedFrame`)
-  rotated: (f: Frame, deltaPhi: number, axis: Vec3) => Frame
+  readonly rotated: (f: Frame, deltaPhi: number, axis: Vec3) => Frame
   // Selected axes negated, position unchanged (C# `oGetInvertFrame`
-  inverted: (f: Frame, mirrorZ: boolean, mirrorX: boolean) => Frame
-  // Y completing Z and X right-handedly (C# `vecGetLocalY`
-  localY: (localZ: Vec3, localX: Vec3) => Vec3
+  readonly inverted: (f: Frame, mirrorZ: boolean, mirrorX: boolean) => Frame
+  // … 2 more members in the API reference
 }
 
 // ShapeKernel `VecOperations` (Hungarian prefixes dropped)
 vecOps: {
   // Cartesian point from cylindrical coordinates (C# `vecGetCylPoint`)
-  cylPoint: (radius: number, phi: number, z: number) => Vec3
+  readonly cylPoint: (radius: number, phi: number, z: number) => Vec3
   // Planar (XY) radius about the absolute Z axis (C# `fGetRadius` / the `R` extension)
-  radius: (pt: Vec3) => number
+  readonly radius: (pt: Vec3) => number
   // Planar polar angle about the absolute Z axis, radians (C# `fGetPhi`)
-  phi: (pt: Vec3) => number
+  readonly phi: (pt: Vec3) => number
   // Same phi and z, new radius (C# `vecSetRadius`)
-  setRadius: (pt: Vec3, newRadius: number) => Vec3
+  readonly setRadius: (pt: Vec3, newRadius: number) => Vec3
   // Radially shifted by deltaRadius (C# `vecUpdateRadius`)
-  updateRadius: (pt: Vec3, deltaRadius: number) => Vec3
+  readonly updateRadius: (pt: Vec3, deltaRadius: number) => Vec3
   // Normalized planar radial direction from the Z axis to the point (C# `vecGetPlanarDir`)
-  planarDir: (pt: Vec3) => Vec3
+  readonly planarDir: (pt: Vec3) => Vec3
   // The vector or its negation, whichever aligns better with the target (C# `vecFlipForAlignment`)
-  flipForAlignment: (dir: Vec3, targetDir: Vec3) => Vec3
+  readonly flipForAlignment: (dir: Vec3, targetDir: Vec3) => Vec3
   // Rotate a point about the absolute Z axis through an optional origin (C# `vecRotateAroundZ`)
-  rotateAroundZ: (pt: Vec3, deltaPhi: number, axisOrigin?: Vec3) => Vec3
+  readonly rotateAroundZ: (pt: Vec3, deltaPhi: number, axisOrigin?: Vec3) => Vec3
   // Rotate a point about an arbitrary axis through an optional origin (C# `vecRotateAroundAxis`)
-  rotateAroundAxis: (pt: Vec3, deltaPhi: number, axis: Vec3, axisOrigin?: Vec3) => Vec3
+  readonly rotateAroundAxis: (pt: Vec3, deltaPhi: number, axis: Vec3, axisOrigin?: Vec3) => Vec3
   // … 15 more members in the API reference
 }
 
@@ -436,6 +429,30 @@ declare class Frames implements Spline
   // … 8 more members in the API reference
 
 FrameType: 'cylindrical' | 'spherical' | 'z' | 'minRotation'
+
+// Lens/washer
+declare class BaseLens extends BaseShape implements MeshBaseShape, SurfaceBaseShape
+  radialSteps: number
+  polarSteps: number
+  heightSteps: number
+  readonly innerRadius: number
+  readonly outerRadius: number
+  upperModulation: SurfaceModulation
+  lowerModulation: SurfaceModulation
+  readonly frame: Frame
+  constructor(frame: Frame, height: number, innerRadius: number, outerRadius: number);
+  // C# `SetHeight` — modulated faces bump radial sampling to 500
+  setHeight(lowerModulation: SurfaceModulation, upperModulation: SurfaceModulation): void;
+  setRadialSteps(steps: number): void;
+  setPolarSteps(steps: number): void;
+  setHeightSteps(steps: number): void;
+  voxConstruct(pk: Pico): Voxels;
+  mshConstruct(pk: Pico): Mesh;
+  protected radiusRatioFromStep(step: number): number;
+  protected phiRatioFromStep(step: number): number;
+  protected heightRatioFromStep(step: number): number;
+  // Surface point (C# `vecGetSurfacePoint`
+  surfacePoint(heightRatio: number, phiRatio: number, radiusRatio: number): Vec3;
 ```
 
 ### `picovoxel/numerics`
@@ -443,38 +460,24 @@ FrameType: 'cylindrical' | 'spherical' | 'z' | 'minRotation'
 ```ts
 // `Vector3` operations
 vec3: {
-  zero: Vec3
-  unitX: Vec3
-  unitZ: Vec3
-  add: (a: Vec3, b: Vec3) => Vec3
-  sub: (a: Vec3, b: Vec3) => Vec3
-  neg: (v: Vec3) => Vec3
-  scale: (v: Vec3, f: number) => Vec3
-  dot: (a: Vec3, b: Vec3) => number
-  cross: (a: Vec3, b: Vec3) => Vec3
-  length: (v: Vec3) => number
+  readonly zero: Vec3
+  readonly unitX: Vec3
+  readonly unitZ: Vec3
+  readonly add: (a: Vec3, b: Vec3) => Vec3
+  readonly sub: (a: Vec3, b: Vec3) => Vec3
+  readonly neg: (v: Vec3) => Vec3
+  readonly scale: (v: Vec3, f: number) => Vec3
+  readonly dot: (a: Vec3, b: Vec3) => number
+  readonly cross: (a: Vec3, b: Vec3) => Vec3
+  readonly length: (v: Vec3) => number
   // Unit-length copy
-  normalized: (v: Vec3) => Vec3
+  readonly normalized: (v: Vec3) => Vec3
   // Unit-length copy, or (0,0,0) for (almost) zero-length input (C# `vecSafeNormalized`)
-  safeNormalized: (v: Vec3) => Vec3
+  readonly safeNormalized: (v: Vec3) => Vec3
   // All components finite (C# `Vector3.bIsFinite`)
-  isFinite: (v: Vec3) => boolean
+  readonly isFinite: (v: Vec3) => boolean
   // … 11 more members in the API reference
 }
-
-// `Frame` factories and operations (C# `Frame3d` surface
-frame: {
-  // The world coordinate system (C# `frmWorld`)
-  world: Frame
-  // Local point (2D points lie in the frame's XY plane) → world (C# `vecPtToWorld`)
-  ptToWorld: (f: Frame, local: Vec2 | Vec3) => Vec3
-  // World point → local coordinates (C# `vecPtFromWorld`)
-  ptFromWorld: (f: Frame, world: Vec3) => Vec3
-  // … 22 more members in the API reference
-}
-
-// A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
-Vec2: readonly [number, number]
 ```
 
 ## API reference

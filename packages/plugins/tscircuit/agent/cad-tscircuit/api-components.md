@@ -7,13 +7,13 @@
 <antenna>: AntennaProps extends CommonComponentProps
 
   // Band-qualified PCB-trace topology to generate
-  antennaShape: AntennaShape
+  antennaShape?: AntennaShape
 
   // Nominal operating band or multiband configuration
-  frequencyBand: AntennaFrequencyBand
+  frequencyBand?: AntennaFrequencyBand
 
   // Explicit antenna path
-  pcbPath: PcbPath
+  pcbPath?: PcbPath
 
 // Category: Components
 // JSX element <resistor> with ResistorProps, required resistance, name
@@ -21,21 +21,21 @@
 
   resistance: number | string
 
-  tolerance: number | string
+  tolerance?: number | string
 
-  pullupFor: string
+  pullupFor?: string
 
-  pullupTo: string
+  pullupTo?: string
 
-  pulldownFor: string
+  pulldownFor?: string
 
-  pulldownTo: string
+  pulldownTo?: string
 
-  schOrientation: SchematicOrientation
+  schOrientation?: SchematicOrientation
 
-  schSize: SchematicSymbolSize
+  schSize?: SchematicSymbolSize
 
-  connections: Connections<ResistorPinLabels>
+  connections?: Connections<ResistorPinLabels>
 
 // Category: Components
 // JSX element <capacitor> with CapacitorProps, required capacitance, name
@@ -43,28 +43,28 @@
 
   capacitance: number | string
 
-  maxVoltageRating: number | string
+  maxVoltageRating?: number | string
 
-  schShowRatings: boolean
+  schShowRatings?: boolean
 
-  polarized: boolean
+  polarized?: boolean
 
-  decouplingFor: string
+  decouplingFor?: string
 
-  decouplingTo: string
+  decouplingTo?: string
 
-  bypassFor: string
+  bypassFor?: string
 
-  bypassTo: string
+  bypassTo?: string
 
   // Maximum allowed PCB trace length between this capacitor and the component it decouples
-  maxDecouplingTraceLength: number | string
+  maxDecouplingTraceLength?: number | string
 
-  schOrientation: SchematicOrientation
+  schOrientation?: SchematicOrientation
 
-  schSize: SchematicSymbolSize
+  schSize?: SchematicSymbolSize
 
-  connections: Connections<CapacitorPinLabels>
+  connections?: Connections<CapacitorPinLabels>
 
 // Category: Components
 // JSX element <inductor> with InductorProps, required inductance, name
@@ -72,76 +72,76 @@
 
   inductance: number | string
 
-  maxCurrentRating: number | string
+  maxCurrentRating?: number | string
 
-  schOrientation: SchematicOrientation
+  schOrientation?: SchematicOrientation
 
-  connections: Connections<InductorPinLabels>
+  connections?: Connections<InductorPinLabels>
 
 // Category: Components
 // JSX element <pushbutton> with PushButtonProps, required name
 <pushbutton>: PushButtonProps extends CommonComponentProps
 
-  pinLabels: PinLabelsProp<SchematicPinLabel, PinLabel>
+  pinLabels?: PinLabelsProp<SchematicPinLabel, PinLabel>
 
   // Whether to show pin aliases in the schematic
-  showPinAliases: boolean
+  showPinAliases?: boolean
 
   // Labels for PCB pins
-  pcbPinLabels: Record<string, string>
+  pcbPinLabels?: Record<string, string>
 
-  schPinArrangement: SchematicPortArrangement
+  schPinArrangement?: SchematicPortArrangement
 
-  pinCompatibleVariants: PinCompatibleVariant[]
+  pinCompatibleVariants?: PinCompatibleVariant[]
 
-  schPinStyle: SchematicPinStyle
+  schPinStyle?: SchematicPinStyle
 
-  schWidth: Distance
+  schWidth?: Distance
 
-  schHeight: Distance
+  schHeight?: Distance
 
-  noSchematicRepresentation: boolean
+  noSchematicRepresentation?: boolean
 
   // Whether to show the components from `internalCircuit` in the schematic
-  schShowInternalCircuit: boolean
+  schShowInternalCircuit?: boolean
 
-  internallyConnectedPins: (string | number)[][]
+  internallyConnectedPins?: (string | number)[][]
 
-  externallyConnectedPins: string[][]
+  externallyConnectedPins?: string[][]
 
   // Pins intentionally left unconnected
-  noConnect: readonly PinLabel[] | PinLabel[]
+  noConnect?: readonly PinLabel[] | PinLabel[]
 
-  connections: Connections<PinLabel>
+  connections?: Connections<PinLabel>
 
-  spiceModel: SpiceModelElement
+  spiceModel?: SpiceModelElement
 
   // Functional components contained inside this physical chip package, wrapped in an `<internalcircuit />` element
-  internalCircuit: InternalCircuitElement
+  internalCircuit?: InternalCircuitElement
 
 // Category: Components
 // JSX element <diode> with DiodeProps, required name
 <diode>: DiodeProps extends CommonComponentProps
 
-  pinLabels: DiodePinLabelsProp<PinLabel>
+  pinLabels?: DiodePinLabelsProp<PinLabel>
 
-  connections: {anode?: string | string[] | readonly string[]; cathode?: string | string[] | readonly string[]; pin1?: string | string[] | readonly string[]; pin2?: string | string[] | readonly string[]; pos?: string | string[] | readonly string[]; neg?: string | string[] | readonly string[]; }
+  connections?: {anode?: string | string[] | readonly string[]; cathode?: string | string[] | readonly string[]; pin1?: string | string[] | readonly string[]; pin2?: string | string[] | readonly string[]; pos?: string | string[] | readonly string[]; neg?: string | string[] | readonly string[]; }
 
-  variant: "standard" | "schottky" | "zener" | "avalanche" | "photo" | "tvs"
+  variant?: "standard" | "schottky" | "zener" | "avalanche" | "photo" | "tvs"
 
-  standard: boolean
+  standard?: boolean
 
-  schottky: boolean
+  schottky?: boolean
 
-  zener: boolean
+  zener?: boolean
 
-  avalanche: boolean
+  avalanche?: boolean
 
-  photo: boolean
+  photo?: boolean
 
-  tvs: boolean
+  tvs?: boolean
 
-  schOrientation: SchematicOrientation
+  schOrientation?: SchematicOrientation
 
 // Category: Components
 // JSX element <fuse> with FuseProps, required currentRating, name
@@ -151,106 +151,106 @@
   currentRating: number | string
 
   // Voltage rating of the fuse
-  voltageRating: number | string
+  voltageRating?: number | string
 
   // Whether to show ratings on schematic
-  schShowRatings: boolean
+  schShowRatings?: boolean
 
-  schOrientation: SchematicOrientation
+  schOrientation?: SchematicOrientation
 
   // Connections to other components
-  connections: Connections<PinLabel>
+  connections?: Connections<PinLabel>
 
 // Category: Components
 // JSX element <led> with LedProps, required name
 <led>: LedProps extends CommonComponentProps
 
-  connections: Partial<Record<"left" | "right" | "pin1" | "pin2" | "anode" | "pos" | "cathode" | "neg", string | readonly string[] | string[]>>
+  connections?: Partial<Record<"left" | "right" | "pin1" | "pin2" | "anode" | "pos" | "cathode" | "neg", string | readonly string[] | string[]>>
 
-  pinLabels: Partial<Record<"left" | "right" | "pin1" | "pin2" | "anode" | "pos" | "cathode" | "neg", string | readonly string[] | string[]>> | Partial<Record<"1" | "2", string | readonly string[] | string[]>>
+  pinLabels?: Partial<Record<"left" | "right" | "pin1" | "pin2" | "anode" | "pos" | "cathode" | "neg", string | readonly string[] | string[]>> | Partial<Record<"1" | "2", string | readonly string[] | string[]>>
 
-  schOrientation: "vertical" | "horizontal" | "pos_top" | "pos_bottom" | "pos_left" | "pos_right" | "neg_top" | "neg_bottom" | "neg_left" | "neg_right"
+  schOrientation?: "vertical" | "horizontal" | "pos_top" | "pos_bottom" | "pos_left" | "pos_right" | "neg_top" | "neg_bottom" | "neg_left" | "neg_right"
 
-  color: string
+  color?: string
 
-  wavelength: string
+  wavelength?: string
 
-  schDisplayValue: string
+  schDisplayValue?: string
 
-  laser: boolean
+  laser?: boolean
 
 // Category: Components
 // JSX element <jumper> with JumperProps, required name
 <jumper>: JumperProps extends CommonComponentProps
 
-  pinLabels: Record<number | SchematicPinLabel, SchematicPinLabel | SchematicPinLabel[]>
+  pinLabels?: Record<number | SchematicPinLabel, SchematicPinLabel | SchematicPinLabel[]>
 
-  schPinStyle: SchematicPinStyle
+  schPinStyle?: SchematicPinStyle
 
-  schWidth: number | string
+  schWidth?: number | string
 
-  schHeight: number | string
+  schHeight?: number | string
 
-  schDirection: "left" | "right"
+  schDirection?: "left" | "right"
 
-  schPinArrangement: SchematicPortArrangement
+  schPinArrangement?: SchematicPortArrangement
 
   // Labels for PCB pins
-  pcbPinLabels: Record<string, string>
+  pcbPinLabels?: Record<string, string>
 
   // Number of pins on the jumper (2 or 3)
-  pinCount: 2 | 3
+  pinCount?: 2 | 3
 
   // Groups of pins that are internally connected e.g., [["1","2"], ["2","3"]]
-  internallyConnectedPins: (string | number)[][]
+  internallyConnectedPins?: (string | number)[][]
 
   // Connections to other components
-  connections: Connections<string>
+  connections?: Connections<string>
 
 // Category: Components
 // JSX element <interconnect> with InterconnectProps, required name
 <interconnect>: InterconnectProps extends CommonComponentProps
 
-  standard: "TSC0001_36P_XALT_2025_11" | "0805" | "0603" | "1206"
+  standard?: "TSC0001_36P_XALT_2025_11" | "0805" | "0603" | "1206"
 
-  pinLabels: Record<number | SchematicPinLabel, SchematicPinLabel | SchematicPinLabel[]>
+  pinLabels?: Record<number | SchematicPinLabel, SchematicPinLabel | SchematicPinLabel[]>
 
   // Groups of pins that are internally connected e.g., [["1","2"], ["2","3"]]
-  internallyConnectedPins: (string | number)[][]
+  internallyConnectedPins?: (string | number)[][]
 
 // Category: Components
 // JSX element <solderjumper> with SolderJumperProps, required name
 <solderjumper>: SolderJumperProps extends CommonComponentProps
 
   // Pins that are bridged with solder by default
-  bridgedPins: string[][]
+  bridgedPins?: string[][]
 
   // If true, all pins are connected with cuttable traces
-  bridged: boolean
+  bridged?: boolean
 
-  pinLabels: Record<number | SchematicPinLabel, SchematicPinLabel | SchematicPinLabel[]>
+  pinLabels?: Record<number | SchematicPinLabel, SchematicPinLabel | SchematicPinLabel[]>
 
-  schPinStyle: SchematicPinStyle
+  schPinStyle?: SchematicPinStyle
 
-  schWidth: number | string
+  schWidth?: number | string
 
-  schHeight: number | string
+  schHeight?: number | string
 
-  schDirection: "left" | "right"
+  schDirection?: "left" | "right"
 
-  schPinArrangement: SchematicPortArrangement
+  schPinArrangement?: SchematicPortArrangement
 
   // Labels for PCB pins
-  pcbPinLabels: Record<string, string>
+  pcbPinLabels?: Record<string, string>
 
   // Number of pins on the jumper (2 or 3)
-  pinCount: 2 | 3
+  pinCount?: 2 | 3
 
   // Groups of pins that are internally connected e.g., [["1","2"], ["2","3"]]
-  internallyConnectedPins: (string | number)[][]
+  internallyConnectedPins?: (string | number)[][]
 
   // Connections to other components
-  connections: Connections<string>
+  connections?: Connections<string>
 
 // Category: Components
 // JSX element <potentiometer> with PotentiometerProps, required maxResistance, name
@@ -258,91 +258,91 @@
 
   maxResistance: number | string
 
-  pinVariant: PotentiometerPinVariant
+  pinVariant?: PotentiometerPinVariant
 
-  connections: Connections<PotentiometerPinLabels>
+  connections?: Connections<PotentiometerPinLabels>
 
 // Category: Components
 // JSX element <chip> with ChipProps, required name
 <chip>: ChipProps extends CommonComponentProps
 
-  pinLabels: PinLabelsProp<SchematicPinLabel, PinLabel>
+  pinLabels?: PinLabelsProp<SchematicPinLabel, PinLabel>
 
   // Whether to show pin aliases in the schematic
-  showPinAliases: boolean
+  showPinAliases?: boolean
 
   // Labels for PCB pins
-  pcbPinLabels: Record<string, string>
+  pcbPinLabels?: Record<string, string>
 
-  schPinArrangement: SchematicPortArrangement
+  schPinArrangement?: SchematicPortArrangement
 
-  pinCompatibleVariants: PinCompatibleVariant[]
+  pinCompatibleVariants?: PinCompatibleVariant[]
 
-  schPinStyle: SchematicPinStyle
+  schPinStyle?: SchematicPinStyle
 
-  schWidth: Distance
+  schWidth?: Distance
 
-  schHeight: Distance
+  schHeight?: Distance
 
-  noSchematicRepresentation: boolean
+  noSchematicRepresentation?: boolean
 
   // Whether to show the components from `internalCircuit` in the schematic
-  schShowInternalCircuit: boolean
+  schShowInternalCircuit?: boolean
 
-  internallyConnectedPins: (string | number)[][]
+  internallyConnectedPins?: (string | number)[][]
 
-  externallyConnectedPins: string[][]
+  externallyConnectedPins?: string[][]
 
   // Pins intentionally left unconnected
-  noConnect: readonly PinLabel[] | PinLabel[]
+  noConnect?: readonly PinLabel[] | PinLabel[]
 
-  connections: Connections<PinLabel>
+  connections?: Connections<PinLabel>
 
-  spiceModel: SpiceModelElement
+  spiceModel?: SpiceModelElement
 
   // Functional components contained inside this physical chip package, wrapped in an `<internalcircuit />` element
-  internalCircuit: InternalCircuitElement
+  internalCircuit?: InternalCircuitElement
 
 // Category: Components
 // JSX element <pinout> with PinoutProps, required name
 <pinout>: PinoutProps extends CommonComponentProps
 
-  pinLabels: PinLabelsProp<SchematicPinLabel, PinLabel>
+  pinLabels?: PinLabelsProp<SchematicPinLabel, PinLabel>
 
   // Whether to show pin aliases in the schematic
-  showPinAliases: boolean
+  showPinAliases?: boolean
 
   // Labels for PCB pins
-  pcbPinLabels: Record<string, string>
+  pcbPinLabels?: Record<string, string>
 
-  schPinArrangement: SchematicPortArrangement
+  schPinArrangement?: SchematicPortArrangement
 
-  pinCompatibleVariants: PinCompatibleVariant[]
+  pinCompatibleVariants?: PinCompatibleVariant[]
 
-  schPinStyle: SchematicPinStyle
+  schPinStyle?: SchematicPinStyle
 
-  schWidth: Distance
+  schWidth?: Distance
 
-  schHeight: Distance
+  schHeight?: Distance
 
-  noSchematicRepresentation: boolean
+  noSchematicRepresentation?: boolean
 
   // Whether to show the components from `internalCircuit` in the schematic
-  schShowInternalCircuit: boolean
+  schShowInternalCircuit?: boolean
 
-  internallyConnectedPins: (string | number)[][]
+  internallyConnectedPins?: (string | number)[][]
 
-  externallyConnectedPins: string[][]
+  externallyConnectedPins?: string[][]
 
   // Pins intentionally left unconnected
-  noConnect: readonly PinLabel[] | PinLabel[]
+  noConnect?: readonly PinLabel[] | PinLabel[]
 
-  connections: Connections<PinLabel>
+  connections?: Connections<PinLabel>
 
-  spiceModel: SpiceModelElement
+  spiceModel?: SpiceModelElement
 
   // Functional components contained inside this physical chip package, wrapped in an `<internalcircuit />` element
-  internalCircuit: InternalCircuitElement
+  internalCircuit?: InternalCircuitElement
 
 // Category: Components
 // JSX element <powersource> with PowerSourceProps, required name, voltage
@@ -354,7 +354,7 @@
 // JSX element <opamp> with OpAmpProps, required name
 <opamp>: OpAmpProps extends CommonComponentProps
 
-  connections: Connections<OpAmpPinLabels>
+  connections?: Connections<OpAmpPinLabels>
 
 // Category: Components
 // JSX element <component> with ComponentProps, required name
@@ -369,76 +369,76 @@
   loadCapacitance: number | string
 
   // Maximum allowed PCB trace length between the crystal and its connected component
-  maxTraceLength: number | string
+  maxTraceLength?: number | string
 
-  mpn: string
+  mpn?: string
 
-  pinVariant: PinVariant
+  pinVariant?: PinVariant
 
-  schOrientation: SchematicOrientation
+  schOrientation?: SchematicOrientation
 
-  connections: Connections<CrystalPinLabels>
+  connections?: Connections<CrystalPinLabels>
 
 // Category: Components
 // JSX element <battery> with BatteryProps, required name
 <battery>: BatteryProps extends CommonComponentProps
 
-  capacity: number | string
+  capacity?: number | string
 
-  voltage: number | string
+  voltage?: number | string
 
-  standard: "AA" | "AAA" | "9V" | "CR2032" | "18650" | "C"
+  standard?: "AA" | "AAA" | "9V" | "CR2032" | "18650" | "C"
 
-  schOrientation: SchematicOrientation
+  schOrientation?: SchematicOrientation
 
-  connections: Connections<BatteryPinLabels>
+  connections?: Connections<BatteryPinLabels>
 
 // Category: Components
 // JSX element <connector> with ConnectorProps, required name
 <connector>: ConnectorProps extends CommonComponentProps
 
   // Connector interface or product family, e.g
-  standard: ConnectorStandard
+  standard?: ConnectorStandard
 
   // Number of electrical circuits in the connector
-  pinCount: number
+  pinCount?: number
 
-  pinLabels: PinLabelsProp<SchematicPinLabel, PinLabel>
+  pinLabels?: PinLabelsProp<SchematicPinLabel, PinLabel>
 
   // Whether to show pin aliases in the schematic
-  showPinAliases: boolean
+  showPinAliases?: boolean
 
   // Labels for PCB pins
-  pcbPinLabels: Record<string, string>
+  pcbPinLabels?: Record<string, string>
 
-  schPinArrangement: SchematicPortArrangement
+  schPinArrangement?: SchematicPortArrangement
 
-  pinCompatibleVariants: PinCompatibleVariant[]
+  pinCompatibleVariants?: PinCompatibleVariant[]
 
-  schPinStyle: SchematicPinStyle
+  schPinStyle?: SchematicPinStyle
 
-  schWidth: Distance
+  schWidth?: Distance
 
-  schHeight: Distance
+  schHeight?: Distance
 
-  noSchematicRepresentation: boolean
+  noSchematicRepresentation?: boolean
 
   // Whether to show the components from `internalCircuit` in the schematic
-  schShowInternalCircuit: boolean
+  schShowInternalCircuit?: boolean
 
-  internallyConnectedPins: (string | number)[][]
+  internallyConnectedPins?: (string | number)[][]
 
-  externallyConnectedPins: string[][]
+  externallyConnectedPins?: string[][]
 
   // Pins intentionally left unconnected
-  noConnect: readonly PinLabel[] | PinLabel[]
+  noConnect?: readonly PinLabel[] | PinLabel[]
 
-  connections: Connections<PinLabel>
+  connections?: Connections<PinLabel>
 
-  spiceModel: SpiceModelElement
+  spiceModel?: SpiceModelElement
 
   // Functional components contained inside this physical chip package, wrapped in an `<internalcircuit />` element
-  internalCircuit: InternalCircuitElement
+  internalCircuit?: InternalCircuitElement
 
 // Category: Components
 // JSX element <pinheader> with PinHeaderProps, required pinCount, name
@@ -448,61 +448,61 @@
   pinCount: number
 
   // Distance between pins
-  pitch: number | string
+  pitch?: number | string
 
   // Schematic facing direction
-  schFacingDirection: "up" | "down" | "left" | "right"
+  schFacingDirection?: "up" | "down" | "left" | "right"
 
   // Whether the header is male, female, or unpopulated
-  gender: "male" | "female" | "unpopulated"
+  gender?: "male" | "female" | "unpopulated"
 
   // Mount the header on the top of the board, so it is connected to from above
-  connectsFromAbove: boolean
+  connectsFromAbove?: boolean
 
   // Mount the header on the underside of the board, so it is connected to from below
-  connectsFromBelow: boolean
+  connectsFromBelow?: boolean
 
   // Whether to show pin labels in silkscreen
-  showSilkscreenPinLabels: boolean
+  showSilkscreenPinLabels?: boolean
 
   // Labels for PCB pins
-  pcbPinLabels: Record<string, string>
+  pcbPinLabels?: Record<string, string>
 
   // Whether the header has two rows of pins
-  doubleRow: boolean
+  doubleRow?: boolean
 
   // If true, the header is a right-angle style connector
-  rightAngle: boolean
+  rightAngle?: boolean
 
   // Orientation of the header on the PCB
-  pcbOrientation: PcbOrientation
+  pcbOrientation?: PcbOrientation
 
   // Diameter of the through-hole for each pin
-  holeDiameter: number | string
+  holeDiameter?: number | string
 
   // Diameter of the plated area around each hole
-  platedDiameter: number | string
+  platedDiameter?: number | string
 
   // Labels for each pin
-  pinLabels: Record<string, SchematicPinLabel> | SchematicPinLabel[]
+  pinLabels?: Record<string, SchematicPinLabel> | SchematicPinLabel[]
 
   // Connections to other components
-  connections: Connections<string>
+  connections?: Connections<string>
 
   // Direction the header is facing
-  facingDirection: "left" | "right"
+  facingDirection?: "left" | "right"
 
   // Pin arrangement in schematic view
-  schPinArrangement: SchematicPinArrangement
+  schPinArrangement?: SchematicPinArrangement
 
   // Schematic pin style (margins, etc)
-  schPinStyle: SchematicPinStyle
+  schPinStyle?: SchematicPinStyle
 
   // Schematic width
-  schWidth: number | string
+  schWidth?: number | string
 
   // Schematic height
-  schHeight: number | string
+  schHeight?: number | string
 
 // Category: Components
 // JSX element <resonator> with ResonatorProps, required frequency, loadCapacitance, name
@@ -512,7 +512,7 @@
 
   loadCapacitance: number | string
 
-  pinVariant: ResonatorPinVariant
+  pinVariant?: ResonatorPinVariant
 
 // Category: Components
 // JSX element <transistor> with TransistorProps, required type, name
@@ -520,37 +520,37 @@
 
   type: "npn" | "pnp" | "bjt" | "jfet" | "mosfet" | "igbt"
 
-  connections: Connections<transistorPinsLabels>
+  connections?: Connections<transistorPinsLabels>
 
 // Category: Components
 // JSX element <switch> with SwitchProps, required name
 <switch>: SwitchProps extends CommonComponentProps
 
-  type: "spst" | "spdt" | "dpst" | "dpdt"
+  type?: "spst" | "spdt" | "dpst" | "dpdt"
 
-  pinLabels: PinLabelsProp<SchematicPinLabel>
+  pinLabels?: PinLabelsProp<SchematicPinLabel>
 
-  isNormallyClosed: boolean
+  isNormallyClosed?: boolean
 
-  spdt: boolean
+  spdt?: boolean
 
-  spst: boolean
+  spst?: boolean
 
-  dpst: boolean
+  dpst?: boolean
 
-  dpdt: boolean
+  dpdt?: boolean
 
-  simSwitchFrequency: number | string
+  simSwitchFrequency?: number | string
 
-  simCloseAt: number | string
+  simCloseAt?: number | string
 
-  simOpenAt: number | string
+  simOpenAt?: number | string
 
-  simStartClosed: boolean
+  simStartClosed?: boolean
 
-  simStartOpen: boolean
+  simStartOpen?: boolean
 
-  connections: Connections<string>
+  connections?: Connections<string>
 
 // Category: Components
 // JSX element <mosfet> with MosfetProps, required channelType, mosfetMode, name
@@ -561,97 +561,97 @@
   mosfetMode: "enhancement" | "depletion"
 
   // The side of the schematic symbol where the drain port is placed
-  symbolDrainSide: "left" | "right" | "top" | "bottom"
+  symbolDrainSide?: "left" | "right" | "top" | "bottom"
 
   // The side of the schematic symbol where the source port is placed
-  symbolSourceSide: "left" | "right" | "top" | "bottom"
+  symbolSourceSide?: "left" | "right" | "top" | "bottom"
 
   // The side of the schematic symbol where the gate port is placed
-  symbolGateSide: "left" | "right" | "top" | "bottom"
+  symbolGateSide?: "left" | "right" | "top" | "bottom"
 
-  connections: Connections<MosfetPinLabels>
+  connections?: Connections<MosfetPinLabels>
 
 // Category: Components
 // JSX element <testpoint> with TestpointProps, required name
 <testpoint>: TestpointProps extends CommonComponentProps
 
   // The footprint variant of the testpoint either a surface pad or through-hole
-  footprintVariant: "pad" | "through_hole"
+  footprintVariant?: "pad" | "through_hole"
 
   // The shape of the pad if using a pad variant
-  padShape: "rect" | "circle"
+  padShape?: "rect" | "circle"
 
   // Diameter of the copper pad (applies to both SMD pads and plated holes)
-  padDiameter: number | string
+  padDiameter?: number | string
 
   // Diameter of the hole if using a through-hole testpoint
-  holeDiameter: number | string
+  holeDiameter?: number | string
 
   // Width of the pad when padShape is rect
-  width: number | string
+  width?: number | string
 
   // Height of the pad when padShape is rect
-  height: number | string
+  height?: number | string
 
-  connections: TestpointConnections
+  connections?: TestpointConnections
 
 // Category: Components
 // JSX element <voltagesource> with VoltageSourceProps, required name
 <voltagesource>: VoltageSourceProps extends CommonComponentProps
 
-  voltage: number | string
+  voltage?: number | string
 
-  frequency: number | string
+  frequency?: number | string
 
-  peakToPeakVoltage: number | string
+  peakToPeakVoltage?: number | string
 
-  waveShape: WaveShape
+  waveShape?: WaveShape
 
-  phase: number | string
+  phase?: number | string
 
-  dutyCycle: number | string
+  dutyCycle?: number | string
 
-  pulseDelay: number | string
+  pulseDelay?: number | string
 
-  riseTime: number | string
+  riseTime?: number | string
 
-  fallTime: number | string
+  fallTime?: number | string
 
-  pulseWidth: number | string
+  pulseWidth?: number | string
 
-  period: number | string
+  period?: number | string
 
   // Small-signal AC magnitude
-  acMagnitude: number | string
+  acMagnitude?: number | string
 
   // Small-signal AC phase
-  acPhase: number | string
+  acPhase?: number | string
 
-  connections: Connections<VoltageSourcePinLabels>
+  connections?: Connections<VoltageSourcePinLabels>
 
 // Category: Components
 // JSX element <currentsource> with CurrentSourceProps, required name
 <currentsource>: CurrentSourceProps extends CommonComponentProps
 
-  current: number | string
+  current?: number | string
 
-  frequency: number | string
+  frequency?: number | string
 
-  peakToPeakCurrent: number | string
+  peakToPeakCurrent?: number | string
 
-  waveShape: WaveShape
+  waveShape?: WaveShape
 
-  phase: number | string
+  phase?: number | string
 
-  dutyCycle: number | string
+  dutyCycle?: number | string
 
   // Small-signal AC magnitude
-  acMagnitude: number | string
+  acMagnitude?: number | string
 
   // Small-signal AC phase
-  acPhase: number | string
+  acPhase?: number | string
 
-  connections: Connections<CurrentSourcePinLabels>
+  connections?: Connections<CurrentSourcePinLabels>
 
 // Category: Components
 // JSX element <ammeter> with AmmeterProps, required connections, name
@@ -659,15 +659,15 @@
 
   connections: Connections<AmmeterPinLabels>
 
-  color: string
+  color?: string
 
-  graphDisplayName: string
+  graphDisplayName?: string
 
-  graphCenter: number
+  graphCenter?: number
 
-  graphVerticalOffset: number | string
+  graphVerticalOffset?: number | string
 
-  graphCurrentPerDiv: number | string
+  graphCurrentPerDiv?: number | string
 
 // Category: Components
 // JSX element <voltageprobe> with VoltageProbeProps, required connectsTo
@@ -675,23 +675,23 @@
 
   connectsTo: string
 
-  referenceTo: string
+  referenceTo?: string
 
-  color: string
+  color?: string
 
-  graphDisplayName: string
+  graphDisplayName?: string
 
-  graphCenter: number
+  graphCenter?: number
 
-  graphVerticalOffset: number | string
+  graphVerticalOffset?: number | string
 
-  graphVoltagePerDiv: number | string
+  graphVoltagePerDiv?: number | string
 
 // Category: Components
 // JSX element <fiducial> with FiducialProps, required padDiameter, name
 <fiducial>: FiducialProps extends CommonComponentProps
 
-  soldermaskPullback: Distance
+  soldermaskPullback?: Distance
 
   padDiameter: Distance
 

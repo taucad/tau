@@ -27,13 +27,13 @@ AppParCurves: declare class AppParCurves
 
 AppParCurves_Constraint: typeof AppParCurves_Constraint[keyof typeof AppParCurves_Constraint]
 
-  AppParCurves_NoConstraint: 'AppParCurves_NoConstraint'
+  readonly AppParCurves_NoConstraint: 'AppParCurves_NoConstraint'
 
-  AppParCurves_PassPoint: 'AppParCurves_PassPoint'
+  readonly AppParCurves_PassPoint: 'AppParCurves_PassPoint'
 
-  AppParCurves_TangencyPoint: 'AppParCurves_TangencyPoint'
+  readonly AppParCurves_TangencyPoint: 'AppParCurves_TangencyPoint'
 
-  AppParCurves_CurvaturePoint: 'AppParCurves_CurvaturePoint'
+  readonly AppParCurves_CurvaturePoint: 'AppParCurves_CurvaturePoint'
 
 AppParCurves_ConstraintCouple: declare class AppParCurves_ConstraintCouple
 

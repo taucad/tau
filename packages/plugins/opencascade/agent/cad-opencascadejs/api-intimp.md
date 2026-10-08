@@ -4,10 +4,10 @@
 
 IntImp_ConstIsoparametric: typeof IntImp_ConstIsoparametric[keyof typeof IntImp_ConstIsoparametric]
 
-  IntImp_UIsoparametricOnCaro1: 'IntImp_UIsoparametricOnCaro1'
+  readonly IntImp_UIsoparametricOnCaro1: 'IntImp_UIsoparametricOnCaro1'
 
-  IntImp_VIsoparametricOnCaro1: 'IntImp_VIsoparametricOnCaro1'
+  readonly IntImp_VIsoparametricOnCaro1: 'IntImp_VIsoparametricOnCaro1'
 
-  IntImp_UIsoparametricOnCaro2: 'IntImp_UIsoparametricOnCaro2'
+  readonly IntImp_UIsoparametricOnCaro2: 'IntImp_UIsoparametricOnCaro2'
 
-  IntImp_VIsoparametricOnCaro2: 'IntImp_VIsoparametricOnCaro2'
+  readonly IntImp_VIsoparametricOnCaro2: 'IntImp_VIsoparametricOnCaro2'

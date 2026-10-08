@@ -28,45 +28,45 @@ ShapeProcess: declare class ShapeProcess
 
 ShapeProcess_Operation: typeof ShapeProcess_Operation[keyof typeof ShapeProcess_Operation]
 
-  First: 'First'
+  readonly First: 'First'
 
-  DirectFaces: 'DirectFaces'
+  readonly DirectFaces: 'DirectFaces'
 
-  SameParameter: 'SameParameter'
+  readonly SameParameter: 'SameParameter'
 
-  SetTolerance: 'SetTolerance'
+  readonly SetTolerance: 'SetTolerance'
 
-  SplitAngle: 'SplitAngle'
+  readonly SplitAngle: 'SplitAngle'
 
-  BSplineRestriction: 'BSplineRestriction'
+  readonly BSplineRestriction: 'BSplineRestriction'
 
-  ElementaryToRevolution: 'ElementaryToRevolution'
+  readonly ElementaryToRevolution: 'ElementaryToRevolution'
 
-  SweptToElementary: 'SweptToElementary'
+  readonly SweptToElementary: 'SweptToElementary'
 
-  SurfaceToBSpline: 'SurfaceToBSpline'
+  readonly SurfaceToBSpline: 'SurfaceToBSpline'
 
-  ToBezier: 'ToBezier'
+  readonly ToBezier: 'ToBezier'
 
-  SplitContinuity: 'SplitContinuity'
+  readonly SplitContinuity: 'SplitContinuity'
 
-  SplitClosedFaces: 'SplitClosedFaces'
+  readonly SplitClosedFaces: 'SplitClosedFaces'
 
-  FixWireGaps: 'FixWireGaps'
+  readonly FixWireGaps: 'FixWireGaps'
 
-  FixFaceSize: 'FixFaceSize'
+  readonly FixFaceSize: 'FixFaceSize'
 
-  DropSmallSolids: 'DropSmallSolids'
+  readonly DropSmallSolids: 'DropSmallSolids'
 
-  DropSmallEdges: 'DropSmallEdges'
+  readonly DropSmallEdges: 'DropSmallEdges'
 
-  FixShape: 'FixShape'
+  readonly FixShape: 'FixShape'
 
-  SplitClosedEdges: 'SplitClosedEdges'
+  readonly SplitClosedEdges: 'SplitClosedEdges'
 
-  SplitCommonVertex: 'SplitCommonVertex'
+  readonly SplitCommonVertex: 'SplitCommonVertex'
 
-  Last: 'Last'
+  readonly Last: 'Last'
 
 ShapeProcess_Context: declare class ShapeProcess_Context extends Standard_Transient
 

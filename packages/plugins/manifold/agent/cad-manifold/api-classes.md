@@ -5,20 +5,20 @@
 // The abstract class from which other classes inherit
 BaseGLTFNode: export declare abstract class BaseGLTFNode
 
-  name: string
+  name?: string
 
-  translation: Vec3 | ((t: number) => Vec3)
+  translation?: Vec3 | ((t: number) => Vec3)
 
   // From the reference frame of the model being rotated, rotations are applied in *z-y'-x"* order
   // Remarks: From the global reference frame, a model will be rotated in *x-y-z* order. That is about the global X axis, then global Y axis, and finally global Z. This matches the behaviour of `Manifold.rotate()`.
-  rotation: Vec3 | ((t: number) => Vec3)
+  rotation?: Vec3 | ((t: number) => Vec3)
 
-  scale: Vec3 | ((t: number) => Vec3)
+  scale?: Vec3 | ((t: number) => Vec3)
 
   // BaseGLTFNode.constructor (constructor)
   constructor(parent?: BaseGLTFNode);
 
-  parent
+  readonly parent: BaseGLTFNode | undefined
 
   // Does this node have any geometry that needs to be converted on export?
   // BaseGLTFNode.isEmpty (method)
@@ -189,9 +189,9 @@ CrossSection: export declare class CrossSection
 // Remarks: A CrossSection object is two dimensional. Attaching it as a node allows it to be included in the final exported file, complete with transformations. > [!NOTE] > > CrossSections are not -- and can never be -- manifold. That means > some exporters (like `.3mf`) will just skip over them entirely.
 CrossSectionGLTFNode: export declare class CrossSectionGLTFNode extends BaseGLTFNode
 
-  crossSection: CrossSection
+  crossSection?: CrossSection
 
-  material: GLTFMaterial
+  material?: GLTFMaterial
 
   // CrossSectionGLTFNode.constructor (constructor)
   constructor(parent?: BaseGLTFNode);
@@ -205,14 +205,14 @@ CrossSectionGLTFNode: export declare class CrossSectionGLTFNode extends BaseGLTF
 
   // Get the runID for this node
   // Remarks: We don't need these for regular operations, but they do help when converting to meshes for export.
-  runID
+  readonly runID: number
 
 // Position a manifold model for later export
 GLTFNode: export declare class GLTFNode extends BaseGLTFNode
 
-  manifold: Manifold
+  manifold?: Manifold
 
-  material: GLTFMaterial
+  material?: GLTFMaterial
 
   // GLTFNode.clone (method)
   clone(newParent?: BaseGLTFNode): GLTFNode;

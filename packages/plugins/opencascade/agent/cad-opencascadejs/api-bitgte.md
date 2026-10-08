@@ -90,17 +90,17 @@ BiTgte_Blend: declare class BiTgte_Blend
 
 BiTgte_ContactType: typeof BiTgte_ContactType[keyof typeof BiTgte_ContactType]
 
-  BiTgte_FaceFace: 'BiTgte_FaceFace'
+  readonly BiTgte_FaceFace: 'BiTgte_FaceFace'
 
-  BiTgte_FaceEdge: 'BiTgte_FaceEdge'
+  readonly BiTgte_FaceEdge: 'BiTgte_FaceEdge'
 
-  BiTgte_FaceVertex: 'BiTgte_FaceVertex'
+  readonly BiTgte_FaceVertex: 'BiTgte_FaceVertex'
 
-  BiTgte_EdgeEdge: 'BiTgte_EdgeEdge'
+  readonly BiTgte_EdgeEdge: 'BiTgte_EdgeEdge'
 
-  BiTgte_EdgeVertex: 'BiTgte_EdgeVertex'
+  readonly BiTgte_EdgeVertex: 'BiTgte_EdgeVertex'
 
-  BiTgte_VertexVertex: 'BiTgte_VertexVertex'
+  readonly BiTgte_VertexVertex: 'BiTgte_VertexVertex'
 
 BiTgte_CurveOnEdge: declare class BiTgte_CurveOnEdge extends Adaptor3d_Curve
 

@@ -191,19 +191,19 @@ Extrema_CurveTool: declare class Extrema_CurveTool
 
 Extrema_ElementType: typeof Extrema_ElementType[keyof typeof Extrema_ElementType]
 
-  Extrema_Node: 'Extrema_Node'
+  readonly Extrema_Node: 'Extrema_Node'
 
-  Extrema_UIsoEdge: 'Extrema_UIsoEdge'
+  readonly Extrema_UIsoEdge: 'Extrema_UIsoEdge'
 
-  Extrema_VIsoEdge: 'Extrema_VIsoEdge'
+  readonly Extrema_VIsoEdge: 'Extrema_VIsoEdge'
 
-  Extrema_Face: 'Extrema_Face'
+  readonly Extrema_Face: 'Extrema_Face'
 
 Extrema_ExtAlgo: typeof Extrema_ExtAlgo[keyof typeof Extrema_ExtAlgo]
 
-  Extrema_ExtAlgo_Grad: 'Extrema_ExtAlgo_Grad'
+  readonly Extrema_ExtAlgo_Grad: 'Extrema_ExtAlgo_Grad'
 
-  Extrema_ExtAlgo_Tree: 'Extrema_ExtAlgo_Tree'
+  readonly Extrema_ExtAlgo_Tree: 'Extrema_ExtAlgo_Tree'
 
 Extrema_ExtCC: declare class Extrema_ExtCC
 
@@ -496,11 +496,11 @@ Extrema_ExtElSS: declare class Extrema_ExtElSS
 
 Extrema_ExtFlag: typeof Extrema_ExtFlag[keyof typeof Extrema_ExtFlag]
 
-  Extrema_ExtFlag_MIN: 'Extrema_ExtFlag_MIN'
+  readonly Extrema_ExtFlag_MIN: 'Extrema_ExtFlag_MIN'
 
-  Extrema_ExtFlag_MAX: 'Extrema_ExtFlag_MAX'
+  readonly Extrema_ExtFlag_MAX: 'Extrema_ExtFlag_MAX'
 
-  Extrema_ExtFlag_MINMAX: 'Extrema_ExtFlag_MINMAX'
+  readonly Extrema_ExtFlag_MINMAX: 'Extrema_ExtFlag_MINMAX'
 
 Extrema_ExtPElC: declare class Extrema_ExtPElC
 

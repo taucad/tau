@@ -550,23 +550,23 @@ gp_Trsf2d: declare class gp_Trsf2d
 
 gp_TrsfForm: typeof gp_TrsfForm[keyof typeof gp_TrsfForm]
 
-  gp_Identity: 'gp_Identity'
+  readonly gp_Identity: 'gp_Identity'
 
-  gp_Rotation: 'gp_Rotation'
+  readonly gp_Rotation: 'gp_Rotation'
 
-  gp_Translation: 'gp_Translation'
+  readonly gp_Translation: 'gp_Translation'
 
-  gp_PntMirror: 'gp_PntMirror'
+  readonly gp_PntMirror: 'gp_PntMirror'
 
-  gp_Ax1Mirror: 'gp_Ax1Mirror'
+  readonly gp_Ax1Mirror: 'gp_Ax1Mirror'
 
-  gp_Ax2Mirror: 'gp_Ax2Mirror'
+  readonly gp_Ax2Mirror: 'gp_Ax2Mirror'
 
-  gp_Scale: 'gp_Scale'
+  readonly gp_Scale: 'gp_Scale'
 
-  gp_CompoundTrsf: 'gp_CompoundTrsf'
+  readonly gp_CompoundTrsf: 'gp_CompoundTrsf'
 
-  gp_Other: 'gp_Other'
+  readonly gp_Other: 'gp_Other'
 
 gp_Vec: declare class gp_Vec
 

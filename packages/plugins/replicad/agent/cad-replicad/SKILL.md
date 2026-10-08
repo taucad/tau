@@ -83,8 +83,6 @@ AxisName: (typeof AXIS_NAMES)[number]
 
 // Creates a box with the given corner points
 export declare function makeBox(corner1: Point, corner2: Point): Solid;
-
-export declare function makeFace(wire: Wire, holes?: Wire[]): Face;
 ```
 
 ### Classes
@@ -109,7 +107,7 @@ export declare class Sketch implements SketchInterface
           defaultOrigin?: Point;
           defaultDirection?: Point;
       });
-  baseFace
+  baseFace: Face | null | undefined
   delete(): void;
   clone(): Sketch;
   // Transforms the lines into a face
@@ -134,28 +132,30 @@ export declare class Sketch implements SketchInterface
   loftWith(otherSketches: this | this[], loftConfig?: LoftConfig, returnShell?: boolean): Shape3D;
   // … 2 more members in the API reference
 
+Shape3D: Shell | Solid | CompSolid | Compound
+
 export declare interface ExtrusionProfile
-  profile: "s-curve" | "linear"
-  endFactor: number
+  profile?: "s-curve" | "linear"
+  endFactor?: number
 
 export declare interface GenericSweepConfig
-  frenet: boolean
-  auxiliarySpine: Wire | Edge
-  law: null | Law_Function
-  transitionMode: "right" | "transformed" | "round"
-  withContact: boolean
-  support: TopoDS_Shape
-  forceProfileSpineOthogonality: boolean
+  frenet?: boolean
+  auxiliarySpine?: Wire | Edge
+  law?: null | Law_Function
+  transitionMode?: "right" | "transformed" | "round"
+  withContact?: boolean
+  support?: TopoDS_Shape
+  forceProfileSpineOthogonality?: boolean
 
 export declare interface LoftConfig
-  ruled: boolean
-  startPoint: Point
-  endPoint: Point
+  ruled?: boolean
+  startPoint?: Point
+  endPoint?: Point
 
 export declare class Drawing implements DrawingInterface
   constructor(innerShape?: Shape2D);
   clone(): Drawing;
-  boundingBox
+  readonly boundingBox: BoundingBox2d
   rotate(angle: number, center?: Point2D): Drawing;
   translate(xDist: number, yDist: number): Drawing;
   translate(translationVector: Point2D): Drawing;
@@ -180,7 +180,7 @@ export declare class Drawing implements DrawingInterface
   // Formats the drawing as a list of SVG paths
   toSVGPaths(): string[] | string[][];
   offset(distance: number, offsetConfig?: Offset2DConfig): Drawing;
-  blueprint
+  readonly blueprint: Blueprint
   // … 7 more members in the API reference
 
 Shape2D: Blueprint | Blueprints | CompoundBlueprint | null
@@ -210,6 +210,8 @@ export declare class EdgeFinder extends Finder3d<Edge>
 
 CurveType: "LINE" | "CIRCLE" | "ELLIPSE" | "HYPERBOLA" | "PARABOLA" | "BEZIER_CURVE" | "BSPLINE_CURVE" | "OFFSET_CURVE" | "OTHER_CURVE"
 
+AnyShape: Vertex | Edge | Wire | Face | Shell | Solid | CompSolid | Compound
+
 export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> implements Shape3DLike<Shape3D, ShapeMesh, AnyShape,
   // Builds a new shape out of the two, fused, shapes
   fuse(other: Shape3D, options?: BooleanOperationOptions): Shape3D;
@@ -236,7 +238,7 @@ export declare class _3DShape<Type extends TopoDS_Shape> extends Shape<Type> imp
   // … 3 more members in the API reference
 
 export declare interface BooleanOperationOptions
-  optimisation: "none" | "commonFace" | "sameFace"
+  optimisation?: "none" | "commonFace" | "sameFace"
 
 // A generic way to define radii for fillet or chamfer (the operation)
 RadiusConfig: ((e: Edge) => R | null) | R | {
@@ -281,9 +283,9 @@ export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type>
   mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): this;
   // Returns a scaled version of the shape
   scale(scale: number, center?: Point): this;
-  faces
-  wires
-  boundingBox
+  readonly faces: Face[]
+  readonly wires: Wire[]
+  readonly boundingBox: BoundingBox
   // … 11 more members in the API reference
 
 // Pieces grouped by their position relative to an oriented plane
@@ -377,27 +379,26 @@ export declare class Sketcher implements GenericSketcher<Sketch>
 export declare class BoundingBox extends WrappingObj<Bnd_Box>
   constructor(wrapped?: Bnd_Box);
   static fromBounds(min: Point, max: Point): BoundingBox;
-  repr
-  bounds
-  center
-  width
-  height
-  depth
+  readonly repr: string
+  readonly bounds: [SimplePoint, SimplePoint]
+  readonly center: SimplePoint
+  readonly width: number
+  readonly height: number
+  readonly depth: number
   add(other: BoundingBox): void;
   isOut(other: BoundingBox): boolean;
 
-// With a FaceFinder you can apply a set of filters to find specific faces…
-export declare class FaceFinder extends Finder3d<Face>
-  clone(): FaceFinder;
-  // Filter to find faces that are parallel to plane or another face
-  parallelTo(plane: Plane | StandardPlane | Face): this;
-  // Filter to find faces that are of a cetain surface type
-  ofSurfaceType(surfaceType: SurfaceType): this;
-  // Filter to find faces that are contained in a plane
-  inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
-  // Check if a particular element should be filtered or not according to the current…
-  shouldKeep(element: Face): boolean;
-  protected applyFilter(shape: AnyShape): Face[];
+export declare class BoundingBox2d extends WrappingObj<Bnd_Box2d>
+  constructor(wrapped?: Bnd_Box2d);
+  readonly repr: string
+  readonly bounds: [Point2D, Point2D]
+  readonly center: Point2D
+  readonly width: number
+  readonly height: number
+  outsidePoint(paddingPercent?: number): Point2D;
+  add(other: BoundingBox2d): void;
+  isOut(other: BoundingBox2d): boolean;
+  containsPoint(other: Point2D): boolean;
 ```
 
 ### Types
@@ -405,18 +406,16 @@ export declare class FaceFinder extends Finder3d<Face>
 ```ts
 ShapeConfig: {
   shape: AnyShape
-  color: string
-  alpha: number
-  name: string
+  color?: string
+  alpha?: number
+  name?: string
   // PBR metalness factor (0 = dielectric, 1 = metal)
-  metalness: number
+  metalness?: number
   // PBR roughness factor — threaded to GLTF only (not STEP
-  roughness: number
+  roughness?: number
   // Material density in g/cm3, written as the shape's STEP material
-  density: number
+  density?: number
 }
-
-Shape3D: Shell | Solid | CompSolid | Compound
 
 ManifoldBox: Box
   min: Vec3

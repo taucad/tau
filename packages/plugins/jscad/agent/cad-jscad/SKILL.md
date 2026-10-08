@@ -54,109 +54,109 @@ The symbols real Tau models use most, as verbatim declarations. Anything not sho
 ```ts
 primitives
   export interface ArcOptions
-    center: Vec2
-    radius: number
-    startAngle: number
-    endAngle: number
-    segments: number
-    makeTangent: boolean
+    center?: Vec2
+    radius?: number
+    startAngle?: number
+    endAngle?: number
+    segments?: number
+    makeTangent?: boolean
   declare function circle(options?: CircleOptions): Geom2
   export interface CircleOptions
-    center: Vec2
-    radius: number
-    startAngle: number
-    endAngle: number
-    segments: number
+    center?: Vec2
+    radius?: number
+    startAngle?: number
+    endAngle?: number
+    segments?: number
   declare function cube(options?: CubeOptions): Geom3
   export interface CubeOptions
-    center: Vec3
-    size: number
+    center?: Vec3
+    size?: number
   declare function cuboid(options?: CuboidOptions): Geom3
   export interface CuboidOptions
-    center: Vec3
-    size: Vec3
+    center?: Vec3
+    size?: Vec3
   declare function cylinder(options?: CylinderOptions): Geom3
   export interface CylinderOptions
-    center: Vec3
-    height: number
-    radius: number
-    segments: number
+    center?: Vec3
+    height?: number
+    radius?: number
+    segments?: number
   export interface CylinderEllipticOptions
-    center: Vec3
-    height: number
-    startRadius: [number, number]
-    startAngle: number
-    endRadius: [number, number]
-    endAngle: number
-    segments: number
+    center?: Vec3
+    height?: number
+    startRadius?: [number, number]
+    startAngle?: number
+    endRadius?: [number, number]
+    endAngle?: number
+    segments?: number
   export interface EllipseOptions
-    center: Vec2
-    radius: Vec2
-    startAngle: number
-    endAngle: number
-    segments: number
+    center?: Vec2
+    radius?: Vec2
+    startAngle?: number
+    endAngle?: number
+    segments?: number
   export interface EllipsoidOptions
-    center: Vec3
-    radius: Vec3
-    segments: number
-    axes: Vec3
+    center?: Vec3
+    radius?: Vec3
+    segments?: number
+    axes?: Vec3
   export interface GeodesicSphereOptions
-    radius: number
-    frequency: number
+    radius?: number
+    frequency?: number
   declare function polygon(options: PolygonOptions): Geom2
   export interface PolygonOptions
     points: Array<Vec2> | Array<Array<Vec2>>
-    paths: Array<number> | Array<Array<number>>
-    orientation: 'counterclockwise' | 'clockwise'
+    paths?: Array<number> | Array<Array<number>>
+    orientation?: 'counterclockwise' | 'clockwise'
   export interface PolyhedronOptions
     points: Array<Vec3>
     faces: Array<Array<number>>
-    colors: Array<RGB | RGBA>
-    orientation: 'outward' | 'inward'
+    colors?: Array<RGB | RGBA>
+    orientation?: 'outward' | 'inward'
   declare function rectangle(options?: RectangleOptions): Geom2
   export interface RectangleOptions
-    center: Vec2
-    size: Vec2
+    center?: Vec2
+    size?: Vec2
   export interface RoundedCuboidOptions
-    center: Vec3
-    size: Vec3
-    roundRadius: number
-    segments: number
+    center?: Vec3
+    size?: Vec3
+    roundRadius?: number
+    segments?: number
   export interface RoundedCylinderOptions
-    center: Vec3
-    height: number
-    radius: number
-    roundRadius: number
-    segments: number
+    center?: Vec3
+    height?: number
+    radius?: number
+    roundRadius?: number
+    segments?: number
   export interface RoundedRectangleOptions
-    center: Vec2
-    size: Vec2
-    roundRadius: number
-    segments: number
+    center?: Vec2
+    size?: Vec2
+    roundRadius?: number
+    segments?: number
   export interface SphereOptions
-    center: Vec3
-    radius: number
-    segments: number
-    axes: Vec3
+    center?: Vec3
+    radius?: number
+    segments?: number
+    axes?: Vec3
   export interface SquareOptions
-    center: Vec2
-    size: number
+    center?: Vec2
+    size?: number
   export interface StarOptions
-    center: Vec2
-    vertices: number
-    density: number
-    outerRadius: number
-    innerRadius: number
-    startAngle: number
+    center?: Vec2
+    vertices?: number
+    density?: number
+    outerRadius?: number
+    innerRadius?: number
+    startAngle?: number
   declare function torus(options?: TorusOptions): Geom3
   export interface TorusOptions
-    innerRadius: number
-    outerRadius: number
-    innerSegments: number
-    outerSegments: number
-    innerRotation: number
-    outerRotation: number
-    startAngle: number
+    innerRadius?: number
+    outerRadius?: number
+    innerSegments?: number
+    outerSegments?: number
+    innerRotation?: number
+    outerRotation?: number
+    startAngle?: number
   // … 15 more members in the API reference
 ```
 
@@ -213,21 +213,21 @@ extrusions
   declare function extrudeLinear(options: ExtrudeLinearOptions, geometry: Geometry): Geom3
   declare function extrudeLinear(options: ExtrudeLinearOptions, ...geometries: RecursiveArray<Geometry>): Geom3
   export interface ExtrudeLinearOptions
-    height: number
-    twistAngle: number
-    twistSteps: number
+    height?: number
+    twistAngle?: number
+    twistSteps?: number
   export interface ExtrudeRectangularOptions
-    size: number
-    height: number
-    corners: Corners
-    segments: number
+    size?: number
+    height?: number
+    corners?: Corners
+    segments?: number
   export interface ExtrudeHelicalOptions
-    angle: number
-    startAngle: number
-    pitch: number
-    height: number
-    endOffset: number
-    segmentsPerRotation: number
+    angle?: number
+    startAngle?: number
+    pitch?: number
+    height?: number
+    endOffset?: number
+    segmentsPerRotation?: number
   slice
     declare function calculatePlane(slice: Slice): Plane
     declare function clone(slice: Slice): Slice
@@ -304,20 +304,20 @@ text
     height: number
     segments: Array<Array<Vec2>>
   export interface VectorCharOptions
-    xOffset: number
-    yOffset: number
-    height: number
-    extrudeOffset: number
-    input: string
+    xOffset?: number
+    yOffset?: number
+    height?: number
+    extrudeOffset?: number
+    input?: string
   export interface VectorTextOptions
-    xOffset: number
-    yOffset: number
-    height: number
-    lineSpacing: number
-    letterSpacing: number
-    align: 'left' | 'center' | 'right'
-    extrudeOffset: number
-    input: string
+    xOffset?: number
+    yOffset?: number
+    height?: number
+    lineSpacing?: number
+    letterSpacing?: number
+    align?: 'left' | 'center' | 'right'
+    extrudeOffset?: number
+    input?: string
   // … 3 more members in the API reference
 ```
 

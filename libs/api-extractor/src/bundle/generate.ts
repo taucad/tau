@@ -21,7 +21,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { TauSkillsManifest } from '#bundle/bundle.types.js';
 import { doctrineFile, skillsManifestFile } from '#bundle/bundle.types.js';
@@ -254,10 +254,20 @@ export type BundleOwner = {
   readonly core?: CoreApiOptions;
 };
 
-/** An owner's committed usage ranking, when the collector has produced one. */
-const usageRanking = (slug: string): UsageRanking | undefined => {
+/**
+ * An owner's committed usage ranking. A core section without one would quietly
+ * fall back to its pins, so a missing file fails the generation instead.
+ *
+ * @param slug - The owner's skill slug.
+ * @returns The ranking committed under `src/generated/usage/`.
+ * @public
+ */
+export const usageRanking = (slug: string): UsageRanking => {
   const path = join(generatedRoot, 'usage', `${slug}.json`);
-  return existsSync(path) ? readJson<UsageRanking>(path) : undefined;
+  if (!existsSync(path)) {
+    throw new Error(`${slug} has a core section but no usage ranking; run nx run api-extractor:collect-usage`);
+  }
+  return readJson<UsageRanking>(path);
 };
 
 /** The import specifier a PicoVoxel declaration file belongs to, from its path in the package. */
@@ -673,7 +683,7 @@ export const generateBundles = async (
               : {
                   core: {
                     options: owner.core,
-                    ...(usageRanking(owner.slug) === undefined ? {} : { ranking: usageRanking(owner.slug) }),
+                    ranking: usageRanking(owner.slug),
                   },
                 }),
             ...(owner.supplementalApi === undefined
@@ -708,7 +718,7 @@ export const generateBundles = async (
   return generated;
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const generated = await generateBundles();
   for (const owner of generated) {
     console.log(

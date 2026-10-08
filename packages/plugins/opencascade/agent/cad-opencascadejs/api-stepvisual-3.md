@@ -76,11 +76,11 @@ StepVisual_StyledItemTarget: declare class StepVisual_StyledItemTarget extends S
 
 StepVisual_SurfaceSide: typeof StepVisual_SurfaceSide[keyof typeof StepVisual_SurfaceSide]
 
-  StepVisual_ssNegative: 'StepVisual_ssNegative'
+  readonly StepVisual_ssNegative: 'StepVisual_ssNegative'
 
-  StepVisual_ssPositive: 'StepVisual_ssPositive'
+  readonly StepVisual_ssPositive: 'StepVisual_ssPositive'
 
-  StepVisual_ssBoth: 'StepVisual_ssBoth'
+  readonly StepVisual_ssBoth: 'StepVisual_ssBoth'
 
 StepVisual_SurfaceSideStyle: declare class StepVisual_SurfaceSideStyle extends Standard_Transient
 

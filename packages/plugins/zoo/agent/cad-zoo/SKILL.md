@@ -300,6 +300,12 @@ faceId(
 
 // Stop KCL evaluation with a user-defined error
 fail(@msg: string): never
+
+// Specifies that the extrusion will be pulled into or pushed out of the existing…
+MERGE: string
+
+// Specifies that a new object is created during extrusion
+NEW: string
 ```
 
 ### std.solid
@@ -476,6 +482,9 @@ round(@input: number): number
 
 // Compute the tangent of a number
 tan(@num: number(Angle)): number
+
+// The value of `tau`, the full circle constant (τ)
+TAU: number
 ```
 
 ## API reference

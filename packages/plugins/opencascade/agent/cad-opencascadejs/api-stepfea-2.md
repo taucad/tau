@@ -665,7 +665,7 @@ StepFEA_SymmetricTensor43dMember: declare class StepFEA_SymmetricTensor43dMember
 
 StepFEA_UnspecifiedValue: typeof StepFEA_UnspecifiedValue[keyof typeof StepFEA_UnspecifiedValue]
 
-  StepFEA_Unspecified: 'StepFEA_Unspecified'
+  readonly StepFEA_Unspecified: 'StepFEA_Unspecified'
 
 StepFEA_Volume3dElementRepresentation: declare class StepFEA_Volume3dElementRepresentation extends StepFEA_ElementRepresentation
 

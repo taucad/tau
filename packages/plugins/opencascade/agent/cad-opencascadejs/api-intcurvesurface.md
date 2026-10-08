@@ -363,8 +363,8 @@ IntCurveSurface_TheQuadCurvFuncOfTheQuadCurvExactHInter: declare class IntCurveS
 
 IntCurveSurface_TransitionOnCurve: typeof IntCurveSurface_TransitionOnCurve[keyof typeof IntCurveSurface_TransitionOnCurve]
 
-  IntCurveSurface_Tangent: 'IntCurveSurface_Tangent'
+  readonly IntCurveSurface_Tangent: 'IntCurveSurface_Tangent'
 
-  IntCurveSurface_In: 'IntCurveSurface_In'
+  readonly IntCurveSurface_In: 'IntCurveSurface_In'
 
-  IntCurveSurface_Out: 'IntCurveSurface_Out'
+  readonly IntCurveSurface_Out: 'IntCurveSurface_Out'

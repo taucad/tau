@@ -469,11 +469,11 @@ Bnd_Range: declare class Bnd_Range
 
 Bnd_Range_IntersectStatus: typeof Bnd_Range_IntersectStatus[keyof typeof Bnd_Range_IntersectStatus]
 
-  IntersectStatus_Out: 'IntersectStatus_Out'
+  readonly IntersectStatus_Out: 'IntersectStatus_Out'
 
-  IntersectStatus_In: 'IntersectStatus_In'
+  readonly IntersectStatus_In: 'IntersectStatus_In'
 
-  IntersectStatus_Boundary: 'IntersectStatus_Boundary'
+  readonly IntersectStatus_Boundary: 'IntersectStatus_Boundary'
 
 Bnd_Sphere: declare class Bnd_Sphere
 

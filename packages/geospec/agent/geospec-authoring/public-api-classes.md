@@ -6,7 +6,7 @@
 GeoSpecModelLoadError: export declare class GeoSpecModelLoadError extends Error
 
   // Structured diagnostics explaining why model loading failed
-  diagnostics: readonly GeometryDiagnostic[]
+  readonly diagnostics: readonly GeometryDiagnostic[]
 
   // GeoSpecModelLoadError.constructor (constructor)
   constructor(diagnostics: readonly GeometryDiagnostic[]);
@@ -16,7 +16,7 @@ GeoSpecModelLoadError: export declare class GeoSpecModelLoadError extends Error
 // Remarks: Runner, CLI, and tool adapters unwrap this error to preserve structured diagnostics instead of collapsing them into a single string.
 GeoSpecAssertionError: export declare class GeoSpecAssertionError extends Error
 
-  diagnostics: readonly GeometryDiagnostic[]
+  readonly diagnostics: readonly GeometryDiagnostic[]
 
   // GeoSpecAssertionError.constructor (constructor)
   constructor(diagnostics: readonly GeometryDiagnostic[]);

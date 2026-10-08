@@ -30,11 +30,11 @@ LProp_BadContinuity: declare class LProp_BadContinuity extends Standard_Failure
 
 LProp_CIType: typeof LProp_CIType[keyof typeof LProp_CIType]
 
-  LProp_Inflection: 'LProp_Inflection'
+  readonly LProp_Inflection: 'LProp_Inflection'
 
-  LProp_MinCur: 'LProp_MinCur'
+  readonly LProp_MinCur: 'LProp_MinCur'
 
-  LProp_MaxCur: 'LProp_MaxCur'
+  readonly LProp_MaxCur: 'LProp_MaxCur'
 
 LProp_CLProps3d: declare class LProp_CLProps3d
 
@@ -218,10 +218,10 @@ LProp_SLProps3d: declare class LProp_SLProps3d
 
 LProp_Status: typeof LProp_Status[keyof typeof LProp_Status]
 
-  LProp_Undecided: 'LProp_Undecided'
+  readonly LProp_Undecided: 'LProp_Undecided'
 
-  LProp_Undefined: 'LProp_Undefined'
+  readonly LProp_Undefined: 'LProp_Undefined'
 
-  LProp_Defined: 'LProp_Defined'
+  readonly LProp_Defined: 'LProp_Defined'
 
-  LProp_Computed: 'LProp_Computed'
+  readonly LProp_Computed: 'LProp_Computed'

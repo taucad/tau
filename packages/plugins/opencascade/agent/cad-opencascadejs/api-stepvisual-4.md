@@ -81,13 +81,13 @@ StepVisual_TextOrCharacter: declare class StepVisual_TextOrCharacter extends Ste
 
 StepVisual_TextPath: typeof StepVisual_TextPath[keyof typeof StepVisual_TextPath]
 
-  StepVisual_tpUp: 'StepVisual_tpUp'
+  readonly StepVisual_tpUp: 'StepVisual_tpUp'
 
-  StepVisual_tpRight: 'StepVisual_tpRight'
+  readonly StepVisual_tpRight: 'StepVisual_tpRight'
 
-  StepVisual_tpDown: 'StepVisual_tpDown'
+  readonly StepVisual_tpDown: 'StepVisual_tpDown'
 
-  StepVisual_tpLeft: 'StepVisual_tpLeft'
+  readonly StepVisual_tpLeft: 'StepVisual_tpLeft'
 
 StepVisual_TextStyle: declare class StepVisual_TextStyle extends Standard_Transient
 

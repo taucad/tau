@@ -44,15 +44,15 @@ HatchGen_Domain: declare class HatchGen_Domain
 
 HatchGen_ErrorStatus: typeof HatchGen_ErrorStatus[keyof typeof HatchGen_ErrorStatus]
 
-  HatchGen_NoProblem: 'HatchGen_NoProblem'
+  readonly HatchGen_NoProblem: 'HatchGen_NoProblem'
 
-  HatchGen_TrimFailure: 'HatchGen_TrimFailure'
+  readonly HatchGen_TrimFailure: 'HatchGen_TrimFailure'
 
-  HatchGen_TransitionFailure: 'HatchGen_TransitionFailure'
+  readonly HatchGen_TransitionFailure: 'HatchGen_TransitionFailure'
 
-  HatchGen_IncoherentParity: 'HatchGen_IncoherentParity'
+  readonly HatchGen_IncoherentParity: 'HatchGen_IncoherentParity'
 
-  HatchGen_IncompatibleStates: 'HatchGen_IncompatibleStates'
+  readonly HatchGen_IncompatibleStates: 'HatchGen_IncompatibleStates'
 
 HatchGen_IntersectionPoint: declare class HatchGen_IntersectionPoint
 
@@ -109,13 +109,13 @@ HatchGen_IntersectionPoint: declare class HatchGen_IntersectionPoint
 
 HatchGen_IntersectionType: typeof HatchGen_IntersectionType[keyof typeof HatchGen_IntersectionType]
 
-  HatchGen_TRUE: 'HatchGen_TRUE'
+  readonly HatchGen_TRUE: 'HatchGen_TRUE'
 
-  HatchGen_TOUCH: 'HatchGen_TOUCH'
+  readonly HatchGen_TOUCH: 'HatchGen_TOUCH'
 
-  HatchGen_TANGENT: 'HatchGen_TANGENT'
+  readonly HatchGen_TANGENT: 'HatchGen_TANGENT'
 
-  HatchGen_UNDETERMINED: 'HatchGen_UNDETERMINED'
+  readonly HatchGen_UNDETERMINED: 'HatchGen_UNDETERMINED'
 
 HatchGen_PointOnElement: declare class HatchGen_PointOnElement extends HatchGen_IntersectionPoint
 

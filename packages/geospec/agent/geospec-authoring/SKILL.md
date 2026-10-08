@@ -65,7 +65,7 @@ export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
 
 // A model admitted by one live GeoSpec host scope
 GeoSpecSubject: {
-  [subjectBrand]: true
+  readonly [subjectBrand]: true
 }
 
 // Load a CAD model into GeoSpec evidence
@@ -74,17 +74,17 @@ export declare function loadModel<Code extends Record<string, string> = Record<s
 // Options accepted by {@link import ('./load-model.js').loadModel}
 LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadModelFileOptions
   // Geometry format to export
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
   // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
   // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Geometry formats accepted by {@link import ('./load-model.js').loadModel}
 GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
@@ -99,7 +99,7 @@ StepStreamingMode: 'auto' | 'native-stream' | 'filesystem'
 // Assertion chain returned by `expectGeo(subject)`
 GeoSpecMatcher: {
   // Core-owned negation
-  not: Omit<GeoSpecMatcher, 'not'>
+  readonly not: Omit<GeoSpecMatcher, 'not'>
   // Assert the fixed rational plate contract
   toSatisfyRationalPlate(): GeoSpecAssertion;
   // Assert the fixed parallel-plane distance contract
@@ -159,31 +159,31 @@ Vec3: readonly [number, number, number]
 
 // Bounding-box expectation accepted by `expectGeo(...).toHaveBoundingBox(...)`
 GeoSpecBoundingBoxExpectation: {
-  min: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
-  max: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
-  size: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
-  center: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
-  tolerance: number
+  min?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
+  max?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
+  size?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
+  center?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
+  tolerance?: number
 }
 
 // Connected-components expectation accepted by `expectGeo(...).toHaveConnectedComponents(...)`
 GeoSpecConnectedComponentsExpectation: {
   count: number
-  tolerance: number
-  toleranceMm: number
+  tolerance?: number
+  toleranceMm?: number
 }
 
 // Component-interference expectation accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
 GeoSpecComponentInterferenceExpectation: {
-  tolerance: number
-  pairs: GeoSpecComponentInterferencePairExpectation[]
-  allowances: GeoSpecComponentInterferenceAllowance[]
+  tolerance?: number
+  pairs?: GeoSpecComponentInterferencePairExpectation[]
+  allowances?: GeoSpecComponentInterferenceAllowance[]
 }
 
 // Assembly occurrence expectation accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)`
 GeoSpecAssemblyOccurrencesExpectation: {
   occurrences: GeoSpecAssemblyOccurrenceExpectation[]
-  uniqueNames: boolean
+  uniqueNames?: boolean
 }
 
 // Spatial relationship expectation accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
@@ -193,72 +193,72 @@ GeoSpecSpatialRelationshipsExpectation: {
 
 // Mesh integrity expectation accepted by `expectGeo(...).toHaveMeshIntegrity(...)`
 GeoSpecMeshIntegrityExpectation: {
-  finitePositions: boolean
-  degenerateTriangles: {
+  finitePositions?: boolean
+  degenerateTriangles?: {
           count?: number;
           maxCount?: number;
           areaTolerance?: number;
       }
-  duplicateFaces: {
+  duplicateFaces?: {
           count?: number;
           maxCount?: number;
       }
-  watertight: boolean
-  triangleCount: GeoSpecNumericExpectation
+  watertight?: boolean
+  triangleCount?: GeoSpecNumericExpectation
 }
 
 // Diagnostic severities rejected by `expectGeo(...).toHaveNoDiagnostics(...)`
 GeoSpecNoDiagnosticsExpectation: {
-  severities: Array<GeometryDiagnostic['severity']>
+  severities?: Array<GeometryDiagnostic['severity']>
 }
 
 // Surface-area expectation accepted by `expectGeo(...).toHaveSurfaceArea(...)`
 GeoSpecSurfaceAreaExpectation: {
   value: number | GeoSpecNumericExpectation
-  tolerance: number
+  tolerance?: number
 }
 
 // Volume expectation accepted by `expectGeo(...).toHaveVolume(...)`
 GeoSpecVolumeExpectation: {
   value: number | GeoSpecNumericExpectation
-  tolerance: number
+  tolerance?: number
 }
 
 // Mass expectation accepted by `expectGeo(...).toHaveMass(...)`
 GeoSpecMassExpectation: {
   value: number | GeoSpecNumericExpectation
-  density: number
-  tolerance: number
+  density?: number
+  tolerance?: number
 }
 
 // Center-of-mass expectation accepted by `expectGeo(...).toHaveCenterOfMass(...)`
 GeoSpecCenterOfMassExpectation: {
   point: GeoSpecPointExpectation
-  tolerance: number
+  tolerance?: number
 }
 
 // Exact BRep validity expectation accepted by `expectGeo(...).toBeValidBrep(...)`
 GeoSpecValidBrepExpectation: {
-  maxTolerance: number
-  freeBounds: {
+  maxTolerance?: number
+  freeBounds?: {
           count?: GeoSpecNumericExpectation;
       }
-  minEdgeLength: number
-  sameParameter: boolean
-  closedShells: boolean
-  closedWires: boolean
+  minEdgeLength?: number
+  sameParameter?: boolean
+  closedShells?: boolean
+  closedWires?: boolean
 }
 
 // Topology-count expectation accepted by `expectGeo(...).toHaveTopologyCounts(...)`
 GeoSpecTopologyCountsExpectation: {
-  vertices: GeoSpecNumericExpectation
-  edges: GeoSpecNumericExpectation
-  wires: GeoSpecNumericExpectation
-  faces: GeoSpecNumericExpectation
-  shells: GeoSpecNumericExpectation
-  solids: GeoSpecNumericExpectation
-  compounds: GeoSpecNumericExpectation
-  tolerance: number
+  vertices?: GeoSpecNumericExpectation
+  edges?: GeoSpecNumericExpectation
+  wires?: GeoSpecNumericExpectation
+  faces?: GeoSpecNumericExpectation
+  shells?: GeoSpecNumericExpectation
+  solids?: GeoSpecNumericExpectation
+  compounds?: GeoSpecNumericExpectation
+  tolerance?: number
 }
 
 // STEP unit expectation accepted by `expectGeo(...).toHaveStepUnits(...)`
@@ -268,62 +268,62 @@ GeoSpecStepUnitsExpectation: {
 
 // Product-structure expectation accepted by `expectGeo(...).toHaveProductStructure(...)`
 GeoSpecProductStructureExpectation: {
-  names: string[]
-  count: GeoSpecNumericExpectation
+  names?: string[]
+  count?: GeoSpecNumericExpectation
 }
 
 // Planar-face expectation accepted by `expectGeo(...).toHavePlanarFace(...)`
 GeoSpecPlanarFaceExpectation: {
   normal: GeoSpecPointExpectation
   offset: number
-  area: GeoSpecNumericExpectation
-  tolerance: number
+  area?: GeoSpecNumericExpectation
+  tolerance?: number
 }
 
 // Cylindrical-face expectation accepted by `expectGeo(...).toHaveCylindricalFace(...)`
 GeoSpecCylindricalFaceExpectation: {
   radius: number
   axis: 'x' | 'y' | 'z'
-  tolerance: number
+  tolerance?: number
 }
 
 // Circular-hole expectation accepted by `expectGeo(...).toHaveCircularHole(...)`
 GeoSpecCircularHoleExpectation: {
   diameter: number
-  through: boolean
-  axis: 'x' | 'y' | 'z'
-  center: GeoSpecPointExpectation
-  tolerance: number
+  through?: boolean
+  axis?: 'x' | 'y' | 'z'
+  center?: GeoSpecPointExpectation
+  tolerance?: number
 }
 
 // Circular-hole-pattern expectation accepted by `expectGeo(...).toHaveCircularHolePattern(...)`
 GeoSpecCircularHolePatternExpectation: {
   count: number
   holeDiameter: number
-  boltCircleDiameter: number
-  axis: 'x' | 'y' | 'z'
-  center: GeoSpecPointExpectation
-  tolerance: number
+  boltCircleDiameter?: number
+  axis?: 'x' | 'y' | 'z'
+  center?: GeoSpecPointExpectation
+  tolerance?: number
 }
 
 // Chamfer-feature expectation accepted by `expectGeo(...).toHaveChamferFeature(...)`
 GeoSpecChamferFeatureExpectation: {
   distance: number
-  selection: string
-  tolerance: number
+  selection?: string
+  tolerance?: number
 }
 
 // Fillet-feature expectation accepted by `expectGeo(...).toHaveFilletFeature(...)`
 GeoSpecFilletFeatureExpectation: {
   radius: number
-  selection: string
-  tolerance: number
+  selection?: string
+  tolerance?: number
 }
 
 // Minimum-wall-thickness expectation accepted by `expectGeo(...).toHaveMinimumWallThickness(...)`
 GeoSpecMinimumWallThicknessExpectation: {
   value: GeoSpecNumericExpectation
-  tolerance: number
+  tolerance?: number
 }
 
 // Void-continuity expectation accepted by `expectGeo(...).toHaveVoidContinuity(...)`
@@ -331,13 +331,13 @@ GeoSpecVoidContinuityExpectation: {
   // Ordered waypoints (>= 1) known to lie in the void being proven
   path: GeoSpecVoidWaypoint[]
   // Occurrence names whose solids bound the void
-  material: string[]
+  material?: string[]
   // Minimum required bottleneck cross-section (mm²), sampled
-  minCrossSection: number
+  minCrossSection?: number
   // Points that must NOT be reachable from the path void (isolation claim)
-  isolatedFrom: Vec3[]
+  isolatedFrom?: Vec3[]
   // Region bounded for the proof (subject frame)
-  bounds: {
+  bounds?: {
           min: Vec3;
           max: Vec3;
       }
@@ -345,9 +345,9 @@ GeoSpecVoidContinuityExpectation: {
 
 // Axis-keyed numeric expectation used by high-level geometry matchers
 GeoSpecAxisExpectation: {
-  x: number
-  y: number
-  z: number
+  x?: number
+  y?: number
+  z?: number
 }
 
 // Shared scalar expectation used by geometry measurements
@@ -367,18 +367,18 @@ GeoSpecComponentInterferencePairExpectation: {
 
 // Intentional component interference allowance accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
 GeoSpecComponentInterferenceAllowance: {
-  kind: 'intentionalInterference'
+  kind?: 'intentionalInterference'
   left: GeoSpecComponentSelector
   right: GeoSpecComponentSelector
-  maxVolume: number
+  maxVolume?: number
   reason: string
 }
 
 // Assembly occurrence rule accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)`
 GeoSpecAssemblyOccurrenceExpectation: {
   name: GeoSpecComponentSelector
-  count: GeoSpecNumericExpectation
-  bounds: {
+  count?: GeoSpecNumericExpectation
+  bounds?: {
           within?: GeoSpecComponentSelector;
           min?: Vec3 | GeoSpecAxisExpectation;
           max?: Vec3 | GeoSpecAxisExpectation;
@@ -389,21 +389,21 @@ GeoSpecAssemblyOccurrenceExpectation: {
 
 // One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
 GeoSpecSpatialRelationshipExpectation: {
-  id: string
+  id?: string
   kind: 'contact' | 'clearance' | 'coaxial' | 'concentric' | 'coplanar' | 'parallel' | 'perpendicular' | 'angle' | 'containment' | 'insertion' | 'interference'
   subject: GeoSpecGeometrySelector
   target: GeoSpecGeometrySelector
-  tolerance: number
-  angularToleranceDegrees: number
+  tolerance?: number
+  angularToleranceDegrees?: number
   // Expected angle in degrees for `kind
-  angleDegrees: number
+  angleDegrees?: number
   // Declared insertion axis (subject-frame direction) for `kind
-  axis: Vec3
-  min: number
-  max: number
-  minVolume: number
-  maxVolume: number
-  reason: string
+  axis?: Vec3
+  min?: number
+  max?: number
+  minVolume?: number
+  maxVolume?: number
+  reason?: string
 }
 
 // Shared scalar expectation used by geometry measurements
@@ -420,13 +420,13 @@ GeometryDiagnostic: {
   code: KernelIssueCode | (string & {})
   severity: 'error' | 'warning' | 'info'
   message: string
-  suggestion: string
-  spatial: {
+  suggestion?: string
+  spatial?: {
           min?: Vec3;
           max?: Vec3;
           center?: Vec3;
       }
-  details: unknown
+  details?: unknown
 }
 
 // Shared scalar expectation used by geometry measurements
@@ -476,6 +476,9 @@ GeoSpecNumericExpectation: number | {
     lessThan?: number;
     lessThanOrEqual?: number;
 }
+
+// Point expectation accepted by center and feature matchers
+GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
 
 // Point expectation accepted by center and feature matchers
 GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation

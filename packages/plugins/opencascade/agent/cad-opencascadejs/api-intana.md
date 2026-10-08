@@ -315,22 +315,22 @@ IntAna_Quadric: declare class IntAna_Quadric
 
 IntAna_ResultType: typeof IntAna_ResultType[keyof typeof IntAna_ResultType]
 
-  IntAna_Point: 'IntAna_Point'
+  readonly IntAna_Point: 'IntAna_Point'
 
-  IntAna_Line: 'IntAna_Line'
+  readonly IntAna_Line: 'IntAna_Line'
 
-  IntAna_Circle: 'IntAna_Circle'
+  readonly IntAna_Circle: 'IntAna_Circle'
 
-  IntAna_PointAndCircle: 'IntAna_PointAndCircle'
+  readonly IntAna_PointAndCircle: 'IntAna_PointAndCircle'
 
-  IntAna_Ellipse: 'IntAna_Ellipse'
+  readonly IntAna_Ellipse: 'IntAna_Ellipse'
 
-  IntAna_Parabola: 'IntAna_Parabola'
+  readonly IntAna_Parabola: 'IntAna_Parabola'
 
-  IntAna_Hyperbola: 'IntAna_Hyperbola'
+  readonly IntAna_Hyperbola: 'IntAna_Hyperbola'
 
-  IntAna_Empty: 'IntAna_Empty'
+  readonly IntAna_Empty: 'IntAna_Empty'
 
-  IntAna_Same: 'IntAna_Same'
+  readonly IntAna_Same: 'IntAna_Same'
 
-  IntAna_NoGeometricSolution: 'IntAna_NoGeometricSolution'
+  readonly IntAna_NoGeometricSolution: 'IntAna_NoGeometricSolution'

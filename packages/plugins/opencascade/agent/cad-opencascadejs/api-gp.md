@@ -1000,17 +1000,17 @@ gp_Dir: declare class gp_Dir
 
 gp_Dir_D: typeof gp_Dir_D[keyof typeof gp_Dir_D]
 
-  X: 'X'
+  readonly X: 'X'
 
-  Y: 'Y'
+  readonly Y: 'Y'
 
-  Z: 'Z'
+  readonly Z: 'Z'
 
-  NX: 'NX'
+  readonly NX: 'NX'
 
-  NY: 'NY'
+  readonly NY: 'NY'
 
-  NZ: 'NZ'
+  readonly NZ: 'NZ'
 
 gp_Dir2d: declare class gp_Dir2d
 
@@ -1102,13 +1102,13 @@ gp_Dir2d: declare class gp_Dir2d
 
 gp_Dir2d_D: typeof gp_Dir2d_D[keyof typeof gp_Dir2d_D]
 
-  X: 'X'
+  readonly X: 'X'
 
-  Y: 'Y'
+  readonly Y: 'Y'
 
-  NX: 'NX'
+  readonly NX: 'NX'
 
-  NY: 'NY'
+  readonly NY: 'NY'
 
 gp_Elips: declare class gp_Elips
 

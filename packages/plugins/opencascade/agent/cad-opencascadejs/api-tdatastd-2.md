@@ -357,11 +357,11 @@ TDataStd_RealArray: declare class TDataStd_RealArray extends TDF_Attribute
 
 TDataStd_RealEnum: typeof TDataStd_RealEnum[keyof typeof TDataStd_RealEnum]
 
-  TDataStd_SCALAR: 'TDataStd_SCALAR'
+  readonly TDataStd_SCALAR: 'TDataStd_SCALAR'
 
-  TDataStd_LENGTH: 'TDataStd_LENGTH'
+  readonly TDataStd_LENGTH: 'TDataStd_LENGTH'
 
-  TDataStd_ANGULAR: 'TDataStd_ANGULAR'
+  readonly TDataStd_ANGULAR: 'TDataStd_ANGULAR'
 
 TDataStd_RealList: declare class TDataStd_RealList extends TDF_Attribute
 

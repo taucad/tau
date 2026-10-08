@@ -4,33 +4,33 @@
 
 gce_ErrorType: typeof gce_ErrorType[keyof typeof gce_ErrorType]
 
-  gce_Done: 'gce_Done'
+  readonly gce_Done: 'gce_Done'
 
-  gce_ConfusedPoints: 'gce_ConfusedPoints'
+  readonly gce_ConfusedPoints: 'gce_ConfusedPoints'
 
-  gce_NegativeRadius: 'gce_NegativeRadius'
+  readonly gce_NegativeRadius: 'gce_NegativeRadius'
 
-  gce_ColinearPoints: 'gce_ColinearPoints'
+  readonly gce_ColinearPoints: 'gce_ColinearPoints'
 
-  gce_IntersectionError: 'gce_IntersectionError'
+  readonly gce_IntersectionError: 'gce_IntersectionError'
 
-  gce_NullAxis: 'gce_NullAxis'
+  readonly gce_NullAxis: 'gce_NullAxis'
 
-  gce_NullAngle: 'gce_NullAngle'
+  readonly gce_NullAngle: 'gce_NullAngle'
 
-  gce_NullRadius: 'gce_NullRadius'
+  readonly gce_NullRadius: 'gce_NullRadius'
 
-  gce_InvertAxis: 'gce_InvertAxis'
+  readonly gce_InvertAxis: 'gce_InvertAxis'
 
-  gce_BadAngle: 'gce_BadAngle'
+  readonly gce_BadAngle: 'gce_BadAngle'
 
-  gce_InvertRadius: 'gce_InvertRadius'
+  readonly gce_InvertRadius: 'gce_InvertRadius'
 
-  gce_NullFocusLength: 'gce_NullFocusLength'
+  readonly gce_NullFocusLength: 'gce_NullFocusLength'
 
-  gce_NullVector: 'gce_NullVector'
+  readonly gce_NullVector: 'gce_NullVector'
 
-  gce_BadEquation: 'gce_BadEquation'
+  readonly gce_BadEquation: 'gce_BadEquation'
 
 gce_MakeCirc: declare class gce_MakeCirc extends gce_Root
 

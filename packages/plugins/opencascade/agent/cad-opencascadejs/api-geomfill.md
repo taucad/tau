@@ -228,9 +228,9 @@ GeomFill_AppSweep: declare class GeomFill_AppSweep extends AppBlend_Approx
 
 GeomFill_ApproxStyle: typeof GeomFill_ApproxStyle[keyof typeof GeomFill_ApproxStyle]
 
-  GeomFill_Section: 'GeomFill_Section'
+  readonly GeomFill_Section: 'GeomFill_Section'
 
-  GeomFill_Location: 'GeomFill_Location'
+  readonly GeomFill_Location: 'GeomFill_Location'
 
 GeomFill_BSplineCurves: declare class GeomFill_BSplineCurves
 

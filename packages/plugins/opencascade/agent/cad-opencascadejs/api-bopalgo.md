@@ -1236,29 +1236,29 @@ BOPAlgo_CheckResult: declare class BOPAlgo_CheckResult
 
 BOPAlgo_CheckStatus: typeof BOPAlgo_CheckStatus[keyof typeof BOPAlgo_CheckStatus]
 
-  BOPAlgo_CheckUnknown: 'BOPAlgo_CheckUnknown'
+  readonly BOPAlgo_CheckUnknown: 'BOPAlgo_CheckUnknown'
 
-  BOPAlgo_BadType: 'BOPAlgo_BadType'
+  readonly BOPAlgo_BadType: 'BOPAlgo_BadType'
 
-  BOPAlgo_SelfIntersect: 'BOPAlgo_SelfIntersect'
+  readonly BOPAlgo_SelfIntersect: 'BOPAlgo_SelfIntersect'
 
-  BOPAlgo_TooSmallEdge: 'BOPAlgo_TooSmallEdge'
+  readonly BOPAlgo_TooSmallEdge: 'BOPAlgo_TooSmallEdge'
 
-  BOPAlgo_NonRecoverableFace: 'BOPAlgo_NonRecoverableFace'
+  readonly BOPAlgo_NonRecoverableFace: 'BOPAlgo_NonRecoverableFace'
 
-  BOPAlgo_IncompatibilityOfVertex: 'BOPAlgo_IncompatibilityOfVertex'
+  readonly BOPAlgo_IncompatibilityOfVertex: 'BOPAlgo_IncompatibilityOfVertex'
 
-  BOPAlgo_IncompatibilityOfEdge: 'BOPAlgo_IncompatibilityOfEdge'
+  readonly BOPAlgo_IncompatibilityOfEdge: 'BOPAlgo_IncompatibilityOfEdge'
 
-  BOPAlgo_IncompatibilityOfFace: 'BOPAlgo_IncompatibilityOfFace'
+  readonly BOPAlgo_IncompatibilityOfFace: 'BOPAlgo_IncompatibilityOfFace'
 
-  BOPAlgo_OperationAborted: 'BOPAlgo_OperationAborted'
+  readonly BOPAlgo_OperationAborted: 'BOPAlgo_OperationAborted'
 
-  BOPAlgo_GeomAbs_C0: 'BOPAlgo_GeomAbs_C0'
+  readonly BOPAlgo_GeomAbs_C0: 'BOPAlgo_GeomAbs_C0'
 
-  BOPAlgo_InvalidCurveOnSurface: 'BOPAlgo_InvalidCurveOnSurface'
+  readonly BOPAlgo_InvalidCurveOnSurface: 'BOPAlgo_InvalidCurveOnSurface'
 
-  BOPAlgo_NotValid: 'BOPAlgo_NotValid'
+  readonly BOPAlgo_NotValid: 'BOPAlgo_NotValid'
 
 BOPAlgo_CheckerSI: declare class BOPAlgo_CheckerSI extends BOPAlgo_Algo
 
@@ -1279,11 +1279,11 @@ BOPAlgo_CheckerSI: declare class BOPAlgo_CheckerSI extends BOPAlgo_Algo
 
 BOPAlgo_GlueEnum: typeof BOPAlgo_GlueEnum[keyof typeof BOPAlgo_GlueEnum]
 
-  BOPAlgo_GlueOff: 'BOPAlgo_GlueOff'
+  readonly BOPAlgo_GlueOff: 'BOPAlgo_GlueOff'
 
-  BOPAlgo_GlueShift: 'BOPAlgo_GlueShift'
+  readonly BOPAlgo_GlueShift: 'BOPAlgo_GlueShift'
 
-  BOPAlgo_GlueFull: 'BOPAlgo_GlueFull'
+  readonly BOPAlgo_GlueFull: 'BOPAlgo_GlueFull'
 
 BOPAlgo_MakeConnected: declare class BOPAlgo_MakeConnected extends BOPAlgo_Options
 

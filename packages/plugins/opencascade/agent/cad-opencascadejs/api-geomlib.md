@@ -201,13 +201,13 @@ GeomLib_Interpolate: declare class GeomLib_Interpolate
 
 GeomLib_InterpolationErrors: typeof GeomLib_InterpolationErrors[keyof typeof GeomLib_InterpolationErrors]
 
-  GeomLib_NoError: 'GeomLib_NoError'
+  readonly GeomLib_NoError: 'GeomLib_NoError'
 
-  GeomLib_NotEnoughtPoints: 'GeomLib_NotEnoughtPoints'
+  readonly GeomLib_NotEnoughtPoints: 'GeomLib_NotEnoughtPoints'
 
-  GeomLib_DegreeSmallerThan3: 'GeomLib_DegreeSmallerThan3'
+  readonly GeomLib_DegreeSmallerThan3: 'GeomLib_DegreeSmallerThan3'
 
-  GeomLib_InversionProblem: 'GeomLib_InversionProblem'
+  readonly GeomLib_InversionProblem: 'GeomLib_InversionProblem'
 
 GeomLib_IsPlanarSurface: declare class GeomLib_IsPlanarSurface
 

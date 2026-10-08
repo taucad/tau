@@ -1108,23 +1108,23 @@ Transfer_SimpleBinderOfTransient: declare class Transfer_SimpleBinderOfTransient
 
 Transfer_StatusExec: typeof Transfer_StatusExec[keyof typeof Transfer_StatusExec]
 
-  Transfer_StatusInitial: 'Transfer_StatusInitial'
+  readonly Transfer_StatusInitial: 'Transfer_StatusInitial'
 
-  Transfer_StatusRun: 'Transfer_StatusRun'
+  readonly Transfer_StatusRun: 'Transfer_StatusRun'
 
-  Transfer_StatusDone: 'Transfer_StatusDone'
+  readonly Transfer_StatusDone: 'Transfer_StatusDone'
 
-  Transfer_StatusError: 'Transfer_StatusError'
+  readonly Transfer_StatusError: 'Transfer_StatusError'
 
-  Transfer_StatusLoop: 'Transfer_StatusLoop'
+  readonly Transfer_StatusLoop: 'Transfer_StatusLoop'
 
 Transfer_StatusResult: typeof Transfer_StatusResult[keyof typeof Transfer_StatusResult]
 
-  Transfer_StatusVoid: 'Transfer_StatusVoid'
+  readonly Transfer_StatusVoid: 'Transfer_StatusVoid'
 
-  Transfer_StatusDefined: 'Transfer_StatusDefined'
+  readonly Transfer_StatusDefined: 'Transfer_StatusDefined'
 
-  Transfer_StatusUsed: 'Transfer_StatusUsed'
+  readonly Transfer_StatusUsed: 'Transfer_StatusUsed'
 
 Transfer_TransferDeadLoop: declare class Transfer_TransferDeadLoop extends Transfer_TransferFailure
 

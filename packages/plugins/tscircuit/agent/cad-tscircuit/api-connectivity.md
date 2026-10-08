@@ -6,46 +6,46 @@
 // JSX element <port> with PortProps
 <port>: PortProps extends CommonLayoutProps
 
-  name: string
+  name?: string
 
-  connectsTo: string | string[]
+  connectsTo?: string | string[]
 
-  layers: string[]
+  layers?: string[]
 
-  direction: "up" | "down" | "left" | "right"
+  direction?: "up" | "down" | "left" | "right"
 
-  pinNumber: number
+  pinNumber?: number
 
-  schStemLength: number
+  schStemLength?: number
 
-  schPinLabelFontSize: string | number
+  schPinLabelFontSize?: string | number
 
-  aliases: string[]
+  aliases?: string[]
 
-  kicadPinMetadata: {electricalType?: "input" | "output" | "bidirectional" | "tri_state" | "passive" | "free" | "unspecified" | "power_in" | "power_out" | "open_collector" | "open_emitter" | "no_connect" | undefined; graphicStyle?: "line" | "inverted" | "clock" | "inverted_clock" | "input_low" | "clock_low" | "output_low" | "falling_edge_clock" | "nonlogic" | undefined; pinLength?: string | number | undefined; nameTextSize?: string | number | undefined; numberTextSize?: string | number | undefined; }
+  kicadPinMetadata?: {electricalType?: "input" | "output" | "bidirectional" | "tri_state" | "passive" | "free" | "unspecified" | "power_in" | "power_out" | "open_collector" | "open_emitter" | "no_connect" | undefined; graphicStyle?: "line" | "inverted" | "clock" | "inverted_clock" | "input_low" | "clock_low" | "output_low" | "falling_edge_clock" | "nonlogic" | undefined; pinLength?: string | number | undefined; nameTextSize?: string | number | undefined; numberTextSize?: string | number | undefined; }
 
-  hasInversionCircle: boolean
+  hasInversionCircle?: boolean
 
 // Category: Connectivity
 // JSX element <netlabel> with NetLabelProps
 <netlabel>: NetLabelProps
 
-  net: string
+  net?: string
 
-  connection: string
+  connection?: string
 
-  connectsTo: string | string[]
+  connectsTo?: string | string[]
 
   // Render the net name along its schematic trace instead of as an anchored label
-  inline: boolean
+  inline?: boolean
 
-  schX: number | string
+  schX?: number | string
 
-  schY: number | string
+  schY?: number | string
 
-  schRotation: number | string
+  schRotation?: number | string
 
-  anchorSide: "left" | "top" | "right" | "bottom"
+  anchorSide?: "left" | "top" | "right" | "bottom"
 
 // Category: Connectivity
 // JSX element <net> with NetProps, required name
@@ -53,17 +53,17 @@
 
   name: string
 
-  connectsTo: string | string[]
+  connectsTo?: string | string[]
 
-  routingPhaseIndex: number | null
+  routingPhaseIndex?: number | null
 
-  highlightColor: string
+  highlightColor?: string
 
-  isPowerNet: boolean
+  isPowerNet?: boolean
 
-  isGroundNet: boolean
+  isGroundNet?: boolean
 
-  nominalTraceWidth: Distance
+  nominalTraceWidth?: Distance
 
 // Category: Connectivity
 // JSX element <trace> with TraceProps
@@ -71,39 +71,39 @@
 
   path: (string | {getPortSelector: () => string; })[]
 
-  width: string | number
+  width?: string | number
 
-  name: string
+  name?: string
 
-  connectsTo: string | string[]
+  connectsTo?: string | string[]
 
-  thickness: string | number
+  thickness?: string | number
 
-  highlightColor: string
+  highlightColor?: string
 
-  displayName: string
+  displayName?: string
 
-  routingPhaseIndex: number | null
+  routingPhaseIndex?: number | null
 
-  maxLength: string | number
+  maxLength?: string | number
 
-  pcbPath: (string | {x: string | number; y: string | number; via?: boolean | undefined; fromLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; toLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; })[]
+  pcbPath?: (string | {x: string | number; y: string | number; via?: boolean | undefined; fromLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; toLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; })[]
 
-  schematicRouteHints: {x: string | number; y: string | number; }[]
+  schematicRouteHints?: {x: string | number; y: string | number; }[]
 
-  pcbRouteHints: {x: string | number; y: string | number; via?: boolean | undefined; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; trace_width?: string | number | undefined; }[]
+  pcbRouteHints?: {x: string | number; y: string | number; via?: boolean | undefined; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; trace_width?: string | number | undefined; }[]
 
-  pcbPathRelativeTo: string
+  pcbPathRelativeTo?: string
 
-  pcbPaths: (string | {x: string | number; y: string | number; via?: boolean | undefined; fromLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; toLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; })[][]
+  pcbPaths?: (string | {x: string | number; y: string | number; via?: boolean | undefined; fromLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; toLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; })[][]
 
-  pcbStraightLine: boolean
+  pcbStraightLine?: boolean
 
-  schDisplayLabel: string
+  schDisplayLabel?: string
 
-  schStroke: string
+  schStroke?: string
 
-  maxViaCount: number
+  maxViaCount?: number
 
   from: string | {getPortSelector: () => string; }
 
@@ -117,37 +117,37 @@
 // JSX element <bus> with BusProps, required connections
 <bus>: BusProps
 
-  name: string
+  name?: string
 
   // One or more trace names or port selectors for the connections in the bus
   connections: string[]
 
   // If set, every trace in this bus is assigned to this autorouting phase
-  routingPhaseIndex: number | null
+  routingPhaseIndex?: number | null
 
   // Maximum routed-length difference between bus members
-  maxLengthSkew: number | string
+  maxLengthSkew?: number | string
 
   // Intended single-ended characteristic impedance
-  targetImpedance: number | string
+  targetImpedance?: number | string
 
   // Explicit PCB trace width for every bus member
-  pcbTraceWidth: number | string
+  pcbTraceWidth?: number | string
 
   // PCB layers on which the bus may be routed
-  pcbAllowedLayers: LayerRefInput[]
+  pcbAllowedLayers?: LayerRefInput[]
 
   // Preferred PCB layer for routing the bus
-  preferredLayer: LayerRefInput
+  preferredLayer?: LayerRefInput
 
   // Preferred PCB layers for routing the bus, in priority order
-  preferredLayers: LayerRefInput[]
+  preferredLayers?: LayerRefInput[]
 
 // Category: Connectivity
 // JSX element <differentialpair> with DifferentialPairProps, required positiveConnection, negativeConnection
 <differentialpair>: DifferentialPairProps
 
-  name: string
+  name?: string
 
   // Name of the trace or pin carrying the positive signal
   positiveConnection: string
@@ -156,30 +156,30 @@
   negativeConnection: string
 
   // Maximum permitted routed-length skew
-  maxLengthSkew: number | string
+  maxLengthSkew?: number | string
 
   // Intended differential characteristic impedance
-  targetDifferentialImpedance: number | string
+  targetDifferentialImpedance?: number | string
 
   // Edge-to-edge PCB copper gap between the pair
-  pcbTraceGap: number | string
+  pcbTraceGap?: number | string
 
   // Maximum length over which the pair may be routed without coupling
-  maxUncoupledLength: number | string
+  maxUncoupledLength?: number | string
 
 // Category: Connectivity
 // JSX element <tracehint> with TraceHintProps
 <tracehint>: TraceHintProps
 
-  offset: {x: string | number; y: string | number; via?: boolean | undefined; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; trace_width?: string | number | undefined; } | {x: string | number; y: string | number; via?: boolean | undefined; toLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; }
+  offset?: {x: string | number; y: string | number; via?: boolean | undefined; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; trace_width?: string | number | undefined; } | {x: string | number; y: string | number; via?: boolean | undefined; toLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; }
 
-  offsets: {x: string | number; y: string | number; via?: boolean | undefined; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; trace_width?: string | number | undefined; }[] | {x: string | number; y: string | number; via?: boolean | undefined; toLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; }[]
+  offsets?: {x: string | number; y: string | number; via?: boolean | undefined; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; trace_width?: string | number | undefined; }[] | {x: string | number; y: string | number; via?: boolean | undefined; toLayer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; }[]
 
-  for: string
+  for?: string
 
-  order: number
+  order?: number
 
-  traceWidth: number
+  traceWidth?: number
 
 // Category: Connectivity
 // JSX element <pcbtrace> with PcbTraceProps, required route
@@ -187,6 +187,6 @@
 
   route: {x: string | number; y: string | number; via?: boolean | undefined; to_layer?: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8" | {name: "top" | "bottom" | "inner1" | "inner2" | "inner3" | "inner4" | "inner5" | "inner6" | "inner7" | "inner8"; } | undefined; trace_width?: string | number | undefined; }[]
 
-  thickness: string | number
+  thickness?: string | number
 
-  layer: string
+  layer?: string

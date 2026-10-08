@@ -157,6 +157,54 @@ describe('renderCoreApi', () => {
     expect(core?.markdown).not.toContain('export declare interface DrawingInterface');
   });
 
+  it('should still show an interface when the class implementing it does not fit', () => {
+    const shapes = createApiCorpus(metadata, [
+      {
+        name: 'Drawing',
+        kind: 'class',
+        type: { text: 'export declare class Drawing implements DrawingInterface' },
+        members: manyMembers,
+      },
+      {
+        name: 'DrawingInterface',
+        kind: 'interface',
+        type: { text: 'export declare interface DrawingInterface' },
+        members: [
+          { name: 'cut', kind: 'method', signatures: [{ parameters: [], text: 'cut(other: Drawing): Drawing;' }] },
+        ],
+      },
+    ]);
+    const core = renderCoreApi([{ corpus: shapes, groupBy }], ranking({ [idOf('DrawingInterface.cut')]: 4 }), {
+      budgetTokens: 140,
+      pins: ['Drawing.*'],
+    });
+
+    expect(core?.markdown).not.toContain('class Drawing');
+    expect(core?.markdown).toContain('export declare interface DrawingInterface\n  cut(other: Drawing): Drawing;');
+  });
+
+  it("should print a property's modifiers and leave out members with nothing to show", () => {
+    const nodes = createApiCorpus(metadata, [
+      {
+        name: 'GLTFNode',
+        kind: 'class',
+        type: { text: 'export declare class GLTFNode' },
+        members: [
+          { name: 'material', kind: 'property', optional: true, type: { text: 'GLTFMaterial' } },
+          { name: 'name', kind: 'property', readonly: true, type: { text: 'string' } },
+          { name: 'count', kind: 'property', static: true, type: { text: 'number' } },
+          { name: 'parent', kind: 'property' },
+        ],
+      },
+    ]);
+    const core = renderCoreApi([{ corpus: nodes, groupBy }], ranking({ [idOf('GLTFNode')]: 1 }), {
+      budgetTokens: 4000,
+    });
+
+    expect(core?.markdown).toContain('  material?: GLTFMaterial\n  readonly name: string\n  static count: number');
+    expect(core?.markdown).not.toMatch(/^ {2}parent$/mu);
+  });
+
   it('should show the fields of a small record nested in a namespace', () => {
     const jscad = createApiCorpus(metadata, [
       {

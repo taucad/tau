@@ -336,6 +336,14 @@ const memberName = (node: ts.ClassElement | ts.TypeElement): string => {
   return node.name === undefined ? '' : node.name.getText(node.getSourceFile());
 };
 
+/** A property's declared type: its annotation, a getter's return type or a setter's parameter type. */
+const propertyType = (node: ts.ClassElement | ts.TypeElement): ts.TypeNode | undefined => {
+  if (ts.isPropertyDeclaration(node) || ts.isPropertySignature(node) || ts.isGetAccessorDeclaration(node)) {
+    return node.type;
+  }
+  return ts.isSetAccessorDeclaration(node) ? node.parameters[0]?.type : undefined;
+};
+
 const memberEntries = (
   nodes: ReadonlyArray<ts.ClassElement | ts.TypeElement>,
   path: string,
@@ -361,7 +369,10 @@ const memberEntries = (
       continue;
     }
 
-    const declaredType = ts.isPropertyDeclaration(node) || ts.isPropertySignature(node) ? node.type : undefined;
+    const declaredType = propertyType(node);
+    const getterOnly =
+      ts.isGetAccessorDeclaration(node) &&
+      !nodes.some((other) => ts.isSetAccessorDeclaration(other) && memberName(other) === name);
     const draft: ApiEntryDraft = {
       name,
       kind,
@@ -376,6 +387,10 @@ const memberEntries = (
       ...(declaredType === undefined ? {} : { type: typeRef(declaredType.getText(node.getSourceFile())) }),
       visibility: (flags & ts.ModifierFlags.Protected) === 0 ? 'public' : 'protected',
       ...((flags & ts.ModifierFlags.Static) === 0 ? {} : { static: true }),
+      ...((ts.isPropertyDeclaration(node) || ts.isPropertySignature(node)) && node.questionToken !== undefined
+        ? { optional: true }
+        : {}),
+      ...((flags & ts.ModifierFlags.Readonly) !== 0 || getterOnly ? { readonly: true } : {}),
       source: sourceOf(node, rootDirectory),
       languageSpecific: { language: 'typescript' },
     };
@@ -458,6 +473,21 @@ const ownDeclarations = (symbol: ts.Symbol, program: ts.Program): ts.Declaration
     return !program.isSourceFileDefaultLibrary(file);
   });
 
+/** Whether a type alias is derived from its same-named value, as in `type E = typeof E[keyof typeof E]`. */
+const aliasesOwnValue = (alias: ts.TypeAliasDeclaration): boolean => {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (ts.isTypeQueryNode(node) && node.exprName.getText(alias.getSourceFile()) === alias.name.text) {
+      found = true;
+    }
+    if (!found) {
+      ts.forEachChild(node, visit);
+    }
+  };
+  visit(alias.type);
+  return found;
+};
+
 const entryOf = (
   symbol: ts.Symbol,
   location: { readonly name: string; readonly path: string | undefined },
@@ -497,9 +527,10 @@ const entryOf = (
     }
     if (ts.isTypeAliasDeclaration(primary) || ts.isVariableDeclaration(primary)) {
       // `type E = typeof E[keyof typeof E]` beside `const E = {…}`: the values live on the const.
-      const valueTwin = ts.isTypeAliasDeclaration(primary)
-        ? declarations.find((declaration) => ts.isVariableDeclaration(declaration))
-        : undefined;
+      const valueTwin =
+        ts.isTypeAliasDeclaration(primary) && aliasesOwnValue(primary)
+          ? declarations.find((declaration) => ts.isVariableDeclaration(declaration))
+          : undefined;
       const nodes = checker
         .getTypeAtLocation(valueTwin ?? primary)
         .getProperties()

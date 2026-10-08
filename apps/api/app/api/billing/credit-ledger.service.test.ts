@@ -46,7 +46,7 @@ describe('recordSettledGenAiUsage', () => {
       7n,
     );
 
-    expect(metrics.genAiCost.add).toHaveBeenCalledExactlyOnceWith(0.000_007, attributes);
+    expect(metrics.genAiCost.add).toHaveBeenCalledExactlyOnceWith(7e-6, attributes);
     expect(metrics.genAiTokenUsage.record).not.toHaveBeenCalled();
   });
 });

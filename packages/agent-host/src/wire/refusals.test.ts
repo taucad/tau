@@ -6,6 +6,8 @@ import type { EventLogErrorCode } from '#log/event-log-error.js';
 import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
 import type { ExternalAgentRefusalCode, ExternalAgentStopCode } from '#wire/external-agent.schema.js';
 import type { GatewayErrorCode } from '#wire/gateway.js';
+import { isResumableRunFailure } from '#log/resumable.js';
+import { gatewayErrorCodes } from '#wire/gateway.js';
 import { isResumable, refusalOf, refusals } from '#wire/refusals.js';
 import type { RefusalCode } from '#wire/refusals.js';
 
@@ -73,5 +75,18 @@ describe('the refusal registry (D11, I17)', () => {
     for (const retired of ['LAUNCHER_CLOSED', 'INTERRUPT_NOT_FOUND', 'LEADER_RESPONSE_TIMEOUT', 'WORKER_CRASHED']) {
       expect(Object.hasOwn(refusals, retired)).toBe(false);
     }
+  });
+});
+
+describe('the route and account denials (W6, W11a)', () => {
+  it.each([
+    ['MODEL_ROUTE_PAUSED', 503],
+    ['BILLING_ACCOUNT_RESTRICTED', 403],
+  ] as const)('should register %s as a gateway code no resume continues', (code, status) => {
+    expect(gatewayErrorCodes).toContain(code);
+    expect(refusalOf(code)).toEqual({ owner: 'gateway', retry: 'never' });
+    expect(isResumable(code)).toBe(false);
+    expect(isResumableRunFailure({ code, message: `fixture ${code}`, status })).toBe(false);
+    expect(resumableFailureCodes).not.toContain(code);
   });
 });

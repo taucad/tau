@@ -9,6 +9,7 @@ import { reduceEventLog } from '#log/reducer.js';
 import {
   createCachedSystemPromptBlocks,
   createGatewayModelTransport as createGatewayModelTransportWithModel,
+  GatewayModelTransportError,
 } from '#transport/gateway-model-transport.js';
 import type { GatewayModelTransportOptions } from '#transport/gateway-model-transport.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
@@ -893,6 +894,9 @@ describe('createGatewayModelTransport', () => {
       await expect(
         refused({ type: 'error', error: { type: 'ORIGIN_NOT_ALLOWED', message: 'origin' } }),
       ).rejects.toMatchObject({ code: 'ORIGIN_NOT_ALLOWED', status: 403 });
+      await expect(
+        refused({ type: 'error', error: { type: 'BILLING_ACCOUNT_RESTRICTED', message: 'restricted' } }),
+      ).rejects.toMatchObject({ code: 'BILLING_ACCOUNT_RESTRICTED', status: 403 });
       await expect(refused({ message: 'Forbidden' })).rejects.toMatchObject({
         code: 'UNKNOWN_GATEWAY_ERROR',
         status: 403,
@@ -2035,6 +2039,52 @@ describe('createGatewayModelTransport', () => {
       message: 'This Tau billing account is closed.',
       status: 403,
     });
+  });
+
+  /* The route and account denials (W6, W11a) cross the transport as the gateway sent them: the code and its details
+   * decide the card, so neither may be reread from the status. */
+  it.each([
+    {
+      code: 'MODEL_ROUTE_PAUSED',
+      status: 503,
+      message: "This model route is paused by Tau's operators.",
+      details: { routeId: 'fixture-route' },
+    },
+    {
+      code: 'BILLING_ACCOUNT_RESTRICTED',
+      status: 403,
+      message: 'This Tau billing account is restricted.',
+      details: undefined,
+    },
+  ] as const)('should pass a $code refusal through with its code and details unchanged', async (refusal) => {
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              type: 'error',
+              error: {
+                type: refusal.code,
+                message: refusal.message,
+                ...(refusal.details === undefined ? {} : { details: refusal.details }),
+              },
+            }),
+            { status: refusal.status, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    });
+
+    const refused = collect(transport.stream(request()));
+    await expect(refused).rejects.toBeInstanceOf(GatewayModelTransportError);
+    await expect(refused).rejects.toMatchObject({
+      name: 'GatewayModelTransportError',
+      code: refusal.code,
+      message: refusal.message,
+      status: refusal.status,
+      rawType: undefined,
+    });
+    await expect(refused).rejects.toHaveProperty('details', refusal.details);
   });
 
   it('should read an oversized request as REQUEST_TOO_LARGE, enveloped or bare', async () => {

@@ -28,6 +28,11 @@ description: Guides tscircuit TSX electronics authoring in main.tsx. Use when cr
 - Wrong: `cadModel='to220_5'` (throws `String cadModel not yet implemented`). Correct: omit `cadModel`; a footprinter `footprint` already has a 3D body, and `cadModel={null}` hides it.
 - Wrong: invented footprint functions such as `cappr_d10mm_p5mm`. Correct: a function from the footprint strings reference, e.g. `radial_p5mm`.
 - Wrong: editing traces for `Could not find port for selector ".U1 > .OUT"`. Correct: fix why `U1` was not created; its error is reported first.
+- Wrong: chasing `No <schematicsheet> was found` or `missing schematic reference designator text`. Correct: leave them; they are schematic styling warnings on any board without a custom sheet or symbol. Fix `missing a trace` warnings instead.
+
+## Verify
+
+Test with a TypeScript `main.geospec.ts` (activate `geospec-authoring`): `await loadModel({ file: 'main.tsx' })` loads the `board` view, the PCB plus every part's 3D body. Assert the outline with `toHaveBoundingBox({ size: { x, y } })`; z spans the board thickness and the part bodies. GeoSpec does not test connectivity: check open pins in `evaluate_model` issues and the `netlist` export.
 
 ## Canonical pattern
 
@@ -331,6 +336,14 @@ interface PcbSxValue
   pcbX: string | number
   pcbY: string | number
   visibility: "hidden" | "visible" | "inherit"
+
+// Props every element extending SubcircuitGroupProps accepts
+interface SubcircuitGroupProps extends BaseGroupProps
+  defaultTraceWidth: Distance
+  autorouter: AutorouterProp
+  // … 28 more members in the API reference
+
+AutorouterProp: AutorouterConfig | AutocompleteString<AutorouterPreset>
 ```
 
 ### Components
@@ -459,19 +472,6 @@ CapacitorPinLabels: "pin1" | "pin2" | "pos" | "neg" | "anode" | "cathode"
   // Connections to other components
   connections: Connections<string>
   // … 16 more members in the API reference
-```
-
-### Connectivity
-
-```ts
-// JSX element <trace> with TraceProps
-<trace>: TraceProps
-  width: string | number
-  name: string
-  thickness: string | number
-  from: string | {getPortSelector: () => string; }
-  to: string | {getPortSelector: () => string; }
-  // … 17 more members in the API reference
 ```
 
 ## API reference

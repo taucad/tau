@@ -894,7 +894,12 @@ export function FileManagerProvider({
     };
     return new MachineSettingsStore(
       service,
-      (typeId, refresh) => contentService?.subscribe(machineSettingsPath({ typeId }), refresh) ?? (() => undefined),
+      (typeId, onEvent) => {
+        if (!contentService) {
+          throw new Error('Machine settings content service is unavailable.');
+        }
+        return contentService.watchReady({ paths: [machineSettingsPath({ typeId })] }, onEvent);
+      },
       () => connection.proxy?.dispose(),
     );
   }, [bridgeOpener, rootDirectory, openRootedFileSystemBridge, whenServicesReady, contentService]);

@@ -1,6 +1,15 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { WatchEvent } from '@taucad/filesystem';
+import { mock } from 'vitest-mock-extended';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import type { FileContentResult } from '@taucad/fs-client/file-content-service';
+import { FileContentService } from '@taucad/fs-client/file-content-service';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
+import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 
 const mockReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
@@ -39,7 +48,28 @@ function writeTreeFile(path: string): void {
   }
 }
 
+let actualContentService: FileContentService | undefined;
+
+const mockContentObservations = new Map<string, ObservationService<FileContentResult>>();
 const mockContentService = {
+  observeContent: (path: string) => {
+    let service = mockContentObservations.get(path);
+    if (!service) {
+      service = new ObservationService<FileContentResult>({
+        resource: path,
+        watch: () => ({ ready: Promise.resolve(), closed: mockTreeService.closed, dispose: () => undefined }),
+        read: async () => {
+          try {
+            return { kind: 'text', content: await mockReadFile(path) };
+          } catch {
+            return { kind: 'orphaned' };
+          }
+        },
+      });
+      mockContentObservations.set(path, service);
+    }
+    return service;
+  },
   watchReady: (_request: unknown, listener: (event: WatchEvent) => void) => {
     watchCallback = listener;
     return { ready: Promise.resolve(), closed: mockTreeService.closed, dispose: mockWatchDispose };
@@ -50,11 +80,11 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     readFile: mockReadFile,
     treeService: mockTreeService,
-    contentService: mockContentService,
+    contentService: actualContentService ?? mockContentService,
   }),
 }));
 
-const { skillMetadataToSlashCommand, usePromptSkillsCatalog, useSkillsCatalog } =
+const { skillMetadataToSlashCommand, usePromptSkillsCatalog, useSkillsCatalog, useSkillsCatalogState } =
   await import('#hooks/use-skills-catalog.js');
 const { parseSkillFrontmatter } = await import('#hooks/use-context-payload.utils.js');
 const { systemSkillsCatalog } = await import('#lib/system-skills-catalog.js');
@@ -109,11 +139,283 @@ describe('skillMetadataToSlashCommand', () => {
 
 describe('usePromptSkillsCatalog', () => {
   beforeEach(() => {
+    actualContentService = undefined;
+    mockContentObservations.clear();
     vi.clearAllMocks();
     settledCallbacks.clear();
     treeSnapshot = new Map();
     mockListDirectory.mockResolvedValue([]);
     mockReadFile.mockRejectedValue(new Error('not found'));
+  });
+
+  it.each(['edit', 'unlink'] as const)(
+    'refreshes the catalog after physical SKILL.md %s with a retained directory and cached content',
+    async (mutation) => {
+      const path = '.agents/skills/cached/SKILL.md';
+      const provider = new MemoryProvider();
+      await provider.writeFile(path, skillMarkdown('cached', 'Original cached description'));
+      const paths = new WorkspacePathResolver('/project');
+      const proxy = mock<ComposedViewClient>();
+      let heldRead: Promise<void> | undefined;
+      let acknowledge: () => void = () => undefined;
+      const ready = new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      });
+      proxy.readFile.mockImplementation(async (absolutePath) => {
+        const relativePath = paths.toRelativePath(absolutePath);
+        if (relativePath === undefined) {
+          throw new Error(`Unexpected provider read outside project: ${absolutePath}`);
+        }
+        const bytes = await provider.readFile(relativePath);
+        if (relativePath === path) {
+          await heldRead;
+        }
+        return bytes;
+      });
+      const watches = new Set<(event: WatchEvent) => void>();
+      const channel = new WorkerChangeChannel({
+        transport: {
+          listen: () => () => undefined,
+          watchReady: (request, callback) => {
+            watches.add(callback);
+            return {
+              ready: request.paths.includes('.agents') ? Promise.resolve() : ready,
+              closed: mockTreeService.closed,
+              unsubscribe: () => {
+                watches.delete(callback);
+              },
+            };
+          },
+        },
+      });
+      const content = new FileContentService({ proxy, paths, channel, refreshGuard: new RefreshGenerationGuard() });
+      actualContentService = content;
+      mockReadFile.mockImplementation(async (file) => content.resolveBytes(file));
+      mockListDirectory.mockImplementation(async (directory) =>
+        directory === '.agents/skills' ? [skillDirectoryRow('cached')] : [],
+      );
+      const { result, unmount } = renderHook(() => useSkillsCatalogState());
+      try {
+        await waitFor(() => {
+          expect(watches.size).toBeGreaterThan(1);
+        });
+        expect(proxy.readFile).not.toHaveBeenCalled();
+        expect(result.current.status).not.toBe('ready');
+        act(() => {
+          acknowledge();
+        });
+        await waitFor(() => {
+          expect(result.current.commands.find((skill) => skill.name === 'cached')?.description).toBe(
+            'Original cached description',
+          );
+        });
+        expect(await content.resolveBytes(path)).toEqual(skillMarkdown('cached', 'Original cached description'));
+        const initialReads = proxy.readFile.mock.calls.length;
+        let releaseRead: () => void = () => undefined;
+        if (mutation === 'edit') {
+          heldRead = new Promise<void>((resolve) => {
+            releaseRead = resolve;
+          });
+        }
+        await (mutation === 'edit'
+          ? provider.writeFile(path, skillMarkdown('cached', 'Fresh authoritative description'))
+          : provider.unlink(path));
+        const retainedDirectories = await provider.readdirEntries('.agents/skills');
+        expect(retainedDirectories.map((entry) => entry.name)).toContain('cached');
+        act(() => {
+          for (const callback of watches) {
+            callback({ type: mutation === 'unlink' ? 'delete' : 'change', path });
+          }
+          settledCallbacks.get('.agents/skills')?.();
+        });
+        await waitFor(() => {
+          expect(proxy.readFile.mock.calls.length).toBeGreaterThan(initialReads);
+        });
+        if (mutation === 'edit') {
+          expect(result.current.status).not.toBe('ready');
+          expect(result.current.commands.find((skill) => skill.name === 'cached')?.description).toBe(
+            'Original cached description',
+          );
+          await act(async () => {
+            releaseRead();
+          });
+        }
+        await waitFor(() => {
+          expect(result.current.status).toBe('ready');
+          expect(result.current.commands.find((skill) => skill.name === 'cached')?.description).toBe(
+            mutation === 'edit' ? 'Fresh authoritative description' : undefined,
+          );
+        });
+        expect(proxy.readFile.mock.calls.length).toBeGreaterThan(initialReads);
+      } finally {
+        unmount();
+        content.dispose();
+        channel.dispose();
+        actualContentService = undefined;
+      }
+    },
+  );
+
+  it('marks an already-ready shared content dependency unhealthy when only its exact watch closes', async () => {
+    const path = '.agents/skills/alpha/SKILL.md';
+    const provider = new MemoryProvider();
+    await provider.writeFile(path, skillMarkdown('alpha', 'Shared ready authority'));
+    const proxy = mock<ComposedViewClient>();
+    const paths = new WorkspacePathResolver('/project');
+    proxy.readFile.mockImplementation(async (absolute) => {
+      const relative = paths.toRelativePath(absolute);
+      if (relative === undefined) {
+        throw new Error('Unexpected project read');
+      }
+      return provider.readFile(relative);
+    });
+    const exactClosed = Promise.withResolvers<void>();
+    const channel = new WorkerChangeChannel({
+      transport: {
+        listen: () => () => undefined,
+        watchReady: (request) => ({
+          ready: Promise.resolve(),
+          closed: request.paths.includes(path) ? exactClosed.promise : mockTreeService.closed,
+          unsubscribe: () => undefined,
+        }),
+      },
+    });
+    const content = new FileContentService({ proxy, paths, channel, refreshGuard: new RefreshGenerationGuard() });
+    const shared = content.observeContent(path).acquire();
+    let unmount: (() => void) | undefined;
+    try {
+      await waitFor(() => {
+        expect(shared.getSnapshot().status).toBe('ready');
+      });
+      expect(proxy.readFile.mock.calls.filter(([file]) => file === `/project/${path}`)).toHaveLength(1);
+      actualContentService = content;
+      serveSingleSkill('alpha', 'Unused generic reader');
+      const current = renderHook(() => useSkillsCatalogState());
+      unmount = current.unmount;
+      await waitFor(() => {
+        expect(current.result.current.status).toBe('ready');
+        expect(current.result.current.commands.find((skill) => skill.name === 'alpha')?.description).toBe(
+          'Shared ready authority',
+        );
+      });
+      expect(proxy.readFile.mock.calls.filter(([file]) => file === `/project/${path}`)).toHaveLength(1);
+      expect(mockListDirectory.mock.calls.filter(([directory]) => directory === '.agents/skills')).toHaveLength(1);
+      await act(async () => {
+        exactClosed.resolve();
+      });
+      await waitFor(() => {
+        expect(current.result.current.status).toBe('error');
+      });
+      expect(shared.getSnapshot().status).toBe('closed');
+    } finally {
+      unmount?.();
+      shared.release();
+      content.dispose();
+      channel.dispose();
+      actualContentService = undefined;
+    }
+  });
+
+  it('keeps failed exact content registration unhealthy through held Retry and releases retired callbacks', async () => {
+    const path = '.agents/skills/alpha/SKILL.md';
+    const provider = new MemoryProvider();
+    await provider.writeFile(path, skillMarkdown('alpha', 'Recovered authority'));
+    const proxy = mock<ComposedViewClient>();
+    const paths = new WorkspacePathResolver('/project');
+    proxy.readFile.mockImplementation(async (absolute) => {
+      const relative = paths.toRelativePath(absolute);
+      if (relative === undefined) {
+        throw new Error('Unexpected project read');
+      }
+      return provider.readFile(relative);
+    });
+    let acknowledge: () => void = () => undefined;
+    const retryReady = new Promise<void>((resolve) => {
+      acknowledge = resolve;
+    });
+    let fail = true;
+    const active = new Set<(event: WatchEvent) => void>();
+    const retired: Array<(event: WatchEvent) => void> = [];
+    const channel = new WorkerChangeChannel({
+      transport: {
+        listen: () => () => undefined,
+        watchReady: (request, callback) => {
+          active.add(callback);
+          const exact = !request.paths.includes('.agents');
+          return {
+            ready: exact
+              ? fail
+                ? Promise.reject(new Error('Exact registration refused'))
+                : retryReady
+              : Promise.resolve(),
+            closed: mockTreeService.closed,
+            unsubscribe: () => {
+              active.delete(callback);
+              retired.push(callback);
+            },
+          };
+        },
+      },
+    });
+    const content = new FileContentService({ proxy, paths, channel, refreshGuard: new RefreshGenerationGuard() });
+    actualContentService = content;
+    serveSingleSkill('alpha', 'Unused generic reader');
+    const mounted = renderHook(() => useSkillsCatalogState());
+    try {
+      await waitFor(() => {
+        expect(mounted.result.current.status).toBe('error');
+      });
+      expect(mounted.result.current.commands.find((skill) => skill.name === 'alpha')).toBeUndefined();
+      expect(proxy.readFile).not.toHaveBeenCalled();
+      fail = false;
+      act(() => {
+        mounted.result.current.retry();
+      });
+      await waitFor(() => {
+        expect(mounted.result.current.status).toBe('pending');
+      });
+      expect(proxy.readFile).not.toHaveBeenCalled();
+      await act(async () => {
+        acknowledge();
+      });
+      await waitFor(() => {
+        expect(mounted.result.current.status).toBe('ready');
+        expect(mounted.result.current.commands.find((skill) => skill.name === 'alpha')?.description).toBe(
+          'Recovered authority',
+        );
+      });
+      mounted.unmount();
+      expect(active.size).toBe(0);
+      const oldCallbacks = [...retired];
+      const replacement = renderHook(() => useSkillsCatalogState());
+      try {
+        await waitFor(() => {
+          expect(replacement.result.current.status).toBe('ready');
+          expect(replacement.result.current.commands.find((skill) => skill.name === 'alpha')?.description).toBe(
+            'Recovered authority',
+          );
+        });
+        const reads = proxy.readFile.mock.calls.length;
+        act(() => {
+          for (const callback of oldCallbacks) {
+            callback({ type: 'reset' });
+          }
+        });
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(proxy.readFile).toHaveBeenCalledTimes(reads);
+        expect(replacement.result.current.status).toBe('ready');
+      } finally {
+        replacement.unmount();
+      }
+      expect(active.size).toBe(0);
+    } finally {
+      mounted.unmount();
+      content.dispose();
+      channel.dispose();
+      actualContentService = undefined;
+    }
   });
 
   it('refreshes equal-metadata skill bytes and reset without rerendering equal values', async () => {
@@ -132,7 +434,8 @@ describe('usePromptSkillsCatalog', () => {
       watchCallback?.({ type: 'change', path: '.agents/skills/alpha/SKILL.md' });
     });
     await waitFor(() => {
-      expect(mockReadFile).toHaveBeenCalledTimes(initialReads * 2);
+      expect(mockReadFile).toHaveBeenCalledTimes(initialReads + 1);
+      expect(mockReadFile.mock.calls.filter(([path]) => path === '.agents/skills/alpha/SKILL.md')).toHaveLength(2);
     });
     await act(async () => {
       await Promise.resolve();

@@ -2,6 +2,8 @@ import { contextMemoryMaxBytes, contextMemoryMaxLines } from '@taucad/chat/schem
 import { truncateMemoryHead } from '#hooks/use-context-payload.js';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import type { FileContentResult } from '@taucad/fs-client/file-content-service';
 import type { FileEntry } from '@taucad/types';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
@@ -21,7 +23,26 @@ const mockTreeService = {
 
 /** A ready recursive watch that never changes: each hook mount reads the catalog afresh. */
 let catalogClosed = Promise.withResolvers<void>();
+const contentObservations = new Map<string, ObservationService<FileContentResult>>();
 const mockContentService = {
+  observeContent: (path: string) => {
+    let service = contentObservations.get(path);
+    if (!service) {
+      service = new ObservationService<FileContentResult>({
+        resource: path,
+        watch: () => ({ ready: Promise.resolve(), closed: catalogClosed.promise, dispose: () => undefined }),
+        read: async () => {
+          try {
+            return { kind: 'text', content: await mockReadFile(path) };
+          } catch {
+            return { kind: 'orphaned' };
+          }
+        },
+      });
+      contentObservations.set(path, service);
+    }
+    return service;
+  },
   watchReady: () => ({
     ready: Promise.resolve(),
     closed: catalogClosed.promise,
@@ -72,6 +93,7 @@ function makeFileEntry(path: string, type: 'file' | 'dir' = 'file'): FileEntry {
 
 describe('useContextPayload', () => {
   beforeEach(() => {
+    contentObservations.clear();
     vi.clearAllMocks();
     catalogClosed = Promise.withResolvers<void>();
     mockListDirectory.mockResolvedValue([]);

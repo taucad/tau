@@ -287,7 +287,7 @@ export default function PluginsRoute(): React.JSX.Element {
 
   const installSkill = useCallback(
     async (slug: string): Promise<void> => {
-      if (catalog.status === 'closed' || catalog.status === 'error') {
+      if (catalog.status !== 'ready') {
         return;
       }
       if (manifestSnapshot.status !== 'ready') {
@@ -381,14 +381,18 @@ export default function PluginsRoute(): React.JSX.Element {
           </Button>
         </div>
       ) : undefined}
-      {catalog.status === 'closed' || catalog.status === 'error' ? (
+      {catalog.status === 'ready' ? undefined : (
         <div role='status' className='flex items-center justify-between gap-2 text-sm'>
-          <span>Skill updates unavailable</span>
+          <span>
+            {catalog.status === 'registering' || catalog.status === 'pending'
+              ? 'Skill updates pending'
+              : 'Skill updates unavailable'}
+          </span>
           <Button variant='ghost' size='sm' aria-label='Retry skill updates' onClick={catalog.retry}>
             Retry
           </Button>
         </div>
-      ) : undefined}
+      )}
       <StoreSection title='Featured' items={featuredPlugins} />
       <StoreSection title='System' items={systemSkills} />
       <StoreSection title='Skills' items={storeSkills} getStatus={getSkillInstallStatus} onInstall={installSkill} />

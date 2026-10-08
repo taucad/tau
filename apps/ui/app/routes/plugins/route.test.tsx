@@ -3,12 +3,19 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SkillMetadata } from '@taucad/chat';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import { useObservation } from '@taucad/fs-client/react/use-observation';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 
 const mockReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
 const mockWriteFiles = vi.fn<(files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>>();
 const mockExists = vi.fn<(path: string) => Promise<boolean>>();
-const catalogHealth = vi.hoisted(() => ({ status: 'ready' as 'ready' | 'closed', retry: vi.fn() }));
+type TestCatalog = { commands: SkillMetadata[]; prompt: SkillMetadata[] };
+const catalogHealth = vi.hoisted(() => ({
+  status: 'ready' as 'ready' | 'closed',
+  retry: vi.fn(),
+  service: undefined as ObservationService<TestCatalog> | undefined,
+}));
 const mockUseSkillsCatalog = vi.fn<() => SkillMetadata[]>();
 
 const mockWatchReady = vi.fn<() => ObservationWatch>();
@@ -32,12 +39,17 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 
 vi.mock('#hooks/use-skills-catalog.js', () => ({
   useSkillsCatalog: mockUseSkillsCatalog,
-  useSkillsCatalogState: () => ({
-    commands: mockUseSkillsCatalog(),
-    prompt: [],
-    status: catalogHealth.status,
-    retry: catalogHealth.retry,
-  }),
+  useSkillsCatalogState: () => {
+    const snapshot = useObservation(catalogHealth.service);
+    return catalogHealth.service
+      ? {
+          commands: snapshot.value?.commands ?? [],
+          prompt: snapshot.value?.prompt ?? [],
+          status: snapshot.status,
+          retry: () => catalogHealth.service?.refresh(),
+        }
+      : { commands: mockUseSkillsCatalog(), prompt: [], status: catalogHealth.status, retry: catalogHealth.retry };
+  },
 }));
 
 const { default: PluginsRoute } = await import('#routes/plugins/route.js');
@@ -58,8 +70,8 @@ type DecodedManifest = {
   >;
 };
 
-function renderRoute(): void {
-  render(
+function renderRoute(): ReturnType<typeof render> {
+  return render(
     <MemoryRouter>
       <PluginsRoute />
     </MemoryRouter>,
@@ -94,6 +106,7 @@ describe('PluginsRoute', () => {
     vi.clearAllMocks();
     mockWatchReady.mockReset().mockImplementation(openWatch);
     catalogHealth.status = 'ready';
+    catalogHealth.service = undefined;
     mockReadFile.mockRejectedValue(Object.assign(new Error('manifest missing'), { code: 'ENOENT' }));
     mockWriteFiles.mockResolvedValue(undefined);
     mockExists.mockResolvedValue(false);
@@ -108,6 +121,69 @@ describe('PluginsRoute', () => {
     expect(catalogHealth.retry).toHaveBeenCalledOnce();
     await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
     expect(mockWriteFiles).not.toHaveBeenCalled();
+  });
+
+  it('should refuse installs throughout held catalog retry until a fresh settled catalog is ready', async () => {
+    const closed = Promise.withResolvers<void>();
+    const ready = Promise.withResolvers<void>();
+    const fresh = Promise.withResolvers<TestCatalog>();
+    const watch = vi
+      .fn<() => ObservationWatch>()
+      .mockReturnValueOnce({ ready: Promise.resolve(), closed: closed.promise, dispose: vi.fn() })
+      .mockReturnValueOnce({
+        ready: ready.promise,
+        closed: new Promise<void>(() => {
+          /* Replacement remains connected until cleanup. */
+        }),
+        dispose: vi.fn(),
+      });
+    const read = vi
+      .fn<() => Promise<TestCatalog>>()
+      .mockResolvedValueOnce({ commands: [], prompt: [] })
+      .mockReturnValue(fresh.promise);
+    const service = new ObservationService<TestCatalog>({ watch, read });
+    catalogHealth.service = service;
+    const pane = renderRoute();
+    try {
+      await waitFor(() => {
+        expect(read).toHaveBeenCalledOnce();
+      });
+      await act(async () => {
+        closed.resolve();
+      });
+      expect(screen.getByText('Skill updates unavailable')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole('button', { name: 'Retry skill updates' }));
+      expect(screen.getByText('Skill updates pending')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      expect(read).toHaveBeenCalledOnce();
+      await act(async () => {
+        ready.resolve();
+      });
+      await waitFor(() => {
+        expect(read).toHaveBeenCalledTimes(2);
+      });
+      expect(screen.getByText('Skill updates pending')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      await act(async () => {
+        fresh.resolve({ commands: [], prompt: [] });
+      });
+      await waitFor(() => {
+        expect(screen.queryByText('Skill updates pending')).not.toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+      await waitFor(() => {
+        expect(mockWriteFiles).toHaveBeenCalledOnce();
+      });
+    } finally {
+      pane.unmount();
+      service.dispose();
+      ready.resolve();
+      fresh.resolve({ commands: [], prompt: [] });
+    }
   });
 
   it('should retry a closed manifest in the same mounted route only after fresh watch acknowledgement', async () => {

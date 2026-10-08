@@ -29,7 +29,7 @@ The API's LangChain providers (`ProviderService`) survive for one narrow case on
 - Prefer an existing gateway provider when it serves the model with the right billing identity, wire, and provider controls.
 - Do not route a non-OpenAI provider under `openai` just because its API is OpenAI-compatible; `providerKind` selects the codec and the compat overrides.
 - Any provider-facing tool schema must satisfy the contract test: one top-level object, no top-level unions, no `$ref`/`definitions`, keyword denylist. A schema that only Anthropic accepts breaks Vertex.
-- If the selected model family lacks a UI brand icon, follow [add-logo](../add-logo/SKILL.md) with the established brand identity instead of sourcing or generating one here.
+- If the selected model family lacks a UI brand icon, follow [create-logo](../create-logo/SKILL.md) with the established brand identity instead of sourcing or generating one here.
 - Keep model descriptions CAD-task focused: say when a Tau user should pick the model.
 - Cap catalog context windows at Tau's effective `200_000` policy unless that policy changes.
 - Keep text-only or uncertain models hidden until Tau can route image inputs safely.

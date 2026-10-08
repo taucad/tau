@@ -27,16 +27,21 @@ export type GeoSpecModelFormat = MeshFileFormat | 'step' | 'stp';
  */
 export type GeoSpecRuntimeClient = Pick<RuntimeClient, 'connect' | 'terminate'> &
   Partial<Pick<RuntimeClient, 'shutdown'>> & {
-  open: (
-    input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>,
-  ) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
-  on?(
-    event: 'telemetry',
-    handler: (batch: {
-      readonly entries: ReadonlyArray<{ name: string; duration: number; startTime: number; workerTimeOrigin: number }>;
-    }) => void,
-  ): () => void;
-};
+    open: (
+      input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>,
+    ) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
+    on?(
+      event: 'telemetry',
+      handler: (batch: {
+        readonly entries: ReadonlyArray<{
+          name: string;
+          duration: number;
+          startTime: number;
+          workerTimeOrigin: number;
+        }>;
+      }) => void,
+    ): () => void;
+  };
 
 /**
  * Lazy runtime factory consumed by `geospec/model`.

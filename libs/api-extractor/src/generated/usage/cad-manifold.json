@@ -7,6 +7,38 @@
   },
   "symbols": [
     {
+      "id": "typescript:BaseGLTFNode.scale",
+      "name": "scale",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GLTFNode",
+      "name": "GLTFNode",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GLTFNode.manifold",
+      "name": "manifold",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GLTFNode.material",
+      "name": "material",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
       "id": "typescript:Manifold",
       "name": "Manifold",
       "score": 1,
@@ -73,14 +105,6 @@
     {
       "id": "typescript:Manifold.union",
       "name": "union",
-      "score": 1,
-      "workspace": 0,
-      "examples": 1,
-      "lookups": 0
-    },
-    {
-      "id": "typescript:default",
-      "name": "default",
       "score": 1,
       "workspace": 0,
       "examples": 1,

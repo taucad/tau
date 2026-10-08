@@ -367,9 +367,28 @@ export const bundleOwners: readonly BundleOwner[] = [
     description:
       'Guides robust Manifold mesh CAD in main.ts. Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.',
     whenToUse: 'Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.',
-    corpus: typescriptCorpus('manifold-3d', 'manifold.d.ts'),
+    // `manifold-3d/manifoldCAD` is what models import; the root `manifold.d.ts` is the raw WASM module.
+    corpus: typescriptCorpus('manifold-3d', 'dist/manifoldCAD.d.ts'),
     groupBy: byKind,
-    core: { budgetTokens: 4000, pins: ['Manifold'] },
+    core: {
+      budgetTokens: 4000,
+      pins: [
+        'Manifold',
+        'Manifold.cylinder',
+        'Manifold.sphere',
+        'Manifold.extrude',
+        'Manifold.revolve',
+        'Manifold.add',
+        'Manifold.subtract',
+        'Manifold.intersect',
+        'Manifold.asOriginal',
+        'CrossSection.circle',
+        'CrossSection.square',
+        'GLTFNode',
+        'GLTFMaterial',
+        'setMaterial',
+      ],
+    },
   },
   {
     slug: 'cad-opencascadejs',

@@ -1,26 +1,38 @@
 # manifold-3d API index
 
-manifold-3d 3.4.1 · 166 symbols · extracted by TypeScript 5.9.3.
+manifold-3d 3.4.1 · 208 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.
 
 ## Functions — `api-functions.md`
 
-getCircularSegments (function) — Determine the result of the {@link setMinCircularAngle}, {@link setMinCircularEdgeLength}, and…
-resetToCircularDefaults (function) — Resets the circular construction parameters to their defaults if {@link…
-setCircularSegments (function) — Sets the default number of circular segments for the {@link…
-setMinCircularAngle (function) — Sets an angle constraint the default number of circular segments…
-setMinCircularEdgeLength (function) — Sets a length constraint the default number of circular segments…
+getAnimationDuration (function) — Get the current duruation of the animation, in seconds
+getAnimationFPS (function) — Get the current animation frame rate
+getAnimationMode (function) — Get the current animation repeat mode
+getCircularSegments (function) — Determine the appropriate number of segments for a given radius
+getGLTFNodes (function) — Get a list of GLTF nodes that have been created…
+getMinCircularAngle (function) — Get the current angle constraint
+getMinCircularEdgeLength (function) — Get the current edge length constraint
+importManifold (function) — Import a model, and convert it to a Manifold object…
+importModel (function) — Import a model, for display only
+isManifoldCAD (function) — Is this module running in manifoldCAD.org or the ManifoldCAD CLI?
+only (function) — Wrap any shape object with this method to display it…
+resetGLTFNodes (function) — Clear the list of cached GLTF nodes
+setMaterial (function) — Return a shallow copy of the input manifold with the…
+setMorphEnd (function) — Apply a morphing animation to the input manifold
+setMorphStart (function) — Apply a morphing animation to the input manifold
+show (function) — Wrap any shape object with this method to display it…
 triangulate (function) — Triangulates a set of /epsilon-valid polygons
-default (function)
 
 ## Types — `api-types.md`
 
+AnimationMode (type)
 Box (type) [2 members] — A three dimensional box, aligned to the coordinate system
   Box.min (property)
   Box.max (property)
 ErrorStatus (type)
 FillRule (type)
+GLTFAttribute (type)
 JoinType (type)
 Mat3 (type) — 3x3 matrix stored in column-major order
 Mat4 (type) — 4x4 matrix stored in column-major order
@@ -37,6 +49,14 @@ Vec3 (type) — A vector in three dimensional space
 
 ## Classes — `api-classes.md`
 
+BaseGLTFNode (class) [7 members] — The abstract class from which other classes inherit
+  BaseGLTFNode.name (property)
+  BaseGLTFNode.translation (property)
+  BaseGLTFNode.rotation (property) — From the reference frame of the model being rotated, rotations…
+  BaseGLTFNode.scale (property)
+  BaseGLTFNode.constructor (constructor)
+  BaseGLTFNode.parent (property)
+  BaseGLTFNode.isEmpty (method) — Does this node have any geometry that needs to be…
 CrossSection (class) [30 members] — Two-dimensional cross sections guaranteed to be without self-intersections, or overlaps…
   CrossSection.constructor (constructor)
   CrossSection.square (method) — Constructs a square with the given XY dimensions
@@ -68,6 +88,18 @@ CrossSection (class) [30 members] — Two-dimensional cross sections guaranteed 
   CrossSection.numContour (method) — The number of contours in the CrossSection
   CrossSection.bounds (method) — Returns the axis-aligned bounding rectangle of all the CrossSection's vertices
   CrossSection.delete (method) — Frees the WASM memory of this CrossSection, since these cannot…
+CrossSectionGLTFNode (class) [6 members] — Display a CrossSection in 3D space
+  CrossSectionGLTFNode.crossSection (property)
+  CrossSectionGLTFNode.material (property)
+  CrossSectionGLTFNode.constructor (constructor)
+  CrossSectionGLTFNode.clone (method)
+  CrossSectionGLTFNode.isEmpty (method) — Does this node have any geometry that needs to be…
+  CrossSectionGLTFNode.runID (property) — Get the runID for this node
+GLTFNode (class) [4 members] — Position a manifold model for later export
+  GLTFNode.manifold (property)
+  GLTFNode.material (property)
+  GLTFNode.clone (method)
+  GLTFNode.isEmpty (method) — Does this node have any geometry that needs to be…
 Manifold (class) [60 members] — This library's internal representation of an oriented, 2-manifold, triangle mesh…
   Manifold.constructor (constructor)
   Manifold.tetrahedron (method) — Constructs a tetrahedron centered at the origin with one vertex…
@@ -129,6 +161,9 @@ Manifold (class) [60 members] — This library's internal representation of an o
   Manifold.originalID (method) — If this mesh is an original, this returns its ID…
   Manifold.reserveIDs (method) — Returns the first of n sequential new unique mesh IDs…
   Manifold.delete (method) — Frees the WASM memory of this Manifold, since these cannot…
+
+## Classes (2) — `api-classes-2.md`
+
 Mesh (class) [21 members] — An alternative to Mesh for output suitable for pushing into…
   Mesh.constructor (constructor)
   Mesh.numProp (property) — Number of properties per vertex, always >= 3
@@ -151,20 +186,30 @@ Mesh (class) [21 members] — An alternative to Mesh for output suitable for pus
   Mesh.extras (method) — Gets any other properties associated with this vertex
   Mesh.tangent (method) — Gets the tangent vector starting at verts(tri)[j] pointing to the…
   Mesh.transform (method) — Gets the column-major 4x4 matrix transform from the original mesh…
+VisualizationGLTFNode (class) [6 members] — Include an imported model for visualization purposes
+  VisualizationGLTFNode.node (property)
+  VisualizationGLTFNode.document (property)
+  VisualizationGLTFNode.uri (property)
+  VisualizationGLTFNode.constructor (constructor)
+  VisualizationGLTFNode.clone (method)
+  VisualizationGLTFNode.isEmpty (method) — Does this node have any geometry that needs to be…
 
 ## Interfaces — `api-interfaces.md`
 
-ManifoldToplevel (interface) [10 members]
-  ManifoldToplevel.CrossSection (property)
-  ManifoldToplevel.Manifold (property)
-  ManifoldToplevel.Mesh (property)
-  ManifoldToplevel.triangulate (property)
-  ManifoldToplevel.setMinCircularAngle (property)
-  ManifoldToplevel.setMinCircularEdgeLength (property)
-  ManifoldToplevel.setCircularSegments (property)
-  ManifoldToplevel.getCircularSegments (property)
-  ManifoldToplevel.resetToCircularDefaults (property)
-  ManifoldToplevel.setup (property)
+GLTFMaterial (interface) [10 members] — Define a material using the glTF metallic-roughness physically-based rendering model
+  GLTFMaterial.attributes (property) — Every vertex in a glTF Mesh has a set of…
+  GLTFMaterial.roughness (property) — Roughness of the material
+  GLTFMaterial.metallic (property) — Metallic property of the material
+  GLTFMaterial.baseColorFactor (property) — Base colour of the material
+  GLTFMaterial.alpha (property) — Transparency of the material
+  GLTFMaterial.unlit (property) — Render model as unlit or shadeless, as opposed to physically…
+  GLTFMaterial.name (property) — Material name
+  GLTFMaterial.sourceMaterial (property) — If set, this material is a copy of another material…
+  GLTFMaterial.sourceRunID (property) — If set, this material is a copy of another material…
+  GLTFMaterial.doubleSided (property) — Treat this material as double sided
+ImportOptions (interface) [2 members]
+  ImportOptions.mimetype (property) — Use `mimetype` to determine the format of the imported model,…
+  ImportOptions.tolerance (property) — When an imported model is not manifold, try closing gaps…
 MeshOptions (interface) [11 members]
   MeshOptions.numProp (property)
   MeshOptions.vertProperties (property)

@@ -9,6 +9,7 @@
  *      `libs/tau-examples/src/kernels/replicad/planetary-gear-system` into the project, then write the showcase chat
  *      into the chat the app created ("Initial design"):
  *        node --import @oxc-node/core/register scripts/src/readme-hero-chat.ts --project <dir> --chat-id <chat id>
+ *   The script itself puts Parameters above Kinematics in the project's saved workbench layout before launching.
  *   3. Build the desktop main process (`cd apps/desktop && npx electron-vite build`) and start a desktop renderer dev
  *      server on --renderer-url (from `apps/ui/desktop`, `react-router dev --config vite.config.ts --port 3002` with
  *      the variables in `apps/ui/.env`).
@@ -30,11 +31,12 @@
  *   - A fresh launch does not apply the view record's display flags, so Axes and Post-processing are set in the viewer
  *     menu and verified.
  *   - The window is focused for coloured traffic lights and ignores real mouse events, so the pointer adds no hover.
+ *   - The terminal running this needs macOS Screen Recording permission; without it the capture has no contents.
  *
  * Exit codes: 0 success, 1 bad arguments or an unexpected app state, 2 network failure, 3 missing dependency.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
@@ -47,12 +49,24 @@ const repoRoot = resolve(import.meta.dirname, '../..');
 const desktopDirectory = join(repoRoot, 'apps/desktop');
 const outputDirectory = join(repoRoot, 'out/screenshots/readme-hero');
 const projectName = 'Planetary Gear System';
+const projectSlug = 'planetary-gear-system';
 const chatName = 'Initial design';
 const sunJoint = 'sun';
 const sunAngle = '30';
 const windowWidth = 1728;
 const windowHeight = 1080;
 const themes = ['light', 'dark'] as const;
+/** Parameters above Kinematics in the workbench lane (weights are relative). */
+const workbenchLayout = {
+  kind: 'split',
+  direction: 'column',
+  children: [
+    { kind: 'group', size: 0.32, tabs: [{ kind: 'pane', pane: 'parameters' }] },
+    { kind: 'group', size: 0.68, tabs: [{ kind: 'pane', pane: 'kinematics' }] },
+  ],
+};
+/** A window capture smaller than this is the frame without contents (no Screen Recording permission). */
+const minimumCaptureBytes = 200_000;
 type Theme = (typeof themes)[number];
 
 class UsageError extends Error {}
@@ -105,7 +119,9 @@ const readUiEnvironment = (): Record<string, string> => {
  * @returns The catalog body as JSON text.
  */
 const fetchCatalog = async (apiUrl: string): Promise<string> => {
-  const response = await fetch(`${apiUrl.replace(/\/$/u, '')}/v1/models`).catch((error: unknown) => {
+  const response = await fetch(`${apiUrl.replace(/\/$/u, '')}/v1/models`, {
+    signal: AbortSignal.timeout(30_000),
+  }).catch((error: unknown) => {
     throw new NetworkError(`Model catalog unreachable: ${String(error)}`);
   });
   if (!response.ok) {
@@ -116,6 +132,33 @@ const fetchCatalog = async (apiUrl: string): Promise<string> => {
     throw new TypeError('Model catalog is not a list.');
   }
   return body;
+};
+
+/**
+ * Put Parameters above Kinematics in the project's saved workbench layout; the app reads it when the project opens.
+ *
+ * @param projectDirectory - The hero project inside the profile's home.
+ */
+const writeWorkbenchLayout = (projectDirectory: string): void => {
+  const file = join(projectDirectory, '.tau/workbench/layout.json');
+  if (!existsSync(file)) {
+    throw new UsageError(`No ${file}; open the project once in the app, then rerun.`);
+  }
+  const layout = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  writeFileSync(file, `${JSON.stringify({ ...layout, workbench: workbenchLayout }, undefined, 2)}\n`);
+};
+
+/**
+ * Parse a URL flag before anything launches.
+ *
+ * @returns The parsed URL.
+ */
+const parseUrlFlag = (flag: string, value: string): URL => {
+  try {
+    return new URL(value);
+  } catch {
+    throw new UsageError(`--${flag} must be an absolute URL, got "${value}".`);
+  }
 };
 
 /** Switch the app theme in place: native chrome plus the app's own theme channel, never a reload. */
@@ -145,8 +188,9 @@ const openProject = async (page: Page): Promise<void> => {
       await sleep(page, 800);
     }
   }
-  await chatLink.click({ noWaitAfter: true });
-  await page.waitForURL(/\/w\//u, { timeout: 60_000 });
+  // Every project made through Build from code has an "Initial design" chat, so the URL proves which one opened.
+  await chatLink.first().click({ noWaitAfter: true });
+  await page.waitForURL(new RegExp(`/w/[^/]+/${projectSlug}(?:[/?]|$)`, 'u'), { timeout: 60_000 });
   await sleep(page, 25_000);
   await page.keyboard.press('Escape');
   if (/[?&]settings=/u.test(page.url())) {
@@ -239,8 +283,17 @@ const captureWindow = async (app: ElectronApplication, page: Page, theme: Theme)
   });
   await sleep(page, 1200);
   const windowNumber = sourceId.split(':')[1] ?? '';
+  if (!/^\d+$/u.test(windowNumber)) {
+    throw new UsageError(`Unexpected window source id "${sourceId}".`);
+  }
   const file = join(outputDirectory, `tau-desktop-${theme}.png`);
   execFileSync('/usr/sbin/screencapture', ['-x', `-l${windowNumber}`, file]);
+  // ponytail: a size floor catches the content-less frame macOS returns without Screen Recording permission.
+  if (!existsSync(file) || statSync(file).size < minimumCaptureBytes) {
+    throw new MissingDependencyError(
+      `${file} is missing or empty; grant Screen Recording to this terminal in System Settings, then rerun.`,
+    );
+  }
   return file;
 };
 
@@ -251,9 +304,17 @@ const main = async (): Promise<void> => {
   if (process.platform !== 'darwin') {
     throw new MissingDependencyError('The capture uses macOS screencapture.');
   }
+  const profile = resolve(values.profile);
+  const projectDirectory = join(profile, 'home', projectSlug);
+  if (!existsSync(join(projectDirectory, 'tau.json'))) {
+    throw new UsageError(`No ${projectSlug} project in ${profile}/home; follow the setup steps in this file's header.`);
+  }
   const rendererUrl = values['renderer-url'];
   const apiUrl = values['api-url'];
+  const { origin } = parseUrlFlag('renderer-url', rendererUrl);
+  parseUrlFlag('api-url', apiUrl);
   const catalog = await fetchCatalog(apiUrl);
+  writeWorkbenchLayout(projectDirectory);
   mkdirSync(outputDirectory, { recursive: true });
 
   // The `electron` package's main export is the path of its binary.
@@ -263,14 +324,13 @@ const main = async (): Promise<void> => {
   }
   const app = await electron.launch({
     executablePath: electronPath,
-    args: [desktopDirectory, `--user-data-dir=${resolve(values.profile)}`],
+    args: [desktopDirectory, `--user-data-dir=${profile}`],
     cwd: desktopDirectory,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment names are SCREAMING_SNAKE.
     env: { ...readUiEnvironment(), ...process.env, TAU_API_URL: apiUrl, ELECTRON_RENDERER_URL: rendererUrl },
     timeout: 120_000,
   });
   try {
-    const { origin } = new URL(rendererUrl);
     await app.context().route('**/v1/models', async (route) =>
       route.fulfill({
         status: 200,
@@ -305,7 +365,10 @@ const main = async (): Promise<void> => {
     });
     await setTheme(app, page, 'light');
   } finally {
-    await app.close();
+    // A close failure must not hide the step that failed.
+    await app.close().catch((error: unknown) => {
+      console.error('closing the app failed:', error);
+    });
   }
 
   if (values['write-assets']) {

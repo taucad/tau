@@ -180,7 +180,8 @@ export const step = (
         return { state: { ...state, row: { ...claimed, leaseUntil: row.dueAt + recoveryGrace } }, answer: 'applied' };
       }
       // T11 reads usage first, else the latest stored observation; a stored provider rejection still releases
-      // the turn. Set insertion order is the row order of `billing_invocation_evidence` (one row per kind).
+      // the turn. The ledger orders observations by `received_at`; the model-based test records one constant
+      // payload per kind, so the writer's digest dedupe keeps each kind at its first position, as the Set does.
       const evidence: OracleEvidence =
         row.intentAt === undefined
           ? 'rejected'

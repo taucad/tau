@@ -64,7 +64,7 @@ const createProject = async (origin: string): Promise<void> => {
 
 const agentTrigger = selectors.getByRole('button', { name: /^Agent and model: /u });
 
-const agentSettings = selectors.getByRole('button', { name: /^Settings/u });
+const agentSettings = selectors.getByRole('dialog').getByRole('button', { name: /^Settings/u });
 
 /** Open the agent sheet and its Settings, and wait for the daemon's segment under *Runs on*. */
 const openRunsOn = async (workspace: string) => {

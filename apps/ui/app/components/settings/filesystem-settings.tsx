@@ -294,8 +294,9 @@ export function FileSystemSettings(): React.JSX.Element {
             </CardHeader>
             <CardContent className='flex flex-col gap-3'>
               <p className='text-sm text-muted-foreground'>
-                Connected workspaces are folders on your disk. Choose one from the new-project location picker when you
-                do not want to use Home.
+                Connect a project folder or a folder containing projects. Tau finds tau.json at the selected root and in
+                nested folders. Choose a workspace from the new-project location picker when you do not want to use
+                Home.
               </p>
               {showWorkspaceConnection ? (
                 <div role='status' aria-live='polite' className='flex items-center gap-3 rounded-md border p-3'>

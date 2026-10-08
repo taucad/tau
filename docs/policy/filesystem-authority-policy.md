@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-09-29'
+updated: '2026-10-04'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/revisions-policy.md
@@ -86,7 +86,7 @@ mountTable.mount(prefix, provider, config);
 
 **Why**: Requirement A — a path that resolves only while its page is open is not a filesystem, and every consumer that outlives the page (thumbnail worker, discovery, cross-tab events) breaks.
 
-Reserve `/projects/<id>` for boot-owned persistent project routes and `/checkouts/<id>` for persistent linked-checkout routes installed from project-root configuration. A checkout route uses the project's storage root, resolves the linked checkout's private physical base, and is invisible to project discovery. Every configured project route, checkout route, and named memory fixture must already be canonical and be an immediate child of its reserved `/projects` or `/checkouts` family; reject `/`, either family root, ancestors, descendants, and overlapping bases before provider acquisition. Public dynamic mount/unmount is allowed only at `/previews/<instance>` and the boot-owned `/node_modules` projection, and both prefix and provider base must already be canonical before provider lookup. Authority bootstrap installs `/` directly through `MountTable`; no public dynamic root mount exists. Preview snapshots never replace a project or checkout route.
+Reserve `/projects/<id>` for boot-owned persistent project routes and `/checkouts/<id>` for persistent linked-checkout routes installed from project-root configuration. A checkout route uses the project's storage root, resolves the linked checkout's private physical base, and is invisible to project discovery. Every configured project route, checkout route, and named memory fixture must already be canonical and be an immediate child of its reserved `/projects` or `/checkouts` family; reject `/`, either family root, ancestors, descendants, and duplicate exact physical bases before provider acquisition. Project physical bases may be the connected root or ordinary nested directories, including nested projects; this does not permit nested logical `/projects` routes. Public dynamic mount/unmount is allowed only at `/previews/<instance>` and the boot-owned `/node_modules` projection, and both prefix and provider base must already be canonical before provider lookup. Authority bootstrap installs `/` directly through `MountTable`; no public dynamic root mount exists. Preview snapshots never replace a project or checkout route.
 
 Serialize complete project-root configuration calls in invocation order. Disposal removes matching routes and discovery roots together; a later discovery scan must not recreate a disposed provider from stale topology.
 
@@ -167,13 +167,15 @@ Ordinary discovery MUST NOT rebind a project away from a known incomplete worksp
 
 ### 12. Project creation is journal → authority commit → local resources
 
-Project creation and duplication MUST first persist one pending operation containing the complete manifest, authored file snapshot, exact allocated physical locator, storage identity, and intended local resources. They then call `WorkspaceFileService.commitPendingProjectDirectory()` with that immutable snapshot. The command validates every path and byte payload before mutation, acquires both logical-project and physical-directory locks, replaces only an exactly reserved manifest-less target, writes files deterministically, writes `tau.json` last, and verifies its project ID.
+Project creation and duplication MUST first persist one pending operation containing the complete manifest, authored file snapshot, exact allocated physical locator, storage identity, and intended local resources. They then call `WorkspaceFileService.commitPendingProjectDirectory()` with that immutable snapshot. The command validates every path and byte payload before mutation, acquires both logical-project and physical-directory ancestor locks, replaces only an exactly reserved manifest-less target, writes files deterministically, writes `tau.json` last, and verifies its project ID.
 
 An existing valid same-ID manifest is an idempotent committed result: replay resumes local library/chat/editor resources without rewriting project bytes. An invalid manifest, a different-ID manifest, an unreserved basename, or an unsafe journal path is an ownership failure and must preserve the target and the pending row. After a committed result, persist the project route, synchronize authority routes, restore local resources, remove any legacy row, and only then clear the journal.
 
 Direct create and duplicate calls await their own commit. Startup replay follows Rule 5: it is observed but does not block unrelated discovery, listing, or route access. Webaccess replay resolves the persisted workspace handle and permission for that operation; a missing workspace becomes a typed per-project recovery failure rather than an empty library. `memory` remains rejected with `WorkspaceDirectoryRequiredError('unsupported')` because durable projects require durable storage.
 
 The transaction is the only legitimate way to write seed files. UI surfaces (`/projects/new`, duplicate, remix-from-publication, and import) MUST go through the project manager; ad-hoc mount/write flows are forbidden because they omit journal ownership, locks, route synchronization, or manifest verification.
+
+Nested project directories share physical data. Local mutations must invalidate every affected mounted project projection and deliver exact file events through each route. Lifecycle admission, ordinary writes and permanent deletion share physical ancestor locks through the connected root, including when a tab only mounts a child. This conservatively serializes writes within one connected storage root. Never permanently delete a connected root as a project, or remove a project directory containing another `tau.json`; fail before deletion and preserve all nested bytes. Discovery failures are incomplete observations, not proof of absence.
 
 ### 13. Home resolves one pinned engine; `initialBackend` is required
 

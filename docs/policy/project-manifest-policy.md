@@ -3,7 +3,7 @@ title: 'Project Manifest Policy'
 description: 'Authority contract for the strict first-release tau.json manifest, host-local project library state, lifecycle overlays, and filesystem-first discovery.'
 status: active
 created: '2026-07-13'
-updated: '2026-09-27'
+updated: '2026-10-04'
 related:
   - docs/policy/filesystem-authority-policy.md
   - docs/policy/filesystem-policy.md
@@ -48,11 +48,11 @@ The governing invariant is:
 
 ### 1. An identifiable manifest establishes project existence
 
-A directory containing a `tau.json` whose identity reads (Rule 15) on a configured storage root **is** a project. A defective declaration degrades that project and never removes it. Discovery scans `/projects/*/tau.json`; no object-store row may create a project, suppress discovery of an active project, or substitute for a missing manifest.
+A directory containing a `tau.json` whose identity reads (Rule 15) on a configured storage root **is** a project. A defective declaration degrades that project and never removes it. Discovery scans the connected folder itself and every ordinary descendant for `tau.json`, continuing below identified projects. Skip hidden directories, `node_modules`, and symbolic-link subtrees. Grouping folders need no manifest; no object-store row may create a project, suppress discovery of an active project, or substitute for a missing manifest.
 
 A pending linked-remote bootstrap is a quarantined provisional directory, not a project. Its protected operation marker proves only recovery ownership and never substitutes for `tau.json`. Discovery admits it only after the reviewed Git tree and setup revision verify and manifest-last publication completes. A local import remains a valid project when its later remote push is pending or refused.
 
-After discovery, the UI may left-join `ProjectLibraryState` by validated logical project ID to sort the library, hide a soft-deleted project, or initialize revision state. This overlay affects local presentation and lifecycle only. A stale row without a discovered manifest is not a project.
+After discovery, the UI may left-join `ProjectLibraryState` by validated logical project ID to sort the library, hide a soft-deleted project, or initialize revision state. This overlay affects local presentation and lifecycle only. A stale row without a discovered manifest is not a project. A previously mounted project whose manifest disappears remains a recovery candidate, including a project at the selected root; a workspace metadata directory alone does not establish a root project. An unreadable subtree marks discovery incomplete and must not trigger orphan cleanup.
 
 **Why**: Disk-level project creation and external edits must work without registering content through one browser profile. The local overlay remembers browser intent but never becomes content authority.
 
@@ -264,6 +264,14 @@ Every degraded or quarantined state is visible with its exact issues: on the ope
 - [ ] No draft parser, manifest migration/recovery subsystem, or second schema URL ships.
 - [ ] Legacy object-store conversion emits strict v1 plus mapped local state and clears a row only after both verify.
 - [ ] No new listing cache or persistent projection is added without measurements and a separate authority contract.
+
+### 16. Reusable parts are explicit, local declarations
+
+Declare reusable files with optional `parts: { include: string[], exclude?: string[] }`. Patterns are relative to the declaring `tau.json`; support `*`, `**`, and `?`. Reject absolute paths, traversal, hidden/dependency segments, negated patterns, and unsupported brace, bracket or extglob syntax. An absent declaration or empty `include` exports no parts. Exclusions win within that declaration.
+
+Contextual lookup collects the selected project's declaration and its ancestor declarations up to the connected folder, nearest first. Sibling declarations do not become ambient dependencies; an ancestor may explicitly include sibling paths. Return each file with its declaring manifest and library-relative path, deduplicating the same physical file nearest first. Invalid declarations export nothing; incomplete reads retain usable results with issues. These declarations grant no new filesystem access and perform no remote publication. Keep the main asset contract unchanged.
+
+**Why**: A library explicitly says which files are reusable, while the connected folder remains the access boundary.
 
 ## References
 

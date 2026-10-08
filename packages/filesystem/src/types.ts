@@ -112,6 +112,8 @@ export type ProviderCapabilities = {
 export type DirectoryEntry = {
   readonly name: string;
   readonly kind: 'file' | 'dir';
+  /** True for a symbolic link; recursive discovery never follows links. */
+  readonly isSymbolicLink?: boolean;
   /**
    * What the enumerating surface says about this row; absent on a raw provider
    * listing. A composed view has already computed it for every row it lists, so

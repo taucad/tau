@@ -173,7 +173,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
     await poll;
   });
 
-  it('polls mounted project contents without recursively crawling discovery-only projects', async () => {
+  it('walks discovery-only directory topology to observe nested manifests', async () => {
     let unmountedEntries: ReturnType<typeof vi.spyOn>;
     await createWebAccessService({
       beforeConfigure: async ({ provider, handle }) => {
@@ -183,7 +183,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
       },
     });
 
-    expect(unmountedEntries?.mock.calls).toHaveLength(0);
+    expect(unmountedEntries?.mock.calls).toHaveLength(1);
   });
 
   it('invalidates only the changed subtree when the external diff is localizable', async () => {

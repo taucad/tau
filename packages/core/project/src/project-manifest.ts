@@ -19,6 +19,24 @@ export const projectRelativePathSchema = z
     return path.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
   }, 'Expected a normalized project-relative POSIX path');
 
+/** Relative part globs support `*`, `**` and `?`; they never grant access outside a library. @public */
+export const projectPartPatternSchema = projectRelativePathSchema.regex(
+  // oxlint-disable-next-line no-control-regex -- NUL must also be rejected by the published JSON Schema.
+  /^(?!\/)(?!.*[\\\u0000!{}[\]():])(?!.*(?:^|\/)\.)(?!.*(?:^|\/)node_modules(?:\/|$))[^/]+(?:\/[^/]+)*$/u,
+  'Expected a relative glob using only *, ** and ? wildcards outside hidden and dependency directories',
+);
+
+/** Explicit reusable-file selection, relative to the declaring tau.json. @public */
+export const projectPartsSchema = z
+  .object({
+    include: z.array(projectPartPatternSchema).max(64),
+    exclude: z.array(projectPartPatternSchema).max(64).optional(),
+  })
+  .strict()
+  .describe(
+    'Reusable files relative to this tau.json. Supports *, ** and ? wildcards. Hidden paths and dependencies are excluded.',
+  );
+
 const projectAssetSchema = z
   .object({
     entryPath: projectRelativePathSchema,
@@ -44,6 +62,7 @@ export const projectManifestSchema = z
      * nothing exists for a push to offer (D25, A30, W17). It lives here rather
      * than in a host store because it is a property of the project: a clone
      * inherits the decision instead of quietly re-enabling it. */
+    parts: projectPartsSchema.optional(),
     syncChats: z
       .boolean()
       .optional()
@@ -184,6 +203,14 @@ export const projectToManifest = (project: Omit<ProjectManifest, '$schema'> | Pr
       ...(project.assets.main.thumbnail === undefined ? {} : { thumbnail: project.assets.main.thumbnail }),
     },
   },
+  ...(project.parts === undefined
+    ? {}
+    : {
+        parts: {
+          include: [...project.parts.include],
+          ...(project.parts.exclude === undefined ? {} : { exclude: [...project.parts.exclude] }),
+        },
+      }),
   ...(project.syncChats === undefined ? {} : { syncChats: project.syncChats }),
   ...(project.syncLargeExports === undefined ? {} : { syncLargeExports: project.syncLargeExports }),
 });

@@ -4,6 +4,7 @@ import {
   projectIdSchema,
   projectManifestSchemaUrl,
   projectRelativePathSchema,
+  projectPartsSchema,
   projectToManifest,
 } from '@taucad/project-core';
 import type {
@@ -21,6 +22,7 @@ export {
   projectManifestSchema,
   projectManifestSchemaUrl,
   projectRelativePathSchema,
+  projectPartsSchema,
   projectToManifest,
   serializeProjectManifest,
 } from '@taucad/project-core';
@@ -102,13 +104,14 @@ const declarationSalvageSchema = z.object({
       }),
     })
     .catch({ main: { entryPath: fallbackEntryPath, thumbnail: undefined } }),
+  parts: projectPartsSchema.optional().catch(undefined),
   syncChats: syncPreference,
   syncLargeExports: syncPreference,
 });
 /* oxlint-enable promise/prefer-await-to-then, unicorn/prefer-top-level-await */
 
 const salvageDeclaration = (input: Record<string, unknown>): AdoptableProjectManifest => {
-  const { name, description, tags, assets, syncChats, syncLargeExports } = declarationSalvageSchema.parse(input);
+  const { name, description, tags, assets, parts, syncChats, syncLargeExports } = declarationSalvageSchema.parse(input);
   const { entryPath, thumbnail } = assets.main;
   return {
     $schema: projectManifestSchemaUrl,
@@ -116,6 +119,7 @@ const salvageDeclaration = (input: Record<string, unknown>): AdoptableProjectMan
     description,
     tags,
     assets: { main: { entryPath, ...(thumbnail === undefined ? {} : { thumbnail }) } },
+    ...(parts === undefined ? {} : { parts }),
     ...(syncChats === undefined ? {} : { syncChats }),
     ...(syncLargeExports === undefined ? {} : { syncLargeExports }),
   };
@@ -260,7 +264,7 @@ export const checkProjectManifestReplacement = (
     return [
       'tau.json must stay a valid Tau project manifest.',
       ...describeProjectManifestIssue(proposed.issue),
-      'It holds only $schema, id, name, description, tags, assets.main (entryPath, optional thumbnail), syncChats and syncLargeExports. Other source files need no manifest entry.',
+      'It holds only $schema, id, name, description, tags, assets.main (entryPath, optional thumbnail), syncChats, syncLargeExports and optional parts (include/exclude globs). Other source files need no manifest entry.',
     ].join('\n');
   }
   const existing = current === undefined ? undefined : readProjectManifestBytes(current);

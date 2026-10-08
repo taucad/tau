@@ -27,6 +27,7 @@ import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metadata.js';
 import type {
+  DirectoryEntry,
   FileMode,
   FileReadStreamOptions,
   FileStatOptions,
@@ -264,6 +265,19 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       entry.isSymbolicLink() ? this._refusesLaunderedLink(canonical, entry.name) : false,
     );
     return rows.filter((_, index) => refused[index] !== true).map(({ name }) => name);
+  }
+
+  /** Read child kinds without reading ordinary file contents; retain link identity for discovery. */
+  public async readdirEntries(path_: string): Promise<DirectoryEntry[]> {
+    const names = await this.readdir(path_);
+    const directory = await this._resolve(path_);
+    return mapConcurrent(names, statConcurrency, async (name) => {
+      const info = await fs.lstat(path.join(directory, name));
+      const isSymbolicLink = info.isSymbolicLink();
+      const target = isSymbolicLink ? await this.stat(joinRooted(path_, name)) : undefined;
+      const kind = target?.type ?? (info.isDirectory() ? 'dir' : 'file');
+      return { name, kind: kind === 'dir' ? 'dir' : 'file', ...(isSymbolicLink ? { isSymbolicLink } : {}) };
+    });
   }
 
   /**

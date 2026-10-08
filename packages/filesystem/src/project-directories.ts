@@ -22,6 +22,7 @@
  */
 
 import { z } from 'zod';
+import { matchesGlob } from '#glob.js';
 import {
   parseProjectManifestBytes,
   projectIdSchema,
@@ -61,6 +62,15 @@ import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { isDurableScope, projectLocatorFor } from '#backend/scope.js';
 import { isNotFoundError } from '#workspace-errors.js';
 import { projectRoute } from '#project-routes.js';
+
+/** Lifecycle operations share every physical ancestor with nested admissions. */
+const projectDirectoryLocks = (storageRootKey: string, directory: string): string[] => {
+  const segments = directory.split('/');
+  return Array.from(
+    { length: segments.length + 1 },
+    (_, index) => `${storageRootKey}:${segments.slice(0, index).join('/')}`,
+  );
+};
 
 /** Concurrent `tau.json` probes while scanning a discovery root. */
 const manifestProbeConcurrency = 16;
@@ -129,6 +139,48 @@ export type ProjectDiscoveryResult = {
   readonly roots: readonly ProjectRootDiscoveryStatus[];
 };
 
+/** A reusable file and the manifest that explicitly exposes it. @public */
+export type ProjectPart = {
+  readonly library: ProjectLocator;
+  readonly entryPath: string;
+  readonly declaredBy: string;
+};
+
+/** Contextual parts from this project and its ancestors within the connected folder. @public */
+export type ListProjectPartsResult = {
+  readonly parts: readonly ProjectPart[];
+  readonly issues: ReadonlyArray<{ readonly code: 'library-invalid' | 'library-unreadable'; readonly path: string }>;
+};
+
+/**
+ * Find the nearest discovered project containing a root-relative file or folder.
+ * Invalid and ambiguous projects remain visible; callers must inspect status.
+ *
+ * @param discovery - Current discovery result.
+ * @param storageRootKey - Connected authority containing the path.
+ * @param relativePath - Canonical path within that authority.
+ * @returns The nearest manifest-bearing ancestor, including the selected root.
+ * @public
+ */
+export function resolveProjectForPath(
+  discovery: ProjectDiscoveryResult,
+  storageRootKey: string,
+  relativePath: string,
+): ProjectDiscoveryEntry | undefined {
+  if (assertRootedPath(relativePath) !== relativePath) {
+    throw new TypeError('Project lookup requires a canonical relative path.');
+  }
+  return discovery.entries
+    .filter(
+      ({ locator }) =>
+        locator.storageRootKey === storageRootKey &&
+        (locator.relativeDirectory === '' ||
+          relativePath === locator.relativeDirectory ||
+          relativePath.startsWith(`${locator.relativeDirectory}/`)),
+    )
+    .sort((left, right) => right.locator.relativeDirectory.length - left.locator.relativeDirectory.length)[0];
+}
+
 /** One configured discovery root, resolved to the scope and root key its scan uses. @public */
 export type ResolvedDiscoveryRoot = {
   root: ProjectRootConfiguration['roots'][number];
@@ -170,6 +222,7 @@ export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDire
     try {
       if (
         assertRootedPath(input.providerBasePath) !== input.providerBasePath ||
+        input.providerBasePath === '' ||
         !isProjectDirectoryPath(input.providerBasePath)
       ) {
         context.addIssue({
@@ -260,7 +313,11 @@ type ProjectDirectoryReading =
  * @param directory - Root-relative project directory.
  * @returns The directory's reading; never throws for manifest content.
  */
-async function readProjectDirectory(provider: FileSystemProvider, directory: string): Promise<ProjectDirectoryReading> {
+async function readProjectDirectory(
+  provider: FileSystemProvider,
+  directory: string,
+  knownProject = false,
+): Promise<ProjectDirectoryReading> {
   let bytes: Uint8Array<ArrayBuffer>;
   try {
     bytes = await provider.readFile(joinRelativePath(directory, 'tau.json'));
@@ -273,7 +330,7 @@ async function readProjectDirectory(provider: FileSystemProvider, directory: str
     }
     // One listing, no `stat`: it both proves Tau state and finds the likely main entry.
     const entries = await readDirectoryEntries(provider, directory).catch(() => []);
-    if (!entries.some((entry) => entry.kind === 'dir' && entry.name === '.tau')) {
+    if (!knownProject && !entries.some((entry) => entry.kind === 'dir' && entry.name === '.tau')) {
       return { kind: 'not-a-project' };
     }
     const mainFile = entries
@@ -321,6 +378,7 @@ export class ProjectDirectories {
   private readonly _treeIndexes: TreeIndexes;
   /** The configured discovery roots, owned by the authority's mount lifecycle. */
   private readonly _discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
+  private readonly _isKnownProject: (storageRootKey: string, directory: string) => boolean;
   private readonly _filePool: () => SharedPool | undefined;
   /** Retire one logical project route the authority installed, as a delete must. */
   private readonly _revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
@@ -337,6 +395,7 @@ export class ProjectDirectories {
     pipeline: MutationPipeline;
     treeIndexes: TreeIndexes;
     discoveryRoots: () => readonly ResolvedDiscoveryRoot[];
+    isKnownProject: (storageRootKey: string, directory: string) => boolean;
     filePool: () => SharedPool | undefined;
     revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
   }) {
@@ -347,13 +406,13 @@ export class ProjectDirectories {
     this._treeIndexes = options.treeIndexes;
     this._discoveryRoots = options.discoveryRoots;
     this._filePool = options.filePool;
+    this._isKnownProject = options.isKnownProject;
     this._revokeProjectRoute = options.revokeProjectRoute;
   }
 
   /**
-   * Discover physical project manifests. A project is any immediate child
-   * directory of a configured root carrying `tau.json`; dot-prefixed children
-   * hold app state and are never scanned.
+   * Discover projects at a selected root and at every nested directory. Hidden
+   * directories, dependencies and symbolic links are outside discovery.
    *
    * @returns Manifests and per-root completeness from the configured physical roots.
    */
@@ -373,27 +432,60 @@ export class ProjectDirectories {
         roots.push({ status: 'inaccessible', root, reason: error instanceof Error ? error.message : String(error) });
         continue;
       }
-      let directories: string[];
-      try {
-        // The workspace root exists by definition; a project is any immediate
-        // child directory carrying `tau.json`. Entry kinds come from the listing
-        // so files never cost a `stat`, and dotdirs are excluded by name alone.
-        const entries = await readDirectoryEntries(provider, '');
-        directories = entries
-          .filter((entry) => entry.kind === 'dir' && !entry.name.startsWith('.'))
-          .map((entry) => entry.name)
-          .sort();
-      } catch (error) {
-        roots.push({ status: 'inaccessible', root, reason: error instanceof Error ? error.message : String(error) });
-        continue;
+      const directories: string[] = [];
+      const failures: string[] = [];
+      const pending = [''];
+      while (pending.length > 0) {
+        const batch = pending.splice(0, manifestProbeConcurrency);
+        const listings = await Promise.all(
+          batch.map(async (directory) => {
+            try {
+              return { directory, entries: await readDirectoryEntries(provider, directory) };
+            } catch (error) {
+              failures.push(`${directory || '.'}: ${error instanceof Error ? error.message : String(error)}`);
+              return undefined;
+            }
+          }),
+        );
+        for (const listing of listings) {
+          if (listing === undefined) {
+            continue;
+          }
+          const { directory, entries } = listing;
+          // A selected root's .tau directory is workspace metadata, not evidence
+          // of a missing project. Descendants retain explicit recovery behavior.
+          if (
+            this._isKnownProject(storageRootKey, directory) ||
+            entries.some((entry) => entry.name === 'tau.json' && entry.kind === 'file') ||
+            (directory !== '' && entries.some((entry) => entry.name === '.tau' && entry.kind === 'dir'))
+          ) {
+            directories.push(directory);
+          }
+          pending.push(
+            ...entries
+              .filter(
+                (entry) =>
+                  entry.kind === 'dir' &&
+                  !entry.isSymbolicLink &&
+                  !entry.name.startsWith('.') &&
+                  entry.name !== 'node_modules',
+              )
+              .map((entry) => joinRelativePath(directory, entry.name))
+              .sort(),
+          );
+        }
       }
+      directories.sort();
       const probe = async (directory: string): Promise<ProjectDiscoveryEntry | undefined> => {
         const relativeDirectory = assertRootedPath(directory);
         const locator = projectLocatorFor(root, storageRootKey, relativeDirectory);
-        // One unreadable child must not blank an otherwise readable root: it is
-        // reported in place and the scan continues. `inaccessible` stays
-        // reserved for failures of the root listing or its provider.
-        const reading = await readProjectDirectory(provider, relativeDirectory);
+        // An unreadable manifest is quarantined in place; an unreadable
+        // directory separately marks the root incomplete for reconciliation.
+        const reading = await readProjectDirectory(
+          provider,
+          relativeDirectory,
+          this._isKnownProject(storageRootKey, relativeDirectory),
+        );
         switch (reading.kind) {
           case 'not-a-project': {
             return undefined;
@@ -419,7 +511,11 @@ export class ProjectDirectories {
         );
         discovered.push(...chunk.filter((entry) => entry !== undefined));
       }
-      roots.push({ status: 'complete', root });
+      roots.push(
+        failures.length === 0
+          ? { status: 'complete', root }
+          : { status: 'inaccessible', root, reason: failures.sort().join('; ') },
+      );
     }
     /* oxlint-enable eslint/no-await-in-loop -- End bounded serial root scan. */
 
@@ -458,6 +554,107 @@ export class ProjectDirectories {
   }
 
   /**
+   * Resolve explicit reusable files from a project and each ancestor manifest.
+   * Globs are rooted at their declaring library, never at the process directory.
+   *
+   * @param input - Exact discovered project locator.
+   * @returns Deterministic parts with provenance and incomplete-library issues.
+   */
+  public async listProjectParts(input: { readonly project: ProjectLocator }): Promise<ListProjectPartsResult> {
+    const { project } = input;
+    if (
+      assertRootedPath(project.relativeDirectory) !== project.relativeDirectory ||
+      !isProjectDirectoryPath(project.relativeDirectory)
+    ) {
+      throw new TypeError('Parts lookup requires a canonical project directory.');
+    }
+    const root = this._discoveryRoots().find((candidate) => candidate.storageRootKey === project.storageRootKey);
+    if (root === undefined) {
+      throw new TypeError('Parts lookup requires a configured discovery root.');
+    }
+    const discovery = await this.listProjectManifests();
+    const owner = resolveProjectForPath(discovery, project.storageRootKey, project.relativeDirectory);
+    if (owner?.status !== 'valid' || owner.locator.relativeDirectory !== project.relativeDirectory) {
+      throw new TypeError('Parts lookup requires an unambiguous discovered project.');
+    }
+    const libraries = discovery.entries
+      .filter(
+        ({ locator }) =>
+          locator.storageRootKey === project.storageRootKey &&
+          (locator.relativeDirectory === '' ||
+            locator.relativeDirectory === project.relativeDirectory ||
+            project.relativeDirectory.startsWith(`${locator.relativeDirectory}/`)),
+      )
+      .sort((left, right) => right.locator.relativeDirectory.length - left.locator.relativeDirectory.length);
+    const provider = await this._registry.getProvider(root.scope);
+    const parts: ProjectPart[] = [];
+    const issues: Array<ListProjectPartsResult['issues'][number]> = [];
+    const seen = new Set<string>();
+    if (discovery.roots.some((status) => status.status === 'inaccessible' && status.root === root.root)) {
+      issues.push({ code: 'library-unreadable', path: '' });
+    }
+    /* oxlint-disable no-await-in-loop -- Library walks are deliberately bounded and nearest declarations win. */
+    for (const library of libraries) {
+      const declaredBy = joinRelativePath(library.locator.relativeDirectory, 'tau.json');
+      if (library.status !== 'valid') {
+        issues.push({ code: 'library-invalid', path: declaredBy });
+        continue;
+      }
+      if (library.issue !== undefined) {
+        issues.push({ code: 'library-invalid', path: declaredBy });
+      }
+      const declaration = library.manifest.parts;
+      if (declaration === undefined || declaration.include.length === 0) {
+        continue;
+      }
+      const pending = [''];
+      while (pending.length > 0) {
+        const relative = pending.pop()!;
+        const directory = joinRelativePath(library.locator.relativeDirectory, relative);
+        let entries;
+        try {
+          entries = await readDirectoryEntries(provider, directory);
+        } catch {
+          issues.push({ code: 'library-unreadable', path: directory });
+          continue;
+        }
+        for (const entry of entries.toSorted((left, right) => left.name.localeCompare(right.name))) {
+          if (
+            entry.isSymbolicLink === true ||
+            entry.name.startsWith('.') ||
+            entry.name === 'node_modules' ||
+            entry.name === 'tau.json'
+          ) {
+            continue;
+          }
+          const entryPath = joinRelativePath(relative, entry.name);
+          if (entry.kind === 'dir') {
+            pending.push(entryPath);
+          } else if (
+            declaration.include.some((pattern) => matchesGlob(entryPath, pattern)) &&
+            !declaration.exclude?.some((pattern) => matchesGlob(entryPath, pattern))
+          ) {
+            const physicalPath = joinRelativePath(library.locator.relativeDirectory, entryPath);
+            if (!seen.has(physicalPath)) {
+              seen.add(physicalPath);
+              parts.push({ library: library.locator, entryPath, declaredBy });
+            }
+          }
+        }
+      }
+    }
+    /* oxlint-enable no-await-in-loop */
+    return {
+      parts: parts.sort(
+        (left, right) =>
+          right.library.relativeDirectory.length - left.library.relativeDirectory.length ||
+          left.entryPath.localeCompare(right.entryPath),
+      ),
+      issues,
+    };
+  }
+
+  /**
    * Give an `adoption-required` project directory a Tau identity in place,
    * writing the salvaged declaration discovery showed. Service-side because the
    * write must re-establish adoptability under the same physical lock every
@@ -484,10 +681,10 @@ export class ProjectDirectories {
       throw new TypeError(`Adoption target is not a configured discovery root: ${locator.storageRootKey}`);
     }
     const provider = await this._registry.getProvider(root.scope);
-    const physicalLock = `${locator.storageRootKey}:${path}`;
-    return this._crossTabCoordinator.withLocks([physicalLock], async () =>
-      this._resourceQueue.queueForMany([physicalLock], async () => {
-        const reading = await readProjectDirectory(provider, path);
+    const locks = projectDirectoryLocks(locator.storageRootKey, path);
+    return this._crossTabCoordinator.withLocks(locks, async () =>
+      this._resourceQueue.queueForMany(locks, async () => {
+        const reading = await readProjectDirectory(provider, path, this._isKnownProject(locator.storageRootKey, path));
         if (reading.kind !== 'adoptable') {
           throw new TypeError(`Project directory is not adoptable: ${path}`);
         }
@@ -495,9 +692,8 @@ export class ProjectDirectories {
           ...reading.manifest,
           id: options?.id ?? generatePrefixedId(idPrefix.project),
         });
-        await provider.writeFile(`${path}/tau.json`, serializeProjectManifest(manifest));
-        // Ponytail: no logical route to invalidate — an unadopted project was
-        // never mounted, so the caller's discovery refetch is the only reader.
+        await provider.writeFile(joinRelativePath(path, 'tau.json'), serializeProjectManifest(manifest));
+        this._pipeline.publishPhysicalDirectoryChange(locator.storageRootKey, path);
         this._crossTabCoordinator.notifyDirectoryChange('/', this._scopedPhysicalAuthority(root.scope, ''));
         return manifest;
       }),
@@ -523,8 +719,10 @@ export class ProjectDirectories {
     if (path !== input.providerBasePath) {
       throw new TypeError('Permanent delete target must already be canonical.');
     }
-    if (!isProjectDirectoryPath(path)) {
-      throw new TypeError('Permanent delete target must be an immediate child of the workspace root.');
+    if (path === '' || !isProjectDirectoryPath(path)) {
+      throw new TypeError(
+        'Permanent delete requires a descendant project directory; disconnect a selected root instead.',
+      );
     }
     // `StorageRootConfig` has no ephemeral member, but an untyped RPC caller can
     // still deliver one, and this operation must never run against it.
@@ -534,8 +732,7 @@ export class ProjectDirectories {
     const scope: StorageRootConfig = { ...input.scope };
     const provider = await this._registry.getProvider(scope);
     const logicalRoot = projectRoute(projectId);
-    const physicalLock = `${this._registry.resolveStorageRootKey(scope)}:${path}`;
-    const locks = [`project:${projectId}`, physicalLock];
+    const locks = [`project:${projectId}`, ...projectDirectoryLocks(this._registry.resolveStorageRootKey(scope), path)];
     return this._crossTabCoordinator.withLocks(locks, async () =>
       this._resourceQueue.queueForMany(locks, async () => {
         await provider.refresh?.();
@@ -557,6 +754,7 @@ export class ProjectDirectories {
           return { status: 'identity-mismatch', actualProjectId: parsed.data.id };
         }
 
+        await this._assertNoNestedProjects(provider, path);
         this._revokeProjectRoute(logicalRoot, true);
         const separator = path.lastIndexOf('/');
         const physicalParent = separator === -1 ? '' : path.slice(0, separator);
@@ -566,7 +764,7 @@ export class ProjectDirectories {
           await this._deleteProjectDirectory(provider, path, manifest);
         } finally {
           this._filePool()?.clear();
-          this._treeIndexes.clear();
+          this._pipeline.publishPhysicalDirectoryChange(this._registry.resolveStorageRootKey(scope), path);
           this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
           this._crossTabCoordinator.notifyDirectoryChange(authorityParent, parentAuthority);
         }
@@ -594,8 +792,7 @@ export class ProjectDirectories {
     const { path, files, manifest, scope, storageRootKey, projectId } = this._validatePendingProjectCommit(input);
     const provider = await this._registry.getProvider(scope);
     const logicalRoot = projectRoute(projectId);
-    const physicalLock = `${storageRootKey}:${path}`;
-    const locks = [`project:${projectId}`, physicalLock];
+    const locks = [`project:${projectId}`, ...projectDirectoryLocks(storageRootKey, path)];
 
     return this._crossTabCoordinator.withLocks(locks, async () =>
       this._resourceQueue.queueForMany(locks, async () => {
@@ -618,6 +815,7 @@ export class ProjectDirectories {
               }
               return { status: 'already-committed' };
             }
+            await this._assertNoNestedProjects(provider, path);
             mutationBegan = true;
             await this._pipeline.rmdirRecursive(provider, path);
           }
@@ -654,18 +852,43 @@ export class ProjectDirectories {
             throw new Error(`Pending project manifest verification failed for ${projectId}`);
           }
 
+          this._pipeline.publishPhysicalDirectoryChange(storageRootKey, path, context);
           this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._scopedPhysicalAuthority(scope, path));
           return { status: 'committed' };
         } catch (error) {
           if (mutationBegan) {
             this._filePool()?.clear();
             this._treeIndexes.removeDirectory(logicalRoot);
+            this._pipeline.publishPhysicalDirectoryChange(storageRootKey, path, context);
             this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._scopedPhysicalAuthority(scope, path));
           }
           throw error;
         }
       }),
     );
+  }
+
+  private async _assertNoNestedProjects(provider: FileSystemProvider, directory: string): Promise<void> {
+    const pending = [directory];
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      // oxlint-disable-next-line no-await-in-loop -- Preflight must finish before deletion starts.
+      const entries = await readDirectoryEntries(provider, current);
+      if (current !== directory && entries.some((entry) => entry.name === 'tau.json')) {
+        throw new TypeError(`Cannot remove a directory containing a nested project: ${current}`);
+      }
+      pending.push(
+        ...entries
+          .filter(
+            (entry) =>
+              entry.kind === 'dir' &&
+              !entry.isSymbolicLink &&
+              !entry.name.startsWith('.') &&
+              entry.name !== 'node_modules',
+          )
+          .map((entry) => joinRelativePath(current, entry.name)),
+      );
+    }
   }
 
   private _validatePendingProjectCommit(input: CommitPendingProjectDirectoryInput): {

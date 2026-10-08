@@ -6,6 +6,8 @@ export {
   projectManifestSchema,
   projectManifestSchemaUrl,
   projectRelativePathSchema,
+  projectPartPatternSchema,
+  projectPartsSchema,
   projectToManifest,
   serializeProjectManifest,
 } from '#project-manifest.js';

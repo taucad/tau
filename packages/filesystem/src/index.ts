@@ -26,8 +26,10 @@ export type {
 export type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 
 export { WorkspaceFileService } from '#workspace-file-service.js';
-export { pendingProjectCommitInputSchema } from '#project-directories.js';
+export { pendingProjectCommitInputSchema, resolveProjectForPath } from '#project-directories.js';
 export type {
+  ProjectPart,
+  ListProjectPartsResult,
   ProjectDiscoveryEntry,
   ProjectDiscoveryResult,
   ProjectRootDiscoveryStatus,

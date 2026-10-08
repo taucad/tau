@@ -291,7 +291,7 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
           const { providerBasePath } = config;
           if (typeof providerBasePath === 'string' && providerBasePath.startsWith('/')) {
             const migrated = providerBasePath.slice(1);
-            if (isFlatProjectBasePath(migrated)) {
+            if (!migrated.includes('/') && isProjectBasePath(migrated)) {
               cursor.update({ ...config, providerBasePath: migrated });
             }
           }
@@ -1120,7 +1120,7 @@ export type ProjectFileSystemConfigChanges = {
 export async function applyProjectFileSystemConfigChanges(changes: ProjectFileSystemConfigChanges): Promise<void> {
   const upsertIds = new Set<string>();
   for (const config of changes.upserts) {
-    if (!isFlatProjectBasePath(config.providerBasePath)) {
+    if (!isProjectBasePath(config.providerBasePath)) {
       throw new TypeError(
         `Project provider path must be a canonical root-relative directory: ${config.providerBasePath}`,
       );
@@ -1433,17 +1433,16 @@ async function readAllHandles(db: IDBDatabase): Promise<ReadonlyMap<string, File
 }
 
 /**
- * Physical project directories are immediate, non-dot-prefixed children of the
- * workspace root (blueprint D1). Mirrors the service-side invariant enforced by
+ * Physical project directories include the selected root and ordinary nested
+ * directories. Hidden and dependency directories remain excluded. Mirrors the service-side invariant enforced by
  * `WorkspaceFileService._configureProjectRoots`.
  */
-function isFlatProjectBasePath(providerBasePath: string): boolean {
+function isProjectBasePath(providerBasePath: string): boolean {
   try {
     return (
-      providerBasePath !== '' &&
       assertRootedPath(providerBasePath) === providerBasePath &&
-      !providerBasePath.includes('/') &&
-      !providerBasePath.startsWith('.')
+      (providerBasePath === '' ||
+        providerBasePath.split('/').every((segment) => !segment.startsWith('.') && segment !== 'node_modules'))
     );
   } catch {
     return false;
@@ -1609,7 +1608,7 @@ function isProjectFileSystemConfig(value: unknown): value is ProjectFileSystemCo
   if (
     typeof config['projectId'] !== 'string' ||
     typeof config['providerBasePath'] !== 'string' ||
-    !isFlatProjectBasePath(config['providerBasePath'])
+    !isProjectBasePath(config['providerBasePath'])
   ) {
     return false;
   }

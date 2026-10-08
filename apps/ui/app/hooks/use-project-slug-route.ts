@@ -6,7 +6,7 @@
  * project's slugs (L1), so an external directory rename corrects itself on the
  * next listing refresh (D8) without any extra bookkeeping. Matching is
  * case-insensitive because the filesystems Tau targets are (F3), and the
- * project slug is the literal directory basename — Tau slugifies only the names
+ * project slug is the complete relative directory path — Tau slugifies only the names
  * it generates.
  */
 
@@ -20,7 +20,6 @@ import { legacyWorkspaceSlugTombstones } from '#filesystem/handle-store.js';
 
 const equalsFolded = (a: string, b: string): boolean => a.toLocaleLowerCase() === b.toLocaleLowerCase();
 const isWorkspaceId = (value: string): boolean => value.startsWith(`${idPrefix.workspace}_`);
-const isProjectId = (value: string): boolean => value.startsWith(`${idPrefix.project}_`);
 
 type RouteProject = Pick<ProjectListItem, 'id' | 'locator' | 'slugs'>;
 
@@ -34,18 +33,17 @@ export function resolveProjectRoute(
     return undefined;
   }
 
-  return projects.find((candidate) => {
+  const matches = projects.filter((candidate) => {
     if (!candidate.slugs) {
       return false;
     }
     const workspaceMatches = isWorkspaceId(workspaceSegment)
       ? candidate.locator.backend === 'webaccess' && candidate.locator.workspaceId === workspaceSegment
       : equalsFolded(candidate.slugs.workspaceSlug, workspaceSegment);
-    const projectMatches = isProjectId(projectSegment)
-      ? candidate.id === projectSegment
-      : equalsFolded(candidate.slugs.projectSlug, projectSegment);
+    const projectMatches = candidate.id === projectSegment || equalsFolded(candidate.slugs.projectSlug, projectSegment);
     return workspaceMatches && projectMatches;
-  })?.id;
+  });
+  return matches.length === 1 ? matches[0]!.id : undefined;
 }
 
 /** Resolution outcome. `resolving` must not render a not-found. */

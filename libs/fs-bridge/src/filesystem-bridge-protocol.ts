@@ -128,6 +128,7 @@ type WorkspaceBridgeMethodName =
   | 'unmount'
   | 'configureProjectRoots'
   | 'listProjectManifests'
+  | 'listProjectParts'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -326,7 +327,8 @@ const rootedPathSchema = z.string().refine((value) => {
   }
 });
 const projectDirectoryPathSchema = rootedPathSchema.refine(
-  (value) => value !== '' && !value.includes('/') && !value.startsWith('.'),
+  (value) =>
+    value === '' || value.split('/').every((segment) => !segment.startsWith('.') && segment !== 'node_modules'),
 );
 const projectIdSchema = projectManifestSchema.shape.id;
 
@@ -905,6 +907,15 @@ const callSchemas = {
   unmount: { args: oneStringArgument, result: voidResult },
   configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },
   listProjectManifests: { args: noArgs, result: projectDiscoveryResultSchema },
+  listProjectParts: {
+    args: z.tuple([z.object({ project: projectLocatorSchema })]),
+    result: z.object({
+      parts: z.array(
+        z.object({ library: projectLocatorSchema, entryPath: rootedPathSchema, declaredBy: rootedPathSchema }),
+      ),
+      issues: z.array(z.object({ code: z.enum(['library-invalid', 'library-unreadable']), path: rootedPathSchema })),
+    }),
+  },
   commitPendingProjectDirectory: {
     args: z.tuple([pendingProjectCommitInputSchema]),
     result: pendingProjectCommitResultSchema,

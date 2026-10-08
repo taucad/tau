@@ -15,8 +15,8 @@ import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode, FileStat, HeadFileStat } from '#types.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
 
-/** Wire version. Version 5 adds authoritative head stat. @public */
-export const nodeFsProtocolVersion = 5;
+/** Wire version. Version 6 requires authoritative head stat and directory entries with symlink identity. @public */
+export const nodeFsProtocolVersion = 6;
 
 /**
  * Watch event as it crosses the port. A superset of the library's
@@ -139,6 +139,7 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   checkedWriteRequestSchema,
   checkedDeleteRequestSchema,
   z.object({ ...rooted, op: z.literal('readdir'), path: z.string() }),
+  z.object({ ...rooted, op: z.literal('readdirEntries'), path: rootedPathSchema }),
   z.object({ ...rooted, op: z.literal('readdirWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirHeadWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('stat'), path: z.string() }),
@@ -215,6 +216,9 @@ export const nodeFsResultSchemas = {
   writeFileChecked: checkedWriteResultSchema,
   deleteFileChecked: checkedWriteResultSchema,
   readdir: z.array(z.string()),
+  readdirEntries: z.array(
+    z.object({ name: z.string(), kind: z.enum(['file', 'dir']), isSymbolicLink: z.boolean().optional() }),
+  ),
   readdirWithStats: z.array(z.object({ name: z.string() }).and(fileStatSchema)),
   readdirHeadWithStats: z.array(z.object({ name: z.string() }).and(headFileStatSchema)),
   stat: fileStatSchema,

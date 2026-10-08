@@ -60,7 +60,7 @@ import type {
 /* The project-directory lifecycle is its own module (D5/W7); the authority
  * keeps the four public calls and owns nothing of the manifest. */
 import { ProjectDirectories } from '#project-directories.js';
-import type { ProjectDiscoveryResult, ResolvedDiscoveryRoot } from '#project-directories.js';
+import type { ListProjectPartsResult, ProjectDiscoveryResult, ResolvedDiscoveryRoot } from '#project-directories.js';
 import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields } from '#content-metadata.js';
@@ -219,6 +219,15 @@ export class WorkspaceFileService {
       pipeline: this._pipeline,
       treeIndexes: this._treeIndexes,
       discoveryRoots: () => this._discoveryRoots,
+      isKnownProject: (storageRootKey, directory) =>
+        this._mountTable
+          .listMounts()
+          .some(
+            (mount) =>
+              mount.kind === 'project' &&
+              mount.storageRootKey === storageRootKey &&
+              mount.providerBasePath === directory,
+          ),
       filePool: () => this._filePool,
       revokeProjectRoute: (path, notifyPeers) => {
         this._revokeProjectRoute(path, notifyPeers);
@@ -1068,6 +1077,11 @@ export class WorkspaceFileService {
     return this._projectDirectories.listProjectManifests();
   }
 
+  /** Resolve reusable files declared by a project and its permitted ancestors. */
+  public async listProjectParts(input: { readonly project: ProjectLocator }): Promise<ListProjectPartsResult> {
+    return this._projectDirectories.listProjectParts(input);
+  }
+
   /**
    * Give an `adoption-required` project directory a Tau identity in place.
    *
@@ -1330,9 +1344,7 @@ export class WorkspaceFileService {
         throw new TypeError(`Project provider path must already be canonical: ${config.providerBasePath}`);
       }
       if (!isProjectDirectoryPath(providerBasePath)) {
-        throw new TypeError(
-          `Project provider path must be an immediate child of the workspace root: ${providerBasePath}`,
-        );
+        throw new TypeError(`Project provider path must be the root or an ordinary descendant: ${providerBasePath}`);
       }
       return this._stageRouteMount(
         { prefix, config, providerBasePath, noun: 'project' },

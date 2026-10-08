@@ -464,7 +464,7 @@ describe('WorkspaceFileService — rooted project filesystems', () => {
     await expect(rooted.exists('')).rejects.toMatchObject({ code: 'ESTALE' });
   });
 
-  it.each(['', '.tau', 'projects/nested/child', 'other/project', '/slash-prefixed'])(
+  it.each(['.tau', 'projects/.hidden/child', 'node_modules/project', '/slash-prefixed'])(
     'rejects invalid configured provider base %s before provider lookup',
     async (providerBasePath) => {
       const { service, providerRegistry } = await createService();

@@ -712,12 +712,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     if (!channel) {
       return undefined;
     }
+    /**
+     * Discovery-relevant file changes: the synthetic
+     * root event, a root-level directory (a project directory appearing or
+     * going away), and any `tau.json`. Dot-prefixed segments are workspace or
+     * project app state (`.tau/**`) and must never trigger a rescan (F1).
+     */
     const isManifestPath = (path: string): boolean => {
       const segments = path.split('/').filter(Boolean);
       if (segments.length === 0) {
         return true;
       }
-      if (segments.some((segment) => segment.startsWith('.'))) {
+      if (segments.some((segment) => segment.startsWith('.') || segment === 'node_modules')) {
         return false;
       }
       return segments.length === 1 || segments.at(-1) === 'tau.json';
@@ -844,11 +850,28 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         await metadataReadOwner.settle();
       },
     });
+    // Nested projects can appear or disappear at any depth, and the watch stream does not say
+    // whether a path is a directory, so directory lifecycle events come from the channel directly.
+    const directorySubscription = {
+      interestedIn: (path: string) =>
+        !path.split('/').some((segment) => segment.startsWith('.') || segment === 'node_modules'),
+      handler: () => {
+        discovery.invalidate();
+      },
+    };
+    const directoryUnsubscribers = [
+      channel.onDirectoryCreated(directorySubscription),
+      channel.onDirectoryDeleted(directorySubscription),
+      channel.onDirectoryRenamed(directorySubscription),
+    ];
     const discoveryLease = discovery.acquire();
     const metadataLease = metadata.acquire();
     return () => {
       if (discoveryObservationRef.current === discovery) {
         discoveryObservationRef.current = undefined;
+      }
+      for (const unsubscribe of directoryUnsubscribers) {
+        unsubscribe();
       }
       discoveryLease.release();
       metadataLease.release();
@@ -1983,17 +2006,19 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       ]);
       const projects: ProjectLibraryEntry[] = validEntries.map((entry) => {
         const { locator } = entry;
-        const slugs = projectSlugsOf(locator, workspaces);
+        const slugs = projectSlugsOf(locator, workspaces, entry.manifest.id);
         const workspaceName =
-          locator.backend === 'webaccess'
-            ? workspaces.find((workspace) => workspace.workspaceId === locator.workspaceId)?.name
-            : undefined;
+          workspaces.find((workspace) =>
+            locator.backend === 'webaccess'
+              ? workspace.workspaceId === locator.workspaceId
+              : locator.backend === 'node' && workspace.path === locator.path,
+          )?.name ?? 'Home';
         return {
           manifest: entry.manifest,
           library: libraryStates.get(entry.manifest.id)!,
           locator,
           ...(slugs === undefined ? {} : { slugs }),
-          ...(workspaceName === undefined ? {} : { workspaceName }),
+          workspaceName,
           ...(entry.issue === undefined ? {} : { issue: entry.issue }),
         };
       });
@@ -2339,6 +2364,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       await ensureDiscoveryReady();
       const worker = await getReadiedWorker();
       const storage = await discoverPermanentDeleteStorage(projectId);
+      if (storage.providerBasePath === '') {
+        throw new Error(
+          'This project is the connected folder. Disconnect its workspace instead of permanently deleting it.',
+        );
+      }
       const operationId = await worker.beginPermanentDeleteProject(projectId, storage);
       const pendingOperations = await worker.getPendingProjectOperations();
       const operation = pendingOperations.find((candidate) => candidate.operationId === operationId);

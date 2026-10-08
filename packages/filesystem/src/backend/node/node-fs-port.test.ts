@@ -128,6 +128,13 @@ const aliasesEntry = (root: string, probe: string, alias: string): boolean => {
 };
 
 describe('node filesystem client/host round trip', () => {
+  it('preserves symlink identity through the port for bounded project discovery', async () => {
+    const { root, provider } = connect();
+    mkdirSync(join(root, 'folder'));
+    symlinkSync(root, join(root, 'folder', 'loop'), 'dir');
+    expect(await provider.readdirEntries('folder')).toEqual([{ name: 'loop', kind: 'dir', isSymbolicLink: true }]);
+  });
+
   it('streams bounded chunks and exact ranges through the authority client, as the local provider does', async () => {
     const { root, provider } = connect();
     const bytes = new Uint8Array(streamChunkSize * 2 + 17).map((_, index) => index % 251);

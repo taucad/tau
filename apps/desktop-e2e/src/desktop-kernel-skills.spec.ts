@@ -278,9 +278,15 @@ test.skipIf(!enabled).each(selected)(
       const projectRoot = join(session.pickedDirectory, slug);
       const eventsPath = join(projectRoot, '.tau/chats', activeChatId(page), 'events.jsonl');
       const read = (): string => (existsSync(eventsPath) ? readFileSync(eventsPath, 'utf8') : '');
+      // A cancelled or failed run never completes; stop waiting instead of spending the whole poll.
+      const halted = (): string | undefined =>
+        /"type":"run\.lifecycle","state":"(?:cancelled|failed)"[^\n]*/u.exec(read())?.[0];
       await expect
         .poll(
           () => {
+            if (halted() !== undefined) {
+              return 'halted';
+            }
             try {
               return latestCompletedRun(read());
             } catch {
@@ -290,6 +296,10 @@ test.skipIf(!enabled).each(selected)(
           { timeout: 1_200_000, interval: 5000 },
         )
         .toBeTruthy();
+      const halt = halted();
+      if (halt !== undefined) {
+        throw new Error(`The Codex turn ended without completing: ${halt.slice(0, 400)}`);
+      }
       const events = read();
       const runId = latestCompletedRun(events);
       const calls = runToolCalls(events, runId);

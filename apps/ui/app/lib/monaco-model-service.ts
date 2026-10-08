@@ -369,6 +369,9 @@ export class MonacoModelService {
     if (uri.scheme === 'file') {
       const path = canonicalWorkspacePath(uri.path);
       const result = await this.contentService.resolve(path);
+      if (result.kind === 'error' || result.kind === 'loading') {
+        return;
+      }
       if (result.kind !== 'text') {
         model.dispose();
         this.editorHolds.delete(path);
@@ -424,6 +427,9 @@ export class MonacoModelService {
     const uri = this.createUri(event.path);
     const model = this.monaco.editor.getModel(uri);
     if (!model) {
+      return;
+    }
+    if (event.result.kind === 'error' || event.result.kind === 'loading') {
       return;
     }
     if (this.rebases.has(event.path)) {

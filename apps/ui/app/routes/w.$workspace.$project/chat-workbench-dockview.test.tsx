@@ -120,10 +120,22 @@ const mockModelService = {
   saveEditor: mockSaveEditor,
 };
 
-const mockUseFileContent = vi.fn<(path: string | undefined) => FileContentResult>();
+const mockUseFileContent =
+  vi.fn<
+    (
+      path: string | undefined,
+    ) => FileContentResult & { observation?: { status: string; error?: string }; retry?: () => void }
+  >();
 
 vi.mock('#hooks/use-file-content.js', () => ({
-  useFileContent: (path: string | undefined) => mockUseFileContent(path),
+  useFileContent: (path: string | undefined) => {
+    const result = mockUseFileContent(path);
+    return {
+      ...result,
+      observation: result.observation ?? { status: 'ready' },
+      retry: result.retry ?? (() => undefined),
+    };
+  },
 }));
 
 const mockFileManager = {
@@ -641,6 +653,27 @@ describe('FileEditor routing', () => {
     expect(screen.getByText(/file not found/i)).toBeInTheDocument();
     expect(screen.getAllByTestId('file-selector')).toHaveLength(2);
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
+  });
+
+  it('should keep the same editor body while unavailable observation offers Retry', async () => {
+    const content = new TextEncoder().encode('unsaved edit');
+    const retry = vi.fn();
+    mockUseFileContent.mockReturnValue({ kind: 'text', content, observation: { status: 'ready' }, retry });
+    const pane = render(<FileEditor paneId='test-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+    const editor = screen.getByTestId('viewer');
+    mockUseFileContent.mockReturnValue({
+      kind: 'text',
+      content,
+      observation: { status: 'closed', error: 'watch closed' },
+      retry,
+    });
+    pane.rerender(
+      <FileEditor paneId='test-pane' filePath='main.ts' panelApi={mockPanelApi} parameters={{ filePath: 'main.ts' }} />,
+    );
+    expect(screen.getByTestId('viewer')).toBe(editor);
+    expect(screen.getByRole('status')).toHaveTextContent('File updates unavailable');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry file updates' }));
+    expect(retry).toHaveBeenCalledOnce();
   });
 
   it('should render the resolved viewer with decoded text content when outcome is text', () => {

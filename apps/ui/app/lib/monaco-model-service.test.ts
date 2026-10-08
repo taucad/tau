@@ -732,6 +732,27 @@ describe('MonacoModelService', () => {
       expect(markerService.removeUri).toHaveBeenCalledWith('file:///main.ts');
     });
 
+    it('should preserve an editor-held dirty model and its base through unavailable content', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('base'));
+      await service.acquireModel('held.ts');
+      const held = models.get('file:///held.ts');
+      held?.setValue('unsaved edit');
+      contentService._outcomeHandler?.({
+        path: 'held.ts',
+        result: { kind: 'error', cause: new Error('watch closed') },
+      });
+      expect(held?.dispose).not.toHaveBeenCalled();
+      expect(held?.getValue()).toBe('unsaved edit');
+      contentService.peekOutcome.mockReturnValue({ kind: 'error', cause: new Error('watch closed') });
+      await service.saveEditor('held.ts', new TextEncoder().encode('unsaved edit'));
+      expect(held?.dispose).not.toHaveBeenCalled();
+      expect(contentService.saveEditor).toHaveBeenCalledWith(
+        'held.ts',
+        new TextEncoder().encode('unsaved edit'),
+        new TextEncoder().encode('base'),
+      );
+    });
+
     it('should keep an editor-held model through an orphaned outcome and dispose an unheld one (RV-W5b2 N2)', async () => {
       contentService.resolve.mockResolvedValueOnce(textResult('held')).mockResolvedValueOnce(textResult('loose'));
       await service.acquireModel('held.ts');

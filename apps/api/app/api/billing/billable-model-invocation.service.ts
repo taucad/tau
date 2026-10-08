@@ -513,16 +513,7 @@ export class BillableModelInvocationService {
         });
         if (isGatewayProviderId(qualification.providerId)) {
           throw classified(
-            new LlmGatewayError(
-              HttpStatus.SERVICE_UNAVAILABLE,
-              'PROVIDER_ACCOUNT_EXHAUSTED',
-              cloudProviderAccountMessage,
-              {
-                providerId: qualification.providerId,
-                providerCode: 'credential_rejected',
-                accountOwner: 'tau',
-              },
-            ),
+            this.providerAccountRefused(qualification.providerId, 'credential_rejected'),
             upstreamErrorType(response.status),
           );
         }
@@ -1091,13 +1082,18 @@ export class BillableModelInvocationService {
     refusal: ProviderAccountRefusal,
   ): LlmGatewayError {
     this.recordProviderAccountExhausted(intent, providerId, refusal);
+    return this.providerAccountRefused(providerId, refusal.providerCode);
+  }
+
+  /** The one Cloud answer for a supplier account Tau cannot spend against, whatever the supplier's reason. */
+  private providerAccountRefused(providerId: GatewayProviderId, providerCode: string | undefined): LlmGatewayError {
     return new LlmGatewayError(
       HttpStatus.SERVICE_UNAVAILABLE,
       'PROVIDER_ACCOUNT_EXHAUSTED',
       cloudProviderAccountMessage,
       {
         providerId,
-        ...(refusal.providerCode === undefined ? {} : { providerCode: refusal.providerCode }),
+        ...(providerCode === undefined ? {} : { providerCode }),
         accountOwner: 'tau',
       },
     );

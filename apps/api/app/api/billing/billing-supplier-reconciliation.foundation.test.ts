@@ -256,6 +256,35 @@ const terminalOperation = async (
   return { operationId: admitted.operationId, evidenceId };
 };
 
+/**
+ * A supplier refusal as the ledger recorded it before the collector kept its kind: the gateway
+ * retained `absorbed_unknown` with the refusal as its reason, then recovery absorbed the turn at
+ * zero and expired its holds, leaving the supplier side `unresolved`.
+ */
+const refusedOperationBeforeTheFix = async (fixture: Fixture, key: string): Promise<{ operationId: string }> => {
+  const admitted = await ledger.admitOperation(admission(fixture, key));
+  if (admitted.status !== 'admitted') {
+    throw new Error(`admission refused: ${admitted.status}`);
+  }
+  const evidence = {
+    kind: 'absorbed_unknown',
+    executionStatus: 'cancelled',
+    normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_rejected', fields: {} },
+  } as const;
+  const claim = { operationId: admitted.operationId, accountId: fixture.accountId, requestDigest: `sha256:${key}` };
+  await ledger.markDispatchIntent(admitted.operationId, admitted.generation);
+  await ledger.recordInvocationEvidence({ ...claim, evidence });
+  const receipt = await ledger.terminalizeOperation({
+    ...claim,
+    expectedGeneration: admitted.generation,
+    evidence,
+    resolvedAt: new Date(),
+    expireSpendHold: true,
+  });
+  expect(receipt).toMatchObject({ customerState: 'absorbed', chargedAtoms: 0n });
+  return { operationId: admitted.operationId };
+};
+
 /** Runs complete bounded passes; peer suites leave their own operations in this database. */
 const sweepAll = async (/** Milliseconds. */ unresolvedMaximumAge: number): Promise<number> => {
   let casesOpened = 0;
@@ -379,16 +408,7 @@ describe('supplier usage reconciliation foundation', () => {
    * hold, because the sweep reopens it while the operation stays unresolved. */
   it('finalizes a refused operation at zero so its route-pausing case closes and stays closed', async () => {
     const fixture = await createFixture();
-    const refused = await terminalOperation(fixture, `refused-${randomUUID()}`);
-    await database
-      .update(creditOperation)
-      .set({
-        customerState: 'absorbed',
-        supplierState: 'unresolved',
-        meteringStatus: 'unavailable',
-        normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_rejected', fields: {} },
-      })
-      .where(eq(creditOperation.id, refused.operationId));
+    const refused = await refusedOperationBeforeTheFix(fixture, `refused-${randomUUID()}`);
     await sweepAll(0);
     expect(await casesFor('supplier_state_unresolved', refused.operationId)).toMatchObject([{ state: 'open' }]);
 

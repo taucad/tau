@@ -145,8 +145,10 @@ export type TerminalHistoryEvidence = {
      * `executionStatus` alone cannot separate a client abort from an expired
      * deadline, so a terminal without a provider-reported reason carries its
      * own: `client_abort`, `deadline`, `malformed_response`,
-     * `authorized_exhausted`, `recovery_expired`, `recovery_unresolvable` or
-     * `service_restart` (the process cut the stream because it was stopping).
+     * `provider_rejected` (the supplier answered with a status and ran
+     * nothing), `authorized_exhausted`, `recovery_expired`,
+     * `recovery_unresolvable` or `service_restart` (the process cut the
+     * stream because it was stopping).
      */
     terminalReason?: string;
     fields: Record<string, string>;

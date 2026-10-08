@@ -27,7 +27,7 @@ import { notarize } from '@electron/notarize';
 import { sign } from '@electron/osx-sign';
 import { packager } from '@electron/packager';
 
-import { quickLookEnabled } from '#shared/quick-look.js';
+import { isQuickLookEnabled } from '#shared/quick-look.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
@@ -92,8 +92,8 @@ if (zip) {
     stdio: 'inherit',
   });
 }
-// ponytail: no Quick Look extensions in the bundle while `quickLookEnabled` is off.
-const extensions = quickLookEnabled ? (['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const) : [];
+// ponytail: no Quick Look extensions in the bundle while `isQuickLookEnabled()` is off.
+const extensions = isQuickLookEnabled() ? (['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const) : [];
 const adhocAppEntitlements = [
   'com.apple.security.cs.allow-jit',
   'com.apple.security.cs.disable-library-validation',

@@ -34,7 +34,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { FuseState, FuseV1Options, getCurrentFuseWire } from '@electron/fuses';
 
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
-import { quickLookEnabled } from '#shared/quick-look.js';
+import { isQuickLookEnabled } from '#shared/quick-look.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
@@ -718,9 +718,9 @@ run(
   300_000,
 );
 
-if (!quickLookEnabled) {
+if (!isQuickLookEnabled()) {
   console.log(
-    `Verified ${String(arm64MachObjectCount)} arm64 Mach-O files. Quick Look is disabled (quickLookEnabled); its checks were skipped.`,
+    `Verified ${String(arm64MachObjectCount)} arm64 Mach-O files. Quick Look is disabled (isQuickLookEnabled()); its checks were skipped.`,
   );
 } else if (unsigned) {
   const probeRoot = mkdtempSync(join(tmpdir(), 'tau-quick-look-converter-probe-'));

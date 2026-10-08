@@ -36,6 +36,7 @@
         "{projectRoot}/runtime/**/*",
         "{projectRoot}/scripts/**/*",
         "{projectRoot}/quick-look-formats.json",
+        "{workspaceRoot}/apps/desktop/src/shared/quick-look.ts",
         "{workspaceRoot}/tsconfig.base.json",
         "^production"
       ],
@@ -48,11 +49,16 @@
       "cache": true,
       "executor": "nx:run-commands",
       "dependsOn": ["^copy-assets"],
-      "inputs": ["{projectRoot}/runtime/**/*", "{projectRoot}/quick-look-formats.json", "^production"],
+      "inputs": [
+        "{projectRoot}/runtime/**/*",
+        "{projectRoot}/quick-look-formats.json",
+        "{workspaceRoot}/apps/desktop/src/shared/quick-look.ts",
+        "^production"
+      ],
       "outputs": ["{projectRoot}/generated/runtime"],
       "options": {
         "cwd": ".",
-        "command": "vite build --config apps/desktop/macos/runtime/vite.config.ts"
+        "command": "if node --import @oxc-node/core/register apps/desktop/macos/scripts/quick-look-enabled.mts; then vite build --config apps/desktop/macos/runtime/vite.config.ts; else echo 'Quick Look is disabled; its runtime is not built.'; fi"
       }
     },
     "build-extensions": {

@@ -106,8 +106,8 @@ import {
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import {
   generatedImageIpcChannel,
+  isQuickLookEnabled,
   openFilesIpcChannel,
-  quickLookEnabled,
   quickLookIpcChannels,
 } from '#shared/quick-look.js';
 import type { QuickLookResult } from '#shared/quick-look.js';
@@ -948,7 +948,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
   };
 
-  if (quickLookEnabled) {
+  if (isQuickLookEnabled()) {
     ipcMain.handle(quickLookIpcChannels.previewPath, (event, payload: unknown) =>
       handleQuickLook(event, (controller) => {
         controller.previewPath(payload);
@@ -1154,7 +1154,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         ],
       },
     });
-    if (quickLookEnabled) {
+    if (isQuickLookEnabled()) {
       quickLookControllers.set(
         window.id,
         createQuickLookController({

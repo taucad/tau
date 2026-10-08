@@ -37,8 +37,8 @@ import {
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
 import {
   generatedImageIpcChannel,
+  isQuickLookEnabled,
   openFilesIpcChannel,
-  quickLookEnabled,
   quickLookIpcChannels,
 } from '#shared/quick-look.js';
 import type {
@@ -169,7 +169,7 @@ contextBridge.exposeInMainWorld('tau', {
         readonly bytes: Uint8Array<ArrayBuffer>;
       },
   },
-  ...(quickLookEnabled
+  ...(isQuickLookEnabled()
     ? {
         quickLook: {
           directPreviewExtensions: quickLookManifest.directElectronPreviewExtensions,

@@ -48,7 +48,7 @@ type DesktopShell = {
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
   readonly generatedImages: DesktopBridge['generatedImages'];
-  /** Absent while the desktop's `quickLookEnabled` flag is off. */
+  /** Absent while the desktop's `isQuickLookEnabled()` flag is off. */
   readonly quickLook?: {
     readonly directPreviewExtensions: readonly string[];
     previewPath(request: { readonly path: string; readonly displayName?: string }): Promise<DesktopQuickLookResult>;
@@ -280,7 +280,7 @@ export type DesktopBridge = {
   readonly generatedImages: {
     read(path: string): Promise<{ readonly path: string; readonly bytes: Uint8Array<ArrayBuffer> }>;
   };
-  /** Absent while the desktop's `quickLookEnabled` flag is off. */
+  /** Absent while the desktop's `isQuickLookEnabled()` flag is off. */
   readonly quickLook?: NonNullable<DesktopShell['quickLook']>;
   /** Slicers that need the desktop host; absent on a shell built before them. */
   readonly slicers?: { readonly bambuStudio: DesktopBambuStudio };

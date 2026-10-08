@@ -593,6 +593,12 @@ async function main(): Promise<void> {
             );
             if (Date.now() - lastScanAt >= scanIntervalMilliseconds) {
               lastScanAt = Date.now();
+              // Refused calls recorded as cost-unknown before the collector kept their kind: finalized
+              // at zero first, so the sweep closes their route-pausing cases instead of reopening them.
+              // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+              await runJob('billing.rejected_supplier_repair', async () =>
+                ledger.finalizeRejectedSupplierLiabilities({ environment: billingEnvironment, limit: 100 }),
+              );
               // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
               await runJob('billing.supplier_sweep', async () =>
                 supplier.sweepSupplierUsage({ pageSize: 100, unresolvedMaximumAge: dayMilliseconds }),

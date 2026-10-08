@@ -140,6 +140,28 @@ const isVertexFinalUsageEvent = (value: unknown): boolean => {
   );
 };
 
+type FailureReason = Parameters<BillableInvocationEvidenceCollector['failed']>[0];
+
+/**
+ * The terminal kind of each failure that ends without complete usage; a refusal settles before
+ * this is asked. Exhaustive on purpose: a reason added without a case here fails to compile
+ * rather than silently absorbing the turn.
+ */
+const incompleteKindOf = (
+  failure: Exclude<FailureReason, 'provider_rejected'>,
+): 'absorbed_unknown' | 'authorized_exhausted' => {
+  switch (failure) {
+    case 'authorized_exhausted': {
+      return 'authorized_exhausted';
+    }
+    case 'client_abort':
+    case 'deadline':
+    case 'malformed_response': {
+      return 'absorbed_unknown';
+    }
+  }
+};
+
 /** Creates an exact protocol usage collector over preserved provider response bytes. */
 export const createBillableModelEvidenceCollector = (
   wire: BillableProviderWire,
@@ -252,9 +274,19 @@ export const createBillableModelEvidenceCollector = (
               },
             },
           };
+    /* A supplier that answered with a status ran nothing, so the refusal is proof of zero cost,
+     * not unknown cost: it keeps its own kind and settles now, instead of absorbing the turn and
+     * leaving a supplier liability that the sweep turns into a route pause a day later. */
+    if (failure === 'provider_rejected') {
+      return {
+        kind: 'provider_rejected',
+        executionStatus: 'rejected',
+        normalizationEvidence: { version: 'provider-usage-v1', terminalReason: failure, fields: {} },
+      };
+    }
     /* A cut at the authorized ceiling is the designed outcome of an in-stream control (R8),
      * not a fault, so it keeps its own terminal kind instead of absorbing the turn at zero. */
-    const incompleteKind = failure === 'authorized_exhausted' ? 'authorized_exhausted' : 'absorbed_unknown';
+    const incompleteKind = failure === undefined ? 'absorbed_unknown' : incompleteKindOf(failure);
     if (
       latest?.input === undefined ||
       latest.output === undefined ||

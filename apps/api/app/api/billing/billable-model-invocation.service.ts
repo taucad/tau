@@ -493,22 +493,30 @@ export class BillableModelInvocationService {
         await response.body.cancel();
       }
       await this.finish(qualification, row, generation, evidence);
+      // Settled as provider_rejected above, released at zero: the customer is charged nothing for it.
       const recognized = providerAccountRefusal(qualification.providerId, body);
       if (recognized) {
-        // Settled as provider_rejected above: the customer is charged nothing for it.
         throw classified(
           this.providerAccountExhausted(intent, recognized.providerId, recognized.refusal),
           'provider_account_exhausted',
         );
       }
       /* F-11: the upstream key is always Tau's here, so a 401/403 is Tau's supplier account
-         failing, never the caller's request. The supplier's sentence stays in the log above. */
+         failing, never the caller's request. The supplier's sentence stays in the log above. The
+         customer gets the same answer as an exhausted supplier account: this supplier's models are
+         unavailable and resuming cannot change that, so the code is the one the host never retries. */
       if (response.status === 401 || response.status === 403) {
         this.metrics?.billingProviderAccountRefusals.add(1, {
           'deployment.environment': intent.environment,
           providerId: qualification.providerId,
           reason: 'credential_rejected',
         });
+        if (isGatewayProviderId(qualification.providerId)) {
+          throw classified(
+            this.providerAccountRefused(qualification.providerId, 'credential_rejected'),
+            upstreamErrorType(response.status),
+          );
+        }
       }
       const retryAfterSeconds = upstreamRetryAfterSeconds(response.headers);
       const classification = classifyUpstreamRefusal({
@@ -1074,13 +1082,18 @@ export class BillableModelInvocationService {
     refusal: ProviderAccountRefusal,
   ): LlmGatewayError {
     this.recordProviderAccountExhausted(intent, providerId, refusal);
+    return this.providerAccountRefused(providerId, refusal.providerCode);
+  }
+
+  /** The one Cloud answer for a supplier account Tau cannot spend against, whatever the supplier's reason. */
+  private providerAccountRefused(providerId: GatewayProviderId, providerCode: string | undefined): LlmGatewayError {
     return new LlmGatewayError(
       HttpStatus.SERVICE_UNAVAILABLE,
       'PROVIDER_ACCOUNT_EXHAUSTED',
       cloudProviderAccountMessage,
       {
         providerId,
-        ...(refusal.providerCode === undefined ? {} : { providerCode: refusal.providerCode }),
+        ...(providerCode === undefined ? {} : { providerCode }),
         accountOwner: 'tau',
       },
     );

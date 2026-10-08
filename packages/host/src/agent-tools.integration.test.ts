@@ -22,11 +22,25 @@ const benchVise = fileURLToPath(new URL('../../../libs/tau-examples/src/kernels/
 
 const roots: string[] = [];
 
+/* CI ships the native engine only to its Darwin lane; a Linux shard resolves the loader but has no binding, and this
+ * proof is about the registry composition, not about provisioning. It runs wherever the engine actually loads. */
+const nativeEngineLoads = await import('@taucad/geospec-engine-native/node').then(
+  ({ Engine }) => {
+    try {
+      new Engine().close();
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  () => false,
+);
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
-describe('test_model over the attached runtime', () => {
+describe.skipIf(!nativeEngineLoads)('test_model over the attached runtime (needs the native GeoSpec binding)', () => {
   it('should verify a bench vise requirement with the default runner', { timeout: 300_000 }, async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-geospec-'));
     roots.push(workspaceRoot);

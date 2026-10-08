@@ -371,7 +371,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
   log.log('info', 'main.ready', { electron: process.versions.electron, packaged: app.isPackaged, isDevelopment });
   if (loginShell !== undefined) {
-    log.log('info', 'main.login-shell-path', loginShell);
+    /* A fallback means the shell timed out or failed: only well-known CLI
+     * directories were added, and nothing from its rc files applied. */
+    log.log(loginShell.fallback ? 'warn' : 'info', 'main.login-shell-path', loginShell);
   }
 
   /* L2's contract: the home root must exist before the renderer's first mount,

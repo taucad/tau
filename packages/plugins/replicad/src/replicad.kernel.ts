@@ -268,11 +268,72 @@ async function identifyImplementationAssets(
 }
 
 // =============================================================================
+// Shared OpenCASCADE instance
+// =============================================================================
+
+type SharedOcct = {
+  readonly key: string;
+  readonly instance: Promise<OpenCascadeInstance>;
+  holders: number;
+};
+
+/**
+ * The one raw OCCT instance of this module scope. `replicad`'s `setOC` writes a single module
+ * global that every library call reads, so a second instance in the same scope would drive shapes
+ * from one WASM heap through the other heap's bindings. Production runs one worker per client;
+ * in-process clients in one scope share this instance instead.
+ */
+let sharedOcct: SharedOcct | undefined;
+
+/**
+ * Hold the module scope's OCCT instance, creating it on first use.
+ *
+ * A different WASM build replaces the instance only once no kernel holds it, because replicad
+ * cannot address two heaps at once.
+ *
+ * @param resolved - The caller's resolved WASM build.
+ * @param create - Instantiates and configures OCCT for that build; runs at most once per instance.
+ * @returns The shared raw instance and the function that releases this hold.
+ */
+async function holdSharedOcct(
+  resolved: ResolvedWasm,
+  create: () => Promise<OpenCascadeInstance>,
+): Promise<{ instance: OpenCascadeInstance; release: () => void }> {
+  const key = `${resolved.variant}:${resolved.wasmUrl ?? ''}`;
+  if (sharedOcct && sharedOcct.key !== key) {
+    if (sharedOcct.holders > 0) {
+      throw new Error(
+        `Replicad OpenCASCADE is already loaded from '${sharedOcct.key}' in this module scope; ` +
+          `a concurrent replicad kernel cannot load '${key}'. Use one wasm option per module scope, ` +
+          'or run kernels with different builds in separate workers.',
+      );
+    }
+    sharedOcct = undefined;
+  }
+  sharedOcct ??= { key, instance: create(), holders: 0 };
+  const shared = sharedOcct;
+  shared.holders += 1;
+  const release = (): void => {
+    shared.holders -= 1;
+  };
+  try {
+    return { instance: await shared.instance, release };
+  } catch (error) {
+    release();
+    if (sharedOcct === shared) {
+      sharedOcct = undefined;
+    }
+    throw error;
+  }
+}
+
+// =============================================================================
 // Types
 // =============================================================================
 
 type ReplicadContext = {
   openCascade: OpenCascadeInstance;
+  releaseOpenCascade: () => void;
   replicadLibrary: ReplicadLibrary;
   tessellationInstancing: boolean;
   replicadInitialised: boolean;
@@ -529,35 +590,41 @@ export const replicadKernel = defineKernel({
 
     const wasmSpan = tracer.startSpan('replicad.wasm-init');
     const resolved = await resolveWasm(wasm, logger, tracer);
-    const compiledModule = resolved.wasmUrl ? runtime.getCompiledWasmModule(resolved.wasmUrl) : undefined;
-    let openCascade = await initOcct(resolved.wasmUrl, resolved.bindingsFactory, {
-      tracer,
-      ...(compiledModule ? { compiledModule } : {}),
-      print: (text) => {
-        logger.trace('OCJS stdout', { data: { text } });
-      },
-      printErr: (text) => {
-        logger.warn('OCJS stderr', { data: { text } });
-      },
-    });
+    // ponytail: the first kernel's logger, tracer and compiled-module cache own the shared instance's
+    // stdout and init spans; per-client attribution needs one worker per client, as production runs.
+    const shared = await holdSharedOcct(resolved, async () => {
+      const compiledModule = resolved.wasmUrl ? runtime.getCompiledWasmModule(resolved.wasmUrl) : undefined;
+      const instance = await initOcct(resolved.wasmUrl, resolved.bindingsFactory, {
+        tracer,
+        ...(compiledModule ? { compiledModule } : {}),
+        print: (text) => {
+          logger.trace('OCJS stdout', { data: { text } });
+        },
+        printErr: (text) => {
+          logger.warn('OCJS stderr', { data: { text } });
+        },
+      });
 
-    if (resolved.variant === 'multi') {
-      /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
-      const pool = openCascade.OSD_ThreadPool.DefaultPool(-1);
-      try {
-        if (pool.IsInUse()) {
-          throw new Error('Cannot configure Replicad OCCT thread pool while it is in use');
+      if (resolved.variant === 'multi') {
+        /* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
+        const pool = instance.OSD_ThreadPool.DefaultPool(-1);
+        try {
+          if (pool.IsInUse()) {
+            throw new Error('Cannot configure Replicad OCCT thread pool while it is in use');
+          }
+          // ponytail: cap OCCT threads to reduce parallel working sets; revisit after native batch memory is reduced.
+          pool.Init(Math.min(pool.NbThreads(), 4));
+        } finally {
+          pool.delete();
         }
-        // ponytail: cap OCCT threads to reduce parallel working sets; revisit after native batch memory is reduced.
-        pool.Init(Math.min(pool.NbThreads(), 4));
-      } finally {
-        pool.delete();
+        /* oxlint-enable new-cap */
+        activateOccParallelism(instance, logger);
+      } else {
+        logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
       }
-      /* oxlint-enable new-cap */
-      activateOccParallelism(openCascade, logger);
-    } else {
-      logger.log(`Replicad OCCT initialised: variant=${resolved.variant} (single-threaded)`);
-    }
+      return instance;
+    });
+    let openCascade = shared.instance;
 
     let tracingSummary: OcTracingSummary | undefined;
 
@@ -571,6 +638,7 @@ export const replicadKernel = defineKernel({
       openCascade = wrapOcForExceptions(openCascade);
     }
 
+    // Every wrapper drives the one shared heap; replicad's own calls trace through the latest kernel's wrapper.
     replicadLibrary.setOC(openCascade);
     wasmSpan.end();
 
@@ -651,6 +719,7 @@ export const replicadKernel = defineKernel({
 
     return {
       openCascade,
+      releaseOpenCascade: shared.release,
       replicadLibrary,
       tessellationInstancing,
       replicadInitialised: true,
@@ -1123,6 +1192,10 @@ export const replicadKernel = defineKernel({
         }
       },
     });
+  },
+
+  async onDispose(context) {
+    context.releaseOpenCascade();
   },
 
   serializeHandle({ handle }, runtime) {

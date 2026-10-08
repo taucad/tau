@@ -23,7 +23,18 @@ type Files = Readonly<{
 }>;
 
 const closingViews = new Set<string>();
-const viewLifetimes = new Map<string, object>();
+type ViewLifetime = { owners: Set<WeakRef<object>> };
+type RetiredViewOwner = { path: string; viewLifetime: ViewLifetime; owner: WeakRef<object> };
+const viewLifetimes = new Map<string, ViewLifetime>();
+const releaseViewOwner = ({ path, viewLifetime, owner }: RetiredViewOwner): void => {
+  viewLifetime.owners.delete(owner);
+  if (viewLifetime.owners.size === 0 && viewLifetimes.get(path) === viewLifetime) {
+    viewLifetimes.delete(path);
+  }
+};
+// Render attempts may be abandoned before effects commit. They own weak tokens only;
+// disposal retires immediately, while abandoned construction is cleaned up eventually by GC.
+const retiredViewOwners = new FinalizationRegistry<RetiredViewOwner>(releaseViewOwner);
 const activeWrites = new Map<string, Set<Promise<CheckedFileWriteResult>>>();
 
 /** Stop a closed view's owners and wait for checked writes before deleting its file. */
@@ -124,17 +135,21 @@ export function createWorkbenchViewStore(
   ready: () => boolean;
 }> {
   const path = `${input.root}/${workbenchPaths.view(input.viewId)}`;
-  const viewEpoch = viewLifetimes.get(path) ?? {};
+  const viewEpoch = viewLifetimes.get(path) ?? { owners: new Set<WeakRef<object>>() };
   viewLifetimes.set(path, viewEpoch);
-  // Ordinary owner replacement shares the logical view lifetime; explicit close alone retires it.
-  const closed = (): boolean => disposed || closingViews.has(path) || viewLifetimes.get(path) !== viewEpoch;
+  const ownerToken = { disposed: false };
+  const owner = new WeakRef(ownerToken);
+  const retirement = { path, viewLifetime: viewEpoch, owner };
+  viewEpoch.owners.add(owner);
+  retiredViewOwners.register(ownerToken, retirement, ownerToken);
+  // Replacement owns its lifetime before a first read; explicit close fences every earlier owner.
+  const closed = (): boolean => ownerToken.disposed || closingViews.has(path) || viewLifetimes.get(path) !== viewEpoch;
   let state: ViewRecordState = {
     record: undefined,
     bytes: null,
     refusal: undefined,
   };
   let observed = false;
-  let disposed = false;
   let generation = 0;
   let readError = false;
   let pending: Promise<unknown> = Promise.resolve();
@@ -630,10 +645,12 @@ export function createWorkbenchViewStore(
       return false;
     },
     dispose: () => {
-      if (disposed) {
+      if (ownerToken.disposed) {
         return;
       }
-      disposed = true;
+      ownerToken.disposed = true;
+      retiredViewOwners.unregister(ownerToken);
+      releaseViewOwner(retirement);
       generation++;
       health.dispose();
       if (retryTimer) {

@@ -30,14 +30,14 @@ Returns compact rows tagged by targetFile, plus \`sourceRevisions\` for loaded m
 
 When NOT to use:
 - NOT as a substitute for \`evaluate_model\` when you only need build status; \`test_model\` measures geometry against requirements.`,
-  [toolName.evaluateModel]: `Evaluate one CAD source and its default view, then list what this build can show and export.
+  [toolName.evaluateModel]: `Evaluate one CAD source file (\`targetFile\`) and its default view, then list what this build can show and export.
 
 Call it after every \`edit_file\`, \`create_file\` or \`delete_file\`. Returns \`status\`, \`kernelIssues\`, offered \`views\`, per-view \`instances\`, and an export-id-to-extension map. A ready build may still report error-severity design issues; inspect them. A default-view render failure is an error, and a valid export-only build can offer zero views. Set \`includeCapabilities: true\` to inspect view/export option schemas, defaults and reachable export targets. ${sourceRevisionRule}
 
 Once 'ready', use \`test_model\` to measure the geometry against requirements.`,
   [toolName.exportModel]: `Export one model artifact set and write its files under \`.tau/artifacts/\` in the active project workspace.
 
-Give explicit \`targetFile\` and \`to\`: a declared export ID (such as \`bom\`) or an unambiguous reachable extension (such as \`stl\` or \`3mf\`), without a dot. IDs win over extensions. Use \`evaluate_model({ includeCapabilities: true })\` to discover targets and options. An unavailable or ambiguous target returns the available choices.
+Give explicit \`targetFile\` and \`to\`: a declared export ID (such as \`bom\`) or an unambiguous reachable extension (such as \`stl\` or \`3mf\`), without a dot. IDs win over extensions. Use \`evaluate_model({ targetFile, includeCapabilities: true })\` to discover targets and options. An unavailable or ambiguous target returns the available choices.
 
 For a design question, text/JSON exports may be used as evidence only when both the declaration and every actual output file are text/JSON: call \`export_model\`, then \`read_file\` on the returned artifact path, and compare \`sourceRevision\` with the current source. A binary or mixed deliverable requires the person's export request.
 
@@ -65,7 +65,7 @@ A source-unit operation changes the unit the source interprets a value in, and i
 
 Pass \`targetFile\` explicitly. Choose a kernel \`view\`, optional sheet/drawing \`instance\`, and that view's \`options\` from \`evaluate_model\`; omit \`view\` for the default. A 2D view produces one image. Each result echoes its view, instance and, for 3D, camera \`angle\`. The call fails for a missing source, unavailable view or instance, render failure, timeout or invalid image. ${sourceRevisionRule}
 
-Modes:
+Modes (\`mode\`, default \`single\`):
 - single: one deterministic perspective isometric image for a 3D view
 - multi_angle: six orthographic camera angles for a 3D view (front, back, right, left, top, bottom)
 

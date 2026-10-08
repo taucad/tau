@@ -1047,6 +1047,53 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     store.release(chatId);
   });
 
+  it('reads a refresh that arrived mid-run once the run settles', async () => {
+    const chatId = 'chat_projected_mid_run';
+    const projectId = 'project_projected_mid_run';
+    const client = createMemoryClient();
+    const rows = readFileSync(
+      new URL(
+        '../../../../packages/agent-host/specs/ChatLog/recorded/in-project-ping-pong-turn.jsonl',
+        pathToFileURL(import.meta.filename),
+      ),
+      'utf8',
+    );
+    const segmentPath = `/projects/${projectId}/.tau/chats/${chatId}/events/other-device.jsonl`;
+    await client.writeFile(segmentPath, new TextEncoder().encode(rows));
+    const deps = createStubDeps(client);
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(deps);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(deps.getChat).toHaveBeenCalledOnce();
+    });
+    await settle();
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.chat.messages.some((message) => message.role === 'assistant')).toBe(true);
+    });
+    const fake = harness.created.find((entry) => entry.id === chatId)!;
+    fake.status = 'streaming';
+    fake.emitStatusChange();
+    await client.writeFile(
+      segmentPath,
+      new TextEncoder().encode(
+        rows.replace('Browser host completed the workspace change.', 'Browser host verified the workspace change.'),
+      ),
+    );
+
+    await store.refreshFromStorage(chatId);
+    expect(JSON.stringify(session.chat.messages)).not.toContain('Browser host verified the workspace change.');
+
+    fake.status = 'ready';
+    fake.emitStatusChange();
+    await vi.waitFor(() => {
+      expect(JSON.stringify(session.chat.messages)).toContain('Browser host verified the workspace change.');
+    });
+    store.release(chatId);
+  });
+
   it('should not replay a refused seed while a durable manual Start waits for intent clearing and log catch-up', async () => {
     const chatId = 'chat_seed_superseded';
     const projectId = 'project_seed_superseded';

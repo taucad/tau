@@ -393,6 +393,8 @@ type InternalSession = ChatSession & {
   transcriptSourceVersion: number;
   commandInFlight: boolean;
   stopRequested: boolean;
+  /** A storage refresh arrived mid-run; it runs once the chat is `ready` again. */
+  refreshDeferred: boolean;
   restoredStoppedRunId: string | undefined;
   status: ChatStatus;
   /** The project this chat belongs to, from its caller (PV-S4, L3 D9); never from focus. */
@@ -983,9 +985,16 @@ export class ChatSessionStore {
   /** Refresh an idle live transcript from the host projection, never from chat-record metadata. */
   public async refreshFromStorage(chatId: string): Promise<void> {
     const session = this.#sessions.get(chatId);
-    if (session?.status !== 'ready') {
+    if (session === undefined) {
       return;
     }
+    if (session.status !== 'ready') {
+      /* Another device's turn projected mid-run is not dropped until the next
+       * load: it is read once this run settles. */
+      session.refreshDeferred = true;
+      return;
+    }
+    session.refreshDeferred = false;
     await this.#refreshRemoteSegmentsSafely(chatId, session.projectId);
     if (this.#sessions.get(chatId) !== session) {
       return;
@@ -3017,6 +3026,9 @@ export class ChatSessionStore {
           if (projection !== undefined && selectCaughtUp(projection)) {
             this.#syncProjection(chatId, 'none');
           }
+          if (session.refreshDeferred) {
+            void this.refreshFromStorage(chatId);
+          }
         }
       }
       this.#chatTopics.get(chatId)?.emit();
@@ -3070,6 +3082,7 @@ export class ChatSessionStore {
       transcriptSourceVersion: 0,
       commandInFlight: false,
       stopRequested: false,
+      refreshDeferred: false,
       restoredStoppedRunId: undefined,
       status: chat.status,
       turnSubscriptions: [],

@@ -30,9 +30,9 @@
 #     because both ship OCCT compiled into the engine; so does a staging desktop
 #     prerelease.
 #
-# A rebuild dispatched from `main` builds without deploying; production deploys
-# only from a run at the release tag. Rollbacks and redeploys of an earlier
-# release go through `deploy-production.yml`.
+# A dispatched rebuild, from `main` or at the tag, builds without deploying;
+# production deploys only from the `release` event's run at the tag. Rollbacks
+# and redeploys of an earlier release go through `deploy-production.yml`.
 #
 # Command Center contract: the release pull request's merge commit is the tag's
 # commit, so this workflow's run for that `head_sha` (event `release`, title the
@@ -404,9 +404,8 @@ jobs:
       - name: Package, sign and notarize
         run: pnpm nx run desktop:package-macos-release --parallel=1
 
-      - name: Verify the signed package
-        run: pnpm nx run desktop:verify-macos-release
-
+      # Uploaded before verification so a failed verify leaves the signed app
+      # for verify-desktop-macos.yml. Publishing still needs this whole job.
       - name: Upload the macOS archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -414,6 +413,9 @@ jobs:
           path: ${{ env.TAU_MACOS_PACKAGE_OUTPUT_ROOT }}/Tau-macos-arm64.zip
           if-no-files-found: error
           retention-days: 7
+
+      - name: Verify the signed package
+        run: pnpm nx run desktop:verify-macos-release
 
       - name: Delete the signing keychain
         if: always()
@@ -615,6 +617,7 @@ jobs:
   production-gate:
     needs: [resolve, verify-app]
     if: >-
+      github.event_name == 'release' &&
       (needs.resolve.outputs.project == 'ui' || needs.resolve.outputs.project == 'api') &&
       github.ref == format('refs/tags/{0}', needs.resolve.outputs.tag)
     name: Require approval for production

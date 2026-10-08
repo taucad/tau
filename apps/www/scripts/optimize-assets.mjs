@@ -17,11 +17,14 @@ const sources = {
 await Promise.all(
   Object.entries(sources).map(async ([name, source]) => {
     const bytes = await readFile(resolve(app, '../..', source));
+    // The workspace capture is small UI text shown about 1260 CSS px wide, so it needs retina widths and a
+    // higher quality without chroma subsampling to stay sharp.
+    const workspace = name.startsWith('workspace');
     await Promise.all(
-      (name.startsWith('workspace') ? [640, 1280] : [480, 768]).map(async (width) => {
+      (workspace ? [640, 1280, 1920, 2560] : [480, 768]).map(async (width) => {
         await sharp(bytes)
           .resize({ width, withoutEnlargement: true })
-          .webp({ quality: 80 })
+          .webp(workspace ? { quality: 90, smartSubsample: true } : { quality: 80 })
           .toFile(join(app, 'public', `${name}-${width}.webp`));
       }),
     );

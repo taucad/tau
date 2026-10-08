@@ -216,22 +216,28 @@ jobs:
           preparation-hit: ${{ steps.prepare.outputs.preparation-hit }}
           cargo-hit: ${{ steps.prepare.outputs.cargo-hit }}
 
-  # Restores the products this run's producer or an earlier run saved. The Darwin host
-  # suites still need a delivery assembled from this checkout's source kit, which
-  # `prepare-geospec-ci-artifacts` reassembles around them.
+  # Restores the products an earlier run saved. The Darwin host suites still need a
+  # delivery assembled from this checkout's source kit, which `prepare-geospec-ci-artifacts`
+  # reassembles around them. Without saved products it prepares them itself (an Nx Cloud
+  # hit, or a build on the retained OCCT preparation) instead of waiting for
+  # `geospec-producer`, so it starts beside the producer rather than after it: about
+  # 9 minutes off the critical path of a run that changes the native source closure
+  # (run 37437873976). The producer still serves the Linux lanes, which consume its
+  # transport.
   geospec-darwin:
     name: Run GeoSpec Darwin host suites
-    needs: [plan, geospec-producer]
+    needs: [plan]
     if: >-
-      !cancelled() && needs.plan.outputs.geospec-required == 'true' &&
-      needs.plan.outputs.geospec-darwin-tests == 'true' &&
-      (needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success')
+      !cancelled() && needs.plan.result == 'success' &&
+      needs.plan.outputs.geospec-required == 'true' &&
+      needs.plan.outputs.geospec-darwin-tests == 'true'
     runs-on: macos-15
     steps:
       - *checkout-darwin
       - *setup-nx-darwin
 
       - name: Restore GeoSpec engine products from an earlier run
+        if: needs.plan.outputs.geospec-cached == 'true'
         uses: ./.github/actions/geospec-transport
         with:
           key: ${{ needs.plan.outputs.geospec-key }}

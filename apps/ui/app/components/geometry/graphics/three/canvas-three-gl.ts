@@ -4,6 +4,16 @@ import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import type { RendererInstance } from '#components/geometry/graphics/three/renderer.js';
 import { createRenderer } from '#components/geometry/graphics/three/renderer.js';
 
+type TauR3fGlDefaults = Parameters<Extract<CanvasProps['gl'], (defaults: never) => unknown>>[0];
+
+/** One factory's renderer ownership, bound to its mounted Canvas DOM node. */
+export type TauR3fGlFactory = ((defaults: TauR3fGlDefaults) => Promise<FiberCompatibleGl>) & {
+  /** Bind the Canvas ref; StrictMode ref replay keeps a reattached canvas alive. */
+  readonly bindCanvas: (canvas: HTMLCanvasElement | undefined) => void;
+  /** Whether this factory's mounted canvas has been removed. */
+  readonly isRetired: () => boolean;
+};
+
 /**
  * R3F `gl` factory / props for {@link ResolvedGraphicsBackend}.
  *
@@ -24,26 +34,62 @@ export function createTauR3fGlProp(
   graphicsBackend: ResolvedGraphicsBackend,
   cameras: readonly ThreeCamera[] = [],
   onCreateError?: (error: Error) => void,
-): CanvasProps['gl'] {
+): TauR3fGlFactory {
   let initialization: Promise<FiberCompatibleGl> | undefined;
+  let ownedRenderer: RendererInstance | undefined;
+  let mountedCanvas: HTMLCanvasElement | undefined = undefined;
+  let hasCanvasBinding = false;
+  let retired = false;
+  let disposed = false;
+  const pending = async (): Promise<never> =>
+    new Promise<never>(() => {
+      // Never settles while R3F waits for a retired or failed canvas.
+      void 0;
+    });
+  const isRetired = (): boolean => retired || (hasCanvasBinding && mountedCanvas === undefined);
+  const retire = (): void => {
+    retired = true;
+    if (ownedRenderer && !disposed) {
+      disposed = true;
+      ownedRenderer.dispose();
+    }
+  };
+  const bindCanvas = (canvas: HTMLCanvasElement | undefined): void => {
+    hasCanvasBinding = true;
+    const previousCanvas = mountedCanvas;
+    mountedCanvas = canvas;
+    if (canvas === undefined) {
+      // Ref cleanup/replay is synchronous; actual DOM removal is known after the commit.
+      queueMicrotask(() => {
+        if (mountedCanvas === undefined && !previousCanvas?.isConnected) {
+          retire();
+        }
+      });
+    }
+  };
   const initialize = async (canvas: HTMLCanvasElement): Promise<FiberCompatibleGl> => {
     let renderer: RendererInstance;
     try {
       renderer = await createRenderer('viewport', graphicsBackend, canvas);
     } catch (error) {
+      if (isRetired()) {
+        return pending();
+      }
       const failure = error instanceof Error ? error : new Error(String(error));
       console.warn('[createTauR3fGlProp] Renderer creation failed:', failure);
       onCreateError?.(failure);
-      return new Promise<never>(() => {
-        // Never settles: R3F keeps waiting while the owner unmounts this canvas.
-        void 0;
-      });
+      return pending();
+    }
+    ownedRenderer = renderer;
+    if (isRetired()) {
+      retire();
+      return pending();
     }
     // R3F reapplies DPR on every resize. WebGLRenderer.setPixelRatio also calls
     // setSize, clearing/reallocating the old buffer before R3F sizes the new one.
     const setPixelRatio = renderer.setPixelRatio.bind(renderer);
     renderer.setPixelRatio = (value: number): void => {
-      if (renderer.getPixelRatio() !== value) {
+      if (!isRetired() && renderer.getPixelRatio() !== value) {
         setPixelRatio(value);
       }
     };
@@ -60,9 +106,18 @@ export function createTauR3fGlProp(
   };
   // R3F can reenter configure before this async factory settles. One canvas/backend
   // mount must share the complete setup; a new keyed factory owns a fresh retry.
-  return async (defaults) => {
+  const factory = async (defaults: TauR3fGlDefaults): Promise<FiberCompatibleGl> => {
+    if (isRetired()) {
+      return pending();
+    }
     initialization ??= initialize(defaults.canvas as HTMLCanvasElement);
-    return initialization;
+    const renderer = await initialization;
+    if (isRetired()) {
+      retire();
+      return pending();
+    }
+    return renderer;
   };
+  return Object.assign(factory, { bindCanvas, isRetired });
 }
 /* oxlint-enable unicorn-js/prevent-abbreviations */

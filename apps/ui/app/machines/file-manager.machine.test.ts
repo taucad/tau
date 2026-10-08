@@ -421,6 +421,17 @@ describe('fileManagerMachine', () => {
     });
     expect(mockViewReaddirWithStats).not.toHaveBeenCalledWith('');
 
+    // Once the root is registered, the reload the provider dispatches lists it.
+    mockViewHelloState = 'ready';
+    mockViewReaddirWithStats.mockResolvedValue([]);
+    actor.send({ type: 'reloadWorkspace' });
+    await vi.waitFor(() => {
+      expect(mockViewReaddirWithStats).toHaveBeenCalledWith('');
+    });
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+
     actor.stop();
   });
 

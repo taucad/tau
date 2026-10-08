@@ -40,7 +40,7 @@
     },
     { "title": "API (REST)", "type": "link", "url": "/d/tau-api-overview", "icon": "dashboard", "targetBlank": false },
     {
-      "title": "WebSocket / RPC",
+      "title": "WebSocket Gateways",
       "type": "link",
       "url": "/d/tau-websocket-rpc",
       "icon": "dashboard",

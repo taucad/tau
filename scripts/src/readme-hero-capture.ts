@@ -209,7 +209,10 @@ const stageKinematics = async (page: Page): Promise<void> => {
     await sleep(page, 1200);
   }
   if (await page.getByRole('link', { name: chatName, exact: true }).isVisible()) {
-    await page.getByRole('button', { name: /toggle sidebar/iu }).first().click();
+    await page
+      .getByRole('button', { name: /toggle sidebar/iu })
+      .first()
+      .click();
     await sleep(page, 1500);
   }
 };
@@ -217,7 +220,12 @@ const stageKinematics = async (page: Page): Promise<void> => {
 /** Set Axes off and Post-processing (ambient occlusion) on in the viewer menu, then verify both. */
 const stageViewer = async (page: Page): Promise<void> => {
   const openMenu = async (): Promise<void> => {
-    if (!(await page.getByText(/Ambient occlusion is/u).first().isVisible())) {
+    if (
+      !(await page
+        .getByText(/Ambient occlusion is/u)
+        .first()
+        .isVisible())
+    ) {
       await page.getByRole('button', { name: 'Viewer settings' }).first().focus();
       await page.keyboard.press('Enter');
       await sleep(page, 900);

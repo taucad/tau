@@ -135,6 +135,8 @@ describe('Vitest Browser test-runner ownership', () => {
       'packages/geospec-engine-native/bindings/browser-conformance/run-browser-conformance.ts',
       'scripts/src/canvas-vite.config.test.ts',
       'scripts/src/check-pack-install.ts',
+      // The README hero capture drives the Electron desktop app, which Browser Mode cannot host.
+      'scripts/src/readme-hero-capture.ts',
       'scripts/src/reference-html.test.ts',
       'scripts/src/reference-html.ts',
     ]);

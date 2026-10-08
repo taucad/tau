@@ -58,6 +58,8 @@ import { toast } from 'sonner';
 import type { EntryPathChange } from '#workbench-records/entries-store.js';
 
 type ProjectContextType = {
+  manifestObservationError: string | undefined;
+  retryManifestObservation: () => void;
   readonly profile: 'editor' | 'shared';
   projectId: string;
   projectRef: ActorRefFrom<typeof projectMachine>;
@@ -751,6 +753,11 @@ export function ProjectProvider({
   }, [actorRef, profile, projectId, projectManager, queryClient]);
 
   const projectIsReady = useSelector(actorRef, (state) => state.matches('ready'));
+  const manifestObservationRef = useRef<ObservationService<void> | undefined>(undefined);
+  const [manifestObservationError, setManifestObservationError] = useState<string>();
+  const retryManifestObservation = useCallback(() => {
+    manifestObservationRef.current?.refresh();
+  }, []);
   useEffect(() => {
     if (!projectIsReady) {
       return;
@@ -787,8 +794,22 @@ export function ProjectProvider({
       invalidate: observer.invalidate,
       read: async () => observer.check(),
     });
+    manifestObservationRef.current = observation;
+    const updateHealth = (): void => {
+      const snapshot = observation.getSnapshot();
+      if (snapshot.status === 'ready') {
+        setManifestObservationError(undefined);
+      } else if (snapshot.status === 'closed' || snapshot.status === 'error') {
+        setManifestObservationError(snapshot.error);
+      }
+    };
+    const unsubscribe = observation.subscribe(updateHealth);
     const lease = observation.acquire();
     return () => {
+      unsubscribe();
+      if (manifestObservationRef.current === observation) {
+        manifestObservationRef.current = undefined;
+      }
       lease.release();
       observer.dispose();
     };
@@ -926,6 +947,8 @@ export function ProjectProvider({
     return {
       projectId,
       profile,
+      manifestObservationError,
+      retryManifestObservation,
       projectRef: actorRef,
       editorRef,
       viewGraphics,
@@ -963,6 +986,8 @@ export function ProjectProvider({
   }, [
     projectId,
     profile,
+    manifestObservationError,
+    retryManifestObservation,
     actorRef,
     editorRef,
     viewGraphics,

@@ -189,30 +189,29 @@ const mockRmdir = vi.fn(async (path: string, options?: { recursive?: boolean }) 
   }
 });
 
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({
-    workerChangeChannel: mockWorkerChangeChannel,
-    /* Content reaches the root that owns the path (W12); the authority-global
-     * surface below it is topology only (charter D5). */
-    recordFiles: {
-      writeFiles: mockWriteFiles,
-      writeFile: async (path: string, bytes: Uint8Array<ArrayBuffer>) =>
-        isAttachmentPath(path) ? mockWriteAttachment(path, bytes) : mockWriteFile(path, bytes),
-      readFile: async (path: string, encoding?: 'utf8') =>
-        isAttachmentPath(path) ? readAttachment(path) : mockReadFile(path, encoding),
-      stat: mockStat,
-      exists: vi.fn(async (path: string) => attachmentFiles.has(path)),
-      rmdir: mockRmdir,
-    },
-    client: {
-      listProjectManifests: mockListProjectManifests,
-      adoptProjectDirectory: mockAdoptProjectDirectory,
-      permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
-      commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
-    },
-    workspace: { syncProjectRoots: mockSyncProjectRoots },
-  }),
-}));
+const mockFileManager = {
+  workerChangeChannel: mockWorkerChangeChannel,
+  /* Content reaches the root that owns the path (W12); the authority-global
+   * surface below it is topology only (charter D5). */
+  recordFiles: {
+    writeFiles: mockWriteFiles,
+    writeFile: async (path: string, bytes: Uint8Array<ArrayBuffer>) =>
+      isAttachmentPath(path) ? mockWriteAttachment(path, bytes) : mockWriteFile(path, bytes),
+    readFile: async (path: string, encoding?: 'utf8') =>
+      isAttachmentPath(path) ? readAttachment(path) : mockReadFile(path, encoding),
+    stat: mockStat,
+    exists: vi.fn(async (path: string) => attachmentFiles.has(path)),
+    rmdir: mockRmdir,
+  },
+  client: {
+    listProjectManifests: mockListProjectManifests,
+    adoptProjectDirectory: mockAdoptProjectDirectory,
+    permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
+    commitPendingProjectDirectory: mockCommitPendingProjectDirectory,
+  },
+  workspace: { syncProjectRoots: mockSyncProjectRoots },
+};
+vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => mockFileManager }));
 
 const recordConfigWrite = async (_config: ProjectFileSystemConfig): Promise<void> => {
   phaseOrder.push('locator');
@@ -670,6 +669,69 @@ describe('useProjectManager.createProject', () => {
     projectRootConfigurationListener = undefined;
     workerChangeSubscriptions.clear();
   });
+
+  it.each(['acknowledged', 'rejected'] as const)(
+    'should expose discovery and metadata watch failures through a %s retry registration',
+    async (outcome) => {
+      const first = Promise.withResolvers<void>();
+      const second = Promise.withResolvers<void>();
+      const retryReady = Promise.withResolvers<void>();
+      const watch = vi.spyOn(mockWorkerChangeChannel, 'watchReady');
+      watch
+        .mockReturnValueOnce({ ready: Promise.resolve(), closed: first.promise, dispose: vi.fn() })
+        .mockReturnValueOnce({ ready: Promise.resolve(), closed: second.promise, dispose: vi.fn() })
+        .mockReturnValueOnce({
+          ready: retryReady.promise,
+          closed: new Promise<void>(() => {
+            /* Keep the acknowledged watch open until disposal. */
+          }),
+          dispose: vi.fn(),
+        })
+        .mockReturnValueOnce({
+          ready: retryReady.promise,
+          closed: new Promise<void>(() => {
+            /* Keep the acknowledged watch open until disposal. */
+          }),
+          dispose: vi.fn(),
+        });
+      const view = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await act(async () => {
+        first.reject(new Error('Discovery disconnected'));
+        second.reject(new Error('Metadata disconnected'));
+      });
+      await waitFor(() => {
+        expect(view.result.current.discoveryObservationError).toBe('Observation connection closed.');
+        expect(view.result.current.metadataObservationError).toBe('Observation connection closed.');
+      });
+      const registrations = watch.mock.calls.length;
+      act(() => {
+        view.result.current.refreshFilesystemObservations();
+      });
+      await waitFor(() => {
+        expect(watch.mock.calls.length).toBe(registrations + 2);
+      });
+      expect(view.result.current.discoveryObservationError).toBe('Observation connection closed.');
+      expect(view.result.current.metadataObservationError).toBe('Observation connection closed.');
+      await act(async () => {
+        if (outcome === 'acknowledged') {
+          retryReady.resolve();
+        } else {
+          retryReady.reject(new Error('Retry acknowledgement refused'));
+        }
+      });
+      await waitFor(() => {
+        if (outcome === 'acknowledged') {
+          expect(view.result.current.discoveryObservationError).toBeUndefined();
+          expect(view.result.current.metadataObservationError).toBeUndefined();
+        } else {
+          expect(view.result.current.discoveryObservationError).toBe('Error: Retry acknowledgement refused');
+          expect(view.result.current.metadataObservationError).toBe('Error: Retry acknowledgement refused');
+        }
+      });
+      view.unmount();
+      watch.mockRestore();
+    },
+  );
 
   it('publishes connected-workspace projects into the one listing key before resolving', async () => {
     mockIsFileSystemAccessSupported = true;

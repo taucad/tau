@@ -207,6 +207,9 @@ export type ConnectedWorkspace = {
 };
 
 type ProjectManagerContextType = {
+  discoveryObservationError: string | undefined;
+  metadataObservationError: string | undefined;
+  refreshFilesystemObservations: () => void;
   isLoading: boolean;
   error: Error | undefined;
   projectManagerRef: ActorRefFrom<typeof projectManagerMachine>;
@@ -701,6 +704,13 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   );
 
   const discoveryObservationRef = useRef<ObservationService<void> | undefined>(undefined);
+  const metadataObservationRef = useRef<ObservationService<void> | undefined>(undefined);
+  const [discoveryObservationError, setDiscoveryObservationError] = useState<string>();
+  const [metadataObservationError, setMetadataObservationError] = useState<string>();
+  const refreshFilesystemObservations = useCallback(() => {
+    discoveryObservationRef.current?.refresh();
+    metadataObservationRef.current?.refresh();
+  }, []);
   const scheduleProjectsListInvalidation = useCallback(() => {
     discoveryEpochRef.current++;
     discoverySnapshotRef.current = undefined;
@@ -725,6 +735,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     let discoveryDirty = false;
     const discovery = new ObservationService<void>({
       resource: 'workspace/project-discovery',
+      refresh: () => {
+        discoveryDirty = true;
+      },
       watch: (invalidate, reset) =>
         channel.watchReady({ paths: [''], recursive: true }, (event) => {
           if (event.type === 'reset') {
@@ -761,6 +774,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     let membership = false;
     const metadata = new ObservationService<void>({
       resource: 'workspace/chat-metadata',
+      refresh: () => {
+        membership = true;
+      },
       watch: (invalidate, reset) =>
         channel.watchReady({ paths: [''], recursive: true }, (event) => {
           if (event.type === 'reset') {
@@ -844,9 +860,35 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         await metadataReadOwner.settle();
       },
     });
+    metadataObservationRef.current = metadata;
+    const updateDiscoveryHealth = (): void => {
+      const snapshot = discovery.getSnapshot();
+      if (snapshot.status === 'ready') {
+        setDiscoveryObservationError(undefined);
+      } else if (snapshot.status === 'error' || snapshot.status === 'closed') {
+        setDiscoveryObservationError(snapshot.error);
+      }
+    };
+    const updateMetadataHealth = (): void => {
+      const snapshot = metadata.getSnapshot();
+      if (snapshot.status === 'ready') {
+        setMetadataObservationError(undefined);
+      } else if (snapshot.status === 'error' || snapshot.status === 'closed') {
+        setMetadataObservationError(snapshot.error);
+      }
+    };
+    const unsubscribeDiscovery = discovery.subscribe(updateDiscoveryHealth);
+    const unsubscribeMetadata = metadata.subscribe(updateMetadataHealth);
     const discoveryLease = discovery.acquire();
     const metadataLease = metadata.acquire();
+    updateDiscoveryHealth();
+    updateMetadataHealth();
     return () => {
+      unsubscribeDiscovery();
+      unsubscribeMetadata();
+      if (metadataObservationRef.current === metadata) {
+        metadataObservationRef.current = undefined;
+      }
       if (discoveryObservationRef.current === discovery) {
         discoveryObservationRef.current = undefined;
       }
@@ -2579,6 +2621,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     return {
       isLoading,
       error,
+      discoveryObservationError,
+      metadataObservationError,
+      refreshFilesystemObservations,
       projectManagerRef: actorRef,
       workspaceConnection,
       connectWorkspace,
@@ -2628,6 +2673,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   }, [
     isLoading,
     error,
+    discoveryObservationError,
+    metadataObservationError,
+    refreshFilesystemObservations,
     actorRef,
     workspaceConnection,
     connectWorkspace,

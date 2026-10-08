@@ -13,7 +13,12 @@ export function useChatRecords(
   readonly error: string | undefined;
   readonly retry: () => Promise<unknown>;
 } {
-  const { getChatRecordsForResource, isLoading: isWorkerLoading } = useProjectManager();
+  const {
+    getChatRecordsForResource,
+    isLoading: isWorkerLoading,
+    metadataObservationError,
+    refreshFilesystemObservations,
+  } = useProjectManager();
   const includeDeleted = options?.includeDeleted ?? false;
   const {
     data: chats = [],
@@ -33,7 +38,10 @@ export function useChatRecords(
   return {
     chats,
     isLoading: isWorkerLoading || isLoading,
-    error: error instanceof Error ? error.message : undefined,
-    retry: refetch,
+    error: metadataObservationError ?? (error instanceof Error ? error.message : undefined),
+    retry: async () => {
+      refreshFilesystemObservations();
+      return refetch();
+    },
   };
 }

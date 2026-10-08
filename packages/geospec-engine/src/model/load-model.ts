@@ -228,9 +228,11 @@ const loadFromRuntime = async (options: RuntimeOptions, forensic?: ForensicSink)
     if ('success' in requestedIntent) {
       throw failure(requestedIntent.diagnostics);
     }
+    // One export, then close: a file watcher would outlive the worker that tears it down.
     const document = runtime.open({
       source: runtimeSource(options),
       ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+      watch: false,
     });
     const exported = await (async () => {
       try {

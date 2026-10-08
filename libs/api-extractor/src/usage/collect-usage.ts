@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { homedir } from 'node:os';
 import { delimiter, join, relative, sep } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 import type { BundleOwner } from '#bundle/generate.js';
@@ -477,15 +477,24 @@ export const listEventLogs = (root: string): readonly string[] => {
   return logs;
 };
 
+const parseEventLine = (line: string): EventLine | undefined => {
+  try {
+    return JSON.parse(line) as EventLine;
+  } catch {
+    return undefined;
+  }
+};
+
 /** `tool-input` messages in one event log, with the run that issued each. */
 const readToolInputs = (log: string): ReadonlyArray<{ readonly runId: string; readonly message: ToolInput }> =>
   readFileSync(log, 'utf8')
     .split('\n')
     .filter((line) => line.includes('"tool-input"'))
     .flatMap((line) => {
-      const event = JSON.parse(line) as EventLine;
-      const message = event.message ?? event.replacement;
-      return message?.role === 'tool-input' && event.runId !== undefined ? [{ runId: event.runId, message }] : [];
+      // A running Tau may be mid-write on its last line; skip what does not parse.
+      const event = parseEventLine(line);
+      const message = event?.message ?? event?.replacement;
+      return message?.role === 'tool-input' && event?.runId !== undefined ? [{ runId: event.runId, message }] : [];
     });
 
 type ToolInput = { readonly role?: string; readonly toolName?: unknown; readonly content?: unknown };
@@ -652,7 +661,7 @@ export const writeUsageReports = (reports: readonly UsageReport[], outDirectory:
   }
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { values } = parseArgs({
     options: {
       workspace: { type: 'string', multiple: true },

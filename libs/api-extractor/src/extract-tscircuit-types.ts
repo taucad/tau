@@ -11,9 +11,10 @@
  * @module
  */
 
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 
 import ts from 'typescript';
 
@@ -36,11 +37,19 @@ const main = (): void => {
     packageVersion: versionOf(core),
     extractor: `TypeScript ${ts.version} over @tscircuit/props ${versionOf(props)} and @tscircuit/footprinter ${versionOf(footprinter)}`,
   });
+  // Keep the committed timestamp when nothing else changed, so regeneration is not a timestamp-only diff.
+  const undated = (text: string): string => text.replace(/"extractionDate": "[^"]*"/u, '"extractionDate": ""');
+  const text = `${JSON.stringify(corpus, undefined, 2)}\n`;
+  const previous = existsSync(tscircuitCorpusFile) ? readFileSync(tscircuitCorpusFile, 'utf8') : undefined;
+  if (previous !== undefined && undated(previous) === undated(text)) {
+    console.log(`${String(corpus.metadata.totalEntries)} symbols, unchanged -> ${tscircuitCorpusFile}`);
+    return;
+  }
   mkdirSync(dirname(tscircuitCorpusFile), { recursive: true });
-  writeFileSync(tscircuitCorpusFile, `${JSON.stringify(corpus, undefined, 2)}\n`);
+  writeFileSync(tscircuitCorpusFile, text);
   console.log(`${String(corpus.metadata.totalEntries)} symbols -> ${tscircuitCorpusFile}`);
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }

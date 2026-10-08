@@ -144,7 +144,9 @@ describe('billing database protections and real command', () => {
     });
     try {
       const [chunk] = (await once(child.stdout, 'data')) as unknown[];
-      expect(JSON.parse(String(chunk))).toMatchObject({
+      // One JSON line per batch every 10 ms: a loaded host can deliver two in one chunk.
+      const [firstLine] = String(chunk).split('\n');
+      expect(JSON.parse(firstLine ?? '')).toMatchObject({
         event: 'billing.llm_recovery_batch',
         environment: 'prod-eu',
         failed: 0,

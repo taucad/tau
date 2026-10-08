@@ -30,7 +30,7 @@ import type { Handle } from '#types/matches.types.js';
 import { PageHeader } from '#components/layout/page-header.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
+import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 import { tauStoreSkills } from '#lib/tau-plugin-store-catalog.js';
 import type { SystemSkill } from '#lib/system-skills-catalog.js';
@@ -232,7 +232,8 @@ function StoreSection({
 
 export default function PluginsRoute(): React.JSX.Element {
   const { readFile, writeFiles, exists, contentService } = useFileManager();
-  const skillsCatalog = useSkillsCatalog();
+  const catalog = useSkillsCatalogState();
+  const skillsCatalog = catalog.commands;
   const manifestService = useMemo(
     () =>
       contentService
@@ -286,6 +287,9 @@ export default function PluginsRoute(): React.JSX.Element {
 
   const installSkill = useCallback(
     async (slug: string): Promise<void> => {
+      if (catalog.status === 'closed' || catalog.status === 'error') {
+        return;
+      }
       if (manifestSnapshot.status !== 'ready') {
         return;
       }
@@ -319,7 +323,7 @@ export default function PluginsRoute(): React.JSX.Element {
       });
       manifestService?.invalidate();
     },
-    [exists, manifest, manifestService, manifestSnapshot.status, writeFiles],
+    [exists, manifest, manifestService, manifestSnapshot.status, writeFiles, catalog.status],
   );
 
   return (
@@ -355,6 +359,36 @@ export default function PluginsRoute(): React.JSX.Element {
           {manifestSnapshot.error}
         </p>
       )}
+      {manifestService &&
+      (manifestSnapshot.status === 'closed' ||
+        manifestSnapshot.status === 'error' ||
+        (manifestSnapshot.value !== undefined && manifestSnapshot.status !== 'ready')) ? (
+        <div role='status' className='flex items-center justify-between gap-2 text-sm'>
+          <span>
+            {manifestSnapshot.status === 'registering' || manifestSnapshot.status === 'pending'
+              ? 'Plugin updates pending'
+              : 'Plugin updates unavailable'}
+          </span>
+          <Button
+            variant='ghost'
+            size='sm'
+            aria-label='Retry plugin updates'
+            onClick={() => {
+              manifestService.refresh();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : undefined}
+      {catalog.status === 'closed' || catalog.status === 'error' ? (
+        <div role='status' className='flex items-center justify-between gap-2 text-sm'>
+          <span>Skill updates unavailable</span>
+          <Button variant='ghost' size='sm' aria-label='Retry skill updates' onClick={catalog.retry}>
+            Retry
+          </Button>
+        </div>
+      ) : undefined}
       <StoreSection title='Featured' items={featuredPlugins} />
       <StoreSection title='System' items={systemSkills} />
       <StoreSection title='Skills' items={storeSkills} getStatus={getSkillInstallStatus} onInstall={installSkill} />

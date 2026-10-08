@@ -83,9 +83,11 @@ vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id?: string }) => <span data-testid='svg-icon' data-icon={id} />,
 }));
 
+const catalogHealth = vi.hoisted(() => ({ status: 'ready' as 'ready' | 'closed', retry: vi.fn() }));
 vi.mock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useSkillsCatalog: () => [],
+  useSkillsCatalogState: () => ({ commands: [], prompt: [], status: catalogHealth.status, retry: catalogHealth.retry }),
 }));
 
 vi.mock('#hooks/use-cad-agent-config.js', () => ({
@@ -309,11 +311,13 @@ describe('ACP slash commands', () => {
 describe('ChatTextareaDesktop draft rehydration', () => {
   beforeEach(() => {
     dictationDependencies.available = false;
+    catalogHealth.status = 'ready';
+    catalogHealth.retry.mockClear();
   });
   const renderComposer = (
     inputText: string,
     acpSessionData: AcpSessionData,
-    options: { canResume?: boolean; handleSubmit?: (text?: string) => Promise<void> } = {},
+    options: { canResume?: boolean; handleSubmit?: (text?: string) => Promise<void>; useTauSkills?: boolean } = {},
   ) => {
     const { canResume = false, handleSubmit = asyncNoop } = options;
     const element = (session: AcpSessionData): React.JSX.Element => (
@@ -335,7 +339,7 @@ describe('ChatTextareaDesktop draft rehydration', () => {
           treeService={undefined}
           chats={[]}
           setDraftText={noop}
-          acpAgentId='codex'
+          acpAgentId={options.useTauSkills ? undefined : 'codex'}
           acpSessionData={session}
           fileInputReference={{ current: null }}
           containerReference={{ current: null }}
@@ -365,6 +369,15 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       },
     };
   };
+
+  it('should show skill recovery in the functional composer after catalog closure', async () => {
+    catalogHealth.status = 'closed';
+    renderComposer('Keep this draft', codexSession, { useTauSkills: true });
+    expect(screen.getByText('Skill updates unavailable')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry skill updates' }));
+    expect(catalogHealth.retry).toHaveBeenCalledOnce();
+    expect(screen.getByRole('textbox')).toHaveTextContent('Keep this draft');
+  });
 
   it('should offer Resume through the full composer without the empty-message refusal', () => {
     renderComposer('', codexSession, { canResume: true });

@@ -1,23 +1,25 @@
 import { MemoryRouter } from 'react-router';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SkillMetadata } from '@taucad/chat';
+import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 
 const mockReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
 const mockWriteFiles = vi.fn<(files: Record<string, { content: Uint8Array<ArrayBuffer> }>) => Promise<void>>();
 const mockExists = vi.fn<(path: string) => Promise<boolean>>();
+const catalogHealth = vi.hoisted(() => ({ status: 'ready' as 'ready' | 'closed', retry: vi.fn() }));
 const mockUseSkillsCatalog = vi.fn<() => SkillMetadata[]>();
 
-const contentService = {
-  watchReady: () => ({
-    ready: Promise.resolve(),
-    closed: new Promise<void>(() => {
-      /* This watch stays open until fixture disposal. */
-    }),
-    dispose: () => undefined,
+const mockWatchReady = vi.fn<() => ObservationWatch>();
+const contentService = { watchReady: mockWatchReady };
+const openWatch = (): ObservationWatch => ({
+  ready: Promise.resolve(),
+  closed: new Promise<void>(() => {
+    /* Open until this mounted owner is disposed. */
   }),
-};
+  dispose: () => undefined,
+});
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
@@ -30,6 +32,12 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 
 vi.mock('#hooks/use-skills-catalog.js', () => ({
   useSkillsCatalog: mockUseSkillsCatalog,
+  useSkillsCatalogState: () => ({
+    commands: mockUseSkillsCatalog(),
+    prompt: [],
+    status: catalogHealth.status,
+    retry: catalogHealth.retry,
+  }),
 }));
 
 const { default: PluginsRoute } = await import('#routes/plugins/route.js');
@@ -84,10 +92,84 @@ function getFirstWrite(): FileWrites {
 describe('PluginsRoute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWatchReady.mockReset().mockImplementation(openWatch);
+    catalogHealth.status = 'ready';
     mockReadFile.mockRejectedValue(Object.assign(new Error('manifest missing'), { code: 'ENOENT' }));
     mockWriteFiles.mockResolvedValue(undefined);
     mockExists.mockResolvedValue(false);
     mockUseSkillsCatalog.mockReturnValue([]);
+  });
+
+  it('should expose unavailable catalog recovery without marking skill installs authoritative', async () => {
+    catalogHealth.status = 'closed';
+    renderRoute();
+    expect(screen.getByText('Skill updates unavailable')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry skill updates' }));
+    expect(catalogHealth.retry).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+    expect(mockWriteFiles).not.toHaveBeenCalled();
+  });
+
+  it('should retry a closed manifest in the same mounted route only after fresh watch acknowledgement', async () => {
+    const firstClosed = Promise.withResolvers<void>();
+    const nextReady = Promise.withResolvers<void>();
+    const disposeFirst = vi.fn();
+    mockWatchReady
+      .mockReturnValueOnce({ ready: Promise.resolve(), closed: firstClosed.promise, dispose: disposeFirst })
+      .mockReturnValueOnce({
+        ready: nextReady.promise,
+        closed: new Promise<void>(() => {
+          /* Replacement remains connected. */
+        }),
+        dispose: vi.fn(),
+      });
+    mockReadFile.mockResolvedValue(encoder.encode(JSON.stringify({ skills: {} })));
+    renderRoute();
+    const heading = screen.getByRole('heading', { level: 1, name: 'Plugins' });
+    await waitFor(() => {
+      expect(mockReadFile).toHaveBeenCalledTimes(1);
+    });
+    await act(async () => {
+      firstClosed.resolve();
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+    expect(mockWriteFiles).not.toHaveBeenCalled();
+    // Recovery uses the existing mounted owner; remounting must not substitute for Retry.
+    const retry = await screen.findByRole('button', { name: 'Retry plugin updates' });
+    mockReadFile.mockResolvedValue(
+      encoder.encode(
+        JSON.stringify({
+          skills: {
+            woodworking: {
+              status: 'installed',
+              source: 'tau-store',
+              installedPath: '.agents/skills/woodworking/SKILL.md',
+              version: '1.0.0',
+              updatedAt: '2026-10-09T00:00:00.000Z',
+            },
+          },
+        }),
+      ),
+    );
+    await userEvent.click(retry);
+    await waitFor(() => {
+      expect(mockWatchReady).toHaveBeenCalledTimes(2);
+    });
+    expect(disposeFirst).toHaveBeenCalledOnce();
+    expect(mockReadFile).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+    expect(mockWriteFiles).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Retry plugin updates' })).toBeInTheDocument();
+    await act(async () => {
+      nextReady.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Woodworking installed' })).toBeInTheDocument();
+    });
+    expect(mockReadFile).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('heading', { level: 1, name: 'Plugins' })).toBe(heading);
+    expect(screen.queryByRole('button', { name: 'Retry plugin updates' })).not.toBeInTheDocument();
+    expect(mockWriteFiles).not.toHaveBeenCalled();
   });
 
   it('should lead with the page title inside the shell main', () => {

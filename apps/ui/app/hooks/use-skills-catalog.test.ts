@@ -6,11 +6,15 @@ import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
 const mockReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
 const mockListDirectory = vi.fn<(path: string) => Promise<ListedDirectoryEntry[]>>();
 const mockUnsubscribe = vi.fn<() => void>();
+const mockWatchDispose = vi.fn<() => void>();
 let watchCallback: ((event: WatchEvent) => void) | undefined;
-let treeCallback: (() => void) | undefined;
-const mockSubscribeTree = vi.fn<(callback: () => void) => () => void>((callback) => {
-  treeCallback = callback;
-  return mockUnsubscribe;
+const settledCallbacks = new Map<string, () => void>();
+const mockSubscribePath = vi.fn<(path: string, callback: () => void) => () => void>((path, callback) => {
+  settledCallbacks.set(path, callback);
+  return () => {
+    settledCallbacks.delete(path);
+    mockUnsubscribe();
+  };
 });
 
 let treeSnapshot = new Map<string, { path: string; type: 'file'; size: number; mtimeMs: number }>();
@@ -20,16 +24,16 @@ const mockTreeService = {
   closed: new Promise<void>(() => {
     /* This watch stays open until fixture disposal. */
   }),
-  getTreeSnapshot: () => treeSnapshot,
+  getTreeSnapshot: vi.fn(() => treeSnapshot),
   listDirectory: mockListDirectory,
-  subscribeTree: mockSubscribeTree,
+  subscribePath: mockSubscribePath,
 };
 
 /** Publish a tree in which `path` was just written, as the tree service does after a file change. */
 function writeTreeFile(path: string): void {
   treeWrites += 1;
   treeSnapshot = new Map(treeSnapshot).set(path, { path, type: 'file', size: treeWrites, mtimeMs: treeWrites });
-  treeCallback?.();
+  settledCallbacks.get(path.slice(0, path.lastIndexOf('/')))?.();
   if (path === '.agents' || path.startsWith('.agents/')) {
     watchCallback?.({ type: 'change', path });
   }
@@ -38,8 +42,7 @@ function writeTreeFile(path: string): void {
 const mockContentService = {
   watchReady: (_request: unknown, listener: (event: WatchEvent) => void) => {
     watchCallback = listener;
-    mockSubscribeTree(() => undefined);
-    return { ready: Promise.resolve(), closed: mockTreeService.closed, dispose: mockUnsubscribe };
+    return { ready: Promise.resolve(), closed: mockTreeService.closed, dispose: mockWatchDispose };
   },
 };
 
@@ -107,14 +110,10 @@ describe('skillMetadataToSlashCommand', () => {
 describe('usePromptSkillsCatalog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    treeCallback = undefined;
+    settledCallbacks.clear();
     treeSnapshot = new Map();
     mockListDirectory.mockResolvedValue([]);
     mockReadFile.mockRejectedValue(new Error('not found'));
-    mockSubscribeTree.mockImplementation((callback) => {
-      treeCallback = callback;
-      return mockUnsubscribe;
-    });
   });
 
   it('refreshes equal-metadata skill bytes and reset without rerendering equal values', async () => {
@@ -155,6 +154,49 @@ describe('usePromptSkillsCatalog', () => {
     });
   });
 
+  it('should converge from settled tree changes after raw discovery returned a stale listing', async () => {
+    serveSingleSkill('alpha', 'Alpha');
+    const hook = renderHook(() => useSkillsCatalog());
+    await waitFor(() => {
+      expect(hook.result.current.some((skill) => skill.name === 'alpha')).toBe(true);
+    });
+    // The exact raw watch may run before the tree owner has merged fresh directory rows.
+    act(() => {
+      watchCallback?.({ type: 'change', path: '.agents/skills/beta' });
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    serveSingleSkill('beta', 'Beta');
+    act(() => {
+      treeSnapshot = new Map<string, { path: string; type: 'file'; size: number; mtimeMs: number }>().set(
+        '.agents/skills/beta/SKILL.md',
+        {
+          path: '.agents/skills/beta/SKILL.md',
+          type: 'file',
+          size: 1,
+          mtimeMs: 1,
+        },
+      );
+      settledCallbacks.get('.agents/skills')?.();
+    });
+    await waitFor(() => {
+      expect(hook.result.current.some((skill) => skill.name === 'beta')).toBe(true);
+    });
+    const reads = mockReadFile.mock.calls.length;
+    const scans = mockTreeService.getTreeSnapshot.mock.calls.length;
+    act(() => {
+      treeSnapshot = new Map(treeSnapshot).set('main.ts', { path: 'main.ts', type: 'file', size: 2, mtimeMs: 2 });
+      settledCallbacks.get('')?.();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockReadFile).toHaveBeenCalledTimes(reads);
+    expect(mockTreeService.getTreeSnapshot).toHaveBeenCalledTimes(scans);
+    hook.unmount();
+  });
+
   it('shares command and prompt acquisition while retaining distinct selections', async () => {
     serveSingleSkill('alpha', 'Alpha');
     const { result } = renderHook(() => ({ commands: useSkillsCatalog(), prompt: usePromptSkillsCatalog() }));
@@ -181,7 +223,7 @@ describe('usePromptSkillsCatalog', () => {
     serveSingleSkill('alpha', 'Alpha v2');
 
     // ...and the tree watcher fires.
-    expect(treeCallback).toBeDefined();
+    expect(mockSubscribePath).toHaveBeenCalledWith('.agents/skills', expect.any(Function));
     act(() => {
       writeTreeFile('.agents/skills/alpha/SKILL.md');
     });
@@ -283,14 +325,17 @@ describe('usePromptSkillsCatalog', () => {
     expect(mockListDirectory).toHaveBeenCalledTimes(listings);
   });
 
-  it('should subscribe once and unsubscribe from the file tree on unmount', () => {
+  it('should subscribe to settled catalog directories and unsubscribe on unmount', async () => {
     const { unmount } = renderHook(() => usePromptSkillsCatalog());
 
-    expect(mockSubscribeTree).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(mockSubscribePath).toHaveBeenCalledWith('.agents/skills', expect.any(Function));
+    });
+    const subscriptions = mockSubscribePath.mock.calls.length;
     expect(mockUnsubscribe).not.toHaveBeenCalled();
 
     unmount();
 
-    expect(mockUnsubscribe).toHaveBeenCalledTimes(1);
+    expect(mockUnsubscribe).toHaveBeenCalledTimes(subscriptions);
   });
 });

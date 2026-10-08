@@ -1,6 +1,6 @@
 import { contextMemoryMaxBytes, contextMemoryMaxLines } from '@taucad/chat/schemas';
 import { truncateMemoryHead } from '#hooks/use-context-payload.js';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { FileEntry } from '@taucad/types';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
@@ -16,15 +16,15 @@ const mockTreeService = {
   listDirectory: mockListDirectory,
   getEntry: mockGetEntry,
   subscribeTree: mockSubscribeTree,
+  subscribePath: (_path: string, callback: () => void) => mockSubscribeTree(callback),
 };
 
 /** A ready recursive watch that never changes: each hook mount reads the catalog afresh. */
+let catalogClosed = Promise.withResolvers<void>();
 const mockContentService = {
   watchReady: () => ({
     ready: Promise.resolve(),
-    closed: new Promise<never>(() => {
-      // Never closes.
-    }),
+    closed: catalogClosed.promise,
     dispose: () => undefined,
   }),
 };
@@ -73,6 +73,7 @@ function makeFileEntry(path: string, type: 'file' | 'dir' = 'file'): FileEntry {
 describe('useContextPayload', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    catalogClosed = Promise.withResolvers<void>();
     mockListDirectory.mockResolvedValue([]);
     mockGetEntry.mockResolvedValue(undefined);
     mockReadFile.mockRejectedValue(new Error('not found'));
@@ -93,6 +94,18 @@ describe('useContextPayload', () => {
         ]),
       );
     });
+  });
+
+  it('should exclude unavailable skill authority from a new prompt after isolated watch closure', async () => {
+    const hook = renderHook(() => useContextPayload());
+    await waitFor(() => {
+      expect(hook.result.current?.skills?.length).toBeGreaterThan(0);
+    });
+    await act(async () => {
+      catalogClosed.resolve();
+    });
+    expect(hook.result.current?.skills).toBeUndefined();
+    hook.unmount();
   });
 
   it('should keep virtual system skills when no user skill directories exist', async () => {

@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { ObservationService } from '@taucad/fs-client/observation-service';
-import { useObservationValue } from '@taucad/fs-client/react/use-observation';
+import type { ObservationSnapshot } from '@taucad/fs-client/observation-service';
+import { useObservation, useObservationValue } from '@taucad/fs-client/react/use-observation';
 import type { SkillMetadata } from '@taucad/chat';
 import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -48,17 +49,34 @@ function catalogFor(tree: FileTreeService, readFile: Reader, content: Content): 
   }
   let service = readers.get(readFile);
   if (!service) {
+    const settled = new Map<string, () => void>();
+    let invalidateSettled: (() => void) | undefined;
     service = new ObservationService({
       resource: '.agents/catalog',
-      watch: (invalidate, reset) =>
-        content.watchReady({ paths: ['.agents'], recursive: true }, (event) => {
+      watch: (invalidate, reset) => {
+        invalidateSettled = invalidate;
+        const watch = content.watchReady({ paths: ['.agents'], recursive: true }, (event) => {
           if (event.type === 'reset') {
             reset();
           } else {
             invalidate();
           }
-        }),
-      read: async () => {
+        });
+        return {
+          ready: watch.ready,
+          closed: watch.closed,
+          dispose: () => {
+            invalidateSettled = undefined;
+            for (const off of settled.values()) {
+              off();
+            }
+            settled.clear();
+            watch.dispose();
+          },
+        };
+      },
+      read: async ({ isCurrent }) => {
+        const seen = new Set<string>();
         // Both resolver selections acquire each file and directory once per refresh.
         const files = new Map<string, Promise<Uint8Array<ArrayBuffer>>>();
         const directories = new Map<string, ReturnType<FileTreeService['listDirectory']>>();
@@ -77,10 +95,28 @@ function catalogFor(tree: FileTreeService, readFile: Reader, content: Content): 
               entries = tree.listDirectory(path);
               directories.set(path, entries);
             }
-            return entries;
+            const value = await entries;
+            seen.add(path);
+            if (isCurrent() && invalidateSettled && !settled.has(path)) {
+              settled.set(
+                path,
+                tree.subscribePath(path, () => {
+                  invalidateSettled?.();
+                }),
+              );
+            }
+            return value;
           },
         });
         const [commands, prompt] = await Promise.all([resolver.listSkills(), resolver.getPromptSkillListing()]);
+        if (isCurrent()) {
+          for (const [path, off] of settled) {
+            if (!seen.has(path)) {
+              off();
+              settled.delete(path);
+            }
+          }
+        }
         return { commands, prompt };
       },
       equal: (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
@@ -90,21 +126,42 @@ function catalogFor(tree: FileTreeService, readFile: Reader, content: Content): 
   return service;
 }
 
-function useCatalog(): Catalog | undefined {
+function useCatalogService(): ObservationService<Catalog> | undefined {
   const { readFile, treeService, contentService } = useFileManager();
   const service = useMemo(
     () => (treeService && contentService ? catalogFor(treeService, readFile, contentService) : undefined),
     [readFile, treeService, contentService],
   );
-  return useObservationValue(service);
+  return service;
 }
 
 /** Merged user-priority slash command catalog, shared with the prompt selector. */
 export function useSkillsCatalog(): SkillMetadata[] {
-  return useCatalog()?.commands ?? emptySkills;
+  return useObservationValue(useCatalogService())?.commands ?? emptySkills;
 }
 
 /** Bounded prompt listing over the same acquisition as the command catalog. */
 export function usePromptSkillsCatalog(): SkillMetadata[] {
-  return useCatalog()?.prompt ?? emptySkills;
+  return useObservationValue(useCatalogService())?.prompt ?? emptySkills;
+}
+
+export type SkillsCatalogState = Catalog & Pick<ObservationSnapshot<Catalog>, 'status' | 'error'> & { retry(): void };
+
+/** Functional catalog selection with truthful authority health and same-owner retry. */
+export function useSkillsCatalogState(): SkillsCatalogState {
+  const service = useCatalogService();
+  const snapshot = useObservation(service);
+  const retry = useCallback(() => {
+    service?.refresh();
+  }, [service]);
+  return useMemo(
+    () => ({
+      commands: snapshot.value?.commands ?? emptySkills,
+      prompt: snapshot.value?.prompt ?? emptySkills,
+      status: snapshot.status,
+      error: snapshot.error,
+      retry,
+    }),
+    [snapshot, retry],
+  );
 }

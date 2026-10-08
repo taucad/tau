@@ -157,10 +157,14 @@ const providerUpstreamFetch =
     },
     {
       provide: BillingRecoveryScheduler,
-      inject: [CreditLedgerService, ConfigService],
-      useFactory(ledger: CreditLedgerService, config: ConfigService<Environment, true>): BillingRecoveryScheduler {
+      inject: [CreditLedgerService, MetricsService, ConfigService],
+      useFactory(
+        ledger: CreditLedgerService,
+        metrics: MetricsService,
+        config: ConfigService<Environment, true>,
+      ): BillingRecoveryScheduler {
         const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
-        return new BillingRecoveryScheduler(ledger, {
+        return new BillingRecoveryScheduler(ledger, metrics, {
           environment: environment.success ? environment.data : 'development',
           intervalMilliseconds: config.get('BILLING_RECOVERY_INTERVAL_MS', { infer: true }),
           limit: recoveryPassLimit,

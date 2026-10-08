@@ -195,9 +195,9 @@
     "dev:cloud": {
       "executor": "nx:run-commands",
       "continuous": true,
-      "dependsOn": ["billing-operations", "billing-recovery"],
+      "dependsOn": ["billing-operations"],
       "metadata": {
-        "description": "Start the API dev server with the two billing workers deployments run beside it. With TAU_CLOUD_ENABLED=true the webhook only records a Stripe event; billing-operations fulfils purchases, subscriptions and automatic reloads, and billing-recovery settles abandoned LLM operations. Without them a paid checkout stays Processing."
+        "description": "Start the API dev server with the billing-operations worker deployments run beside it. With TAU_CLOUD_ENABLED=true the webhook only records a Stripe event; billing-operations fulfils purchases, subscriptions and automatic reloads. Without it a paid checkout stays Processing. The API itself settles abandoned LLM operations; the billing-recovery target is optional scale-out."
       },
       "options": {
         "command": "vite",

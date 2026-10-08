@@ -32,6 +32,9 @@
         "forwardAllArgs": true
       }
     },
+    "test": {
+      "dependsOn": ["^copy-assets"]
+    },
     "test:ds3": {
       "executor": "nx:run-commands",
       "options": {

@@ -65,6 +65,7 @@
         "{projectRoot}/Config/*",
         "{projectRoot}/generated/*",
         "{projectRoot}/scripts/build-quick-look-extensions.mts",
+        "{workspaceRoot}/apps/desktop/src/shared/quick-look.ts",
         { "runtime": "xcodebuild -version" },
         { "dependentTasksOutputFiles": "**/*" }
       ],

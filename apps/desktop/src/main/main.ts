@@ -104,7 +104,12 @@ import {
   slicersChannels,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
-import { generatedImageIpcChannel, openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
+import {
+  generatedImageIpcChannel,
+  openFilesIpcChannel,
+  quickLookEnabled,
+  quickLookIpcChannels,
+} from '#shared/quick-look.js';
 import type { QuickLookResult } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
@@ -943,25 +948,27 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
   };
 
-  ipcMain.handle(quickLookIpcChannels.previewPath, (event, payload: unknown) =>
-    handleQuickLook(event, (controller) => {
-      controller.previewPath(payload);
-    }),
-  );
-  ipcMain.handle(quickLookIpcChannels.previewUsdz, (event, payload: unknown) =>
-    handleQuickLook(event, (controller) => {
-      controller.previewUsdz(payload);
-    }),
-  );
-  ipcMain.on(quickLookIpcChannels.close, (event) => {
-    if (!trusted(event.senderFrame)) {
-      return;
-    }
-    const window = BrowserWindow.fromWebContents(event.sender);
-    if (window !== null) {
-      quickLookControllers.get(window.id)?.close();
-    }
-  });
+  if (quickLookEnabled) {
+    ipcMain.handle(quickLookIpcChannels.previewPath, (event, payload: unknown) =>
+      handleQuickLook(event, (controller) => {
+        controller.previewPath(payload);
+      }),
+    );
+    ipcMain.handle(quickLookIpcChannels.previewUsdz, (event, payload: unknown) =>
+      handleQuickLook(event, (controller) => {
+        controller.previewUsdz(payload);
+      }),
+    );
+    ipcMain.on(quickLookIpcChannels.close, (event) => {
+      if (!trusted(event.senderFrame)) {
+        return;
+      }
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (window !== null) {
+        quickLookControllers.get(window.id)?.close();
+      }
+    });
+  }
   ipcMain.handle(openFilesIpcChannel, async (event) => {
     if (!trusted(event.senderFrame)) {
       return [];
@@ -1147,13 +1154,17 @@ const bootstrapElectronApp = async (): Promise<void> => {
         ],
       },
     });
-    const quickLook = createQuickLookController({
-      maxOutputBytes: quickLookManifest.limits.maxOutputBytes,
-      registry: roots,
-      temporaryRoot: quickLookTemporaryRoot,
-      window,
-    });
-    quickLookControllers.set(window.id, quickLook);
+    if (quickLookEnabled) {
+      quickLookControllers.set(
+        window.id,
+        createQuickLookController({
+          maxOutputBytes: quickLookManifest.limits.maxOutputBytes,
+          registry: roots,
+          temporaryRoot: quickLookTemporaryRoot,
+          window,
+        }),
+      );
+    }
     window.once('close', () => {
       try {
         writeWindowState(windowStatePath, {
@@ -1164,7 +1175,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       } catch (error) {
         log.log('warn', 'window-state.write-failed', { message: String(error) });
       }
-      quickLook.dispose();
+      quickLookControllers.get(window.id)?.dispose();
       quickLookControllers.delete(window.id);
     });
     forwardRendererDiagnostics(window.webContents, log, () => {

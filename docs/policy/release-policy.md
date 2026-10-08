@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-10-04'
+updated: '2026-10-08'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -30,7 +30,7 @@ Nx Release with version plans provides native monorepo integration and decouples
 | `@taucad/cli`             | Headless CAD export CLI                                   |
 | `@taucad/react`           | React bindings for the runtime                            |
 | `geospec`                 | GeoSpec authoring contract and CLI-facing specification   |
-| `@taucad/geospec-engine`  | Fair-source GeoSpec execution/proof engine and CLI        |
+| `@taucad/geospec-engine`  | GeoSpec CLI and Node worker-pool host                     |
 | `@taucad/openrscad`       | OpenRSCAD runtime plugin                                  |
 | `packages/plugins/*`      | Publishable runtime capability toolkits                   |
 | `packages/core/*`         | Publishable shared implementation packages                |

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { it } from 'node:test';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import {
   isHostContended,
@@ -13,7 +13,6 @@ import {
   toRunCase,
   verifyLabArtifacts,
   verifySourceAuthority,
-  loadLegacyWithoutPersistence,
   summarizeLabCaseResults,
   writeLabChildReport,
   readLabChildReport,
@@ -242,7 +241,7 @@ void it('binds the explicit v6 successor without rewriting the immutable v5 stat
 });
 
 void it('counts known differences separately and preserves unsupported, unverified and unexpected statuses', () => {
-  const legacyCases = ['toHaveBoundingBox', 'toHaveCenterOfMass', 'toHaveCircularHole', 'toHaveChamferFeature'].map(
+  const positiveCases = ['toHaveBoundingBox', 'toHaveCenterOfMass', 'toHaveCircularHole', 'toHaveChamferFeature'].map(
     (matcher) =>
       ({
         caseId: `m3-${matcher}-positive`,
@@ -251,22 +250,9 @@ void it('counts known differences separately and preserves unsupported, unverifi
         expectedStatus: 'failed',
       }) as const,
   );
-  const original = structuredClone(legacyCases);
-  const legacy = summarizeLabCaseResults('legacy-wasm', legacyCases);
-  assert.deepStrictEqual(legacyCases, original);
-  assert.deepStrictEqual(legacy.counts, {
-    expectedMatches: 0,
-    qualifiedTargetDifferences: 0,
-    retainedLegacyNumericalOutcomes: 2,
-    knownLegacyDefects: 2,
-    unexpectedStatuses: 0,
-    unsupported: 0,
-    unverifiedExpectations: 0,
-  });
-  assert.equal(legacy.knownDifferences.length, 4);
-  assert.ok(legacy.knownDifferences.every(({ reason, sources }) => reason.length > 0 && sources.length > 0));
+  const original = structuredClone(positiveCases);
   const mixed = summarizeLabCaseResults('combined-wasm', [
-    ...legacyCases.slice(0, 2),
+    ...positiveCases.slice(0, 2),
     ...['toHaveBoundingBox', 'toHaveCenterOfMass'].map(
       (matcher) =>
         ({
@@ -304,14 +290,14 @@ void it('counts known differences separately and preserves unsupported, unverifi
   assert.deepStrictEqual(mixed.counts, {
     expectedMatches: 1,
     qualifiedTargetDifferences: 4,
-    retainedLegacyNumericalOutcomes: 0,
-    knownLegacyDefects: 0,
     unexpectedStatuses: 1,
     unsupported: 1,
     unverifiedExpectations: 1,
   });
   assert.equal(mixed.knownDifferences.length, 4);
-  assert.equal(summarizeLabCaseResults('native-desktop', legacyCases).counts.unexpectedStatuses, 4);
+  assert.ok(mixed.knownDifferences.every(({ reason, sources }) => reason.length > 0 && sources.length > 0));
+  assert.equal(summarizeLabCaseResults('native-desktop', positiveCases).counts.unexpectedStatuses, 4);
+  assert.deepStrictEqual(positiveCases, original);
 });
 
 void it('plans the shared authored catalog and verifies a pinned ordinary input without loading engines', async () => {
@@ -328,7 +314,6 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
     /Performance-lab source authority changed: .*authority-queries\.json/,
   );
   const options = parseCliArguments([
-    '--legacy-module=/installed/legacy.mjs',
     '--mixed-module=/installed/mixed.mjs',
     '--native-module=/installed/native.mjs',
     '--output-dir=out/reports/benchmarks/performance-lab',
@@ -348,7 +333,6 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
   assert.throws(
     () =>
       parseCliArguments([
-        '--legacy-module=/installed/legacy.mjs',
         '--mixed-module=/installed/mixed.mjs',
         '--native-module=/installed/native.mjs',
         '--output-dir=out/reports/benchmarks/full',
@@ -358,7 +342,7 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
   );
   assert.deepStrictEqual(
     options.modules.map(({ engine }) => engine),
-    ['legacy-wasm', 'combined-wasm', 'native-desktop'],
+    ['combined-wasm', 'native-desktop'],
   );
   assert.equal(options.outputDir, resolve(import.meta.dirname, '../../../../out/reports/benchmarks/performance-lab'));
   const ordinary = selectLabFixtures(false);
@@ -406,14 +390,14 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
     ).size,
     cells.length,
   );
-  assert.equal(cells[0]?.module.engine, 'legacy-wasm');
+  assert.equal(cells[0]?.module.engine, 'combined-wasm');
   assert.deepStrictEqual(
     cells.slice(0, 2).map(({ condition }) => condition),
     ['cold', 'warm'],
   );
   assert.equal(cells[6]?.module.engine, 'combined-wasm');
-  assert.equal(cells[ordinary.length * 3 * 2]?.selection.fixture.id, ordinary[1]?.fixture.id);
-  assert.equal(cells[ordinary.length * 3 * 2]?.module.engine, 'native-desktop');
+  assert.equal(cells[ordinary.length * 2 * 2]?.selection.fixture.id, ordinary[1]?.fixture.id);
+  assert.equal(cells[ordinary.length * 2 * 2]?.module.engine, 'combined-wasm');
   assert.deepStrictEqual(
     [1, 2, 3, 4, 5].map(
       (round) =>
@@ -422,7 +406,7 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
             cell.round === round && cell.condition === 'cold' && cell.selection.fixture.id === ordinary[0]?.fixture.id,
         )?.module.engine,
     ),
-    ['legacy-wasm', 'combined-wasm', 'native-desktop', 'legacy-wasm', 'combined-wasm'],
+    ['combined-wasm', 'native-desktop', 'combined-wasm', 'native-desktop', 'combined-wasm'],
   );
   const scaleOptions = parseCliArguments([
     '--native-module=/installed/native.mjs',
@@ -453,25 +437,6 @@ void it('plans the shared authored catalog and verifies a pinned ordinary input 
   const path = resolve(import.meta.dirname, '../../../..', fixture.path);
   const artifacts = await verifyLabArtifacts([{ path, sha256: fixture.sha256 }]);
   assert.deepStrictEqual(artifacts, [{ path, sha256: fixture.sha256, bytes: fixture.bytes }]);
-});
-
-void it('disables the selected legacy store before importing its entry module', async (context) => {
-  const directory = await mkdtemp(resolve(tmpdir(), 'geospec-lab-inert-cache-'));
-  context.after(async () => rm(directory, { recursive: true, force: true }));
-  await mkdir(resolve(directory, 'cache'));
-  await writeFile(
-    resolve(directory, 'cache/evidence-cache.mjs'),
-    'let store = {}; export const setGeoSpecEvidenceStore = value => { store = value; }; export const getGeoSpecEvidenceStore = () => store;',
-  );
-  const entry = resolve(directory, 'index.mjs');
-  await writeFile(
-    entry,
-    "import { getGeoSpecEvidenceStore } from './cache/evidence-cache.mjs'; export const geoSpecEngineImplementation = { disabledBeforeImport: getGeoSpecEvidenceStore() === undefined };",
-  );
-  const loaded = await loadLegacyWithoutPersistence(entry);
-  assert.deepStrictEqual(loaded.geoSpecEngineImplementation, {
-    disabledBeforeImport: true,
-  });
 });
 
 void it('should load lane-built add-on, glue and ST binary overrides and disclose a contended host only on opt-in', async (context) => {

@@ -1,11 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import '@taucad/geospec-engine/register/node';
+import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
 import { Engine } from '@taucad/geospec-engine-native/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
-import { createModelLoader } from 'geospec/model';
-import { createGeoSpecNodeRunner, createNodeVmFileSystem } from 'geospec/runner/node';
+import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import { describe, expect, it, vi } from 'vitest';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -18,7 +17,6 @@ const inventory = JSON.parse(readFileSync(resolve(examplesSource, 'manifest.json
 }>;
 const models = inventory.filter(({ kind }) => kind === 'model');
 const examplePattern = process.env['TAU_EXAMPLE_PATTERN'];
-const cache = process.env['TAU_GEOSPEC_CACHE'] !== '0';
 const expectedModels = examplePattern
   ? models.filter(({ kernel, name }) => new RegExp(examplePattern).test(`${kernel}.${name}`)).length
   : models.length;
@@ -33,16 +31,13 @@ describe('Tau example model health', () => {
       .spyOn(console, 'error')
       .mockImplementation((...values) => consoleDiagnostics.push(`error: ${values.map(String).join(' ')}`));
     const engine = new Engine();
-    const runner = createGeoSpecNodeRunner({
+    const runner = createNativeGeoSpecRunner({
       filesystem: createNodeVmFileSystem(examplesRoot),
-      projectPath: examplesRoot,
-      cache,
       nativeAssertions: { engine },
-      modelLoader: createModelLoader({
-        engine,
+      model: {
         projectPath: examplesSource,
         runtime: async () => createExampleGeoSpecRuntimeClient(examplesRoot),
-      }),
+      },
     });
     try {
       const result = await runner.run({

@@ -1,9 +1,10 @@
 /**
- * The substrate/engine seam and the machine-readable matcher registry.
+ * The machine-readable matcher registry and the canonical JSON helpers.
  *
- * `@taucad/geospec-engine` (or any conforming engine) imports this subpath to
- * register itself; consumers import it to discover what the active engine can
- * execute.
+ * Every GeoSpec matcher is described here once; the authoring surface, the
+ * native assertion client and tooling read the same registry. The compiled
+ * `@taucad/geospec-engine-native` core evaluates the claims, so nothing
+ * registers into this subpath.
  *
  * @module
  */
@@ -21,49 +22,6 @@ export {
   assertGeoSpecJsonValue,
   decodeGeoSpecCanonicalJson,
   encodeGeoSpecCanonicalJson,
-  geoSpecEngineProtocolVersion,
-  geoSpecMatcherRegistryVersion,
   isGeoSpecJsonValue,
   toGeoSpecProtocolJson,
-  type GeoSpecCancelRequest,
-  type GeoSpecCancelResult,
-  type GeoSpecClaim,
-  type GeoSpecClaimId,
-  type GeoSpecClaimResult,
-  type GeoSpecDeterminismClass,
-  type GeoSpecEngineProtocol,
-  type GeoSpecExecutionOptions,
-  type GeoSpecIngestSubjectRequest,
-  type GeoSpecIngestSubjectResult,
-  type GeoSpecInitializeRequest,
-  type GeoSpecInitializeResult,
-  type GeoSpecProtocolCapability,
-  type GeoSpecProtocolEvent,
-  type GeoSpecProtocolProvenance,
-  type GeoSpecReleaseSubjectRequest,
-  type GeoSpecReleaseSubjectResult,
-  type GeoSpecRequestId,
-  type GeoSpecSubjectFrame,
-  type GeoSpecSubjectId,
-  type GeoSpecSubjectReference,
-  type GeoSpecSubmitClaimsRequest,
-  type GeoSpecSubmitClaimsResult,
 } from '#engine/protocol.js';
-
-export {
-  clearGeoSpecEngine,
-  describeGeoSpecEngine,
-  geoSpecEngineGlobalKey,
-  geoSpecEngineUnavailableCode,
-  geoSpecEngineUnavailableDiagnostic,
-  GeoSpecEngineUnavailableError,
-  getGeoSpecEngine,
-  getGeoSpecEngineHostBinding,
-  getGeoSpecEngineProtocol,
-  registerGeoSpecEngine,
-  requireGeoSpecEngineHostBinding,
-  type GeoSpecEngineCapability,
-  type GeoSpecEngineDescriptor,
-  type GeoSpecEngineHostBindings,
-  type GeoSpecEngineImplementation,
-} from '#engine/seam.js';

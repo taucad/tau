@@ -1,18 +1,6 @@
 # geospec — Types
 
-72 top-level symbols. Signatures are verbatim typescript.
-
-// Stateful GeoSpec API created by {@link createGeoSpec}
-GeoSpec: {
-    loadMesh(options: LoadMeshOptions): Promise<LoadMeshResult>;
-    analyzeMesh(options: AnalyzeMeshOptions): Promise<AnalyzeMeshResult>;
-}
-
-  // GeoSpec.loadMesh (method)
-  loadMesh(options: LoadMeshOptions): Promise<LoadMeshResult>;
-
-  // GeoSpec.analyzeMesh (method)
-  analyzeMesh(options: AnalyzeMeshOptions): Promise<AnalyzeMeshResult>;
+67 top-level symbols. Signatures are verbatim typescript.
 
 // A model admitted by one live GeoSpec host scope
 GeoSpecSubject: {
@@ -271,7 +259,7 @@ GeoSpecGeometrySelector: GeoSpecComponentSelector | {
 }
 /**
  * SB3 V1 selector catalog kinds (body/face/datum/interface/group plus the
- * string shorthand), resolved by the `geospec/selector` engine. SB4 routes
+ * string shorthand), resolved by the native engine. SB4 routes
  * relationship endpoints through that engine: the legacy explicit
  * axis/plane members above resolve as `stability: 'explicit'` fixtures
  * (rejected by the production evidence policy), while named legacy forms
@@ -1328,83 +1316,6 @@ StepEvidence: {
 // Numeric 3D vector
 Vec3: readonly [number, number, number]
 
-// Analyze source bytes or an already retained subject, never both
-AnalyzeMeshOptions: (LoadMeshOptions & {
-    subject?: never;
-}) | ({
-    subject: GeometrySubject;
-} & {
-    [Key in keyof LoadMeshOptions]?: never;
-})
-
-  source: MeshSource
-
-  format: MeshFileFormat
-
-  path: string
-
-  name: string
-
-  // Unit exposed by the returned GeoSpec subject
-  unit: GeoSpecUnit
-
-  // Coordinate unit of the supplied mesh data before normalization
-  sourceUnit: GeoSpecUnit
-
-  parameters: Record<string, unknown>
-
-  subject: never
-
-// Mesh analysis result
-AnalyzeMeshResult: {
-    success: true;
-    stats: GeometryStats;
-    subject: GeometrySubject;
-} | LoadMeshFailure
-
-  success: true
-
-// Options for loading mesh evidence
-LoadMeshOptions: {
-    source: MeshSource;
-    format?: MeshFileFormat;
-    path?: string;
-    name?: string;
-    /**
-     * Unit exposed by the returned GeoSpec subject. Direct GLB/glTF loading
-     * defaults to raw glTF metres; in-memory mesh buffers default to millimetres.
-     */
-    unit?: GeoSpecUnit;
-    /**
-     * Coordinate unit of the supplied mesh data before normalization. Direct
-     * GLB/glTF files default to their raw document units; runtime-backed
-     * `loadModel` calls pass the unit honored by the selected export route.
-     */
-    sourceUnit?: GeoSpecUnit;
-    parameters?: Record<string, unknown>;
-}
-
-  source: MeshSource
-
-  format: MeshFileFormat
-
-  path: string
-
-  name: string
-
-  // Unit exposed by the returned GeoSpec subject
-  unit: GeoSpecUnit
-
-  // Coordinate unit of the supplied mesh data before normalization
-  sourceUnit: GeoSpecUnit
-
-  parameters: Record<string, unknown>
-
-// Result of loading mesh evidence into a GeoSpec geometry subject
-LoadMeshResult: LoadMeshSuccess | LoadMeshFailure
-
-  success: false
-
 // Numeric 3D vector
 GeoSpecVec3: readonly [number, number, number]
 
@@ -1475,7 +1386,7 @@ RuntimeExportIntentFailure: {
 // Defaults accepted by {@link import ('./load-model.js').createModelLoader}
 CreateModelLoaderOptions: {
     /** Initialized compiled engine supplied by the host, never selected by an authored spec. */
-    engine?: GeoSpecNativeModelEngine;
+    engine: GeoSpecNativeModelEngine;
     /** Rooted host reader for direct filesystem or URL sources. */
     readSource?: GeoSpecNativeSourceReader;
     /** Geometry format to export when an individual call does not specify one. */

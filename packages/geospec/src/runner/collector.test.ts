@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createGeoSpec, describe as geoDescribe, expectGeo, geoSpecMatcherNames, it as geoIt, test } from '#index.js';
+import { describe as geoDescribe, expectGeo, geoSpecMatcherNames, it as geoIt, test } from '#index.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
-import { decodeGeoSpecCanonicalJson, geoSpecEngineProtocolVersion, toGeoSpecProtocolJson } from '#engine/protocol.js';
-import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
-import { createTestGeoSpecEngineProtocol } from '#engine/protocol.test-support.js';
-import type { GeoSpecSubmitClaimsRequest, GeoSpecSubmitClaimsResult } from '#engine/protocol.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
 import { bindGeoSpecSubject } from '#model/subject.js';
@@ -21,6 +17,38 @@ import {
 } from '#runner/collector.js';
 
 const failure: GeometryDiagnostic = { code: 'FIXTURE_FAIL', severity: 'error', message: 'nope' };
+
+const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
+
+/** A compiled-engine double that answers every claim with one status and diagnostic list. */
+const createNativeFixture = (status = 'passed', diagnostics: readonly GeometryDiagnostic[] = []) => {
+  const claims: unknown[] = [];
+  const engine: GeoSpecAssertionClientOptions['engine'] = {
+    processRequest: (input) => input,
+    evaluateClaim: (input) => {
+      const envelope = JSON.parse(new TextDecoder().decode(input)) as {
+        plan: { claims: Array<{ claimId: string }> };
+      };
+      const [claim] = envelope.plan.claims;
+      claims.push(claim);
+      return {
+        canonicalClaim: encode(claim),
+        canonicalPlan: encode(envelope.plan),
+        canonicalResult: encode({ results: [{ claimId: claim?.claimId, status, diagnostics }] }),
+      };
+    },
+  };
+  const options: GeoSpecAssertionClientOptions = { engine, workUnitLimit: 1000 };
+  const subject = bindGeoSpecSubject({
+    engine,
+    client: createGeoSpecAssertionClient(options),
+    identity: { subjectHash: 'a'.repeat(64) },
+    isLive: () => true,
+  });
+  return { claims, options, subject };
+};
+
+const createTestCollector = () => createCollector({ nativeAssertions: createNativeFixture().options });
 
 describe('compiled report outcome accounting', () => {
   it.each([
@@ -80,54 +108,14 @@ describe('compiled report outcome accounting', () => {
   });
 });
 
-const subject = { kind: 'geometry-subject-reference', subjectId: 'subject-1', contentHash: 'sha256:test' };
-
-const claimResult = (
-  request: GeoSpecSubmitClaimsRequest,
-  diagnostics: readonly GeometryDiagnostic[] = [],
-): GeoSpecSubmitClaimsResult => {
-  const claim = decodeGeoSpecCanonicalJson(request.claims[0]!);
-  const claimId =
-    typeof claim === 'object' && claim !== null && !Array.isArray(claim) && typeof claim['claimId'] === 'string'
-      ? claim['claimId']
-      : 'invalid';
-  return {
-    requestId: request.requestId,
-    results: [
-      {
-        claimId,
-        status: diagnostics.length === 0 ? 'passed' : 'failed',
-        diagnostics: diagnostics.map((diagnostic) => toGeoSpecProtocolJson(diagnostic)),
-        provenance: {},
-      },
-    ],
-  };
-};
-
-const registerProtocol = (options: {
-  capability: string;
-  submitClaims: (request: GeoSpecSubmitClaimsRequest) => GeoSpecSubmitClaimsResult | Promise<GeoSpecSubmitClaimsResult>;
-}): void => {
-  registerGeoSpecEngine({
-    protocolVersion: geoSpecEngineProtocolVersion,
-    engine: 'collector-test-engine',
-    version: '0.0.0',
-    protocol: createTestGeoSpecEngineProtocol({
-      capabilities: [options.capability],
-      submitClaims: options.submitClaims,
-    }),
-  });
-};
-
 afterEach(() => {
   vi.useRealTimers();
-  clearGeoSpecEngine();
   clearCollectorGlobals();
 });
 
 describe('collector globals', () => {
   it('should install, read, and clear the collector global', () => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     installCollector(collector);
 
     expect(getCollector()).toBe(collector);
@@ -161,7 +149,7 @@ describe('suite and test tree', () => {
     new Error('ordinary failure'),
     'string failure',
   ])('keeps invalid or ordinary thrown values as serializable failures %#', async (error) => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.it('failure', () => {
       // oxlint-disable-next-line typescript/only-throw-error -- Deliberately test arbitrary thrown values at the runner boundary.
       throw error;
@@ -175,7 +163,7 @@ describe('suite and test tree', () => {
   });
 
   it('unwraps a transported model error and normalizes opaque details', async () => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.it('failure', () => {
       // oxlint-disable-next-line typescript/only-throw-error -- Worker errors can arrive as plain structured data.
       throw {
@@ -204,7 +192,7 @@ describe('suite and test tree', () => {
       },
       { code: 'KERNEL_FAILED', severity: 'error', message: 'kernel failed' },
     ];
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.it('load', async () => {
       throw new GeoSpecModelLoadError(diagnostics);
     });
@@ -214,7 +202,7 @@ describe('suite and test tree', () => {
     expect(JSON.parse(JSON.stringify(collector.tests[0]?.diagnostics))).toStrictEqual(diagnostics);
   });
   it('should record nested suites, skips, and passing tests', async () => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.describe('outer', () => {
       collector.it('passes', () => undefined);
       collector.itSkip('skipped');
@@ -232,7 +220,7 @@ describe('suite and test tree', () => {
   });
 
   it('should settle asynchronous suite definitions before running tests', async () => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.describe('async suite', async () => {
       await Promise.resolve();
       collector.it('registered late', () => undefined);
@@ -243,7 +231,7 @@ describe('suite and test tree', () => {
   });
 
   it('should record a failed asynchronous suite definition as a failed test', async () => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.describe('broken suite', async () => {
       await Promise.resolve();
       throw new Error('definition exploded');
@@ -255,7 +243,7 @@ describe('suite and test tree', () => {
   });
 
   it('should run waitForCompletion only once', async () => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.it('once', () => undefined);
     await collector.waitForCompletion(1000);
     const first = collector.tests[0]?.durationMs;
@@ -266,7 +254,7 @@ describe('suite and test tree', () => {
 
   it('should not execute tests the name pattern excludes', async () => {
     const executed: string[] = [];
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.it('kept', () => {
       executed.push('kept');
     });
@@ -279,7 +267,7 @@ describe('suite and test tree', () => {
   });
 
   it('should fail a test that exceeds the timeout', async () => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.it('slow', async () => {
       await new Promise((resolve) => {
         setTimeout(resolve, 50);
@@ -293,7 +281,7 @@ describe('suite and test tree', () => {
 
   it('should not impose a default timeout on cold model acquisition', async () => {
     vi.useFakeTimers();
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.it('cold assembly', async () => {
       await new Promise((resolve) => {
         setTimeout(resolve, 51_000);
@@ -310,61 +298,52 @@ describe('suite and test tree', () => {
 
 describe('expectGeo proxy', () => {
   it('should expose every registry matcher name in registry order', () => {
-    const matcher = createCollector().expectGeo(undefined);
+    const matcher = createTestCollector().expectGeo(undefined);
 
     expect(Object.keys(matcher)).toStrictEqual([...Object.keys(geoSpecMatcherDescriptors), 'not']);
     expect(geoSpecMatcherNames).toStrictEqual(Object.keys(geoSpecMatcherDescriptors));
   });
 
   it('should refuse assertions outside it()', () => {
-    expect(() => createCollector().expectGeo(undefined).toBeWatertight()).toThrow(
+    expect(() => createTestCollector().expectGeo(undefined).toBeWatertight()).toThrow(
       'expectGeo() must be called inside it().',
     );
   });
 
-  it('should record a passing synchronous assertion with its normalized expectation', async () => {
-    const claims: unknown[] = [];
-    registerProtocol({
-      capability: 'toHaveBoundingBox',
-      submitClaims: (request) => {
-        claims.push(decodeGeoSpecCanonicalJson(request.claims[0]!));
-        return claimResult(request);
-      },
-    });
-
-    const collector = createCollector();
+  it('should record a passing assertion with its normalized expectation and canonical claim', async () => {
+    const fixture = createNativeFixture();
+    const collector = createCollector({ nativeAssertions: fixture.options });
     collector.it('bounds', () => {
-      collector.expectGeo(subject).toHaveBoundingBox([0, 0, 0], [1, 1, 1]);
+      collector.expectGeo(fixture.subject).toHaveBoundingBox([0, 0, 0], [1, 1, 1]);
     });
     await collector.waitForCompletion(1000);
 
     const [assertion] = collector.tests[0]?.assertions ?? [];
     expect(collector.tests[0]?.status).toBe('passed');
     expect(assertion?.passed).toBe(true);
+    expect(assertion?.subject).toStrictEqual({ subjectHash: 'a'.repeat(64) });
     expect(assertion?.expected).toStrictEqual({ min: [0, 0, 0], max: [1, 1, 1] });
     expect(assertion?.durationMs).toBeGreaterThanOrEqual(0);
-    expect(claims[0]).toMatchObject({
+    expect(fixture.claims[0]).toMatchObject({
       capability: 'toHaveBoundingBox',
-      subjectIds: ['subject-1'],
+      polarity: 'positive',
       payload: {
         kind: 'boundingBox',
         arguments: [
           [0, 0, 0],
           [1, 1, 1],
         ],
-        expected: { min: [0, 0, 0], max: [1, 1, 1] },
       },
     });
   });
 
-  it('should throw GeoSpecAssertionError inside it() when a sync matcher fails', async () => {
-    registerProtocol({ capability: 'toBeWatertight', submitClaims: (request) => claimResult(request, [failure]) });
-
-    const collector = createCollector();
+  it('should throw GeoSpecAssertionError inside it() when a native claim fails', async () => {
+    const fixture = createNativeFixture('failed', [failure]);
+    const collector = createCollector({ nativeAssertions: fixture.options });
     let caught: unknown;
     collector.it('watertight', () => {
       try {
-        collector.expectGeo(subject).toBeWatertight();
+        collector.expectGeo(fixture.subject).toBeWatertight();
       } catch (error) {
         caught = error;
         throw error;
@@ -375,91 +354,24 @@ describe('expectGeo proxy', () => {
     expect(caught).toBeInstanceOf(GeoSpecAssertionError);
     expect(collector.tests[0]?.status).toBe('failed');
     expect(collector.tests[0]?.diagnostics).toStrictEqual([failure]);
-  });
-
-  it('should settle an async matcher before the test completes', async () => {
-    registerProtocol({
-      capability: 'toHaveSpatialRelationships',
-      submitClaims: async (request) => claimResult(request, [failure]),
-    });
-
-    const collector = createCollector();
-    collector.it('relationships', () => {
-      collector.expectGeo(subject).toHaveSpatialRelationships({ relationships: [] });
-    });
-    await collector.waitForCompletion(1000);
-
-    expect(collector.tests[0]?.status).toBe('failed');
     expect(collector.tests[0]?.assertions[0]?.diagnostics).toStrictEqual([failure]);
   });
 
-  it('should settle every pending assertion after an ordinary callback rejection', async () => {
-    const second = Promise.withResolvers<void>();
-    let calls = 0;
-    registerProtocol({
-      capability: 'toHaveSpatialRelationships',
-      submitClaims: async (request) => {
-        const call = ++calls;
-        if (call === 2) {
-          await second.promise;
-        }
-        return claimResult(request, call === 1 ? [failure] : []);
-      },
-    });
-
-    const collector = createCollector();
-    collector.it('relationships', () => {
-      collector.expectGeo(subject).toHaveSpatialRelationships({ relationships: [] });
-      collector.expectGeo(subject).toHaveSpatialRelationships({ relationships: [] });
-      throw new Error('body failed');
-    });
-    let completed = false;
-    const observeCompletion = async (): Promise<void> => {
-      await collector.waitForCompletion(1000);
-      completed = true;
-    };
-    const completion = observeCompletion();
-    await vi.waitFor(() => {
-      expect(calls).toBe(2);
-    });
-    await Promise.resolve();
-
-    expect(completed).toBe(false);
-    second.resolve();
-    await completion;
-
-    expect(collector.tests[0]?.status).toBe('failed');
-    expect(collector.tests[0]?.diagnostics.map((diagnostic) => diagnostic.message)).toStrictEqual([
-      'body failed',
-      failure.message,
-    ]);
-    expect(collector.tests[0]?.assertions.map((assertion) => assertion.passed)).toStrictEqual([false, true]);
-  });
-
-  it('should answer GEOSPEC_ENGINE_UNAVAILABLE when no engine backs the matcher', async () => {
-    const collector = createCollector();
+  it('should fail an assertion on a subject the host never admitted', async () => {
+    const collector = createTestCollector();
     collector.it('volume', () => {
       collector.expectGeo('subject').toHaveVolume({ value: 1 });
     });
     await collector.waitForCompletion(1000);
 
-    expect(collector.tests[0]?.diagnostics[0]?.code).toBe('GEOSPEC_ENGINE_UNAVAILABLE');
-  });
-
-  it('should reject an engine that returns a promise from a synchronous matcher', async () => {
-    registerProtocol({ capability: 'toHaveVolume', submitClaims: async (request) => claimResult(request) });
-
-    const collector = createCollector();
-    collector.it('volume', () => {
-      collector.expectGeo(subject).toHaveVolume({ value: 1 });
-    });
-    await collector.waitForCompletion(1000);
-
-    expect(collector.tests[0]?.diagnostics[0]?.code).toBe('GEOSPEC_ENGINE_CONTRACT_VIOLATION');
+    expect(collector.tests[0]?.status).toBe('failed');
+    expect(collector.tests[0]?.assertions[0]?.passed).toBe(false);
+    expect(collector.tests[0]?.diagnostics[0]).toMatchObject({ code: 'TEST_FAILED' });
+    expect(collector.tests[0]?.diagnostics[0]?.message).toContain('not admitted');
   });
 
   it('should translate known subject-API misuse into a guided diagnostic', async () => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     collector.it('misuse', () => {
       throw new Error('model.volume is not a function');
     });
@@ -477,7 +389,7 @@ describe('expectGeo proxy', () => {
 
 describe('authoring helpers', () => {
   it('should reject forged root subjects independently of an installed reference collector', () => {
-    installCollector(createCollector());
+    installCollector(createTestCollector());
 
     // @ts-expect-error -- The public trust boundary refuses hash bags.
     expect(() => expectGeo({ contentHash: 'sha256:test' })).toThrow('not admitted');
@@ -509,7 +421,7 @@ describe('authoring helpers', () => {
   });
 
   it('should delegate the module-scoped helpers to the installed collector', async () => {
-    const collector = createCollector();
+    const collector = createTestCollector();
     installCollector(collector);
 
     geoDescribe('helpers', () => {
@@ -528,18 +440,5 @@ describe('authoring helpers', () => {
       'skipped test',
       'skipped suite',
     ]);
-  });
-
-  it('should expose lazy mesh helpers from createGeoSpec', async () => {
-    const geospec = createGeoSpec();
-
-    await expect(geospec.loadMesh({ source: 'model.glb' })).resolves.toStrictEqual({
-      success: false,
-      diagnostics: [expect.objectContaining({ code: 'GEOSPEC_ENGINE_UNAVAILABLE' })],
-    });
-    await expect(geospec.analyzeMesh({ source: 'model.glb' })).resolves.toStrictEqual({
-      success: false,
-      diagnostics: [expect.objectContaining({ code: 'GEOSPEC_ENGINE_UNAVAILABLE' })],
-    });
   });
 });

@@ -1,11 +1,6 @@
 # geospec — Functions
 
-8 top-level symbols. Signatures are verbatim typescript.
-
-// Create a GeoSpec instance
-// Remarks: The root factory stays lazy: mesh parsing code is loaded only when a mesh method is called.
-// createGeoSpec (function)
-export declare function createGeoSpec(): GeoSpec;
+7 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -33,17 +28,17 @@ export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
   // test.skip (method)
   skip(name: string, function_?: GeoSpecTestCallback): void;
 
-// Create a {@link loadModel} function with shared defaults
+// Create a {@link loadModel} function over a host-supplied compiled engine
 // createModelLoader (function)
-(defaults?: CreateModelLoaderOptions) => ManagedGeoSpecModelLoader
-//   defaults: Model loading defaults
+(defaults: CreateModelLoaderOptions) => ManagedGeoSpecModelLoader
+//   defaults: The compiled engine plus model loading defaults
 
 // Load a CAD model into GeoSpec evidence
-// Remarks: Direct geometry sources are parsed immediately. Code and project files are exported through the required `@taucad/runtime` integration on this subpath.
-// Throws: {@link GeoSpecModelLoadError} when the model cannot be exported or parsed, or when no GeoSpec engine is registered.
+// Remarks: This is the authoring declaration: a GeoSpec runner replaces it with the host's native model loader. Called outside a runner it always throws.
+// Throws: {@link GeoSpecModelLoadError} with `GEOSPEC_MODEL_LOADER_UNAVAILABLE` when no runner is active.
 // loadModel (function)
-export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
-//   options: Source, code, or file model load options
+export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(_options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
+//   _options: Source, code, or file model load options
 
 // resolveRuntimeExportIntent (function)
 (options: {

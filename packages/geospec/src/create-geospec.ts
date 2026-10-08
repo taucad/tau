@@ -5,43 +5,10 @@
  */
 
 import { getCollector } from '#runner/collector.js';
-import type { AnalyzeMeshOptions, AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 import type { GeoSpecMatcher } from '#runner/types.js';
 import { expectGeoSubject } from '#model/subject-assertions.js';
 import type { GeoSpecSubject } from '#model/subject.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
-
-/**
- * Stateful GeoSpec API created by {@link createGeoSpec}.
- *
- * @public
- */
-export type GeoSpec = {
-  loadMesh(options: LoadMeshOptions): Promise<LoadMeshResult>;
-  analyzeMesh(options: AnalyzeMeshOptions): Promise<AnalyzeMeshResult>;
-};
-
-/**
- * Create a GeoSpec instance.
- *
- * The root factory stays lazy: mesh parsing code is loaded only when a mesh
- * method is called.
- *
- * @returns A GeoSpec API instance.
- * @public
- */
-export function createGeoSpec(): GeoSpec {
-  return {
-    async loadMesh(options) {
-      const mesh = await import('#mesh/index.js');
-      return mesh.loadMesh(options);
-    },
-    async analyzeMesh(options) {
-      const mesh = await import('#mesh/index.js');
-      return mesh.analyzeMesh(options);
-    },
-  };
-}
 
 type GeoSpecTestCallback = () => unknown | PromiseLike<unknown>;
 

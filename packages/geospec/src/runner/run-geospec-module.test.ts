@@ -3,14 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { GeoSpecModelLoadEvidence, GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
-import { bindGeoSpecSubject } from '#model/subject.js';
-import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
 import type { SourceRevision } from '@taucad/runtime/types';
-import { geoSpecEngineProtocolVersion } from '#engine/protocol.js';
-import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
-import type { GeoSpecEngineHostBindings } from '#engine/seam.js';
-import { createTestGeoSpecEngineProtocol } from '#engine/protocol.test-support.js';
-import type { GeometrySubject } from '#mesh/types.js';
 import { runGeoSpecModule } from '#runner/index.js';
 import type { GeoSpecRunnerEvent } from '#runner/worker/index.js';
 import { createSerialGeoSpecRunner } from '#runner/worker/serial-runner.js';
@@ -49,7 +42,6 @@ class MemoryFileSystem implements VmFileSystem {
   }
 }
 
-const subject = { kind: 'geometry-subject' } as unknown as GeometrySubject;
 const nativeAssertions = {
   engine: {
     evaluateClaim: (input: Uint8Array<ArrayBuffer>) => ({
@@ -75,11 +67,11 @@ const runModule = async (entries: readonly SourceEntry[], options: Record<string
   runGeoSpecModule({
     filesystem: filesystemWith(entries),
     entryPath: entries[0]?.[0] ?? 'spec.geospec.ts',
+    nativeAssertions,
     ...options,
   });
 
 afterEach(() => {
-  clearGeoSpecEngine();
   vi.restoreAllMocks();
 });
 
@@ -488,12 +480,14 @@ describe('runGeoSpecModule', () => {
     const collected = await runGeoSpecModule({
       filesystem,
       entryPath: 'spec.geospec.ts',
+      nativeAssertions,
       collectOnly: true,
       bundleCache,
     });
     const shard = await runGeoSpecModule({
       filesystem,
       entryPath: 'spec.geospec.ts',
+      nativeAssertions,
       testNamePattern: 'second$',
       bundleCache,
     });
@@ -507,7 +501,7 @@ describe('runGeoSpecModule', () => {
     expect(shard.tests.map(({ name }) => name)).toStrictEqual(['second']);
 
     filesystem.setText('spec.geospec.ts', `import { it } from 'geospec'; it('changed', () => {});`);
-    const changed = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+    const changed = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', nativeAssertions, bundleCache });
     expect(changed.success).toBe(true);
     if (!changed.success) {
       return;
@@ -524,8 +518,8 @@ describe('runGeoSpecModule', () => {
     };
     const bundleCache = new Map();
 
-    const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
-    const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+    const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', nativeAssertions, bundleCache });
+    const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', nativeAssertions, bundleCache });
 
     expect(first.success && first.tests.map(({ name }) => name)).toStrictEqual(['v1']);
     expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['v2']);
@@ -541,9 +535,9 @@ describe('runGeoSpecModule', () => {
     ]);
     const bundleCache = new Map();
 
-    const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+    const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', nativeAssertions, bundleCache });
     filesystem.setText('helper.js', `export const variant = 'helper.js';`);
-    const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+    const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', nativeAssertions, bundleCache });
 
     expect(first.success && first.tests.map(({ name }) => name)).toStrictEqual(['helper.ts']);
     expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['helper.js']);
@@ -572,8 +566,13 @@ describe('runGeoSpecModule', () => {
     const bundleCache = new Map();
     const globals = globalThis as Record<string, unknown>;
     try {
-      const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
-      const second = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', bundleCache });
+      const first = await runGeoSpecModule({ filesystem, entryPath: 'spec.geospec.ts', nativeAssertions, bundleCache });
+      const second = await runGeoSpecModule({
+        filesystem,
+        entryPath: 'spec.geospec.ts',
+        nativeAssertions,
+        bundleCache,
+      });
 
       expect(second.success && second.bundle).toBe(first.success && first.bundle);
       expect(second.success && second.tests.map(({ name }) => name)).toStrictEqual(['body']);
@@ -586,56 +585,27 @@ describe('runGeoSpecModule', () => {
     }
   });
 
-  it('should retain the legitimate low-level STEP loader seam', async () => {
-    const result = await runModule(
-      [
-        [
-          'spec.geospec.ts',
-          `
-          import { it } from 'geospec';
-          import { loadStep, createStepLoader } from 'geospec/step';
-          import { analyzeBrep } from 'geospec/brep';
-          it('loads', async () => {
-            const model = await loadStep({ source: 'c' });
-            await createStepLoader({})({ source: 'd' });
-            if (analyzeBrep({ subject: model }).success !== true) { throw new Error('expected brep evidence'); }
-            if (analyzeBrep({ subject: {} }).success !== false) { throw new Error('expected subject rejection'); }
-            if (analyzeBrep({ subject: { kind: 'geometry-subject' } }).success !== false) {
-              throw new Error('expected evidence rejection');
-            }
-          });
-        `,
-        ],
-      ],
-      {
-        stepLoader: async () => ({ ...subject, brep: {}, diagnostics: [] }),
-      },
-    );
-
-    expect(result.success && result.tests[0]?.status).toBe('passed');
-  });
-
   it('should fail authored loads when no loader is bound', async () => {
     const result = await runModule([
       [
         'spec.geospec.ts',
         `
         import { it } from 'geospec';
-        import { loadModel } from 'geospec/model';
-        import { loadStep } from 'geospec/step';
+        import { createModelLoader, loadModel } from 'geospec/model';
         it('model', async () => { await loadModel({ source: 'a' }); });
-        it('step', async () => { await loadStep({ source: 'a' }); });
+        it('managed', () => { createModelLoader({}); });
       `,
       ],
     ]);
 
     expect(result.success && result.tests.map((entry) => entry.status)).toStrictEqual(['failed', 'failed']);
     expect(result.success && result.tests[0]?.diagnostics[0]?.message).toContain('No GeoSpec model loader is active');
-    expect(result.success && result.tests[1]?.diagnostics[0]?.message).toContain('No GeoSpec STEP loader is active');
+    expect(result.success && result.tests[1]?.diagnostics[0]?.message).toContain(
+      'No managed GeoSpec model loader is active',
+    );
   });
 
-  it('should bind canonical loading to the compiled host without using the reference loader', async () => {
-    const modelLoader = vi.fn(async () => subject);
+  it('should bind canonical loading to the compiled host', async () => {
     const nativeModelLoader = vi.fn(async () => ({ subjectHash: 'native-subject' }));
     const result = await runModule(
       [
@@ -653,15 +623,14 @@ describe('runGeoSpecModule', () => {
         `,
         ],
       ],
-      { modelLoader, nativeAssertions, nativeModelLoader },
+      { nativeModelLoader },
     );
 
     expect(result.success && result.tests[0]?.status).toBe('passed');
-    expect(modelLoader).not.toHaveBeenCalled();
     expect(nativeModelLoader).toHaveBeenCalledOnce();
   });
 
-  it('should retain canonical opaque host admission lineage without a raw loader or entry-path map', async () => {
+  it('should retain canonical opaque host admission lineage without an entry-path map', async () => {
     const load: GeoSpecModelLoadEvidence = {
       loadId: 'host-load',
       status: 'complete',
@@ -670,14 +639,7 @@ describe('runGeoSpecModule', () => {
       ingestOptions: {},
       artifacts: [{ name: 'part.glb', sha256: 'a'.repeat(64), byteLength: 24 }],
     };
-    const modelLoader = async () =>
-      bindGeoSpecSubject({
-        ...nativeAssertions,
-        client: createGeoSpecAssertionClient(nativeAssertions),
-        identity: { subjectHash: 'b'.repeat(64) },
-        load,
-        isLive: () => true,
-      });
+    const nativeModelLoader = async () => ({ subjectHash: 'b'.repeat(64), load });
     const result = await runModule(
       [
         [
@@ -686,7 +648,7 @@ describe('runGeoSpecModule', () => {
       it('load', async () => { await loadModel({ source: 'part.glb' }); });`,
         ],
       ],
-      { nativeAssertions, modelLoader },
+      { nativeModelLoader },
     );
     expect(result).toMatchObject({
       success: true,
@@ -949,21 +911,6 @@ describe('runGeoSpecModule', () => {
 
     expect(result.success && result.tests[0]?.status).toBe('passed');
   });
-
-  it('should flush the engine evidence store at the module boundary', async () => {
-    const flushEvidenceStore = vi.fn(async () => undefined);
-    registerGeoSpecEngine({
-      protocolVersion: geoSpecEngineProtocolVersion,
-      engine: 'test-engine',
-      version: '0.0.0',
-      protocol: createTestGeoSpecEngineProtocol(),
-      host: { flushEvidenceStore } satisfies Partial<GeoSpecEngineHostBindings>,
-    });
-
-    await runModule([['spec.geospec.ts', 'export const noop = 1;']]);
-
-    expect(flushEvidenceStore).toHaveBeenCalledTimes(1);
-  });
 });
 
 const passing = (name: string): string => `
@@ -973,6 +920,7 @@ const passing = (name: string): string => `
 
 describe('serial runner shell', () => {
   const runnerOptions = () => ({
+    nativeAssertions,
     filesystem: filesystemWith([
       ['first.geospec.ts', passing('first')],
       ['second.geospec.ts', passing('second')],
@@ -1139,6 +1087,7 @@ describe('serial runner shell', () => {
 
   it('should bail after the first failing file', async () => {
     const runner = createSerialGeoSpecRunner({
+      nativeAssertions,
       filesystem: filesystemWith([
         ['a.geospec.ts', 'throw new Error("boom");'],
         ['b.geospec.ts', passing('second')],

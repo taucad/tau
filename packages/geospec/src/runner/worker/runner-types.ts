@@ -1,5 +1,4 @@
 import type { GeoSpecRunResult, RunGeoSpecModuleOptions, GeoSpecTestAccounting } from '#runner/types.js';
-import type { GeoSpecRunProfile } from '#runner/profile.js';
 import type { ManagedGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { VmFileSystem, VmIssue } from '@taucad/esbuild/vm';
 
@@ -111,25 +110,19 @@ export type GeoSpecRunnerRunOptions = {
 };
 
 /**
- * Shared options for Node and browser GeoSpec runner factories.
+ * Shared options for GeoSpec runner factories.
  *
  * @public
  */
 export type GeoSpecRunnerOptions = {
   /** Filesystem containing the project and test modules. */
   filesystem: VmFileSystem;
-  /** Model loader exposed to authored tests through `geospec/model`. */
-  modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
-  /** Protocol-3 assertion client used by explicitly native runners. */
-  nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions'];
+  /** Protocol-3 assertion client shared by every authored assertion and model admission. */
+  nativeAssertions: RunGeoSpecModuleOptions['nativeAssertions'];
   /** Managed native model loader released after each settled run. */
   nativeModelLoader?: ManagedGeoSpecNativeModelLoader;
-  /** STEP loader exposed to authored tests through `geospec/step`. */
-  stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
   /** Additional in-memory modules made available to the VM. */
   builtinModules?: RunGeoSpecModuleOptions['builtinModules'];
-  /** Internal profile counters used by opt-in benchmark tooling. */
-  internalProfile?: GeoSpecRunProfile;
 };
 
 /**

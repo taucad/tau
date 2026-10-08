@@ -1,28 +1,11 @@
 /**
- * Mesh loading and analysis utilities.
+ * Mesh source and geometry evidence types.
  *
  * @module
  */
 
-export { analyzeMeshOverlap } from '#mesh/overlap.js';
 export type { GeoSpecUnit } from '#geometry-unit.js';
-export type {
-  AnalyzeMeshOverlapOptions,
-  AnalyzeMeshOverlapResult,
-  MeshComponentOverlap,
-  MeshOverlapEvidence,
-} from '#mesh/overlap.js';
-export { analyzeMesh, loadMesh } from '#mesh/load-mesh.js';
-export type {
-  AnalyzeMeshOptions,
-  AnalyzeMeshResult,
-  LoadMeshFailure,
-  LoadMeshOptions,
-  LoadMeshResult,
-  LoadMeshSuccess,
-  MeshBufferSource,
-  MeshSource,
-} from '#mesh/load-mesh.js';
+export type { MeshBufferSource, MeshSource } from '#model/types.js';
 export type {
   AabbMeters,
   BoundingBoxAxisExtremum,

@@ -30,15 +30,15 @@ describe('GeoSpec public type extraction', () => {
     expect(bundle.files['runner/native/index.d.ts']).toContain('createNativeGeoSpecRunner');
     expect(bundle.files['model/index.d.ts']).toContain('loadModel');
     expect(bundle.files['create-geospec.d.ts']).toContain('expectGeo');
-    const source = generated['geospec']!.files['mesh/load-mesh.d.ts']!;
-    const ast = ts.createSourceFile('mesh/load-mesh.d.ts', source, ts.ScriptTarget.Latest, true);
+    const source = generated['geospec']!.files['model/types.d.ts']!;
+    const ast = ts.createSourceFile('model/types.d.ts', source, ts.ScriptTarget.Latest, true);
     const options = ast.statements.find(
-      (statement) => ts.isTypeAliasDeclaration(statement) && statement.name.text === 'AnalyzeMeshOptions',
+      (statement) => ts.isTypeAliasDeclaration(statement) && statement.name.text === 'MeshSource',
     );
     if (!options || !ts.isTypeAliasDeclaration(options) || !ts.isUnionTypeNode(options.type)) {
-      throw new Error('Missing public AnalyzeMeshOptions union');
+      throw new Error('Missing public MeshSource union');
     }
-    expect(options.type.types).toHaveLength(2);
+    expect(options.type.types).toHaveLength(7);
     const statsSource = generated['geospec']!.files['mesh/types.d.ts']!;
     const statsAst = ts.createSourceFile('mesh/types.d.ts', statsSource, ts.ScriptTarget.Latest, true);
     const stats = statsAst.statements.find(

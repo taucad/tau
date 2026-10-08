@@ -6,8 +6,6 @@ import {
   GeoSpecAssertionError,
 } from '#assertion-client/index.js';
 import type { GeoSpecNativeEngine } from '#assertion-client/index.js';
-import type { InspectGeometryOptions } from '#inspection/inspect.js';
-import type { AnalyzeMeshOverlapOptions } from '#mesh/overlap.js';
 
 const subject = { subjectHash: 'a'.repeat(64) };
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
@@ -102,11 +100,11 @@ describe('positive ancillary query authoring', () => {
     },
   );
 
-  it('reuses existing selector and overlap authoring types with ordinary RegExp values', async () => {
+  it('serializes ordinary RegExp values in selector and overlap payloads', async () => {
     const { engine } = recordingEngine();
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 1 });
-    const inspection: Omit<InspectGeometryOptions, 'subject'> = { selectors: [/^bolt/iu] };
-    const overlap: Omit<AnalyzeMeshOverlapOptions, 'subject'> = { pairs: [{ left: /^A/u, right: /b$/i }] };
+    const inspection = { selectors: [/^bolt/iu] };
+    const overlap = { pairs: [{ left: /^A/u, right: /b$/i }] };
     const first = await client.query({ subject, capability: 'inspectGeometry', payload: inspection });
     const second = await client.query({ subject, capability: 'analyzeMeshOverlap', payload: overlap });
     expect(first.claim['payload']).toStrictEqual({

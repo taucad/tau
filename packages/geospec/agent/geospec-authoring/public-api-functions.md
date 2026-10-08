@@ -1,11 +1,6 @@
 # geospec — Functions
 
-70 top-level symbols. Signatures are verbatim typescript.
-
-// Create a GeoSpec instance
-// Remarks: The root factory stays lazy: mesh parsing code is loaded only when a mesh method is called.
-// createGeoSpec (function)
-export declare function createGeoSpec(): GeoSpec;
+34 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -33,11 +28,6 @@ export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
   // test.skip (method)
   skip(name: string, function_?: GeoSpecTestCallback): void;
 
-// Read BRep evidence from a loaded GeoSpec subject
-// analyzeBrep (function)
-(options: AnalyzeBrepOptions) => AnalyzeBrepResult
-//   options: BRep subject to inspect
-
 // Derive the `expected` value an assertion records from the call arguments
 // normalizeGeoSpecExpected (function)
 (shape: GeoSpecMatcherExpectedShape, callArguments: readonly unknown[]) => unknown
@@ -64,73 +54,17 @@ export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
 // toGeoSpecProtocolJson (function)
 (value: unknown, ancestors?: Set<object>) => JSONValue
 
-// Remove the registered engine
-// clearGeoSpecEngine (function)
-() => void
-
-// Describe the registered engine and its advertised capabilities
-// describeGeoSpecEngine (function)
-() => GeoSpecEngineDescriptor | undefined
-
-// geoSpecEngineUnavailableDiagnostic (function)
-(capability: string) => GeometryDiagnostic
-
-// The registered engine, if any
-// getGeoSpecEngine (function)
-() => GeoSpecEngineImplementation | undefined
-
-// Look up one engine export
-// getGeoSpecEngineHostBinding (function)
-<Name extends keyof GeoSpecEngineHostBindings>(capability: Name) => GeoSpecEngineHostBindings[Name] | undefined
-//   capability: Export name
-
-// The registered Contract-B binding, if any
-// getGeoSpecEngineProtocol (function)
-() => GeoSpecEngineProtocol | undefined
-
-// Register the engine that executes GeoSpec claims
-// Throws: GeoSpecEngineUnavailableError when the engine speaks a different protocol version — an unusable engine must never register silently.
-// registerGeoSpecEngine (function)
-(implementation: GeoSpecEngineImplementation) => void
-//   implementation: The engine's protocol implementation
-
-// Look up one engine export or fail with the engine-unavailable error
-// Throws: GeoSpecEngineUnavailableError when no engine provides it.
-// requireGeoSpecEngineHostBinding (function)
-<Name extends keyof GeoSpecEngineHostBindings>(capability: Name) => GeoSpecEngineHostBindings[Name]
-//   capability: Export name
-
-// Resolve selectors against a subject and report the matched entities
-// inspectGeometry (function)
-(options: InspectGeometryOptions) => InspectGeometryResult
-//   options: Subject, selectors, and requested evidence kinds
-
-// Find positive-volume intersections between a subject's components
-// analyzeMeshOverlap (function)
-(options: AnalyzeMeshOverlapOptions) => Promise<AnalyzeMeshOverlapResult>
-//   options: Subject, tolerance, and optional pair selectors
-
-// Return a detached full-statistics snapshot
-// analyzeMesh (function)
-(options: AnalyzeMeshOptions) => Promise<AnalyzeMeshResult>
-//   options: Mesh source, format, and unit handling
-
-// Load mesh evidence into a GeoSpec geometry subject
-// loadMesh (function)
-(options: LoadMeshOptions) => Promise<LoadMeshResult>
-//   options: Mesh source, format, and unit handling
-
-// Create a {@link loadModel} function with shared defaults
+// Create a {@link loadModel} function over a host-supplied compiled engine
 // createModelLoader (function)
-(defaults?: CreateModelLoaderOptions) => ManagedGeoSpecModelLoader
-//   defaults: Model loading defaults
+(defaults: CreateModelLoaderOptions) => ManagedGeoSpecModelLoader
+//   defaults: The compiled engine plus model loading defaults
 
 // Load a CAD model into GeoSpec evidence
-// Remarks: Direct geometry sources are parsed immediately. Code and project files are exported through the required `@taucad/runtime` integration on this subpath.
-// Throws: {@link GeoSpecModelLoadError} when the model cannot be exported or parsed, or when no GeoSpec engine is registered.
+// Remarks: This is the authoring declaration: a GeoSpec runner replaces it with the host's native model loader. Called outside a runner it always throws.
+// Throws: {@link GeoSpecModelLoadError} with `GEOSPEC_MODEL_LOADER_UNAVAILABLE` when no runner is active.
 // loadModel (function)
-export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
-//   options: Source, code, or file model load options
+export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(_options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
+//   _options: Source, code, or file model load options
 
 // resolveRuntimeExportIntent (function)
 (options: {
@@ -143,23 +77,13 @@ export declare function loadModel<Code extends Record<string, string> = Record<s
 // clearCollectorGlobals (function)
 () => void
 
+// Create the collector used by the embedded GeoSpec runner
 // createCollector (function)
-export declare function createCollector(options: GeoSpecCollectorOptions & {
-    nativeAssertions: GeoSpecAssertionClientOptions;
-}): GeoSpecNativeCollector;
-export declare function createCollector(options?: GeoSpecCollectorOptions & {
-    nativeAssertions?: undefined;
-}): GeoSpecCollector;
-export declare function createCollector(options?: GeoSpecCollectorOptions): GeoSpecCollector | GeoSpecNativeCollector;
+export declare function createCollector(options: GeoSpecCollectorOptions): GeoSpecCollector;
+//   options: The native assertion client configuration for this module
 
 // installCollector (function)
-(collector: GeoSpecCollector | GeoSpecNativeCollector) => void
-
-// chargeBudget (function)
-(units: number) => void
-
-// checkBudget (function)
-() => void
+(collector: GeoSpecCollector) => void
 
 // Compile a Vitest-style test-name pattern once for a GeoSpec run
 // Remarks: String inputs are JavaScript regular expression sources matched against the full `suite > test` name. `RegExp` inputs are used as-is.
@@ -220,113 +144,9 @@ export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Prom
 (defaults: CreateGeoSpecNativeModelLoaderOptions) => ManagedGeoSpecNativeModelLoader
 //   defaults: Native engine, Runtime defaults, and optional source reader
 
-// Create a GeoSpec runner for Node.js and CLI environments
-// createGeoSpecNodeRunner (function)
-(options: GeoSpecNodeRunnerOptions) => GeoSpecRunner
-//   options: Filesystem, project root, loaders, and cache controls
-
-// Create a worker-pool GeoSpec runner for Node.js
-// createGeoSpecNodePoolRunner (function)
-(options: GeoSpecNodePoolRunnerOptions) => GeoSpecRunner
-//   options: Project root, worker count, watchdog, and cache controls
-
-// Create a Node `VmFileSystem` rooted at `root`
-// createNodeVmFileSystem (function)
-(root: string) => VmFileSystem
-//   root: Absolute project root path
-
-// Create a GeoSpec runner for browser environments
-// Remarks: The public surface intentionally hides worker and MessagePort primitives. Applications provide filesystem and loader capabilities, and the runner returns compact results suitable for UI and agent RPC consumption.
-// createGeoSpecWebRunner (function)
-(options: GeoSpecWebRunnerOptions) => GeoSpecRunner
-//   options: Filesystem, project root, loaders, and lifecycle event hook
-
-// Create a worker-pool GeoSpec runner for browser environments
-// createGeoSpecWebPoolRunner (function)
-(options: GeoSpecWebPoolRunnerOptions) => GeoSpecRunner
-//   options: Worker factory, worker count, and lifecycle event hook
-
 // Create a run-level issue when filters select no tests
 // createNoMatchingGeoSpecTestsIssue (function)
 () => VmIssue
-
-// Start serving shards
-// startGeoSpecPoolWorkerHost (function)
-(options: GeoSpecPoolWorkerHostOptions) => void
-//   options: Worker filesystem, loaders, and message plumbing
-
-// Compose a full selector name from an occurrence path and a part-relative interface name
-// composeFullName (function)
-(occurrencePath: string, interfaceName: string) => string
-//   occurrencePath: Dot-joined instance path from the root (root omitted)
-//   interfaceName: Part-relative interface name
-
-// Validate a stored (artifact-side) interface or occurrence name against the profile grammar
-// isValidStoredName (function)
-(name: string) => boolean
-//   name: Candidate stored name
-
-// Parse a selector-side dotted path into segments
-// parseSelectorPath (function)
-(path: string) => SelectorPathSegment[] | undefined
-//   path: Dotted selector path such as `headL.boltHole[*]`
-
-// Resolve effective tolerances from optional overrides
-// resolveTolerances (function)
-(overrides?: Partial<SelectorTolerances>) => SelectorTolerances
-//   overrides: Partial tolerance overrides
-
-// Reconstruct a selector from its JSON-safe serialized form
-// deserializeSelector (function)
-(serialized: unknown) => GeometrySelector
-//   serialized: Value produced by {@link serializeSelector} (possibly round-tripped through JSON)
-
-// Serialize a selector to a JSON-safe value (RegExp as `{ pattern, flags }`) so diagnostics, agents, and tooling can exchange selectors
-// serializeSelector (function)
-(selector: GeometrySelector) => unknown
-//   selector: Selector to serialize
-
-// Build the per-subject selector index from an SB1 XDE read result and its per-occurrence face facts
-// buildSelectorIndex (function)
-(options: BuildSelectorIndexOptions) => SelectorIndex
-//   options: XDE structure plus subject-frame face facts per occurrence
-
-// Resolve a geometry selector against a per-subject selector index
-// Remarks: Pure and deterministic (D1): identical selector and index produce a deeply equal {@link GeometrySelection}; no fallback across evidence classes.
-// resolve (function)
-(selector: GeometrySelector, index: SelectorIndex) => GeometrySelection
-//   selector: Typed selector or string shorthand (authored path or `#o…` snapshot topology ref)
-//   index: Selector index built by {@link import ('./index-builder.js').buildSelectorIndex}
-
-// Build a `GEOSPEC_SELECTOR_AMBIGUOUS` diagnostic
-// ambiguousDiagnostic (function)
-(options: SelectorDiagnosticOptions) => GeometryDiagnostic
-//   options: Selector context and ranked candidates with facts
-
-// Build a `GEOSPEC_SELECTOR_UNMATCHED` diagnostic
-// unmatchedDiagnostic (function)
-(options: SelectorDiagnosticOptions) => GeometryDiagnostic
-//   options: Selector context, near-misses, and repair suggestion
-
-// Build a `GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE` diagnostic
-// unsupportedEvidenceDiagnostic (function)
-(options: SelectorDiagnosticOptions) => GeometryDiagnostic
-//   options: Selector context and fallback suggestion
-
-// Create a {@link loadStep} function with shared defaults
-// createStepLoader (function)
-(defaults?: CreateStepLoaderOptions) => GeoSpecStepLoader
-//   defaults: STEP loading defaults
-
-// Load STEP/XDE/BRep evidence into a GeoSpec geometry subject
-// loadStep (function)
-(options: LoadStepOptions) => Promise<GeometrySubject>
-//   options: STEP source, units, streaming mode, and mesh settings
-
-// Parse the native reader's JSON payload into a structured XDE read result
-// parseXdeReadResultJson (function)
-(json: string) => XdeReadResult
-//   json: JSON emitted by the engine's XDE reader
 
 // Create a standalone native GeoSpec assertion client
 // createGeoSpecAssertionClient (function)

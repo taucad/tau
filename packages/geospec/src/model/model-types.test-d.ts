@@ -13,6 +13,7 @@ import type { RuntimeClient } from '@taucad/runtime/client';
 import type { KernelPlugin } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime';
 import type { z } from 'zod';
+import type { GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 
 type RequiredEvaluationKernel = KernelPlugin<
   Record<never, never>,
@@ -34,6 +35,7 @@ type OptionalEvaluationKernel = KernelPlugin<
   readonly ['cad'],
   z.ZodObject<{ quality: z.ZodOptional<z.ZodNumber> }>
 >;
+declare const engine: GeoSpecNativeModelEngine;
 declare const optionalEvaluationKernel: OptionalEvaluationKernel;
 const optionalEvaluationRuntime = defineRuntime({ kernels: [optionalEvaluationKernel] });
 
@@ -71,7 +73,7 @@ describe('geospec/model public types', () => {
     void invalidCodeOptions;
 
     // @ts-expect-error -- shared defaults cannot override the runtime-backed source-unit contract.
-    createModelLoader({ sourceUnit: 'mm' });
+    createModelLoader({ engine, sourceUnit: 'mm' });
   });
 
   it('should keep kernel selection out of loadModel authoring options', () => {
@@ -107,7 +109,9 @@ describe('geospec/model public types', () => {
         throw new Error('type-only fixture');
       },
     };
+    createModelLoader({ engine, sourceAdapters: [adapter] });
+    expectTypeOf(createModelLoader({ engine })).toEqualTypeOf<ManagedGeoSpecModelLoader>();
+    // @ts-expect-error -- a host loader always needs the compiled engine that admits its subjects.
     createModelLoader({ sourceAdapters: [adapter] });
-    expectTypeOf(createModelLoader()).toEqualTypeOf<ManagedGeoSpecModelLoader>();
   });
 });

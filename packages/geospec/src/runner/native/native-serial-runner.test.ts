@@ -41,7 +41,7 @@ describe('native runner admission authority', () => {
     });
     const binding = owner.serial.mock.calls[0]?.[0];
     const scoped = binding?.nativeModelLoader;
-    const assertions = binding?.nativeAssertions?.engine;
+    const assertions = binding?.nativeAssertions.engine;
     if (scoped === undefined || assertions === undefined) {
       throw new Error('Expected native runner bindings.');
     }
@@ -82,7 +82,7 @@ describe('native runner admission authority', () => {
     });
     const binding = owner.serial.mock.calls[0]?.[0];
     const scoped = binding?.nativeModelLoader;
-    const assertions = binding?.nativeAssertions?.engine;
+    const assertions = binding?.nativeAssertions.engine;
     if (scoped === undefined || assertions === undefined) {
       throw new Error('Expected native runner bindings.');
     }

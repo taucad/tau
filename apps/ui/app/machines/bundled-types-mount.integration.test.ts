@@ -87,12 +87,12 @@ describe('bundled kernel types mount', () => {
       await expect(fileService.exists('/node_modules/opencascade.js/index.d.ts')).resolves.toBe(false);
 
       const geospecPackage = geospecTypes['geospec'];
-      const geospecRunnerWeb = geospecPackage?.files?.['runner/web/index.d.ts'];
-      if (geospecRunnerWeb === undefined) {
-        throw new TypeError('Generated GeoSpec runner/web declarations are missing.');
+      const geospecRunnerNative = geospecPackage?.files?.['runner/native/index.d.ts'];
+      if (geospecRunnerNative === undefined) {
+        throw new TypeError('Generated GeoSpec runner/native declarations are missing.');
       }
-      await expect(fileService.readFile('/node_modules/geospec/runner/web/index.d.ts', 'utf8')).resolves.toBe(
-        geospecRunnerWeb,
+      await expect(fileService.readFile('/node_modules/geospec/runner/native/index.d.ts', 'utf8')).resolves.toBe(
+        geospecRunnerNative,
       );
 
       await Promise.all(
@@ -115,7 +115,7 @@ describe('bundled kernel types mount', () => {
       );
       await expect(fileService.exists('/node_modules/@jscad/modeling/colors/package.json')).resolves.toBe(false);
       await expect(fileService.exists('/node_modules/manifold-3d/manifoldCAD/package.json')).resolves.toBe(false);
-      await expect(fileService.exists('/node_modules/geospec/runner/web/package.json')).resolves.toBe(false);
+      await expect(fileService.exists('/node_modules/geospec/runner/native/package.json')).resolves.toBe(false);
     } finally {
       fileService.dispose();
     }

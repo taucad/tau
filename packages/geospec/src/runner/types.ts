@@ -2,11 +2,8 @@ import type { GeoSpecAssertionClientOptions, GeoSpecCanonicalClaimReport } from 
 import type { BuiltinModule, BundleResult, VmFileSystem, VmIssue } from '@taucad/esbuild/vm';
 import type { GeometryDiagnostic, Vec3 } from '#mesh/types.js';
 import type { GeometrySelector } from '#selector/types.js';
-import type { GeoSpecModelLoader } from '#model/index.js';
 import type { GeoSpecNativeModelLoader, GeoSpecModelLoadEvidence } from '#model/native-model-loader.js';
 import type { GeoSpecNativeSubject } from '#engine/client.js';
-import type { GeoSpecRunProfile } from '#runner/profile.js';
-import type { GeoSpecStepLoader } from '#step/index.js';
 
 /**
  * Axis-keyed numeric expectation used by high-level geometry matchers.
@@ -353,7 +350,7 @@ export type GeoSpecGeometrySelector =
     }
   /**
    * SB3 V1 selector catalog kinds (body/face/datum/interface/group plus the
-   * string shorthand), resolved by the `geospec/selector` engine. SB4 routes
+   * string shorthand), resolved by the native engine. SB4 routes
    * relationship endpoints through that engine: the legacy explicit
    * axis/plane members above resolve as `stability: 'explicit'` fixtures
    * (rejected by the production evidence policy), while named legacy forms
@@ -760,19 +757,13 @@ export type RunGeoSpecModuleOptions = {
    * admitted subject lifetimes and supplies bindings through builtinModules;
    * authored tests use the canonical GeoSpec API, not a separate native dialect.
    */
-  nativeAssertions?: GeoSpecAssertionClientOptions;
+  nativeAssertions: GeoSpecAssertionClientOptions;
   /** Host-composed identity loader; authored tests use the canonical `geospec/model` API. */
   nativeModelLoader?: (
     options: Parameters<GeoSpecNativeModelLoader>[0],
   ) => Promise<GeoSpecNativeSubject & { readonly load?: GeoSpecModelLoadEvidence }>;
-  /** Model loader exposed to VM tests through `geospec/model`. */
-  modelLoader?: GeoSpecModelLoader;
-  /** STEP loader exposed to VM tests through `geospec/step`. */
-  stepLoader?: GeoSpecStepLoader;
   /** Additional in-memory modules made available to the VM. */
   builtinModules?: Record<string, BuiltinModule>;
-  /** Internal profile counters used by opt-in benchmark tooling. */
-  internalProfile?: GeoSpecRunProfile;
   /** Successful bundle cache owned by a serial runner worker. @internal */
   bundleCache?: GeoSpecModuleBundleCache;
   /**

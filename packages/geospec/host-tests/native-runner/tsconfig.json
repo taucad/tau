@@ -6,7 +6,6 @@
     "model-installed.test.ts",
     "model.geospec.ts",
     "native-subject.d.ts",
-    "native-helper-legacy.geospec.ts",
     "ordinary.geospec.ts",
     "vitest.config.mts"
   ]

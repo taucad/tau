@@ -183,7 +183,7 @@ export type HostDaemonAgentOptions = {
   readonly systemPrompt: string;
   /**
    * Offer the `test_model` tool. Defaults to `true`, which still yields the
-   * tool only where `@taucad/geospec-engine` resolves — `false` withholds it
+   * tool only where the native GeoSpec engine resolves — `false` withholds it
    * from an installation that has the engine, so the surface is this host's
    * own decision rather than a resolution accident.
    */

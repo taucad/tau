@@ -85,7 +85,23 @@ ExtremaPC_Result: declare class ExtremaPC_Result
 
 ExtremaPC_SearchMode: typeof ExtremaPC_SearchMode[keyof typeof ExtremaPC_SearchMode]
 
+  MinMax: 'MinMax'
+
+  Min: 'Min'
+
+  Max: 'Max'
+
 ExtremaPC_Status: typeof ExtremaPC_Status[keyof typeof ExtremaPC_Status]
+
+  OK: 'OK'
+
+  NotDone: 'NotDone'
+
+  InfiniteSolutions: 'InfiniteSolutions'
+
+  NoSolution: 'NoSolution'
+
+  NumericalError: 'NumericalError'
 
 ExtremaPC_BSplineCurve: declare class ExtremaPC_BSplineCurve
 
@@ -288,6 +304,10 @@ ExtremaPC_GridEvaluator: declare class ExtremaPC_GridEvaluator
   [Symbol.dispose](): void;
 
 ExtremaPC_GridEvaluator_CandidateType: typeof ExtremaPC_GridEvaluator_CandidateType[keyof typeof ExtremaPC_GridEvaluator_CandidateType]
+
+  SignChange: 'SignChange'
+
+  NearZero: 'NearZero'
 
 ExtremaPC_Hyperbola: declare class ExtremaPC_Hyperbola
 

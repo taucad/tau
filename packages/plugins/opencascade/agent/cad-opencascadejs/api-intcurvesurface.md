@@ -362,3 +362,9 @@ IntCurveSurface_TheQuadCurvFuncOfTheQuadCurvExactHInter: declare class IntCurveS
   [Symbol.dispose](): void;
 
 IntCurveSurface_TransitionOnCurve: typeof IntCurveSurface_TransitionOnCurve[keyof typeof IntCurveSurface_TransitionOnCurve]
+
+  IntCurveSurface_Tangent: 'IntCurveSurface_Tangent'
+
+  IntCurveSurface_In: 'IntCurveSurface_In'
+
+  IntCurveSurface_Out: 'IntCurveSurface_Out'

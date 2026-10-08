@@ -4,6 +4,34 @@
 
 gce_ErrorType: typeof gce_ErrorType[keyof typeof gce_ErrorType]
 
+  gce_Done: 'gce_Done'
+
+  gce_ConfusedPoints: 'gce_ConfusedPoints'
+
+  gce_NegativeRadius: 'gce_NegativeRadius'
+
+  gce_ColinearPoints: 'gce_ColinearPoints'
+
+  gce_IntersectionError: 'gce_IntersectionError'
+
+  gce_NullAxis: 'gce_NullAxis'
+
+  gce_NullAngle: 'gce_NullAngle'
+
+  gce_NullRadius: 'gce_NullRadius'
+
+  gce_InvertAxis: 'gce_InvertAxis'
+
+  gce_BadAngle: 'gce_BadAngle'
+
+  gce_InvertRadius: 'gce_InvertRadius'
+
+  gce_NullFocusLength: 'gce_NullFocusLength'
+
+  gce_NullVector: 'gce_NullVector'
+
+  gce_BadEquation: 'gce_BadEquation'
+
 gce_MakeCirc: declare class gce_MakeCirc extends gce_Root
 
   // gce_MakeCirc.constructor (constructor)

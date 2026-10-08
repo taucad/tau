@@ -278,6 +278,14 @@ Contap_HCurve2dTool: declare class Contap_HCurve2dTool
 
 Contap_IType: typeof Contap_IType[keyof typeof Contap_IType]
 
+  Contap_Lin: 'Contap_Lin'
+
+  Contap_Circle: 'Contap_Circle'
+
+  Contap_Walking: 'Contap_Walking'
+
+  Contap_Restriction: 'Contap_Restriction'
+
 Contap_Line: declare class Contap_Line
 
   // Contap_Line.constructor (constructor)
@@ -497,6 +505,14 @@ Contap_SurfProps: declare class Contap_SurfProps
   [Symbol.dispose](): void;
 
 Contap_TFunction: typeof Contap_TFunction[keyof typeof Contap_TFunction]
+
+  Contap_ContourStd: 'Contap_ContourStd'
+
+  Contap_ContourPrs: 'Contap_ContourPrs'
+
+  Contap_DraftStd: 'Contap_DraftStd'
+
+  Contap_DraftPrs: 'Contap_DraftPrs'
 
 Contap_TheIWLineOfTheIWalking: declare class Contap_TheIWLineOfTheIWalking extends Standard_Transient
 

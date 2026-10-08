@@ -306,6 +306,20 @@ declare class TopExp_Explorer
   [Symbol.dispose](): void;
 
 TopAbs_ShapeEnum: typeof TopAbs_ShapeEnum[keyof typeof TopAbs_ShapeEnum]
+  TopAbs_COMPOUND: 'TopAbs_COMPOUND'
+  TopAbs_COMPSOLID: 'TopAbs_COMPSOLID'
+  TopAbs_SOLID: 'TopAbs_SOLID'
+  TopAbs_SHELL: 'TopAbs_SHELL'
+  TopAbs_FACE: 'TopAbs_FACE'
+  TopAbs_WIRE: 'TopAbs_WIRE'
+  TopAbs_EDGE: 'TopAbs_EDGE'
+  TopAbs_VERTEX: 'TopAbs_VERTEX'
+  TopAbs_SHAPE: 'TopAbs_SHAPE'
+
+declare class TopExp
+  static FirstVertex(E: TopoDS_Edge, CumOri?: boolean): TopoDS_Vertex;
+  static LastVertex(E: TopoDS_Edge, CumOri?: boolean): TopoDS_Vertex;
+  // … 8 more members in the API reference
 ```
 
 ### TopoDS
@@ -321,6 +335,14 @@ declare class TopoDS
   static Compound(shape: TopoDS_Shape): TopoDS_Compound;
 ```
 
+### BRep
+
+```ts
+declare class BRep_Tool
+  static Pnt(V: TopoDS_Vertex): gp_Pnt;
+  // … 28 more members in the API reference
+```
+
 ### gp
 
 ```ts
@@ -328,7 +350,10 @@ declare class gp_Pnt
   constructor();
   constructor(theCoord: gp_XYZ);
   constructor(theXp: number, theYp: number, theZp: number);
-  // … 27 more members in the API reference
+  X(): number;
+  Y(): number;
+  Z(): number;
+  // … 24 more members in the API reference
 
 declare class gp_Dir
   constructor();
@@ -376,7 +401,7 @@ declare class gp_Trsf
 
 ## API reference
 
-To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 75301 symbols by file.
+To read any other signature, grep the skill directory for the name followed by `(` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. `api-index.md` lists all 77875 symbols by file.
 
 - 22 reference files, named in `api-index.md`
 - 357 further files are fetched on demand; `api-index.md` names them.

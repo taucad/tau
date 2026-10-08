@@ -70,6 +70,28 @@ BRepOffset_Analyse: declare class BRepOffset_Analyse
 
 BRepOffset_Error: typeof BRepOffset_Error[keyof typeof BRepOffset_Error]
 
+  BRepOffset_NoError: 'BRepOffset_NoError'
+
+  BRepOffset_UnknownError: 'BRepOffset_UnknownError'
+
+  BRepOffset_BadNormalsOnGeometry: 'BRepOffset_BadNormalsOnGeometry'
+
+  BRepOffset_C0Geometry: 'BRepOffset_C0Geometry'
+
+  BRepOffset_NullOffset: 'BRepOffset_NullOffset'
+
+  BRepOffset_NotConnectedShell: 'BRepOffset_NotConnectedShell'
+
+  BRepOffset_CannotTrimEdges: 'BRepOffset_CannotTrimEdges'
+
+  BRepOffset_CannotFuseVertices: 'BRepOffset_CannotFuseVertices'
+
+  BRepOffset_CannotExtentEdge: 'BRepOffset_CannotExtentEdge'
+
+  BRepOffset_UserBreak: 'BRepOffset_UserBreak'
+
+  BRepOffset_MixedConnectivity: 'BRepOffset_MixedConnectivity'
+
 BRepOffset_Inter2d: declare class BRepOffset_Inter2d
 
   // BRepOffset_Inter2d.constructor (constructor)
@@ -243,6 +265,12 @@ BRepOffset_MakeSimpleOffset: declare class BRepOffset_MakeSimpleOffset
 
 BRepOffset_Mode: typeof BRepOffset_Mode[keyof typeof BRepOffset_Mode]
 
+  BRepOffset_Skin: 'BRepOffset_Skin'
+
+  BRepOffset_Pipe: 'BRepOffset_Pipe'
+
+  BRepOffset_RectoVerso: 'BRepOffset_RectoVerso'
+
 BRepOffset_Offset: declare class BRepOffset_Offset
 
   // BRepOffset_Offset.constructor (constructor)
@@ -318,6 +346,14 @@ BRepOffset_SimpleOffset: declare class BRepOffset_SimpleOffset extends BRepTools
   [Symbol.dispose](): void;
 
 BRepOffset_Status: typeof BRepOffset_Status[keyof typeof BRepOffset_Status]
+
+  BRepOffset_Good: 'BRepOffset_Good'
+
+  BRepOffset_Reversed: 'BRepOffset_Reversed'
+
+  BRepOffset_Degenerated: 'BRepOffset_Degenerated'
+
+  BRepOffset_Unknown: 'BRepOffset_Unknown'
 
 BRepOffset_DataMapOfShapeOffset: NCollection_DataMap_TopoDS_Shape_BRepOffset_Offset_TopTools_ShapeMapHasher
 

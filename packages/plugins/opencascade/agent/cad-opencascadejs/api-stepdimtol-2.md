@@ -1,6 +1,38 @@
 # libcascade — StepDimTol (2)
 
-43 top-level symbols. Signatures are verbatim typescript.
+44 top-level symbols. Signatures are verbatim typescript.
+
+StepDimTol_GeometricToleranceType: typeof StepDimTol_GeometricToleranceType[keyof typeof StepDimTol_GeometricToleranceType]
+
+  StepDimTol_GTTAngularityTolerance: 'StepDimTol_GTTAngularityTolerance'
+
+  StepDimTol_GTTCircularRunoutTolerance: 'StepDimTol_GTTCircularRunoutTolerance'
+
+  StepDimTol_GTTCoaxialityTolerance: 'StepDimTol_GTTCoaxialityTolerance'
+
+  StepDimTol_GTTConcentricityTolerance: 'StepDimTol_GTTConcentricityTolerance'
+
+  StepDimTol_GTTCylindricityTolerance: 'StepDimTol_GTTCylindricityTolerance'
+
+  StepDimTol_GTTFlatnessTolerance: 'StepDimTol_GTTFlatnessTolerance'
+
+  StepDimTol_GTTLineProfileTolerance: 'StepDimTol_GTTLineProfileTolerance'
+
+  StepDimTol_GTTParallelismTolerance: 'StepDimTol_GTTParallelismTolerance'
+
+  StepDimTol_GTTPerpendicularityTolerance: 'StepDimTol_GTTPerpendicularityTolerance'
+
+  StepDimTol_GTTPositionTolerance: 'StepDimTol_GTTPositionTolerance'
+
+  StepDimTol_GTTRoundnessTolerance: 'StepDimTol_GTTRoundnessTolerance'
+
+  StepDimTol_GTTStraightnessTolerance: 'StepDimTol_GTTStraightnessTolerance'
+
+  StepDimTol_GTTSurfaceProfileTolerance: 'StepDimTol_GTTSurfaceProfileTolerance'
+
+  StepDimTol_GTTSymmetryTolerance: 'StepDimTol_GTTSymmetryTolerance'
+
+  StepDimTol_GTTTotalRunoutTolerance: 'StepDimTol_GTTTotalRunoutTolerance'
 
 StepDimTol_GeometricToleranceWithDatumReference: declare class StepDimTol_GeometricToleranceWithDatumReference extends StepDimTol_GeometricTolerance
 
@@ -184,6 +216,12 @@ StepDimTol_GeometricToleranceWithModifiers: declare class StepDimTol_GeometricTo
   [Symbol.dispose](): void;
 
 StepDimTol_LimitCondition: typeof StepDimTol_LimitCondition[keyof typeof StepDimTol_LimitCondition]
+
+  StepDimTol_MaximumMaterialCondition: 'StepDimTol_MaximumMaterialCondition'
+
+  StepDimTol_LeastMaterialCondition: 'StepDimTol_LeastMaterialCondition'
+
+  StepDimTol_RegardlessOfFeatureSize: 'StepDimTol_RegardlessOfFeatureSize'
 
 StepDimTol_LineProfileTolerance: declare class StepDimTol_LineProfileTolerance extends StepDimTol_GeometricTolerance
 
@@ -473,6 +511,50 @@ StepDimTol_ShapeToleranceSelect: declare class StepDimTol_ShapeToleranceSelect e
   [Symbol.dispose](): void;
 
 StepDimTol_SimpleDatumReferenceModifier: typeof StepDimTol_SimpleDatumReferenceModifier[keyof typeof StepDimTol_SimpleDatumReferenceModifier]
+
+  StepDimTol_SDRMAnyCrossSection: 'StepDimTol_SDRMAnyCrossSection'
+
+  StepDimTol_SDRMAnyLongitudinalSection: 'StepDimTol_SDRMAnyLongitudinalSection'
+
+  StepDimTol_SDRMBasic: 'StepDimTol_SDRMBasic'
+
+  StepDimTol_SDRMContactingFeature: 'StepDimTol_SDRMContactingFeature'
+
+  StepDimTol_SDRMDegreeOfFreedomConstraintU: 'StepDimTol_SDRMDegreeOfFreedomConstraintU'
+
+  StepDimTol_SDRMDegreeOfFreedomConstraintV: 'StepDimTol_SDRMDegreeOfFreedomConstraintV'
+
+  StepDimTol_SDRMDegreeOfFreedomConstraintW: 'StepDimTol_SDRMDegreeOfFreedomConstraintW'
+
+  StepDimTol_SDRMDegreeOfFreedomConstraintX: 'StepDimTol_SDRMDegreeOfFreedomConstraintX'
+
+  StepDimTol_SDRMDegreeOfFreedomConstraintY: 'StepDimTol_SDRMDegreeOfFreedomConstraintY'
+
+  StepDimTol_SDRMDegreeOfFreedomConstraintZ: 'StepDimTol_SDRMDegreeOfFreedomConstraintZ'
+
+  StepDimTol_SDRMDistanceVariable: 'StepDimTol_SDRMDistanceVariable'
+
+  StepDimTol_SDRMFreeState: 'StepDimTol_SDRMFreeState'
+
+  StepDimTol_SDRMLeastMaterialRequirement: 'StepDimTol_SDRMLeastMaterialRequirement'
+
+  StepDimTol_SDRMLine: 'StepDimTol_SDRMLine'
+
+  StepDimTol_SDRMMajorDiameter: 'StepDimTol_SDRMMajorDiameter'
+
+  StepDimTol_SDRMMaximumMaterialRequirement: 'StepDimTol_SDRMMaximumMaterialRequirement'
+
+  StepDimTol_SDRMMinorDiameter: 'StepDimTol_SDRMMinorDiameter'
+
+  StepDimTol_SDRMOrientation: 'StepDimTol_SDRMOrientation'
+
+  StepDimTol_SDRMPitchDiameter: 'StepDimTol_SDRMPitchDiameter'
+
+  StepDimTol_SDRMPlane: 'StepDimTol_SDRMPlane'
+
+  StepDimTol_SDRMPoint: 'StepDimTol_SDRMPoint'
+
+  StepDimTol_SDRMTranslation: 'StepDimTol_SDRMTranslation'
 
 StepDimTol_SimpleDatumReferenceModifierMember: declare class StepDimTol_SimpleDatumReferenceModifierMember extends StepData_SelectInt
 

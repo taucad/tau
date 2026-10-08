@@ -814,6 +814,26 @@ MathUtils_ScalarResult: declare class MathUtils_ScalarResult
 
 MathUtils_Status: typeof MathUtils_Status[keyof typeof MathUtils_Status]
 
+  OK: 'OK'
+
+  NotConverged: 'NotConverged'
+
+  MaxIterations: 'MaxIterations'
+
+  NumericalError: 'NumericalError'
+
+  InvalidInput: 'InvalidInput'
+
+  InfiniteSolutions: 'InfiniteSolutions'
+
+  NoSolution: 'NoSolution'
+
+  NotPositiveDefinite: 'NotPositiveDefinite'
+
+  Singular: 'Singular'
+
+  NonDescentDirection: 'NonDescentDirection'
+
 MathUtils_VectorResult: declare class MathUtils_VectorResult
 
   // MathUtils_VectorResult.constructor (constructor)

@@ -341,7 +341,8 @@ describe('every committed bundle', () => {
       expect(properties).toHaveLength(count);
       expect(members?.map(({ name }) => name).sort()).toEqual(properties.map(({ name }) => name).sort());
     }
-    expect(corpus?.metadata.totalEntries).toBe(65_053 + 5118 + 5118 + 7 + 5);
+    // 2574: the values of `type E = typeof E[keyof typeof E]` enums, read from their `const E` twins.
+    expect(corpus?.metadata.totalEntries).toBe(65_053 + 5118 + 5118 + 7 + 5 + 2574);
 
     const serialized = JSON.stringify(corpus);
     expect(serialized).not.toContain('"docs"');

@@ -90,6 +90,18 @@ BiTgte_Blend: declare class BiTgte_Blend
 
 BiTgte_ContactType: typeof BiTgte_ContactType[keyof typeof BiTgte_ContactType]
 
+  BiTgte_FaceFace: 'BiTgte_FaceFace'
+
+  BiTgte_FaceEdge: 'BiTgte_FaceEdge'
+
+  BiTgte_FaceVertex: 'BiTgte_FaceVertex'
+
+  BiTgte_EdgeEdge: 'BiTgte_EdgeEdge'
+
+  BiTgte_EdgeVertex: 'BiTgte_EdgeVertex'
+
+  BiTgte_VertexVertex: 'BiTgte_VertexVertex'
+
 BiTgte_CurveOnEdge: declare class BiTgte_CurveOnEdge extends Adaptor3d_Curve
 
   // BiTgte_CurveOnEdge.constructor (constructor)

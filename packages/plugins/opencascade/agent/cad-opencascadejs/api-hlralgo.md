@@ -505,6 +505,32 @@ HLRAlgo_PolyInternalSegment: declare class HLRAlgo_PolyInternalSegment
 
 HLRAlgo_PolyMask: typeof HLRAlgo_PolyMask[keyof typeof HLRAlgo_PolyMask]
 
+  HLRAlgo_PolyMask_EMskOutLin1: 'HLRAlgo_PolyMask_EMskOutLin1'
+
+  HLRAlgo_PolyMask_EMskOutLin2: 'HLRAlgo_PolyMask_EMskOutLin2'
+
+  HLRAlgo_PolyMask_EMskOutLin3: 'HLRAlgo_PolyMask_EMskOutLin3'
+
+  HLRAlgo_PolyMask_EMskGrALin1: 'HLRAlgo_PolyMask_EMskGrALin1'
+
+  HLRAlgo_PolyMask_EMskGrALin2: 'HLRAlgo_PolyMask_EMskGrALin2'
+
+  HLRAlgo_PolyMask_EMskGrALin3: 'HLRAlgo_PolyMask_EMskGrALin3'
+
+  HLRAlgo_PolyMask_FMskBack: 'HLRAlgo_PolyMask_FMskBack'
+
+  HLRAlgo_PolyMask_FMskSide: 'HLRAlgo_PolyMask_FMskSide'
+
+  HLRAlgo_PolyMask_FMskHiding: 'HLRAlgo_PolyMask_FMskHiding'
+
+  HLRAlgo_PolyMask_FMskFlat: 'HLRAlgo_PolyMask_FMskFlat'
+
+  HLRAlgo_PolyMask_FMskOnOutL: 'HLRAlgo_PolyMask_FMskOnOutL'
+
+  HLRAlgo_PolyMask_FMskOrBack: 'HLRAlgo_PolyMask_FMskOrBack'
+
+  HLRAlgo_PolyMask_FMskFrBack: 'HLRAlgo_PolyMask_FMskFrBack'
+
 HLRAlgo_PolyShellData: declare class HLRAlgo_PolyShellData extends Standard_Transient
 
   // HLRAlgo_PolyShellData.constructor (constructor)

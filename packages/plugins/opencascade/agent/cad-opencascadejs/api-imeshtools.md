@@ -153,6 +153,12 @@ IMeshTools_MeshAlgoFactory: declare class IMeshTools_MeshAlgoFactory extends Sta
 
 IMeshTools_MeshAlgoType: typeof IMeshTools_MeshAlgoType[keyof typeof IMeshTools_MeshAlgoType]
 
+  IMeshTools_MeshAlgoType_DEFAULT: 'IMeshTools_MeshAlgoType_DEFAULT'
+
+  IMeshTools_MeshAlgoType_Watson: 'IMeshTools_MeshAlgoType_Watson'
+
+  IMeshTools_MeshAlgoType_Delabella: 'IMeshTools_MeshAlgoType_Delabella'
+
 IMeshTools_MeshBuilder: declare class IMeshTools_MeshBuilder extends Message_Algorithm
 
   // IMeshTools_MeshBuilder.constructor (constructor)

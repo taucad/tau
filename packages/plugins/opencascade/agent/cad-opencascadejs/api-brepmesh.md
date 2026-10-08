@@ -450,6 +450,20 @@ BRepMesh_Deflection: declare class BRepMesh_Deflection extends Standard_Transien
 
 BRepMesh_DegreeOfFreedom: typeof BRepMesh_DegreeOfFreedom[keyof typeof BRepMesh_DegreeOfFreedom]
 
+  BRepMesh_Free: 'BRepMesh_Free'
+
+  BRepMesh_InVolume: 'BRepMesh_InVolume'
+
+  BRepMesh_OnSurface: 'BRepMesh_OnSurface'
+
+  BRepMesh_OnCurve: 'BRepMesh_OnCurve'
+
+  BRepMesh_Fixed: 'BRepMesh_Fixed'
+
+  BRepMesh_Frontier: 'BRepMesh_Frontier'
+
+  BRepMesh_Deleted: 'BRepMesh_Deleted'
+
 BRepMesh_DelabellaBaseMeshAlgo: declare class BRepMesh_DelabellaBaseMeshAlgo extends BRepMesh_CustomBaseMeshAlgo
 
   // BRepMesh_DelabellaBaseMeshAlgo.constructor (constructor)
@@ -790,6 +804,18 @@ BRepMesh_GeomTool: declare class BRepMesh_GeomTool
   [Symbol.dispose](): void;
 
 BRepMesh_GeomTool_IntFlag: typeof BRepMesh_GeomTool_IntFlag[keyof typeof BRepMesh_GeomTool_IntFlag]
+
+  NoIntersection: 'NoIntersection'
+
+  Cross: 'Cross'
+
+  EndPointTouch: 'EndPointTouch'
+
+  PointOnSegment: 'PointOnSegment'
+
+  Glued: 'Glued'
+
+  Same: 'Same'
 
 BRepMesh_IncrementalMesh: declare class BRepMesh_IncrementalMesh extends BRepMesh_DiscretRoot
 

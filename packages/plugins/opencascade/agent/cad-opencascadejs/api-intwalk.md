@@ -4,6 +4,18 @@
 
 IntWalk_StatusDeflection: typeof IntWalk_StatusDeflection[keyof typeof IntWalk_StatusDeflection]
 
+  IntWalk_PasTropGrand: 'IntWalk_PasTropGrand'
+
+  IntWalk_StepTooSmall: 'IntWalk_StepTooSmall'
+
+  IntWalk_PointConfondu: 'IntWalk_PointConfondu'
+
+  IntWalk_ArretSurPointPrecedent: 'IntWalk_ArretSurPointPrecedent'
+
+  IntWalk_ArretSurPoint: 'IntWalk_ArretSurPoint'
+
+  IntWalk_OK: 'IntWalk_OK'
+
 IntWalk_TheInt2S: declare class IntWalk_TheInt2S
 
   // IntWalk_TheInt2S.constructor (constructor)

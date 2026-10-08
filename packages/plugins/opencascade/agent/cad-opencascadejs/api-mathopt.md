@@ -4,6 +4,14 @@
 
 MathOpt_ConjugateGradientFormula: typeof MathOpt_ConjugateGradientFormula[keyof typeof MathOpt_ConjugateGradientFormula]
 
+  FletcherReeves: 'FletcherReeves'
+
+  PolakRibiere: 'PolakRibiere'
+
+  HestenesStiefel: 'HestenesStiefel'
+
+  DaiYuan: 'DaiYuan'
+
 MathOpt_FRPRConfig: declare class MathOpt_FRPRConfig extends MathUtils_Config
 
   // MathOpt_FRPRConfig.constructor (constructor)
@@ -48,6 +56,14 @@ MathOpt_GlobalConfig: declare class MathOpt_GlobalConfig extends MathUtils_NDimC
 
 MathOpt_GlobalStrategy: typeof MathOpt_GlobalStrategy[keyof typeof MathOpt_GlobalStrategy]
 
+  PSO: 'PSO'
+
+  MultiStart: 'MultiStart'
+
+  PSOHybrid: 'PSOHybrid'
+
+  DifferentialEvolution: 'DifferentialEvolution'
+
 MathOpt_NewtonConfig: declare class MathOpt_NewtonConfig extends MathUtils_Config
 
   // MathOpt_NewtonConfig.constructor (constructor)
@@ -65,6 +81,12 @@ MathOpt_NewtonConfig: declare class MathOpt_NewtonConfig extends MathUtils_Confi
   [Symbol.dispose](): void;
 
 MathOpt_PSOBoundaryMode: typeof MathOpt_PSOBoundaryMode[keyof typeof MathOpt_PSOBoundaryMode]
+
+  Clamp: 'Clamp'
+
+  Reflect: 'Reflect'
+
+  Wrap: 'Wrap'
 
 MathOpt_PSOConfig: declare class MathOpt_PSOConfig extends MathUtils_NDimConfig
 
@@ -114,7 +136,17 @@ MathOpt_PSOConfig: declare class MathOpt_PSOConfig extends MathUtils_NDimConfig
 
 MathOpt_PSOInertiaSchedule: typeof MathOpt_PSOInertiaSchedule[keyof typeof MathOpt_PSOInertiaSchedule]
 
+  Constant: 'Constant'
+
+  LinearDecay: 'LinearDecay'
+
 MathOpt_PSOInitMode: typeof MathOpt_PSOInitMode[keyof typeof MathOpt_PSOInitMode]
+
+  RandomOnly: 'RandomOnly'
+
+  SeededOnly: 'SeededOnly'
+
+  SeededPlusRandom: 'SeededPlusRandom'
 
 MathOpt_PSOSeedParticle: declare class MathOpt_PSOSeedParticle
 

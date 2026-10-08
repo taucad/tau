@@ -32,6 +32,40 @@ TopAbs: declare class TopAbs
 
 TopAbs_Orientation: typeof TopAbs_Orientation[keyof typeof TopAbs_Orientation]
 
+  TopAbs_FORWARD: 'TopAbs_FORWARD'
+
+  TopAbs_REVERSED: 'TopAbs_REVERSED'
+
+  TopAbs_INTERNAL: 'TopAbs_INTERNAL'
+
+  TopAbs_EXTERNAL: 'TopAbs_EXTERNAL'
+
 TopAbs_ShapeEnum: typeof TopAbs_ShapeEnum[keyof typeof TopAbs_ShapeEnum]
 
+  TopAbs_COMPOUND: 'TopAbs_COMPOUND'
+
+  TopAbs_COMPSOLID: 'TopAbs_COMPSOLID'
+
+  TopAbs_SOLID: 'TopAbs_SOLID'
+
+  TopAbs_SHELL: 'TopAbs_SHELL'
+
+  TopAbs_FACE: 'TopAbs_FACE'
+
+  TopAbs_WIRE: 'TopAbs_WIRE'
+
+  TopAbs_EDGE: 'TopAbs_EDGE'
+
+  TopAbs_VERTEX: 'TopAbs_VERTEX'
+
+  TopAbs_SHAPE: 'TopAbs_SHAPE'
+
 TopAbs_State: typeof TopAbs_State[keyof typeof TopAbs_State]
+
+  TopAbs_IN: 'TopAbs_IN'
+
+  TopAbs_OUT: 'TopAbs_OUT'
+
+  TopAbs_ON: 'TopAbs_ON'
+
+  TopAbs_UNKNOWN: 'TopAbs_UNKNOWN'

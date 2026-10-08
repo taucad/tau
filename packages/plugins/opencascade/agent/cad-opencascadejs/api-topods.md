@@ -504,6 +504,28 @@ TopoDS_TShape: declare class TopoDS_TShape extends Standard_Transient
 
 TopoDS_TShape_BitLayout: typeof TopoDS_TShape_BitLayout[keyof typeof TopoDS_TShape_BitLayout]
 
+  Bits_ShapeType_Mask: 'Bits_ShapeType_Mask'
+
+  Bits_ShapeType_Shift: 'Bits_ShapeType_Shift'
+
+  Bit_Free: 'Bit_Free'
+
+  Bit_Modified: 'Bit_Modified'
+
+  Bit_Checked: 'Bit_Checked'
+
+  Bit_Orientable: 'Bit_Orientable'
+
+  Bit_Closed: 'Bit_Closed'
+
+  Bit_Infinite: 'Bit_Infinite'
+
+  Bit_Convex: 'Bit_Convex'
+
+  Bit_Locked: 'Bit_Locked'
+
+  Bits_Reserved: 'Bits_Reserved'
+
 TopoDS_TShell: declare class TopoDS_TShell extends TopoDS_TShape
 
   // TopoDS_TShell.constructor (constructor)

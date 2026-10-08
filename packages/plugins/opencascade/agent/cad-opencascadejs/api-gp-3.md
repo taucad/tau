@@ -550,6 +550,24 @@ gp_Trsf2d: declare class gp_Trsf2d
 
 gp_TrsfForm: typeof gp_TrsfForm[keyof typeof gp_TrsfForm]
 
+  gp_Identity: 'gp_Identity'
+
+  gp_Rotation: 'gp_Rotation'
+
+  gp_Translation: 'gp_Translation'
+
+  gp_PntMirror: 'gp_PntMirror'
+
+  gp_Ax1Mirror: 'gp_Ax1Mirror'
+
+  gp_Ax2Mirror: 'gp_Ax2Mirror'
+
+  gp_Scale: 'gp_Scale'
+
+  gp_CompoundTrsf: 'gp_CompoundTrsf'
+
+  gp_Other: 'gp_Other'
+
 gp_Vec: declare class gp_Vec
 
   // gp_Vec.constructor (constructor)

@@ -146,6 +146,18 @@ TNaming_DeltaOnRemoval: declare class TNaming_DeltaOnRemoval extends TDF_DeltaOn
 
 TNaming_Evolution: typeof TNaming_Evolution[keyof typeof TNaming_Evolution]
 
+  TNaming_PRIMITIVE: 'TNaming_PRIMITIVE'
+
+  TNaming_GENERATED: 'TNaming_GENERATED'
+
+  TNaming_MODIFY: 'TNaming_MODIFY'
+
+  TNaming_DELETE: 'TNaming_DELETE'
+
+  TNaming_REPLACE: 'TNaming_REPLACE'
+
+  TNaming_SELECTED: 'TNaming_SELECTED'
+
 TNaming_Identifier: declare class TNaming_Identifier
 
   // TNaming_Identifier.constructor (constructor)
@@ -354,6 +366,30 @@ TNaming_Name: declare class TNaming_Name
   [Symbol.dispose](): void;
 
 TNaming_NameType: typeof TNaming_NameType[keyof typeof TNaming_NameType]
+
+  TNaming_UNKNOWN: 'TNaming_UNKNOWN'
+
+  TNaming_IDENTITY: 'TNaming_IDENTITY'
+
+  TNaming_MODIFUNTIL: 'TNaming_MODIFUNTIL'
+
+  TNaming_GENERATION: 'TNaming_GENERATION'
+
+  TNaming_INTERSECTION: 'TNaming_INTERSECTION'
+
+  TNaming_UNION: 'TNaming_UNION'
+
+  TNaming_SUBSTRACTION: 'TNaming_SUBSTRACTION'
+
+  TNaming_CONSTSHAPE: 'TNaming_CONSTSHAPE'
+
+  TNaming_FILTERBYNEIGHBOURGS: 'TNaming_FILTERBYNEIGHBOURGS'
+
+  TNaming_ORIENTATION: 'TNaming_ORIENTATION'
+
+  TNaming_WIREIN: 'TNaming_WIREIN'
+
+  TNaming_SHELLIN: 'TNaming_SHELLIN'
 
 TNaming_NamedShape: declare class TNaming_NamedShape extends TDF_Attribute
 

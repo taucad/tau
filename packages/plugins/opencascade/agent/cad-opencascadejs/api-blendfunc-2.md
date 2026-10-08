@@ -200,6 +200,14 @@ BlendFunc_RuledInv: declare class BlendFunc_RuledInv extends Blend_FuncInv
 
 BlendFunc_SectionShape: typeof BlendFunc_SectionShape[keyof typeof BlendFunc_SectionShape]
 
+  BlendFunc_Rational: 'BlendFunc_Rational'
+
+  BlendFunc_QuasiAngular: 'BlendFunc_QuasiAngular'
+
+  BlendFunc_Polynomial: 'BlendFunc_Polynomial'
+
+  BlendFunc_Linear: 'BlendFunc_Linear'
+
 BlendFunc_Tensor: declare class BlendFunc_Tensor
 
   // BlendFunc_Tensor.constructor (constructor)

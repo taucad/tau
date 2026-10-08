@@ -147,6 +147,58 @@ TDataXtd_Constraint: declare class TDataXtd_Constraint extends TDF_Attribute
 
 TDataXtd_ConstraintEnum: typeof TDataXtd_ConstraintEnum[keyof typeof TDataXtd_ConstraintEnum]
 
+  TDataXtd_RADIUS: 'TDataXtd_RADIUS'
+
+  TDataXtd_DIAMETER: 'TDataXtd_DIAMETER'
+
+  TDataXtd_MINOR_RADIUS: 'TDataXtd_MINOR_RADIUS'
+
+  TDataXtd_MAJOR_RADIUS: 'TDataXtd_MAJOR_RADIUS'
+
+  TDataXtd_TANGENT: 'TDataXtd_TANGENT'
+
+  TDataXtd_PARALLEL: 'TDataXtd_PARALLEL'
+
+  TDataXtd_PERPENDICULAR: 'TDataXtd_PERPENDICULAR'
+
+  TDataXtd_CONCENTRIC: 'TDataXtd_CONCENTRIC'
+
+  TDataXtd_COINCIDENT: 'TDataXtd_COINCIDENT'
+
+  TDataXtd_DISTANCE: 'TDataXtd_DISTANCE'
+
+  TDataXtd_ANGLE: 'TDataXtd_ANGLE'
+
+  TDataXtd_EQUAL_RADIUS: 'TDataXtd_EQUAL_RADIUS'
+
+  TDataXtd_SYMMETRY: 'TDataXtd_SYMMETRY'
+
+  TDataXtd_MIDPOINT: 'TDataXtd_MIDPOINT'
+
+  TDataXtd_EQUAL_DISTANCE: 'TDataXtd_EQUAL_DISTANCE'
+
+  TDataXtd_FIX: 'TDataXtd_FIX'
+
+  TDataXtd_RIGID: 'TDataXtd_RIGID'
+
+  TDataXtd_FROM: 'TDataXtd_FROM'
+
+  TDataXtd_AXIS: 'TDataXtd_AXIS'
+
+  TDataXtd_MATE: 'TDataXtd_MATE'
+
+  TDataXtd_ALIGN_FACES: 'TDataXtd_ALIGN_FACES'
+
+  TDataXtd_ALIGN_AXES: 'TDataXtd_ALIGN_AXES'
+
+  TDataXtd_AXES_ANGLE: 'TDataXtd_AXES_ANGLE'
+
+  TDataXtd_FACES_ANGLE: 'TDataXtd_FACES_ANGLE'
+
+  TDataXtd_ROUND: 'TDataXtd_ROUND'
+
+  TDataXtd_OFFSET: 'TDataXtd_OFFSET'
+
 TDataXtd_Geometry: declare class TDataXtd_Geometry extends TDF_Attribute
 
   // TDataXtd_Geometry.constructor (constructor)
@@ -224,6 +276,22 @@ TDataXtd_Geometry: declare class TDataXtd_Geometry extends TDF_Attribute
   [Symbol.dispose](): void;
 
 TDataXtd_GeometryEnum: typeof TDataXtd_GeometryEnum[keyof typeof TDataXtd_GeometryEnum]
+
+  TDataXtd_ANY_GEOM: 'TDataXtd_ANY_GEOM'
+
+  TDataXtd_POINT: 'TDataXtd_POINT'
+
+  TDataXtd_LINE: 'TDataXtd_LINE'
+
+  TDataXtd_CIRCLE: 'TDataXtd_CIRCLE'
+
+  TDataXtd_ELLIPSE: 'TDataXtd_ELLIPSE'
+
+  TDataXtd_SPLINE: 'TDataXtd_SPLINE'
+
+  TDataXtd_PLANE: 'TDataXtd_PLANE'
+
+  TDataXtd_CYLINDER: 'TDataXtd_CYLINDER'
 
 TDataXtd_Pattern: declare class TDataXtd_Pattern extends TDF_Attribute
 

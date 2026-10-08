@@ -175,6 +175,52 @@ PCDM_Reader: declare class PCDM_Reader extends Standard_Transient
 
 PCDM_ReaderStatus: typeof PCDM_ReaderStatus[keyof typeof PCDM_ReaderStatus]
 
+  PCDM_RS_OK: 'PCDM_RS_OK'
+
+  PCDM_RS_NoDriver: 'PCDM_RS_NoDriver'
+
+  PCDM_RS_UnknownFileDriver: 'PCDM_RS_UnknownFileDriver'
+
+  PCDM_RS_OpenError: 'PCDM_RS_OpenError'
+
+  PCDM_RS_NoVersion: 'PCDM_RS_NoVersion'
+
+  PCDM_RS_NoSchema: 'PCDM_RS_NoSchema'
+
+  PCDM_RS_NoDocument: 'PCDM_RS_NoDocument'
+
+  PCDM_RS_ExtensionFailure: 'PCDM_RS_ExtensionFailure'
+
+  PCDM_RS_WrongStreamMode: 'PCDM_RS_WrongStreamMode'
+
+  PCDM_RS_FormatFailure: 'PCDM_RS_FormatFailure'
+
+  PCDM_RS_TypeFailure: 'PCDM_RS_TypeFailure'
+
+  PCDM_RS_TypeNotFoundInSchema: 'PCDM_RS_TypeNotFoundInSchema'
+
+  PCDM_RS_UnrecognizedFileFormat: 'PCDM_RS_UnrecognizedFileFormat'
+
+  PCDM_RS_MakeFailure: 'PCDM_RS_MakeFailure'
+
+  PCDM_RS_PermissionDenied: 'PCDM_RS_PermissionDenied'
+
+  PCDM_RS_DriverFailure: 'PCDM_RS_DriverFailure'
+
+  PCDM_RS_AlreadyRetrievedAndModified: 'PCDM_RS_AlreadyRetrievedAndModified'
+
+  PCDM_RS_AlreadyRetrieved: 'PCDM_RS_AlreadyRetrieved'
+
+  PCDM_RS_UnknownDocument: 'PCDM_RS_UnknownDocument'
+
+  PCDM_RS_WrongResource: 'PCDM_RS_WrongResource'
+
+  PCDM_RS_ReaderException: 'PCDM_RS_ReaderException'
+
+  PCDM_RS_NoModel: 'PCDM_RS_NoModel'
+
+  PCDM_RS_UserBreak: 'PCDM_RS_UserBreak'
+
 PCDM_Reference: declare class PCDM_Reference
 
   // PCDM_Reference.constructor (constructor)
@@ -290,7 +336,33 @@ PCDM_StorageDriver: declare class PCDM_StorageDriver extends PCDM_Writer
 
 PCDM_StoreStatus: typeof PCDM_StoreStatus[keyof typeof PCDM_StoreStatus]
 
+  PCDM_SS_OK: 'PCDM_SS_OK'
+
+  PCDM_SS_DriverFailure: 'PCDM_SS_DriverFailure'
+
+  PCDM_SS_WriteFailure: 'PCDM_SS_WriteFailure'
+
+  PCDM_SS_Failure: 'PCDM_SS_Failure'
+
+  PCDM_SS_Doc_IsNull: 'PCDM_SS_Doc_IsNull'
+
+  PCDM_SS_No_Obj: 'PCDM_SS_No_Obj'
+
+  PCDM_SS_Info_Section_Error: 'PCDM_SS_Info_Section_Error'
+
+  PCDM_SS_UserBreak: 'PCDM_SS_UserBreak'
+
+  PCDM_SS_UnrecognizedFormat: 'PCDM_SS_UnrecognizedFormat'
+
 PCDM_TypeOfFileDriver: typeof PCDM_TypeOfFileDriver[keyof typeof PCDM_TypeOfFileDriver]
+
+  PCDM_TOFD_File: 'PCDM_TOFD_File'
+
+  PCDM_TOFD_CmpFile: 'PCDM_TOFD_CmpFile'
+
+  PCDM_TOFD_XmlFile: 'PCDM_TOFD_XmlFile'
+
+  PCDM_TOFD_Unknown: 'PCDM_TOFD_Unknown'
 
 PCDM_Writer: declare class PCDM_Writer extends Standard_Transient
 

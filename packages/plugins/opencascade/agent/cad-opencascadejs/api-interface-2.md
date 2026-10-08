@@ -1,6 +1,35 @@
 # libcascade — Interface (2)
 
-17 top-level symbols. Signatures are verbatim typescript.
+18 top-level symbols. Signatures are verbatim typescript.
+
+Interface_NodeOfGeneralLib: declare class Interface_NodeOfGeneralLib extends Standard_Transient
+
+  // Interface_NodeOfGeneralLib.constructor (constructor)
+  constructor();
+
+  // Interface_NodeOfGeneralLib.AddNode (method)
+  AddNode(anode: Interface_GlobalNodeOfGeneralLib): void;
+
+  // Interface_NodeOfGeneralLib.Protocol (method)
+  Protocol(): Interface_Protocol;
+
+  // Interface_NodeOfGeneralLib.Next (method)
+  Next(): Interface_NodeOfGeneralLib;
+
+  // Interface_NodeOfGeneralLib.get_type_name (method)
+  static get_type_name(): string;
+
+  // Interface_NodeOfGeneralLib.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // Interface_NodeOfGeneralLib.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // Interface_NodeOfGeneralLib.delete (method)
+  delete(): void;
+
+  // Interface_NodeOfGeneralLib.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 Interface_NodeOfReaderLib: declare class Interface_NodeOfReaderLib extends Standard_Transient
 
@@ -118,6 +147,28 @@ Interface_ParamSet: declare class Interface_ParamSet extends Standard_Transient
   [Symbol.dispose](): void;
 
 Interface_ParamType: typeof Interface_ParamType[keyof typeof Interface_ParamType]
+
+  Interface_ParamMisc: 'Interface_ParamMisc'
+
+  Interface_ParamInteger: 'Interface_ParamInteger'
+
+  Interface_ParamReal: 'Interface_ParamReal'
+
+  Interface_ParamIdent: 'Interface_ParamIdent'
+
+  Interface_ParamVoid: 'Interface_ParamVoid'
+
+  Interface_ParamText: 'Interface_ParamText'
+
+  Interface_ParamEnum: 'Interface_ParamEnum'
+
+  Interface_ParamLogical: 'Interface_ParamLogical'
+
+  Interface_ParamSub: 'Interface_ParamSub'
+
+  Interface_ParamHexa: 'Interface_ParamHexa'
+
+  Interface_ParamBinary: 'Interface_ParamBinary'
 
 Interface_Protocol: declare class Interface_Protocol extends Standard_Transient
 

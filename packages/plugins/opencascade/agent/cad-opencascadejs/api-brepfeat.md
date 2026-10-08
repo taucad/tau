@@ -340,6 +340,16 @@ BRepFeat_MakeRevol: declare class BRepFeat_MakeRevol extends BRepFeat_Form
 
 BRepFeat_PerfSelection: typeof BRepFeat_PerfSelection[keyof typeof BRepFeat_PerfSelection]
 
+  BRepFeat_NoSelection: 'BRepFeat_NoSelection'
+
+  BRepFeat_SelectionFU: 'BRepFeat_SelectionFU'
+
+  BRepFeat_SelectionU: 'BRepFeat_SelectionU'
+
+  BRepFeat_SelectionSh: 'BRepFeat_SelectionSh'
+
+  BRepFeat_SelectionShU: 'BRepFeat_SelectionShU'
+
 BRepFeat_RibSlot: declare class BRepFeat_RibSlot extends BRepBuilderAPI_MakeShape
 
   // BRepFeat_RibSlot.IsDeleted (method)
@@ -426,4 +436,66 @@ BRepFeat_SplitShape: declare class BRepFeat_SplitShape extends BRepBuilderAPI_Ma
 
 BRepFeat_Status: typeof BRepFeat_Status[keyof typeof BRepFeat_Status]
 
+  BRepFeat_NoError: 'BRepFeat_NoError'
+
+  BRepFeat_InvalidPlacement: 'BRepFeat_InvalidPlacement'
+
+  BRepFeat_HoleTooLong: 'BRepFeat_HoleTooLong'
+
 BRepFeat_StatusError: typeof BRepFeat_StatusError[keyof typeof BRepFeat_StatusError]
+
+  BRepFeat_OK: 'BRepFeat_OK'
+
+  BRepFeat_BadDirect: 'BRepFeat_BadDirect'
+
+  BRepFeat_BadIntersect: 'BRepFeat_BadIntersect'
+
+  BRepFeat_EmptyBaryCurve: 'BRepFeat_EmptyBaryCurve'
+
+  BRepFeat_EmptyCutResult: 'BRepFeat_EmptyCutResult'
+
+  BRepFeat_FalseSide: 'BRepFeat_FalseSide'
+
+  BRepFeat_IncDirection: 'BRepFeat_IncDirection'
+
+  BRepFeat_IncSlidFace: 'BRepFeat_IncSlidFace'
+
+  BRepFeat_IncParameter: 'BRepFeat_IncParameter'
+
+  BRepFeat_IncTypes: 'BRepFeat_IncTypes'
+
+  BRepFeat_IntervalOverlap: 'BRepFeat_IntervalOverlap'
+
+  BRepFeat_InvFirstShape: 'BRepFeat_InvFirstShape'
+
+  BRepFeat_InvOption: 'BRepFeat_InvOption'
+
+  BRepFeat_InvShape: 'BRepFeat_InvShape'
+
+  BRepFeat_LocOpeNotDone: 'BRepFeat_LocOpeNotDone'
+
+  BRepFeat_LocOpeInvNotDone: 'BRepFeat_LocOpeInvNotDone'
+
+  BRepFeat_NoExtFace: 'BRepFeat_NoExtFace'
+
+  BRepFeat_NoFaceProf: 'BRepFeat_NoFaceProf'
+
+  BRepFeat_NoGluer: 'BRepFeat_NoGluer'
+
+  BRepFeat_NoIntersectF: 'BRepFeat_NoIntersectF'
+
+  BRepFeat_NoIntersectU: 'BRepFeat_NoIntersectU'
+
+  BRepFeat_NoParts: 'BRepFeat_NoParts'
+
+  BRepFeat_NoProjPt: 'BRepFeat_NoProjPt'
+
+  BRepFeat_NotInitialized: 'BRepFeat_NotInitialized'
+
+  BRepFeat_NotYetImplemented: 'BRepFeat_NotYetImplemented'
+
+  BRepFeat_NullRealTool: 'BRepFeat_NullRealTool'
+
+  BRepFeat_NullToolF: 'BRepFeat_NullToolF'
+
+  BRepFeat_NullToolU: 'BRepFeat_NullToolU'

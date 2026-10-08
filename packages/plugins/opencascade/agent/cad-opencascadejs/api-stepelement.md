@@ -81,6 +81,8 @@ StepElement_Curve3dElementDescriptor: declare class StepElement_Curve3dElementDe
 
 StepElement_CurveEdge: typeof StepElement_CurveEdge[keyof typeof StepElement_CurveEdge]
 
+  StepElement_ElementEdge: 'StepElement_ElementEdge'
+
 StepElement_CurveElementEndReleasePacket: declare class StepElement_CurveElementEndReleasePacket extends Standard_Transient
 
   // StepElement_CurveElementEndReleasePacket.constructor (constructor)
@@ -365,6 +367,10 @@ StepElement_CurveElementSectionDerivedDefinitions: declare class StepElement_Cur
 
 StepElement_Element2dShape: typeof StepElement_Element2dShape[keyof typeof StepElement_Element2dShape]
 
+  StepElement_Quadrilateral: 'StepElement_Quadrilateral'
+
+  StepElement_Triangle: 'StepElement_Triangle'
+
 StepElement_ElementAspect: declare class StepElement_ElementAspect extends StepData_SelectType
 
   // StepElement_ElementAspect.constructor (constructor)
@@ -555,15 +561,65 @@ StepElement_ElementMaterial: declare class StepElement_ElementMaterial extends S
 
 StepElement_ElementOrder: typeof StepElement_ElementOrder[keyof typeof StepElement_ElementOrder]
 
+  StepElement_Linear: 'StepElement_Linear'
+
+  StepElement_Quadratic: 'StepElement_Quadratic'
+
+  StepElement_Cubic: 'StepElement_Cubic'
+
 StepElement_ElementVolume: typeof StepElement_ElementVolume[keyof typeof StepElement_ElementVolume]
+
+  StepElement_Volume: 'StepElement_Volume'
 
 StepElement_EnumeratedCurveElementFreedom: typeof StepElement_EnumeratedCurveElementFreedom[keyof typeof StepElement_EnumeratedCurveElementFreedom]
 
+  StepElement_XTranslation: 'StepElement_XTranslation'
+
+  StepElement_YTranslation: 'StepElement_YTranslation'
+
+  StepElement_ZTranslation: 'StepElement_ZTranslation'
+
+  StepElement_XRotation: 'StepElement_XRotation'
+
+  StepElement_YRotation: 'StepElement_YRotation'
+
+  StepElement_ZRotation: 'StepElement_ZRotation'
+
+  StepElement_Warp: 'StepElement_Warp'
+
+  StepElement_None: 'StepElement_None'
+
 StepElement_EnumeratedCurveElementPurpose: typeof StepElement_EnumeratedCurveElementPurpose[keyof typeof StepElement_EnumeratedCurveElementPurpose]
+
+  StepElement_Axial: 'StepElement_Axial'
+
+  StepElement_YYBending: 'StepElement_YYBending'
+
+  StepElement_ZZBending: 'StepElement_ZZBending'
+
+  StepElement_Torsion: 'StepElement_Torsion'
+
+  StepElement_XYShear: 'StepElement_XYShear'
+
+  StepElement_XZShear: 'StepElement_XZShear'
+
+  StepElement_Warping: 'StepElement_Warping'
 
 StepElement_EnumeratedSurfaceElementPurpose: typeof StepElement_EnumeratedSurfaceElementPurpose[keyof typeof StepElement_EnumeratedSurfaceElementPurpose]
 
+  StepElement_MembraneDirect: 'StepElement_MembraneDirect'
+
+  StepElement_MembraneShear: 'StepElement_MembraneShear'
+
+  StepElement_BendingDirect: 'StepElement_BendingDirect'
+
+  StepElement_BendingTorsion: 'StepElement_BendingTorsion'
+
+  StepElement_NormalToPlaneShear: 'StepElement_NormalToPlaneShear'
+
 StepElement_EnumeratedVolumeElementPurpose: typeof StepElement_EnumeratedVolumeElementPurpose[keyof typeof StepElement_EnumeratedVolumeElementPurpose]
+
+  StepElement_StressDisplacement: 'StepElement_StressDisplacement'
 
 StepElement_MeasureOrUnspecifiedValue: declare class StepElement_MeasureOrUnspecifiedValue extends StepData_SelectType
 
@@ -939,6 +995,8 @@ StepElement_UniformSurfaceSection: declare class StepElement_UniformSurfaceSecti
 
 StepElement_UnspecifiedValue: typeof StepElement_UnspecifiedValue[keyof typeof StepElement_UnspecifiedValue]
 
+  StepElement_Unspecified: 'StepElement_Unspecified'
+
 StepElement_Volume3dElementDescriptor: declare class StepElement_Volume3dElementDescriptor extends StepElement_ElementDescriptor
 
   // StepElement_Volume3dElementDescriptor.constructor (constructor)
@@ -976,6 +1034,14 @@ StepElement_Volume3dElementDescriptor: declare class StepElement_Volume3dElement
   [Symbol.dispose](): void;
 
 StepElement_Volume3dElementShape: typeof StepElement_Volume3dElementShape[keyof typeof StepElement_Volume3dElementShape]
+
+  StepElement_Hexahedron: 'StepElement_Hexahedron'
+
+  StepElement_Wedge: 'StepElement_Wedge'
+
+  StepElement_Tetrahedron: 'StepElement_Tetrahedron'
+
+  StepElement_Pyramid: 'StepElement_Pyramid'
 
 StepElement_VolumeElementPurpose: declare class StepElement_VolumeElementPurpose extends StepData_SelectType
 

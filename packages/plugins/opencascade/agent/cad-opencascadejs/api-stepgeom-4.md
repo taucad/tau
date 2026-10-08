@@ -1,6 +1,26 @@
 # libcascade — StepGeom (4)
 
-2 top-level symbols. Signatures are verbatim typescript.
+12 top-level symbols. Signatures are verbatim typescript.
+
+StepGeom_Array1OfPcurveOrSurface: NCollection_Array1_StepGeom_PcurveOrSurface
+
+StepGeom_Array1OfSurfaceBoundary: NCollection_Array1_StepGeom_SurfaceBoundary
+
+StepGeom_Array1OfTrimmingSelect: NCollection_Array1_StepGeom_TrimmingSelect
+
+StepGeom_Array2OfCartesianPoint: NCollection_Array2_handle_StepGeom_CartesianPoint
+
+StepGeom_Array2OfSurfacePatch: NCollection_Array2_handle_StepGeom_SurfacePatch
+
+StepGeom_HArray1OfCartesianPoint: NCollection_HArray1_handle_StepGeom_CartesianPoint
+
+StepGeom_HArray1OfCompositeCurveSegment: NCollection_HArray1_handle_StepGeom_CompositeCurveSegment
+
+StepGeom_HArray1OfPcurveOrSurface: NCollection_HArray1_StepGeom_PcurveOrSurface
+
+StepGeom_HArray1OfSurfaceBoundary: NCollection_HArray1_StepGeom_SurfaceBoundary
+
+StepGeom_HArray1OfTrimmingSelect: NCollection_HArray1_StepGeom_TrimmingSelect
 
 StepGeom_HArray2OfCartesianPoint: NCollection_HArray2_handle_StepGeom_CartesianPoint
 

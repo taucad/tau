@@ -318,6 +318,12 @@ BRepGraphInc_Populate: declare class BRepGraphInc_Populate
 
 BRepGraphInc_Populate_BuildStatus: typeof BRepGraphInc_Populate_BuildStatus[keyof typeof BRepGraphInc_Populate_BuildStatus]
 
+  Success: 'Success'
+
+  SuccessWithWarnings: 'SuccessWithWarnings'
+
+  Failed: 'Failed'
+
 BRepGraphInc_Populate_Options: declare class BRepGraphInc_Populate_Options
 
   // BRepGraphInc_Populate_Options.constructor (constructor)

@@ -31,3 +31,15 @@ LDOMBasicString: declare class LDOMBasicString
   [Symbol.dispose](): void;
 
 LDOMBasicString_StringType: typeof LDOMBasicString_StringType[keyof typeof LDOMBasicString_StringType]
+
+  LDOM_NULL: 'LDOM_NULL'
+
+  LDOM_Integer: 'LDOM_Integer'
+
+  LDOM_AsciiFree: 'LDOM_AsciiFree'
+
+  LDOM_AsciiDoc: 'LDOM_AsciiDoc'
+
+  LDOM_AsciiDocClear: 'LDOM_AsciiDocClear'
+
+  LDOM_AsciiHashed: 'LDOM_AsciiHashed'

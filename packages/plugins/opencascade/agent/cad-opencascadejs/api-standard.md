@@ -21,6 +21,14 @@ Standard: declare class Standard
 
 Standard_AllocatorType: typeof Standard_AllocatorType[keyof typeof Standard_AllocatorType]
 
+  NATIVE: 'NATIVE'
+
+  OPT: 'OPT'
+
+  TBB: 'TBB'
+
+  JEMALLOC: 'JEMALLOC'
+
 Standard_ArrayStreamBuffer: declare class Standard_ArrayStreamBuffer
 
   // Standard_ArrayStreamBuffer.constructor (constructor)
@@ -182,6 +190,22 @@ Standard_DumpValue: declare class Standard_DumpValue
   [Symbol.dispose](): void;
 
 Standard_JsonKey: typeof Standard_JsonKey[keyof typeof Standard_JsonKey]
+
+  Standard_JsonKey_None: 'Standard_JsonKey_None'
+
+  Standard_JsonKey_OpenChild: 'Standard_JsonKey_OpenChild'
+
+  Standard_JsonKey_CloseChild: 'Standard_JsonKey_CloseChild'
+
+  Standard_JsonKey_OpenContainer: 'Standard_JsonKey_OpenContainer'
+
+  Standard_JsonKey_CloseContainer: 'Standard_JsonKey_CloseContainer'
+
+  Standard_JsonKey_Quote: 'Standard_JsonKey_Quote'
+
+  Standard_JsonKey_SeparatorKeyToValue: 'Standard_JsonKey_SeparatorKeyToValue'
+
+  Standard_JsonKey_SeparatorValueToValue: 'Standard_JsonKey_SeparatorValueToValue'
 
 Standard_ErrorHandler_Callback: declare class Standard_ErrorHandler_Callback
 

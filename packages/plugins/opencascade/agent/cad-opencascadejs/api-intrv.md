@@ -128,3 +128,29 @@ Intrv_Intervals: declare class Intrv_Intervals
   [Symbol.dispose](): void;
 
 Intrv_Position: typeof Intrv_Position[keyof typeof Intrv_Position]
+
+  Intrv_Before: 'Intrv_Before'
+
+  Intrv_JustBefore: 'Intrv_JustBefore'
+
+  Intrv_OverlappingAtStart: 'Intrv_OverlappingAtStart'
+
+  Intrv_JustEnclosingAtEnd: 'Intrv_JustEnclosingAtEnd'
+
+  Intrv_Enclosing: 'Intrv_Enclosing'
+
+  Intrv_JustOverlappingAtStart: 'Intrv_JustOverlappingAtStart'
+
+  Intrv_Similar: 'Intrv_Similar'
+
+  Intrv_JustEnclosingAtStart: 'Intrv_JustEnclosingAtStart'
+
+  Intrv_Inside: 'Intrv_Inside'
+
+  Intrv_JustOverlappingAtEnd: 'Intrv_JustOverlappingAtEnd'
+
+  Intrv_OverlappingAtEnd: 'Intrv_OverlappingAtEnd'
+
+  Intrv_JustAfter: 'Intrv_JustAfter'
+
+  Intrv_After: 'Intrv_After'

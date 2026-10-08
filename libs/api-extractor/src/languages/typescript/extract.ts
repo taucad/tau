@@ -496,8 +496,12 @@ const entryOf = (
       return moduleEntries(symbol, memberPath, context);
     }
     if (ts.isTypeAliasDeclaration(primary) || ts.isVariableDeclaration(primary)) {
+      // `type E = typeof E[keyof typeof E]` beside `const E = {…}`: the values live on the const.
+      const valueTwin = ts.isTypeAliasDeclaration(primary)
+        ? declarations.find((declaration) => ts.isVariableDeclaration(declaration))
+        : undefined;
       const nodes = checker
-        .getTypeAtLocation(primary)
+        .getTypeAtLocation(valueTwin ?? primary)
         .getProperties()
         .flatMap((property) =>
           (property.getDeclarations() ?? []).filter(

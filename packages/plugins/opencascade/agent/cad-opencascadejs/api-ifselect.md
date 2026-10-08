@@ -1,6 +1,6 @@
 # libcascade — IFSelect
 
-47 top-level symbols. Signatures are verbatim typescript.
+46 top-level symbols. Signatures are verbatim typescript.
 
 IFSelect: declare class IFSelect
 
@@ -454,6 +454,18 @@ IFSelect_Dispatch: declare class IFSelect_Dispatch extends Standard_Transient
 
 IFSelect_EditValue: typeof IFSelect_EditValue[keyof typeof IFSelect_EditValue]
 
+  IFSelect_Optional: 'IFSelect_Optional'
+
+  IFSelect_Editable: 'IFSelect_Editable'
+
+  IFSelect_EditProtected: 'IFSelect_EditProtected'
+
+  IFSelect_EditComputed: 'IFSelect_EditComputed'
+
+  IFSelect_EditRead: 'IFSelect_EditRead'
+
+  IFSelect_EditDynamic: 'IFSelect_EditDynamic'
+
 IFSelect_Editor: declare class IFSelect_Editor extends Standard_Transient
 
   // IFSelect_Editor.SetValue (method)
@@ -878,11 +890,51 @@ IFSelect_ParamEditor: declare class IFSelect_ParamEditor extends IFSelect_Editor
 
 IFSelect_PrintCount: typeof IFSelect_PrintCount[keyof typeof IFSelect_PrintCount]
 
+  IFSelect_ItemsByEntity: 'IFSelect_ItemsByEntity'
+
+  IFSelect_CountByItem: 'IFSelect_CountByItem'
+
+  IFSelect_ShortByItem: 'IFSelect_ShortByItem'
+
+  IFSelect_ListByItem: 'IFSelect_ListByItem'
+
+  IFSelect_EntitiesByItem: 'IFSelect_EntitiesByItem'
+
+  IFSelect_CountSummary: 'IFSelect_CountSummary'
+
+  IFSelect_GeneralInfo: 'IFSelect_GeneralInfo'
+
+  IFSelect_Mapping: 'IFSelect_Mapping'
+
+  IFSelect_ResultCount: 'IFSelect_ResultCount'
+
 IFSelect_PrintFail: typeof IFSelect_PrintFail[keyof typeof IFSelect_PrintFail]
+
+  IFSelect_FailOnly: 'IFSelect_FailOnly'
+
+  IFSelect_FailAndWarn: 'IFSelect_FailAndWarn'
 
 IFSelect_RemainMode: typeof IFSelect_RemainMode[keyof typeof IFSelect_RemainMode]
 
+  IFSelect_RemainForget: 'IFSelect_RemainForget'
+
+  IFSelect_RemainCompute: 'IFSelect_RemainCompute'
+
+  IFSelect_RemainDisplay: 'IFSelect_RemainDisplay'
+
+  IFSelect_RemainUndo: 'IFSelect_RemainUndo'
+
 IFSelect_ReturnStatus: typeof IFSelect_ReturnStatus[keyof typeof IFSelect_ReturnStatus]
+
+  IFSelect_RetVoid: 'IFSelect_RetVoid'
+
+  IFSelect_RetDone: 'IFSelect_RetDone'
+
+  IFSelect_RetError: 'IFSelect_RetError'
+
+  IFSelect_RetFail: 'IFSelect_RetFail'
+
+  IFSelect_RetStop: 'IFSelect_RetStop'
 
 IFSelect_SelectAnyList: declare class IFSelect_SelectAnyList extends IFSelect_SelectDeduct
 
@@ -1325,70 +1377,4 @@ IFSelect_SelectModelRoots: declare class IFSelect_SelectModelRoots extends IFSel
   delete(): void;
 
   // IFSelect_SelectModelRoots.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-IFSelect_SelectPointed: declare class IFSelect_SelectPointed extends IFSelect_SelectBase
-
-  // IFSelect_SelectPointed.constructor (constructor)
-  constructor();
-
-  // IFSelect_SelectPointed.Clear (method)
-  Clear(): void;
-
-  // IFSelect_SelectPointed.IsSet (method)
-  IsSet(): boolean;
-
-  // IFSelect_SelectPointed.SetEntity (method)
-  SetEntity(item: Standard_Transient): void;
-
-  // IFSelect_SelectPointed.SetList (method)
-  SetList(list: NCollection_HSequence_handle_Standard_Transient): void;
-
-  // IFSelect_SelectPointed.Add (method)
-  Add(item: Standard_Transient): boolean;
-
-  // IFSelect_SelectPointed.Remove (method)
-  Remove(item: Standard_Transient): boolean;
-
-  // IFSelect_SelectPointed.Toggle (method)
-  Toggle(item: Standard_Transient): boolean;
-
-  // IFSelect_SelectPointed.AddList (method)
-  AddList(list: NCollection_HSequence_handle_Standard_Transient): boolean;
-
-  // IFSelect_SelectPointed.RemoveList (method)
-  RemoveList(list: NCollection_HSequence_handle_Standard_Transient): boolean;
-
-  // IFSelect_SelectPointed.ToggleList (method)
-  ToggleList(list: NCollection_HSequence_handle_Standard_Transient): boolean;
-
-  // IFSelect_SelectPointed.Rank (method)
-  Rank(item: Standard_Transient): number;
-
-  // IFSelect_SelectPointed.NbItems (method)
-  NbItems(): number;
-
-  // IFSelect_SelectPointed.Item (method)
-  Item(num: number): Standard_Transient;
-
-  // IFSelect_SelectPointed.Update (method)
-  Update(control: Interface_CopyControl): void;
-  Update(trf: IFSelect_Transformer): void;
-
-  // IFSelect_SelectPointed.Label (method)
-  Label(): TCollection_AsciiString;
-
-  // IFSelect_SelectPointed.get_type_name (method)
-  static get_type_name(): string;
-
-  // IFSelect_SelectPointed.get_type_descriptor (method)
-  static get_type_descriptor(): Standard_Type;
-
-  // IFSelect_SelectPointed.DynamicType (method)
-  DynamicType(): Standard_Type;
-
-  // IFSelect_SelectPointed.delete (method)
-  delete(): void;
-
-  // IFSelect_SelectPointed.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

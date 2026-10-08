@@ -122,6 +122,16 @@ GProp_PEquation: declare class GProp_PEquation
 
 GProp_PEquation_Type: typeof GProp_PEquation_Type[keyof typeof GProp_PEquation_Type]
 
+  None: 'None'
+
+  Point: 'Point'
+
+  Line: 'Line'
+
+  Plane: 'Plane'
+
+  Space: 'Space'
+
 GProp_PGProps: declare class GProp_PGProps extends GProp_GProps
 
   // GProp_PGProps.constructor (constructor)
@@ -221,6 +231,28 @@ GProp_UndefinedAxis: declare class GProp_UndefinedAxis extends Standard_DomainEr
   [Symbol.dispose](): void;
 
 GProp_ValueType: typeof GProp_ValueType[keyof typeof GProp_ValueType]
+
+  GProp_Mass: 'GProp_Mass'
+
+  GProp_CenterMassX: 'GProp_CenterMassX'
+
+  GProp_CenterMassY: 'GProp_CenterMassY'
+
+  GProp_CenterMassZ: 'GProp_CenterMassZ'
+
+  GProp_InertiaXX: 'GProp_InertiaXX'
+
+  GProp_InertiaYY: 'GProp_InertiaYY'
+
+  GProp_InertiaZZ: 'GProp_InertiaZZ'
+
+  GProp_InertiaXY: 'GProp_InertiaXY'
+
+  GProp_InertiaXZ: 'GProp_InertiaXZ'
+
+  GProp_InertiaYZ: 'GProp_InertiaYZ'
+
+  GProp_Unknown: 'GProp_Unknown'
 
 GProp_VelGProps: declare class GProp_VelGProps extends GProp_GProps
 

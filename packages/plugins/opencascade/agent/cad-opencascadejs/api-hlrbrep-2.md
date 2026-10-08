@@ -490,6 +490,18 @@ HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf: declare class HLRBRep_TheQu
 
 HLRBRep_TypeOfResultingEdge: typeof HLRBRep_TypeOfResultingEdge[keyof typeof HLRBRep_TypeOfResultingEdge]
 
+  HLRBRep_Undefined: 'HLRBRep_Undefined'
+
+  HLRBRep_IsoLine: 'HLRBRep_IsoLine'
+
+  HLRBRep_OutLine: 'HLRBRep_OutLine'
+
+  HLRBRep_Rg1Line: 'HLRBRep_Rg1Line'
+
+  HLRBRep_RgNLine: 'HLRBRep_RgNLine'
+
+  HLRBRep_Sharp: 'HLRBRep_Sharp'
+
 HLRBRep_VertexList: declare class HLRBRep_VertexList
 
   // HLRBRep_VertexList.IsPeriodic (method)

@@ -179,13 +179,17 @@ export const step = (
       if (row.evidence.size === 0 && row.intentAt !== undefined && now < row.dueAt + recoveryGrace) {
         return { state: { ...state, row: { ...claimed, leaseUntil: row.dueAt + recoveryGrace } }, answer: 'applied' };
       }
+      // T11 reads usage first, else the latest stored observation; a stored provider rejection still releases
+      // the turn. The ledger orders observations by `received_at`; the model-based test records one constant
+      // payload per kind, so the writer's digest dedupe keeps each kind at its first position, as the Set does.
       const evidence: OracleEvidence =
-        row.intentAt === undefined ? 'rejected' : row.evidence.has('final') ? 'final' : 'unknown';
+        row.intentAt === undefined
+          ? 'rejected'
+          : row.evidence.has('final')
+            ? 'final'
+            : ([...row.evidence].at(-1) ?? 'unknown');
       const recorded = { ...claimed, evidence: new Set([...claimed.evidence, evidence]) };
-      return {
-        state: terminal(state, recorded, row.intentAt === undefined ? 'released' : outcomeOf(evidence)),
-        answer: 'applied',
-      };
+      return { state: terminal(state, recorded, outcomeOf(evidence)), answer: 'applied' };
     }
     case 'tick': {
       if (!row) {

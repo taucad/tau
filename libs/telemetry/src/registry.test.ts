@@ -6,7 +6,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(71);
+    expect(metrics).toHaveLength(64);
   });
 
   it('should bound funded-operation telemetry to content-free dimensions', () => {

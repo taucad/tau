@@ -142,7 +142,7 @@
       "title": "User-Charged LLM Spend",
       "description": "User-charged LLM spend in the selected time range: what Tau bills the user for the call (priced from the model catalog), not the supplier invoice.",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 1 },
       "targets": [
         { "expr": "sum(increase(gen_ai_client_cost_total{service_name=~\"$service\"}[$__range])) or vector(0)" }
       ],
@@ -157,19 +157,6 @@
               { "value": 20, "color": "red" }
             ]
           }
-        }
-      }
-    },
-    {
-      "title": "SSE Streams",
-      "description": "Active server-sent event streams (AI chat)",
-      "type": "stat",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
-      "targets": [{ "expr": "sse_connections_active{service_name=~\"$service\"} or vector(0)" }],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "thresholds": { "steps": [{ "value": 0, "color": "blue" }] }
         }
       }
     },
@@ -210,15 +197,14 @@
     },
     {
       "title": "Active Connections",
-      "description": "WebSocket + SSE connections over time",
+      "description": "WebSocket connections over time, by gateway",
       "type": "timeseries",
       "gridPos": { "h": 7, "w": 8, "x": 16, "y": 6 },
       "targets": [
         {
           "expr": "sum by (ws_gateway) (ws_connections_active{service_name=~\"$service\"})",
           "legendFormat": "WebSocket {{ws_gateway}}"
-        },
-        { "expr": "sse_connections_active{service_name=~\"$service\"}", "legendFormat": "SSE" }
+        }
       ],
       "fieldConfig": { "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2 } } }
     },

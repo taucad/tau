@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { FileTreeService } from '#file-tree-service.js';
 import type { ExternalPollTelemetry } from '#file-tree-service.js';
-import type { FileTreeNode, HeadFileStat } from '@taucad/filesystem';
+import type { FileTreeNode, HeadFileStat, WatchEvent } from '@taucad/filesystem';
 import type { ChangeEvent, FileEntry, FileProvenance, FileStat } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
+import type { WorkerChangeChannelTransport } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import { createComposedViewClient } from '#composed-view-client.js';
@@ -157,6 +158,7 @@ function createTreeHarness(overrides?: {
   workspaceRoot?: string;
   initialEntries?: FileEntry[];
   visibility?: VisibilityProvider;
+  watchReady?: WorkerChangeChannelTransport['watchReady'];
   onExternalPollTelemetry?: ConstructorParameters<typeof FileTreeService>[0]['onExternalPollTelemetry'];
 }): {
   tree: FileTreeService;
@@ -171,7 +173,7 @@ function createTreeHarness(overrides?: {
   });
   const root = overrides?.workspaceRoot ?? workspaceRoot;
   const paths = new WorkspacePathResolver(root);
-  const channel = new WorkerChangeChannel({ transport: { listen } });
+  const channel = new WorkerChangeChannel({ transport: { listen, watchReady: overrides?.watchReady } });
   const proxy =
     overrides?.proxy ??
     mock<ComposedViewClient>({
@@ -1252,6 +1254,180 @@ describe('FileTreeService listDirectory / subscribePath', () => {
 });
 
 describe('directory observation bootstrap and shared cancellation', () => {
+  it('should read fresh rows after reacquisition acknowledges without background refresh', async () => {
+    const ready = Promise.withResolvers<void>();
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('old.ts')]);
+    const unsubscribe = vi.fn();
+    const watchReady = vi
+      .fn<NonNullable<WorkerChangeChannelTransport['watchReady']>>()
+      .mockReturnValueOnce({ ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, unsubscribe })
+      .mockReturnValue({ ready: ready.promise, closed: Promise.withResolvers<void>().promise, unsubscribe: vi.fn() });
+    const { tree, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+      watchReady,
+    });
+    const observation = tree.observeDirectory('source');
+    const first = observation.acquire();
+    await vi.waitFor(() => {
+      expect(first.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'old.ts' }] });
+    });
+    first.release();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    readDirectory.mockResolvedValue([textNode('fresh.ts')]);
+    const second = observation.acquire();
+    expect(watchReady).toHaveBeenCalledTimes(2);
+    await Promise.resolve();
+    expect(readDirectory).toHaveBeenCalledOnce();
+    ready.resolve();
+    await vi.waitFor(() => {
+      expect(second.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'fresh.ts' }] });
+    });
+    expect(readDirectory).toHaveBeenCalledTimes(2);
+    second.release();
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it('should preserve explicit scheduled refresh for an actively observed directory', async () => {
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('safe.ts')]);
+    const { tree, disposeChannel } = createTreeHarness({ proxy: mock<ComposedViewClient>({ readDirectory }) });
+    const lease = tree.observeDirectory('source').acquire();
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().status).toBe('ready');
+    });
+    readDirectory.mockClear();
+    readDirectory.mockResolvedValue([textNode('fresh.ts')]);
+    tree.scheduleRefresh('source');
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'fresh.ts' }] });
+    });
+    expect(readDirectory).toHaveBeenCalledOnce();
+    lease.release();
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it('should share one authoritative reset read across exact watch and root channel delivery', async () => {
+    let onWatch = (_event: WatchEvent): void => undefined;
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('safe.ts')]);
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+      watchReady: (_request, handler) => {
+        onWatch = handler;
+        return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, unsubscribe: vi.fn() };
+      },
+    });
+    const lease = tree.observeDirectory('source').acquire();
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().status).toBe('ready');
+    });
+    readDirectory.mockClear();
+    emitFileChanged({ type: 'backendChanged', backend: 'indexeddb' });
+    onWatch({ type: 'reset' });
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().status).toBe('ready');
+    });
+    expect(readDirectory).toHaveBeenCalledOnce();
+    lease.release();
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it('should bound sustained directory invalidations and refuse stale rows until quiescence', async () => {
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('safe.ts')]);
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+    });
+    const owner = tree.observeDirectory('source');
+    const first = owner.acquire();
+    const second = owner.acquire();
+    await vi.waitFor(() => {
+      expect(first.getSnapshot().status).toBe('ready');
+    });
+    const safe = first.getSnapshot().value;
+    const pending: Array<PromiseWithResolvers<FileTreeNode[]>> = [];
+    readDirectory.mockImplementation(async () => {
+      const read = Promise.withResolvers<FileTreeNode[]>();
+      pending.push(read);
+      return read.promise;
+    });
+    for (let round = 0; round < 3; round++) {
+      for (let index = 0; index < 20; index++) {
+        emitFileChanged({ type: 'directoryChanged', path: 'source', backend: 'indexeddb' });
+      }
+      expect(pending).toHaveLength(round + 1);
+      expect(first.getSnapshot()).toMatchObject({ status: 'pending', value: safe });
+      if (round === 0) {
+        first.release();
+      }
+      pending[round]!.resolve([textNode('stale.ts')]);
+      // oxlint-disable-next-line no-await-in-loop -- Each held generation must finish before its single trailing read starts.
+      await vi.waitFor(() => {
+        expect(pending).toHaveLength(round + 2);
+      });
+      expect(tree.listDirectorySync('source')).toMatchObject([{ name: 'safe.ts' }]);
+    }
+    pending[3]!.resolve([textNode('current.ts')]);
+    await vi.waitFor(() => {
+      expect(second.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'current.ts' }] });
+    });
+    expect(readDirectory).toHaveBeenCalledTimes(5);
+    expect(owner.diagnostics.activeWatches).toBe(1);
+    second.release();
+    expect(owner.diagnostics.activeWatches).toBe(0);
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it('should refresh an observed shallow directory on child changes without refreshing unrelated directories', async () => {
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('alpha.ts')]);
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+    });
+    const lease = tree.observeDirectory('source').acquire();
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().status).toBe('ready');
+    });
+    readDirectory.mockClear();
+    readDirectory.mockResolvedValue([textNode('beta.ts')]);
+    emitFileChanged({ type: 'fileWritten', path: 'other/file.ts', backend: 'indexeddb' });
+    expect(readDirectory).not.toHaveBeenCalled();
+    emitFileChanged({ type: 'fileWritten', path: 'source/beta.ts', backend: 'indexeddb' });
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'beta.ts' }] });
+    });
+    expect(readDirectory).toHaveBeenCalledOnce();
+    lease.release();
+    tree.dispose();
+    disposeChannel();
+  });
+
+  it('should expose a failed authoritative update and retry fresh rows without revisiting', async () => {
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('alpha.ts')]);
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+    });
+    const lease = tree.observeDirectory('').acquire();
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'alpha.ts' }] });
+    });
+    readDirectory.mockRejectedValueOnce(new Error('provider unavailable'));
+    emitFileChanged({ type: 'directoryChanged', path: '', backend: 'indexeddb' });
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().value).toMatchObject({ kind: 'error' });
+    });
+    readDirectory.mockResolvedValue([textNode('beta.ts')]);
+    const reads = readDirectory.mock.calls.length;
+    lease.refresh();
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'beta.ts' }] });
+    });
+    expect(readDirectory.mock.calls.length).toBeGreaterThan(reads);
+    lease.release();
+    tree.dispose();
+    disposeChannel();
+  });
+
   it('should catch up once after a burst invalidates a held bootstrap read', async () => {
     const first = Promise.withResolvers<FileTreeNode[]>();
     const readDirectory = vi

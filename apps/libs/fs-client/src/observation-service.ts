@@ -33,6 +33,8 @@ export type ObservationServiceOptions<T> = {
   read(fence: ObservationRead): Promise<T>;
   equal?(previous: T, next: T): boolean;
   publish?(value: T): void;
+  /** Prepare an explicit authoritative retry independently of settled dependency notifications. */
+  refresh?(): void;
   /** Fence internally publishing domain effects synchronously at invalidation. */
   invalidate?(): void;
   /** Release decoded values and owned URLs on final release. */
@@ -131,6 +133,7 @@ export class ObservationService<T> {
 
   /** Explicit retry recreates a closed watch actor before reading again. */
   public refresh(): void {
+    this.options.refresh?.();
     if (this.actor?.getSnapshot().hasTag('closed') && this.leases > 0) {
       this.epoch++;
       this.options.invalidate?.();

@@ -135,6 +135,100 @@ describe('FileContentService', () => {
     emitFileChanged = harness.emitFileChanged;
   });
 
+  it('should fence old content health and reads across source replacement with active leases', async () => {
+    const oldRead = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+    const oldClosed = Promise.withResolvers<void>();
+    const newReady = Promise.withResolvers<void>();
+    const watchReady = vi
+      .fn<NonNullable<WorkerChangeChannelTransport['watchReady']>>()
+      .mockReturnValueOnce({ ready: Promise.resolve(), closed: oldClosed.promise, unsubscribe: vi.fn() })
+      .mockReturnValueOnce({
+        ready: newReady.promise,
+        closed: Promise.withResolvers<void>().promise,
+        unsubscribe: vi.fn(),
+      });
+    const proxy = createMockProxy({
+      readFile: vi.fn().mockReturnValueOnce(oldRead.promise).mockResolvedValue(new TextEncoder().encode('new source')),
+    });
+    const harness = createHarness({ proxy, watchReady });
+    const old = harness.service.observeContent('main.txt').acquire();
+    await vi.waitFor(() => {
+      expect(proxy.readFile).toHaveBeenCalledOnce();
+    });
+    harness.service.reset('/replacement');
+    const current = harness.service.observeContent('main.txt').acquire();
+    oldClosed.resolve();
+    expect(current.getSnapshot().status).toBe('registering');
+    expect(harness.service.peekOutcome('main.txt').kind).toBe('loading');
+    newReady.resolve();
+    await vi.waitFor(() => {
+      expect(current.getSnapshot().status).toBe('ready');
+    });
+    oldRead.resolve(new TextEncoder().encode('old source'));
+    old.release();
+    expect(harness.service.peekOutcome('main.txt')).toMatchObject({
+      kind: 'text',
+      content: new TextEncoder().encode('new source'),
+    });
+    expect(current.getSnapshot().status).toBe('ready');
+    current.release();
+    harness.service.dispose();
+    harness.disposeChannel();
+  });
+
+  it('should notify mounted content on rejected registration and recover through the same owner', async () => {
+    const ready = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const watchReady = vi
+      .fn()
+      .mockReturnValueOnce({ ready: ready.promise, closed: closed.promise, unsubscribe: vi.fn() })
+      .mockReturnValue({
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        unsubscribe: vi.fn(),
+      });
+    const harness = createHarness({ watchReady });
+    const notify = vi.fn();
+    const unsubscribe = harness.service.subscribe('main.txt', notify);
+    expect(harness.proxy.readFile).not.toHaveBeenCalled();
+    ready.reject(new Error('registration refused'));
+    await vi.waitFor(() => {
+      expect(harness.service.peekOutcome('main.txt').kind).toBe('error');
+    });
+    expect(notify).toHaveBeenCalled();
+    vi.mocked(harness.proxy.readFile).mockResolvedValue(new TextEncoder().encode('fresh'));
+    harness.service.observeContent('main.txt').refresh();
+    await vi.waitFor(() => {
+      expect(harness.service.peekOutcome('main.txt').kind).toBe('text');
+    });
+    expect(harness.service.peekOutcome('main.txt')).toMatchObject({ kind: 'text' });
+    expect(watchReady).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    harness.service.dispose();
+    harness.disposeChannel();
+  });
+
+  it('should notify mounted content when its isolated watch closes while retaining safe bytes', async () => {
+    const closed = Promise.withResolvers<void>();
+    const harness = createHarness({
+      watchReady: () => ({ ready: Promise.resolve(), closed: closed.promise, unsubscribe: vi.fn() }),
+    });
+    const notify = vi.fn();
+    const unsubscribe = harness.service.subscribe('main.txt', notify);
+    await vi.waitFor(() => {
+      expect(harness.service.peekOutcome('main.txt').kind).toBe('text');
+    });
+    notify.mockClear();
+    closed.resolve();
+    await vi.waitFor(() => {
+      expect(harness.service.peekOutcome('main.txt').kind).toBe('error');
+    });
+    expect(notify).toHaveBeenCalled();
+    unsubscribe();
+    harness.service.dispose();
+    harness.disposeChannel();
+  });
+
   it.each<ChangeEvent>([
     fileWritten('dir/file.txt'),
     { type: 'fileRenamed', oldPath: 'dir/file.txt', newPath: 'dir/new.txt', backend: 'indexeddb' },
@@ -2383,6 +2477,21 @@ describe('FileContentService over the composed view (north star W2)', () => {
 });
 
 describe('inactive content outcome budget', () => {
+  it('should preserve the safe content base held by a selecting observation lease', async () => {
+    const harness = createHarness({ cacheOptions: { maxEntries: 2, maxTotalBytes: 4, maxSingleFileBytes: 4 } });
+    vi.mocked(harness.proxy.readFile).mockResolvedValue(new Uint8Array([65, 66]));
+    const lease = harness.service.observeContent('active.ts').acquire();
+    await vi.waitFor(() => {
+      expect(lease.getSnapshot().status).toBe('ready');
+    });
+    await harness.service.resolve('old.ts');
+    await harness.service.resolve('latest.ts');
+    expect(harness.service.peekOutcome('active.ts').kind).toBe('text');
+    lease.release();
+    harness.service.dispose();
+    harness.disposeChannel();
+  });
+
   it('should evict inactive decoded bytes while preserving an active editor base', async () => {
     const harness = createHarness({ cacheOptions: { maxEntries: 2, maxTotalBytes: 4, maxSingleFileBytes: 4 } });
     vi.mocked(harness.proxy.readFile).mockResolvedValue(new Uint8Array([65, 66]));

@@ -52,6 +52,14 @@ it('keeps value consumers stable while status consumers see equal-value refresh'
   });
   expect(valueRenders).toBe(beforeValue);
   expect(statusRenders).toBeGreaterThan(beforeStatus);
+  await act(async () => {
+    closed.resolve();
+  });
+  await waitFor(() => {
+    expect(status.result.current.status).toBe('closed');
+  });
+  expect(selected.result.current).toBe(value);
+  expect(valueRenders).toBe(beforeValue);
   selected.unmount();
   status.unmount();
   expect(service.diagnostics.leases).toBe(0);

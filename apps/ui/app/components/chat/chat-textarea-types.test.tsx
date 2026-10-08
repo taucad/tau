@@ -53,6 +53,8 @@ let mockActiveModel: ResolvedModel = stableModel;
 let mockExecution: CadAgentExecution | undefined;
 let mockResume: (() => void) | undefined;
 let mockStatus: ChatComposerContextValue['status'] = 'ready';
+const mockStop = vi.fn<ChatComposerContextValue['stop']>();
+let cancelShortcut: (() => void) | undefined;
 
 const chatActionsMock = {
   stop: vi.fn<() => void>(),
@@ -111,7 +113,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
       kernel: { kernelId: 'openscad', kernel: resolveKernel('openscad'), setActiveKernel: vi.fn() },
       status: mockStatus,
       agentActivity: 'ready',
-      stop: () => undefined,
+      stop: mockStop,
       resume: mockResume,
       contextUsage: undefined,
       session: undefined,
@@ -119,7 +121,10 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 }));
 
 vi.mock('#hooks/use-keyboard.js', () => ({
-  useKeybinding: () => ({ formattedKeyCombination: 'Ctrl+Backspace' }),
+  useKeybinding: (_combination: unknown, callback: () => void) => {
+    cancelShortcut = callback;
+    return { formattedKeyCombination: 'Ctrl+Backspace' };
+  },
 }));
 
 const toastErrorMock = vi.fn();
@@ -138,6 +143,17 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     mockResume = undefined;
     mockStatus = 'ready';
     draftState = defaultDraftState;
+  });
+
+  it('should name the Stop button and the Stop shortcut as different origins', () => {
+    mockStatus = 'streaming';
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn() }));
+
+    act(() => {
+      result.current.handleCancelClick();
+      cancelShortcut?.();
+    });
+    expect(mockStop.mock.calls).toEqual([['stop-button'], ['stop-shortcut']]);
   });
 
   it('should resume an empty main draft through both submit and Enter without sending a new message', async () => {

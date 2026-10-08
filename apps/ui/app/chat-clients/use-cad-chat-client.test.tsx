@@ -888,22 +888,6 @@ describe('useCadChatClient', () => {
    * turn until it settles", "should queue a turn requested while finishing").
    */
 
-  it('should still allow stop while a request is in flight', () => {
-    const chat = mock<Chat<MyUIMessage>>();
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    useChatSelectorMock.mockReturnValue('streaming');
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderClient();
-
-    act(() => {
-      result.current.stop();
-    });
-
-    expect(actions.stop).toHaveBeenCalledTimes(1);
-  });
-
   it('should call actions.editMessage with the rebuilt content, and admit its own turn, when edit fires', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     /* An edit rewinds to a message the transcript holds: `turnIntentOf` refuses
@@ -936,21 +920,6 @@ describe('useCadChatClient', () => {
       attachments: [imageAttachment],
       command: { type: 'start', payload: { trigger: 'edit', message: { id: 'msg_99' } } },
     });
-  });
-
-  it('should call actions.stop when stop fires', () => {
-    const chat = mock<Chat<MyUIMessage>>();
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderClient();
-
-    act(() => {
-      result.current.stop();
-    });
-
-    expect(actions.stop).toHaveBeenCalledTimes(1);
   });
 
   it('should expose messages and error from the bound chat instance, and status from useChatSelector', () => {

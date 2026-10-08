@@ -2919,11 +2919,21 @@ describe('ChatSessionStore', () => {
       ]);
       expect(store.getProjection(chatId)?.views[runId]?.user?.id).toBe('msg_projected_cancel');
 
-      store.stopRun(chatId);
+      const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+      store.stopRun(chatId, 'stop-button');
       await vi.waitFor(() => {
         expect(hostCommand).toHaveBeenCalledTimes(1);
       });
-      expect(hostCommand.mock.calls[0]?.[0].type).toBe('cancel');
+      const cancel = hostCommand.mock.calls[0]?.[0];
+      expect(cancel?.type).toBe('cancel');
+      /* The host labels every cancel USER_STOPPED; only this line says which gesture sent it. */
+      expect(info).toHaveBeenCalledWith('[ChatSessionStore] host cancel', {
+        chatId,
+        runId,
+        commandId: cancel?.commandId,
+        origin: 'stop-button',
+      });
+      info.mockRestore();
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('');
 
       publishLogRows(store, chatId, [lifecycleRow(3, 'cancelled', runId)], 3);
@@ -2963,7 +2973,7 @@ describe('ChatSessionStore', () => {
         }),
       ]);
 
-      store.stopRun(chatId);
+      store.stopRun(chatId, 'stop-shortcut');
       await vi.waitFor(() => {
         expect(hostCommand).toHaveBeenCalledTimes(1);
       });

@@ -857,7 +857,7 @@ export const useSidebarCommands = (): SidebarCommands => {
        * records that the person stopped it, so the row reads `Stopped` instead
        * of vanishing. */
       closeChat: (projectId, chatId) => {
-        chatSessions.stopRun(chatId);
+        chatSessions.stopRun(chatId, 'close-chat');
         chatReferencesOf(sessions, chatSessions, projectId).get(chatId)?.send({ type: 'close' });
       },
       closeProject: (projectId) => {

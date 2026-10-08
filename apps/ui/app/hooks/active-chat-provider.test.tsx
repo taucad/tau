@@ -374,7 +374,7 @@ describe('ChatComposerProvider', () => {
 
     expect(typeof result.current.stop).toBe('function');
     expect(() => {
-      result.current.stop();
+      result.current.stop('stop-button');
     }).not.toThrow();
   });
 
@@ -1001,7 +1001,7 @@ describe('ActiveChatProvider', () => {
         [logRow(3, { type: 'interrupt.recorded', interruptId: 'i1', phase: 'resolved', reason: 'approval' })],
         3,
       );
-      result.current.composer.stop();
+      result.current.composer.stop('stop-button');
     });
     expect(result.current.composer.agentActivity).toBe('stopping');
   });
@@ -1012,7 +1012,7 @@ describe('ActiveChatProvider', () => {
     });
     act(() => {
       publishLogRows(result.current.store, 'chat_stop', runningRows());
-      result.current.composer.stop();
+      result.current.composer.stop('stop-button');
     });
     expect(result.current.store.isStopping('chat_stop')).toBe(true);
     expect(result.current.composer.agentActivity).toBe('stopping');

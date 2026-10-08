@@ -913,7 +913,7 @@ describe('use-sidebar-status — pin (R1/P63): *Close* on a chat stops the run a
 
     /* The run's owner is asked once — the store's `stopRequest`, the same verb
      * the composer's *Stop* sends — and nothing stopped the chat's machine. */
-    expect(stopRun).toHaveBeenCalledExactlyOnceWith('sweep');
+    expect(stopRun).toHaveBeenCalledExactlyOnceWith('sweep', 'close-chat');
     expect(fakeRegistry.chatReferences['bracket']?.['sweep']).toBe(actor);
     expect(actor.getSnapshot().status).toBe('active');
     expect(screen.getByRole('button').textContent).toBe('Stopped');

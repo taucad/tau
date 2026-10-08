@@ -145,6 +145,19 @@ const nonOutputChunkTypes: ReadonlySet<string> = new Set([
 export const isDocumentActive = (): boolean =>
   typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
 
+/**
+ * What asked a chat's run to stop. The host records every renderer cancel as `USER_STOPPED`, so the origin is
+ * logged beside the cancel's command id: the one way to tell which gesture a ledger's stop row came from.
+ *
+ * @public
+ */
+export type StopOrigin = 'stop-button' | 'stop-shortcut' | 'message-stop' | 'close-chat' | 'new-turn' | 'project-close';
+
+/* Renderer console reaches the desktop log, where it lines up with the ledger's cancel row by command id. */
+const logStop = (command: HostCommand, origin: StopOrigin | undefined): void => {
+  console.info('[ChatSessionStore] host cancel', { ...command.payload, commandId: command.commandId, origin });
+};
+
 export type ChatSessionDeps = {
   getChat: (chatId: string, projectId?: string) => Promise<ChatEntity | undefined>;
   patchChat: <K extends keyof ChatEntity>(
@@ -393,6 +406,8 @@ type InternalSession = ChatSession & {
   transcriptSourceVersion: number;
   commandInFlight: boolean;
   stopRequested: boolean;
+  /** What asked for the pending stop; logged with the cancel it sends. */
+  stopOrigin: StopOrigin | undefined;
   restoredStoppedRunId: string | undefined;
   status: ChatStatus;
   /** The project this chat belongs to, from its caller (PV-S4, L3 D9); never from focus. */
@@ -824,6 +839,7 @@ export class ChatSessionStore {
       commandId: generatePrefixedId(idPrefix.request),
       payload: { chatId, runId: run.runId },
     };
+    logStop(command, 'project-close');
     const answer = await sendHostCommand(async () => connector.connect(chatId), command);
     if (answer.status === 'refused') {
       if (
@@ -1492,14 +1508,16 @@ export class ChatSessionStore {
    * stopping a local SDK watch alone never settles the run.
    *
    * @param chatId - The chat whose run should stop.
+   * @param origin - The gesture that asked, logged with the cancel.
    * @public
    */
-  public stopRun(chatId: string): void {
+  public stopRun(chatId: string, origin: StopOrigin): void {
     const session = this.#sessions.get(chatId);
     if (session === undefined) {
       return;
     }
     session.stopRequested = true;
+    session.stopOrigin = origin;
     this.#chatTopics.get(chatId)?.emit();
     session.watch?.stop();
     session.watch = undefined;
@@ -1772,11 +1790,13 @@ export class ChatSessionStore {
     if (runId === undefined || connector === undefined) {
       return;
     }
-    const answer = await sendHostCommand(async () => connector.connect(session.chatId), {
+    const command: HostCommand = {
       type: 'cancel',
       commandId: generatePrefixedId(idPrefix.request),
       payload: { chatId: session.chatId, runId },
-    });
+    };
+    logStop(command, session.stopOrigin);
+    const answer = await sendHostCommand(async () => connector.connect(session.chatId), command);
     if (answer.status === 'refused') {
       session.persistenceActorRef.send({
         type: 'setPersistedError',
@@ -2123,7 +2143,7 @@ export class ChatSessionStore {
         void this.#dispatchTurn(session, request);
       }),
       stateActorRef.on('stopTurnRequest', () => {
-        this.stopRun(session.chatId);
+        this.stopRun(session.chatId, 'new-turn');
       }),
       stateActorRef.subscribe(() => {
         const admits = this.#isAdmittingTurn(session);
@@ -3070,6 +3090,7 @@ export class ChatSessionStore {
       transcriptSourceVersion: 0,
       commandInFlight: false,
       stopRequested: false,
+      stopOrigin: undefined,
       restoredStoppedRunId: undefined,
       status: chat.status,
       turnSubscriptions: [],

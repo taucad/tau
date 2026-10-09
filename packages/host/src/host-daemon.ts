@@ -19,7 +19,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
-import { createNodeMachineHost } from '@taucad/runtime/host/node';
+import { createNodeMachineHost, MachineHostStartInFlightError } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
@@ -1019,8 +1019,21 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       }
     };
     /* No job starts from here on: a start the closing channel still admits would begin as the host goes away. The
-     * gate is up at the call; the wait lets a start already past it settle before the host closes under it. */
-    await settle(machines?.host.quiesce(), () => undefined);
+     * gate is up at the call; the wait lets a start already past it settle before the host closes under it. A start
+     * that outlasts the wait keeps the gate up, and the stop carries on to close the host: said, not failed. */
+    await settle(
+      machines?.host.quiesce().catch((error: unknown) => {
+        if (!(error instanceof MachineHostStartInFlightError)) {
+          throw error;
+        }
+        emit({
+          type: 'warning',
+          code: 'MACHINE_HOST',
+          message: 'A machine job was still starting when Tau Host stopped; check the machine.',
+        });
+      }),
+      () => undefined,
+    );
     agentRunReporter?.close();
     agentRunReporter = undefined;
     agentExternalAgents = [];

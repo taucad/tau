@@ -487,7 +487,7 @@ describe('an agent action a person approved, through a real machine host', () =>
       let candidate: MachineCandidate | undefined;
       for await (const event of person.discover({
         providerId: 'bambu-simulator',
-        configuration: { logicalId: 'simulated-x1c' },
+        configuration: {},
       })) {
         if (event.type === 'found') {
           candidate = event.candidate;

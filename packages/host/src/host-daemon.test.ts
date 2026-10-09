@@ -23,6 +23,7 @@ import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
 import type * as runtimeFilesystem from '@taucad/runtime/filesystem';
 import type * as runtimeHost from '@taucad/runtime/host';
+import type * as runtimeHostNode from '@taucad/runtime/host/node';
 import { z } from 'zod';
 
 import { startHostDaemon } from '#host-daemon.js';
@@ -50,6 +51,28 @@ vi.mock('@taucad/runtime/host', async (importOriginal) => {
         revoke: (session: Parameters<typeof admission.revoke>[0]) => {
           revokedSessions.push(session);
           return admission.revoke(session);
+        },
+      };
+    },
+  };
+});
+/* A machine host whose quiesce a case times out with a start still in flight, counting the resumes it hands out. */
+const machineQuiesce = vi.hoisted(() => ({ isStartInFlight: false, resumes: 0 }));
+vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
+  const original = await importOriginal<typeof runtimeHostNode>();
+  return {
+    ...original,
+    createNodeMachineHost: async (input: Parameters<typeof original.createNodeMachineHost>[0]) => {
+      const host = await original.createNodeMachineHost(input);
+      return {
+        ...host,
+        quiesce: async (options?: Parameters<typeof host.quiesce>[0]) => {
+          if (machineQuiesce.isStartInFlight) {
+            throw new original.MachineHostStartInFlightError(() => {
+              machineQuiesce.resumes += 1;
+            });
+          }
+          return host.quiesce(options);
         },
       };
     },
@@ -917,6 +940,43 @@ describe('startHostDaemon', () => {
 
     await daemon.close();
     expect(await daemon.closed).toEqual({ cause: 'requested' });
+  }, 20_000);
+
+  it('should stop, saying so, when a machine job is still starting as the machine host closes', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-starting-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.env['TAU_SECRET_VAULT'] = 'memory';
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    const events: HostDaemonEvent[] = [];
+    machineQuiesce.resumes = 0;
+    machineQuiesce.isStartInFlight = true;
+    try {
+      const daemon = startHostDaemon({
+        relayUrl: new URL('http://127.0.0.1:1'),
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
+        agent: { ...(await agentOptionsIn(temporaryDirectory)), machines: { providers: [fixtureMachine()] } },
+        onEvent: (event) => events.push(event),
+      });
+      await daemon.ready;
+      await daemon.close();
+      expect(await daemon.closed).toEqual({ cause: 'requested' });
+      /* The gate stays up through the close: nothing admits starts again on the way out. */
+      expect(machineQuiesce.resumes).toBe(0);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'warning',
+          code: 'MACHINE_HOST',
+          message: 'A machine job was still starting when Tau Host stopped; check the machine.',
+        }),
+      );
+    } finally {
+      machineQuiesce.isStartInFlight = false;
+    }
   }, 20_000);
 
   it('should warn and keep serving without machines while another Tau app owns the machine store', async () => {

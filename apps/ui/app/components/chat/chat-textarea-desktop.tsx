@@ -621,7 +621,9 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
       await document.fonts.ready;
       fit();
     };
-    void refitWhenFontsLoad();
+    if (document.fonts.status === 'loading') {
+      void refitWhenFontsLoad();
+    }
     return () => {
       disposed = true;
       resize.disconnect();

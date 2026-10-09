@@ -490,7 +490,10 @@ describe('composer bar measurement lifecycle', () => {
     observers.clear();
     originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
     fonts = Promise.withResolvers<FontFaceSet>();
-    Object.defineProperty(document, 'fonts', { configurable: true, value: { ready: fonts.promise } });
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { status: 'loading', ready: fonts.promise },
+    });
     vi.stubGlobal(
       'ResizeObserver',
       class implements ResizeObserver {

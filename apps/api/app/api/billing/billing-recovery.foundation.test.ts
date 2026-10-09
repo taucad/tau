@@ -23,6 +23,7 @@ import { createOperationsGaugeSource, recordOpenCases } from '#billing-command.o
 import type { OperationsGaugeMetrics } from '#billing-command.operations.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
+import type { MetricsService } from '#telemetry/metrics.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl) {
@@ -499,5 +500,54 @@ describe('the in-API recovery scheduler', () => {
         child.kill('SIGKILL');
       }
     }
+  });
+});
+
+describe('LLM recovery telemetry', () => {
+  it('should record the cost and tokens of an operation recovery settles, and route an unpriced supplier cost to the gauge', async () => {
+    const genAiCost = { add: vi.fn() };
+    const genAiTokenUsage = { record: vi.fn() };
+    const billingSupplierCostPicoUsd = { add: vi.fn() };
+    const recovering = new CreditLedgerService({ database }, new BillingPolicyService({ database }), {
+      genAiCost,
+      genAiTokenUsage,
+      billingSupplierCostPicoUsd,
+    } as unknown as MetricsService);
+    const fixture = await createFixture();
+    const admitted = await admit(fixture, `telemetry-${randomUUID()}`, { quantity: 40n });
+    await recovering.recordInvocationEvidence({
+      operationId: admitted.operationId,
+      accountId: fixture.accountId,
+      requestDigest: admitted.requestDigest,
+      evidence: {
+        kind: 'final_usage',
+        usageOccurredAt: new Date(),
+        meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 5n }],
+      },
+    });
+    await makeDue(admitted.operationId);
+
+    const result = await recovering.recoverDueLlmOperations({ environment, limit: 100, accountId: fixture.accountId });
+
+    expect(result.resolved).toBe(1);
+    const row = await readOperation(admitted.operationId);
+    expect(row.customerState).toBe('settled');
+    const attributes = {
+      'gen_ai.request.model': 'test-model',
+      'gen_ai.provider.name': row.providerId ?? 'unknown',
+      'tau.surface': 'gateway',
+      'tau.activity': 'agent',
+    };
+    expect(genAiCost.add).toHaveBeenCalledExactlyOnceWith(Number(row.chargedAtoms ?? 0n) / 1_000_000, attributes);
+    expect(genAiTokenUsage.record).toHaveBeenCalledExactlyOnceWith(5, {
+      ...attributes,
+      'gen_ai.token.type': 'input',
+    });
+    // Recovery passes the receipt it just wrote to the same recorder as the live path. This fixture
+    // admits without a pinned invocation, so there is no supplier valuation: the cost is unpriced,
+    // the unpriced-operations gauge counts it, and the supplier counter records nothing. The priced
+    // emission is covered by recordSettledGenAiUsage's unit test, which both paths call.
+    expect(row).toMatchObject({ supplierCostPicoUsd: null, supplierCostUnpricedReason: 'missing_rate' });
+    expect(billingSupplierCostPicoUsd.add).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,7 @@ import {
   assertMatchingRequestDigest,
   classifyFundedLlmCapacity,
   CreditLedgerService,
+  recordSettledGenAiUsage,
 } from '#api/billing/credit-ledger.service.js';
 import {
   billingAccountClosedError,
@@ -39,7 +40,7 @@ import type {
   QualifiedBillableInvocation,
 } from '#api/billing/billable-model-invocation.types.js';
 import type { AdmissionDenied } from '#api/billing/credit-ledger.service.js';
-import type { QualifiedAdmissionInput, TerminalEvidence, TerminalReceipt } from '#api/billing/credit-ledger.types.js';
+import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
@@ -128,19 +129,13 @@ const streamErrorType = (reason: string | undefined): string =>
       : reason === 'authorized_exhausted' || reason === 'malformed_response' || reason === 'service_restart'
         ? reason
         : 'incomplete';
-const genAiTokenTypes = new Map([
-  ['uncached_input', 'input'],
-  ['cache_read', 'cache_read'],
-  ['cache_write', 'cache_write'],
-  ['output', 'output'],
-]);
-const genAiAttributes = (qualification: QualifiedBillableInvocation): Record<string, string> => ({
+const genAiAttributes = (
+  qualification: QualifiedBillableInvocation,
+): Record<'gen_ai.request.model' | 'gen_ai.provider.name' | 'tau.surface', string> => ({
   'gen_ai.request.model': qualification.modelId,
   'gen_ai.provider.name': qualification.providerId,
   'tau.surface': qualification.surface,
 });
-/** One credit atom is one micro-USD. */
-const creditAtomsPerUsd = 1_000_000;
 
 /** Owns one funded model invocation from qualified admission through one terminal mutation. */
 @Injectable()
@@ -743,48 +738,13 @@ export class BillableModelInvocationService {
       evidence,
       resolvedAt: new Date(),
     });
-    this.recordSettledUsage(qualification, row, evidence, receipt);
-  }
-
-  /**
-   * Records the tokens, charged USD and estimated supplier cost of one operation this service
-   * settled, written together so the series reconcile: the supplier counter carries the same model
-   * and provider labels as the charge, so their ratio is the route's margin. An operation left
-   * pending for recovery records none of them here, and recovery's own settlement is not recorded
-   * either (a known gap; the unpriced-operations gauge reads the receipts themselves).
-   */
-  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one settled operation
-  private recordSettledUsage(
-    qualification: QualifiedBillableInvocation,
-    row: InvocationRow,
-    evidence: TerminalEvidence,
-    receipt: Pick<TerminalReceipt, 'chargedAtoms' | 'supplierCostPicoUsd'>,
-  ): void {
-    this.metrics?.genAiCost.add(Number(receipt.chargedAtoms) / creditAtomsPerUsd, {
-      ...genAiAttributes(qualification),
-      'tau.activity': row.activity,
-    });
-    // A refusal or an undispatched call cost nothing, and an unpriced one is counted by the gauge instead.
-    if (receipt.supplierCostPicoUsd !== null && receipt.supplierCostPicoUsd > 0n) {
-      this.metrics?.billingSupplierCostPicoUsd.add(Number(receipt.supplierCostPicoUsd), {
-        'gen_ai.request.model': qualification.modelId,
-        'gen_ai.provider.name': qualification.providerId,
-        'deployment.environment': row.environment,
-      });
-    }
-    // A stop-cut absorbed turn settles at zero; its partial meters are not usage it was charged for.
-    const meterItems =
-      evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
-    for (const item of meterItems) {
-      const tokenType = genAiTokenTypes.get(item.dimension);
-      if (tokenType !== undefined) {
-        this.metrics?.genAiTokenUsage.record(Number(item.quantity), {
-          ...genAiAttributes(qualification),
-          'gen_ai.token.type': tokenType,
-          'tau.activity': row.activity,
-        });
-      }
-    }
+    recordSettledGenAiUsage(
+      this.metrics,
+      { ...genAiAttributes(qualification), 'tau.activity': row.activity },
+      evidence,
+      receipt,
+      row.environment,
+    );
   }
 
   /**

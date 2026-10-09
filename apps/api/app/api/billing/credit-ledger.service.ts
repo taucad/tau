@@ -12,7 +12,7 @@ import { calculateSupplierCost } from '#api/billing/billable-model-cost.js';
 import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
 import { parseCommercialPolicyDocument, resolvePolicyRoute } from '#api/billing/billing-policy.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { ConflictException, ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -23,6 +23,7 @@ import {
 } from '@taucad/billing';
 import type { FinancialActivityKind } from '@taucad/billing';
 import { DatabaseService } from '#database/database.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
 import { BillingPolicyService, PolicyRouteUnavailableError } from '#api/billing/billing-policy.service.js';
 import {
   billingFinancialCase,
@@ -369,6 +370,51 @@ const hasConstraint = (error: unknown, constraint: string): boolean => {
   return false;
 };
 
+const genAiTokenTypes = new Map([
+  ['uncached_input', 'input'],
+  ['cache_read', 'cache_read'],
+  ['cache_write', 'cache_write'],
+  ['output', 'output'],
+]);
+/** One credit atom is one micro-USD. */
+const creditAtomsPerUsd = 1_000_000;
+
+/**
+ * Records the tokens and charged USD of one settled operation, written together so the two series
+ * reconcile. Both the live terminal and recovery's settlement call this; the labels are the
+ * operation's pinned model, provider, surface and activity, so cardinality stays that of admission.
+ */
+/* eslint-disable max-params-no-constructor/max-params-no-constructor -- one settled operation */
+export const recordSettledGenAiUsage = (
+  metrics: Pick<MetricsService, 'genAiCost' | 'genAiTokenUsage' | 'billingSupplierCostPicoUsd'> | undefined,
+  attributes: Record<'gen_ai.request.model' | 'gen_ai.provider.name' | 'tau.surface' | 'tau.activity', string>,
+  evidence: TerminalEvidence,
+  receipt: Pick<TerminalReceipt, 'chargedAtoms' | 'supplierCostPicoUsd'>,
+  environment: string,
+): void => {
+  metrics?.genAiCost.add(Number(receipt.chargedAtoms) / creditAtomsPerUsd, attributes);
+  // The supplier counter carries the charge's model and provider labels, so their ratio is the
+  // route's margin. A refusal or an undispatched call cost nothing, and an unpriced operation is
+  // counted by the unpriced-operations gauge instead.
+  if (receipt.supplierCostPicoUsd !== null && receipt.supplierCostPicoUsd > 0n) {
+    metrics?.billingSupplierCostPicoUsd.add(Number(receipt.supplierCostPicoUsd), {
+      'gen_ai.request.model': attributes['gen_ai.request.model'],
+      'gen_ai.provider.name': attributes['gen_ai.provider.name'],
+      'deployment.environment': environment,
+    });
+  }
+  // An absorbed turn's partial meters are not usage it was charged for.
+  const meterItems =
+    evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
+  for (const item of meterItems) {
+    const tokenType = genAiTokenTypes.get(item.dimension);
+    if (tokenType !== undefined) {
+      metrics?.genAiTokenUsage.record(Number(item.quantity), { ...attributes, 'gen_ai.token.type': tokenType });
+    }
+  }
+};
+/* eslint-enable max-params-no-constructor/max-params-no-constructor -- one settled operation */
+
 @Injectable()
 export class CreditLedgerService {
   private readonly logger = new Logger(CreditLedgerService.name);
@@ -377,6 +423,8 @@ export class CreditLedgerService {
     @Inject(DatabaseService)
     private readonly databaseService: Pick<DatabaseService, 'database'>,
     private readonly policyService: BillingPolicyService,
+    // oxlint-disable-next-line new-cap -- NestJS parameter decorators are invoked without new
+    @Optional() private readonly metrics?: MetricsService,
   ) {}
 
   /** Creates stable financial identity before a financial transaction takes the account lock. */
@@ -1308,6 +1356,18 @@ export class CreditLedgerService {
             detail: `Expired ${recoveryGraceMinutes} minutes after due_at with no retained evidence`,
           });
         }
+        recordSettledGenAiUsage(
+          this.metrics,
+          {
+            'gen_ai.request.model': operation.modelId,
+            'gen_ai.provider.name': operation.providerId ?? 'unknown',
+            'tau.surface': operation.surface,
+            'tau.activity': operation.activity,
+          },
+          evidence,
+          receipt,
+          input.environment,
+        );
         resolved += 1;
       } catch (error) {
         // Never retry provider execution: classify, then either back off or absorb this claim.

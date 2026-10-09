@@ -295,7 +295,9 @@ export class ObservationService<T> {
           }
           if (signal.aborted) {
             this.refused++;
-            this.options.disposeValue?.(value);
+            if (value !== this.snapshot.value) {
+              this.options.disposeValue?.(value);
+            }
             signal.throwIfAborted();
           }
           if (isCurrent()) {
@@ -310,7 +312,9 @@ export class ObservationService<T> {
             this.staged = { generation: input.generation, value };
           } else {
             this.refused++;
-            this.options.disposeValue?.(value);
+            if (value !== this.snapshot.value) {
+              this.options.disposeValue?.(value);
+            }
           }
           return { kind: 'read', generation: input.generation };
         },

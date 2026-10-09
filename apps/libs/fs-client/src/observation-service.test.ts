@@ -186,6 +186,48 @@ describe('ObservationService', () => {
     },
   );
 
+  it.each([false, true])('preserves a published value returned by an obsolete read (shared=%s)', async (shared) => {
+    const current = { url: 'current' };
+    const stale = shared ? current : { url: 'distinct stale' };
+    const next = { url: 'next' };
+    const second = Promise.withResolvers<typeof current>();
+    const third = Promise.withResolvers<typeof current>();
+    const disposeValue = vi.fn();
+    const publish = vi.fn();
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(current)
+      .mockReturnValueOnce(second.promise)
+      .mockReturnValueOnce(third.promise);
+    const service = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'shared-value',
+      watch: () => ({ ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() }),
+      read,
+      disposeValue,
+      publish,
+    });
+    const lease = service.acquire();
+    try {
+      await flush();
+      lease.refresh();
+      await flush();
+      lease.refresh();
+      second.resolve(stale);
+      await flush();
+      expect.soft(lease.getSnapshot().value).toBe(current);
+      expect.soft(publish).toHaveBeenCalledExactlyOnceWith(current);
+      expect.soft(disposeValue.mock.calls).toEqual(shared ? [] : [[stale]]);
+      expect.soft(read).toHaveBeenCalledTimes(3);
+      third.resolve(next);
+      await flush();
+      expect(lease.getSnapshot().value).toBe(next);
+      expect(disposeValue.mock.calls).toEqual(shared ? [[current]] : [[stale], [current]]);
+    } finally {
+      lease.release();
+    }
+  });
+
   it('should preserve equal values without republishing and dispose discarded and final values', async () => {
     const first = { bytes: 'same' };
     const next = { bytes: 'same' };

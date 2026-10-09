@@ -13,8 +13,8 @@ Grbl 1.1 and grblHAL CNC router machine plugin, modelled on the Sienci LongMill 
 - **One call composes it** — `grbl()` registers the serial provider with `defineRuntime`.
 - **Safe by construction** — held jogs send short `$J=` segments that end by themselves; stop holds, waits for the
   machine to settle, then resets, so the position is kept; jobs load under a feed hold and start at the machine.
-- **Homing switches optional** — with `$22=0`, as on a stock LongMill, the session offers no homing and works from the
-  work zero a person sets.
+- **Homing switches optional** — with homing off (`$22` bit 0 clear: `$22=0` on a stock LongMill; grblHAL's `$22` is
+  a bitfield), the session offers no homing and works from the work zero a person sets.
 - **A simulator behind the real protocol** — `grblSimulatorMachine` runs the same session against a virtual Grbl 1.1h
   controller (no homing switches unless its binding sets `homingSwitches`), and `grblDemoProgram()` cuts a sign in
   about a minute.

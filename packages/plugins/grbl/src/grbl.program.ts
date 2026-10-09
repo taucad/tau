@@ -7,7 +7,7 @@
 
 import type { MachineCheck, MachineProgramSummary } from '@taucad/runtime/machine';
 
-import { longMillTravel } from '#grbl.manifest.js';
+import type { GrblTravel } from '#grbl.manifest.js';
 
 import { cleanGcodeLine, grblMaximumLineLength } from '#grbl.protocol.js';
 
@@ -309,7 +309,8 @@ export const readGrblProgram = (text: string, name: string): GrblProgram => {
  * What a program needs from the machine before it may start: that Grbl runs every line, what its bit changes ask of
  * a person, and that it stays within the travel from the chosen zero.
  * @internal
- * @param input - The program, the start form's choices, and the zero's machine position when the position is trusted.
+ * @param input - The program, the start form's choices, the zero's machine position when the position is trusted, and
+ *   the travel.
  * @returns One check per fact, each passed, needing attention, blocked or unknown.
  */
 export const grblProgramChecks = (
@@ -321,9 +322,11 @@ export const grblProgramChecks = (
     origin: Readonly<Record<Axis, number>> | undefined;
     /** Whether the machine can home; without homing switches an untrusted position stays unknown. */
     canHome?: boolean;
+    /** The travel the controller reports (`$130`–`$132`). */
+    travel: GrblTravel;
   }>,
 ): MachineCheck[] => {
-  const { program, toolChange, workOffset, origin, canHome = true } = input;
+  const { program, toolChange, workOffset, origin, canHome = true, travel } = input;
   const checks: MachineCheck[] = [];
   const [refusal] = program.refused;
   checks.push({
@@ -368,11 +371,7 @@ export const grblProgramChecks = (
         ...(work === undefined ? [] : [{ min: work.min + origin[axis], max: work.max + origin[axis] }]),
         ...(machine === undefined ? [] : [machine]),
       ];
-      if (
-        ranges.some(
-          (range) => range.min < longMillTravel[axis].min - 1e-3 || range.max > longMillTravel[axis].max + 1e-3,
-        )
-      ) {
+      if (ranges.some((range) => range.min < travel[axis].min - 1e-3 || range.max > travel[axis].max + 1e-3)) {
         outside.push(axis.toUpperCase());
       }
     }

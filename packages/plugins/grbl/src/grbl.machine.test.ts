@@ -102,7 +102,7 @@ describe('grblMachine', () => {
       },
       resolveSecret: async () => '',
     };
-    await expect(definition.connect(input, runtime)).rejects.toThrow(/no serial access/u);
+    await expect(definition.connect(input, runtime)).rejects.toMatchObject({ code: 'MACHINE_UNAVAILABLE' });
     const opened: unknown[] = [];
     // Never a real port: the host's serial opener hands back the virtual controller.
     const session = await definition.connect(input, {

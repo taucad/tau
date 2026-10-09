@@ -11,6 +11,7 @@ import type {
   MachineAvailability,
   MachineCheck,
   MachineFailureCode,
+  MachineObservation,
   MachineRemedy,
   MachineReport,
   MachineRun,
@@ -20,6 +21,18 @@ import type {
 import { grblSimulatorLidAction } from '#grbl.manifest.js';
 import { grblAlarm, grblErrorSentence } from '#grbl.protocol.js';
 import type { GrblController } from '#grbl.session.js';
+
+/** Actions a timed router run leaves available: realtime bytes and answers, which never queue behind its dwell. */
+const realtimeActions = new Set([
+  'run.pause',
+  'run.resume',
+  'run.cancel',
+  'level.set',
+  'option.set',
+  'interaction.respond',
+  'spindle.set',
+  grblSimulatorLidAction,
+]);
 
 /* eslint-disable @typescript-eslint/naming-convention -- Grbl's own state words. */
 const statusWords: Readonly<Record<string, MachineStatus>> = {
@@ -219,7 +232,7 @@ const runOf = (controller: GrblController): MachineRun | undefined => {
     progress: {
       basis: 'queued',
       fraction: run.total === 0 ? 1 : Math.min(1, run.acknowledged / run.total),
-      ...(run.startedAtMs === undefined ? {} : { elapsed: Date.now() - run.startedAtMs }),
+      ...(run.startedAt === undefined ? {} : { elapsed: Date.parse(controller.now()) - Date.parse(run.startedAt) }),
       counters: [{ id: 'lines', label: 'Lines', current: run.acknowledged, total: run.total }],
     },
     ...(run.stage === undefined ? {} : { stage: run.stage }),
@@ -325,6 +338,7 @@ const availability = (controller: GrblController): MachineAvailability[] => {
   const busy = controller.isBusy
     ? `Finish ${controller.activity?.view.label.toLowerCase() ?? 'the procedure'} first.`
     : undefined;
+  const timed = controller.isRouterTimed ? 'The router is on a timed run. Switch it off first.' : undefined;
   const isTouching = controller.status?.pins?.includes('P') === true;
   const declared = [...controller.actions, ...controller.options.manifest.holds];
   return declared.map((descriptor): MachineAvailability => {
@@ -351,6 +365,9 @@ const availability = (controller: GrblController): MachineAvailability[] => {
       descriptor.id !== grblSimulatorLidAction
     ) {
       return unavailable('MACHINE_ACTION_BUSY', busy);
+    }
+    if (timed !== undefined && !realtimeActions.has(descriptor.id)) {
+      return unavailable('MACHINE_ACTION_BUSY', timed);
     }
     if (descriptor.id === 'probe.run' && isTouching) {
       return unavailable('MACHINE_ACTION_PRECONDITION_FAILED', 'The bit already touches the plate.', {
@@ -380,4 +397,29 @@ export const grblReport = (controller: GrblController): MachineReport => {
     availability: availability(controller),
     alerts: alerts(controller),
   };
+};
+
+/**
+ * A snapshot first and whenever more than component groups moved; otherwise only the groups that moved, with their
+ * new `receivedAt`, which is what keeps them fresh. Undefined when nothing moved.
+ * @internal
+ * @param previous - The report observed last, if any.
+ * @param report - The report now.
+ * @returns The observation to yield, or undefined.
+ */
+export const grblObservation = (
+  previous: MachineReport | undefined,
+  report: MachineReport,
+): MachineObservation | undefined => {
+  if (previous === undefined) {
+    return { type: 'snapshot', snapshot: report };
+  }
+  const { components, observedAt, ...rest } = report;
+  const { components: before, observedAt: _before, ...previousRest } = previous;
+  if (JSON.stringify(rest) !== JSON.stringify(previousRest)) {
+    return { type: 'snapshot', snapshot: report };
+  }
+  const seen = new Set(before.map((observation) => JSON.stringify(observation)));
+  const moved = components.filter((observation) => !seen.has(JSON.stringify(observation)));
+  return moved.length === 0 ? undefined : { type: 'changed', observedAt, components: moved };
 };

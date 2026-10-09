@@ -29,6 +29,22 @@ export const longMillTravel = Object.freeze({
   z: { min: -120, max: 0 },
 });
 
+/** Machine travel per axis. Millimetres. @internal */
+export type GrblTravel = Readonly<Record<'x' | 'y' | 'z', Readonly<{ min: number; max: number }>>>;
+
+/**
+ * The travel the controller's `$130`–`$132` give, homed to front-left-top with the origin forced to zero; the
+ * LongMill MK2 30×30 defaults for any setting not read back yet.
+ * @internal
+ * @param settings - The `$$` settings as read back.
+ * @returns Each axis's range, millimetres.
+ */
+export const grblTravel = (settings: ReadonlyMap<number, number>): GrblTravel => ({
+  x: { min: 0, max: settings.get(130) ?? longMillTravel.x.max },
+  y: { min: 0, max: settings.get(131) ?? longMillTravel.y.max },
+  z: { min: -(settings.get(132) ?? -longMillTravel.z.min), max: 0 },
+});
+
 /** Fastest the LongMill moves (`$110`–`$112`). Millimetres per minute. @internal */
 export const longMillMaximumRate = 4000;
 
@@ -83,6 +99,28 @@ const routerSchema = z.discriminatedUnion('mode', [
     duration: quantity({ unit: 's' }).positive().max(600).meta({ title: 'Stops by itself after' }),
   }),
 ]);
+
+/**
+ * The parameter schemas this manifest narrows from the standard families, and the simulator's own. The session parses
+ * with these, so what it sends is exactly what the host validated.
+ * @internal
+ */
+export const grblActionSchemas = {
+  move: z.strictObject({
+    frame: z.enum(['machine', 'work']).meta({ title: 'Coordinates' }),
+    position: axisPosition,
+    feed: quantity({ unit: 'mm/min' }).positive().max(longMillMaximumRate).optional().meta({ title: 'Feed' }),
+  }),
+  offsetSelect: z.strictObject({ offset }),
+  offsetSet: z.strictObject({ offset, position: axisPosition }),
+  probe: probeSchema,
+  router: routerSchema,
+  feedOverride: z.strictObject({
+    ratio: quantity({ unit: '1' }).min(0.1).max(2).meta({ title: 'Feed', description: '1 is the programmed feed.' }),
+  }),
+  rapidOverride: z.strictObject({ option: z.enum(['100', '50', '25']).meta({ title: 'Rapids (%)' }) }),
+  lid: z.strictObject({ button: z.enum(['start', 'hold', 'reset']).meta({ title: 'Button' }) }),
+} as const;
 
 /**
  * The LongMill manifest, with every action `designed` (or `qualified` under one profile, for the simulator).
@@ -239,11 +277,7 @@ export const longMillManifest = (
         label: 'Go to',
         when: idle,
         requires: [{ componentId: 'motion', group: 'position' }],
-        schema: z.strictObject({
-          frame: z.enum(['machine', 'work']).meta({ title: 'Coordinates' }),
-          position: axisPosition,
-          feed: quantity({ unit: 'mm/min' }).positive().max(longMillMaximumRate).optional().meta({ title: 'Feed' }),
-        }),
+        schema: grblActionSchemas.move,
         ...q,
       }),
       standardMachineAction({
@@ -251,7 +285,7 @@ export const longMillManifest = (
         componentId: 'motion',
         label: 'Use work offset',
         when: idle,
-        schema: z.strictObject({ offset }),
+        schema: grblActionSchemas.offsetSelect,
         ...q,
       }),
       standardMachineAction({
@@ -260,7 +294,7 @@ export const longMillManifest = (
         label: 'Set zero here',
         when: idle,
         requires: [{ componentId: 'motion', group: 'position' }],
-        schema: z.strictObject({ offset, position: axisPosition }),
+        schema: grblActionSchemas.offsetSet,
         ...q,
       }),
       standardMachineAction({
@@ -268,7 +302,7 @@ export const longMillManifest = (
         componentId: 'touch-plate',
         label: 'Probe with the touch plate',
         when: idle,
-        schema: probeSchema,
+        schema: grblActionSchemas.probe,
         consequence: 'The bit moves down until it touches the plate. Attach the magnet first; the router must be off.',
         requires: [{ componentId: 'touch-plate', group: 'inputs' }],
         ...q,
@@ -287,7 +321,7 @@ export const longMillManifest = (
         componentId: 'router',
         label: 'Router',
         when: idle,
-        schema: routerSchema,
+        schema: grblActionSchemas.router,
         consequence: 'The relay switches the router; its own dial sets the speed.',
         confirms: 'acknowledgement',
         ...q,
@@ -306,12 +340,7 @@ export const longMillManifest = (
         label: 'Feed override',
         when: ['active', 'held'],
         effects: ['motion'],
-        schema: z.strictObject({
-          ratio: quantity({ unit: '1' })
-            .min(0.1)
-            .max(2)
-            .meta({ title: 'Feed', description: '1 is the programmed feed.' }),
-        }),
+        schema: grblActionSchemas.feedOverride,
         ...q,
       }),
       standardMachineAction({
@@ -320,7 +349,7 @@ export const longMillManifest = (
         label: 'Rapid override',
         when: ['active', 'held'],
         effects: ['motion'],
-        schema: z.strictObject({ option: z.enum(['100', '50', '25']).meta({ title: 'Rapids (%)' }) }),
+        schema: grblActionSchemas.rapidOverride,
         ...q,
       }),
       standardMachineAction({
@@ -388,5 +417,5 @@ export const grblSimulatorLid = (qualification: MachineActionQualification): Mac
       requires: [],
       confirms: 'acknowledgement',
     },
-    z.strictObject({ button: z.enum(['start', 'hold', 'reset']).meta({ title: 'Button' }) }),
+    grblActionSchemas.lid,
   );

@@ -16,7 +16,8 @@ Grbl 1.1 and grblHAL CNC router machine plugin
 - `src/index.ts`
 - `src/grbl.plugin.ts`
 - `src/grbl.machine.ts` (serial discovery and connection; the session loads lazily)
-- `src/grbl.session.ts` (session ABI v2 over one serial stream; `grbl.report.ts` builds its report)
+- `src/grbl.session.ts` (session ABI v2 over one serial stream; `grbl.report.ts` builds its report and observation deltas)
+- `src/grbl.stream.ts` (streams a job: loads under a feed hold, character-counted feed, bit-change pauses, refused lines)
 - `src/grbl.protocol.ts` (pure Grbl 1.1 framing, parsing, realtime bytes, character counting, code tables)
 - `src/grbl.program.ts` (G-code summary and start checks)
 - `src/grbl.manifest.ts` (LongMill MK2 30×30 manifest)

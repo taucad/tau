@@ -1,6 +1,11 @@
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine, machineManifestOf } from '@taucad/runtime/machine';
-import type { MachineDiscoveryEvent, MachineDiscoveryRuntime, MachineSerialPort } from '@taucad/runtime/machine';
+import type {
+  MachineDiscoveryEvent,
+  MachineDiscoveryRuntime,
+  MachineFailureCode,
+  MachineSerialPort,
+} from '@taucad/runtime/machine';
 import { z } from 'zod';
 
 import { grblWorkOffsets, longMillManifest } from '#grbl.manifest.js';
@@ -97,7 +102,9 @@ export const grblMachine = defineMachine({
   discover: discoverGrblPorts,
   async connect(input, runtime) {
     if (runtime.openSerial === undefined) {
-      throw new Error('This host has no serial access, so it cannot reach a Grbl controller.');
+      throw Object.assign(new Error('This host has no serial access, so it cannot reach a Grbl controller.'), {
+        code: 'MACHINE_UNAVAILABLE' satisfies MachineFailureCode,
+      });
     }
     const path = input.configuration.port ?? input.candidate.endpoint.address;
     // Opening the port toggles DTR, which restarts an Uno: Grbl comes back locked until it homes.

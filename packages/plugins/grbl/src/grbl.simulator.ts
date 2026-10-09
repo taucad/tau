@@ -19,6 +19,7 @@ import { grblSubmissionConfiguration } from '#grbl.machine.js';
 import {
   grblSimulatorLid,
   grblSimulationProfile,
+  grblTravel,
   grblWorkOffsets,
   longMillManifest,
   longMillTravel,
@@ -180,9 +181,9 @@ export class VirtualGrbl {
     return () => this.listeners.delete(listener);
   }
 
-  /** Power up: the welcome line, and the homing lock because homing is enabled (`$22=1`). */
+  /** Power up: the welcome line, and the homing lock when homing is enabled (`$22` bit 0, as grblHAL reads it too). */
   public powerOn(): void {
-    this.state = this.settings.get(22) === 1 ? 'Alarm' : 'Idle';
+    this.state = (this.settings.get(22) ?? 0) % 2 === 1 ? 'Alarm' : 'Idle';
     this.say("Grbl 1.1h ['$' for help]", ...(this.state === 'Alarm' ? ["[MSG:'$H'|'$X' to unlock]"] : []));
     clearInterval(this.timer);
     this.timer = setInterval(() => {
@@ -580,9 +581,11 @@ export class VirtualGrbl {
         target[axis] = isRelative ? start[axis] + value * scale : value * scale + offset[axis];
       }
     }
+    // Soft limits follow `$130`–`$132`; the hard-limit switches stay where the LongMill's frame puts them.
+    const travel = grblTravel(this.settings);
     if (
       this.settings.get(20) === 1 &&
-      axes.some((axis) => target[axis] < longMillTravel[axis].min || target[axis] > longMillTravel[axis].max)
+      axes.some((axis) => target[axis] < travel[axis].min || target[axis] > travel[axis].max)
     ) {
       return 'error:15';
     }

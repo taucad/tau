@@ -4,6 +4,8 @@ import { componentValue, machineManifestOf } from '@taucad/runtime/machine';
 import type {
   MachineArtifactReference,
   MachineCommandReceipt,
+  MachineNetworkStream,
+  MachineObservation,
   MachineProviderHold,
   MachineReport,
   MachineSession,
@@ -39,23 +41,40 @@ const artifact = (path: string): MachineArtifactReference =>
 
 type Connected = Readonly<{
   machine: VirtualGrbl;
+  /** The serial line; closing it is the cable coming out. */
+  stream: MachineNetworkStream;
   session: MachineSession<GrblSubmission>;
   controller: GrblController;
   report: () => Promise<MachineReport>;
-  /** Apply `componentId:action`, in the run when one is named. */
-  act: (target: string, parameters?: unknown, runId?: string) => Promise<MachineCommandReceipt>;
+  /** Apply `componentId:action`, in the run when one is named, as a person unless an agent is named. */
+  act: (
+    target: string,
+    parameters?: unknown,
+    context?: Readonly<{ runId?: string; requester?: 'user' | 'agent' }>,
+  ) => Promise<MachineCommandReceipt>;
   until: (condition: (report: MachineReport) => boolean, waitLimit?: number) => Promise<MachineReport>;
 }>;
 
 const open: Connected[] = [];
 let operation = 0;
 
-const connect = async (program = '', options: VirtualGrblOptions = {}): Promise<Connected> => {
-  const machine = new VirtualGrbl({ speed: 20, tick: 5, homingSwitches: true, ...options });
+type Setup = Readonly<{
+  /** `$` settings the controller holds at power-up, over the simulator's own. */
+  settings?: Readonly<Record<number, number>>;
+  /** The host clock; the wall clock by default. */
+  now?: () => string;
+}>;
+
+const connect = async (program = '', options: VirtualGrblOptions = {}, setup: Setup = {}): Promise<Connected> => {
+  const machine = new VirtualGrbl({ speed: 100, tick: 5, homingSwitches: true, ...options });
+  for (const [id, value] of Object.entries(setup.settings ?? {})) {
+    machine.settings.set(Number(id), value);
+  }
+  const stream = createVirtualGrblStream(machine);
   const session = await openGrblSession({
-    stream: createVirtualGrblStream(machine),
+    stream,
     runtime: {
-      clock: { now: () => new Date().toISOString() },
+      clock: { now: setup.now ?? (() => new Date().toISOString()) },
       log: async () => undefined,
       async *readArtifact() {
         yield encoder.encode(program);
@@ -73,10 +92,11 @@ const connect = async (program = '', options: VirtualGrblOptions = {}): Promise<
   const report = async (): Promise<MachineReport> => session.getSnapshot({ signal: new AbortController().signal });
   const connected: Connected = {
     machine,
+    stream,
     session,
     controller: session.controller,
     report,
-    act: async (target, parameters, runId) => {
+    act: async (target, parameters, context = {}) => {
       operation += 1;
       const [componentId = '', action = ''] = target.split(':');
       return session.controller.apply({
@@ -84,8 +104,9 @@ const connect = async (program = '', options: VirtualGrblOptions = {}): Promise<
         componentId,
         action,
         version: 1,
-        expectedRunId: runId ?? null,
+        expectedRunId: context.runId ?? null,
         parameters: parameters ?? {},
+        requestedBy: { kind: context.requester ?? 'user' },
         signal: new AbortController().signal,
       });
     },
@@ -117,12 +138,17 @@ const originOf = (report: MachineReport): Xyz => motionOf(report).workOffset.ori
 /** Apply an action and require the controller to take it. */
 const accept = async (connected: Connected, target: string, parameters?: unknown): Promise<MachineCommandReceipt> => {
   const receipt = await connected.act(target, parameters);
-  expect(receipt.status).toBe('accepted');
+  expect(receipt.status === 'rejected' ? `${receipt.code}: ${receipt.message}` : receipt.status).toBe('accepted');
   return receipt;
 };
 
 const answer = async (connected: Connected, answerId: string): Promise<void> => {
-  const report = await connected.until((current) => current.activities[0]?.awaiting?.kind === 'confirmation');
+  // A person can answer once the machine allows it: the plate prompt shows while Z is still lifting off the plate.
+  const report = await connected.until(
+    (current) =>
+      current.activities[0]?.awaiting?.kind === 'confirmation' &&
+      (current.state.status === 'ready' || current.state.status === 'held'),
+  );
   const activity = report.activities[0]!;
   const awaiting = activity.awaiting as Extract<NonNullable<typeof activity.awaiting>, { kind: 'confirmation' }>;
   await accept(connected, 'controller:interaction.respond', {
@@ -166,6 +192,7 @@ const holdJog = async (connected: Connected, axis: 'y' | 'z' = 'y'): Promise<Mac
     componentId: 'motion',
     hold: 'motion.jog',
     parameters: { axis, direction: 1, feed: 1500 },
+    requestedBy: { kind: 'user' },
     signal: new AbortController().signal,
   });
   if (!('extend' in hold)) {
@@ -196,7 +223,18 @@ describe('grbl session against the virtual controller', () => {
     ]);
     const descriptor = await connected.session.getDescriptor({ signal: new AbortController().signal });
     expect(descriptor.firmware).toBe('Grbl 1.1h');
+    // The session repeats admission when it sends: a move in alarm is refused before any line reaches Grbl.
+    expect(await connected.act('motion:motion.move', { frame: 'machine', position: { x: 10 } })).toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_PRECONDITION_FAILED',
+    });
+    expect(connected.machine.lines.some((line) => line.startsWith('G90G21'))).toBe(false);
     await home(connected);
+    // Parameters are parsed with the action's schema, not cast.
+    expect(await connected.act('motion:motion.move', { frame: 'tool', position: { x: 10 } })).toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_PARAMETERS_INVALID',
+    });
     const homed = await connected.report();
     expect(machineAt(homed)).toEqual({ x: 0, y: 0, z: 0 });
     expect(homed.alerts).toEqual([]);
@@ -282,7 +320,7 @@ describe('grbl session against the virtual controller', () => {
     await connected.until(() => connected.machine.spindle);
 
     // Feed hold from Tau: the router keeps turning in the cut.
-    const pause = await connected.act('controller:run.pause', {}, 'run-start-sign.gcode');
+    const pause = await connected.act('controller:run.pause', {}, { runId: 'run-start-sign.gcode' });
     expect(pause.status).toBe('accepted');
     report = await connected.until((current) => current.state.native === 'Hold:0');
     expect(report.run).toMatchObject({ state: 'paused', paused: { by: 'person' } });
@@ -302,10 +340,8 @@ describe('grbl session against the virtual controller', () => {
 
   it('raises a critical alarm on a hard limit and loses the position', async () => {
     const connected = await connect();
-    await connected.until((report) => report.state.status === 'alarm');
-    await accept(connected, 'controller:controller.unlock');
-    await connected.until((report) => report.state.status === 'ready');
-    // The gantry is physically 400 mm from the X switch while Grbl believes it is at zero.
+    await home(connected);
+    // Homed at the X switch: a jog past it trips the limit (soft limits are off, as on a stock LongBoard).
     await accept(connected, 'motion:motion.jog', { axis: 'x', distance: -500, feed: 4000 });
     const report = await connected.until((current) => current.state.status === 'alarm' && current.alerts.length > 0);
     expect(motionOf(report).trust).toBe('lost');
@@ -377,7 +413,6 @@ describe('grbl session against the virtual controller', () => {
     expect(report.alerts).toEqual([]);
     expect(motionOf(report).trust).toBe('unknown');
     expect(report.checks.find((check) => check.id === 'position')).toMatchObject({ state: 'unknown' });
-    await accept(connected, 'controller:controller.unlock');
 
     // Raise Z clear of the plate with a held jog, then probe the stock top.
     const hold = await holdJog(connected, 'z');
@@ -388,6 +423,7 @@ describe('grbl session against the virtual controller', () => {
       await hold.extend();
     }
     await hold.release();
+    await connected.until((current) => current.state.status === 'ready');
     await accept(connected, 'motion:motion.move', { frame: 'machine', position: { z: 20 } });
     await connected.until((current) => current.state.status === 'ready' && machineAt(current).z === 20);
     await accept(connected, 'touch-plate:probe.run', { cycle: 'z', plateThickness: 15 });
@@ -425,4 +461,250 @@ describe('grbl session against the virtual controller', () => {
     expect(motionOf(report).trust).toBe('unknown');
     expect(connected.machine.droppedBytes).toBe(0);
   }, 30_000);
+});
+
+describe('grbl session stops, admission and observation', () => {
+  it('reads $22 as a bitfield, so a grblHAL controller with homing on offers homing', async () => {
+    const connected = await connect('', { homingSwitches: false }, { settings: { 22: 79 } });
+    const report = await connected.until((current) => current.state.status === 'alarm');
+    const descriptor = await connected.session.getDescriptor({ signal: new AbortController().signal });
+    expect(descriptor.capabilities.actions.map((action) => action.id)).toContain('motion.home');
+    expect(report.alerts.find((alert) => alert.code === 'homing-required')?.remedies?.[0]).toEqual({
+      type: 'action',
+      componentId: 'motion',
+      action: 'motion.home',
+    });
+  });
+
+  it('checks moves and programs against the travel the controller reports in $130–$132', async () => {
+    const connected = await connect('G90 G0 X450', {}, { settings: { 130: 400 } });
+    await home(connected);
+    expect(await connected.act('motion:motion.move', { frame: 'machine', position: { x: 450 } })).toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_PRECONDITION_FAILED',
+    });
+    const preparation = await jobsOf(connected).prepare({
+      operationId: 'prepare-travel',
+      expectedMachineId: 'grbl-simulator',
+      artifact: artifact('jobs/wide.gcode'),
+      configuration: submission,
+      signal: new AbortController().signal,
+    });
+    if (preparation.status === 'refused') {
+      throw new Error(preparation.message);
+    }
+    expect(preparation.checks.find((check) => check.id === 'travel')).toMatchObject({ state: 'blocked' });
+  });
+
+  it('leaves an operation it never sent pending, and refuses an answer to a replaced question', async () => {
+    const connected = await connect();
+    await home(connected);
+    expect(connected.controller.confirm('never-sent')).toEqual({ status: 'pending' });
+    await accept(connected, 'touch-plate:probe.run', { cycle: 'z', plateThickness: 15 });
+    const report = await connected.until((current) => current.activities[0]?.awaiting?.kind === 'confirmation');
+    expect(
+      await connected.act('controller:interaction.respond', {
+        activityId: report.activities[0]?.activityId,
+        promptId: 'an-older-question',
+        answer: 'continue',
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_PROMPT_STALE' });
+  });
+
+  it('switches a timed router off by hold, settle and reset, keeping the work offset, with nothing queued behind it', async () => {
+    const connected = await connect();
+    await home(connected);
+    await accept(connected, 'motion:motion.move', { frame: 'machine', position: { x: 50 } });
+    await connected.until((report) => report.state.status === 'ready' && machineAt(report).x === 50);
+    await accept(connected, 'motion:work-offset.select', { offset: 'G55' });
+    await connected.until((report) => motionOf(report).workOffset.id === 'G55');
+    // A start form left blank runs from the zero the machine uses now; a value given wins.
+    const complete = async (configuration: Readonly<Record<string, string>>): Promise<unknown> =>
+      jobsOf(connected).completeConfiguration?.({
+        expectedMachineId: 'grbl-simulator',
+        artifact: artifact('jobs/any.gcode'),
+        configuration,
+        signal: new AbortController().signal,
+      });
+    expect(await complete({})).toEqual({ workOffset: 'G55' });
+    expect(await complete({ workOffset: 'G54', toolChange: 'refuse' })).toEqual({
+      workOffset: 'G54',
+      toolChange: 'refuse',
+    });
+    await accept(connected, 'router:spindle.set', { mode: 'clockwise', duration: 600 });
+    await connected.until(() => connected.machine.spindle);
+    // The dwell holds Grbl's line queue: a line sent now would wait behind it, and the reset that ends it would drop it.
+    expect(await connected.act('motion:work-offset.set', { offset: 'G55', position: { x: 0 } })).toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_BUSY',
+    });
+    await accept(connected, 'router:spindle.set', { mode: 'off' });
+    expect(connected.machine.spindle).toBe(false);
+    let report = await connected.until((current) => current.state.status === 'ready');
+    expect(motionOf(report)).toMatchObject({ trust: 'kept', workOffset: { id: 'G55' } });
+    expect(report.alerts).toEqual([]);
+    await accept(connected, 'motion:work-offset.set', { offset: 'G55', position: { x: 0 } });
+    report = await connected.until((current) => originOf(current).x === 50);
+    expect(motionOf(report).workOffset.id).toBe('G55');
+  });
+
+  it('stops a moving job by hold, settle and reset: the position is kept and the router stops', async () => {
+    let clock = Date.parse('2026-10-09T12:00:00.000Z');
+    const cut = Array.from(
+      { length: 20 },
+      (_, index) => `G1 X${String(10 + (index % 2) * 300)} Y${String(10 + index)}`,
+    );
+    const connected = await connect(
+      ['G21 G90', 'M3 S18000', 'G1 Z-1 F600', 'F300', ...cut, 'M5', 'M30'].join('\n'),
+      {},
+      {
+        now: () => new Date(clock).toISOString(),
+      },
+    );
+    await home(connected);
+    await start(connected, 'moving.gcode');
+    await connected.until((current) => current.state.native === 'Hold:0');
+    connected.machine.press('start');
+    let report = await connected.until((current) => current.run?.state === 'running' && current.state.native === 'Run');
+    // Elapsed time comes from the host clock, not the wall clock.
+    clock += 5000;
+    report = await connected.report();
+    expect(report.run?.progress.elapsed).toBe(5000);
+    await connected.until(() => connected.machine.spindle);
+    const stop = await connected.session.stop({ operationId: 'stop-moving', signal: new AbortController().signal });
+    expect(stop.status).toBe('accepted');
+    report = await connected.until((current) => current.state.status === 'ready');
+    expect(report.run).toMatchObject({ state: 'cancelled' });
+    expect(motionOf(report).trust).toBe('kept');
+    expect(connected.machine.spindle).toBe(false);
+    expect(report.alerts).toEqual([]);
+    // A reset while moving shifts the gantry from where Grbl believes it is; a settled one does not.
+    expect(connected.machine.drift).toEqual({ x: 0, y: 0, z: 0 });
+  });
+
+  it('reports a feed hold an agent asked for as paused by the agent', async () => {
+    const connected = await connect(['G21 G90', 'F100', 'G1 X300', 'G1 X0', 'M30'].join('\n'));
+    await home(connected);
+    await start(connected, 'agent-pause.gcode');
+    await connected.until((report) => report.state.native === 'Hold:0');
+    connected.machine.press('start');
+    await connected.until((report) => report.run?.state === 'running' && report.state.native === 'Run');
+    const pause = await connected.act(
+      'controller:run.pause',
+      {},
+      {
+        runId: 'run-start-agent-pause.gcode',
+        requester: 'agent',
+      },
+    );
+    expect(pause.status).toBe('accepted');
+    const report = await connected.until((current) => current.state.native === 'Hold:0');
+    expect(report.run).toMatchObject({ state: 'paused', paused: { by: 'agent' } });
+  });
+
+  it('preempts a queued action when it stops', async () => {
+    const connected = await connect();
+    await home(connected);
+    void connected.controller.send('G4P600');
+    const queued = connected.act('motion:work-offset.set', { offset: 'G54', position: { x: 0 } });
+    await sleep(50);
+    expect(
+      await connected.session.stop({ operationId: 'stop-queued', signal: new AbortController().signal }),
+    ).toMatchObject({
+      status: 'accepted',
+    });
+    expect(await queued).toMatchObject({ status: 'unknown' });
+    const report = await connected.until((current) => current.state.status === 'ready');
+    expect(originOf(report)).toEqual({ x: 0, y: 0, z: 0 });
+  });
+
+  it('reports a stop that could not settle as unknown, with the position lost', async () => {
+    const connected = await connect();
+    await home(connected);
+    await accept(connected, 'motion:motion.move', { frame: 'machine', position: { x: 500 }, feed: 200 });
+    await connected.until((report) => report.state.native === 'Run');
+    // Freeze the controller mid-move: the hold never reaches Hold:0.
+    connected.machine.powerOff();
+    const stop = await connected.session.stop({ operationId: 'stop-frozen', signal: new AbortController().signal });
+    expect(stop.status).toBe('unknown');
+    const report = await connected.until((current) => current.alerts.some((alert) => alert.code === 'ALARM:3'));
+    expect(motionOf(report).trust).toBe('lost');
+  }, 15_000);
+
+  it('refuses a held jog while a job loads, and never queues more travel than the bound', async () => {
+    const connected = await connect('G21 G90\nG1 X20 F600\nM30');
+    await home(connected);
+    const { holds } = connected.session;
+    if (holds.type !== 'supported') {
+      throw new Error('Holds are unsupported.');
+    }
+    const startedAt = performance.now();
+    const hold = await holdJog(connected);
+    for (let renewal = 0; renewal < 5; renewal += 1) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- renewals arrive back to back, faster than the bound allows.
+      await hold.extend();
+    }
+    const elapsed = performance.now() - startedAt;
+    // Segments are half the 150 ms bound: back-to-back renewals queue at most two, plus one per segment already run.
+    expect(jogSegments(connected)).toBeLessThanOrEqual(2 + Math.floor(elapsed / 75));
+    await hold.release();
+    await connected.until((report) => report.state.status === 'ready');
+
+    await start(connected, 'short.gcode');
+    await connected.until((report) => report.run?.state === 'starting' && report.state.native === 'Hold:0');
+    const refused = await holds.begin({
+      operationId: 'hold-during-start',
+      componentId: 'motion',
+      hold: 'motion.jog',
+      parameters: { axis: 'y', direction: 1, feed: 1500 },
+      requestedBy: { kind: 'user' },
+      signal: new AbortController().signal,
+    });
+    expect('extend' in refused).toBe(false);
+  });
+
+  it('marks a streamed run unknown when the link is lost, and still reconciles its start', async () => {
+    const connected = await connect(
+      ['G21 G90', 'F100', ...Array.from({ length: 20 }, (_, index) => `G1 X${String(index * 20)}`)].join('\n'),
+    );
+    await home(connected);
+    const started = await start(connected, 'unplugged.gcode');
+    await connected.until((report) => report.state.native === 'Hold:0');
+    connected.machine.press('start');
+    await connected.until((report) => report.run?.state === 'running');
+    await connected.stream.close();
+    const report = await connected.until((current) => current.connection === 'disconnected');
+    expect(report.run).toMatchObject({
+      state: 'unknown',
+      stage: 'The connection was lost while the job was being fed.',
+    });
+    expect(
+      await connected.session.reconcile({
+        operationId: 'start-unplugged.gcode',
+        kind: 'start',
+        signal: new AbortController().signal,
+      }),
+    ).toEqual(started);
+  });
+
+  it('observes a snapshot first, then only the groups that moved, and ends when aborted', async () => {
+    const connected = await connect();
+    await home(connected);
+    const abort = new AbortController();
+    const iterator = connected.session.observe({ signal: abort.signal })[Symbol.asyncIterator]();
+    const first = await iterator.next();
+    expect(first.value).toMatchObject({ type: 'snapshot' });
+    let next = await iterator.next();
+    while (next.value?.type !== 'changed') {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- observations arrive one report at a time.
+      next = await iterator.next();
+    }
+    const changed: MachineObservation | undefined = next.done === true ? undefined : next.value;
+    if (changed?.type !== 'changed') {
+      throw new Error('The observation ended before a change.');
+    }
+    expect(changed.components.map((observation) => observation.group)).toContain('position');
+    abort.abort();
+    expect(await iterator.next()).toMatchObject({ done: true });
+  });
 });

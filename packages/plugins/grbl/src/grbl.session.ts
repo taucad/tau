@@ -9,6 +9,7 @@
  * @module
  */
 
+import { checkMachineAction, standardMachineActions, standardMachineHolds } from '@taucad/runtime/machine';
 import type {
   MachineActionConfirmation,
   MachineActivity,
@@ -17,25 +18,29 @@ import type {
   MachineCheck,
   MachineCommandReceipt,
   MachineConnectionRuntime,
+  MachineFailure,
   MachineFailureCode,
   MachineManifest,
   MachineNetworkStream,
   MachinePreparation,
   MachinePromptAnswer,
   MachineProviderActionInput,
+  MachineProviderDescriptor,
   MachineProviderHold,
   MachineProviderHoldInput,
   MachineReport,
   MachineRun,
   MachineSession,
 } from '@taucad/runtime/machine';
+import type { z } from 'zod';
 
-import { grblWorkOffsets, longMillMaximumRate, longMillTravel } from '#grbl.manifest.js';
+import { grblActionSchemas, grblTravel, grblWorkOffsets, longMillMaximumRate } from '#grbl.manifest.js';
+import type { GrblTravel } from '#grbl.manifest.js';
 import { grblProgramChecks, readGrblProgram } from '#grbl.program.js';
-import { grblChecks, grblReport } from '#grbl.report.js';
+import { grblChecks, grblObservation, grblReport } from '#grbl.report.js';
+import { startGrblRun } from '#grbl.stream.js';
 import {
   GrblCharacterCounter,
-  cleanGcodeLine,
   createGrblLineSplitter,
   grblAlarm,
   grblErrorSentence,
@@ -70,7 +75,8 @@ export type GrblSessionOptions = Readonly<{
   signal: AbortSignal;
 }>;
 
-type Reply =
+/** A line's reply, or why none will come. @internal */
+export type GrblReply =
   | Readonly<{ type: 'ok' }>
   | Readonly<{ type: 'error'; code: number }>
   | Readonly<{ type: 'reset' | 'closed' }>;
@@ -86,7 +92,8 @@ type Activity = {
   answered: Set<string>;
 };
 
-type Run = {
+/** A job the session is streaming. @internal */
+export type GrblRun = {
   runId: string;
   name: string;
   total: number;
@@ -94,7 +101,6 @@ type Run = {
   state: MachineRun['state'];
   paused?: NonNullable<MachineRun['paused']>;
   startedAt?: string;
-  startedAtMs?: number;
   endedAt?: string;
   stage?: string;
   abort: AbortController;
@@ -111,22 +117,39 @@ const parkZ = -5;
 /** Without homing switches machine Z means nothing: park this far above the work zero, the plate plus room for a longer bit. */
 const parkWorkZ = 35;
 
-const isAborted = (run: Readonly<{ abort: AbortController }>): boolean => run.abort.signal.aborted;
-
-const gate = (): NonNullable<Run['gate']> => {
-  let open = (): void => undefined;
-  const promise = new Promise<void>((resolve) => {
-    open = resolve;
-  });
-  return { promise, open };
-};
-
-const toPosition = (values: readonly number[] | undefined, scale: number): Position | undefined =>
-  values === undefined
-    ? undefined
-    : { x: (values[0] ?? 0) * scale, y: (values[1] ?? 0) * scale, z: (values[2] ?? 0) * scale };
+const toPosition = (values: readonly number[], scale: number): Position => ({
+  x: (values[0] ?? 0) * scale,
+  y: (values[1] ?? 0) * scale,
+  z: (values[2] ?? 0) * scale,
+});
 
 const format = (value: number): string => String(Math.round(value * 1000) / 1000);
+
+const isAxis = (value: string): value is Axis => (axes as readonly string[]).includes(value);
+
+/**
+ * G-code axis words for the axes a partial position names.
+ * @param position - Millimetres per named axis.
+ * @returns Such as `X10Y0`.
+ */
+const axisWords = (position: Readonly<Partial<Position>>): string =>
+  axes
+    .flatMap((axis) => {
+      const value = position[axis];
+      return value === undefined ? [] : [`${axis.toUpperCase()}${format(value)}`];
+    })
+    .join('');
+
+/**
+ * Parse parameters with the schema the host validated them with.
+ * @param schema - The action's schema.
+ * @param parameters - What arrived.
+ * @returns The parsed parameters, or undefined when they do not fit.
+ */
+const parse = <Schema extends z.ZodType>(schema: Schema, parameters: unknown): z.output<Schema> | undefined => {
+  const result = schema.safeParse(parameters ?? {});
+  return result.success ? result.data : undefined;
+};
 
 /**
  * The live connection: state from reports, the line queue, and every procedure.
@@ -149,21 +172,25 @@ export class GrblController {
   public overrides?: GrblStatus['overrides'];
   public accessories?: string;
   public activity?: Activity;
-  public run?: Run;
+  public run?: GrblRun;
   public streamError?: Readonly<{ code: number; line: number }>;
   public reportSequence = 0;
+  /**
+   * Whether the router is on a timed run: its `G4` dwell holds the controller's line queue until the `M5` behind it.
+   * Every line-sending action is busy meanwhile, so the reset that ends it early flushes nothing else.
+   */
+  public isRouterTimed = false;
   public reportedAt?: string;
   public readonly settings = new Map<number, number>();
   public readonly options: GrblSessionOptions;
 
   private readonly counter = new GrblCharacterCounter();
-  private readonly queue: Array<{ line: string; resolve: (reply: Reply) => void; sent: () => void }> = [];
-  private readonly inFlight: Array<(reply: Reply) => void> = [];
+  private readonly queue: Array<{ line: string; resolve: (reply: GrblReply) => void; sent: () => void }> = [];
+  private readonly inFlight: Array<(reply: GrblReply) => void> = [];
   private readonly listeners = new Set<() => void>();
   private readonly confirmations = new Map<string, () => MachineActionConfirmation>();
   private readonly receipts = new Map<string, MachineCommandReceipt>();
   private lastProbe?: Readonly<{ position: Position; isSuccess: boolean }>;
-  private dwellUntil = 0;
   private activityCount = 0;
   private poll?: ReturnType<typeof setInterval>;
 
@@ -180,11 +207,20 @@ export class GrblController {
   }
 
   /**
-   * Whether `$22` homing is on. A stock LongMill has no homing switches: it works from the work zero a person sets.
+   * Whether `$22` homing is on: bit 0, on Grbl 1.1 (`0`/`1`) and on grblHAL, where `$22` is a bitfield (`79`). A stock
+   * LongMill has no homing switches: it works from the work zero a person sets.
    * @returns True when the controller can home.
    */
   public get isHomingEnabled(): boolean {
-    return this.settings.get(22) === 1;
+    return (this.settings.get(22) ?? 0) % 2 === 1;
+  }
+
+  /**
+   * The travel the controller reports.
+   * @returns Each axis's range from `$130`–`$132`, millimetres.
+   */
+  public get travel(): GrblTravel {
+    return grblTravel(this.settings);
   }
 
   /**
@@ -214,7 +250,9 @@ export class GrblController {
     const answered = await this.waitFor(() => this.status !== undefined, this.options.bootTimeout ?? 3000);
     if (!answered) {
       await this.close();
-      throw new Error('No Grbl controller answered on this port.');
+      throw Object.assign(new Error('No Grbl controller answered on this port.'), {
+        code: 'MACHINE_UNAVAILABLE' satisfies MachineFailureCode,
+      });
     }
     await this.refresh();
   }
@@ -239,12 +277,12 @@ export class GrblController {
    * @param line - The line without its newline.
    * @returns When it was sent, and its reply.
    */
-  public transmit(line: string): Readonly<{ sent: Promise<void>; reply: Promise<Reply> }> {
+  public transmit(line: string): Readonly<{ sent: Promise<void>; reply: Promise<GrblReply> }> {
     let markSent = (): void => undefined;
     const sent = new Promise<void>((resolve) => {
       markSent = resolve;
     });
-    const reply = new Promise<Reply>((resolve) => {
+    const reply = new Promise<GrblReply>((resolve) => {
       if (!this.isConnected) {
         resolve({ type: 'closed' });
         markSent();
@@ -261,7 +299,7 @@ export class GrblController {
    * @param line - The line without its newline.
    * @returns `ok`, the error, or why no reply will come.
    */
-  public async send(line: string): Promise<Reply> {
+  public async send(line: string): Promise<GrblReply> {
     return this.transmit(line).reply;
   }
 
@@ -369,9 +407,12 @@ export class GrblController {
    * Park, have a person fit the next bit, probe Z again, and have them switch the router back on.
    * @param tool - The bit's tool number.
    * @param context - The run that asked for it, if any, and the operation that started it.
-   * @returns Whether the change finished.
+   * @returns The procedure, begun, and whether the change finished.
    */
-  public async toolChange(tool: number, context: Readonly<{ runId?: string; operationId?: string }>): Promise<boolean> {
+  public toolChange(
+    tool: number,
+    context: Readonly<{ runId?: string; operationId?: string }>,
+  ): Readonly<{ activity: Activity; done: Promise<boolean> }> {
     const isRouterOn = this.accessories?.includes('S') === true;
     const activity = this.beginActivity({
       kind: 'tool-change',
@@ -385,83 +426,67 @@ export class GrblController {
         ['Remove the plate and the magnet', 'person'],
       ],
     });
-    await this.send('M5');
-    await this.send(this.isHomingEnabled ? `G53G0Z${String(parkZ)}` : `G90G0Z${String(parkWorkZ)}`);
-    // Grbl answers a move once it is planned: dwell for nothing so the person is asked only once Z has stopped.
-    await this.send('G4P0');
-    this.advance(activity);
-    const answer = await this.ask(
-      activity,
-      `Fit bit T${String(tool)}, then put the magnet on it and the plate under it.`,
-      [
-        { id: 'continue', label: 'Bit fitted, plate in place', role: 'confirm' },
-        { id: 'cancel', label: 'Cancel', role: 'cancel' },
-      ],
-    );
-    if (answer !== 'continue') {
-      this.finishActivity('failed', 'Cancelled.');
-      return false;
-    }
-    this.tool = tool;
-    this.advance(activity);
-    const failure = await this.probeZ(15);
-    if (failure !== undefined) {
-      this.finishActivity('failed', failure);
-      return false;
-    }
-    this.advance(activity);
-    const done = await this.ask(activity, 'Remove the plate and the magnet, and stand clear.', [
-      { id: 'done', label: 'Done', role: 'confirm' },
-    ]);
-    if (done !== 'done') {
-      return false;
-    }
-    if (isRouterOn) {
-      // The relay restarts the router; give it time to reach speed before the program plunges.
-      await this.send('M3');
-      await this.send('G4P3');
-    }
-    this.finishActivity('succeeded');
-    return true;
+    return { activity, done: this.changeTool(activity, tool, isRouterOn) };
   }
 
   /**
-   * Start feeding a program under a feed hold; the person's Play press starts the motion.
-   * @param input - The run id, the program lines and the start form.
-   * @returns Once the controller took the first block.
+   * Whether the latest report shows an action's effect. An operation this session never sent is `pending`: the host
+   * escalates it for a person to reconcile, since this session cannot tell.
+   * @param operationId - The caller-retained id the action was applied with.
+   * @returns The confirmation.
    */
-  public async startRun(
-    input: Readonly<{ runId: string; name: string; text: string; submission: GrblSubmission }>,
-  ): Promise<MachineCommandReceipt> {
-    const lines = input.text
-      .split(/\r?\n/u)
-      .map((raw, index) => ({ number: index + 1, text: cleanGcodeLine(raw) }))
-      .filter((line) => line.text.length > 0);
-    const run: Run = {
-      runId: input.runId,
-      name: input.name,
-      total: lines.length,
-      acknowledged: 0,
-      state: 'starting',
-      stage: 'Waiting for Play on the controller',
-      abort: new AbortController(),
+  public confirm(operationId: string): MachineActionConfirmation {
+    return this.confirmations.get(operationId)?.() ?? { status: 'pending' };
+  }
+
+  /**
+   * The descriptor the session reports.
+   * @returns Identity, firmware and installed capabilities, with `motion.home` only while homing is on.
+   */
+  public descriptor(): MachineProviderDescriptor {
+    const { manifest } = this.options;
+    return {
+      id: this.options.id,
+      name: this.options.name,
+      vendor: manifest.identity.vendor,
+      model: manifest.identity.displayName,
+      firmware: this.firmware,
+      capabilities: {
+        connection: manifest.connection,
+        axes: manifest.axes,
+        components: manifest.components,
+        processes: manifest.processes,
+        actions: this.actions,
+        holds: manifest.holds,
+        jobs: manifest.jobs,
+        stop: manifest.stop,
+      },
     };
-    this.run = run;
-    this.streamError = undefined;
-    // Hold first: lines fill the planner but nothing moves until a person presses Play at the machine.
-    this.realtime(grblRealtime.feedHold);
-    const first = await this.send(input.submission.workOffset);
-    if (first.type !== 'ok') {
-      this.endRun('failed', first.type === 'error' ? grblErrorSentence(first.code) : 'The controller reset.');
-      return {
-        status: 'rejected',
-        code: 'MACHINE_ACTION_PROVIDER_REJECTED',
-        message: 'The controller refused the work offset.',
-        observedAt: this.now(),
-      };
+  }
+
+  /** Tell every listener the state changed. */
+  public notify(): void {
+    for (const listener of this.listeners) {
+      listener();
     }
-    void this.feedOrFail(run, lines);
-    return { status: 'accepted', runId: run.runId, observedAt: this.now() };
+  }
+
+  /**
+   * End the live run, if any, and release its stream.
+   * @param state - How it ended.
+   * @param reason - The stage sentence surfaces show.
+   */
+  public endRun(state: 'completed' | 'cancelled' | 'failed', reason?: string): void {
+    const { run } = this;
+    if (run === undefined || ['completed', 'cancelled', 'failed', 'unknown'].includes(run.state)) {
+      return;
+    }
+    run.state = state;
+    run.endedAt = this.now();
+    run.stage = reason;
+    run.paused = undefined;
+    run.abort.abort();
+    run.gate?.open();
   }
 
   /**
@@ -470,15 +495,6 @@ export class GrblController {
    */
   public snapshot(): MachineReport {
     return grblReport(this);
-  }
-
-  /**
-   * Whether the latest report shows an action's effect.
-   * @param operationId - The caller-retained id the action was applied with.
-   * @returns The confirmation.
-   */
-  public confirm(operationId: string): MachineActionConfirmation {
-    return this.confirmations.get(operationId)?.() ?? { status: 'confirmed' };
   }
 
   /**
@@ -491,66 +507,31 @@ export class GrblController {
   }
 
   /**
-   * Apply one admitted action. Sends once.
+   * Apply one admitted action. Repeats admission against this session's own report first, then sends once.
    * @param input - The admitted action.
    * @returns The receipt.
    */
   // oxlint-disable-next-line eslint/complexity, max-lines-per-function -- One dispatch over the declared actions.
   public async apply(input: MachineProviderActionInput): Promise<MachineCommandReceipt> {
-    const parameters = (input.parameters ?? {}) as Readonly<Record<string, unknown>>;
     const { operationId } = input;
+    const refusal = this.admit(input.componentId, input.action, 'action', input.expectedRunId);
+    if (refusal !== undefined) {
+      return this.remember(operationId, this.rejected(refusal.code, refusal.message));
+    }
     const { run } = this;
     const isRunLive = run !== undefined && ['starting', 'running', 'paused', 'finishing'].includes(run.state);
     const key = `${input.componentId}:${input.action}`;
-    if (key.startsWith('controller:run.') && (!isRunLive || run.runId !== input.expectedRunId)) {
-      return this.remember(
-        operationId,
-        this.rejected('MACHINE_ACTION_STALE_RUN', 'The run you saw has ended or changed.'),
-      );
+    if (key.startsWith('controller:run.')) {
+      return run === undefined || !isRunLive || run.runId !== input.expectedRunId
+        ? this.remember(operationId, this.rejected('MACHINE_ACTION_STALE_RUN', 'The run you saw has ended or changed.'))
+        : this.applyToRun(key, run, input);
     }
+    const invalid = (): MachineCommandReceipt =>
+      this.remember(
+        operationId,
+        this.rejected('MACHINE_ACTION_PARAMETERS_INVALID', 'Some values are not valid for this control.'),
+      );
     switch (key) {
-      case 'controller:run.pause': {
-        this.realtime(grblRealtime.feedHold);
-        run!.paused = { by: 'person', reason: 'Paused from Tau' };
-        return this.remember(
-          operationId,
-          this.accepted(),
-          this.after(() => this.status?.state === 'Hold'),
-        );
-      }
-      case 'controller:run.resume': {
-        if (this.isBusy) {
-          return this.remember(operationId, this.rejected('MACHINE_ACTION_BUSY', 'Finish the bit change first.'));
-        }
-        if (this.streamError !== undefined) {
-          this.streamError = undefined;
-        }
-        run!.paused = undefined;
-        if (run!.gate !== undefined) {
-          run!.state = 'running';
-          run!.gate.open();
-        }
-        this.realtime(grblRealtime.cycleStart);
-        return this.remember(
-          operationId,
-          this.accepted(),
-          this.after(() => this.status?.state === 'Run' || this.run?.state === 'completed'),
-        );
-      }
-      case 'controller:run.cancel': {
-        const isSettled = await this.halt();
-        return this.remember(
-          operationId,
-          isSettled
-            ? this.accepted()
-            : {
-                status: 'unknown',
-                reason: 'The machine did not settle before the reset; home it before the next job.',
-                observedAt: this.now(),
-              },
-          this.after(() => this.run?.state === 'cancelled'),
-        );
-      }
       case 'controller:controller.unlock': {
         const reply = await this.send('$X');
         return this.remember(
@@ -560,11 +541,15 @@ export class GrblController {
         );
       }
       case 'controller:interaction.respond': {
+        const parameters = parse(standardMachineActions['interaction.respond'].schema, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
         const { activity } = this;
         const awaiting = activity?.view.awaiting;
         if (
           activity === undefined ||
-          activity.view.activityId !== parameters['activityId'] ||
+          activity.view.activityId !== parameters.activityId ||
           awaiting?.kind !== 'confirmation'
         ) {
           return this.remember(
@@ -572,8 +557,8 @@ export class GrblController {
             this.rejected('MACHINE_ACTION_PROMPT_STALE', 'Nothing is waiting for that answer.'),
           );
         }
-        if (awaiting.promptId !== parameters['promptId']) {
-          const code = activity.answered.has(String(parameters['promptId']))
+        if (awaiting.promptId !== parameters.promptId) {
+          const code = activity.answered.has(parameters.promptId)
             ? 'MACHINE_ACTION_PROMPT_CONSUMED'
             : 'MACHINE_ACTION_PROMPT_STALE';
           return this.remember(
@@ -581,7 +566,7 @@ export class GrblController {
             this.rejected(code, 'That question has already been answered or replaced.'),
           );
         }
-        const answer = String(parameters['answer']);
+        const { answer } = parameters;
         if (!awaiting.answers.some((candidate) => candidate.id === answer)) {
           return this.remember(
             operationId,
@@ -593,14 +578,17 @@ export class GrblController {
         return this.remember(operationId, this.accepted({ activityId: activity.view.activityId }));
       }
       case 'controller:grbl-simulator.lid.press': {
-        const button = parameters['button'] as 'start' | 'hold' | 'reset';
+        const parameters = parse(grblActionSchemas.lid, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
         if (this.options.lid === undefined) {
           return this.remember(
             operationId,
             this.rejected('MACHINE_ACTION_UNSUPPORTED', 'Only the simulator has these buttons.'),
           );
         }
-        this.options.lid(button);
+        this.options.lid(parameters.button);
         return this.remember(operationId, this.accepted());
       }
       case 'motion:motion.home': {
@@ -622,17 +610,19 @@ export class GrblController {
         );
       }
       case 'motion:motion.jog': {
-        const axis = String(parameters['axis']).toLowerCase();
-        if (!axes.includes(axis as Axis)) {
+        const parameters = parse(standardMachineActions['motion.jog'].schema, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
+        const axis = parameters.axis.toLowerCase();
+        if (!isAxis(axis)) {
           return this.remember(
             operationId,
             this.rejected('MACHINE_ACTION_PARAMETERS_INVALID', `The LongMill has no ${axis.toUpperCase()} axis.`),
           );
         }
-        const feed = Math.min(Number(parameters['feed']), longMillMaximumRate);
-        const reply = await this.send(
-          `$J=G91G21${axis.toUpperCase()}${format(Number(parameters['distance']))}F${format(feed)}`,
-        );
+        const feed = Math.min(parameters.feed, longMillMaximumRate);
+        const reply = await this.send(`$J=G91G21${axis.toUpperCase()}${format(parameters.distance)}F${format(feed)}`);
         return this.remember(
           operationId,
           this.replied(reply),
@@ -640,8 +630,12 @@ export class GrblController {
         );
       }
       case 'motion:motion.move': {
-        const position = parameters['position'] as Partial<Position>;
-        const isMachine = parameters['frame'] === 'machine';
+        const parameters = parse(grblActionSchemas.move, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
+        const { position } = parameters;
+        const isMachine = parameters.frame === 'machine';
         const target: Partial<Position> = { ...this.machine };
         for (const axis of axes) {
           const value = position[axis];
@@ -649,12 +643,13 @@ export class GrblController {
             target[axis] = isMachine ? value : value + this.workOrigin[axis];
           }
         }
+        const { travel } = this;
         const outside = axes.find((axis) => {
           const value = target[axis];
           return (
             value !== undefined &&
             position[axis] !== undefined &&
-            (value < longMillTravel[axis].min || value > longMillTravel[axis].max)
+            (value < travel[axis].min || value > travel[axis].max)
           );
         });
         if (outside !== undefined && (this.trust === 'homed' || this.trust === 'kept')) {
@@ -666,12 +661,9 @@ export class GrblController {
             ),
           );
         }
-        const words = axes
-          .filter((axis) => position[axis] !== undefined)
-          .map((axis) => `${axis.toUpperCase()}${format(position[axis]!)}`);
         const { feed } = parameters;
-        const motion = feed === undefined ? 'G0' : `G1F${format(Math.min(Number(feed), longMillMaximumRate))}`;
-        const reply = await this.send(`G90G21${isMachine ? 'G53' : ''}${motion}${words.join('')}`);
+        const motion = feed === undefined ? 'G0' : `G1F${format(Math.min(feed, longMillMaximumRate))}`;
+        const reply = await this.send(`G90G21${isMachine ? 'G53' : ''}${motion}${axisWords(position)}`);
         return this.remember(
           operationId,
           this.replied(reply),
@@ -686,7 +678,11 @@ export class GrblController {
         );
       }
       case 'motion:work-offset.select': {
-        const offset = parameters['offset'] as GrblWorkOffset;
+        const parameters = parse(grblActionSchemas.offsetSelect, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
+        const { offset } = parameters;
         const reply = await this.send(offset);
         await this.send('$G');
         return this.remember(operationId, this.replied(reply), () =>
@@ -694,35 +690,40 @@ export class GrblController {
         );
       }
       case 'motion:work-offset.set': {
-        const offset = parameters['offset'] as GrblWorkOffset;
-        const position = parameters['position'] as Partial<Position>;
+        const parameters = parse(grblActionSchemas.offsetSet, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
+        const { offset, position } = parameters;
         const { machine } = this;
-        const words = axes
-          .filter((axis) => position[axis] !== undefined)
-          .map((axis) => `${axis.toUpperCase()}${format(position[axis]!)}`);
+        const words = axisWords(position);
         if (words.length === 0 || machine === undefined) {
           return this.remember(
             operationId,
             this.rejected('MACHINE_ACTION_PARAMETERS_INVALID', 'Name at least one axis.'),
           );
         }
-        const reply = await this.send(`G10L20P${String(grblWorkOffsets.indexOf(offset) + 1)}${words.join('')}`);
+        const reply = await this.send(`G10L20P${String(grblWorkOffsets.indexOf(offset) + 1)}${words}`);
         this.offsetRevision += 1;
         await this.send('$#');
         return this.remember(operationId, this.replied(reply), () =>
-          axes.every(
-            (axis) =>
-              position[axis] === undefined ||
-              Math.abs((this.offsets[offset]?.[axis] ?? Number.NaN) - (machine[axis] - position[axis])) < 0.002,
-          )
+          axes.every((axis) => {
+            const value = position[axis];
+            return (
+              value === undefined ||
+              Math.abs((this.offsets[offset]?.[axis] ?? Number.NaN) - (machine[axis] - value)) < 0.002
+            );
+          })
             ? { status: 'confirmed' }
             : { status: 'pending' },
         );
       }
       case 'touch-plate:probe.run': {
-        const thickness = Number(parameters['plateThickness'] ?? 15);
-        void this.probeActivity(thickness, operationId);
-        const { activityId } = this.activity!.view;
+        const parameters = parse(grblActionSchemas.probe, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
+        const { activityId } = this.startProbing(parameters.plateThickness, operationId).view;
         return this.remember(operationId, this.accepted({ activityId }), () => {
           const view = this.activity?.view;
           if (view?.activityId !== activityId) {
@@ -743,32 +744,49 @@ export class GrblController {
         });
       }
       case 'tools:tool.change': {
-        void this.toolChange(Number(parameters['tool']), { operationId });
-        return this.remember(operationId, this.accepted({ activityId: this.activity!.view.activityId }));
+        const parameters = parse(standardMachineActions['tool.change'].schema, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
+        const { activity } = this.toolChange(parameters.tool, { operationId });
+        return this.remember(operationId, this.accepted({ activityId: activity.view.activityId }));
       }
       case 'router:spindle.set': {
-        if (parameters['mode'] === 'off') {
-          if (this.dwellUntil > Date.now()) {
-            // The timed run's dwell holds the line queue; a reset at rest drops the relay and keeps the position.
-            this.dwellUntil = 0;
-            this.realtime(grblRealtime.reset);
-            return this.remember(operationId, this.accepted());
+        const parameters = parse(grblActionSchemas.router, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
+        if (parameters.mode === 'off') {
+          if (this.isRouterTimed) {
+            // Only a reset ends the dwell early. Stop as `stop` does (hold, settle, reset) so the position is kept;
+            // nothing else is queued behind the dwell, and the work offset the reset drops is selected again.
+            const { workOffset } = this;
+            const isSettled = await this.halt();
+            if (this.workOffset !== workOffset) {
+              await this.send(workOffset);
+              await this.send('$G');
+            }
+            return this.remember(operationId, isSettled ? this.accepted() : this.unsettled());
           }
           return this.remember(operationId, this.replied(await this.send('M5')));
         }
+        if (this.isRouterTimed) {
+          return this.remember(operationId, this.rejected('MACHINE_ACTION_BUSY', 'The router is already on.'));
+        }
         // The relay switches on and the dwell and M5 are queued behind it, so the router stops by itself even when
         // Tau goes away. A feed hold during the dwell suspends it with the router still on.
-        const seconds = Number(parameters['duration']);
         const reply = await this.send('M3');
         if (reply.type === 'ok') {
-          this.dwellUntil = Date.now() + seconds * 1000;
-          void this.send(`G4P${format(seconds)}`);
-          void this.send('M5');
+          void this.timeRouter(parameters.duration);
         }
         return this.remember(operationId, this.replied(reply));
       }
       case 'dust:switch.set': {
-        const isOn = parameters['on'] === true;
+        const parameters = parse(standardMachineActions['switch.set'].schema, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
+        const isOn = parameters.on;
         if (isRunLive) {
           if (this.accessories?.includes('F') !== isOn) {
             this.realtime(grblRealtime.floodToggle);
@@ -778,7 +796,11 @@ export class GrblController {
         return this.remember(operationId, this.replied(await this.send(isOn ? 'M8' : 'M9')));
       }
       case 'feed-override:level.set': {
-        const target = Math.round(Number(parameters['ratio']) * 100);
+        const parameters = parse(grblActionSchemas.feedOverride, input.parameters);
+        if (parameters === undefined) {
+          return invalid();
+        }
+        const target = Math.round(parameters.ratio * 100);
         for (const byte of grblFeedOverrideBytes(this.overrides?.feed ?? 100, target)) {
           this.realtime(byte);
         }
@@ -789,9 +811,9 @@ export class GrblController {
         );
       }
       case 'rapid-override:option.set': {
-        const option = String(parameters['option']);
-        const byte = grblRapidOverrides[option];
-        if (byte === undefined) {
+        const parameters = parse(grblActionSchemas.rapidOverride, input.parameters);
+        const byte = parameters === undefined ? undefined : grblRapidOverrides[parameters.option];
+        if (parameters === undefined || byte === undefined) {
           return this.remember(
             operationId,
             this.rejected('MACHINE_ACTION_PARAMETERS_INVALID', 'Rapids run at 100, 50 or 25 %.'),
@@ -801,7 +823,7 @@ export class GrblController {
         return this.remember(
           operationId,
           this.accepted(),
-          this.after(() => String(this.overrides?.rapid) === option),
+          this.after(() => String(this.overrides?.rapid) === parameters.option),
         );
       }
       default: {
@@ -819,13 +841,17 @@ export class GrblController {
    * @param bound - The declared bound. Milliseconds.
    * @returns The hold, or why it cannot start.
    */
-  public beginJog(
-    input: MachineProviderHoldInput,
-    bound: number,
-  ): MachineProviderHold | Readonly<{ code: MachineFailureCode; message: string }> {
-    const parameters = input.parameters as Readonly<{ axis: string; direction: 1 | -1; feed: number }>;
-    const axis = parameters.axis.toLowerCase() as Axis;
-    if (!axes.includes(axis)) {
+  public beginJog(input: MachineProviderHoldInput, bound: number): MachineProviderHold | MachineFailure {
+    const refusal = this.admit(input.componentId, input.hold, 'hold', null);
+    if (refusal !== undefined) {
+      return refusal;
+    }
+    const parameters = parse(standardMachineHolds['motion.jog'].schema, input.parameters);
+    if (parameters === undefined) {
+      return { code: 'MACHINE_ACTION_PARAMETERS_INVALID', message: 'Some values are not valid for this control.' };
+    }
+    const axis = parameters.axis.toLowerCase();
+    if (!isAxis(axis)) {
       return {
         code: 'MACHINE_ACTION_PARAMETERS_INVALID',
         message: `The LongMill has no ${parameters.axis.toUpperCase()} axis.`,
@@ -843,13 +869,14 @@ export class GrblController {
     let isInFlight = false;
     let isReleased = false;
     const isTrusted = this.trust === 'homed' || this.trust === 'kept';
+    const { travel } = this;
     const extend = async (): Promise<void> => {
       const now = Date.now();
       if (isReleased || isInFlight || Math.max(0, queuedUntil - now) + segment > bound) {
         return;
       }
       const next = (this.machine?.[axis] ?? 0) + 2 * distance;
-      if (isTrusted && (next < longMillTravel[axis].min || next > longMillTravel[axis].max)) {
+      if (isTrusted && (next < travel[axis].min || next > travel[axis].max)) {
         return;
       }
       isInFlight = true;
@@ -866,6 +893,10 @@ export class GrblController {
       release: async () => {
         isReleased = true;
         this.realtime(grblRealtime.jogCancel);
+        if (this.firmware.startsWith('GrblHAL')) {
+          // On grblHAL the jog cancel also empties the input buffer: the lines in it are dropped without an answer.
+          this.dropInFlight('reset');
+        }
         return this.remember(
           input.operationId,
           this.accepted(),
@@ -900,6 +931,7 @@ export class GrblController {
         workOffset: submission.workOffset,
         origin: isTrusted ? origin : undefined,
         canHome: this.isHomingEnabled,
+        travel: this.travel,
       }),
     );
     const isRunLive = this.run !== undefined && ['starting', 'running', 'paused', 'finishing'].includes(this.run.state);
@@ -950,13 +982,107 @@ export class GrblController {
     }
     const text = await this.readText(input.artifact, input.signal);
     const name = input.artifact.path.split('/').at(-1) ?? input.artifact.path;
-    const receipt = await this.startRun({
+    const receipt = await startGrblRun(this, {
       runId: `run-${input.operationId}`,
       name,
       text,
       submission: input.submission,
     });
     return this.remember(input.operationId, receipt);
+  }
+
+  /**
+   * Pause, resume or cancel the live run the caller saw.
+   * @param key - `controller:run.<verb>`.
+   * @param run - The live run.
+   * @param input - The admitted action: its operation id and who asked.
+   * @returns The receipt.
+   */
+  private async applyToRun(
+    key: string,
+    run: GrblRun,
+    input: Pick<MachineProviderActionInput, 'operationId' | 'requestedBy'>,
+  ): Promise<MachineCommandReceipt> {
+    const { operationId } = input;
+    switch (key) {
+      case 'controller:run.pause': {
+        this.realtime(grblRealtime.feedHold);
+        run.paused = { by: input.requestedBy.kind === 'agent' ? 'agent' : 'person', reason: 'Paused from Tau' };
+        return this.remember(
+          operationId,
+          this.accepted(),
+          this.after(() => this.status?.state === 'Hold'),
+        );
+      }
+      case 'controller:run.resume': {
+        if (this.isBusy) {
+          return this.remember(operationId, this.rejected('MACHINE_ACTION_BUSY', 'Finish the bit change first.'));
+        }
+        if (this.streamError !== undefined) {
+          this.streamError = undefined;
+        }
+        run.paused = undefined;
+        if (run.gate !== undefined) {
+          run.state = 'running';
+          run.gate.open();
+        }
+        this.realtime(grblRealtime.cycleStart);
+        return this.remember(
+          operationId,
+          this.accepted(),
+          this.after(() => this.status?.state === 'Run' || this.run?.state === 'completed'),
+        );
+      }
+      case 'controller:run.cancel': {
+        const isSettled = await this.halt();
+        return this.remember(
+          operationId,
+          isSettled ? this.accepted() : this.unsettled(),
+          this.after(() => this.run?.state === 'cancelled'),
+        );
+      }
+      default: {
+        return this.remember(operationId, this.rejected('MACHINE_ACTION_UNDECLARED', `${key} is not declared.`));
+      }
+    }
+  }
+
+  /**
+   * Repeat admission at the moment of sending, over this session's own report: state, run fence, freshness, trust,
+   * interlocks and the session's availability. Qualification, authority and attendance are the host's to admit.
+   * @param componentId - The component it targets.
+   * @param action - The action or hold id.
+   * @param kind - An action or a hold.
+   * @param expectedRunId - The run the caller saw, or null.
+   * @returns Why it may not be sent, or undefined when it may.
+   */
+  // oxlint-disable-next-line eslint/max-params -- the four facts the pure check reads, in its order.
+  private admit(
+    componentId: string,
+    action: string,
+    kind: 'action' | 'hold',
+    // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run.
+    expectedRunId: string | null,
+  ): MachineFailure | undefined {
+    const check = checkMachineAction({
+      entry: { name: this.options.name, descriptor: this.descriptor(), snapshot: this.snapshot(), testing: true },
+      componentId,
+      action,
+      kind,
+      expectedRunId,
+      caller: 'person',
+      attended: true,
+      now: Date.parse(this.now()),
+    });
+    return check.status === 'unavailable' ? { code: check.code, message: check.message } : undefined;
+  }
+
+  private unsettled(): MachineCommandReceipt {
+    return {
+      status: 'unknown',
+      reason: 'The machine did not settle before the reset; home it before the next job.',
+      observedAt: this.now(),
+    };
   }
 
   private get pollInterval(): number {
@@ -1019,13 +1145,21 @@ export class GrblController {
    * @param reason - Why no reply will come.
    */
   private flush(reason: 'reset' | 'closed'): void {
-    this.counter.clear();
-    for (const resolve of this.inFlight.splice(0)) {
-      resolve({ type: reason });
-    }
+    this.dropInFlight(reason);
     for (const item of this.queue.splice(0)) {
       item.sent();
       item.resolve({ type: reason });
+    }
+  }
+
+  /**
+   * Forget every line sent and not yet answered: the controller emptied its buffer and will answer none of them.
+   * @param reason - Why no reply will come.
+   */
+  private dropInFlight(reason: 'reset' | 'closed'): void {
+    this.counter.clear();
+    for (const resolve of this.inFlight.splice(0)) {
+      resolve({ type: reason });
     }
   }
 
@@ -1056,7 +1190,6 @@ export class GrblController {
       case 'welcome': {
         this.firmware = `${message.firmware} ${message.version}`;
         this.flush('reset');
-        this.dwellUntil = 0;
         this.endRun('cancelled', 'The controller was reset.');
         this.finishActivity('failed', 'The controller was reset.');
         this.selectOffset('G54');
@@ -1084,14 +1217,11 @@ export class GrblController {
         break;
       }
       case 'probe': {
-        this.lastProbe = { position: toPosition(message.position, this.scale)!, isSuccess: message.isSuccess };
+        this.lastProbe = { position: toPosition(message.position, this.scale), isSuccess: message.isSuccess };
         break;
       }
       case 'offset': {
-        const position = toPosition(message.values, this.scale);
-        if (position !== undefined) {
-          this.offsets[message.name] = position;
-        }
+        this.offsets[message.name] = toPosition(message.values, this.scale);
         break;
       }
       case 'setting': {
@@ -1117,14 +1247,14 @@ export class GrblController {
     const { scale } = this;
     const previous = this.status;
     if (status.workOffset !== undefined) {
-      const origin = toPosition(status.workOffset, scale)!;
+      const origin = toPosition(status.workOffset, scale);
       if (axes.some((axis) => Math.abs(origin[axis] - this.workOrigin[axis]) > 1e-6)) {
         this.offsetRevision += 1;
       }
       this.workOrigin = origin;
     }
-    const machine = toPosition(status.machine, scale);
-    const work = toPosition(status.work, scale);
+    const machine = status.machine === undefined ? undefined : toPosition(status.machine, scale);
+    const work = status.work === undefined ? undefined : toPosition(status.work, scale);
     this.machine =
       machine ??
       (work === undefined
@@ -1155,17 +1285,10 @@ export class GrblController {
         run.paused = undefined;
         run.stage = undefined;
         run.startedAt ??= this.now();
-        run.startedAtMs ??= Date.now();
       } else if (status.state === 'Hold' && run.state === 'running' && previous?.state !== 'Hold') {
         run.state = 'paused';
         run.paused ??= { by: 'person', reason: 'Feed hold' };
       }
-    }
-  }
-
-  private notify(): void {
-    for (const listener of this.listeners) {
-      listener();
     }
   }
 
@@ -1300,7 +1423,48 @@ export class GrblController {
     this.notify();
   }
 
-  private async probeActivity(thickness: number, operationId: string): Promise<void> {
+  private async changeTool(activity: Activity, tool: number, isRouterOn: boolean): Promise<boolean> {
+    await this.send('M5');
+    await this.send(this.isHomingEnabled ? `G53G0Z${String(parkZ)}` : `G90G0Z${String(parkWorkZ)}`);
+    // Grbl answers a move once it is planned: dwell for nothing so the person is asked only once Z has stopped.
+    await this.send('G4P0');
+    this.advance(activity);
+    const answer = await this.ask(
+      activity,
+      `Fit bit T${String(tool)}, then put the magnet on it and the plate under it.`,
+      [
+        { id: 'continue', label: 'Bit fitted, plate in place', role: 'confirm' },
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      ],
+    );
+    if (answer !== 'continue') {
+      this.finishActivity('failed', 'Cancelled.');
+      return false;
+    }
+    this.tool = tool;
+    this.advance(activity);
+    const failure = await this.probeZ(15);
+    if (failure !== undefined) {
+      this.finishActivity('failed', failure);
+      return false;
+    }
+    this.advance(activity);
+    const done = await this.ask(activity, 'Remove the plate and the magnet, and stand clear.', [
+      { id: 'done', label: 'Done', role: 'confirm' },
+    ]);
+    if (done !== 'done') {
+      return false;
+    }
+    if (isRouterOn) {
+      // The relay restarts the router; give it time to reach speed before the program plunges.
+      await this.send('M3');
+      await this.send('G4P3');
+    }
+    this.finishActivity('succeeded');
+    return true;
+  }
+
+  private startProbing(thickness: number, operationId: string): Activity {
     const activity = this.beginActivity({
       kind: 'probing',
       label: 'Probing Z with the touch plate',
@@ -1312,6 +1476,11 @@ export class GrblController {
         ['Remove the plate and the magnet', 'person'],
       ],
     });
+    void this.probing(activity, thickness);
+    return activity;
+  }
+
+  private async probing(activity: Activity, thickness: number): Promise<void> {
     const answer = await this.ask(activity, 'Is the magnet on the bit and the plate under it?', [
       { id: 'continue', label: 'Plate is in place', role: 'confirm' },
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
@@ -1329,134 +1498,6 @@ export class GrblController {
     this.advance(activity);
     await this.ask(activity, 'Remove the plate and the magnet.', [{ id: 'done', label: 'Done', role: 'confirm' }]);
     this.finishActivity('succeeded');
-  }
-
-  private endRun(state: 'completed' | 'cancelled' | 'failed', reason?: string): void {
-    const { run } = this;
-    if (run === undefined || ['completed', 'cancelled', 'failed', 'unknown'].includes(run.state)) {
-      return;
-    }
-    run.state = state;
-    run.endedAt = this.now();
-    run.stage = reason;
-    run.paused = undefined;
-    run.abort.abort();
-    run.gate?.open();
-  }
-
-  private pauseRun(run: Run, paused: NonNullable<Run['paused']>): void {
-    run.state = 'paused';
-    run.paused = paused;
-    run.stage = undefined;
-    run.gate = gate();
-    this.notify();
-  }
-
-  private async feedOrFail(run: Run, lines: ReadonlyArray<Readonly<{ number: number; text: string }>>): Promise<void> {
-    try {
-      await this.feed(run, lines);
-    } catch (error) {
-      void this.options.runtime.log({ level: 'error', message: `Grbl stream failed: ${String(error)}` });
-      this.endRun('failed', 'Tau stopped feeding the program.');
-      this.notify();
-    }
-  }
-
-  private async feed(run: Run, lines: ReadonlyArray<Readonly<{ number: number; text: string }>>): Promise<void> {
-    const replies: Array<Promise<Reply>> = [];
-    let hasMotion = false;
-    for (const line of lines) {
-      if (run.abort.signal.aborted) {
-        return;
-      }
-      if (run.gate !== undefined) {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- the stream waits while the run is paused.
-        await run.gate.promise;
-        run.gate = undefined;
-      }
-      let { text } = line;
-      if (run.state === 'starting' && /M0?[3478](?!\d)/u.test(text)) {
-        // A held controller still switches its relays: keep the router and the dust collector off until Play.
-        // oxlint-disable-next-line eslint/no-await-in-loop -- the stream waits for the person at the machine.
-        await this.waitFor(() => run.state !== 'starting' || run.abort.signal.aborted, 7 * 24 * 3_600_000);
-      }
-      if (/M0?6(?!\d)/u.test(text) && !hasMotion) {
-        // The first bit was fitted before the start; the person vouched for it.
-        this.tool = Number(/T(\d+)/u.exec(text)?.[1] ?? this.tool ?? 0);
-        text = text.replace(/M0?6(?!\d)/u, '');
-      }
-      if (/M0?6(?!\d)/u.test(text)) {
-        // Grbl rejects M6 (error 20): drain the planner, then a person changes the bit.
-        // oxlint-disable-next-line eslint/no-await-in-loop -- the change happens between two program lines.
-        await Promise.all(replies);
-        // oxlint-disable-next-line eslint/no-await-in-loop -- see above.
-        await this.drained(run);
-        const tool = Number(/T(\d+)/u.exec(text)?.[1] ?? this.tool ?? 0);
-        this.pauseRun(run, { by: 'program', reason: `Tool change: fit bit T${String(tool)}` });
-        // oxlint-disable-next-line eslint/no-await-in-loop -- see above.
-        const isChanged = await this.toolChange(tool, { runId: run.runId });
-        if (!isChanged) {
-          if (!isAborted(run)) {
-            // oxlint-disable-next-line eslint/no-await-in-loop -- see above.
-            await this.halt();
-          }
-          return;
-        }
-        run.state = 'running';
-        run.paused = undefined;
-        run.gate = undefined;
-        this.notify();
-        text = text.replace(/M0?6(?!\d)/u, '');
-      }
-      if (text.replace(/T\d+/u, '').length === 0) {
-        run.acknowledged += 1;
-        continue;
-      }
-      hasMotion ||= /[XYZ]-?[\d.]/u.test(text);
-      const { sent, reply } = this.transmit(text);
-      replies.push(this.programReply(run, line.number, reply));
-      // oxlint-disable-next-line eslint/no-await-in-loop -- character counting sends a line only when it fits.
-      await sent;
-    }
-    await Promise.all(replies);
-    await this.drained(run);
-    if (!run.abort.signal.aborted) {
-      this.endRun('completed');
-      this.notify();
-    }
-  }
-
-  private async programReply(run: Run, line: number, reply: Promise<Reply>): Promise<Reply> {
-    const answer = await reply;
-    this.onProgramReply(run, line, answer);
-    return answer;
-  }
-
-  /**
-   * Wait until a report taken after every reply so far shows the planner empty, after Play.
-   * @param run - The run being fed.
-   */
-  private async drained(run: Run): Promise<void> {
-    const sequence = this.reportSequence;
-    await this.waitFor(
-      () =>
-        run.abort.signal.aborted ||
-        (run.state === 'running' && this.reportSequence > sequence && this.status?.state === 'Idle'),
-      7 * 24 * 3_600_000,
-    );
-  }
-
-  private onProgramReply(run: Run, line: number, reply: Reply): void {
-    if (reply.type === 'ok') {
-      run.acknowledged += 1;
-    } else if (reply.type === 'error' && this.run === run && this.streamError === undefined) {
-      // Grbl drops the bad line and keeps running the next ones: hold now and let a person decide.
-      run.acknowledged += 1;
-      this.realtime(grblRealtime.feedHold);
-      this.streamError = { code: reply.code, line };
-      this.pauseRun(run, { by: 'machine', reason: `Line ${String(line)}: ${grblErrorSentence(reply.code)}` });
-    }
-    this.notify();
   }
 
   private remember(
@@ -1479,7 +1520,7 @@ export class GrblController {
     return { status: 'rejected', code, message, observedAt: this.now() };
   }
 
-  private replied(reply: Reply): MachineCommandReceipt {
+  private replied(reply: GrblReply): MachineCommandReceipt {
     if (reply.type === 'ok') {
       return this.accepted();
     }
@@ -1511,6 +1552,20 @@ export class GrblController {
       }
       return this.reportSequence > sequence && condition() ? { status: 'confirmed' } : { status: 'pending' };
     };
+  }
+
+  /**
+   * Hold the router on for a time: a dwell, then `M5`, both queued in the controller. Busy until the `M5` answers,
+   * or a reset drops it.
+   * @param seconds - How long.
+   */
+  private async timeRouter(seconds: number): Promise<void> {
+    this.isRouterTimed = true;
+    this.notify();
+    void this.send(`G4P${format(seconds)}`);
+    await this.send('M5');
+    this.isRouterTimed = false;
+    this.notify();
   }
 
   private async homeCycle(): Promise<void> {
@@ -1557,23 +1612,7 @@ export const openGrblSession = async (
   return {
     controller,
     async getDescriptor() {
-      return {
-        id: options.id,
-        name: options.name,
-        vendor: manifest.identity.vendor,
-        model: manifest.identity.displayName,
-        firmware: controller.firmware,
-        capabilities: {
-          connection: manifest.connection,
-          axes: manifest.axes,
-          components: manifest.components,
-          processes: manifest.processes,
-          actions: controller.actions,
-          holds: manifest.holds,
-          jobs: manifest.jobs,
-          stop: manifest.stop,
-        },
-      };
+      return controller.descriptor();
     },
     async getSnapshot() {
       return controller.snapshot();
@@ -1591,6 +1630,7 @@ export const openGrblSession = async (
           wake = resolve;
         });
       signal.addEventListener('abort', onAbort);
+      let previous: MachineReport | undefined;
       try {
         while (!signal.aborted) {
           if (!isDirty) {
@@ -1600,7 +1640,12 @@ export const openGrblSession = async (
             continue;
           }
           isDirty = false;
-          yield { type: 'snapshot', snapshot: controller.snapshot() };
+          const report = controller.snapshot();
+          const observation = grblObservation(previous, report);
+          previous = report;
+          if (observation !== undefined) {
+            yield observation;
+          }
           if (!controller.isConnected) {
             return;
           }
@@ -1635,6 +1680,13 @@ export const openGrblSession = async (
     jobs: {
       type: 'supported',
       delivery: 'streamed',
+      // Of the start form, only the work offset is the machine's to say: the one it uses now. The rest have defaults.
+      completeConfiguration: async ({ configuration }) => ({
+        workOffset: controller.workOffset,
+        ...(typeof configuration === 'object' && configuration !== null && !Array.isArray(configuration)
+          ? configuration
+          : {}),
+      }),
       prepare: async (input) => controller.prepare(input.artifact, input.configuration, input.signal),
       start: async (input) =>
         controller.start({

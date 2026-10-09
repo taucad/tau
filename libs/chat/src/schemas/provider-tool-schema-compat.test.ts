@@ -9,6 +9,7 @@ import {
   toProviderToolJsonSchema,
 } from '#schemas/provider-tool-schemas.js';
 import { getPrintProfilesInputSchema, requestPrintInputSchema } from '#schemas/tools/print.tool.schema.js';
+import { installPackagesInputSchema } from '#schemas/tools/install-packages.tool.schema.js';
 
 /**
  * Keywords no provider accepts today: Vertex rejects `const`/`propertyNames`/`prefixItems`, and
@@ -123,6 +124,7 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.revisions,
       toolName.updateTodos,
       toolName.askQuestions,
+      toolName.installPackages,
       toolName.getMachine,
       toolName.getPrintProfiles,
       toolName.requestPrint,
@@ -149,6 +151,20 @@ describe('provider-facing tool schema compatibility', () => {
     expect(collectKeywordPaths(schema)).toEqual(emptyKeywordPaths());
     expect(arrayItemsPaths(schema)).toEqual([]);
     expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThanOrEqual(14_336);
+  });
+
+  it('keeps install_packages provider-safe with a typeless add record', () => {
+    const schema = providerSchemaFor(toolName.installPackages);
+    expect(Object.keys(schema.properties ?? {})).toEqual(['add', 'remove', 'upgrade']);
+    expect(schema.required ?? []).toEqual([]);
+    expect(collectKeywordPaths(schema)).toEqual(emptyKeywordPaths());
+    expect(toolDescriptions[toolName.installPackages]).toContain('package-not-locked');
+    expect(installPackagesInputSchema.parse({})).toEqual({});
+    expect(installPackagesInputSchema.parse({ add: { 'simplex-noise': '^4.0.3' } })).toEqual({
+      add: { 'simplex-noise': '^4.0.3' },
+    });
+    expect(installPackagesInputSchema.safeParse({ add: ['simplex-noise@^4.0.3'] }).success).toBe(false);
+    expect(installPackagesInputSchema.safeParse({ add: { 'simplex-noise': '' } }).success).toBe(false);
   });
 
   it('should omit test_model when testing is disabled', () => {

@@ -12,6 +12,7 @@ import { toast } from '#components/ui/sonner.js';
 import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
 import { answerMachineAction, pendingMachineActionOf } from '#components/print/machine-action-approval.js';
 import { useMachinesFacet } from '#hooks/use-machines.js';
+import { operator } from '#hooks/use-machine-control.js';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 
@@ -167,8 +168,46 @@ const continuationNote = (execution: CadAgentExecution | undefined, name: string
     : `Approving lets ${name} continue this turn; Tau does not ask again for each action it takes.`;
 
 /**
- * Answer one interrupt. An agent's machine action is recorded on the host through the person's own machines session
- * first (R15), so the paused tool's apply finds the approval; any other interrupt is answered directly.
+ * Resolve an agent's job on the person's own machines session (R16): the agent's session can never approve one. A job
+ * already settled elsewhere is left alone, and an approval that needs what only the Print pane takes (attestations,
+ * presence) leaves the job waiting there.
+ *
+ * @param input - The person's machines client, the job and the decision.
+ */
+const resolveAgentJob = async ({
+  client,
+  jobId,
+  machineId,
+  approved,
+}: Readonly<{ client: MachineClient; jobId: string; machineId: string; approved: boolean }>): Promise<void> => {
+  const jobs = await client.listJobs({ machineId });
+  const job = jobs.find((listed) => listed.jobId === jobId);
+  if (job?.state !== 'awaiting-approval') {
+    return;
+  }
+  if (!approved) {
+    await client.resolveJob({ jobId, decision: 'deny', resolvedBy: operator });
+    return;
+  }
+  const machine = await client.get({ machineId });
+  const facts = machine.descriptor.capabilities.jobs;
+  if (facts.type !== 'supported' || facts.attestations.length > 0 || facts.safety.attended) {
+    return;
+  }
+  await client.resolveJob({
+    jobId,
+    decision: 'approve',
+    resolvedBy: operator,
+    attestations: [],
+    // Named by the job, so a second click finds the same operations rather than sending twice.
+    transferOperationId: `${jobId}:transfer`,
+    startOperationId: `${jobId}:start`,
+  });
+};
+
+/**
+ * Answer one interrupt. An agent's machine action or job is recorded on the host through the person's own machines
+ * session first (R15, R16), so the paused tool finds the person's decision; any other interrupt is answered directly.
  *
  * @param input - The interrupt, the decision, this computer's machines and how the chat is answered.
  * @throws When the machines cannot be reached or the host refuses the record; the interrupt stays open.
@@ -185,14 +224,23 @@ const answerInterrupt = async ({
   answer: (approvalId: string, approved: boolean) => Promise<void>;
 }>): Promise<void> => {
   const pending = pendingMachineActionOf(approval);
-  if (pending === undefined) {
+  const jobId = approval.context?.jobId;
+  const machineId = approval.context?.machineId;
+  if (pending === undefined && (jobId === undefined || machineId === undefined)) {
     await answer(approval.approvalId, approved);
     return;
   }
   if (!machines.available) {
     throw new Error('This computer cannot reach its machines, so Tau cannot record your answer.');
   }
-  await answerMachineAction({ client: machines, pending, approved, respond: answer });
+  if (pending !== undefined) {
+    await answerMachineAction({ client: machines, pending, approved, respond: answer });
+    return;
+  }
+  if (jobId !== undefined && machineId !== undefined) {
+    await resolveAgentJob({ client: machines, jobId, machineId, approved });
+  }
+  await answer(approval.approvalId, approved);
 };
 
 /**

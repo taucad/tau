@@ -372,21 +372,10 @@ describe('MachinesSettings', () => {
     expect(accessCode).toHaveValue('');
   });
 
-  it('should find a Grbl controller on a serial port and bind it through its provider with no access code', async () => {
+  /* No host ships a serial driver yet (C2-6): a serial machine is named with the reason, never offered or asked. */
+  it("should say why a serial machine can't be added here, and ask only the providers the host can reach", async () => {
     const facet = facetWith([]);
     facet.listProviders.mockResolvedValue([x1cProvider, grblProvider, simulatorProvider]);
-    const controller: MachineCandidate = {
-      ...candidate,
-      id: 'serial:/dev/tty.usbmodem1101',
-      name: 'Grbl controller on /dev/tty.usbmodem1101',
-      endpoint: { address: '/dev/tty.usbmodem1101', interface: 'serial' },
-      claimedIdentity: { serial: '95530', model: 'longmill-mk2-30x30' },
-    };
-    facet.discover.mockImplementation(async function* ({ providerId }) {
-      if (providerId === 'grbl') {
-        yield { type: 'found', candidate: controller };
-      }
-    });
     state.facet = facet;
     renderSettings();
     const find = screen.getByRole('button', { name: 'Find machines' });
@@ -394,43 +383,24 @@ describe('MachinesSettings', () => {
       expect(find).toBeEnabled();
     });
 
+    expect(
+      screen.getByText(
+        `${grblProvider.manifest.identity.displayName} connects by a serial cable, which Tau can't use on this computer yet, so it can't be added here.`,
+      ),
+    ).toBeInTheDocument();
     fireEvent.click(find);
 
-    /* Every real provider is asked; the simulator is not. */
     await waitFor(() => {
-      expect(facet.discover.mock.calls.map(([input]) => input.providerId)).toEqual(['bambu', 'grbl']);
+      expect(facet.discover).toHaveBeenCalled();
     });
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'Grbl controller on /dev/tty.usbmodem1101 LongMill MK2 30×30 · /dev/tty.usbmodem1101',
-      }),
-    );
-    const form = screen.getByRole('form', { name: 'Connect a Sienci Labs machine' });
-    expect(within(form).getByRole('combobox', { name: 'Model' })).toHaveValue('grbl');
-    await within(form).findByRole('textbox', { name: 'Input for Name' });
-    expect(bindingField('Serial port')).toHaveValue('/dev/tty.usbmodem1101');
-    /* A claimed identity takes no code, and the candidate's serial is not a Grbl binding field. */
-    expect(within(form).queryByLabelText('Access code')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Bind' })).toHaveFocus();
-
-    fireEvent.submit(form);
-
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Grbl controller on /dev/tty.usbmodem1101 is bound as bambu:sim.',
-      );
-    });
-    expect(facet.discover).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        providerId: 'grbl',
-        configuration: { logicalId: 'Grbl controller on /dev/tty.usbmodem1101', port: '/dev/tty.usbmodem1101' },
-      }),
-    );
-    expect(facet.beginBinding).toHaveBeenCalledExactlyOnceWith({
-      candidate: controller,
-      name: 'Grbl controller on /dev/tty.usbmodem1101',
-    });
-    expect(state.completeBinding).toHaveBeenCalledExactlyOnceWith({ ceremonyId: 'ceremony-1' });
+    expect(facet.discover.mock.calls.map(([input]) => input.providerId)).toEqual(['bambu']);
+    fireEvent.click(screen.getByRole('button', { name: 'Enter details' }));
+    const model = await screen.findByRole('combobox', { name: 'Model' });
+    expect(
+      within(model)
+        .getAllByRole('option')
+        .map((option) => option.getAttribute('value')),
+    ).toEqual(['bambu']);
   });
 
   it("should say a provider's own refusal as an alert, without the shell's wrapping", async () => {

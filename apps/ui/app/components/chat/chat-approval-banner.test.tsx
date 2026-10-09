@@ -7,7 +7,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { CombinedChatState } from '#hooks/use-chat.js';
-import { createFixture } from '#routes/w.$workspace.$project/chat-print.fixture.js';
+import { agentJob, createFixture, entry } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 
 const respondToToolApproval = vi.fn(async () => undefined);
@@ -241,6 +241,7 @@ describe('ChatApprovalBanner', () => {
           operationId: 'op-1',
           parameters: { on: true },
           version: 1,
+          expectedRunId: null,
         },
       }),
     ];
@@ -255,8 +256,15 @@ describe('ChatApprovalBanner', () => {
     expect(fixture.approveAction).toHaveBeenCalledExactlyOnceWith({
       machineId: 'machine-1',
       operationId: 'op-1',
-      intent: { componentId: 'chamber-light', action: 'switch.set', version: 1, parameters: { on: true } },
+      intent: {
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        version: 1,
+        expectedRunId: null,
+        parameters: { on: true },
+      },
       decision: 'deny',
+      approvedBy: expect.objectContaining({ kind: 'user' }) as Record<string, unknown>,
     });
     expect(fixture.approveAction.mock.invocationCallOrder[0]).toBeLessThan(
       respondToToolApproval.mock.invocationCallOrder[0]!,
@@ -275,6 +283,7 @@ describe('ChatApprovalBanner', () => {
           operationId: 'op-1',
           parameters: { on: true },
           version: 1,
+          expectedRunId: null,
         },
       }),
     ];
@@ -284,6 +293,73 @@ describe('ChatApprovalBanner', () => {
     await user.click(screen.getByRole('button', { name: 'Approve' }));
 
     expect(respondToToolApproval).not.toHaveBeenCalled();
+  });
+
+  /** The X1C as listed, asking the person for nothing only the Print pane takes. */
+  const chatApprovable = () => {
+    const listed = entry();
+    const { jobs } = listed.descriptor.capabilities;
+    if (jobs.type !== 'supported') {
+      throw new Error('The fixture machine runs jobs.');
+    }
+    return entry({
+      descriptor: {
+        ...listed.descriptor,
+        capabilities: { ...listed.descriptor.capabilities, jobs: { ...jobs, attestations: [] } },
+      },
+    });
+  };
+  const jobInterrupt = () =>
+    approvalMessage({
+      ...pendingInput,
+      options: [],
+      prompt: 'Print pyramid.gcode.3mf on Workshop X1C?',
+      context: { jobId: 'job-agent-1', machineId: 'machine-1', fileName: 'pyramid.gcode.3mf' },
+    });
+
+  it.each([
+    ['Approve', 'approve', true],
+    ['Deny', 'deny', false],
+  ] as const)(
+    "resolves an agent's job on the person's session before answering (%s)",
+    async (button, decision, approved) => {
+      const fixture = createFixture({ entries: [chatApprovable()], jobs: [agentJob()] });
+      machines = { available: true, ...fixture.client };
+      messages = [jobInterrupt()];
+      const user = userEvent.setup();
+
+      render(<ChatApprovalBanner />);
+      await user.click(screen.getByRole('button', { name: button }));
+
+      await vi.waitFor(() => {
+        expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', approved, { optionId: undefined });
+      });
+      expect(fixture.resolveJob).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          jobId: 'job-agent-1',
+          decision,
+          resolvedBy: expect.objectContaining({ kind: 'user' }) as Record<string, unknown>,
+        }) as Record<string, unknown>,
+      );
+      expect(fixture.resolveJob.mock.invocationCallOrder[0]).toBeLessThan(
+        respondToToolApproval.mock.invocationCallOrder[0]!,
+      );
+    },
+  );
+
+  it('leaves a job that needs a confirmation only the Print pane takes to the pane, and answers', async () => {
+    const fixture = createFixture({ jobs: [agentJob()] });
+    machines = { available: true, ...fixture.client };
+    messages = [jobInterrupt()];
+    const user = userEvent.setup();
+
+    render(<ChatApprovalBanner />);
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+
+    await vi.waitFor(() => {
+      expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', true, { optionId: undefined });
+    });
+    expect(fixture.resolveJob).not.toHaveBeenCalled();
   });
 
   /* A Tau tool gated by the API offers no option list of its own. */

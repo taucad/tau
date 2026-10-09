@@ -64,6 +64,13 @@ const endpointLabels: Readonly<Record<Transport, string>> = { network: 'address'
 
 const endpointFieldOf = (provider: MachineProvider): string => endpointFields[provider.manifest.connection.transport];
 
+/**
+ * How the hosts behind this card can reach a real machine. ponytail: no host ships a serial driver yet (C2-6), so a
+ * serial machine is named with the reason instead of offered; read this from the host once its provider listing says
+ * which transports it serves.
+ */
+const servedTransports: ReadonlySet<Transport> = new Set<Transport>(['network']);
+
 /** Whether binding takes an access code: the host's ceremony asks one only of a real machine that authenticates. */
 const takesCode = (manifest: MachineManifest): boolean =>
   !isSimulatedMachine(manifest) && manifest.connection.identity === 'authenticated';
@@ -488,6 +495,26 @@ const statusAfterFind = (current: string | undefined, heardNothing: boolean): st
   return current === listeningForMore || current === lookingForMachines ? undefined : current;
 };
 
+/** Why the real machines this host cannot reach are not offered, by name; nothing when it reaches them all. */
+function UnreachableMachines({
+  providers,
+}: {
+  readonly providers: readonly MachineProvider[];
+}): React.JSX.Element | undefined {
+  if (providers.length === 0) {
+    return undefined;
+  }
+  const names = new Intl.ListFormat('en', { type: 'conjunction' }).format(
+    providers.map(({ manifest }) => manifest.identity.displayName),
+  );
+  const one = providers.length === 1;
+  return (
+    <p className='text-xs text-muted-foreground'>
+      {`${names} connect${one ? 's' : ''} by a serial cable, which Tau can't use on this computer yet, so ${one ? 'it' : 'they'} can't be added here.`}
+    </p>
+  );
+}
+
 function MachinesPanel({ client }: { readonly client: MachineClient }): React.JSX.Element {
   const directory = useMachineDirectory(client);
   const { refresh } = directory;
@@ -512,7 +539,9 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     [directory.providers],
   );
   const simulators = directory.providers.filter(({ manifest }) => isSimulatedMachine(manifest));
-  const physicalProviders = directory.providers.filter(({ manifest }) => !isSimulatedMachine(manifest));
+  const realProviders = directory.providers.filter(({ manifest }) => !isSimulatedMachine(manifest));
+  const physicalProviders = realProviders.filter(({ manifest }) => servedTransports.has(manifest.connection.transport));
+  const unreachable = realProviders.filter(({ manifest }) => !servedTransports.has(manifest.connection.transport));
   /* Until the person picks a model, the first one the host serves. */
   const selected = selectedProviderId === undefined ? physicalProviders[0] : providers.get(selectedProviderId);
 
@@ -678,6 +707,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         <h3 id='machines-add-title' className='text-sm font-medium'>
           Add a machine
         </h3>
+        <UnreachableMachines providers={unreachable} />
         <div className='flex flex-wrap gap-2'>
           <Button
             type='button'

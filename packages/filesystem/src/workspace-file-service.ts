@@ -1228,6 +1228,7 @@ export class WorkspaceFileService {
     this._filePool?.clear();
     this._filePool = undefined;
     this._treeIndexes.clear();
+    this._pendingTreeScans.clear();
     this._projectRoutes.clear();
     this._discoveryRoots = [];
     this._mountTable.dispose();

@@ -50,6 +50,19 @@ describe('describeOutcome', () => {
       'Motion halts at once, heaters turn off, the position is kept.',
     );
   });
+
+  it('should say whether the beam turns off on a machine that declares it', () => {
+    expect(
+      describeOutcome({
+        motion: 'halts',
+        spindle: 'none',
+        heaters: 'none',
+        emission: 'off',
+        position: 'kept',
+        recovery: [],
+      }),
+    ).toBe('Motion halts at once, the beam turns off, the position is kept.');
+  });
 });
 
 describe('formatQuantity', () => {

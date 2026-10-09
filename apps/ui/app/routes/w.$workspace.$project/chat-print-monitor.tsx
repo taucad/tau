@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { Activity, Bot, History, Info, LoaderCircle, OctagonAlert, Play, TriangleAlert } from 'lucide-react';
-import { componentValue, fffProcessOf, millingProcessOf } from '@taucad/runtime/machine';
+import { componentValue, fffProcessOf, machineActionOf, millingProcessOf } from '@taucad/runtime/machine';
 import type {
   ComponentObservation,
   MachineAlert,
@@ -565,12 +565,17 @@ function MillingRows({ entry }: { readonly entry: MachineDirectoryEntry }): Reac
  * @public
  */
 export const monitorSummary = (entry: MachineDirectoryEntry): string => {
+  /* Only groups that can home, as the runtime gates motion: a group without homing never trusts or loses a position. */
   const trusts = entry.descriptor.capabilities.components
-    .filter((component) => component.kind === 'motion')
+    .filter(
+      (component) =>
+        component.kind === 'motion' &&
+        machineActionOf(entry, { componentId: component.id, action: 'motion.home' }) !== undefined,
+    )
     .map((motion) => componentValue(entry.snapshot.components, motion.id, 'motion')?.trust ?? 'unknown');
   const isMilling = millingProcessOf(entry.descriptor.capabilities) !== undefined;
   if (isMilling && trusts.length > 0) {
-    /* The least trusted motion group speaks for the machine: one lost group is enough to stop motion. */
+    /* The least trusted homing group speaks for the machine: one lost group is enough to stop motion. */
     const trust = trustOrder.find((candidate) => trusts.includes(candidate)) ?? 'unknown';
     const spindle = entry.descriptor.capabilities.components.find((component) => component.kind === 'spindle');
     const spindleValue =

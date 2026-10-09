@@ -285,7 +285,8 @@ describe('Control on a milling machine', () => {
     expect(screen.getByText('Lost')).toBeInTheDocument();
   });
 
-  it('reads and controls every motion group, and sums up by the least trusted one', () => {
+  it('reads and controls every motion group, and sums up by the least trusted one', async () => {
+    const user = userEvent.setup();
     // A second head with its own axis, homed apart from the first: its position is lost.
     const home = routerManifest.actions.find((action) => action.id === 'motion.home');
     const twoHeads: typeof routerManifest = {
@@ -318,7 +319,9 @@ describe('Control on a milling machine', () => {
         limits: [],
       }),
     ];
-    renderControl(router({ manifest: twoHeads, snapshot: machineSnapshot(observations) }));
+    const { fixture } = renderControl(router({ manifest: twoHeads, snapshot: machineSnapshot(observations) }), {
+      attended: true,
+    });
     const monitor = screen.getByRole('region', { name: 'Monitor' });
     expect(within(monitor).getByRole('heading', { name: 'Axes position' })).toBeInTheDocument();
     expect(within(monitor).getByRole('heading', { name: 'Second head position' })).toBeInTheDocument();
@@ -332,6 +335,48 @@ describe('Control on a milling machine', () => {
     expect(within(second).getByRole('button', { name: /^Home/u })).toBeInTheDocument();
     // The controller's own buttons stay with the first group, not once per head.
     expect(within(second).queryByRole('button', { name: /^Unlock/u })).not.toBeInTheDocument();
+    // The lost head blocks the first group's jog: the refusal names it, and its remedy homes it, not the Axes.
+    const axes = within(control).getByRole('group', { name: 'Axes' });
+    expect(axes).toHaveTextContent('Second head: The position was lost. Home first.');
+    await user.click(within(axes).getByRole('button', { name: /^Second head: Home/u }));
+    await waitFor(() => {
+      expect(fixture.applyAction).toHaveBeenCalledWith(
+        expect.objectContaining({ componentId: 'head-2', action: 'motion.home' }),
+      );
+    });
+  });
+
+  /** The router with a rotary unit on axis A, declaring the given actions of the router's motion group. */
+  const withRotary = (actions: readonly string[]): typeof routerManifest => ({
+    ...routerManifest,
+    axes: [
+      ...routerManifest.axes,
+      { id: 'a', label: 'A', kind: 'rotary', unit: 'deg', carries: 'work', reference: 'none' },
+    ],
+    components: [...routerManifest.components, { id: 'rotary', label: 'Rotary', kind: 'motion', axes: ['a'] }],
+    actions: [
+      ...routerManifest.actions,
+      ...routerManifest.actions
+        .filter((action) => action.componentId === 'motion' && actions.includes(action.id))
+        .map((action) => ({ ...action, componentId: 'rotary' })),
+    ],
+  });
+
+  it('sums up position trust only over the groups that can home, as motion is gated', () => {
+    // The rotary unit declares no homing and reports no trust: it neither gates motion nor reads as not homed.
+    const rotary = withRotary(['motion.move']);
+    renderControl(router({ manifest: rotary, snapshot: machineSnapshot(millingComponents(rotary)) }));
+    expect(screen.getByRole('button', { name: /^Monitor/u })).toHaveTextContent('Homed · Router off');
+  });
+
+  it('offers a rotary-only group no work-zero move and no empty jog pad', () => {
+    const rotary = withRotary(['motion.home', 'motion.move', 'motion.jog']);
+    renderControl(router({ manifest: rotary, snapshot: machineSnapshot(millingComponents(rotary)) }));
+    const group = within(openStage('Control')).getByRole('group', { name: 'Rotary' });
+    expect(within(group).getByRole('button', { name: /^Home/u })).toBeInTheDocument();
+    expect(within(group).queryByRole('button', { name: /^Go to work zero/u })).not.toBeInTheDocument();
+    expect(within(group).queryByRole('group', { name: 'Jog step' })).not.toBeInTheDocument();
+    expect(within(group).queryByText('Jog')).not.toBeInTheDocument();
   });
 
   it('offers an alert’s action remedy as its button and a person’s remedy as words', async () => {
@@ -396,6 +441,48 @@ describe('press and hold', () => {
       expect(jog).toHaveAttribute('aria-pressed', 'true');
     });
   };
+
+  it('presses only the jog button of the group whose hold is in force', async () => {
+    // A second head on the same Z: each group has its own Z+.
+    const jog = routerManifest.actions.find((action) => action.id === 'motion.jog');
+    const twoOnZ: typeof routerManifest = {
+      ...routerManifest,
+      components: [...routerManifest.components, { id: 'head-2', label: 'Second head', kind: 'motion', axes: ['z'] }],
+      actions: [...routerManifest.actions, ...(jog === undefined ? [] : [{ ...jog, componentId: 'head-2' }])],
+      holds: [
+        ...routerManifest.holds,
+        machineActionDescriptorOf(machineJogHold({ componentId: 'head-2', lease: 100, bound: 150 })),
+      ],
+    };
+    const machine = router({
+      manifest: twoOnZ,
+      snapshot: machineSnapshot([
+        ...millingComponents(twoOnZ),
+        known('head-2', 'position', {
+          kind: 'motion',
+          homed: { z: true },
+          trust: 'homed',
+          position: { machine: { z: 0 }, work: { z: 0 } },
+          workOffset: { id: 'G54', revision: 'wo-2', origin: { z: 0 } },
+          mode: 'normal',
+          feed: 0,
+          limits: [],
+        }),
+      ]),
+    });
+    const fixture = createFixture({ entries: [machine] });
+    renderControl(machine, { attended: true, fixture });
+    const control = openStage('Control');
+    const axes = within(control).getByRole('group', { name: 'Axes' });
+    const second = within(control).getByRole('group', { name: 'Second head' });
+    fireEvent.click(within(axes).getByRole('radio', { name: 'Hold to jog' }));
+    fireEvent.click(within(second).getByRole('radio', { name: 'Hold to jog' }));
+    const held = within(second).getByRole('button', { name: 'Jog Z+' });
+    await press(fixture, held);
+    expect(fixture.beginHold).toHaveBeenCalledWith(expect.objectContaining({ componentId: 'head-2' }));
+    expect(within(axes).getByRole('button', { name: 'Jog Z+' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.pointerUp(held);
+  });
 
   it('keeps a hold while the machine reports itself moving, and keeps its button live to let go', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

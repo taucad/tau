@@ -1752,7 +1752,7 @@ describe('Print pane monitor and controls', () => {
     expect(await screen.findByText('Stopping…')).toHaveAttribute('role', 'status');
     expect(screen.queryByText(/did not confirm the stop/u)).not.toBeInTheDocument();
     /* No state: the stop has left the host's bounded window of recent operations. */
-    const settle = (state?: 'confirming' | 'accepted' | 'attention'): void => {
+    const settle = (state?: 'confirming' | 'accepted' | 'attention' | 'rejected'): void => {
       const current = printing();
       fixture.observe({
         ...current,
@@ -1819,6 +1819,31 @@ describe('Print pane monitor and controls', () => {
         await vi.advanceTimersByTimeAsync(5000);
       });
       expect(screen.queryByText(/did not confirm the stop/u)).not.toBeInTheDocument();
+      expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps saying a refused Stop was not confirmed once it leaves the host’s recent operations', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const notice = 'Workshop X1C did not confirm the stop. Use the machine’s own stop if it is still moving.';
+      const settle = await unconfirmedStop();
+      settle('rejected');
+      expect(await screen.findByText(notice)).toBeInTheDocument();
+      // 64 newer operations later, the host no longer lists the stop.
+      settle();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(screen.getByText(notice)).toBeInTheDocument();
+      expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
+      // Past the unlisted wait: still the sentence, never "Stopping…" again.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(screen.getByText(notice)).toBeInTheDocument();
       expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -3395,7 +3420,10 @@ const controlOf = (machine: ReturnType<typeof entry>, overrides: Partial<Machine
 
 describe('Print pane presence, Stop and jobs across machines', () => {
   it.each([
-    { when: 'a jog is held', overrides: { hold: { parameters: { axis: 'x', direction: 1, feed: 1000 } } } },
+    {
+      when: 'a jog is held',
+      overrides: { hold: { componentId: 'motion', parameters: { axis: 'x', direction: 1, feed: 1000 } } },
+    },
     { when: 'a stop is in flight', overrides: { isStopping: true } },
   ] as const)('offers Stop while $when on an idle printer', ({ overrides }) => {
     expect(hasSomethingToStop(controlOf(entry()))).toBe(false);

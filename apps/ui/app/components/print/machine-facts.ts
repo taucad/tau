@@ -135,9 +135,12 @@ export const describeOutcome = (outcome: MachineHaltOutcome): string => {
   const spindle = { stops: 'the spindle stops', 'keeps-turning': 'the spindle keeps turning', none: undefined }[
     outcome.spindle
   ];
+  const beam = { off: 'the beam turns off', unchanged: 'the beam stays as it is', none: undefined }[
+    outcome.emission ?? 'none'
+  ];
   const heaters = { off: 'heaters turn off', unchanged: 'heaters stay on', none: undefined }[outcome.heaters];
   const position = outcome.position === 'kept' ? 'the position is kept' : 'the position may be lost';
-  return `${[motion, spindle, heaters, position].filter((part) => part !== undefined).join(', ')}.`;
+  return `${[motion, spindle, beam, heaters, position].filter((part) => part !== undefined).join(', ')}.`;
 };
 
 /**

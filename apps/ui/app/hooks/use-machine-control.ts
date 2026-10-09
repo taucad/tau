@@ -56,8 +56,8 @@ export const usePresence = (): Presence => {
   return { attended: since !== undefined, setAttended, touch };
 };
 
-/** A press-and-hold in force, as the pane shows it. @public */
-export type ActiveHold = Readonly<{ parameters: MachineJogHoldParameters }>;
+/** A press-and-hold in force, as the pane shows it: the held component and what it moves. @public */
+export type ActiveHold = Readonly<{ componentId: string; parameters: MachineJogHoldParameters }>;
 
 /** The lease behind a press: its component, granted id, renewal timer, release listeners and whether it ended. */
 type HoldLease = {
@@ -314,7 +314,7 @@ export const useMachineControl = ({
     setError(undefined);
     const current: HoldLease = { componentId, released: false };
     holdRef.current = current;
-    setHold({ parameters });
+    setHold({ componentId, parameters });
     /* The press ends wherever it is let go: a disabled or moved-away button may never see its own release. */
     const letGo = (): void => {
       if (holdRef.current === current) {
@@ -401,9 +401,17 @@ export const useMachineControl = ({
       ? undefined
       : entry.snapshot.operations.find((operation) => operation.operationId === unconfirmedStop);
   const isStopListed = stopOperation !== undefined;
-  /* An accepted stop is settled, so forget it: the host lists only its most recent operations, and a stop pushed out of
-   * that window later must not re-arm the unlisted wait and read as unconfirmed. */
-  if (stopOperation?.state === 'accepted') {
+  const stopNoticeText = `${entry.name} did not confirm the stop. Use the machine’s own stop if it is still moving.`;
+  /* A stop in a final state is settled, so forget it: the host lists only its most recent operations, and a stop pushed
+   * out of that window later must not read as stopping again. A refused stop keeps its sentence as the pane's error. */
+  if (
+    stopOperation?.state === 'accepted' ||
+    stopOperation?.state === 'attention' ||
+    stopOperation?.state === 'rejected'
+  ) {
+    if (stopOperation.state !== 'accepted') {
+      setError(stopNoticeText);
+    }
     setUnconfirmedStop(undefined);
   }
   useEffect(() => {
@@ -423,11 +431,7 @@ export const useMachineControl = ({
       ? !isStopUnlisted
       : ['planned', 'sending', 'confirming'].includes(stopOperation.state));
   const stopNotice =
-    stopOperation?.state === 'attention' ||
-    stopOperation?.state === 'rejected' ||
-    (unconfirmedStop !== undefined && stopOperation === undefined && isStopUnlisted)
-      ? `${entry.name} did not confirm the stop. Use the machine’s own stop if it is still moving.`
-      : undefined;
+    unconfirmedStop !== undefined && stopOperation === undefined && isStopUnlisted ? stopNoticeText : undefined;
 
   return {
     entry,

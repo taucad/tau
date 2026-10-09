@@ -267,9 +267,12 @@ export const stopControlId = (machineId: string): string => `machine-stop-${mach
 export function RemedyButton({
   control,
   remedy,
+  componentLabel,
 }: {
   readonly control: MachineControl;
   readonly remedy: MachineRemedy;
+  /** Names the component an action remedy acts on, where that is not the group it is shown in. */
+  readonly componentLabel?: string;
 }): React.JSX.Element | undefined {
   if (remedy.type === 'person') {
     return (
@@ -302,7 +305,15 @@ export function RemedyButton({
       </p>
     );
   }
-  return <ActionButton control={control} componentId={remedy.componentId} action={remedy.action} />;
+  const label = declaredAction(control.entry, remedy.componentId, remedy.action)?.label ?? remedy.action;
+  return (
+    <ActionButton
+      control={control}
+      componentId={remedy.componentId}
+      action={remedy.action}
+      label={componentLabel === undefined ? undefined : `${componentLabel}: ${label}`}
+    />
+  );
 }
 
 /**
@@ -361,7 +372,7 @@ export function Blocked({
   readonly componentId: string;
   readonly action: string;
   readonly kind?: 'action' | 'hold';
-  /** Off where the group already shows the remedy's own button. */
+  /** Off where the group already shows the remedy's own button; a remedy for another motion group still shows. */
   readonly hasRemedy?: boolean;
 }): React.JSX.Element | undefined {
   const check = control.check(componentId, action, kind);
@@ -372,13 +383,25 @@ export function Blocked({
     check.status === 'unavailable' &&
     check.code !== 'MACHINE_ACTION_UNDECLARED' &&
     !(asksHere && check.code === 'MACHINE_ACTION_ATTENDANCE_REQUIRED');
+  /* On a machine with several motion groups, a remedy that homes another group names it: this group's own Home would
+   * move the wrong axes and leave the block in place. */
+  const remedy = check.status === 'unavailable' ? check.remedy : undefined;
+  const motions = control.entry.descriptor.capabilities.components.filter((component) => component.kind === 'motion');
+  const otherGroup =
+    motions.length > 1 && remedy?.type === 'action' && remedy.componentId !== componentId
+      ? motions.find((motion) => motion.id === remedy.componentId)
+      : undefined;
   return (
     <>
       {isReasonShown ? (
         <div className='flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground'>
           <CircleAlert aria-hidden className='size-3.5 shrink-0 text-warning' />
-          <span className='min-w-0 flex-1'>{check.message}</span>
-          {check.remedy === undefined || !hasRemedy ? null : <RemedyButton control={control} remedy={check.remedy} />}
+          <span className='min-w-0 flex-1'>
+            {otherGroup === undefined ? check.message : `${otherGroup.label}: ${check.message}`}
+          </span>
+          {remedy === undefined || (!hasRemedy && otherGroup === undefined) ? null : (
+            <RemedyButton control={control} remedy={remedy} componentLabel={otherGroup?.label} />
+          )}
         </div>
       ) : null}
       {asksHere ? <InlinePresence control={control} /> : null}
@@ -510,7 +533,11 @@ function JogPad({
         variant='outline'
         aria-label={isBed ? `Jog ${label}, bed ${shown > 0 ? 'up' : 'down'}` : `Jog ${label}`}
         aria-pressed={
-          isHold ? control.hold?.parameters.axis === axis && control.hold.parameters.direction === direction : undefined
+          isHold
+            ? control.hold?.componentId === motion.id &&
+              control.hold.parameters.axis === axis &&
+              control.hold.parameters.direction === direction
+            : undefined
         }
         /* The button whose hold is in force stays live: a disabled button may never see its own release. */
         disabled={!isEnabled && control.hold === undefined}
@@ -650,24 +677,30 @@ function MotionGroup({
     declaredAction(entry, componentId, action) !== undefined;
   const controllerId =
     entry.descriptor.capabilities.components.find((component) => component.kind === 'controller')?.id ?? 'controller';
+  /* The pad, work zero and zeroing are X/Y/Z linear: a group without such an axis (a rotary unit) offers none of them,
+   * rather than an empty move or a pad with no buttons. ponytail: rotary jog is a follow-up. */
+  const axes = entry.descriptor.capabilities.axes.filter(
+    (axis) => motion.axes.includes(axis.id) && axis.kind === 'linear',
+  );
+  const workZero = Object.fromEntries(axes.filter((axis) => axis.id !== 'z').map((axis) => [axis.id, 0]));
   const hasJog =
-    has(motion.id, 'motion.jog') ||
-    machineActionOf(entry, { componentId: motion.id, action: 'motion.jog', kind: 'hold' }) !== undefined;
+    axes.some((axis) => jogButtons.some((jog) => jog.axis === axis.id)) &&
+    (has(motion.id, 'motion.jog') ||
+      machineActionOf(entry, { componentId: motion.id, action: 'motion.jog', kind: 'hold' }) !== undefined);
+  const hasWorkZero = has(motion.id, 'motion.move') && Object.keys(workZero).length > 0;
+  const offset = componentValue(entry.snapshot.components, motion.id, 'motion')?.workOffset.id;
+  const hasZeroing = has(motion.id, 'work-offset.set') && offset !== undefined && axes.length > 0;
   const offered = [
     hasController && has(controllerId, 'controller.unlock'),
     hasController && has(controllerId, 'controller.wake'),
     has(motion.id, 'motion.home'),
-    has(motion.id, 'motion.move'),
+    hasWorkZero,
     hasJog,
-    has(motion.id, 'work-offset.set'),
+    hasZeroing,
   ];
   if (!offered.some(Boolean)) {
     return undefined;
   }
-  const axes = entry.descriptor.capabilities.axes.filter(
-    (axis) => motion.axes.includes(axis.id) && axis.kind === 'linear',
-  );
-  const offset = componentValue(entry.snapshot.components, motion.id, 'motion')?.workOffset.id;
   return group(
     title,
     <>
@@ -680,19 +713,18 @@ function MotionGroup({
           </>
         ) : null}
         {hasJog ? null : <ActionButton control={control} componentId={motion.id} action='motion.home' />}
-        <ActionButton
-          control={control}
-          componentId={motion.id}
-          action='motion.move'
-          label='Go to work zero'
-          parameters={{
-            frame: 'work',
-            position: Object.fromEntries(axes.filter((axis) => axis.id !== 'z').map((axis) => [axis.id, 0])),
-          }}
-        />
+        {hasWorkZero ? (
+          <ActionButton
+            control={control}
+            componentId={motion.id}
+            action='motion.move'
+            label='Go to work zero'
+            parameters={{ frame: 'work', position: workZero }}
+          />
+        ) : null}
       </div>
       {hasJog ? <JogPad control={control} motion={motion} axes={axes} /> : null}
-      {has(motion.id, 'work-offset.set') && offset !== undefined ? (
+      {hasZeroing ? (
         <div className='flex flex-wrap items-center gap-2'>
           <span className='text-xs text-muted-foreground'>Zero {offset} here:</span>
           {axes.map((axis) => (

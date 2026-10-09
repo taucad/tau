@@ -163,6 +163,8 @@ const gcodeProgram = {
   requiredMembers: [],
   payloadSelection: 'single',
   technology: 'subtractive.milling',
+  /* Grbl's list: `.gc` is none of the names Tau knows G-code by without it. */
+  extensions: ['.gcode', '.gc', '.nc', '.tap', '.cnc'],
 };
 
 /** What differs from the X1C manifest. */

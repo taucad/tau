@@ -56,7 +56,6 @@ import {
 import {
   defaultBambuStudioEngine,
   describePrintProfiles,
-  observedPlate,
   readProjectMachinePreferences,
 } from '#registry/print-profiles.js';
 import type { BambuStudioEngine, ResolvedMachinePreferences } from '#registry/print-profiles.js';
@@ -172,6 +171,11 @@ export type MachinePrintPlanner = (
     configuration: MachineRequestJobInput['configuration'];
     /** What the program is, as Tau read it; the host's own parse wins. */
     program: Partial<MachineProgramSummary> & Readonly<{ name: string }>;
+    /**
+     * The plate id the job is for when the machine does not report one: stated by the call or by the project's saved
+     * settings. The approval prompt names it, since the person approves a print made for it.
+     */
+    statedPlate?: string | undefined;
     /** What the project's print intent contributed, or why it was ignored, for the tool result. */
     machinePreferences?: JsonObject | undefined;
     /** What the slice could not honour although it was made, or what Tau could not read; the agent tells the person. */
@@ -779,7 +783,8 @@ const processVerbs: Readonly<Record<string, string>> = { fff: 'Print', milling: 
  *
  * @param job - The job awaiting approval.
  * @param entry - Its machine.
- * @param statedPlate - The plate id the agent passed, when the machine does not report its own.
+ * @param statedPlate - The plate id the plan is for when the machine does not report its own (the call's or the
+ *   project's saved one).
  * @returns The prompt.
  */
 const approvalPrompt = (job: MachineJob, entry: MachineDirectoryEntry, statedPlate: string | undefined): string => {
@@ -964,7 +969,7 @@ const requestJob = async (
   }
   const resolution = await invocation.approve({
     key: approvalKey,
-    prompt: approvalPrompt(job, entry, observedPlate(entry) === undefined ? parsed.plate : undefined),
+    prompt: approvalPrompt(job, entry, plan.statedPlate),
     payload: {
       kind: 'job',
       jobId,

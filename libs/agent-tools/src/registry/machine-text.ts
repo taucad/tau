@@ -7,6 +7,7 @@
 
 import { checkMachineAction, fffProcessOf, isSimulatedMachine } from '@taucad/runtime/machine';
 import type {
+  MachineAcceptedContainer,
   MachineActionDescriptor,
   MachineCheck,
   MachineComponentValue,
@@ -132,15 +133,23 @@ const quantityText = (value: unknown): string =>
 const percent = (fraction: number): string => `${String(Math.round(fraction * 100))}%`;
 
 /**
+ * One container a machine accepts, with the file extensions its programs have when the provider declares them.
+ * @param container - The accepted container.
+ * @returns "subtractive.milling (text/x.gcode: .gcode, .nc)".
+ */
+export const acceptedText = ({ technology, mediaType, extensions }: MachineAcceptedContainer): string =>
+  `${technology} (${mediaType}${extensions === undefined ? '' : `: ${extensions.join(', ')}`})`;
+
+/**
  * What jobs a machine takes from Tau and what starting one asks of a person, in one line.
  * @param jobs - The machine's job capability.
- * @returns "Jobs: accepts additive.fff (application/vnd.bambulab.gcode-3mf); stored, then started by Tau …".
+ * @returns "Jobs: accepts additive.fff (application/vnd.bambulab.gcode-3mf: .gcode.3mf); stored, then started by Tau …".
  */
 const jobsText = (jobs: MachineInstalledCapabilities['jobs']): string => {
   if (jobs.type === 'unsupported') {
     return 'Jobs: this machine takes none from Tau.';
   }
-  const accepts = jobs.accepts.map(({ technology, mediaType }) => `${technology} (${mediaType})`).join(', ');
+  const accepts = jobs.accepts.map((container) => acceptedText(container)).join(', ');
   const start =
     jobs.start === 'remote' ? 'started by Tau once a person accepts it' : 'started by a person at the machine';
   const confirms = [

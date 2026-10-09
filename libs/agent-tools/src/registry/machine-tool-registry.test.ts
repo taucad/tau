@@ -582,6 +582,16 @@ describe('machine tool registry', () => {
       expect(text).not.toContain('legacyProjection');
     });
 
+    it('lists the file extensions a container declares', async () => {
+      const { client } = fixtureClient({ entries: [fixtureEntry({ milling: true, run: false })] });
+
+      const result = await run(client, { toolName: 'get_machine', input: {} });
+
+      expect(result.content).toContain(
+        'Jobs (request_job): accepts subtractive.milling (text/x.gcode: .gcode, .gc, .nc, .tap, .cnc);',
+      );
+    });
+
     it('names Stop and what it costs when only Stop clears an alert', async () => {
       const entry = fixtureEntry({
         snapshot: {
@@ -1140,11 +1150,22 @@ describe('machine tool registry', () => {
       });
     });
 
-    it('names the plate the person stated in the approval prompt when the machine reports none', async () => {
+    it('names the plate the plan is for in the approval prompt when the machine reports none', async () => {
       const fixture = fixtureClient({ entries: [fixtureEntry({ plate: false })] });
       const approve = approveWith('denied');
+      /* The call names no plate: the planner took it from the project's saved settings. */
+      planPrint.mockResolvedValueOnce({
+        artifact: fixtureArtifact,
+        configuration: { expectedBedType: 'cool', operatorConfirmedBedType: 'cool' },
+        program: {
+          name: 'pyramid.gcode.3mf',
+          estimatedDuration: 3_900_000,
+          facts: { process: 'fff', layers: 125, filamentLength: 2100 },
+        },
+        statedPlate: 'cool',
+      });
 
-      await run(fixture.client, { toolName: 'request_job', input: { targetFile: 'main.ts', plate: 'cool' }, approve });
+      await run(fixture.client, { toolName: 'request_job', input: { targetFile: 'main.ts' }, approve });
 
       expect(approve.mock.calls[0]?.[0].prompt).toBe(
         'Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min. On the Cool plate, as stated; Workshop X1C does not report its plate.',

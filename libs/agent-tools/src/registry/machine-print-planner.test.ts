@@ -334,6 +334,21 @@ describe('machine print planner', () => {
     );
   });
 
+  it('names a finished program by the extensions its container declares', async () => {
+    const deps = { ...dependencies(), readArtifact: async () => new TextEncoder().encode('G21\n') };
+    const router = fixtureEntry({ milling: true, run: false, name: 'Workshop mill' });
+    const planner = createMachinePrintPlanner(deps);
+    const { signal } = new AbortController();
+
+    /* `.gc` is Grbl's, declared on the container; no table in Tau names it. */
+    await expect(
+      planner({ toolCallId: 'call-1', artifact: 'cam/PART.GC', machine: router, signal }),
+    ).resolves.toMatchObject({ artifact: { mediaType: 'text/x.gcode', selectedMember: 'cam/PART.GC' } });
+    await expect(planner({ toolCallId: 'call-2', artifact: 'cam/part.xyz', machine: router, signal })).rejects.toThrow(
+      'Workshop mill accepts subtractive.milling (text/x.gcode: .gcode, .gc, .nc, .tap, .cnc); cam/part.xyz is not one of them.',
+    );
+  });
+
   it('refuses a plate container that names no plate to run, rather than guess one', async () => {
     const entry = machine(loaded);
     const { jobs } = entry.descriptor.capabilities;
@@ -492,6 +507,34 @@ describe('machine print planner', () => {
       ).resolves.toMatchObject({ configuration: {} });
     });
 
+    it('slices for a printer that declares no material system with the process defaults', async () => {
+      const entry = fixtureEntry({ generic: true, run: false });
+      const { capabilities } = entry.descriptor;
+      const bare: MachineDirectoryEntry = {
+        ...entry,
+        descriptor: {
+          ...entry.descriptor,
+          capabilities: {
+            ...capabilities,
+            components: capabilities.components.filter(({ kind }) => kind !== 'material-system'),
+          },
+        },
+      };
+      const manifest = fixtureManifest({ generic: true });
+      const provider = fixtureProvider({
+        ...manifest,
+        components: manifest.components.filter(({ kind }) => kind !== 'material-system'),
+      });
+      const deps = { ...generic(), machines: { listProviders: async () => [provider] } };
+
+      const result = await plan(deps, bare);
+
+      expect(result.configuration).toEqual({});
+      expect(deps.exportModel.mock.calls[0]![0]).toMatchObject({ to: 'gcode', options: { plate: 'textured-pei' } });
+      /* Nothing reports a material, so none is claimed in the file. */
+      expect(deps.exportModel.mock.calls[0]![0].options).not.toHaveProperty('filamentType');
+    });
+
     it("keeps a stated plate out of a finished program's configuration, which the provider completes", async () => {
       const deps = generic();
       const result = await createMachinePrintPlanner(deps)({
@@ -524,9 +567,9 @@ describe('machine print planner', () => {
 
     it('refuses on a machine that is no 3D printer, or a plate not its own, reading nothing', async () => {
       const deps = dependencies();
-      await expect(finished(fixtureEntry({ milling: true, run: false }), 'cool', deps)).rejects.toThrow(
-        'plate applies to a 3D printer; Workshop X1C is not one, so pass no plate.',
-      );
+      await expect(
+        finished(fixtureEntry({ milling: true, run: false, name: 'Workshop mill' }), 'cool', deps),
+      ).rejects.toThrow('plate applies to a 3D printer; Workshop mill is not one, so pass no plate.');
       await expect(finished(machine({ materials: loaded.materials }), 'glass', deps)).rejects.toThrow(
         'plate "glass" is not one of Workshop X1C\'s plates: textured-pei, cool.',
       );
@@ -705,6 +748,8 @@ describe('machine print planner', () => {
         expectedBedType: 'high-temperature',
         operatorConfirmedBedType: 'high-temperature',
       });
+      /* The approval prompt names the plate the person approves a print made for. */
+      expect(unreported.statedPlate).toBe('high-temperature');
       expect(unreported.machinePreferences).toEqual({
         ...reportedProfile,
         configurationVersions: {
@@ -719,6 +764,7 @@ describe('machine print planner', () => {
       });
       expect(reported.configuration).toMatchObject({ expectedBedType: 'textured-pei' });
       expect(reported.configuration).not.toHaveProperty('operatorConfirmedBedType');
+      expect(reported).not.toHaveProperty('statedPlate');
       expect(reported.machinePreferences).toEqual({
         ...reportedProfile,
         configurationVersions: {

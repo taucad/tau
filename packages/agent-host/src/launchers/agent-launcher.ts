@@ -868,7 +868,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       }
       if (writers.has(chatId)) {
         const sourceGeneration = writerGenerations.get(chatId)!;
-        if (input.cursor > 0 && input.sourceGeneration !== sourceGeneration) {
+        if ((input.cursor > 0 || input.sourceGeneration !== undefined) && input.sourceGeneration !== sourceGeneration) {
           return { status: 'refused', chatId, reason: 'identity-mismatch', expected: { sourceGeneration } };
         }
         // oxlint-disable-next-line no-await-in-loop -- the writer owns the long poll for this iteration.
@@ -893,7 +893,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         }
         sourceGeneration = chat.generation;
         sourceHealth = chat.sourceHealth;
-        if (input.cursor > 0 && input.sourceGeneration !== sourceGeneration) {
+        if ((input.cursor > 0 || input.sourceGeneration !== undefined) && input.sourceGeneration !== sourceGeneration) {
           return { status: 'refused', chatId, reason: 'identity-mismatch', expected: { sourceGeneration } };
         }
         checkDriver(chatId, chat.ledger, false);

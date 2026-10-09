@@ -4,12 +4,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createAgentLauncher } from '@taucad/agent-host/launcher';
+import { createNodeChatStore } from '@taucad/agent-host/node';
+import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import { createAgentHostClient } from '#services/agent-host-client.js';
+import type { AgentHostClient } from '#services/agent-host-client.js';
+import type { AgentHostTransport } from '#services/agent-host-transport.js';
 import { pathToFileURL } from 'node:url';
 import { createActor } from 'xstate';
 import type { Chat as ChatEntity, ModelSupport, MyUIMessage } from '@taucad/chat';
 import { errorCategory } from '@taucad/types/constants';
 import type * as AiSdk from 'ai';
-import type { AgentHostClient } from '#services/agent-host-client.js';
 import type { WatchEvent } from '@taucad/filesystem';
 import type { CatchUpFrame, CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
@@ -2059,6 +2067,96 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       });
       store.setProjectSession('proj_a', undefined);
       store.setProjectSession('proj_b', undefined);
+    }
+  });
+
+  it('should reread an empty replacement generation before certifying its read authority', async () => {
+    const chatId = 'chat_empty_generation_handoff';
+    const projectId = 'project_empty_generation_handoff';
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-store-generation-'));
+    const model = { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000, maxTokens: 4096 } as const;
+    const createOwner = () =>
+      createAgentLauncher({
+        chats: createNodeChatStore({ workspaceRoot }),
+        modelTransport: createTauCloudGatewayModelTransport({
+          baseUrl: 'https://gateway.example',
+          model,
+          auth: () => 'fixture',
+          fetch: async () => {
+            throw new Error('Read-only generation handoff must not invoke a model.');
+          },
+        }),
+        credential: () => ({ mode: 'session' }),
+        systemPrompt: 'Read-only fixture',
+        model,
+        toolRegistry: { list: () => [], invoke: async () => ({ content: 'unused', isError: true }) },
+      });
+    const original = createOwner();
+    const replacement = createOwner();
+    const beginReplacement = Promise.withResolvers<void>();
+    const nextRead = Promise.withResolvers<Parameters<AgentHostTransport['read']>[0]>();
+    const releaseNextRead = Promise.withResolvers<void>();
+    let reads = 0;
+    const transport: AgentHostTransport = {
+      ready: Promise.resolve(),
+      execute: async (command) => replacement.execute(command),
+      catchUp: (input) => original.catchUp(input),
+      liveEvents: (id, signal) => replacement.liveEvents({ chatId: id, signal }),
+      close: () => undefined,
+      read: async (input) => {
+        reads += 1;
+        if (reads === 1) {
+          await beginReplacement.promise;
+        } else if (reads === 2) {
+          nextRead.resolve(input);
+          await releaseNextRead.promise;
+        }
+        return replacement.read(input);
+      },
+    };
+    const client = createAgentHostClient(transport);
+    const store = new ChatSessionStore({ chatSession });
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
+    store.setDependencies(deps);
+    const unpublish = store.publishProjectHostConnector(projectId, async () => client);
+    const unobserve = store.observe(chatId, projectId);
+    try {
+      await vi.waitFor(() => {
+        expect(reads).toBe(1);
+        expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
+      });
+      beginReplacement.resolve();
+      const requested = await nextRead.promise;
+      // The real follow loop must discard the retired generation/health before its next read.
+      expect({
+        cursor: requested.cursor,
+        sourceGeneration: requested.sourceGeneration,
+        sourceHealth: requested.sourceHealth,
+        usageReady: store.historicalUsageReady(chatId, projectId),
+        attached: store.getAttachmentStatus(chatId) === 'attached',
+      }).toEqual({
+        cursor: 0,
+        sourceGeneration: undefined,
+        sourceHealth: undefined,
+        usageReady: false,
+        attached: false,
+      });
+      releaseNextRead.resolve();
+      await vi.waitFor(() => {
+        expect(reads).toBe(3);
+        expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
+        expect(store.getAttachmentStatus(chatId)).toBe('attached');
+      });
+    } finally {
+      beginReplacement.resolve();
+      releaseNextRead.resolve();
+      unobserve();
+      unpublish();
+      await client.close();
+      await original.close();
+      await replacement.close();
+      await rm(workspaceRoot, { recursive: true, force: true });
     }
   });
 

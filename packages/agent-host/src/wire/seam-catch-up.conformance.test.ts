@@ -152,7 +152,7 @@ const readDeadline = (): AbortController => {
 
 describe('SeamCatchUp source health conformance', () => {
   it.each(['replacement', 'writer'] as const)(
-    'should publish new cursor-zero source identity before parking after %s',
+    'should refuse a retired cursor-zero source and acknowledge an unqualified reread after %s',
     async (schedule) => {
       const { launcher, path } = await healthFixture(schedule === 'replacement' ? 'quarantined alpha\n' : '');
       const first = await launcher.read({ chatId: 'health', cursor: 0, limit: 16, maxBytes: 1024 });
@@ -171,11 +171,17 @@ describe('SeamCatchUp source health conformance', () => {
         signal: controller.signal,
       });
       expect(controller.signal.aborted).toBe(false);
-      expect(next).toMatchObject({ status: 'batch', nextCursor: 0, endCursor: 0, sourceHealth: first.sourceHealth });
-      if (next.status !== 'batch') {
-        throw new Error('Expected replacement health.');
+      expect(next).toMatchObject({ status: 'refused', chatId: 'health', reason: 'identity-mismatch' });
+      const reread = await launcher.read({ chatId: 'health', cursor: 0, limit: 16, maxBytes: 1024 });
+      expect(reread).toMatchObject({ status: 'batch', nextCursor: 0, endCursor: 0, sourceHealth: first.sourceHealth });
+      if (reread.status !== 'batch') {
+        throw new Error('Expected replacement health after the unqualified reread.');
       }
-      expect(next.sourceGeneration).not.toBe(first.sourceGeneration);
+      expect(reread.sourceGeneration).not.toBe(first.sourceGeneration);
+      await expect(launcher.read({ chatId: 'health', cursor: 1, limit: 16, maxBytes: 1024 })).resolves.toMatchObject({
+        status: 'refused',
+        reason: 'identity-mismatch',
+      });
     },
   );
 

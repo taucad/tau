@@ -2855,7 +2855,7 @@ describe('admission without supplier state', () => {
 describe('post-hoc supplier metering', () => {
   const resolver = new CodeOwnedBillableModelQualificationResolver({
     adapters: new Map(
-      ['anthropic-claude-haiku-4.5', 'openai-gpt-5.6-luna', 'google-gemini-3.5-flash', 'together-glm-5.2'].map(
+      ['anthropic-claude-haiku-5.5', 'openai-gpt-5.6-luna', 'google-gemini-3.5-flash', 'together-glm-5.2'].map(
         (routeId) => [
           routeId,
           {
@@ -2941,7 +2941,7 @@ describe('post-hoc supplier metering', () => {
   it.each([
     {
       // $1, $0.10, $1.25 (5m write) and $5 per million.
-      routeId: 'anthropic-claude-haiku-4.5',
+      routeId: 'anthropic-claude-haiku-5.5',
       providerWire: 'anthropic',
       body: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 500 },
       priceHeaders: { 'anthropic-version': '2023-06-01' },

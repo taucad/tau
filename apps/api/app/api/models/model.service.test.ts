@@ -51,7 +51,7 @@ const pdfInputModelIds = [
   'anthropic-claude-sonnet-5.5',
   'anthropic-claude-sonnet-5',
   'anthropic-claude-sonnet-4.6',
-  'anthropic-claude-haiku-4.5',
+  'anthropic-claude-haiku-5.5',
   'openai-gpt-6-astra',
   'openai-gpt-6-sol',
   'openai-gpt-6-luna',

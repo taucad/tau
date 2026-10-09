@@ -28,7 +28,7 @@ export const composerSelector = '[aria-label="Ask Tau to build anything..."]';
 export const editComposerSelector = 'article [aria-label="Edit your message"]';
 export const seededIdsStorageKey = 'tau:e2e:chat-attachments';
 /** The Anthropic-wire catalog row the gateway fixture speaks; it reads images and PDFs. */
-export const pdfModelName = 'Haiku 4.5';
+export const pdfModelName = 'Haiku 5.5';
 /** A catalog row that reads images but not PDFs (D20). */
 export const imageOnlyModelName = 'Gemini 3.1 Pro';
 

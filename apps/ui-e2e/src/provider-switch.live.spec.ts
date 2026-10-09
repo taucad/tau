@@ -29,7 +29,7 @@ import {
 } from '#support/live-chat-turn.js';
 
 const models = {
-  anthropic: { id: 'anthropic-claude-haiku-4.5', providerId: 'anthropic' },
+  anthropic: { id: 'anthropic-claude-haiku-5.5', providerId: 'anthropic' },
   openai: { id: 'openai-gpt-5.6-sol', providerId: 'openai' },
   vertex: { id: 'google-gemini-3.8-flash', providerId: 'vertexai' },
 } as const satisfies Record<string, LiveModel>;

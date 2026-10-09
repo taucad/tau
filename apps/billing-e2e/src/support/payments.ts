@@ -44,6 +44,36 @@ export const readCredits = async (account: Account): Promise<WireBalanceExplanat
 export const availableAtoms = (credits: WireBalanceExplanation): string =>
   credits.balance?.eligibleAvailableCreditAtoms ?? 'unavailable';
 
+/** Atoms the three sources hold for operations still running; none when the ledger could not answer. */
+export const heldAtoms = ({ balance }: Pick<WireBalanceExplanation, 'balance'>): bigint =>
+  balance === null
+    ? 0n
+    : BigInt(balance.promoHeldCreditAtoms) +
+      BigInt(balance.planHeldCreditAtoms) +
+      BigInt(balance.purchasedHeldCreditAtoms);
+
+/**
+ * The balance once no source holds atoms, or the last read once `settleBudget` has passed. A page-driven agent keeps
+ * working after the call a row waited for settles (a tool result starts its next call), and that call's settlement
+ * would make a page rendered later disagree with a balance read earlier.
+ */
+export const waitForSettledHolds = async (
+  account: Account,
+  settleBudget = 90_000,
+): Promise<{ readonly credits: WireBalanceExplanation; readonly held: bigint; readonly seconds: number }> => {
+  const started = Date.now();
+  let credits = await readCredits(account);
+  let held = heldAtoms(credits);
+  while (held > 0n && Date.now() - started < settleBudget) {
+    // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one balance
+    await delay(2000);
+    // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one balance
+    credits = await readCredits(account);
+    held = heldAtoms(credits);
+  }
+  return { credits, held, seconds: Math.round((Date.now() - started) / 1000) };
+};
+
 /**
  * Whether the action may still move on its own: a settling state, or an attention the customer is told to wait out
  * (`provider_outcome_unknown`/`wait`), which a later Stripe event can still settle.

@@ -61,6 +61,7 @@ import {
   settlingStates,
   summaryTaxMinor,
   uiRecheckSeconds,
+  waitForSettledHolds,
   waitForSettlement,
 } from '#support/payments.js';
 import { matrixRow, runDirectory, runId } from '#support/results.js';
@@ -643,7 +644,10 @@ describe('funded journey', () => {
       if (settled === undefined || paid === undefined) {
         return { outcome: 'blocked', defect: 'H-03', evidence: ['TU-01 and FD-02 left no purchase and usage'] };
       }
-      const credits = await readCredits(account);
+      // FD-05's agent keeps working after the call that row waited for settles (a tool result starts its next call),
+      // so the ledger is read once no hold is outstanding; the page would otherwise render that call's settlement.
+      const { credits, held, seconds } = await waitForSettledHolds(account);
+      evidence.push(held === 0n ? `holds settled after ${seconds} s` : `${held} atoms still held after ${seconds} s`);
       const { page } = browsing;
       await billingSettings(page).open();
       // The split renders once the balance loads, after the card's title.
@@ -785,7 +789,10 @@ describe('funded journey', () => {
       const { page } = browsing;
       const settings = billingSettings(page);
       const credits = await readCredits(account);
-      await settings.open();
+      const stall = await settings.open();
+      if (stall !== undefined) {
+        evidence.push(stall);
+      }
       await settings.closure.confirm();
       const preparing = page.waitForResponse(
         (response) => response.url().endsWith('/v1/billing/account-closure') && response.request().method() === 'POST',

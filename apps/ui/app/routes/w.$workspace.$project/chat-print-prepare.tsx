@@ -625,7 +625,7 @@ export const usePrintPrepare = ({
       ...withBambuSubmissionSlots(provider, flags, mapping),
       ...(transientSubmission?.key === preferenceKey ? transientSubmission.values : {}),
     };
-  }, [machineSettings.machine, filamentColors, entry, provider, manifest, transientSubmission, preferenceKey]);
+  }, [machineSettings.machine, filamentColors, entry, provider, transientSubmission, preferenceKey]);
   const setSubmission = useCallback(
     (next: Record<string, unknown>): void => {
       /* Bambu's own keys are remembered in its preferences or completed by the provider; every other choice passes. */
@@ -678,12 +678,16 @@ export const usePrintPrepare = ({
       effective['operatorConfirmedBedType'] = plate;
     }
     return effective;
-  }, [entry, filamentColors, manifest, modelColors, plate, provider, slice?.rendering, submission, submissionSchema]);
+  }, [entry, filamentColors, modelColors, plate, provider, slice?.rendering, submission, submissionSchema]);
   /* The slot each filament prints from, kept while its content is the same so a telemetry frame reloads nothing. */
-  const currentSlots = bambuSubmissionSlots(provider, effectiveSubmission);
-  const slotsKey = JSON.stringify(currentSlots);
-  // oxlint-disable-next-line react-hooks/exhaustive-deps -- keyed by content: a new array with the same slots is the same mapping
-  const slots = useMemo(() => currentSlots, [slotsKey]);
+  const slotsKey = JSON.stringify(bambuSubmissionSlots(provider, effectiveSubmission));
+  /* Keyed by content: a new array with the same slots is the same mapping, so it is rebuilt from the key. */
+  const slots = useMemo(
+    (): ReadonlyArray<MaterialSlotAddress | undefined> =>
+      // JSON writes an empty slot as null; `?? undefined` restores it.
+      (JSON.parse(slotsKey) as ReadonlyArray<MaterialSlotAddress | undefined>).map((slot) => slot ?? undefined),
+    [slotsKey],
+  );
   const studio = useBambuStudio({ provider, entry, manifest, plate, mapping: slots, intent, update: updateIntent });
   const selectFilamentSlot = useCallback(
     (filament: number, slot: MaterialSlotAddress) => {

@@ -1442,6 +1442,9 @@ importers:
       '@taucad/formal':
         specifier: workspace:*
         version: link:tools/formal
+      '@taucad/fs-bridge':
+        specifier: workspace:*
+        version: link:libs/fs-bridge
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:packages/core/geometry

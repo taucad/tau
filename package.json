@@ -240,6 +240,7 @@
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/formal": "workspace:*",
+    "@taucad/fs-bridge": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/nx": "workspace:*",

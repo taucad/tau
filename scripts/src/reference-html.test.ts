@@ -185,7 +185,7 @@ const successfulPage = `<!doctype html>
       <div class="spacer"></div>
       <p id="lazy"></p>
     </main>
-    <header style="position: fixed; font-size: 1px; line-height: 1px">Persistent header</header>
+    <header style="position: fixed; font-size: 12px; line-height: 16px">Persistent header</header>
     <footer>Footer noise</footer>
     <script>
       const canvas = document.querySelector('#canvas');

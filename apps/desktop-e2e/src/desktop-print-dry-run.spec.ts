@@ -204,12 +204,13 @@ const requestPyramidPrint = async (page: Page, root: string): Promise<string> =>
   await expectGeometryFramed(page);
 
   const chatBanner = chatApprovalOf(page);
-  const refusal = page.getByText(/^The request was refused before anything was sent/u);
-  await expect
-    .poll(async () => (await chatBanner.count()) + (await refusal.count()), { timeout: 180_000 })
-    .toBeGreaterThan(0);
+  /* A refused program is a `request_job` tool error the turn hands back to the model (no job, no pane card). */
+  const refusals = (): number =>
+    fixture!.gatewayRequests.slice(before).filter((request) => JSON.stringify(request).includes('refused the program'))
+      .length;
+  await expect.poll(async () => (await chatBanner.count()) + refusals(), { timeout: 180_000 }).toBeGreaterThan(0);
   /* H-6 witness: an agent-planned request must pass the machine's own submission schema. */
-  expect(await refusal.allTextContents()).toEqual([]);
+  expect(refusals()).toBe(0);
   /* The X1C's attestation is the pane's alone, so the prompt itself sends the person there. */
   const prompt = new RegExp(
     `Print (\\S+\\.gcode\\.3mf) on ${machineName}\\? \\d+ layers, about [^.]+\\. Accept it in the Print pane, confirming: The build plate is clear\\.`,

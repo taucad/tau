@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 import { launchDesktopApp } from '#support/desktop-app.js';
+import { openNativeProjectionProject } from '#support/filesystem-projection-fixture.js';
 import { activeChatId, expectVisible } from '#support/scenario.js';
 
 test('projects independent native manifest and chat metadata while the workspace remains mounted', async () => {
@@ -44,16 +45,7 @@ test('projects independent native manifest and chat metadata while the workspace
         );
       }
     });
-    await page.goto('app://tau/__e2e/project-file-tree?chat=1&startupTrace=1');
-    await page.waitForURL(/\/w\//u, { timeout: 60_000 });
-    await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]').last());
-    const slug = new URL(page.url()).pathname.split('/').at(-1);
-    if (!slug) {
-      throw new Error('The native metadata fixture has no rooted project.');
-    }
-    const root = join(session.homeRoot, slug);
-    const manifestPath = join(root, 'tau.json');
-    const chatPath = join(root, '.tau/chats', activeChatId(page), 'chat.json');
+    const { manifestPath, chatPath } = await openNativeProjectionProject(session, 'Native metadata fixture');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
     const chat = JSON.parse(await readFile(chatPath, 'utf8')) as Record<string, unknown>;
     const identity = await page.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }));
@@ -109,7 +101,7 @@ test('projects independent native manifest and chat metadata while the workspace
           url &&
           ((url.protocol === 'app:' &&
             url.host === 'tau' &&
-            (url.pathname === '/' || url.pathname === '/__e2e/project-file-tree')) ||
+            (url.pathname === '/' || url.pathname === '/projects/new' || url.pathname.startsWith('/w/'))) ||
             (url.protocol === 'file:' && url.pathname.endsWith('/index.html')))
         ) {
           selected.add(event.source.id);

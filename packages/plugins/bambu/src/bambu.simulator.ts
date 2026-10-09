@@ -26,7 +26,6 @@ import type { BambuExternalSpoolCommand, BambuWireForm } from '#bambu.commands.j
 import { bambuDefinitions, bambuSimulatedDefinition, bambuSubmissionConfigurations } from '#bambu.manifest.js';
 import type { BambuModel } from '#bambu.protocol.js';
 import { BambuProtocolError, bambuExternalSpoolSlot, bambuModels, parseBambuStill } from '#bambu.protocol.js';
-import { openBambuSession } from '#bambu.session.js';
 import type { BambuLink, BambuSubmission } from '#bambu.session.js';
 import { bambuSettingsConfiguration } from '#bambu.settings.js';
 
@@ -1252,6 +1251,9 @@ export const createBambuSimulator = async (
         }
       },
     };
+    /* The session loads with the first connection, so the package's root entry stays light (and Node-free) for
+     * consumers that only read manifests. */
+    const { openBambuSession } = await import('#bambu.session.js');
     const session = await openBambuSession({
       model,
       serial,

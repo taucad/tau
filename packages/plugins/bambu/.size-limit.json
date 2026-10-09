@@ -1,8 +1,14 @@
 [
   {
-    "name": "@taucad/bambu (.) static graph, without the lazy host and archive chunks — measured 10.32 kB brotli on 2026-09-27",
-    "path": ["dist/*.mjs", "!dist/bambu.host.mjs", "!dist/bambu.archive.mjs", "!dist/bambu.plate.mjs"],
-    "limit": "11.35 kB"
+    "name": "@taucad/bambu (.) static graph, without the lazy host, session and archive chunks — measured 19.99 kB brotli on 2026-10-10",
+    "path": [
+      "dist/*.mjs",
+      "!dist/bambu.host.mjs",
+      "!dist/bambu.session.mjs",
+      "!dist/bambu.archive.mjs",
+      "!dist/bambu.plate.mjs"
+    ],
+    "limit": "22 kB"
   },
   {
     "name": "@taucad/bambu/plate (plate GLBs load on demand) — measured 620 B brotli on 2026-10-03",

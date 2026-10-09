@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { fileExtensions } from '@taucad/types/constants';
 import { runtimeContentSchema } from '@taucad/runtime';
+import { fileContentBytes } from '@taucad/fs-client/file-content-service';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
 import { XIcon, Download, Info, Check, ChevronDown, ChevronRight } from 'lucide-react';
@@ -986,33 +987,27 @@ const exportPreferencesSchema = z.object({
 export function useExportPreferences(
   fileManager: ReturnType<typeof useFileManager>,
 ): readonly [ExportPreferences, (next: ExportPreferences) => void] {
-  const { contentService, readFile, writeFiles, exists } = fileManager;
+  const { contentService, writeFiles } = fileManager;
   const service = useMemo(
     () =>
       contentService
         ? new ObservationService<ExportPreferences>({
             resource: preferencesPath,
-            watch: (invalidate, reset) =>
-              contentService.watchReady({ paths: [preferencesPath] }, (event) => {
-                if (event.type === 'reset') {
-                  reset();
-                } else {
-                  invalidate();
-                }
-              }),
-            read: async () =>
-              (await exists(preferencesPath))
-                ? {
+            read: async (read) => {
+              const result = await read.observe(contentService.observeContent(preferencesPath));
+              return result.kind === 'orphaned'
+                ? defaultPreferences
+                : {
                     ...defaultPreferences,
                     ...exportPreferencesSchema.parse(
-                      JSON.parse(new TextDecoder().decode(await readFile(preferencesPath))),
+                      JSON.parse(new TextDecoder().decode(fileContentBytes({ path: preferencesPath, result }))),
                     ),
-                  }
-                : defaultPreferences,
+                  };
+            },
             equal: (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
           })
         : undefined,
-    [contentService, exists, readFile],
+    [contentService],
   );
   const snapshot = useObservation(service);
   const activeSource = useRef(service);
@@ -1068,7 +1063,7 @@ export function useExportPreferences(
             return;
           }
           setWrite((current) => (current?.local === captured ? { local: captured, phase: 'saved' } : current));
-          service.invalidate();
+          service.refresh();
         } catch (error) {
           if (activeSource.current !== service) {
             return;

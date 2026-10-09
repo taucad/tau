@@ -31,6 +31,7 @@ import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters'
 import type { WorkbenchEntries, WorkbenchView } from '@taucad/workbench';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
+import { fileContentBytes } from '@taucad/fs-client/file-content-service';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -237,17 +238,19 @@ const idMismatchIssue = (expected: string, found: string): ProjectManifestParseI
  */
 export const createProjectManifestChangeObserver = ({
   projectId,
-  readManifest,
   getCurrent,
   reload,
   report,
 }: {
   readonly projectId: string;
-  readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>>;
   readonly getCurrent: () => ObservedManifestState;
   readonly reload: () => void;
   readonly report: (issue: ProjectManifestParseIssue) => void;
-}): { readonly check: () => Promise<void>; readonly invalidate: () => void; readonly dispose: () => void } => {
+}): {
+  readonly check: (input: { readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>> }) => Promise<void>;
+  readonly invalidate: () => void;
+  readonly dispose: () => void;
+} => {
   let disposed = false;
   let generation = 0;
   let lastObserved: string | undefined;
@@ -262,7 +265,7 @@ export const createProjectManifestChangeObserver = ({
     invalidate: () => {
       generation++;
     },
-    check: async () => {
+    check: async ({ readManifest }) => {
       const attempt = ++generation;
       let bytes: Uint8Array<ArrayBuffer>;
       try {
@@ -769,7 +772,6 @@ export function ProjectProvider({
 
     const observer = createProjectManifestChangeObserver({
       projectId,
-      readManifest: async () => fileManager.readFile('tau.json'),
       getCurrent: () => {
         const { project, manifestIssue } = actorRef.getSnapshot().context;
         return { project, issue: manifestIssue };
@@ -783,16 +785,16 @@ export function ProjectProvider({
     });
     const observation = new ObservationService({
       resource: 'tau.json',
-      watch: (invalidate, reset) =>
-        contentService.watchReady({ paths: ['tau.json'] }, (event) => {
-          if (event.type === 'reset') {
-            reset();
-          } else {
-            invalidate();
-          }
-        }),
       invalidate: observer.invalidate,
-      read: async () => observer.check(),
+      read: async (read) =>
+        observer.check({
+          readManifest: async () => {
+            return fileContentBytes({
+              path: 'tau.json',
+              result: await read.observe(contentService.observeContent('tau.json')),
+            });
+          },
+        }),
     });
     manifestObservationRef.current = observation;
     const updateHealth = (): void => {
@@ -810,8 +812,8 @@ export function ProjectProvider({
       if (manifestObservationRef.current === observation) {
         manifestObservationRef.current = undefined;
       }
-      lease.release();
       observer.dispose();
+      lease.release();
     };
   }, [actorRef, fileManager, projectId, projectIsReady]);
 

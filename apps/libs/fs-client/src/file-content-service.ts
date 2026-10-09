@@ -78,6 +78,50 @@ export type RawReadOptions = {
   readonly sizeLimit?: number;
 };
 
+/** Existing classified content and its error-reporting path. @public */
+export type FileContentBytesInput = {
+  readonly path: string;
+  readonly result: FileContentResult;
+};
+
+/**
+ * Interpret classified text content without acquiring I/O or changing ownership.
+ * @param input - The existing content outcome and its workspace-relative path.
+ * @returns The same owned text byte array held by the outcome.
+ * @throws {BinaryFileError} When the content is binary.
+ * @throws {FileTooLargeError} When it exceeds the existing open-time limit.
+ * @throws {FileNotFoundError} When it is orphaned.
+ * @public
+ */
+export function fileContentBytes({ path, result }: FileContentBytesInput): Uint8Array<ArrayBuffer> {
+  switch (result.kind) {
+    case 'text': {
+      return result.content;
+    }
+    case 'binary': {
+      throw new BinaryFileError(`File '${path}' is binary and cannot be read as text`, {
+        path,
+        size: result.size,
+      });
+    }
+    case 'too-large': {
+      throw new FileTooLargeError(
+        `File '${path}' (${result.size} bytes) exceeds open-time size limit (${result.limit} bytes)`,
+        { path, size: result.size, limit: result.limit },
+      );
+    }
+    case 'orphaned': {
+      throw new FileNotFoundError(`File '${path}' was not found`, { path });
+    }
+    case 'error': {
+      throw result.cause instanceof Error ? result.cause : new Error(String(result.cause));
+    }
+    case 'loading': {
+      throw new Error(`Unexpected 'loading' outcome for '${path}'`);
+    }
+  }
+}
+
 /**
  * Outcome publication event for `useSyncExternalStore` consumers.
  *
@@ -376,32 +420,7 @@ export class FileContentService {
    */
   public async resolveBytes(path: string, options?: ResolveOptions): Promise<Uint8Array<ArrayBuffer>> {
     const result = await this.resolve(path, options);
-    switch (result.kind) {
-      case 'text': {
-        return result.content;
-      }
-      case 'binary': {
-        throw new BinaryFileError(`File '${path}' is binary and cannot be read as text`, {
-          path,
-          size: result.size,
-        });
-      }
-      case 'too-large': {
-        throw new FileTooLargeError(
-          `File '${path}' (${result.size} bytes) exceeds open-time size limit (${result.limit} bytes)`,
-          { path, size: result.size, limit: result.limit },
-        );
-      }
-      case 'orphaned': {
-        throw new FileNotFoundError(`File '${path}' was not found`, { path });
-      }
-      case 'error': {
-        throw result.cause instanceof Error ? result.cause : new Error(String(result.cause));
-      }
-      case 'loading': {
-        throw new Error(`Unexpected 'loading' outcome for '${path}'`);
-      }
-    }
+    return fileContentBytes({ path, result });
   }
 
   /**

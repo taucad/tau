@@ -11,7 +11,12 @@ import type {
 /** A real registration acknowledgement and connection lifetime. @public */
 export type ObservationWatch = { readonly ready: Promise<void>; readonly closed: Promise<unknown>; dispose(): void };
 /** Publication fence passed to domain effects which may publish internally. @public */
-export type ObservationRead = { readonly signal: AbortSignal; isCurrent(): boolean };
+export type ObservationRead = {
+  readonly signal: AbortSignal;
+  isCurrent(): boolean;
+  /** Acquire and read a current dependency through this driver's lifetime. */
+  observe<S>(source: ObservationService<S>): Promise<S>;
+};
 /** Stable selecting snapshot; decoded values live here, outside the lifecycle machine. @public */
 export type ObservationSnapshot<T> = {
   readonly status: 'registering' | 'pending' | 'ready' | 'error' | 'closed';
@@ -29,7 +34,7 @@ export type ObservationLease<T> = {
 export type ObservationServiceOptions<T> = {
   readonly actorOptions?: Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>;
   readonly resource: string;
-  watch(invalidate: () => void, reset: () => void): ObservationWatch;
+  watch?(invalidate: () => void, reset: () => void): ObservationWatch;
   read(fence: ObservationRead): Promise<T>;
   equal?(previous: T, next: T): boolean;
   publish?(value: T): void;
@@ -39,6 +44,13 @@ export type ObservationServiceOptions<T> = {
   invalidate?(): void;
   /** Release decoded values and owned URLs on final release. */
   disposeValue?(value: T): void;
+};
+
+type ObservedDependency = {
+  readonly lease: ObservationLease<unknown>;
+  readonly waiting: Set<() => boolean>;
+  initialized: boolean;
+  unsubscribe(): void;
 };
 
 /**
@@ -54,6 +66,8 @@ export class ObservationService<T> {
   private actor: ReturnType<typeof createObservationActor> | undefined;
   private leases = 0;
   private epoch = 0;
+  private readonly dependencies = new Map<ObservationService<unknown>, ObservedDependency>();
+  private refreshingDependencies = false;
   private reads = 0;
   private invalidations = 0;
   private coalesced = 0;
@@ -120,7 +134,7 @@ export class ObservationService<T> {
       coalesced: this.coalesced,
       refused: this.refused,
       leases: this.leases,
-      activeWatches: this.actor && !this.actor.getSnapshot().hasTag('closed') ? 1 : 0,
+      activeWatches: this.options.watch && this.actor && !this.actor.getSnapshot().hasTag('closed') ? 1 : 0,
       dedupedLeases: Math.max(0, this.leases - 1),
     };
   }
@@ -139,9 +153,18 @@ export class ObservationService<T> {
       this.options.invalidate?.();
       this.actor.stop();
       this.actor = undefined;
+      this.releaseDependencies();
       this.discardStaged();
       this.start();
       return;
+    }
+    this.refreshingDependencies = true;
+    try {
+      for (const dependency of this.dependencies.values()) {
+        dependency.lease.refresh();
+      }
+    } finally {
+      this.refreshingDependencies = false;
     }
     this.invalidate();
   }
@@ -176,11 +199,11 @@ export class ObservationService<T> {
           this.options.invalidate?.();
           sendBack({ type: 'reset' });
         };
-        const watch = this.options.watch(invalidate, reset);
+        const watch = this.options.watch?.(invalidate, reset);
         let disposed = false;
         const register = async (): Promise<void> => {
           try {
-            await watch.ready;
+            await watch?.ready;
             if (!disposed) {
               sendBack({ type: 'ready' });
             }
@@ -192,7 +215,7 @@ export class ObservationService<T> {
         };
         const close = async (): Promise<void> => {
           try {
-            await watch.closed;
+            await watch?.closed;
           } catch {
             /* Either settlement closes this captured connection. */
           }
@@ -203,10 +226,12 @@ export class ObservationService<T> {
           }
         };
         void register();
-        void close();
+        if (watch) {
+          void close();
+        }
         return () => {
           disposed = true;
-          watch.dispose();
+          watch?.dispose();
         };
       }),
       observationRead: createAsyncLogic<ObservationReadOutput, { generation: number }>({
@@ -216,9 +241,16 @@ export class ObservationService<T> {
             !signal.aborted &&
             epoch === this.epoch &&
             this.actor?.getSnapshot().context.generation === input.generation;
+          const seen = new Set<ObservedDependency>();
+          const failures = new Map<ObservedDependency, Error>();
           let value: T;
           try {
-            value = await this.options.read({ signal, isCurrent });
+            value = await this.options.read({
+              signal,
+              isCurrent,
+              observe: async <S>(source: ObservationService<S>): Promise<S> =>
+                this.observeDependency(source, { signal, isCurrent, seen, failures, epoch }),
+            });
           } catch (error) {
             if (!isCurrent()) {
               this.refused++;
@@ -226,12 +258,33 @@ export class ObservationService<T> {
             signal.throwIfAborted();
             return { kind: 'failed', generation: input.generation, error: String(error) };
           }
+          const failure =
+            !this.options.watch && seen.size === 0
+              ? new Error('Observation requires a watch or an observed dependency.')
+              : failures.values().next().value;
+          if (failure) {
+            if (!isCurrent()) {
+              this.refused++;
+            }
+            if (value !== this.snapshot.value) {
+              this.options.disposeValue?.(value);
+            }
+            signal.throwIfAborted();
+            return { kind: 'failed', generation: input.generation, error: String(failure) };
+          }
           if (signal.aborted) {
             this.refused++;
             this.options.disposeValue?.(value);
             signal.throwIfAborted();
           }
           if (isCurrent()) {
+            for (const [source, dependency] of this.dependencies) {
+              if (!seen.has(dependency)) {
+                this.dependencies.delete(source);
+                dependency.unsubscribe();
+                dependency.lease.release();
+              }
+            }
             this.discardStaged();
             this.staged = { generation: input.generation, value };
           } else {
@@ -296,6 +349,103 @@ export class ObservationService<T> {
     actor.start();
   }
 
+  private async observeDependency<S>(
+    source: ObservationService<S>,
+    read: Pick<ObservationRead, 'signal' | 'isCurrent'> & {
+      readonly seen: Set<ObservedDependency>;
+      readonly failures: Map<ObservedDependency, Error>;
+      readonly epoch: number;
+    },
+  ): Promise<S> {
+    const { signal, isCurrent, seen, failures, epoch } = read;
+    if (!isCurrent()) {
+      throw new Error('Observation acquisition was superseded.');
+    }
+    let dependency = this.dependencies.get(source);
+    if (!dependency) {
+      const lease = source.acquire();
+      const initial = source.getSnapshot();
+      const owned: ObservedDependency = {
+        lease,
+        waiting: new Set(),
+        initialized: initial.status === 'ready' || initial.status === 'closed' || initial.status === 'error',
+        unsubscribe: () => undefined,
+      };
+      this.dependencies.set(source, owned);
+      owned.unsubscribe = lease.subscribe(() => {
+        if (epoch !== this.epoch || this.dependencies.get(source) !== owned) {
+          return;
+        }
+        const snapshot = source.getSnapshot();
+        if (!owned.initialized) {
+          owned.initialized =
+            snapshot.status === 'ready' || snapshot.status === 'closed' || snapshot.status === 'error';
+          return;
+        }
+        if (
+          this.refreshingDependencies ||
+          (snapshot.status === 'ready' && [...owned.waiting].some((current) => current()))
+        ) {
+          return;
+        }
+        this.invalidate();
+      });
+      if (initial.status === 'registering') {
+        lease.refresh();
+      }
+      dependency = owned;
+    }
+    seen.add(dependency);
+    const owned = dependency;
+    return new Promise<S>((resolve, reject) => {
+      let off: () => void = () => undefined;
+      const cleanup = (): void => {
+        off();
+        owned.waiting.delete(isCurrent);
+        signal.removeEventListener('abort', aborted);
+      };
+      const aborted = (): void => {
+        cleanup();
+        reject(signal.reason instanceof Error ? signal.reason : new Error('Observation acquisition was superseded.'));
+      };
+      const check = (): void => {
+        if (!isCurrent() || this.dependencies.get(source) !== owned) {
+          aborted();
+          return;
+        }
+        const snapshot = source.getSnapshot();
+        if (this.isReadySnapshot(snapshot)) {
+          cleanup();
+          resolve(snapshot.value);
+        } else if (snapshot.status === 'error' || snapshot.status === 'closed') {
+          const error = new Error(snapshot.error ?? 'Observation dependency unavailable.');
+          failures.set(owned, error);
+          cleanup();
+          reject(error);
+        }
+      };
+      owned.waiting.add(isCurrent);
+      off = owned.lease.subscribe(check);
+      signal.addEventListener('abort', aborted, { once: true });
+      check();
+    });
+  }
+
+  private isReadySnapshot<S>(
+    snapshot: ObservationSnapshot<S>,
+  ): snapshot is ObservationSnapshot<S> & { readonly status: 'ready'; readonly value: S } {
+    return snapshot.status === 'ready' && 'value' in snapshot;
+  }
+
+  private releaseDependencies(): void {
+    const dependencies = [...this.dependencies.values()];
+    this.dependencies.clear();
+    for (const dependency of dependencies) {
+      dependency.unsubscribe();
+      dependency.lease.release();
+    }
+  }
+
   private discardStaged(): void {
     const { staged } = this;
     this.staged = undefined;
@@ -316,6 +466,7 @@ export class ObservationService<T> {
     this.options.invalidate?.();
     this.actor?.stop();
     this.actor = undefined;
+    this.releaseDependencies();
     this.discardStaged();
     if (this.snapshot.value !== undefined) {
       this.options.disposeValue?.(this.snapshot.value);

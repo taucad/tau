@@ -1,5 +1,4 @@
-import { isNotFound } from '#db/attachment-store.js';
-import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
+import { fileContentBytes } from '@taucad/fs-client/file-content-service';
 import { z } from 'zod';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
@@ -231,37 +230,22 @@ function StoreSection({
 }
 
 export default function PluginsRoute(): React.JSX.Element {
-  const { readFile, writeFiles, exists, contentService } = useFileManager();
+  const { writeFiles, exists, contentService } = useFileManager();
   const catalog = useSkillsCatalogState();
   const skillsCatalog = catalog.commands;
-  const manifestService = useMemo(
-    () =>
-      contentService
-        ? new ObservationService<InstalledPluginManifest>({
-            resource: manifestPath,
-            watch: (invalidate, reset) =>
-              contentService.watchReady({ paths: [manifestPath] }, (event) => {
-                if (event.type === 'reset') {
-                  reset();
-                } else {
-                  invalidate();
-                }
-              }),
-            read: async () => {
-              try {
-                return parseManifest(await readFile(manifestPath));
-              } catch (error) {
-                if (error instanceof FileNotFoundError || isNotFound(error)) {
-                  return {};
-                }
-                throw error;
-              }
-            },
-            equal: (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
-          })
-        : undefined,
-    [contentService, readFile],
-  );
+  const manifestService = useMemo(() => {
+    if (!contentService) {
+      return undefined;
+    }
+    return new ObservationService<InstalledPluginManifest>({
+      resource: manifestPath,
+      read: async (read) => {
+        const result = await read.observe(contentService.observeContent(manifestPath));
+        return result.kind === 'orphaned' ? {} : parseManifest(fileContentBytes({ path: manifestPath, result }));
+      },
+      equal: (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
+    });
+  }, [contentService]);
   const manifestSnapshot = useObservation(manifestService);
   const manifest = manifestSnapshot.value ?? {};
 
@@ -321,7 +305,7 @@ export default function PluginsRoute(): React.JSX.Element {
         [targetPath]: { content: textEncoder.encode(skill.skillMarkdown) },
         [manifestPath]: { content: textEncoder.encode(JSON.stringify(nextManifest, null, 2) + '\n') },
       });
-      manifestService?.invalidate();
+      manifestService?.refresh();
     },
     [exists, manifest, manifestService, manifestSnapshot.status, writeFiles, catalog.status],
   );

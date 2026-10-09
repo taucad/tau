@@ -3,6 +3,7 @@ import { StepClock } from '@taucad/xstate-testing/clock';
 import { observationIgnoredEvents } from '#machines/observation.machine.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ObservationService } from '#observation-service.js';
+import type { FileContentResult } from '#file-content-service.js';
 
 const guards: Array<ReturnType<typeof guardActors>> = [];
 const guardedOptions = (): { inspect: ReturnType<typeof guardActors>['inspect']; clock: StepClock } => {
@@ -234,6 +235,338 @@ describe('explicit registration retry', () => {
     ready.resolve();
     await flush();
     expect(lease.getSnapshot().value).toBe('recovered');
+    lease.release();
+  });
+});
+
+describe('observed dependencies', () => {
+  it('refuses a watchless successful read that observes no dependency', async () => {
+    const publish = vi.fn();
+    const service = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'unowned',
+      read: async () => 'unowned',
+      publish,
+    });
+    const lease = service.acquire();
+    await flush();
+    expect(lease.getSnapshot().status).toBe('error');
+    expect(lease.getSnapshot().error).toContain('requires a watch or an observed dependency');
+    expect(publish).not.toHaveBeenCalled();
+    lease.release();
+  });
+
+  it.each(['dependency', 'configuration'] as const)(
+    'disposes a returned fallback exactly once when %s refuses publication',
+    async (failure) => {
+      const fallback = { capability: 'owned-fallback' };
+      const disposeValue = vi.fn();
+      const source = new ObservationService({
+        actorOptions: guardedOptions(),
+        resource: 'failed-source',
+        watch: () => ({
+          ready: Promise.reject(new Error('registration refused')),
+          closed: Promise.withResolvers<void>().promise,
+          dispose: vi.fn(),
+        }),
+        read: async () => 'unreachable',
+      });
+      const service = new ObservationService({
+        actorOptions: guardedOptions(),
+        resource: 'fallback-domain',
+        disposeValue,
+        read: async (fence) => {
+          if (failure === 'dependency') {
+            try {
+              await fence.observe(source);
+            } catch {
+              /* Domain catches dependency rejection and returns an owned fallback. */
+            }
+          }
+          return fallback;
+        },
+      });
+      const lease = service.acquire();
+      await flush();
+      await flush();
+      expect(lease.getSnapshot().status).toBe('error');
+      expect(lease.getSnapshot().value).toBeUndefined();
+      expect(disposeValue).toHaveBeenCalledExactlyOnceWith(fallback);
+      lease.release();
+      expect(disposeValue).toHaveBeenCalledOnce();
+      expect(source.activeLeaseCount).toBe(0);
+    },
+  );
+
+  it('registers before reading and shares repeated dependencies until the last consumer releases', async () => {
+    const ready = Promise.withResolvers<void>();
+    const dispose = vi.fn();
+    const read = vi.fn(async () => 'authoritative');
+    const source = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'source',
+      watch: () => ({ ready: ready.promise, closed: Promise.withResolvers<void>().promise, dispose }),
+      read,
+    });
+    const makeDependent = () =>
+      new ObservationService({
+        actorOptions: guardedOptions(),
+        resource: 'dependent',
+        read: async (fence) => Promise.all([fence.observe(source), fence.observe(source)]),
+      });
+    const one = makeDependent().acquire();
+    const two = makeDependent().acquire();
+    await flush();
+    expect(source.activeLeaseCount).toBe(2);
+    expect(read).not.toHaveBeenCalled();
+    ready.resolve();
+    await flush();
+    await flush();
+    expect(one.getSnapshot()).toMatchObject({ status: 'ready', value: ['authoritative', 'authoritative'] });
+    expect(two.getSnapshot().status).toBe('ready');
+    expect(read).toHaveBeenCalledOnce();
+    one.release();
+    expect(source.activeLeaseCount).toBe(1);
+    expect(dispose).not.toHaveBeenCalled();
+    two.release();
+    one.release();
+    two.release();
+    expect(source.activeLeaseCount).toBe(0);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('propagates the first closure of an already-ready shared dependency even when the domain catches failure', async () => {
+    const closed = Promise.withResolvers<void>();
+    const read = vi.fn(async () => 'safe');
+    const source = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'shared',
+      watch: () => ({ ready: Promise.resolve(), closed: closed.promise, dispose: vi.fn() }),
+      read,
+    });
+    const held = source.acquire();
+    await flush();
+    const service = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'catching-domain',
+      read: async (fence) => {
+        try {
+          return [await fence.observe(source)];
+        } catch {
+          return [];
+        }
+      },
+    });
+    const lease = service.acquire();
+    await flush();
+    expect(lease.getSnapshot()).toMatchObject({ status: 'ready', value: ['safe'] });
+    expect(read).toHaveBeenCalledOnce();
+    closed.resolve();
+    await flush();
+    await flush();
+    expect(lease.getSnapshot().status).not.toBe('ready');
+    expect(lease.getSnapshot().value).toEqual(['safe']);
+    lease.release();
+    held.release();
+  });
+
+  it('recovers by pruning a removed unseen unhealthy dependency only after a current successful read', async () => {
+    const closed = Promise.withResolvers<void>();
+    const disposeAlpha = vi.fn();
+    const alpha = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'alpha',
+      watch: () => ({ ready: Promise.resolve(), closed: closed.promise, dispose: disposeAlpha }),
+      read: async () => 'alpha',
+    });
+    const beta = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'beta',
+      watch: () => ({ ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() }),
+      read: async () => 'beta',
+    });
+    let changed = (): void => undefined;
+    let includeAlpha = true;
+    const service = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'directory-catalog',
+      watch: (invalidate) => {
+        changed = invalidate;
+        return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() };
+      },
+      read: async (fence) => {
+        const result = [await fence.observe(beta)];
+        if (includeAlpha) {
+          try {
+            result.push(await fence.observe(alpha));
+          } catch {
+            /* Real resolver treats an unreadable file as absent. */
+          }
+        }
+        return result;
+      },
+    });
+    const lease = service.acquire();
+    await flush();
+    await flush();
+    expect(lease.getSnapshot()).toMatchObject({ status: 'ready', value: ['beta', 'alpha'] });
+    closed.resolve();
+    await flush();
+    await flush();
+    expect(lease.getSnapshot().status).not.toBe('ready');
+    includeAlpha = false;
+    changed();
+    await flush();
+    await flush();
+    expect(lease.getSnapshot()).toMatchObject({ status: 'ready', value: ['beta'] });
+    expect(alpha.activeLeaseCount).toBe(0);
+    expect(beta.activeLeaseCount).toBe(1);
+    expect(disposeAlpha).toHaveBeenCalledOnce();
+    lease.release();
+    expect(beta.activeLeaseCount).toBe(0);
+  });
+
+  it('refuses late acquisition and pruning from an aborted owner after replacement has published', async () => {
+    const domainGate = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const source = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'source',
+      watch: () => ({ ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() }),
+      read: async () => 'current',
+    });
+    const retiredWatch = vi.fn(() => ({
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      dispose: vi.fn(),
+    }));
+    const retiredOnly = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'retired-only',
+      watch: retiredWatch,
+      read: async () => 'retired',
+    });
+    let first = true;
+    const publish = vi.fn();
+    const service = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'domain',
+      publish,
+      read: async (fence) => {
+        const value = await fence.observe(source);
+        if (first) {
+          first = false;
+          entered.resolve();
+          await domainGate.promise;
+          await fence.observe(retiredOnly);
+        }
+        return value;
+      },
+    });
+    const old = service.acquire();
+    await entered.promise;
+    old.release();
+    const current = service.acquire();
+    await flush();
+    await flush();
+    expect(current.getSnapshot()).toMatchObject({ status: 'ready', value: 'current' });
+    expect(source.activeLeaseCount).toBe(1);
+    domainGate.resolve();
+    await flush();
+    expect(retiredWatch).not.toHaveBeenCalled();
+    expect(retiredOnly.activeLeaseCount).toBe(0);
+    expect(source.activeLeaseCount).toBe(1);
+    expect(publish).toHaveBeenCalledExactlyOnceWith('current');
+    current.release();
+  });
+
+  it('retries the current failed dependency through held acknowledgement without restarting a retired lease', async () => {
+    const ready = Promise.withResolvers<void>();
+    const disposeFirst = vi.fn();
+    const watch = vi
+      .fn()
+      .mockReturnValueOnce({
+        ready: Promise.reject(new Error('registration refused')),
+        closed: Promise.withResolvers<void>().promise,
+        dispose: disposeFirst,
+      })
+      .mockReturnValue({ ready: ready.promise, closed: Promise.withResolvers<void>().promise, dispose: vi.fn() });
+    const read = vi.fn<() => Promise<FileContentResult>>(async () => ({ kind: 'orphaned' }));
+    const source = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'missing-manifest',
+      watch,
+      read,
+    });
+    const service = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'plugins',
+      read: async (fence) => {
+        const result = await fence.observe(source);
+        return result.kind === 'orphaned' ? {} : undefined;
+      },
+    });
+    const lease = service.acquire();
+    await flush();
+    await flush();
+    expect(lease.getSnapshot().status).not.toBe('ready');
+    expect(read).not.toHaveBeenCalled();
+    lease.refresh();
+    await flush();
+    expect(watch).toHaveBeenCalledTimes(2);
+    expect(disposeFirst).toHaveBeenCalledOnce();
+    expect(read).not.toHaveBeenCalled();
+    ready.resolve();
+    await flush();
+    await flush();
+    expect(lease.getSnapshot()).toMatchObject({ status: 'ready', value: {} });
+    expect(read).toHaveBeenCalledOnce();
+    expect(source.activeLeaseCount).toBe(1);
+    lease.release();
+    expect(source.activeLeaseCount).toBe(0);
+  });
+
+  it('keeps one active source read and one trailing convergence without a refresh feedback loop', async () => {
+    const old = Promise.withResolvers<string>();
+    let changed = (): void => undefined;
+    let reset = (): void => undefined;
+    const read = vi
+      .fn()
+      .mockImplementationOnce(async () => old.promise)
+      .mockResolvedValue('fresh');
+    const source = new ObservationService<string>({
+      actorOptions: guardedOptions(),
+      resource: 'source',
+      watch: (invalidate, resetSource) => {
+        changed = invalidate;
+        reset = resetSource;
+        return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() };
+      },
+      read,
+    });
+    const publish = vi.fn();
+    const service = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'domain',
+      publish,
+      read: async (fence) => fence.observe(source),
+    });
+    const lease = service.acquire();
+    await flush();
+    expect(read).toHaveBeenCalledOnce();
+    reset();
+    for (let index = 0; index < 100; index++) {
+      changed();
+    }
+    await flush();
+    expect(read).toHaveBeenCalledOnce();
+    expect(publish).not.toHaveBeenCalled();
+    old.resolve('obsolete');
+    await flush();
+    await flush();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(publish).toHaveBeenCalledExactlyOnceWith('fresh');
+    expect(lease.getSnapshot()).toMatchObject({ status: 'ready', value: 'fresh' });
     lease.release();
   });
 });

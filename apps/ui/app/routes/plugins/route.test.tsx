@@ -2,6 +2,15 @@ import { MemoryRouter } from 'react-router';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import type { WatchEvent } from '@taucad/filesystem';
+import type { FileContentResult } from '@taucad/fs-client/file-content-service';
+import { FileContentService } from '@taucad/fs-client/file-content-service';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
+import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { SkillMetadata } from '@taucad/chat';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
@@ -19,7 +28,31 @@ const catalogHealth = vi.hoisted(() => ({
 const mockUseSkillsCatalog = vi.fn<() => SkillMetadata[]>();
 
 const mockWatchReady = vi.fn<() => ObservationWatch>();
-const contentService = { watchReady: mockWatchReady };
+const contentObservations = new Map<string, ObservationService<FileContentResult>>();
+const contentService = {
+  observeContent: (path: string) => {
+    let service = contentObservations.get(path);
+    if (!service) {
+      service = new ObservationService<FileContentResult>({
+        resource: path,
+        watch: () => mockWatchReady(),
+        read: async () => {
+          try {
+            return { kind: 'text', content: await mockReadFile(path) };
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+              return { kind: 'orphaned' };
+            }
+            throw error;
+          }
+        },
+      });
+      contentObservations.set(path, service);
+    }
+    return service;
+  },
+};
+let actualContentService: FileContentService | undefined;
 const openWatch = (): ObservationWatch => ({
   ready: Promise.resolve(),
   closed: new Promise<void>(() => {
@@ -33,7 +66,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
     readFile: mockReadFile,
     writeFiles: mockWriteFiles,
     exists: mockExists,
-    contentService,
+    contentService: actualContentService ?? contentService,
   }),
 }));
 
@@ -103,7 +136,12 @@ function getFirstWrite(): FileWrites {
 
 describe('PluginsRoute', () => {
   beforeEach(() => {
+    for (const service of contentObservations.values()) {
+      service.dispose();
+    }
+    contentObservations.clear();
     vi.clearAllMocks();
+    actualContentService = undefined;
     mockWatchReady.mockReset().mockImplementation(openWatch);
     catalogHealth.status = 'ready';
     catalogHealth.service = undefined;
@@ -141,7 +179,7 @@ describe('PluginsRoute', () => {
       .fn<() => Promise<TestCatalog>>()
       .mockResolvedValueOnce({ commands: [], prompt: [] })
       .mockReturnValue(fresh.promise);
-    const service = new ObservationService<TestCatalog>({ watch, read });
+    const service = new ObservationService<TestCatalog>({ resource: '.agents/catalog', watch, read });
     catalogHealth.service = service;
     const pane = renderRoute();
     try {
@@ -246,6 +284,176 @@ describe('PluginsRoute', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Plugins' })).toBe(heading);
     expect(screen.queryByRole('button', { name: 'Retry plugin updates' })).not.toBeInTheDocument();
     expect(mockWriteFiles).not.toHaveBeenCalled();
+  });
+
+  it('reacquires fresh physical manifest bytes after retry instead of publishing the cached empty manifest', async () => {
+    const path = '.agents/plugins/installed.json';
+    const provider = new MemoryProvider();
+    await provider.writeFile(path, '{}\n');
+    const paths = new WorkspacePathResolver('/home');
+    const proxy = mock<ComposedViewClient>();
+    proxy.readFile.mockImplementation(async (absolutePath) => {
+      const relativePath = paths.toRelativePath(absolutePath);
+      if (relativePath === undefined) {
+        throw new Error(`Unexpected Home read: ${absolutePath}`);
+      }
+      return provider.readFile(relativePath);
+    });
+    const ready = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const rootEvents = new Set<(event: WatchEvent) => void>();
+    let holdExact = false;
+    const channel = new WorkerChangeChannel({
+      transport: {
+        listen: () => () => undefined,
+        watchReady: (request, callback) => {
+          const root = request.paths.includes('.agents');
+          if (root) {
+            rootEvents.add(callback);
+          }
+          return {
+            ready: !root && holdExact ? ready.promise : Promise.resolve(),
+            closed:
+              root || holdExact
+                ? new Promise<void>(() => {
+                    /* Remain open until this dependency lease is retired. */
+                  })
+                : closed.promise,
+            unsubscribe: () => {
+              rootEvents.delete(callback);
+            },
+          };
+        },
+      },
+    });
+    const content = new FileContentService({ proxy, paths, channel, refreshGuard: new RefreshGenerationGuard() });
+    actualContentService = content;
+    const rootLease = content.watchReady({ paths: ['.agents'] }, () => undefined);
+    mockReadFile.mockImplementation(async (file) => content.resolveBytes(file));
+    expect(decoder.decode(await content.resolveBytes(path))).toBe('{}\n');
+    expect(proxy.readFile).toHaveBeenCalledOnce();
+    const pane = renderRoute();
+    try {
+      const heading = screen.getByRole('heading', { level: 1, name: 'Plugins' });
+      await waitFor(() => {
+        expect(proxy.readFile).toHaveBeenCalledTimes(2);
+        expect(screen.queryByRole('button', { name: 'Retry plugin updates' })).not.toBeInTheDocument();
+      });
+      await act(async () => {
+        closed.resolve();
+      });
+      await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      holdExact = true;
+      await userEvent.click(await screen.findByRole('button', { name: 'Retry plugin updates' }));
+      const fresh =
+        JSON.stringify({
+          skills: {
+            woodworking: {
+              status: 'installed',
+              source: 'tau-store',
+              installedPath: '.agents/skills/woodworking/SKILL.md',
+              version: '1.0.0',
+              updatedAt: '2026-10-08T00:00:00.000Z',
+            },
+          },
+        }) + '\n';
+      await provider.writeFile(path, fresh);
+      act(() => {
+        for (const callback of rootEvents) {
+          callback({ type: 'change', path });
+        }
+      });
+      expect(decoder.decode(await provider.readFile(path))).toBe(fresh);
+      expect(decoder.decode(await content.resolveBytes(path))).toBe('{}\n');
+      await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      await act(async () => {
+        ready.resolve();
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Woodworking installed' })).toBeInTheDocument();
+      });
+      expect(screen.getByRole('heading', { level: 1, name: 'Plugins' })).toBe(heading);
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+    } finally {
+      pane.unmount();
+      rootLease.dispose();
+      content.dispose();
+    }
+  });
+
+  it('settles its installed label after a successful content write with watch delivery delayed', async () => {
+    const path = '.agents/plugins/installed.json';
+    const provider = new MemoryProvider();
+    await provider.writeFile(path, '{}\n');
+    const paths = new WorkspacePathResolver('/home');
+    const proxy = mock<ComposedViewClient>();
+    proxy.readFile.mockImplementation(async (absolute) => {
+      const relative = paths.toRelativePath(absolute);
+      if (relative === undefined) {
+        throw new Error(`Unexpected Home read: ${absolute}`);
+      }
+      return provider.readFile(relative);
+    });
+    proxy.writeFiles.mockImplementation(async (files) => {
+      await Promise.all(
+        Object.entries(files).map(async ([absolute, file]) => {
+          const relative = paths.toRelativePath(absolute);
+          if (relative === undefined) {
+            throw new Error(`Unexpected Home write: ${absolute}`);
+          }
+          await provider.writeFile(relative, file.content);
+        }),
+      );
+    });
+    const channel = new WorkerChangeChannel({
+      transport: {
+        listen: () => () => undefined,
+        watchReady: () => ({
+          ready: Promise.resolve(),
+          closed: new Promise<void>(() => {
+            /* Watch delivery is deliberately delayed after the write receipt. */
+          }),
+          unsubscribe: () => undefined,
+        }),
+      },
+    });
+    const content = new FileContentService({ proxy, paths, channel, refreshGuard: new RefreshGenerationGuard() });
+    actualContentService = content;
+    mockReadFile.mockImplementation(async (file) => content.resolveBytes(file));
+    const written = Promise.withResolvers<void>();
+    mockWriteFiles.mockImplementation(async (files) => {
+      await content.writeFiles(files, 'user');
+      written.resolve();
+    });
+    const pane = renderRoute();
+    try {
+      await waitFor(() => {
+        expect(proxy.readFile).toHaveBeenCalledOnce();
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+      await waitFor(() => {
+        expect(mockWriteFiles).toHaveBeenCalledOnce();
+      });
+      await act(async () => {
+        await written.promise;
+      });
+      const physical = JSON.parse(decoder.decode(await provider.readFile(path))) as DecodedManifest;
+      expect(physical.skills?.['woodworking']?.status).toBe('installed');
+      expect(await content.resolveBytes(path)).toEqual(await provider.readFile(path));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Woodworking installed' })).toBeInTheDocument();
+      });
+      await userEvent.click(screen.getByRole('button', { name: 'Woodworking installed' }));
+      expect(mockWriteFiles).toHaveBeenCalledOnce();
+    } finally {
+      pane.unmount();
+      content.dispose();
+    }
   });
 
   it('should lead with the page title inside the shell main', () => {

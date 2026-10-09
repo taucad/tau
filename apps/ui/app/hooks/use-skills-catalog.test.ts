@@ -44,7 +44,24 @@ function writeTreeFile(path: string): void {
   treeSnapshot = new Map(treeSnapshot).set(path, { path, type: 'file', size: treeWrites, mtimeMs: treeWrites });
   settledCallbacks.get(path.slice(0, path.lastIndexOf('/')))?.();
   if (path === '.agents' || path.startsWith('.agents/')) {
-    watchCallback?.({ type: 'change', path });
+    dispatchWatchEvent({ type: 'change', path });
+  }
+}
+
+function dispatchWatchEvent(event: WatchEvent): void {
+  watchCallback?.(event);
+  if (actualContentService) {
+    return;
+  }
+  for (const [path, source] of mockContentObservations) {
+    if (
+      event.type === 'reset' ||
+      (event.type === 'rename'
+        ? event.oldPath === path || event.newPath === path
+        : event.path === path || path.startsWith(`${event.path}/`))
+    ) {
+      source.invalidate();
+    }
   }
 }
 
@@ -431,7 +448,7 @@ describe('usePromptSkillsCatalog', () => {
     const initialRenders = renders;
     const initialReads = mockReadFile.mock.calls.length;
     act(() => {
-      watchCallback?.({ type: 'change', path: '.agents/skills/alpha/SKILL.md' });
+      dispatchWatchEvent({ type: 'change', path: '.agents/skills/alpha/SKILL.md' });
     });
     await waitFor(() => {
       expect(mockReadFile).toHaveBeenCalledTimes(initialReads + 1);
@@ -443,14 +460,14 @@ describe('usePromptSkillsCatalog', () => {
     expect(renders).toBe(initialRenders);
     serveSingleSkill('alpha', 'Bravo');
     act(() => {
-      watchCallback?.({ type: 'change', path: '.agents/skills/alpha/SKILL.md' });
+      dispatchWatchEvent({ type: 'change', path: '.agents/skills/alpha/SKILL.md' });
     });
     await waitFor(() => {
       expect(result.current.find((skill) => skill.name === 'alpha')?.description).toBe('Bravo');
     });
     serveSingleSkill('alpha', 'Delta');
     act(() => {
-      watchCallback?.({ type: 'reset' });
+      dispatchWatchEvent({ type: 'reset' });
     });
     await waitFor(() => {
       expect(result.current.find((skill) => skill.name === 'alpha')?.description).toBe('Delta');
@@ -465,7 +482,7 @@ describe('usePromptSkillsCatalog', () => {
     });
     // The exact raw watch may run before the tree owner has merged fresh directory rows.
     act(() => {
-      watchCallback?.({ type: 'change', path: '.agents/skills/beta' });
+      dispatchWatchEvent({ type: 'change', path: '.agents/skills/beta' });
     });
     await act(async () => {
       await Promise.resolve();

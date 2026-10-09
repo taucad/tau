@@ -754,6 +754,14 @@ StepGeom_IntersectionCurve: declare class StepGeom_IntersectionCurve extends Ste
 
 StepGeom_KnotType: typeof StepGeom_KnotType[keyof typeof StepGeom_KnotType]
 
+  readonly StepGeom_ktUniformKnots: 'StepGeom_ktUniformKnots'
+
+  readonly StepGeom_ktUnspecified: 'StepGeom_ktUnspecified'
+
+  readonly StepGeom_ktQuasiUniformKnots: 'StepGeom_ktQuasiUniformKnots'
+
+  readonly StepGeom_ktPiecewiseBezierKnots: 'StepGeom_ktPiecewiseBezierKnots'
+
 StepGeom_Line: declare class StepGeom_Line extends StepGeom_Curve
 
   // StepGeom_Line.constructor (constructor)

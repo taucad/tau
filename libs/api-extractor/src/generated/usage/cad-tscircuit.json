@@ -1,0 +1,634 @@
+{
+  "slug": "cad-tscircuit",
+  "sources": {
+    "workspaceFiles": 1,
+    "exampleFiles": 1,
+    "transcriptRuns": 2
+  },
+  "symbols": [
+    {
+      "id": "typescript:<board>",
+      "name": "<board>",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<chip>",
+      "name": "<chip>",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<net>",
+      "name": "<net>",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<net>.name",
+      "name": "name",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<resistor>",
+      "name": "<resistor>",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<resistor>.resistance",
+      "name": "resistance",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<trace>",
+      "name": "<trace>",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<trace>.from",
+      "name": "from",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<trace>.name",
+      "name": "name",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<trace>.to",
+      "name": "to",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<trace>.width",
+      "name": "width",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseGroupProps.height",
+      "name": "height",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseGroupProps.name",
+      "name": "name",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseGroupProps.width",
+      "name": "width",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CommonComponentProps.name",
+      "name": "name",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CommonLayoutProps.footprint",
+      "name": "footprint",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PcbLayoutProps.pcbX",
+      "name": "pcbX",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PcbLayoutProps.pcbY",
+      "name": "pcbY",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<board>.layers",
+      "name": "layers",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<board>.thickness",
+      "name": "thickness",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<board>.title",
+      "name": "title",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<capacitor>",
+      "name": "<capacitor>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<capacitor>.capacitance",
+      "name": "capacitance",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<capacitor>.connections",
+      "name": "connections",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<capacitor>.maxVoltageRating",
+      "name": "maxVoltageRating",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<chip>.connections",
+      "name": "connections",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<chip>.pinLabels",
+      "name": "pinLabels",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<courtyardrect>",
+      "name": "<courtyardrect>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<courtyardrect>.height",
+      "name": "height",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<courtyardrect>.strokeWidth",
+      "name": "strokeWidth",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<courtyardrect>.width",
+      "name": "width",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<diode>",
+      "name": "<diode>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<diode>.connections",
+      "name": "connections",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<diode>.pinLabels",
+      "name": "pinLabels",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<footprint>",
+      "name": "<footprint>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<footprint>.name",
+      "name": "name",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<hole>",
+      "name": "<hole>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<hole>.diameter",
+      "name": "diameter",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<hole>.height",
+      "name": "height",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<hole>.name",
+      "name": "name",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<hole>.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<hole>.shape",
+      "name": "shape",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<hole>.width",
+      "name": "width",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<led>",
+      "name": "<led>",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<pinheader>",
+      "name": "<pinheader>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<pinheader>.connections",
+      "name": "connections",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<pinheader>.holeDiameter",
+      "name": "holeDiameter",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<pinheader>.pinCount",
+      "name": "pinCount",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<pinheader>.pinLabels",
+      "name": "pinLabels",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<platedhole>",
+      "name": "<platedhole>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<platedhole>.holeDiameter",
+      "name": "holeDiameter",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<platedhole>.name",
+      "name": "name",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<platedhole>.outerDiameter",
+      "name": "outerDiameter",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<platedhole>.portHints",
+      "name": "portHints",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<platedhole>.shape",
+      "name": "shape",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<resistor>.connections",
+      "name": "connections",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreencircle>",
+      "name": "<silkscreencircle>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreencircle>.radius",
+      "name": "radius",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreencircle>.strokeWidth",
+      "name": "strokeWidth",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreenrect>",
+      "name": "<silkscreenrect>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreenrect>.height",
+      "name": "height",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreenrect>.strokeWidth",
+      "name": "strokeWidth",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreenrect>.width",
+      "name": "width",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreentext>",
+      "name": "<silkscreentext>",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreentext>.fontSize",
+      "name": "fontSize",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreentext>.layers",
+      "name": "layers",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<silkscreentext>.text",
+      "name": "text",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:<trace>.thickness",
+      "name": "thickness",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseGroupProps.connections",
+      "name": "connections",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BaseGroupProps.minTraceWidth",
+      "name": "minTraceWidth",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CommonComponentProps.manufacturerPartNumber",
+      "name": "manufacturerPartNumber",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CommonComponentProps.pinAttributes",
+      "name": "pinAttributes",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CommonLayoutProps.schRotation",
+      "name": "schRotation",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CommonLayoutProps.schX",
+      "name": "schX",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:CommonLayoutProps.schY",
+      "name": "schY",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:PcbLayoutProps.pcbRotation",
+      "name": "pcbRotation",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SubcircuitGroupProps.autorouter",
+      "name": "autorouter",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:SubcircuitGroupProps.defaultTraceWidth",
+      "name": "defaultTraceWidth",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    }
+  ]
+}

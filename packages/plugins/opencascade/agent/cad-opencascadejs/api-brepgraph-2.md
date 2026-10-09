@@ -1,6 +1,80 @@
 # libcascade — BRepGraph (2)
 
-43 top-level symbols. Signatures are verbatim typescript.
+40 top-level symbols. Signatures are verbatim typescript.
+
+BRepGraph_Layer: declare class BRepGraph_Layer extends Standard_Transient
+
+  // BRepGraph_Layer.ID (method)
+  ID(): Standard_GUID;
+
+  // BRepGraph_Layer.Name (method)
+  Name(): TCollection_AsciiString;
+
+  // BRepGraph_Layer.OnNodeRemoved (method)
+  OnNodeRemoved(theNode: BRepGraph_NodeId): void;
+
+  // BRepGraph_Layer.OnItemRemoved (method)
+  OnItemRemoved(theItem: BRepGraph_ItemId): void;
+
+  // BRepGraph_Layer.OnNodeReplaced (method)
+  OnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
+
+  // BRepGraph_Layer.CopyTo (method)
+  CopyTo(theCopy: BRepGraph_CopyRemap): void;
+
+  // BRepGraph_Layer.InvalidateAll (method)
+  InvalidateAll(): void;
+
+  // BRepGraph_Layer.Clear (method)
+  Clear(): void;
+
+  // BRepGraph_Layer.SubscribedKinds (method)
+  SubscribedKinds(): number;
+
+  // BRepGraph_Layer.OnNodeModified (method)
+  OnNodeModified(theNode: BRepGraph_NodeId): void;
+
+  // BRepGraph_Layer.OnItemModified (method)
+  OnItemModified(theItem: BRepGraph_ItemId): void;
+
+  // BRepGraph_Layer.OnNodesModified (method)
+  OnNodesModified(theModifiedNodes: NCollection_Array1_BRepGraph_NodeId): void;
+
+  // BRepGraph_Layer.KindBit (method)
+  static KindBit(theKind: BRepGraph_NodeId_Kind): number;
+
+  // BRepGraph_Layer.SubscribedRefKinds (method)
+  SubscribedRefKinds(): number;
+
+  // BRepGraph_Layer.OnRefRemoved (method)
+  OnRefRemoved(theRef: BRepGraph_RefId): void;
+
+  // BRepGraph_Layer.OnRefModified (method)
+  OnRefModified(theRef: BRepGraph_RefId): void;
+
+  // BRepGraph_Layer.OnRefsModified (method)
+  OnRefsModified(theModifiedRefs: NCollection_Array1_BRepGraph_RefId): void;
+
+  // BRepGraph_Layer.RefKindBit (method)
+  static RefKindBit(theKind: BRepGraph_RefId_Kind): number;
+
+  // BRepGraph_Layer.Revision (method)
+  Revision(): number;
+
+  // BRepGraph_Layer.get_type_name (method)
+  static get_type_name(): string;
+
+  // BRepGraph_Layer.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // BRepGraph_Layer.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // BRepGraph_Layer.delete (method)
+  delete(): void;
+
+  // BRepGraph_Layer.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerDeferred: declare class BRepGraph_LayerDeferred extends BRepGraph_Layer
 
@@ -91,6 +165,18 @@ BRepGraph_LayerDeferred: declare class BRepGraph_LayerDeferred extends BRepGraph
   [Symbol.dispose](): void;
 
 BRepGraph_LayerDeferred_RepresentationKind: typeof BRepGraph_LayerDeferred_RepresentationKind[keyof typeof BRepGraph_LayerDeferred_RepresentationKind]
+
+  readonly Unknown: 'Unknown'
+
+  readonly Geometry: 'Geometry'
+
+  readonly Mesh: 'Mesh'
+
+  readonly Topology: 'Topology'
+
+  readonly Assembly: 'Assembly'
+
+  readonly Parametric: 'Parametric'
 
 BRepGraph_LayerDeferred_Entry: declare class BRepGraph_LayerDeferred_Entry
 
@@ -289,6 +375,14 @@ BRepGraph_LayerHistory: declare class BRepGraph_LayerHistory extends BRepGraph_L
 
 BRepGraph_LayerHistory_Kind: typeof BRepGraph_LayerHistory_Kind[keyof typeof BRepGraph_LayerHistory_Kind]
 
+  readonly Modified: 'Modified'
+
+  readonly Generated: 'Generated'
+
+  readonly Deleted: 'Deleted'
+
+  readonly Replaced: 'Replaced'
+
 BRepGraph_LayerIterator: declare class BRepGraph_LayerIterator
 
   // BRepGraph_LayerIterator.constructor (constructor)
@@ -435,7 +529,23 @@ BRepGraph_LayerParametric: declare class BRepGraph_LayerParametric extends BRepG
 
 BRepGraph_LayerParametric_GenerationFlag: typeof BRepGraph_LayerParametric_GenerationFlag[keyof typeof BRepGraph_LayerParametric_GenerationFlag]
 
+  readonly Topology: 'Topology'
+
+  readonly Geometry: 'Geometry'
+
+  readonly Mesh: 'Mesh'
+
 BRepGraph_LayerParametric_MeshQuality: typeof BRepGraph_LayerParametric_MeshQuality[keyof typeof BRepGraph_LayerParametric_MeshQuality]
+
+  readonly VeryCoarse: 'VeryCoarse'
+
+  readonly Coarse: 'Coarse'
+
+  readonly Medium: 'Medium'
+
+  readonly Fine: 'Fine'
+
+  readonly VeryFine: 'VeryFine'
 
 BRepGraph_LayerRegistry: declare class BRepGraph_LayerRegistry
 
@@ -578,6 +688,22 @@ BRepGraph_LayerTopoSupplement: declare class BRepGraph_LayerTopoSupplement exten
   [Symbol.dispose](): void;
 
 BRepGraph_LayerTopoSupplement_AttachmentKind: typeof BRepGraph_LayerTopoSupplement_AttachmentKind[keyof typeof BRepGraph_LayerTopoSupplement_AttachmentKind]
+
+  readonly VertexSupplementShape: 'VertexSupplementShape'
+
+  readonly EdgeInternalVertex: 'EdgeInternalVertex'
+
+  readonly FaceDirectVertex: 'FaceDirectVertex'
+
+  readonly SolidAuxShape: 'SolidAuxShape'
+
+  readonly ShellAuxShape: 'ShellAuxShape'
+
+  readonly CompSolidAuxShape: 'CompSolidAuxShape'
+
+  readonly CompoundAuxShape: 'CompoundAuxShape'
+
+  readonly GenericSupplementShape: 'GenericSupplementShape'
 
 BRepGraph_MeshView: declare class BRepGraph_MeshView
 
@@ -1077,115 +1203,4 @@ BRepGraph_FaceId: declare class BRepGraph_FaceId
   delete(): void;
 
   // BRepGraph_FaceId.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-BRepGraph_NodeId: declare class BRepGraph_NodeId
-
-  // BRepGraph_NodeId.constructor (constructor)
-  constructor();
-  constructor(theKind: BRepGraph_NodeId_Kind, theIdx: number);
-
-  NodeKind: BRepGraph_NodeId_Kind
-
-  Index: number
-
-  // BRepGraph_NodeId.IsValidKind (method)
-  static IsValidKind(theKind: BRepGraph_NodeId_Kind): boolean;
-
-  // BRepGraph_NodeId.IsTopologyKind (method)
-  static IsTopologyKind(theKind: BRepGraph_NodeId_Kind): boolean;
-
-  // BRepGraph_NodeId.IsAssemblyKind (method)
-  static IsAssemblyKind(theKind: BRepGraph_NodeId_Kind): boolean;
-
-  // BRepGraph_NodeId.Start (method)
-  static Start(theKind: BRepGraph_NodeId_Kind): BRepGraph_NodeId;
-
-  // BRepGraph_NodeId.Invalid (method)
-  static Invalid(theKind?: BRepGraph_NodeId_Kind): BRepGraph_NodeId;
-
-  // BRepGraph_NodeId.IsValid (method)
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  // BRepGraph_NodeId.IsRemoved (method)
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  // BRepGraph_NodeId.IsOwned (method)
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  // BRepGraph_NodeId.delete (method)
-  delete(): void;
-
-  // BRepGraph_NodeId.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-BRepGraph_NodeId_Kind: typeof BRepGraph_NodeId_Kind[keyof typeof BRepGraph_NodeId_Kind]
-
-BRepGraph_OccurrenceId: declare class BRepGraph_OccurrenceId
-
-  // BRepGraph_OccurrenceId.constructor (constructor)
-  constructor();
-  constructor(theIdx: number);
-  constructor(theId: BRepGraph_NodeId);
-
-  Index: number
-
-  // BRepGraph_OccurrenceId.Start (method)
-  static Start(): unknown;
-
-  // BRepGraph_OccurrenceId.Invalid (method)
-  static Invalid(): unknown;
-
-  // BRepGraph_OccurrenceId.IsValid (method)
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  // BRepGraph_OccurrenceId.FromNodeId (method)
-  static FromNodeId(theId: BRepGraph_NodeId): unknown;
-
-  // BRepGraph_OccurrenceId.IsRemoved (method)
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  // BRepGraph_OccurrenceId.IsOwned (method)
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  // BRepGraph_OccurrenceId.delete (method)
-  delete(): void;
-
-  // BRepGraph_OccurrenceId.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-BRepGraph_ProductId: declare class BRepGraph_ProductId
-
-  // BRepGraph_ProductId.constructor (constructor)
-  constructor();
-  constructor(theIdx: number);
-  constructor(theId: BRepGraph_NodeId);
-
-  Index: number
-
-  // BRepGraph_ProductId.Start (method)
-  static Start(): unknown;
-
-  // BRepGraph_ProductId.Invalid (method)
-  static Invalid(): unknown;
-
-  // BRepGraph_ProductId.IsValid (method)
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  // BRepGraph_ProductId.FromNodeId (method)
-  static FromNodeId(theId: BRepGraph_NodeId): unknown;
-
-  // BRepGraph_ProductId.IsRemoved (method)
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  // BRepGraph_ProductId.IsOwned (method)
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  // BRepGraph_ProductId.delete (method)
-  delete(): void;
-
-  // BRepGraph_ProductId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

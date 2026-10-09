@@ -314,3 +314,23 @@ IntAna_Quadric: declare class IntAna_Quadric
   [Symbol.dispose](): void;
 
 IntAna_ResultType: typeof IntAna_ResultType[keyof typeof IntAna_ResultType]
+
+  readonly IntAna_Point: 'IntAna_Point'
+
+  readonly IntAna_Line: 'IntAna_Line'
+
+  readonly IntAna_Circle: 'IntAna_Circle'
+
+  readonly IntAna_PointAndCircle: 'IntAna_PointAndCircle'
+
+  readonly IntAna_Ellipse: 'IntAna_Ellipse'
+
+  readonly IntAna_Parabola: 'IntAna_Parabola'
+
+  readonly IntAna_Hyperbola: 'IntAna_Hyperbola'
+
+  readonly IntAna_Empty: 'IntAna_Empty'
+
+  readonly IntAna_Same: 'IntAna_Same'
+
+  readonly IntAna_NoGeometricSolution: 'IntAna_NoGeometricSolution'

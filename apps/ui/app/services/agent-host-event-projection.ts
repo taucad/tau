@@ -242,9 +242,11 @@ const assistantChunks = (
     if (value['type'] === 'text' && typeof value['text'] === 'string') {
       const id = `${message.id}:text:${String(index)}`;
       const key = blockKey(runId, message.id, index);
-      const streamed = streamedBlocks?.get(key);
+      let streamed = streamedBlocks?.get(key);
       if (streamed?.type === 'text') {
         if (!streamed.closed) {
+          streamed = { ...streamed };
+          streamedBlocks?.set(key, streamed);
           const suffix = value['text'].startsWith(streamed.content) ? value['text'].slice(streamed.content.length) : '';
           if (streamCheckpoint) {
             // An empty delta still carries the rest fact: the reducer appends '' and assigns the metadata.
@@ -258,10 +260,8 @@ const assistantChunks = (
           }
           if (!streamCheckpoint) {
             chunks.push({ type: 'text-end', id });
+            streamed.closed = true;
           }
-        }
-        if (!streamCheckpoint) {
-          streamed.closed = true;
         }
       } else {
         const resting = streamCheckpoint && streamedBlocks !== undefined;
@@ -279,10 +279,12 @@ const assistantChunks = (
     if (value['type'] === 'thinking' && typeof value['thinking'] === 'string') {
       const id = `${message.id}:thinking:${String(index)}`;
       const key = blockKey(runId, message.id, index);
-      const streamed = streamedBlocks?.get(key);
+      let streamed = streamedBlocks?.get(key);
       const timing = reasoningTiming(message.metadata, index);
       if (streamed?.type === 'thinking') {
         if (!streamed.closed) {
+          streamed = { ...streamed };
+          streamedBlocks?.set(key, streamed);
           const suffix = value['thinking'].startsWith(streamed.content)
             ? value['thinking'].slice(streamed.content.length)
             : '';
@@ -307,10 +309,8 @@ const assistantChunks = (
                     },
                   }),
             });
+            streamed.closed = true;
           }
-        }
-        if (!streamCheckpoint) {
-          streamed.closed = true;
         }
       } else {
         chunks.push(
@@ -720,7 +720,7 @@ export const projectAgentHostLiveEvent = (
     if (tool?.type !== 'tool' || tool.input !== 'started') {
       return [];
     }
-    tool.input = 'available';
+    streamedBlocks.set(toolKey(event.runId, event.toolCallId), { ...tool, input: 'available' });
     return [
       {
         type: 'tool-input-available',
@@ -780,7 +780,8 @@ export const projectAgentHostLiveEvent = (
     ];
   }
   const start: UIMessageChunk[] = current ? [] : [{ type: type === 'text' ? 'text-start' : 'reasoning-start', id }];
-  const block = current ?? { type, content: '', closed: false };
+  const block: NonNullable<typeof current> =
+    current === undefined ? { type, content: '', closed: false } : { ...current };
   if (event.type === 'text-delta' || event.type === 'thinking-delta') {
     // Durable checkpoints and live deltas travel on independent subscriptions.
     // A missing prefix is recovered by the next checkpoint/end, never guessed.

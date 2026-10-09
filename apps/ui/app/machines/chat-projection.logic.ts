@@ -800,8 +800,7 @@ const foldRunViews = (
   return { views: views ?? previousViews, blocks: nextBlocks };
 };
 
-const copyBlocks = (blocks: Readonly<Record<string, Block>>): AgentHostLiveBlocks =>
-  new Map(Object.entries(blocks).map(([key, block]) => [key, { ...block }]));
+const copyBlocks = (blocks: Readonly<Record<string, Block>>): AgentHostLiveBlocks => new Map(Object.entries(blocks));
 
 /** Apply a durable row to the ephemeral watch too, deduping it against live block offsets. */
 const foldLiveRow = (

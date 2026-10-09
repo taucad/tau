@@ -1501,3 +1501,238 @@ describe('presentation identity for semantically empty observations', () => {
     expect(unreadable.state.ledger).toBe(state.ledger);
   });
 });
+
+it.each(['live delta', 'durable checkpoint'] as const)(
+  'should leave completed blocks untouched when a long active run receives a %s',
+  (delivery) => {
+    let state = project([lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')], 1);
+    for (let index = 0; index < 64; index++) {
+      state = reduceChatProjection(state, {
+        type: 'live',
+        event: {
+          type: 'text-end',
+          chatId: 'chat_1',
+          runId: 'run_1',
+          messageId: `completed-${index}`,
+          contentIndex: 0,
+          content: `Completed block ${index}.`,
+        },
+      }).state;
+    }
+    state = reduceChatProjection(state, {
+      type: 'live',
+      event: {
+        type: 'text-delta',
+        chatId: 'chat_1',
+        runId: 'run_1',
+        messageId: 'active-tail',
+        contentIndex: 0,
+        delta: 'Tail',
+        offset: 0,
+      },
+    }).state;
+    const previous = state;
+    const previousLive = previous.live!;
+    const tailKey = JSON.stringify(['run_1', 'active-tail', 0]);
+    const completed = Object.entries(previousLive.blocks).filter(([key]) => key !== tailKey);
+    expect(completed).toHaveLength(64);
+    const historicalContentReads = { count: 0 };
+    for (const [, block] of completed) {
+      const retainedContent = block.content;
+      Object.defineProperty(block, 'content', {
+        configurable: true,
+        enumerable: true,
+        get: () => {
+          historicalContentReads.count++;
+          return retainedContent;
+        },
+      });
+    }
+    const next =
+      delivery === 'live delta'
+        ? reduceChatProjection(previous, {
+            type: 'live',
+            event: {
+              type: 'text-delta',
+              chatId: 'chat_1',
+              runId: 'run_1',
+              messageId: 'active-tail',
+              contentIndex: 0,
+              delta: ' suffix',
+              offset: 4,
+            },
+          }).state
+        : reduceChatProjection(previous, {
+            type: 'batch',
+            answer: batch(
+              [
+                logRow(2, {
+                  type: 'message.appended',
+                  message: {
+                    id: 'active-tail',
+                    role: 'assistant',
+                    content: 'Tail suffix',
+                    metadata: { tauInternal: { kind: 'stream', streamState: 'checkpoint' } },
+                  },
+                }),
+              ],
+              2,
+              3,
+            ),
+          }).state;
+    // A tail update has no semantic dependency on any completed block's content.
+    expect.soft(historicalContentReads.count).toBe(0);
+    expect(previous.live).toBe(previousLive);
+    expect(previousLive.blocks[tailKey]?.content).toBe('Tail');
+    expect(next.live?.blocks[tailKey]?.content).toBe('Tail suffix');
+    expect(next.live?.blocks[tailKey]).not.toBe(previousLive.blocks[tailKey]);
+    for (const [key, block] of completed) {
+      expect.soft(next.live?.blocks[key]).toBe(block);
+      expect(block.closed).toBe(true);
+      expect(block.content).toMatch(/^Completed block \d+\.$/u);
+    }
+    expect(chunksOf(next.live!.chunks)).toContainEqual(
+      expect.objectContaining({
+        type: 'text-delta',
+        id: 'active-tail:text:0',
+        delta: ' suffix',
+      }),
+    );
+  },
+);
+
+it.each(['text', 'thinking'] as const)(
+  'should isolate old %s blocks across checkpoints, corrections and late frames',
+  (kind) => {
+    const identity = { chatId: 'chat_1', runId: 'run_1', messageId: 'streamed', contentIndex: 0 };
+    const key = JSON.stringify(['run_1', 'streamed', 0]);
+    const active = project([lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')], 1);
+    const first = reduceChatProjection(active, {
+      type: 'live',
+      event: { ...identity, type: kind === 'text' ? 'text-delta' : 'thinking-delta', delta: 'base', offset: 0 },
+    }).state;
+    const firstSnapshot = JSON.stringify(first);
+    const checkpoint = reduceChatProjection(first, {
+      type: 'batch',
+      answer: batch(
+        [
+          logRow(2, {
+            type: 'message.appended',
+            message: {
+              id: 'streamed',
+              role: 'assistant',
+              content: kind === 'text' ? [{ type: 'text', text: 'base' }] : [{ type: 'thinking', thinking: 'base' }],
+              metadata: { tauInternal: { kind: 'stream', streamState: 'checkpoint' } },
+            },
+          }),
+        ],
+        2,
+        3,
+      ),
+    }).state;
+    expect(JSON.stringify(first)).toBe(firstSnapshot);
+    const checkpointSnapshot = JSON.stringify(checkpoint);
+    const continued = reduceChatProjection(checkpoint, {
+      type: 'live',
+      event: { ...identity, type: kind === 'text' ? 'text-delta' : 'thinking-delta', delta: ' tail', offset: 4 },
+    }).state;
+    expect(JSON.stringify(checkpoint)).toBe(checkpointSnapshot);
+    expect(continued.live?.blocks[key]?.content).toBe('base tail');
+    const continuedSnapshot = JSON.stringify(continued);
+    const ended = reduceChatProjection(continued, {
+      type: 'live',
+      event: { ...identity, type: kind === 'text' ? 'text-end' : 'thinking-end', content: 'corrected final' },
+    }).state;
+    expect(JSON.stringify(continued)).toBe(continuedSnapshot);
+    expect(ended.live?.blocks[key]?.content).toBe('corrected final');
+    expect(ended.live?.blocks[key]?.closed).toBe(true);
+    const endedSnapshot = JSON.stringify(ended);
+    const late = reduceChatProjection(ended, {
+      type: 'live',
+      event: { ...identity, type: kind === 'text' ? 'text-delta' : 'thinking-delta', delta: ' ignored', offset: 15 },
+    }).state;
+    expect(late.live?.blocks[key]).toBe(ended.live?.blocks[key]);
+    expect(JSON.stringify(ended)).toBe(endedSnapshot);
+    const corrected = reduceChatProjection(ended, {
+      type: 'batch',
+      answer: batch(
+        [
+          logRow(3, {
+            type: 'message.envelope-replaced',
+            messageId: 'streamed',
+            replacement: {
+              id: 'streamed',
+              role: 'assistant',
+              content:
+                kind === 'text'
+                  ? [{ type: 'text', text: 'authoritative correction' }]
+                  : [{ type: 'thinking', thinking: 'authoritative correction' }],
+            },
+          }),
+        ],
+        3,
+        4,
+      ),
+    }).state;
+    expect(JSON.stringify(ended)).toBe(endedSnapshot);
+    expect(corrected.blocks['run_1']?.[key]?.content).toBe('authoritative correction');
+  },
+);
+
+it('should isolate tool input and output blocks from previously published snapshots', () => {
+  const identity = {
+    chatId: 'chat_1',
+    runId: 'run_1',
+    messageId: 'tool-message',
+    contentIndex: 0,
+    toolCallId: 'call-1',
+    toolName: 'read_file',
+  };
+  const key = JSON.stringify(['run_1', 'tool', 'call-1']);
+  const active = project([lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')], 1);
+  const started = reduceChatProjection(active, {
+    type: 'live',
+    event: { ...identity, type: 'tool-input-start' },
+  }).state;
+  const startedSnapshot = JSON.stringify(started);
+  const available = reduceChatProjection(started, {
+    type: 'live',
+    event: { ...identity, type: 'tool-input-end', input: { targetFile: 'main.txt' } },
+  }).state;
+  expect(JSON.stringify(started)).toBe(startedSnapshot);
+  expect(started.live?.blocks[key]).toMatchObject({ input: 'started', closed: false });
+  expect(available.live?.blocks[key]).toMatchObject({ input: 'available', closed: false });
+  const availableSnapshot = JSON.stringify(available);
+  const preview = reduceChatProjection(available, {
+    type: 'live',
+    event: { ...identity, type: 'tool-output-update', output: 'preview', isError: false },
+  }).state;
+  expect(preview.live?.blocks[key]).toBe(available.live?.blocks[key]);
+  const settled = reduceChatProjection(preview, {
+    type: 'batch',
+    answer: batch(
+      [
+        logRow(2, {
+          type: 'message.appended',
+          message: {
+            id: 'output-1',
+            role: 'tool-output',
+            toolCallId: 'call-1',
+            toolName: 'read_file',
+            content: 'actual',
+            isError: false,
+          },
+        }),
+      ],
+      2,
+      3,
+    ),
+  }).state;
+  expect(JSON.stringify(available)).toBe(availableSnapshot);
+  expect(settled.live?.blocks[key]).toMatchObject({ input: 'available', closed: true });
+  const late = reduceChatProjection(settled, {
+    type: 'live',
+    event: { ...identity, type: 'tool-output-update', output: 'ignored', isError: false },
+  }).state;
+  expect(late.live?.blocks[key]).toBe(settled.live?.blocks[key]);
+});

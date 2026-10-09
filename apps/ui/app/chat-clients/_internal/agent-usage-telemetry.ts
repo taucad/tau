@@ -399,13 +399,15 @@ const foldCallOutput = (facts: TurnFacts, call: CallFacts, chunk: Readonly<Recor
     call.semantics === 'test_model' &&
     completed &&
     isRecord(output) &&
-    Array.isArray(output['failures']) &&
+    typeof output['total'] === 'number' &&
     typeof output['passed'] === 'number'
   ) {
+    /* `failures` is trimmed to 20 in the durable row of an oversized run; `total` and `passed` are kept whole. */
     const { geospec } = context;
+    const passed = Math.max(0, Math.round(output['passed']));
     geospec.runs += 1;
-    geospec.passed += Math.max(0, Math.round(output['passed']));
-    geospec.failed += output['failures'].length;
+    geospec.passed += passed;
+    geospec.failed += Math.max(0, Math.round(output['total']) - passed);
     const status = output['runStatus'];
     if (typeof status === 'string' && knownRunStatuses.has(status)) {
       increment(geospec.statuses, status as GeospecRunStatus);

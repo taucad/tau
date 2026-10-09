@@ -7,7 +7,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { isSimulatedMachine, machineCredentialReference } from '@taucad/runtime/machine';
+import {
+  isSimulatedMachine,
+  machineCredentialOf,
+  machineCredentialReference,
+  withMachineCode,
+} from '@taucad/runtime/machine';
 import type {
   MachineBindingOutcome,
   MachineManifest,
@@ -82,8 +87,8 @@ const pinServices = async (
 };
 
 /**
- * What the candidate's provider declares its binding needs: a simulator or a claimed identity takes no code, and
- * only a network machine has services to pin (`connection.services`).
+ * What the candidate's provider declares its binding needs: a code when its `connection.credential` is `secret`
+ * (never for a simulator), and services to pin (`connection.services`) only on a network machine.
  *
  * @param providers - The providers the host serves.
  * @param providerId - The candidate's provider.
@@ -101,50 +106,18 @@ const bindingNeeds = (
   const { connection } = provider.manifest;
   const simulated = isSimulatedMachine(provider.manifest);
   return {
-    code: !simulated && connection.identity === 'authenticated',
+    code: !simulated && machineCredentialOf(connection) === 'secret',
     services: simulated || connection.transport !== 'network' ? [] : (connection.services ?? []),
   };
 };
 
 /**
- * Complete a ceremony `beginBinding` answered with `operator-action-required`.
+ * The ceremony itself; {@link completeMachineBinding} gives its refusals their typed code.
  *
- * What the ceremony asks is what the candidate's provider declares. A simulated provider, or a machine whose
- * identity is only claimed (a controller on a serial port, or a network one that takes no code), binds with no
- * code. A machine that authenticates takes an access code. Over the network, the services the provider's binding pins are pinned on
- * first use from the address the provider will connect to: a required one must answer, an optional one that does
- * not is left unpinned and reported. A typed code is staged in memory for the connect and saved to the vault,
- * beside its pins, only once the binding commits, so a wrong code never reaches the vault. Without a typed code the
- * machine's saved code is reused only while every required service presents the certificate it was saved with, so
- * a device claiming a machine's serial never receives that machine's code.
- *
- * ponytail: pins are taken silently; when an operator review of the digest is
- * wanted, return the probed trust to the form before committing.
- *
- * @param input - The host, its providers, its secret custody, the ceremony and the typed code, if any.
+ * @param input - As {@link completeMachineBinding} takes it.
  * @returns The host's own outcome.
- * @throws `MACHINE_BINDING_UNKNOWN_CEREMONY`, `MACHINE_PROVIDER_UNAVAILABLE` when the host serves no such provider,
- * `MACHINE_BINDING_ENDPOINT_INVALID` when the provider pins network services and the candidate has no network address,
- * `MACHINE_CREDENTIAL_REQUIRED` when no code is typed or saved, `MACHINE_CREDENTIAL_TRUST_CHANGED` when the saved
- * code's pins no longer match, a required service's probe failure, or `MACHINE_CREDENTIAL_SAVE_FAILED` (the binding
- * is removed again; `cause.code` is the vault's code).
- * @public
- *
- * @example <caption>The desktop services utility completing the ceremony a renderer began</caption>
- * ```typescript
- * import { completeMachineBinding } from '@taucad/host';
- * import type { MachineSecretStore } from '@taucad/host';
- * import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
- *
- * export const onBindingFrame = async (
- *   host: NodeMachineHost,
- *   providers: CreateNodeMachineHostInput['providers'],
- *   secrets: MachineSecretStore,
- *   frame: Readonly<{ ceremonyId: string; accessCode?: string }>,
- * ) => completeMachineBinding({ host, providers, secrets, ...frame });
- * ```
  */
-export const completeMachineBinding = async (input: CompleteMachineBindingInput): Promise<MachineBindingOutcome> => {
+const bindWithCeremony = async (input: CompleteMachineBindingInput): Promise<MachineBindingOutcome> => {
   const { host, secrets, ceremonyId, accessCode } = input;
   const pending = host.describeBinding(ceremonyId);
   if (pending === undefined) {
@@ -216,5 +189,53 @@ export const completeMachineBinding = async (input: CompleteMachineBindingInput)
     return outcome;
   } finally {
     release();
+  }
+};
+
+/**
+ * Complete a ceremony `beginBinding` answered with `operator-action-required`.
+ *
+ * What the ceremony asks is what the candidate's provider declares. A machine whose `connection.credential` is
+ * `secret` (by default, one whose identity is authenticated) takes an access code or key; a simulated provider, or
+ * one that declares no secret (a controller on a serial port), binds with no code. Over the network, the services the provider's binding pins are pinned on
+ * first use from the address the provider will connect to: a required one must answer, an optional one that does
+ * not is left unpinned and reported. A typed code is staged in memory for the connect and saved to the vault,
+ * beside its pins, only once the binding commits, so a wrong code never reaches the vault. Without a typed code the
+ * machine's saved code is reused only while every required service presents the certificate it was saved with, so
+ * a device claiming a machine's serial never receives that machine's code.
+ *
+ * ponytail: pins are taken silently; when an operator review of the digest is
+ * wanted, return the probed trust to the form before committing.
+ *
+ * @param input - The host, its providers, its secret custody, the ceremony and the typed code, if any.
+ * @returns The host's own outcome.
+ * @throws An `Error` whose `code` (and message) is `MACHINE_BINDING_UNKNOWN_CEREMONY`, `MACHINE_PROVIDER_UNAVAILABLE`
+ * when the host serves no such provider,
+ * `MACHINE_BINDING_ENDPOINT_INVALID` when the provider pins network services and the candidate has no network address,
+ * `MACHINE_CREDENTIAL_REQUIRED` when no code is typed or saved, `MACHINE_CREDENTIAL_TRUST_CHANGED` when the saved
+ * code's pins no longer match, a required service's probe failure, or `MACHINE_CREDENTIAL_SAVE_FAILED` (the binding
+ * is removed again; `cause.code` is the vault's code).
+ * @public
+ *
+ * @example <caption>The desktop services utility completing the ceremony a renderer began</caption>
+ * ```typescript
+ * import { completeMachineBinding } from '@taucad/host';
+ * import type { MachineSecretStore } from '@taucad/host';
+ * import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
+ *
+ * export const onBindingFrame = async (
+ *   host: NodeMachineHost,
+ *   providers: CreateNodeMachineHostInput['providers'],
+ *   secrets: MachineSecretStore,
+ *   frame: Readonly<{ ceremonyId: string; accessCode?: string }>,
+ * ) => completeMachineBinding({ host, providers, secrets, ...frame });
+ * ```
+ */
+export const completeMachineBinding = async (input: CompleteMachineBindingInput): Promise<MachineBindingOutcome> => {
+  try {
+    return await bindWithCeremony(input);
+  } catch (error) {
+    // Every refusal reaches its caller with a typed `code`, whoever the caller is.
+    throw withMachineCode(error);
   }
 };

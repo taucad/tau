@@ -72,6 +72,8 @@ const ceremony = (
     vault?: SecretVault;
     certificate?: Pinned;
     camera?: boolean;
+    /** The providers the host serves; defaults to every default provider. */
+    served?: CompleteMachineBindingInput['providers'];
   }> = {},
 ) => {
   const providerId = options.providerId ?? 'bambu';
@@ -110,7 +112,7 @@ const ceremony = (
     completeMachineBinding({
       host,
       secrets,
-      providers,
+      providers: options.served ?? providers,
       ceremonyId: input.ceremonyId ?? 'ceremony-1',
       ...(input.accessCode === undefined ? {} : { accessCode: input.accessCode }),
       probeCertificateTrust: probe,
@@ -133,9 +135,11 @@ describe('completeMachineBinding', () => {
   it('should refuse a ceremony the host is not holding', async () => {
     const { complete, completeBinding, probe } = ceremony();
 
-    await expect(complete({ ceremonyId: 'gone', accessCode: printerCode })).rejects.toThrow(
-      'MACHINE_BINDING_UNKNOWN_CEREMONY',
-    );
+    /* Typed by the ceremony itself, so every caller reads `code`, not the message. */
+    await expect(complete({ ceremonyId: 'gone', accessCode: printerCode })).rejects.toMatchObject({
+      code: 'MACHINE_BINDING_UNKNOWN_CEREMONY',
+      message: 'MACHINE_BINDING_UNKNOWN_CEREMONY',
+    });
     expect(probe).not.toHaveBeenCalled();
     expect(completeBinding).not.toHaveBeenCalled();
   });
@@ -183,6 +187,37 @@ describe('completeMachineBinding', () => {
     await expect(bind.secrets.has(`vault:machine/${providerId}/CLAIMED-1`)).resolves.toBe(false);
     /* And none is asked for. */
     await expect(ceremony({ providerId }).complete()).resolves.toEqual({ status: 'bound', machineId: 'workshop-x1c' });
+  });
+
+  it('should take a code from a machine that declares a secret though its identity is only claimed', async () => {
+    const served = providers.map((provider): CompleteMachineBindingInput['providers'][number] =>
+      provider.id === 'makera-carvera'
+        ? {
+            ...provider,
+            manifest: {
+              ...provider.manifest,
+              connection: { ...provider.manifest.connection, credential: 'secret' },
+            },
+          }
+        : provider,
+    );
+    const claimedSerial = 'CLAIMED-1';
+    const bind = ceremony({
+      providerId: 'makera-carvera',
+      candidate: candidateAt('192.168.0.120', claimedSerial),
+      served,
+    });
+
+    await expect(bind.complete()).rejects.toMatchObject({ code: 'MACHINE_CREDENTIAL_REQUIRED' });
+    await expect(bind.complete({ accessCode: printerCode })).resolves.toEqual({
+      status: 'bound',
+      machineId: 'workshop-x1c',
+    });
+    expect(bind.completeBinding).toHaveBeenLastCalledWith({
+      ceremonyId: 'ceremony-1',
+      secretRef: `vault:machine/makera-carvera/${claimedSerial}`,
+      serviceTrust: {},
+    });
   });
 
   describe('a typed code', () => {

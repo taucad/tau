@@ -1,6 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createBillableModelEvidenceCollector } from '#api/billing/billable-model-evidence.js';
+import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
+import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import type { DatabaseService } from '#database/database.service.js';
 
 /* The real 200 stream OpenAI sent on 2026-09-19 with an exhausted organisation balance: no usage, then
  * `error` and `response.failed`. Staging sent the same shape for GPT-6 Luna on 2026-10-09 (FD-12). */
@@ -464,12 +467,49 @@ describe('createBillableModelEvidenceCollector', () => {
     expect(collector.complete()).toEqual({
       kind: 'provider_rejected',
       executionStatus: 'rejected',
-      normalizationEvidence: {
-        version: 'provider-usage-v1',
-        terminalReason: 'provider_failed',
-        fields: { providerCode: 'credit_balance_exhausted' },
-      },
+      normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_failed', fields: {} },
     });
+  });
+
+  /* The ledger persists `fields` as measured quantities and rejects any other value before it writes, so a
+   * terminal the collector shapes has to pass that schema or the turn keeps its hold: on staging the first
+   * release of a failed stream named the supplier's code in a field and never settled (Run 2 FD-12). The
+   * ledger is driven only as far as its serialization; the stub transaction stands in for the write. */
+  it('should shape a failed-stream terminal the ledger retains', async () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-responses',
+      new Set(['uncached_input', 'cache_read', 'cache_write', 'output']),
+      'openai',
+    );
+    collector.accept(bytes(exhaustedCapture));
+    const transaction = vi.fn(async () => undefined);
+    const ledger = new CreditLedgerService(
+      { database: { transaction } } as unknown as Pick<DatabaseService, 'database'>,
+      {} as BillingPolicyService,
+    );
+    const retain = async (evidence: ReturnType<typeof collector.complete>) =>
+      ledger.recordInvocationEvidence({
+        operationId: '23e17cf6-d476-4c6d-a516-870e0d303059',
+        accountId: 'account',
+        requestDigest: `hmac-sha256:${'a'.repeat(64)}`,
+        evidence,
+      });
+    const evidence = collector.complete();
+
+    await expect(retain(evidence)).resolves.toBeUndefined();
+    expect(transaction).toHaveBeenCalledOnce();
+    // The control: the same terminal with a code in a field is what the ledger refused on staging.
+    await expect(
+      retain({
+        ...evidence,
+        normalizationEvidence: {
+          version: 'provider-usage-v1',
+          terminalReason: 'provider_failed',
+          fields: { providerCode: 'credit_balance_exhausted' },
+        },
+      }),
+    ).rejects.toThrow();
+    expect(transaction).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -480,23 +520,21 @@ describe('createBillableModelEvidenceCollector', () => {
       stream:
         'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","usage":null}}\n\n' +
         'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n',
-      fields: {},
     },
     {
       name: 'an OpenAI-compatible error body',
       wire: 'openai-completions',
       providerId: 'vertexai',
       stream: 'data: {"error":{"code":429,"message":"Resource exhausted.","status":"RESOURCE_EXHAUSTED"}}\n\n',
-      fields: { providerCode: '429' },
     },
-  ] as const)('should settle $name that carried no usage as rejected', ({ wire, providerId, stream, fields }) => {
+  ] as const)('should settle $name that carried no usage as rejected', ({ wire, providerId, stream }) => {
     const collector = createBillableModelEvidenceCollector(wire, new Set(['uncached_input', 'output']), providerId);
     collector.accept(bytes(stream));
 
     expect(collector.complete()).toMatchObject({
       kind: 'provider_rejected',
       executionStatus: 'rejected',
-      normalizationEvidence: { terminalReason: 'provider_failed', fields },
+      normalizationEvidence: { terminalReason: 'provider_failed', fields: {} },
     });
   });
 

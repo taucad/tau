@@ -616,7 +616,9 @@ export type MachineFailureCode = (typeof machineFailureCodes)[number];
 
 /**
  * Why a job or a transfer failed: a host code, or a provider's own under `MACHINE_JOB_` or `MACHINE_TRANSFER_`. One
- * shape for the job check's refusal, the job's `failure` and a provider's rejected receipt.
+ * shape for the job check's refusal and the job's `failure`. A provider's own code is kept when its check or
+ * preparation refuses; a transfer or start the machine rejects is recorded as a receipt, whose code is always a
+ * `MachineFailureCode` (`MACHINE_ACTION_PROVIDER_REJECTED`, with the provider's code in its message).
  * @public
  */
 export type MachineJobFailureCode = MachineFailureCode | `MACHINE_JOB_${string}` | `MACHINE_TRANSFER_${string}`;

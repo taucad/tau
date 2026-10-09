@@ -15,10 +15,10 @@ import { cloneBoundedJson } from '@taucad/parameters/json';
 import { identity, receiptMessage } from '#host/node-machine-context.js';
 import type { NodeMachineHostContext } from '#host/node-machine-context.js';
 import type { NodeMachineOperations } from '#host/node-machine-actions.js';
-import { machineError } from '#host/node-machine-operations.js';
+import { machineError, requesterOf } from '#host/node-machine-operations.js';
 import type { NodeMachineOperationState } from '#host/node-machine-operations.js';
 import type { AdmittedHostOperation } from '#host/host-admission.js';
-import { isMachineJobFailureCode } from '#machines/machine-actions.js';
+import { isMachineJobFailureCode, machineFailureCodes } from '#machines/machine-actions.js';
 import type { MachineFailure } from '#machines/machine-actions.js';
 import { parseMachineProgramSummary } from '#machines/machine-channel.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
@@ -116,7 +116,8 @@ const failureOf = (error: unknown): JobFailure => {
 /**
  * Fold a job's transfer and start operations into its state. An unproven transfer (`confirming`, `attention`) keeps
  * the job `transferring` until the journal settles it; a start follows only a proven transfer, so a job settled
- * `starting` after its approver's call returned is driven by approving it again.
+ * `starting` after its approver's call returned is driven by a person approving it again, admitted as the first
+ * approval was (attendance and attestations included).
  * @internal
  * @param job - Any job.
  * @param operations - Every recorded operation, by id.
@@ -506,7 +507,9 @@ export const createNodeMachineJobs = (
           signal: input.signal,
         });
         if ('refusal' in checked) {
-          return { refusal: { code: 'MACHINE_UNAVAILABLE', message: checked.refusal.message } };
+          // A provider's own job code has no receipt form; its message still says what happened.
+          const code = machineFailureCodes.find((known) => known === checked.refusal.code);
+          return { refusal: { code: code ?? 'MACHINE_PREPARATION_FAILED', message: checked.refusal.message } };
         }
         const { entry, session } = checked;
         if (
@@ -517,11 +520,17 @@ export const createNodeMachineJobs = (
             refusal: { code: 'MACHINE_ACTION_RUN_ACTIVE', message: 'The machine is already running something.' },
           };
         }
-        if ((await setupDigestOf(entry, checked.preparation.setup)) !== prepared.setupDigest) {
+        // The setup and the completed configuration (e.g. which slot feeds which filament) as they are now must be
+        // what was approved; the approved configuration is what is sent.
+        if (
+          (await setupDigestOf(entry, checked.preparation.setup)) !== prepared.setupDigest ||
+          (await digestOf(checked.configuration, 'NODE_MACHINE_PREPARATION_CONFIGURATION')) !==
+            prepared.configurationDigest
+        ) {
           return {
             refusal: {
               code: 'MACHINE_JOB_SETUP_CHANGED',
-              message: 'The machine’s setup changed since this job was approved. Approve it again.',
+              message: 'The machine’s setup changed since this job was approved. Request the job again.',
             },
           };
         }
@@ -572,6 +581,8 @@ export const createNodeMachineJobs = (
   return {
     sync,
     async observe() {
+      // ponytail: visits every job kept (terminal ones return at once); index the jobs a run can still move if a store
+      // ever keeps thousands.
       const listed = await context.directory.snapshot();
       const entries = new Map(listed.entries.map((entry) => [entry.machineId, entry]));
       for (const job of jobs.values()) {
@@ -649,7 +660,7 @@ export const createNodeMachineJobs = (
             machineId,
             artifact: input.artifact,
             configuration,
-            requestedBy: input.requestedBy,
+            requestedBy: requesterOf(input.admitted.actor, input.requestedBy),
             state: 'preparing',
             createdAt,
             updatedAt: createdAt,
@@ -715,6 +726,7 @@ export const createNodeMachineJobs = (
         }
         const jobId = identity.parse(input.jobId);
         const { admitted } = input;
+        const resolvedBy = requesterOf(admitted.actor, input.resolvedBy);
         return effectQueue.queueFor(`job:${jobId}`, async () => {
           input.signal.throwIfAborted();
           admitted.assertCurrent();
@@ -722,65 +734,74 @@ export const createNodeMachineJobs = (
           if (!job) {
             throw new Error('MACHINE_JOB_UNKNOWN');
           }
+          // A job is resolved on a person's session: an agent neither approves nor denies one, and never drives a
+          // start, whatever the machine declares (a start is never on the low-risk list).
+          if (resolvedBy.kind === 'agent') {
+            throw refusal(
+              input.attended === true
+                ? { code: 'MACHINE_ACTION_PERSON_REQUIRED', message: 'Only a person can say they are at the machine.' }
+                : input.decision === 'deny'
+                  ? { code: 'MACHINE_ACTION_PERSON_REQUIRED', message: 'Only a person can deny a job.' }
+                  : { code: 'MACHINE_ACTION_APPROVAL_REQUIRED', message: 'A person must approve this job in Tau.' },
+            );
+          }
           if (input.decision === 'deny') {
             if (job.state !== 'awaiting-approval') {
               throw new Error('MACHINE_JOB_NOT_AWAITING');
             }
-            return commitJob({ ...job, state: 'denied', resolvedBy: input.resolvedBy });
+            return commitJob({ ...job, state: 'denied', resolvedBy });
+          }
+          const isFirst = job.state === 'awaiting-approval';
+          if (!isFirst && job.state !== 'approved' && job.state !== 'transferring' && job.state !== 'starting') {
+            if (job.state !== 'awaiting-start' && !terminalJobStates.has(job.state)) {
+              throw new Error('MACHINE_JOB_NOT_AWAITING');
+            }
+            return job;
+          }
+          if (
+            !isFirst &&
+            ((input.transferOperationId !== undefined && input.transferOperationId !== job.transferOperationId) ||
+              (input.startOperationId !== undefined && input.startOperationId !== job.startOperationId))
+          ) {
+            throw refusal({
+              code: 'MACHINE_OPERATION_ID_CONFLICT',
+              message: 'This job already uses other operation ids.',
+            });
           }
           // An approval moves toward the machine; a machine whose journal is unreadable could not record it.
           context.usableMachine(job.machineId, 'MACHINE_UNAVAILABLE');
+          const entry = await currentEntry(job.machineId);
+          const facts = entry?.descriptor.capabilities.jobs;
+          if (!entry || !facts) {
+            throw refusal({ code: 'MACHINE_UNAVAILABLE', message: 'This machine is not connected.' });
+          }
+          if (facts.type === 'unsupported') {
+            throw refusal({ code: 'MACHINE_JOB_UNSUPPORTED', message: 'This machine does not run programs from Tau.' });
+          }
+          // Approving again (a job whose transfer was proven after its approver's call returned) drives a start just
+          // as the first approval does, so it is admitted the same way: attendance and attestations, again.
+          if (facts.safety.attended && input.attended !== true) {
+            throw refusal({ code: 'MACHINE_ACTION_ATTENDANCE_REQUIRED', message: 'Say you are at the machine first.' });
+          }
+          const declared = new Set(facts.attestations.map(({ id }) => id));
+          const made = new Set(input.attestations ?? []);
+          const missing = facts.attestations.find(({ id }) => !made.has(id));
+          if ([...made].some((id) => !declared.has(id)) || missing) {
+            throw refusal({
+              code: 'MACHINE_JOB_ATTESTATION_REQUIRED',
+              message: missing ? `Confirm first: ${missing.label}` : 'Confirm only what this machine asks for.',
+            });
+          }
           let current = job;
-          if (current.state === 'awaiting-approval') {
-            const entry = await currentEntry(current.machineId);
-            const facts = entry?.descriptor.capabilities.jobs;
-            if (!entry || !facts) {
-              throw refusal({ code: 'MACHINE_UNAVAILABLE', message: 'This machine is not connected.' });
+          if (isFirst && !isPrepared(current)) {
+            // Older than its window, or purged by a restart: made again, not refused, since the setup digest fences
+            // the start.
+            current = await commitJob(await prepareJob(current, input.signal));
+            if (current.state !== 'awaiting-approval') {
+              return current;
             }
-            if (facts.type === 'unsupported') {
-              throw refusal({
-                code: 'MACHINE_JOB_UNSUPPORTED',
-                message: 'This machine does not run programs from Tau.',
-              });
-            }
-            const isAgent = admitted.actor.kind === 'agent' || input.resolvedBy.kind === 'agent';
-            if (isAgent && input.attended === true) {
-              throw refusal({
-                code: 'MACHINE_ACTION_PERSON_REQUIRED',
-                message: 'Only a person can say they are at the machine.',
-              });
-            }
-            // The host owns the job floor: a start is never on the low-risk list, so a manifest declaring `agent`
-            // still needs a person's approval (`approved-agent` at the least).
-            if (isAgent) {
-              throw refusal({
-                code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
-                message: 'A person must approve this job in Tau.',
-              });
-            }
-            if (facts.safety.attended && input.attended !== true) {
-              throw refusal({
-                code: 'MACHINE_ACTION_ATTENDANCE_REQUIRED',
-                message: 'Say you are at the machine first.',
-              });
-            }
-            const declared = new Set(facts.attestations.map(({ id }) => id));
-            const made = new Set(input.attestations ?? []);
-            const missing = facts.attestations.find(({ id }) => !made.has(id));
-            if ([...made].some((id) => !declared.has(id)) || missing) {
-              throw refusal({
-                code: 'MACHINE_JOB_ATTESTATION_REQUIRED',
-                message: missing ? `Confirm first: ${missing.label}` : 'Confirm only what this machine asks for.',
-              });
-            }
-            if (!isPrepared(current)) {
-              // Older than its window, or purged by a restart: made again, not refused, since the setup digest fences
-              // the start.
-              current = await commitJob(await prepareJob(current, input.signal));
-              if (current.state !== 'awaiting-approval') {
-                return current;
-              }
-            }
+          }
+          if (isFirst) {
             const blocked = current.checks.find((check) => check.state === 'blocked');
             if (blocked) {
               throw refusal({ code: 'MACHINE_JOB_CHECK_BLOCKED', message: `${blocked.label}: not ready.` });
@@ -789,32 +810,22 @@ export const createNodeMachineJobs = (
             if (interlock) {
               throw refusal(interlock);
             }
-            const at = now();
-            const stored = facts.delivery === 'stored';
-            current = await commitJob({
-              ...current,
-              state: stored ? 'transferring' : 'starting',
-              resolvedBy: input.resolvedBy,
-              attestations: [...made].map((id) => ({ id, by: input.resolvedBy, at })),
-              attended: input.attended === true,
-              ...(stored ? { transferOperationId: identity.parse(input.transferOperationId ?? randomUUID()) } : {}),
-              startOperationId: identity.parse(input.startOperationId ?? randomUUID()),
-            });
-          } else if (current.state === 'approved' || current.state === 'transferring' || current.state === 'starting') {
-            if (
-              (input.transferOperationId !== undefined && input.transferOperationId !== current.transferOperationId) ||
-              (input.startOperationId !== undefined && input.startOperationId !== current.startOperationId)
-            ) {
-              throw refusal({
-                code: 'MACHINE_OPERATION_ID_CONFLICT',
-                message: 'This job already uses other operation ids.',
-              });
-            }
-          } else if (current.state !== 'awaiting-start' && !terminalJobStates.has(current.state)) {
-            throw new Error('MACHINE_JOB_NOT_AWAITING');
-          } else {
-            return current;
           }
+          const at = now();
+          const stored = facts.delivery === 'stored';
+          current = await commitJob({
+            ...current,
+            ...(isFirst
+              ? {
+                  state: stored ? 'transferring' : 'starting',
+                  ...(stored ? { transferOperationId: identity.parse(input.transferOperationId ?? randomUUID()) } : {}),
+                  startOperationId: identity.parse(input.startOperationId ?? randomUUID()),
+                }
+              : {}),
+            resolvedBy,
+            attestations: [...made].map((id) => ({ id, by: resolvedBy, at })),
+            attended: input.attended === true,
+          });
           try {
             // The approval is durable: the transfer and start answer to the host, not to the caller's wait.
             return await drive(current, { admitted, signal: admitted.signal });
@@ -828,6 +839,7 @@ export const createNodeMachineJobs = (
       },
       async withdrawJob(input) {
         const jobId = identity.parse(input.jobId);
+        const resolvedBy = requesterOf(input.admitted.actor, input.resolvedBy);
         return effectQueue.queueFor(`job:${jobId}`, async () => {
           input.signal.throwIfAborted();
           input.admitted.assertCurrent();
@@ -840,7 +852,14 @@ export const createNodeMachineJobs = (
           if (job.state !== 'awaiting-approval' && job.state !== 'awaiting-start') {
             throw new Error('MACHINE_JOB_NOT_AWAITING');
           }
-          return commitJob({ ...job, state: 'withdrawn', resolvedBy: input.resolvedBy });
+          // An agent withdraws only its own request; a person withdraws any.
+          if (
+            resolvedBy.kind === 'agent' &&
+            (job.requestedBy.kind !== 'agent' || job.requestedBy.id !== resolvedBy.id)
+          ) {
+            throw refusal({ code: 'MACHINE_ACTION_PERSON_REQUIRED', message: 'Only a person can withdraw this job.' });
+          }
+          return commitJob({ ...job, state: 'withdrawn', resolvedBy });
         });
       },
     },

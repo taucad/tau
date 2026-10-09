@@ -72,8 +72,10 @@ export type MachineOperation = Readonly<{
   receipt?: MachineOperationReceipt;
   /** The first unknown receipt, kept once. */
   confirmingSince?: string;
-  /** Who caused it, and whether they said they were at the machine. */
+  /** Who caused it, and whether they said they were at the machine. The host takes the kind and id from the session. */
   requestedBy?: MachineRequester;
+  /** The person whose approval admitted an agent's action. */
+  approvedBy?: MachineRequester;
   attended?: boolean;
   /** For an action: which one, its label, and the activity it started when the machine reports one. */
   action?: Readonly<{ componentId: string; id: string; label: string; activityId?: string }>;
@@ -305,6 +307,7 @@ export const machineOperationSchema: z.ZodType<MachineOperation> = z.strictObjec
   receipt: machineOperationReceiptSchema.optional(),
   confirmingSince: instant.optional(),
   requestedBy: machineRequesterSchema.optional(),
+  approvedBy: machineRequesterSchema.optional(),
   attended: z.boolean().optional(),
   action: z
     .strictObject({ componentId: identity, id: identity, label: identity, activityId: identity.optional() })

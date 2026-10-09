@@ -589,17 +589,28 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
   const ledger = createNodeMachineJobs(context, journal);
   built.ledger = ledger;
   await Promise.all([...machines.keys()].map(async (machineId) => journal.publish(machineId)));
-  // Every report may show a job's run; observations already settle operations through the same topic.
+  // Every report may show a job's run; observations already settle operations through the same topic. One pass at a
+  // time, and reports that arrive during it fold into one more pass, so a slow pass never queues one per report.
+  let isObserving = false;
+  let isObserveWanted = false;
   let observing = Promise.resolve();
   const stopObservingRuns = commits.subscribe(() => {
-    const previous = observing;
+    isObserveWanted = true;
+    if (isObserving) {
+      return;
+    }
+    isObserving = true;
     observing = (async (): Promise<void> => {
-      await previous;
-      try {
-        await ledger.observe();
-      } catch (error) {
-        report(error);
+      while (isObserveWanted) {
+        isObserveWanted = false;
+        try {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- one pass at a time, over the latest reports.
+          await ledger.observe();
+        } catch (error) {
+          report(error);
+        }
       }
+      isObserving = false;
     })();
   });
   // A lost session ends what only it could carry: every hold on the machine, and every streamed run it was feeding.

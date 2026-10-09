@@ -15,6 +15,7 @@ import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
 import type { MachineEventLog } from '#host/node-machine-event-log.js';
+import type { HostActor } from '#host/host-admission.js';
 import { machineFailureCodes } from '#machines/machine-actions.js';
 import type { MachineFailure, MachineFailureCode } from '#machines/machine-actions.js';
 import { parseMachineOperationReceipt } from '#machines/machine-channel.js';
@@ -24,6 +25,7 @@ import type {
   MachineOperationKind,
   MachineOperationReceipt,
   MachineReceipt,
+  MachineRequester,
 } from '#machines/machine-jobs.js';
 import type { MachineCommandReceipt } from '#machines/machine.js';
 
@@ -47,9 +49,9 @@ export const receiptMessage = z
   .refine((value) => value.isWellFormed());
 
 /**
- * How long an operation may go unproven before a person is asked to look. Milliseconds. The X1C proves a start only
- * through its status reports, 15–41 s after `project_file` on the 2026-10-03 send (blueprint x1c-start-confirmation,
- * F1–F2).
+ * How long an operation may go unproven before a person is asked to look. Milliseconds. Long enough for a machine
+ * that proves a start only through its later status reports; a provider's own evidence for its machines lives with
+ * that provider.
  * @internal
  */
 export const confirmationWindow = 180_000;
@@ -77,6 +79,8 @@ const plannedSchema = z.strictObject({
   /** What was asked, as digested; what a confirmation or reconciliation needs to ask the provider again. */
   intent: z.unknown().transform((value) => cloneBoundedJson(value, intentLimits)),
   requestedBy: machineRequesterSchema.optional(),
+  /** The person whose approval admitted an agent's action. */
+  approvedBy: machineRequesterSchema.optional(),
   attended: z.boolean().optional(),
   action: z
     .strictObject({
@@ -217,6 +221,20 @@ export const replayJournal = async (
 const encoder = new TextEncoder();
 
 /**
+ * Who asked, as the host records and tells the provider: the admitted session's actor id, `agent` when the session or
+ * the request says so, and the request's label to show. A request never names a person its session is not.
+ * @internal
+ * @param actor - The admitted session's actor.
+ * @param claimed - What the request says, of which only the label is kept as given.
+ * @returns The requester to record.
+ */
+export const requesterOf = (actor: HostActor, claimed: MachineRequester): MachineRequester => ({
+  kind: actor.kind === 'agent' || claimed.kind === 'agent' ? 'agent' : 'user',
+  id: actor.id,
+  label: claimed.label,
+});
+
+/**
  * The digest that makes an operation id idempotent: the same id with the same digest is the same operation.
  * @internal
  * @param input - The machine, the kind and the bounded intent.
@@ -324,6 +342,7 @@ export const operationRecord = (operation: NodeMachineOperationState): MachineOp
     ...(operation.receipt ? { receipt: operation.receipt } : {}),
     ...(operation.confirmingSince === undefined ? {} : { confirmingSince: operation.confirmingSince }),
     ...(planned.requestedBy === undefined ? {} : { requestedBy: planned.requestedBy }),
+    ...(planned.approvedBy === undefined ? {} : { approvedBy: planned.approvedBy }),
     ...(planned.attended === undefined ? {} : { attended: planned.attended }),
     ...(planned.action === undefined
       ? {}

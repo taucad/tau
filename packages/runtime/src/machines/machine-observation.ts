@@ -271,6 +271,25 @@ export type MachineAlert = Readonly<{
   remedies?: readonly MachineRemedy[];
 }>;
 
+/**
+ * Each observation valid for its group's declared budget from when it was received; an undeclared group keeps
+ * whatever the provider said.
+ * @internal
+ * @param components - The observations as reported.
+ * @param budgets - Each declared group's `staleAfter`, in milliseconds.
+ * @returns The observations with `validUntil` stamped.
+ */
+export const withValidity = (
+  components: readonly ComponentObservation[],
+  budgets: ReadonlyMap<string, number>,
+): readonly ComponentObservation[] =>
+  components.map((observation) => {
+    const budget = budgets.get(observation.group);
+    return budget === undefined
+      ? observation
+      : { ...observation, validUntil: new Date(Date.parse(observation.receivedAt) + budget).toISOString() };
+  });
+
 /** What a provider reports, before the host adds operations and freshness. @public */
 export type MachineReport = Readonly<{
   /** `occupied`: another client holds a machine that serves one at a time. */

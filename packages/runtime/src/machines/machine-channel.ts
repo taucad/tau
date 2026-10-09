@@ -148,7 +148,11 @@ export type MachineChannelHostOperations = Readonly<
   }
 >;
 
-/** Direct machines channel plus its explicit wire lifecycle. @public */
+/**
+ * Direct machines channel plus its explicit wire lifecycle. `ready` rejects with code
+ * `MACHINE_CHANNEL_VERSION_MISMATCH` when the host speaks another protocol version: the person updates Tau.
+ * @public
+ */
 export type MachineChannelClient = MachineClient & Readonly<{ ready: Promise<void>; close(): void }>;
 
 /** Supported structured and byte-framed transports for one machine channel. @public */
@@ -301,7 +305,7 @@ const progressSchema = z.strictObject({
     )
     .max(8),
 });
-const jobSchema = z.strictObject({
+const jobSchema: z.ZodType<MachineJob> = z.strictObject({
   version: z.literal(1),
   jobId: identitySchema,
   machineId: identitySchema,
@@ -404,8 +408,7 @@ const freeze = <Value>(value: Value): Value => {
  * @param value - Untrusted record value.
  * @returns Detached, frozen record.
  */
-// SAFETY: the strict schema is the runtime proof of the job's shape.
-export const parseMachineJob = (value: unknown): MachineJob => freeze(jobSchema.parse(value) as unknown as MachineJob);
+export const parseMachineJob = (value: unknown): MachineJob => freeze(jobSchema.parse(value));
 
 /** Admit one bounded prepared-job record for the wire or the machine store. @internal
  * @param value - Untrusted record value.
@@ -538,9 +541,11 @@ const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
           componentId: identitySchema,
           action: identitySchema,
           version: z.number().int().min(1).max(1000),
+          expectedRunId: identitySchema.nullable(),
           parameters: configurationSchema,
         }),
         decision: z.enum(['approve', 'deny']),
+        approvedBy: requesterSchema,
       }),
       result: typed(
         z.union([
@@ -783,7 +788,22 @@ export const connectMachineChannel = (port: MachineChannelEndpoint): MachineChan
     streamFlowControl,
   });
   return {
-    ready: channel.ready,
+    // The only frame validated before `ready` is the host's hello: one this client refuses is another version.
+    ready: (async (): Promise<void> => {
+      try {
+        await channel.ready;
+      } catch (error) {
+        if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'WIRE_VALIDATION_FAILED') {
+          throw Object.assign(
+            new Error('This Tau and the machines host it reached are different versions. Update Tau.', {
+              cause: error,
+            }),
+            { code: 'MACHINE_CHANNEL_VERSION_MISMATCH' },
+          );
+        }
+        throw error;
+      }
+    })(),
     listProviders: async ({ signal }) => channel.call('listProviders', {}, signal),
     discover: ({ signal, ...input }) => channel.listen('discover', input, signal),
     beginBinding: async ({ signal, ...input }) => channel.call('beginBinding', input, signal),

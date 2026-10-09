@@ -3,7 +3,14 @@
  * closes. A live session is waited out, a lost one is retried on a backoff, and a good connect starts the backoff over.
  * A machine whose provider opens by resetting the controller is never reconnected by itself while its last report
  * showed a run, and one whose identity or certificate changed is never retried; each stays stale with the host's own
- * alert naming what a person does, until a good connect or a new binding clears it.
+ * alert naming what a person does, until a good connect or a new binding clears it. A machine with a claimed identity
+ * that stays unreachable is still retried, and after four failed attempts is listed with how to bind it at its new
+ * port or address.
+ *
+ * Accepted: when the host starts, every binding is connected once without the resets-controller check, since the
+ * store does not keep the last run. Starting Tau is the person's reconnect, as the `tau.reconnect-required` remedy
+ * says; a controller that resets on opening loses a run streamed by a Tau that crashed (its planner buffer drains in
+ * seconds, so there is little left to lose).
  *
  * @module
  */
@@ -69,6 +76,23 @@ const rebindRequiredAlert: MachineAlert = {
   blocks: 'everything',
   remedies: [{ type: 'person', instruction: 'Find the machine where it is now and bind it again to confirm it.' }],
 };
+
+/** Listed on a machine with a claimed identity that has not answered at its bound port or address for a while. */
+const unreachableAlert: MachineAlert = {
+  code: 'tau.unreachable',
+  severity: 'warning',
+  message: 'Tau cannot reach this machine where it was bound. It keeps trying.',
+  blocks: 'everything',
+  remedies: [
+    {
+      type: 'person',
+      instruction: 'If the machine moved to another port or address, find it there and bind it again.',
+    },
+  ],
+};
+
+/** Failed attempts after which a claimed machine is listed as unreachable. */
+const unreachableAfter = 4;
 
 /** What reconnect supervision serves. @internal */
 export type NodeMachineSupervision = Readonly<{
@@ -221,6 +245,15 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
         report(error);
         if (needsRebind(error)) {
           return listAlerts(record.id, [rebindRequiredAlert]);
+        }
+        // A claimed identity is pinned to its endpoint, so a machine that moved never answers there again; the
+        // person is told once, and the loop keeps trying in case it comes back.
+        if (
+          attempts === unreachableAfter &&
+          providerSources.get(record.providerId)?.manifest.connection.identity === 'claimed'
+        ) {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- listed once, between attempts.
+          await listAlerts(record.id, [unreachableAlert]);
         }
       }
     }

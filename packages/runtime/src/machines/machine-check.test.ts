@@ -181,6 +181,24 @@ describe('checkMachineActionAtSend', () => {
       now,
     });
 
+  it('holds the report to the manifest freshness budgets it is given, as the host does', () => {
+    const hold = {
+      name: 'Fixture printer',
+      capabilities,
+      report: fixtureReport(),
+      componentId: 'motion',
+      action: 'motion.jog',
+      kind: 'hold',
+      expectedRunId: null,
+      // Five seconds after the report: past the position's one-second budget.
+      now: now + 5000,
+    } as const;
+    expect(checkMachineActionAtSend(hold)).toBeUndefined();
+    expect(checkMachineActionAtSend({ ...hold, observations: machineManifestFixture.observations })).toMatchObject({
+      code: 'MACHINE_ACTION_STALE_OBSERVATION',
+    });
+  });
+
   it("repeats the machine's state at sending and leaves qualification and authority to the host", () => {
     expect(atSend('run.pause', 'controller')).toMatchObject({ code: 'MACHINE_ACTION_PRECONDITION_FAILED' });
     expect(atSend('motion.home', 'motion')).toBeUndefined();

@@ -17,6 +17,7 @@ import { connectMachineChannel } from '#machines/machine-channel.js';
 import type { MachineChannelClient, MachineChannelHostOperations } from '#machines/machine-channel.js';
 import { machineCredentialReference } from '#machines/machine-credential.js';
 import type { MachineApplyActionInput } from '#machines/machine-client.js';
+import type { MachineResolveJobInput } from '#machines/machine-jobs.js';
 import type { MachineObservation, MachineRun } from '#machines/machine-observation.js';
 import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
 import {
@@ -605,11 +606,19 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
     await expect(fixture.client.get({ machineId })).resolves.toMatchObject({
       snapshot: { operations: [{ operationId: 'light-1', state: 'accepted', kind: 'action' }] },
     });
+    // The session says who asks: an agent naming a person is still recorded, and told to the printer, as the agent.
+    await agentClient.applyAction(lightOn(fixture.revision, 'light-2', { requestedBy: operator }));
+    expect(apply).toHaveBeenLastCalledWith(expect.objectContaining({ requestedBy: { kind: 'agent' } }));
+    isOn = true;
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'light-2' })).resolves.toMatchObject({
+      requestedBy: { kind: 'agent', id: 'agent-1', label: 'Operator' },
+    });
     await fixture.close();
     const journal = await readFile(join(fixture.root, machineId, 'journal.jsonl'), 'utf8');
     expect(journal.indexOf('machine-operation-planned')).toBeLessThan(journal.indexOf('machine-operation-sending'));
     expect(journal.indexOf('machine-operation-sending')).toBeLessThan(journal.indexOf('machine-operation-result'));
-    expect(journal.match(/"source":"confirmation"/gu)).toHaveLength(1);
+    // One confirmation per operation (light-1, light-2).
+    expect(journal.match(/"source":"confirmation"/gu)).toHaveLength(2);
   });
 
   it('should refuse a changed revision, an unknown version, invalid values and an agent at the machine, sending nothing', async () => {
@@ -711,8 +720,10 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
       progress: { basis: 'executed', counters: [] },
     };
     const apply = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const feed = reportFeed();
     const fixture = await boundPrinter({
       getSnapshot: async () => fixtureReport({ state: { status: 'active' }, run }),
+      observe: feed.observe,
       actions: { type: 'supported', apply, confirm: () => ({ status: 'confirmed' }) },
     });
     const agentClient = await fixture.serveAs(agentActor);
@@ -726,13 +737,18 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
     const decide = async (
       client: MachineChannelClient,
       operationId: string,
-      { decision = 'approve', parameters = {} }: Readonly<{ decision?: 'approve' | 'deny'; parameters?: unknown }> = {},
+      {
+        decision = 'approve',
+        parameters = {},
+        action = 'run.cancel',
+      }: Readonly<{ decision?: 'approve' | 'deny'; parameters?: unknown; action?: string }> = {},
     ) =>
       client.approveAction({
         machineId,
         operationId,
-        intent: { componentId: 'controller', action: 'run.cancel', version: 1, parameters },
+        intent: { componentId: 'controller', action, version: 1, expectedRunId: 'run-1', parameters },
         decision,
+        approvedBy: operator,
       });
     const refused = { status: 'rejected', code: 'MACHINE_ACTION_APPROVAL_REQUIRED' } as const;
     await expect(agentClient.applyAction(cancel('cancel-1'))).resolves.toMatchObject(refused);
@@ -740,6 +756,10 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
     await expect(decide(agentClient, 'cancel-1')).resolves.toMatchObject({
       status: 'refused',
       code: 'MACHINE_ACTION_PERSON_REQUIRED',
+    });
+    // Nothing is recorded for a control an agent could never send, approved or not.
+    await expect(decide(fixture.client, 'home-1', { action: 'motion.home' })).resolves.toMatchObject({
+      status: 'refused',
     });
     await expect(agentClient.applyAction(cancel('cancel-1'))).resolves.toMatchObject(refused);
     // An approval of other values admits nothing, and is not used up by the attempt.
@@ -769,14 +789,62 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
       expiresAt: new Date(currentTime.value + 10 * 60_000).toISOString(),
     });
     await expect(agentClient.applyAction(cancel('cancel-1'))).resolves.toMatchObject({ status: 'accepted' });
-    // Confirmed by acknowledgement: accepted when the printer accepts.
+    // Confirmed by acknowledgement: accepted when the printer accepts. The record names who approved it.
     await expect(fixture.client.reconcileOperation({ machineId, operationId: 'cancel-1' })).resolves.toMatchObject({
       state: 'accepted',
       requestedBy: agent,
+      approvedBy: operator,
     });
     // Used once: the next operation needs its own approval.
     await expect(agentClient.applyAction(cancel('cancel-4'))).resolves.toMatchObject(refused);
+    // An approval is for the run the person saw: against the run that followed it admits nothing and stays unused.
+    await decide(fixture.client, 'cancel-5');
+    feed.push({
+      type: 'snapshot',
+      snapshot: fixtureReport({ state: { status: 'active' }, run: { ...run, runId: 'run-2' } }),
+    });
+    await vi.waitFor(async () => {
+      await expect(fixture.client.get({ machineId })).resolves.toMatchObject({ snapshot: { run: { runId: 'run-2' } } });
+    });
+    await expect(agentClient.applyAction({ ...cancel('cancel-5'), expectedRunId: 'run-2' })).resolves.toMatchObject({
+      ...refused,
+      message: 'The approval of “Cancel” was for other values. Ask a person again.',
+    });
     expect(apply).toHaveBeenCalledOnce();
+    await fixture.close();
+  });
+
+  it("should keep a person's approval when the action it admits is refused before it is journaled", async () => {
+    const run: MachineRun = {
+      runId: 'run-1',
+      origin: 'tau',
+      delivery: 'stored',
+      state: 'running',
+      progress: { basis: 'executed', counters: [] },
+    };
+    // Declared by the manifest, but this session cannot apply actions: refused after admission, nothing journaled.
+    const fixture = await boundPrinter({
+      getSnapshot: async () => fixtureReport({ state: { status: 'active' }, run }),
+      actions: { type: 'unsupported' },
+    });
+    const agentClient = await fixture.serveAs(agentActor);
+    const cancel: MachineApplyActionInput = {
+      ...lightOn(fixture.revision, 'cancel-1'),
+      componentId: 'controller',
+      action: 'run.cancel',
+      expectedRunId: 'run-1',
+      parameters: {},
+    };
+    await fixture.client.approveAction({
+      machineId,
+      operationId: 'cancel-1',
+      intent: { componentId: 'controller', action: 'run.cancel', version: 1, expectedRunId: 'run-1', parameters: {} },
+      decision: 'approve',
+      approvedBy: operator,
+    });
+    const unsupported = { status: 'rejected', code: 'MACHINE_ACTION_UNSUPPORTED' } as const;
+    await expect(agentClient.applyAction(cancel)).resolves.toMatchObject(unsupported);
+    await expect(agentClient.applyAction(cancel)).resolves.toMatchObject(unsupported);
     await fixture.close();
   });
 
@@ -855,6 +923,24 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('a
       state: 'accepted',
       kind: 'stop',
     });
+    // A stop the machine took is not sent twice under its id.
+    await expect(agentClient.stop({ machineId, operationId: 'stop-1', requestedBy: agent })).resolves.toMatchObject({
+      operationId: 'stop-1',
+      status: 'accepted',
+    });
+    expect(stop).toHaveBeenCalledOnce();
+    // A retried stop whose reply was lost, or an id used before for something else, is sent again under a fresh id.
+    stop.mockResolvedValueOnce({ status: 'unknown', reason: 'reply lost', observedAt });
+    await expect(
+      fixture.client.stop({ machineId, operationId: 'stop-2', requestedBy: operator }),
+    ).resolves.toMatchObject({ operationId: 'stop-2', status: 'unknown' });
+    const retried = await fixture.client.stop({ machineId, operationId: 'stop-2', requestedBy: operator });
+    expect(retried).toMatchObject({ kind: 'stop', status: 'accepted' });
+    expect(retried.operationId).not.toBe('stop-2');
+    await expect(
+      fixture.client.stop({ machineId, operationId: 'jog-1', requestedBy: operator }),
+    ).resolves.toMatchObject({ kind: 'stop', status: 'accepted' });
+    expect(stop).toHaveBeenCalledTimes(4);
     // A machine that is not bound here is told nothing, and the answer says so.
     await expect(fixture.client.stop({ machineId: 'elsewhere', requestedBy: operator })).resolves.toMatchObject({
       status: 'rejected',
@@ -1132,6 +1218,10 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     expect(jobs.start).toHaveBeenCalledOnce();
 
     await request(agentClient, 'job-2');
+    // A job is the person's to resolve: an agent denies nothing either.
+    await expect(agentClient.resolveJob({ jobId: 'job-2', decision: 'deny', resolvedBy: agent })).rejects.toThrow(
+      'Only a person can deny a job.',
+    );
     await expect(
       fixture.client.resolveJob({ jobId: 'job-2', decision: 'deny', resolvedBy: operator }),
     ).resolves.toMatchObject({ state: 'denied', resolvedBy: operator });
@@ -1236,6 +1326,43 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     await fixture.close();
   });
 
+  it('should look up an operation waiting for attention once a minute, not on every tick', async () => {
+    const jobs = storedJobs();
+    const reconcile = vi.fn(
+      async (): Promise<MachineCommandReceipt> => ({ status: 'unknown', reason: 'no proof yet', observedAt }),
+    );
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const fixture = await boundPrinter(jobs.facet, { reconcile });
+    jobs.start.mockResolvedValueOnce({ status: 'unknown', reason: 'reply lost', observedAt });
+    await request(fixture.client, 'job-1');
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'confirming' });
+    const settled = async (): Promise<void> => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+      });
+    };
+    // Unproven: looked up on each 5 s tick, then escalated once 180 s have passed.
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.waitFor(() => {
+      expect(reconcile).toHaveBeenCalledOnce();
+    });
+    currentTime.value += 180_000;
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.waitFor(async () => {
+      await expect(fixture.client.listJobs({})).resolves.toMatchObject([{ state: 'unknown' }]);
+    });
+    reconcile.mockClear();
+    // At attention a person is asked to look; the printer is asked again only on the minute.
+    await vi.advanceTimersByTimeAsync(9 * 5000);
+    await settled();
+    expect(reconcile).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5000);
+    await vi.waitFor(() => {
+      expect(reconcile).toHaveBeenCalledOnce();
+    });
+    await fixture.close();
+  });
+
   it('should wait for the start button of a printer that starts at the machine', async () => {
     const jobs = storedJobs();
     const feed = reportFeed();
@@ -1314,6 +1441,72 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       agentClient.resolveJob({ jobId: 'job-1', decision: 'approve', resolvedBy: agent, attestations: ['plate-clear'] }),
     ).rejects.toThrow('A person must approve this job in Tau.');
     expect(jobs.transfer).not.toHaveBeenCalled();
+    await fixture.close();
+  });
+
+  it('should admit approving a job again as the first approval: a person, at the machine, never an agent', async () => {
+    const jobs = storedJobs();
+    let isProven = false;
+    const reconcile = vi.fn(
+      async (input: Readonly<{ kind: string }>): Promise<MachineCommandReceipt> =>
+        input.kind === 'transfer' && isProven
+          ? { status: 'accepted', transferId: 'transfer-late', observedAt }
+          : { status: 'unknown', reason: 'no proof yet', observedAt },
+    );
+    // A machine whose start needs the person at it, as a CNC's does.
+    const descriptor = withJobFacts((facts) => ({ safety: { ...facts.safety, attended: true } }));
+    const fixture = await boundPrinter(jobs.facet, { descriptor, reconcile });
+    const agentClient = await fixture.serveAs(agentActor);
+    await request(agentClient, 'job-1');
+    const resolve = async (client: MachineChannelClient, extra: Partial<MachineResolveJobInput> = {}) =>
+      client.resolveJob({
+        jobId: 'job-1',
+        decision: 'approve',
+        resolvedBy: operator,
+        attestations: ['plate-clear'],
+        ...extra,
+      });
+    jobs.transfer.mockResolvedValueOnce({ status: 'unknown', reason: 'reply lost', observedAt });
+    await expect(
+      resolve(fixture.client, { attended: true, transferOperationId: 'transfer-1', startOperationId: 'start-1' }),
+    ).resolves.toMatchObject({ state: 'transferring' });
+    // The transfer is proven after the approver's call returned: the job waits to be approved again to start.
+    isProven = true;
+    await fixture.client.reconcileOperation({ machineId, operationId: 'transfer-1' });
+    await expect(fixture.client.listJobs({})).resolves.toMatchObject([{ state: 'starting' }]);
+    await expect(
+      agentClient.resolveJob({ jobId: 'job-1', decision: 'approve', resolvedBy: agent, attestations: ['plate-clear'] }),
+    ).rejects.toThrow('A person must approve this job in Tau.');
+    await expect(resolve(fixture.client)).rejects.toThrow('Say you are at the machine first.');
+    await expect(resolve(fixture.client, { attended: true, attestations: [] })).rejects.toThrow(
+      'Confirm first: The plate is clear.',
+    );
+    expect(jobs.start).not.toHaveBeenCalled();
+    await expect(resolve(fixture.client, { attended: true })).resolves.toMatchObject({
+      state: 'started',
+      resolvedBy: operator,
+      attended: true,
+    });
+    expect(jobs.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ transferId: 'transfer-late' }));
+    await fixture.close();
+  });
+
+  it('should refuse a start whose completed configuration changed since approval and send the approved one', async () => {
+    const jobs = storedJobs();
+    let slot = 'A1';
+    // The provider maps the program's material to the slot the machine reports now.
+    const completeConfiguration = vi.fn(async () => ({ slot }));
+    const fixture = await boundPrinter({ ...jobs.facet, completeConfiguration });
+    await request(fixture.client, 'job-1');
+    slot = 'A2';
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({
+      state: 'failed',
+      failure: { code: 'MACHINE_JOB_SETUP_CHANGED' },
+    });
+    expect(jobs.start).not.toHaveBeenCalled();
+    await request(fixture.client, 'job-2');
+    await expect(approve(fixture.client, 'job-2')).resolves.toMatchObject({ state: 'started' });
+    expect(jobs.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ configuration: { slot: 'A2' } }));
     await fixture.close();
   });
 
@@ -1917,6 +2110,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
 
   it('should move a claimed printer to a new address only when a person binds it there again', async () => {
     const root = await storeRoot();
+    const release = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
     const claimed = fixtureProvider({
       id: 'binding-provider',
       manifest: {
@@ -1925,15 +2119,35 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
       },
       candidates: [candidateA, candidateB],
       async connect() {
-        return fixtureSession();
+        return fixtureSession({
+          holds: { type: 'supported', begin: async () => ({ extend: async () => undefined, release }) },
+        });
       },
     });
     const fixture = await openServedHost(root, claimed, runtime);
     const bound = await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    await expect(
+      fixture.client.beginHold({
+        machineId,
+        componentId: 'motion',
+        capabilityRevision: await revisionOf(fixture.client),
+        operationId: 'jog-1',
+        hold: 'motion.jog',
+        version: 1,
+        parameters: { axis: 'x', direction: 1, feed: 600 },
+        requestedBy: operator,
+        attended: true,
+      }),
+    ).resolves.toMatchObject({ status: 'held' });
     // The same claimed identity answering at another address is the same printer once a person confirms it.
     await expect(
       bindAs(fixture, { candidateId: 'candidate-b', name: machineId, secretRef: 'vault:x1c' }),
     ).resolves.toBe(bound);
+    // The session it replaced is lost as any other: the hold it carried ends.
+    await vi.waitFor(() => {
+      expect(release).toHaveBeenCalledOnce();
+    });
+    await expect(fixture.client.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'ended' });
     expect(JSON.parse(await readFile(join(root, machineId, 'machine.json'), 'utf8'))).toMatchObject({
       name: machineId,
       candidate: { endpoint: { address: 'candidate-b.local' } },
@@ -2195,6 +2409,15 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
       snapshot: { alerts: [{ code: 'tau.rebind-required', remedies: [{ type: 'person' }] }] },
     });
     vi.useRealTimers();
+    // The remedy works: binding the printer again where it is now confirms the same binding, not a second one.
+    await expect(
+      bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' }),
+    ).resolves.toBe(machineId);
+    await expect(fixture.client.get(machine)).resolves.toMatchObject({
+      freshness: 'current',
+      snapshot: { alerts: [] },
+    });
+    await expect(fixture.client.list({})).resolves.toMatchObject({ entries: [{ machineId }] });
     await fixture.close();
 
     // The same refusal at the next start is not retried either.
@@ -2204,6 +2427,53 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     expect(restarted.onError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: code }));
     expect(vi.getTimerCount()).toBe(1);
     await restarted.close();
+  });
+
+  it('should tell a person how to find a claimed machine that stops answering, and keep trying', async () => {
+    const root = await storeRoot();
+    let isOffline = false;
+    const claimed = fixtureProvider({
+      id: 'binding-provider',
+      manifest: {
+        ...machineManifestDefinitionFixture,
+        connection: { ...machineManifestDefinitionFixture.connection, identity: 'claimed' },
+      },
+      candidates: [candidateA],
+      async connect() {
+        if (isOffline) {
+          throw new Error('FIXTURE_OFFLINE');
+        }
+        return fixtureSession();
+      },
+    });
+    const first = await openServedHost(root, claimed, runtime);
+    await bindAs(first, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    await first.close();
+    isOffline = true;
+    useFakeTimers();
+    const fixture = await openServedHost(root, claimed, runtime);
+    const alertCodes = async (): Promise<string[]> => {
+      const entry = await fixture.client.get(machine);
+      return entry.snapshot.alerts.map(({ code }) => code);
+    };
+    const isListed = async (code: string): Promise<boolean> => {
+      const codes = await alertCodes();
+      return codes.includes(code);
+    };
+    // The attempt at start, then 2 s, 5 s and 10 s later: not yet.
+    await vi.advanceTimersByTimeAsync(2000 + 5000 + 10_000);
+    await until(() => fixture.onError.mock.calls.length === 4);
+    await expect(alertCodes()).resolves.toEqual([]);
+    // The fourth retry fails too: the person is told, and the host keeps trying.
+    await vi.advanceTimersByTimeAsync(30_000);
+    await until(() => fixture.onError.mock.calls.length === 5);
+    await vi.waitUntil(async () => isListed('tau.unreachable'));
+    isOffline = false;
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.waitUntil(async () => !(await isListed('tau.unreachable')));
+    await expect(fixture.client.get(machine)).resolves.toMatchObject({ freshness: 'current' });
+    vi.useRealTimers();
+    await fixture.close();
   });
 
   it('should cancel a pending retry and abandon an attempt in flight when the host closes', async () => {

@@ -283,12 +283,24 @@ describe('machine channel', () => {
       expect(fixture.operations.applyAction).toHaveBeenCalledWith(
         expect.objectContaining({ parameters: { on: true } }),
       );
-      const intent = { componentId: 'chamber-light', action: 'switch.set', version: 1, parameters: { on: true } };
+      const intent = {
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        version: 1,
+        expectedRunId: null,
+        parameters: { on: true },
+      };
       await expect(
-        fixture.client.approveAction({ machineId: 'machine-1', operationId: 'light-1', intent, decision: 'approve' }),
+        fixture.client.approveAction({
+          machineId: 'machine-1',
+          operationId: 'light-1',
+          intent,
+          decision: 'approve',
+          approvedBy: requester,
+        }),
       ).resolves.toEqual({ status: 'approved', operationId: 'light-1', expiresAt: '2026-09-06T00:10:00Z' });
       expect(fixture.operations.approveAction).toHaveBeenCalledWith(
-        expect.objectContaining({ operationId: 'light-1', intent, decision: 'approve' }),
+        expect.objectContaining({ operationId: 'light-1', intent, decision: 'approve', approvedBy: requester }),
       );
       await expect(fixture.client.stop({ machineId: 'machine-1', requestedBy: requester })).resolves.toMatchObject({
         status: 'accepted',
@@ -476,6 +488,24 @@ describe('machine channel', () => {
     } finally {
       fixture.client.close();
       fixture.server.dispose();
+    }
+  });
+
+  it.each([
+    { server: 'machines', protocolVersion: 1 },
+    { server: 'jobs', protocolVersion: 2 },
+  ])('should tell a person to update Tau when the host says hello as $server v$protocolVersion', async (hello) => {
+    const ports = new MessageChannel();
+    const client = connectMachineChannel(ports.port2);
+    ports.port1.postMessage({ v: 1, k: 'lh', o: 1, d: hello });
+    try {
+      await expect(client.ready).rejects.toMatchObject({
+        code: 'MACHINE_CHANNEL_VERSION_MISMATCH',
+        message: 'This Tau and the machines host it reached are different versions. Update Tau.',
+      });
+    } finally {
+      client.close();
+      ports.port1.close();
     }
   });
 

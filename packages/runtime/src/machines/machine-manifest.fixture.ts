@@ -7,11 +7,11 @@ import type { MachineManifestDefinition } from '#machines/machine.js';
 
 const qualified = { status: 'qualified', profileId: 'fixture-simulation' } as const;
 
-/** The fixture's start form: nothing to choose. @internal */
+/** The fixture's start form: only the slot a provider may map the program's material to. @internal */
 export const machineSubmissionFixture = defineConfiguration({
   id: 'fixture.submission',
   version: '1',
-  schema: z.strictObject({}),
+  schema: z.strictObject({ slot: z.string().optional() }),
   ui: { version: 1, rjsf: {} },
 });
 

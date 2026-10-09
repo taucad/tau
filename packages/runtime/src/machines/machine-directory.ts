@@ -17,6 +17,7 @@ import {
   machineProviderReportSchema,
   machineReportSchema,
   mergeComponentObservations,
+  withValidity,
 } from '#machines/machine-observation.js';
 import type {
   ComponentObservation,
@@ -233,8 +234,10 @@ export type CreateMachineDirectoryInput = Readonly<{
   onError(error: unknown): void;
 }>;
 
+// A frozen value was frozen here, children first, so it is frozen all the way down: skipping it keeps a snapshot per
+// report from walking every descriptor and action manifest again.
 const freeze = <Value>(value: Value): Value => {
-  if (value !== null && typeof value === 'object') {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const child of Object.values(value)) {
       freeze(child);
     }
@@ -335,19 +338,6 @@ const machineIdentity = (entry: MachineDirectoryEntry): string => {
   }
   return `${entry.providerId}\u0000${descriptor}`;
 };
-
-// Each observation is valid for its group's declared budget from when it was received; an undeclared group keeps
-// whatever the provider said.
-const withValidity = (
-  components: readonly ComponentObservation[],
-  budgets: ReadonlyMap<string, number>,
-): readonly ComponentObservation[] =>
-  components.map((observation) => {
-    const budget = budgets.get(observation.group);
-    return budget === undefined
-      ? observation
-      : { ...observation, validUntil: new Date(Date.parse(observation.receivedAt) + budget).toISOString() };
-  });
 
 const componentKey = (observation: Pick<ComponentObservation, 'componentId' | 'group'>): string =>
   `${observation.componentId}\u0000${observation.group}`;

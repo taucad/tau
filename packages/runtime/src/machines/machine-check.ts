@@ -15,7 +15,8 @@ import type {
 } from '#machines/machine-actions.js';
 import type { MachineApplyActionInput } from '#machines/machine-client.js';
 import type { MachineDirectoryEntry } from '#machines/machine-directory.js';
-import { componentValue } from '#machines/machine-observation.js';
+import type { MachineManifest } from '#machines/machine-manifest.js';
+import { componentValue, withValidity } from '#machines/machine-observation.js';
 import type { MachineReport } from '#machines/machine-observation.js';
 import type { MachineInstalledCapabilities } from '#machines/machine.js';
 
@@ -227,8 +228,11 @@ export const checkMachineAction = (input: MachineActionCheckInput): MachineActio
 /**
  * A provider's own admission at the moment of sending: the same check over its latest report, so no provider keeps
  * a copy. Qualification, authority and attendance were the host's to admit and are not repeated; state, the run
- * fence, freshness, homing, interlocks and the provider's own availability are.
- * @param input - The provider's name for the machine, what is installed, its latest report and the intent.
+ * fence, freshness, homing, interlocks and the provider's own availability are. Freshness holds the report to the
+ * manifest's `observations` budgets, as the host does; without them, only `validUntil` stamps the provider set itself
+ * are checked, so pass them.
+ * @param input - The provider's name for the machine, what is installed, its latest report, its freshness budgets
+ * and the intent.
  * @returns The refusal to return as a rejected receipt, or undefined when the action may be sent.
  * @public
  */
@@ -237,6 +241,8 @@ export const checkMachineActionAtSend = (
     name: string;
     capabilities: MachineActionCheckEntry['descriptor']['capabilities'];
     report: MachineReport;
+    /** The manifest's observation groups, whose `staleAfter` each observation is valid for from its `receivedAt`. */
+    observations?: MachineManifest['observations'];
     componentId: string;
     action: string;
     kind?: 'action' | 'hold';
@@ -252,7 +258,16 @@ export const checkMachineActionAtSend = (
       name: input.name,
       testing: true,
       descriptor: { capabilities: input.capabilities },
-      snapshot: input.report,
+      snapshot:
+        input.observations === undefined
+          ? input.report
+          : {
+              ...input.report,
+              components: withValidity(
+                input.report.components,
+                new Map(input.observations.map(({ group, staleAfter }) => [group, staleAfter])),
+              ),
+            },
     },
     componentId: input.componentId,
     action: input.action,

@@ -89,7 +89,7 @@ export type MachineApplyActionInput = Readonly<{
   // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run; absent would be no statement.
   expectedRunId: string | null;
   parameters: unknown;
-  /** Who is asking. An agent never states attendance. */
+  /** Who is asking: the label to show. The host takes the kind and id from the session; an agent never states attendance. */
   requestedBy: MachineRequester;
   /** The person states they are at the machine. Refused from an agent. */
   attended?: boolean;
@@ -99,21 +99,36 @@ export type MachineApplyActionInput = Readonly<{
 /**
  * A person's answer to an agent's request that needs approval, recorded by the host against this operation id and
  * intent. The agent then sends the same intent with the same `operationId`; the host admits it once while the
- * approval is fresh and its intent matches. Only a person's session may approve.
+ * approval is fresh and its intent, run included, matches. Only a person's session may approve, and only a request
+ * an agent may send once approved. The host holds the decision in memory for 10 minutes; a host restart drops it,
+ * and the person approves again.
  * @public
  */
 export type MachineApproveActionInput = Readonly<{
   machineId: string;
   /** The agent's caller-retained operation id. */
   operationId: string;
-  /** Exactly what the person saw and approves. */
-  intent: Readonly<{ componentId: string; action: string; version: number; parameters: unknown }>;
+  /**
+   * Exactly what the person saw and approves, as the agent will send it: `expectedRunId` is the run the person was
+   * shown (`null` for an action that needs no run), so the approval never admits the action against another run.
+   */
+  intent: Readonly<{
+    componentId: string;
+    action: string;
+    version: number;
+    // oxlint-disable-next-line typescript/no-restricted-types -- null is the statement that the person saw no run.
+    expectedRunId: string | null;
+    parameters: unknown;
+  }>;
   decision: 'approve' | 'deny';
+  /** The label to show for the person; the host takes who they are from the session. */
+  approvedBy: MachineRequester;
   signal?: AbortSignal;
 }>;
 
 /**
- * What the host recorded for one approval. `refused`: nothing was recorded (an agent's session, an unknown action).
+ * What the host recorded for one approval. `refused`: nothing was recorded (an agent's session, an unknown action, or
+ * one an agent could never send). An approval expires at `expiresAt` and does not survive a host restart.
  * @public
  */
 export type MachineActionApproval =

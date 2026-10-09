@@ -591,6 +591,30 @@ describe('loadModel — the runtime branch', () => {
     ]);
   });
 
+  it('should keep the load error when an owned runtime also fails to shut down', async () => {
+    const runtime = Object.assign(fakeRuntime({ fail: true }), {
+      shutdown: async () => {
+        throw new Error('shutdown failed');
+      },
+    });
+    const error = await diagnosticsOf(async () => loadModel({ file: 'main.ts', runtime: async () => runtime }));
+    expect(error.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      'KERNEL_ERROR',
+      'GEOSPEC_MODEL_EXPORT_FAILED',
+    ]);
+  });
+
+  it('should report a failed shutdown of a loaded owned runtime as a load error', async () => {
+    const runtime = Object.assign(fakeRuntime({ bytes: await glbBytes() }), {
+      shutdown: async () => {
+        throw new Error('shutdown failed');
+      },
+    });
+    const error = await diagnosticsOf(async () => loadModel({ file: 'main.ts', runtime: async () => runtime }));
+    expect(error.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(['GEOSPEC_MODEL_EXPORT_FAILED']);
+    expect(error.diagnostics[0]?.message).toContain('shutdown failed');
+  });
+
   it('should surface an export-intent refusal', async () => {
     // A STEP export routed through a transcoder cannot carry exact BRep.
     const runtime = fakeRuntime({ transcoderId: 'mesher', fidelity: 'mesh' });
@@ -776,6 +800,17 @@ describe('createModelLoader', () => {
 
     expect(subject.mesh.stats.triangleCount).toBe(1);
     expect(runtime.state.terminated).toBe(0);
+  });
+
+  it('should reject dispose when its shared runtime fails to shut down', async () => {
+    const runtime = Object.assign(fakeRuntime({ bytes: await glbBytes() }), {
+      shutdown: async () => {
+        throw new Error('shutdown failed');
+      },
+    });
+    const loader = createModelLoader({ runtime: async () => runtime });
+    await loader({ file: 'main.ts' });
+    await expect(loader.dispose()).rejects.toThrow('shutdown failed');
   });
 
   it('should dispose cleanly after a shared runtime factory rejects', async () => {

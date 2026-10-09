@@ -198,9 +198,112 @@ const runtimeSource = (options: RuntimeOptions): { files: Record<string, string>
   'code' in options ? { files: options.code, entry: options.file } : { path: options.file };
 
 /**
+ * Release a runtime this loader owns, awaiting its host resources when the
+ * client can report them closed.
+ *
+ * @param runtime - The owned runtime client.
+ */
+const releaseOwnedRuntime = async (runtime: GeoSpecRuntimeClient): Promise<void> => {
+  if (runtime.shutdown) {
+    await runtime.shutdown();
+  } else {
+    runtime.terminate();
+  }
+};
+
+/**
+ * Export a model through a connected Tau runtime and parse the bytes it produced.
+ *
+ * @param runtime - The runtime client, owned or borrowed.
+ * @param options - The runtime-branch options.
+ * @param forensic - Optional run-scoped forensic sink.
+ * @returns The subject, with the honored export route recorded in provenance.
+ */
+const exportThroughRuntime = async (
+  runtime: GeoSpecRuntimeClient,
+  options: RuntimeOptions,
+  forensic?: ForensicSink,
+): Promise<GeometrySubject> => {
+  const format = (options.format ?? 'glb') as RuntimeBackedModelFormat;
+  await runtime.connect();
+  // Before the source selects its kernel, a Tau runtime has no concrete
+  // route metadata. The canonical preflight still supplies the wire intent;
+  // the request-scoped export renders privately (publish:false), avoiding a
+  // multi-gigabyte preview payload that GeoSpec would immediately discard.
+  const intentInput = {
+    runtime,
+    format,
+    ...(options.meshLinearTolerance === undefined ? {} : { meshLinearTolerance: options.meshLinearTolerance }),
+    ...(options.meshAngularToleranceDegrees === undefined
+      ? {}
+      : { meshAngularToleranceDegrees: options.meshAngularToleranceDegrees }),
+  };
+  const requestedIntent = resolveRuntimeExportIntent(intentInput);
+  if ('success' in requestedIntent) {
+    throw failure(requestedIntent.diagnostics);
+  }
+  const document = runtime.open({
+    source: runtimeSource(options),
+    ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+  });
+  const exported = await (async () => {
+    try {
+      return await document.export(format, { options: requestedIntent.options });
+    } finally {
+      document.close();
+    }
+  })();
+  if (!exported.success) {
+    throw failure(exported.issues.map((issue) => runtimeIssueDiagnostic(issue, 'GEOSPEC_MODEL_EXPORT_FAILED')));
+  }
+  const files: ExportFile[] = [...exported.files];
+  const file = files[0];
+  if (!file) {
+    throw failure([
+      {
+        code: 'GEOSPEC_MODEL_EXPORT_FAILED',
+        severity: 'error',
+        message: `The runtime exported no ${format.toUpperCase()} file for '${options.file}'.`,
+        suggestion: 'Check that the entry file default-exports a shape.',
+        details: { file: options.file, format },
+      },
+    ]);
+  }
+  // The export has now selected exactly one kernel and published its route
+  // metadata. Validate that concrete route rather than recording the
+  // route-less preflight as provenance.
+  const honoredIntent = resolveRuntimeExportIntent(intentInput);
+  if ('success' in honoredIntent) {
+    throw failure(honoredIntent.diagnostics);
+  }
+  const subject = await loadDirectSource(
+    {
+      source: file.bytes,
+      format,
+      name: file.name,
+      path: options.file,
+      ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+      ...(options.stepStreaming === undefined ? {} : { stepStreaming: options.stepStreaming }),
+      ...(options.mesh === undefined ? {} : { mesh: options.mesh }),
+      ...(options.meshLinearTolerance === undefined ? {} : { meshLinearTolerance: options.meshLinearTolerance }),
+      ...(options.meshAngularToleranceDegrees === undefined
+        ? {}
+        : { meshAngularToleranceDegrees: options.meshAngularToleranceDegrees }),
+    },
+    honoredIntent.sourceUnit,
+    forensic,
+  );
+  subject.diagnostics.push(
+    ...exported.issues.map((issue) => runtimeIssueDiagnostic(issue, 'GEOSPEC_MODEL_EXPORT_FAILED')),
+  );
+  return withExportIntent(subject, honoredIntent.provenance);
+};
+
+/**
  * Export a model through the Tau runtime and parse the bytes it produced.
  *
  * @param options - The runtime-branch options.
+ * @param forensic - Optional run-scoped forensic sink.
  * @returns The subject, with the honored export route recorded in provenance.
  */
 const loadFromRuntime = async (options: RuntimeOptions, forensic?: ForensicSink): Promise<GeometrySubject> => {
@@ -209,84 +312,10 @@ const loadFromRuntime = async (options: RuntimeOptions, forensic?: ForensicSink)
     throw rejected;
   }
   const format = (options.format ?? 'glb') as RuntimeBackedModelFormat;
-  const { runtime, owned } = await resolveRuntime(options);
-  try {
-    await runtime.connect();
-    // Before the source selects its kernel, a Tau runtime has no concrete
-    // route metadata. The canonical preflight still supplies the wire intent;
-    // the request-scoped export renders privately (publish:false), avoiding a
-    // multi-gigabyte preview payload that GeoSpec would immediately discard.
-    const intentInput = {
-      runtime,
-      format,
-      ...(options.meshLinearTolerance === undefined ? {} : { meshLinearTolerance: options.meshLinearTolerance }),
-      ...(options.meshAngularToleranceDegrees === undefined
-        ? {}
-        : { meshAngularToleranceDegrees: options.meshAngularToleranceDegrees }),
-    };
-    const requestedIntent = resolveRuntimeExportIntent(intentInput);
-    if ('success' in requestedIntent) {
-      throw failure(requestedIntent.diagnostics);
-    }
-    const document = runtime.open({
-      source: runtimeSource(options),
-      ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
-    });
-    const exported = await (async () => {
-      try {
-        return await document.export(format, { options: requestedIntent.options });
-      } finally {
-        document.close();
-      }
-    })();
-    if (!exported.success) {
-      throw failure(exported.issues.map((issue) => runtimeIssueDiagnostic(issue, 'GEOSPEC_MODEL_EXPORT_FAILED')));
-    }
-    const files: ExportFile[] = [...exported.files];
-    const file = files[0];
-    if (!file) {
-      throw failure([
-        {
-          code: 'GEOSPEC_MODEL_EXPORT_FAILED',
-          severity: 'error',
-          message: `The runtime exported no ${format.toUpperCase()} file for '${options.file}'.`,
-          suggestion: 'Check that the entry file default-exports a shape.',
-          details: { file: options.file, format },
-        },
-      ]);
-    }
-    // The export has now selected exactly one kernel and published its route
-    // metadata. Validate that concrete route rather than recording the
-    // route-less preflight as provenance.
-    const honoredIntent = resolveRuntimeExportIntent(intentInput);
-    if ('success' in honoredIntent) {
-      throw failure(honoredIntent.diagnostics);
-    }
-    const subject = await loadDirectSource(
-      {
-        source: file.bytes,
-        format,
-        name: file.name,
-        path: options.file,
-        ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
-        ...(options.stepStreaming === undefined ? {} : { stepStreaming: options.stepStreaming }),
-        ...(options.mesh === undefined ? {} : { mesh: options.mesh }),
-        ...(options.meshLinearTolerance === undefined ? {} : { meshLinearTolerance: options.meshLinearTolerance }),
-        ...(options.meshAngularToleranceDegrees === undefined
-          ? {}
-          : { meshAngularToleranceDegrees: options.meshAngularToleranceDegrees }),
-      },
-      honoredIntent.sourceUnit,
-      forensic,
-    );
-    subject.diagnostics.push(
-      ...exported.issues.map((issue) => runtimeIssueDiagnostic(issue, 'GEOSPEC_MODEL_EXPORT_FAILED')),
-    );
-    return withExportIntent(subject, honoredIntent.provenance);
-  } catch (error) {
-    // A raw kernel throw must never reach a matcher: every model-load failure
-    // leaves through the same structured error.
-    throw error instanceof GeoSpecModelLoadError
+  // A raw kernel or teardown throw must never reach a matcher: every
+  // model-load failure leaves through the same structured error.
+  const asLoadError = (error: unknown): GeoSpecModelLoadError =>
+    error instanceof GeoSpecModelLoadError
       ? error
       : failure([
           {
@@ -297,15 +326,28 @@ const loadFromRuntime = async (options: RuntimeOptions, forensic?: ForensicSink)
             details: { file: options.file, format },
           },
         ]);
-  } finally {
+  const { runtime, owned } = await resolveRuntime(options);
+  let subject: GeometrySubject;
+  try {
+    subject = await exportThroughRuntime(runtime, options, forensic);
+  } catch (error) {
     if (owned) {
-      if (runtime.shutdown) {
-        await runtime.shutdown();
-      } else {
-        runtime.terminate();
+      try {
+        await releaseOwnedRuntime(runtime);
+      } catch {
+        // The load failure is the one to report; a teardown failure must not replace it.
       }
     }
+    throw asLoadError(error);
   }
+  if (owned) {
+    try {
+      await releaseOwnedRuntime(runtime);
+    } catch (error) {
+      throw asLoadError(error);
+    }
+  }
+  return subject;
 };
 
 const withExportIntent = (
@@ -428,16 +470,14 @@ export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): Mana
       if (sharedRuntime === undefined) {
         return;
       }
+      let runtime: GeoSpecRuntimeClient;
       try {
-        const runtime = await sharedRuntime;
-        if (runtime.shutdown) {
-          await runtime.shutdown();
-        } else {
-          runtime.terminate();
-        }
+        runtime = await sharedRuntime;
       } catch {
-        // Runtime creation failed, so there is no live client to terminate.
+        // Runtime creation failed, so there is no live client to release.
+        return;
       }
+      await releaseOwnedRuntime(runtime);
     },
   });
 };

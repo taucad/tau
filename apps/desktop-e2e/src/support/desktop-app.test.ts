@@ -1,10 +1,12 @@
+import { EventEmitter } from 'node:events';
+import type { BrowserWindow, WebContents, WebContentsDidStartNavigationEventParams } from 'electron';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { _electron as electron } from 'playwright';
 import { describe, expect, it, vi } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
-import { desktopDescendants, launchDesktopApp } from '#support/desktop-app.js';
+import { desktopDescendants, launchDesktopApp, observeDesktopNavigation } from '#support/desktop-app.js';
 
 describe('desktop process ownership', () => {
   const snapshot =
@@ -71,6 +73,7 @@ describe('explicit manual desktop window identity', () => {
       const on = vi.fn();
       const ownedWindow = { setTitle, on };
       const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+      application.browserWindow.mockResolvedValue(mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>());
       application.process.mockReturnValue(mockDeep<ReturnType<typeof application.process>>());
       application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
       const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
@@ -83,7 +86,9 @@ describe('explicit manual desktop window identity', () => {
         if (typeof configure !== 'function') {
           throw new TypeError('Expected the owned window configuration callback.');
         }
-        Reflect.apply(configure, undefined, [ownedWindow, title]);
+        if (!Object.is(configure, observeDesktopNavigation)) {
+          Reflect.apply(configure, undefined, [ownedWindow, title]);
+        }
         return undefined;
       });
       application.firstWindow.mockResolvedValue(page);
@@ -92,7 +97,7 @@ describe('explicit manual desktop window identity', () => {
       try {
         const options = { token: 'fixture-token', profileRoot, visible: true, windowTitle };
         await expect(launchDesktopApp(options)).rejects.toThrow('The desktop shell did not survive launch.');
-        expect(application.browserWindow).toHaveBeenCalledTimes(windowTitle === undefined ? 0 : 1);
+        expect(application.browserWindow).toHaveBeenCalledTimes(windowTitle === undefined ? 1 : 2);
         if (windowTitle !== undefined) {
           expect(application.browserWindow).toHaveBeenCalledWith(page);
           expect(setTitle).toHaveBeenCalledWith(windowTitle);
@@ -132,6 +137,7 @@ describe('explicit automated trace snapshot accommodation', () => {
       const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-trace-test-'));
       const stopped = new Error('Fixture stops at trace initialization.');
       const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+      application.browserWindow.mockResolvedValue(mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>());
       application.process.mockReturnValue(mockDeep<ReturnType<typeof application.process>>());
       application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
       const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
@@ -179,6 +185,9 @@ describe('initial main navigation readiness', () => {
     const loaded = Promise.withResolvers<void>();
     const stopped = new Error('Fixture stops after initial load readiness.');
     const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+    const navigationHandle = mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>();
+    navigationHandle.evaluate.mockReturnValue(Promise.withResolvers<string>().promise);
+    application.browserWindow.mockResolvedValue(navigationHandle);
     application.process.mockReturnValue(mockDeep<ReturnType<typeof application.process>>());
     application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
     const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
@@ -233,6 +242,90 @@ describe('initial main navigation readiness', () => {
       if (picked) {
         await rm(dirname(picked), { recursive: true, force: true });
       }
+    }
+  });
+});
+
+describe('owned main navigation diagnostics', () => {
+  it('should retain bounded scalar navigation evidence without credentials or event interference', () => {
+    // oxlint-disable-next-line unicorn/prefer-event-target -- Electron WebContents uses Node EventEmitter semantics.
+    const events = new EventEmitter();
+    // oxlint-disable-next-line unicorn/prefer-event-target -- Electron BrowserWindow uses Node EventEmitter semantics.
+    const windowEvents = new EventEmitter();
+    const contents = mockDeep<WebContents>({ id: 37 });
+    const window = mockDeep<BrowserWindow>({ webContents: contents });
+    contents.on.mockImplementation((event, handler) => {
+      events.on(event, handler);
+      return contents;
+    });
+    contents.removeListener.mockImplementation((event, handler) => {
+      events.removeListener(event, handler);
+      return contents;
+    });
+    window.once.mockImplementation((event, handler) => {
+      windowEvents.once(event, handler);
+      return window;
+    });
+    window.removeListener.mockImplementation((event, handler) => {
+      windowEvents.removeListener(event, handler);
+      return window;
+    });
+    contents.getOSProcessId.mockReturnValue(91);
+    contents.isDestroyed.mockReturnValue(false);
+    contents.isLoading.mockReturnValue(true);
+    contents.isLoadingMainFrame.mockReturnValue(true);
+    contents.getURL.mockReturnValue('app://tau/workspace?token=secret#private');
+    const log = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const preventDefault = vi.fn();
+    try {
+      observeDesktopNavigation(window, 'install');
+      const navigation: WebContentsDidStartNavigationEventParams = {
+        url: 'https://user:password@example.test/path?code=sensitive#fragment',
+        isSameDocument: false,
+        isMainFrame: true,
+        frame: null,
+      };
+      // Installed Electron supplies details first and retains these deprecated positional arguments.
+      events.emit('did-start-navigation', { ...navigation, preventDefault }, navigation.url, false, true, 92, 7);
+      expect(log.mock.lastCall?.[1]).toContain('"frameProcessId":92');
+      expect(log.mock.lastCall?.[1]).toContain('"isMainFrame":true');
+      events.emit(
+        'did-fail-provisional-load',
+        { preventDefault },
+        -3,
+        'private error text',
+        'app://tau/fixture?secret=value',
+        true,
+        92,
+        7,
+      );
+      events.emit('will-prevent-unload', { preventDefault });
+      const output = log.mock.calls.map(([, value]) => String(value)).join('\n');
+      expect(output).toContain('"rendererPid":91');
+      expect(output).toContain('"webContentsId":37');
+      expect(output).toContain('"pathname":"/path"');
+      expect(output).toContain('"frameRoutingId":7');
+      expect(output).toContain('"errorCode":-3');
+      expect(output).not.toMatch(/secret|password|sensitive|private|fragment|user:/u);
+      expect(preventDefault).not.toHaveBeenCalled();
+      for (let index = 0; index < 140; index++) {
+        events.emit('did-start-loading');
+      }
+      expect(log).toHaveBeenCalledTimes(128);
+      observeDesktopNavigation(window, 'snapshot');
+      expect(log).toHaveBeenCalledTimes(129);
+      expect(log.mock.lastCall?.[1]).toContain('"dropped":16');
+      observeDesktopNavigation(window, 'dispose');
+      observeDesktopNavigation(window, 'dispose');
+      expect(events.eventNames()).toEqual([]);
+      events.emit('did-finish-load');
+      expect(log).toHaveBeenCalledTimes(129);
+      observeDesktopNavigation(window, 'install');
+      windowEvents.emit('closed');
+      expect(events.eventNames()).toEqual([]);
+    } finally {
+      observeDesktopNavigation(window, 'dispose');
+      log.mockRestore();
     }
   });
 });

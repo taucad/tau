@@ -77,6 +77,141 @@ export const desktopDescendants = (
     })
     .map(({ pid, command }) => ({ pid, command }));
 };
+/** Observe only the launched window's main-process navigation; serialized into Electron by Playwright. */
+export const observeDesktopNavigation = (
+  window: BrowserWindow,
+  action: 'install' | 'snapshot' | 'dispose',
+): string | undefined => {
+  const owner = window as BrowserWindow & {
+    __tauNavigationObservation?: { snapshot: () => string | undefined; dispose: () => void };
+  };
+  if (action !== 'install') {
+    if (action === 'snapshot') {
+      return owner.__tauNavigationObservation?.snapshot();
+    }
+    owner.__tauNavigationObservation?.dispose();
+    return undefined;
+  }
+  owner.__tauNavigationObservation?.dispose();
+  const contents = window.webContents;
+  const emitter: NodeJS.EventEmitter = contents;
+  const started = performance.now();
+  let recorded = 0;
+  let dropped = 0;
+  let disposed = false;
+  const location = (value: unknown): Record<string, string> => {
+    if (typeof value !== 'string') {
+      return {};
+    }
+    try {
+      const url = new URL(value);
+      return { protocol: url.protocol, host: url.host, pathname: url.pathname };
+    } catch {
+      return {};
+    }
+  };
+  const scalar = (value: unknown): Record<string, number | boolean> => {
+    if (typeof value !== 'object' || value === null) {
+      return {};
+    }
+    const selected: Record<string, number | boolean> = {};
+    for (const key of ['isMainFrame', 'processId', 'routingId', 'frameProcessId', 'frameRoutingId', 'exitCode']) {
+      const entry: unknown = Reflect.get(value, key);
+      if (typeof entry === 'boolean' || (typeof entry === 'number' && Number.isFinite(entry))) {
+        selected[key] = entry;
+      }
+    }
+    return selected;
+  };
+  const write = (event: string, detail: Record<string, unknown> = {}): string | undefined => {
+    if (disposed) {
+      return;
+    }
+    if (event !== 'snapshot' && recorded >= 128) {
+      dropped += 1;
+      return;
+    }
+    recorded += 1;
+    const destroyed = contents.isDestroyed();
+    const receipt = JSON.stringify({
+      event,
+      elapsedMilliseconds: Math.round(performance.now() - started),
+      webContentsId: contents.id,
+      destroyed,
+      ...(destroyed
+        ? {}
+        : {
+            rendererPid: contents.getOSProcessId(),
+            loading: contents.isLoading(),
+            loadingMainFrame: contents.isLoadingMainFrame(),
+            ...location(contents.getURL()),
+          }),
+      ...detail,
+      recorded,
+      dropped,
+    });
+    console.info('DESKTOP MAIN NAVIGATION', receipt);
+    return receipt;
+  };
+  const listeners: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
+  const listen = (event: string, select: (args: unknown[]) => Record<string, unknown> = () => ({})): void => {
+    const handler = (...args: unknown[]): void => {
+      write(event, select(args));
+    };
+    emitter.on(event, handler);
+    listeners.push({ event, handler });
+  };
+  for (const event of [
+    'did-start-loading',
+    'did-stop-loading',
+    'dom-ready',
+    'did-finish-load',
+    'unresponsive',
+    'responsive',
+    'will-prevent-unload',
+  ]) {
+    listen(event);
+  }
+  for (const event of ['will-navigate', 'will-frame-navigate', 'did-start-navigation']) {
+    listen(event, ([details, url, , isMainFrame, frameProcessId, frameRoutingId]) => ({
+      ...scalar({ isMainFrame, frameProcessId, frameRoutingId }),
+      ...scalar(details),
+      ...scalar(typeof details === 'object' && details !== null ? Reflect.get(details, 'frame') : undefined),
+      ...location(typeof details === 'object' && details !== null ? (Reflect.get(details, 'url') ?? url) : url),
+    }));
+  }
+  listen('did-frame-navigate', ([, url, status, , isMainFrame, frameProcessId, frameRoutingId]) => ({
+    ...location(url),
+    ...scalar({ isMainFrame, frameProcessId, frameRoutingId }),
+    ...(typeof status === 'number' ? { status } : {}),
+  }));
+  listen('did-frame-finish-load', ([, isMainFrame, frameProcessId, frameRoutingId]) =>
+    scalar({ isMainFrame, frameProcessId, frameRoutingId }),
+  );
+  for (const event of ['did-fail-provisional-load', 'did-fail-load']) {
+    listen(event, ([, errorCode, , url, isMainFrame, frameProcessId, frameRoutingId]) => ({
+      ...location(url),
+      ...scalar({ isMainFrame, frameProcessId, frameRoutingId }),
+      ...(typeof errorCode === 'number' ? { errorCode } : {}),
+    }));
+  }
+  listen('render-process-gone', ([, details]) => scalar(details));
+  const dispose = (): void => {
+    if (disposed) {
+      return;
+    }
+    for (const { event, handler } of listeners) {
+      emitter.removeListener(event, handler);
+    }
+    window.removeListener('closed', dispose);
+    disposed = true;
+    delete owner.__tauNavigationObservation;
+  };
+  owner.__tauNavigationObservation = { snapshot: () => write('snapshot'), dispose };
+  window.once('closed', dispose);
+  return write('installed');
+};
+
 const completedArtifactForbiddenEnvironment = [
   'NODE_OPTIONS',
   'NODE_PATH',
@@ -370,12 +505,42 @@ export const launchDesktopApp = async (options: {
    * received a session to close. */
   const consoleErrors: string[] = [];
   let page: Page;
+  let navigationWindow: Awaited<ReturnType<ElectronApplication['browserWindow']>> | undefined;
+  let navigationInstallation: 'pending' | 'installed' | 'unavailable' = 'pending';
+  let navigationDisposed = false;
+  let navigationObservation = Promise.resolve();
+  const isNavigationDisposed = (): boolean => navigationDisposed;
+  const disposeNavigation = async (): Promise<void> => {
+    navigationDisposed = true;
+    try {
+      await navigationWindow?.evaluate<string | undefined, 'dispose'>(observeDesktopNavigation, 'dispose');
+    } catch {
+      // Process/window teardown may already have closed the diagnostic inspector.
+    }
+  };
   try {
     /* A packaged launch releases main bootstrap before its first window exists.
      * Configure the main-process test overrides only after that startup boundary. */
     recordStartupPhase('firstWindow.before');
     page = await application.firstWindow();
     recordStartupPhase('firstWindow.after', page.url());
+    navigationObservation = (async () => {
+      try {
+        const ownedWindow = await application.browserWindow(page);
+        navigationWindow = ownedWindow;
+        if (isNavigationDisposed()) {
+          navigationInstallation = 'unavailable';
+          return;
+        }
+        await ownedWindow.evaluate<string | undefined, 'install'>(observeDesktopNavigation, 'install');
+        navigationInstallation = 'installed';
+        if (isNavigationDisposed()) {
+          await ownedWindow.evaluate<string | undefined, 'dispose'>(observeDesktopNavigation, 'dispose');
+        }
+      } catch {
+        navigationInstallation = 'unavailable';
+      }
+    })();
     recordStartupPhase('domcontentloaded.before');
     await page.waitForLoadState('domcontentloaded');
     recordStartupPhase('domcontentloaded.after', page.url());
@@ -436,6 +601,7 @@ export const launchDesktopApp = async (options: {
     await page.context().tracing.start({ screenshots: true, snapshots });
     recordStartupPhase('tracing.after', page.url());
   } catch (error) {
+    void disposeNavigation();
     child.kill('SIGKILL');
     await preserveStartupFailure(error).catch(() => undefined);
     /* The shell's own output is the only account of why it went away, and the
@@ -483,6 +649,46 @@ export const launchDesktopApp = async (options: {
       ].join('\n'),
       'utf8',
     );
+    // Main observation is best-effort and never delays the original renderer failure or trace collection.
+    const navigationPath = join(directory, 'main-navigation.json');
+    await writeFile(
+      navigationPath,
+      JSON.stringify({ status: 'pending', installation: navigationInstallation }),
+      'utf8',
+    );
+    const captureNavigation = async (): Promise<void> => {
+      try {
+        await navigationObservation;
+        if (navigationInstallation !== 'installed' || navigationWindow === undefined) {
+          await writeFile(
+            navigationPath,
+            JSON.stringify({ status: 'unavailable', installation: navigationInstallation }),
+            'utf8',
+          );
+          return;
+        }
+        const receipt = await navigationWindow.evaluate<string | undefined, 'snapshot'>(
+          observeDesktopNavigation,
+          'snapshot',
+        );
+        await writeFile(
+          navigationPath,
+          JSON.stringify({ status: receipt === undefined ? 'unavailable' : 'complete', receipt }),
+          'utf8',
+        );
+      } catch {
+        try {
+          await writeFile(
+            navigationPath,
+            JSON.stringify({ status: 'unavailable', installation: navigationInstallation }),
+            'utf8',
+          );
+        } catch {
+          // The initial pending receipt survives an unavailable process or artifact destination.
+        }
+      }
+    };
+    void captureNavigation();
     if (tracing) {
       tracing = false;
       /* A quit-path failure can close the renderer before diagnostics run;
@@ -528,6 +734,7 @@ export const launchDesktopApp = async (options: {
   };
 
   const close = async (): Promise<void> => {
+    void disposeNavigation();
     if (tracing) {
       tracing = false;
       await page

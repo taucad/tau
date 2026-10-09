@@ -20,7 +20,11 @@ import type { ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/serv
  * `MACHINE_JOB_ARTIFACT_INVALID`. */
 const runtimeOptions = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createNodeMachineRuntime>[0]>);
 /* A directory a case lists in place of the store's, for runs no simulator can be left in. */
-const listed = vi.hoisted(() => ({ entries: undefined as undefined | readonly unknown[] }));
+const listed = vi.hoisted(() => ({
+  entries: undefined as undefined | readonly unknown[],
+  /* A directory read that fails, as a busy store does. */
+  error: undefined as undefined | Error,
+}));
 
 vi.mock('@taucad/host', async (importOriginal) => {
   const actual = await importOriginal<typeof TauHost>();
@@ -32,7 +36,15 @@ vi.mock('@taucad/host', async (importOriginal) => {
     },
     localMachineFacet: (serve: Parameters<typeof TauHost.localMachineFacet>[0]) => {
       const facet = actual.localMachineFacet(serve);
-      const { entries } = listed;
+      const { entries, error } = listed;
+      if (error !== undefined) {
+        return {
+          ...facet,
+          list: async () => {
+            throw error;
+          },
+        };
+      }
       return entries === undefined ? facet : { ...facet, list: async () => ({ cursor: undefined, entries }) };
     },
   };
@@ -374,6 +386,35 @@ describe('createServicesHost — machines', () => {
       await expect(machines.streaming('streaming')).resolves.toEqual(['Router', 'Mill']);
     } finally {
       listed.entries = undefined;
+      await machines.cleanup();
+    }
+  }, 30_000);
+
+  it('should refuse to quiesce, closing nothing, while a streamed run feeds or that cannot be read', async () => {
+    const machines = await machinesHarness();
+    try {
+      const client = machines.connect();
+      await machines.bindSimulator(client);
+
+      listed.entries = [{ name: 'Router', snapshot: { run: { delivery: 'streamed', state: 'running' } } }];
+      await expect(machines.host.quiesce()).rejects.toMatchObject({
+        refusal: { type: 'quiesce-refused', reason: 'streaming', machines: ['Router'] },
+      });
+      await expect(client.list({})).resolves.toMatchObject({ entries: [expect.anything()] });
+
+      listed.entries = undefined;
+      listed.error = new Error('The store is busy.');
+      await expect(machines.host.quiesce()).rejects.toMatchObject({
+        refusal: { reason: 'streaming-unknown', message: 'The store is busy.' },
+      });
+      await expect(client.list({})).resolves.toMatchObject({ entries: [expect.anything()] });
+
+      /* The person chose to quit anyway: the machine host closes with the rest. */
+      await machines.host.quiesce({ quitIfStreamingUnknown: true });
+      await expect(client.list({})).rejects.toThrow();
+    } finally {
+      listed.entries = undefined;
+      listed.error = undefined;
       await machines.cleanup();
     }
   }, 30_000);

@@ -66,7 +66,10 @@ export type ServicesQuiesceOutcome =
   | Readonly<{ status: 'timeout' }>
   | Readonly<{ status: 'no-utility' }>
   | Readonly<{ status: 'host-exited' }>
-  | Readonly<{ status: 'failed'; message: string }>;
+  | Readonly<{ status: 'failed'; message: string }>
+  /* Refused before anything closed (Q-streamed-host); the broker serves again and a later quit asks again. */
+  | Readonly<{ status: 'streaming'; machines: readonly string[] }>
+  | Readonly<{ status: 'streaming-unknown'; message: string }>;
 
 /** Options for {@link createServicesBroker}. */
 export type ServicesBrokerOptions = {
@@ -149,9 +152,14 @@ export type ServicesBroker = {
    * non-success outcomes before forced disposal.
    *
    * @param boundMilliseconds - How long to wait before cutting.
+   * @param options - `quitIfStreamingUnknown`: the person chose to quit although Tau could not tell whether a program
+   *   is streaming to a machine.
    * @returns What ended the wait.
    */
-  quiesce(boundMilliseconds: number): Promise<ServicesQuiesceOutcome>;
+  quiesce(
+    boundMilliseconds: number,
+    options?: Readonly<{ quitIfStreamingUnknown?: boolean }>,
+  ): Promise<ServicesQuiesceOutcome>;
   /** Terminate the utility. */
   dispose(): Promise<void>;
 };
@@ -332,6 +340,25 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       streamingWaiters
         .get(requestId)
         ?.resolve(Array.isArray(machines) ? machines.filter((name): name is string => typeof name === 'string') : []);
+      return;
+    }
+    if (type === 'quiesce-refused') {
+      if (utility !== spawned) {
+        return;
+      }
+      const record = frame as Record<string, unknown>;
+      const { machines, message } = record;
+      /* Nothing closed in the utility: serve again, and let the next quit ask again. */
+      quiescence = undefined;
+      acceptingConnections = true;
+      settleQuiescence?.(
+        record['reason'] === 'streaming' && Array.isArray(machines)
+          ? { status: 'streaming', machines: machines.filter((name): name is string => typeof name === 'string') }
+          : {
+              status: 'streaming-unknown',
+              message: typeof message === 'string' ? message : 'Tau could not tell whether a program is streaming.',
+            },
+      );
       return;
     }
     if (type === 'quiesced' || type === 'quiesce-failed') {
@@ -708,7 +735,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       return runtimeContexts.get(canonicalRoot(executionRoot))?.['computeProjectRoot'];
     },
     // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
-    quiesce(boundMilliseconds) {
+    quiesce(boundMilliseconds, quit) {
       acceptingConnections = false;
       options.revokeGeometry?.();
       if (quiescence !== undefined) {
@@ -737,7 +764,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         settleQuiescence?.({ status: 'host-exited' });
       });
       try {
-        spawned.postMessage({ type: 'quiesce' });
+        spawned.postMessage({ type: 'quiesce', quitIfStreamingUnknown: quit?.quitIfStreamingUnknown === true });
       } catch {
         settleQuiescence({ status: 'host-exited' });
       }

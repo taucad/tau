@@ -303,7 +303,27 @@ export type ServicesHostOptions = {
 /** Result returned to main after a graceful quiesce request. */
 export type ServicesHostQuiesceOutcome =
   | Readonly<{ type: 'quiesced' }>
-  | Readonly<{ type: 'quiesce-failed'; message: string }>;
+  | Readonly<{ type: 'quiesce-failed'; message: string }>
+  | QuiesceRefusal;
+
+/**
+ * Quiescence refused before anything closed (Q-streamed-host): a streamed run is feeding a machine, or this utility
+ * could not tell whether one is and main did not say the person chose to quit anyway.
+ */
+export type QuiesceRefusal =
+  | Readonly<{ type: 'quiesce-refused'; reason: 'streaming'; machines: readonly string[] }>
+  | Readonly<{ type: 'quiesce-refused'; reason: 'streaming-unknown'; message: string }>;
+
+/** What {@link ServicesHost.quiesce} throws when it refuses; nothing was closed, and a later quiesce asks again. */
+export class ServicesQuiesceRefusedError extends Error {
+  public readonly refusal: QuiesceRefusal;
+
+  public constructor(refusal: QuiesceRefusal) {
+    super(refusal.reason === 'streaming' ? 'A program is streaming to a machine.' : refusal.message);
+    this.name = 'ServicesQuiesceRefusedError';
+    this.refusal = refusal;
+  }
+}
 
 /** The services host, seen by its entry and by tests. */
 export type ServicesHost = {
@@ -320,8 +340,11 @@ export type ServicesHost = {
    * so closing it takes the `close` cut and then awaits W13's `awaitSyncSettled`
    * through `ProjectRevisions.release()`. This never reimplements that wait; it
    * is the one place that lets it finish before the process goes.
+   *
+   * Refused first, with nothing closed, while a streamed run feeds a machine, or while that cannot be read unless
+   * `quitIfStreamingUnknown` says the person chose to quit anyway ({@link ServicesQuiesceRefusedError}).
    */
-  quiesce(): Promise<void>;
+  quiesce(options?: Readonly<{ quitIfStreamingUnknown?: boolean }>): Promise<void>;
   /** Release project runtimes when the owning utility exits. */
   dispose(): void;
 };
@@ -1091,9 +1114,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         // async-iife: bootstrap -- a control frame has no caller to return to.
         void (async (): Promise<void> => {
           try {
-            await quiesce();
+            await quiesce({ quitIfStreamingUnknown: frame['quitIfStreamingUnknown'] === true });
             quiesced?.({ type: 'quiesced' });
           } catch (error) {
+            if (error instanceof ServicesQuiesceRefusedError) {
+              log('quiesce-refused', error.refusal);
+              quiesced?.(error.refusal);
+              return;
+            }
             const message = error instanceof Error ? error.message : String(error);
             log('quiesce-failed', message);
             quiesced?.({ type: 'quiesce-failed', message });
@@ -1290,8 +1318,30 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     }
   };
 
-  const beginQuiesce = async (): Promise<void> => {
+  const beginQuiesce = async (quitIfStreamingUnknown: boolean): Promise<void> => {
     quiescing = true;
+    /* Q-streamed-host, authoritative: read again here, with no new session admitted, because a stream may have begun
+     * since main asked. Closing the machine host would cut it mid-run, so nothing closes; a later quit asks again. */
+    const refuse = (refusal: QuiesceRefusal): never => {
+      quiescing = false;
+      quiescence = undefined;
+      throw new ServicesQuiesceRefusedError(refusal);
+    };
+    let streaming: readonly string[] = [];
+    try {
+      streaming = await streamingMachines();
+    } catch (error) {
+      if (!quitIfStreamingUnknown) {
+        refuse({
+          type: 'quiesce-refused',
+          reason: 'streaming-unknown',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (streaming.length > 0) {
+      refuse({ type: 'quiesce-refused', reason: 'streaming', machines: streaming });
+    }
     const failures: unknown[] = [];
     const fileSystemDisposers = [...nodeFileSystemDisposers];
     const runtimeDisposers = [...runtimeFileSystemDisposers];
@@ -1327,10 +1377,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   // Deliberately non-async: every caller observes the same close settlement.
   // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
-  const quiesce = (): Promise<void> => {
+  const quiesce = (options?: Readonly<{ quitIfStreamingUnknown?: boolean }>): Promise<void> => {
     quiescence ??= disposed
       ? Promise.reject(new Error('The services host was forcibly disposed before graceful quiescence.'))
-      : beginQuiesce();
+      : beginQuiesce(options?.quitIfStreamingUnknown === true);
     return quiescence;
   };
 

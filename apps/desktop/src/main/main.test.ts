@@ -62,8 +62,16 @@ const state = vi.hoisted(() => ({
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
-    async (): Promise<
-      { status: 'quiesced' } | { status: 'failed'; message: string } | { status: 'timeout' } | { status: 'no-utility' }
+    async (
+      _boundMilliseconds: number,
+      _options?: Readonly<{ quitIfStreamingUnknown?: boolean }>,
+    ): Promise<
+      | { status: 'quiesced' }
+      | { status: 'failed'; message: string }
+      | { status: 'timeout' }
+      | { status: 'no-utility' }
+      | { status: 'streaming'; machines: readonly string[] }
+      | { status: 'streaming-unknown'; message: string }
     > => ({ status: 'quiesced' }),
   ),
   utilityEnvironmentAdditions: [] as NodeJS.ProcessEnv[],
@@ -648,6 +656,63 @@ describe('desktop main compute owner', () => {
       });
       expect(state.sentToRenderer).not.toContain(quitChannels.ask);
       expect(state.servicesQuiesce).not.toHaveBeenCalled();
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should ask before quitting when Tau cannot tell whether a program streams, and quit only on Quit anyway',
+    async () => {
+      await bootstrap();
+      state.servicesStreaming.mockRejectedValue(new Error('The desktop machine host did not answer.'));
+
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['Keep Tau open', 'Quit anyway'],
+        defaultId: 0,
+        message: "Tau can't tell whether a program is streaming to a machine.",
+      });
+      expect(state.servicesQuiesce).not.toHaveBeenCalled();
+      expect(app.quit).not.toHaveBeenCalled();
+
+      dialog.showMessageBox.mockResolvedValue({ response: 1 });
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+      expect(state.servicesQuiesce).toHaveBeenCalledWith(expect.any(Number), { quitIfStreamingUnknown: true });
+      dialog.showMessageBox.mockResolvedValue({ response: 0 });
+      state.servicesStreaming.mockResolvedValue([]);
+    },
+    bootMilliseconds,
+  );
+
+  /* The utility reads again before it closes anything: a stream begun after main asked still holds the quit. */
+  it(
+    'should refuse to quit when the utility finds a stream that began after the first question',
+    async () => {
+      await bootstrap();
+      state.servicesQuiesce.mockResolvedValueOnce({ status: 'streaming', machines: ['LongMill'] });
+
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['Keep Tau open'],
+        message: 'A program is streaming to LongMill; stop it first.',
+      });
+      expect(state.servicesQuiesce).toHaveBeenCalledWith(expect.any(Number), { quitIfStreamingUnknown: false });
       expect(state.servicesDispose).not.toHaveBeenCalled();
       expect(app.quit).not.toHaveBeenCalled();
     },

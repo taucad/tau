@@ -1312,6 +1312,38 @@ const bootstrapElectronApp = async (): Promise<void> => {
     });
     return response === 1;
   };
+  /**
+   * Q-streamed-host: a program this app feeds line by line would stop mid-run, so there is no *Quit anyway*.
+   *
+   * @param machines - The machines a streamed run is feeding.
+   */
+  const refuseWhileStreaming = async (machines: readonly string[]): Promise<void> => {
+    log.log('info', 'main.quit-refused-streaming', { machines: machines.length });
+    await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Keep Tau open'],
+      defaultId: 0,
+      cancelId: 0,
+      message: `A program is streaming to ${new Intl.ListFormat('en', { type: 'conjunction' }).format(machines)}; stop it first.`,
+      detail: 'Tau sends the program as the machine runs it. Quitting now would stop the machine mid-run.',
+    });
+  };
+  /**
+   * The person decides when Tau could not read whether a program is streaming: never a silent quit.
+   *
+   * @returns Whether to quit regardless.
+   */
+  const askToQuitWhileStreamingUnknown = async (): Promise<boolean> => {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Keep Tau open', 'Quit anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      message: "Tau can't tell whether a program is streaming to a machine.",
+      detail: 'If one is, quitting now would stop the machine mid-run. Check your machines before you quit.',
+    });
+    return response === 1;
+  };
   app.on('before-quit', (event) => {
     quitting = true;
     if (shutdownComplete) {
@@ -1334,25 +1366,20 @@ const bootstrapElectronApp = async (): Promise<void> => {
          * Q-streamed-host, before anything is quiesced: this app feeds a
          * streamed program line by line for its whole run, so quitting would
          * stop the machine mid-run. There is no *Quit anyway*; the person
-         * stops the program first. An unanswered question goes on to the hold
-         * below, which offers its own way out.
+         * stops the program first. An unanswered question asks the person.
+         * The utility checks again before it closes anything (below).
          */
-        let streaming: readonly string[] = [];
+        let streaming: readonly string[] | undefined;
         try {
           streaming = await services.streamingMachines(machineStreamingMilliseconds);
         } catch (error) {
           log.log('error', 'main.streaming-unknown', error);
         }
-        if (streaming.length > 0) {
-          log.log('info', 'main.quit-refused-streaming', { machines: streaming.length });
-          await dialog.showMessageBox({
-            type: 'warning',
-            buttons: ['Keep Tau open'],
-            defaultId: 0,
-            cancelId: 0,
-            message: `A program is streaming to ${new Intl.ListFormat('en', { type: 'conjunction' }).format(streaming)}; stop it first.`,
-            detail: 'Tau sends the program as the machine runs it. Quitting now would stop the machine mid-run.',
-          });
+        const quitIfStreamingUnknown = streaming === undefined;
+        if (streaming === undefined ? !(await askToQuitWhileStreamingUnknown()) : streaming.length > 0) {
+          if (streaming !== undefined) {
+            await refuseWhileStreaming(streaming);
+          }
           quitting = false;
           shutdown = undefined;
           return;
@@ -1375,7 +1402,21 @@ const bootstrapElectronApp = async (): Promise<void> => {
           return;
         }
         forced ||= rendererOutcome === 'timeout';
-        const utilityOutcome = await services.quiesce(quitQuiesceMilliseconds);
+        let utilityOutcome = await services.quiesce(quitQuiesceMilliseconds, { quitIfStreamingUnknown });
+        if (utilityOutcome.status === 'streaming-unknown') {
+          log.log('error', 'main.streaming-unknown', utilityOutcome.message);
+          if (await askToQuitWhileStreamingUnknown()) {
+            utilityOutcome = await services.quiesce(quitQuiesceMilliseconds, { quitIfStreamingUnknown: true });
+          }
+        }
+        if (utilityOutcome.status === 'streaming' || utilityOutcome.status === 'streaming-unknown') {
+          if (utilityOutcome.status === 'streaming') {
+            await refuseWhileStreaming(utilityOutcome.machines);
+          }
+          quitting = false;
+          shutdown = undefined;
+          return;
+        }
         log.log(
           utilityOutcome.status === 'quiesced' || utilityOutcome.status === 'no-utility' ? 'info' : 'error',
           'main.quiesce',

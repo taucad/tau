@@ -875,13 +875,34 @@ describe('createServicesBroker — the quit hold (W19, D31)', () => {
 
     const quiescing = broker.quiesce(5000);
     expect(broker.quiesce(5000)).toBe(quiescing);
-    expect(utility.postMessage).toHaveBeenCalledWith({ type: 'quiesce' });
+    expect(utility.postMessage).toHaveBeenCalledWith({ type: 'quiesce', quitIfStreamingUnknown: false });
     expect(utility.kill).not.toHaveBeenCalled();
 
     utility.message({ type: 'quiesced' });
 
     await expect(quiescing).resolves.toEqual({ status: 'quiesced' });
     expect(utility.kill).not.toHaveBeenCalled();
+  });
+
+  it('reports a refusal over a streamed run, serves again, and asks again on the next quit', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.connect('nodeFs');
+    const utility = spawns[0]!;
+
+    const refused = broker.quiesce(5000);
+    utility.message({ type: 'quiesce-refused', reason: 'streaming', machines: ['LongMill'] });
+    await expect(refused).resolves.toEqual({ status: 'streaming', machines: ['LongMill'] });
+    expect(() => broker.connect('nodeFs')).not.toThrow();
+
+    const unknown = broker.quiesce(5000);
+    expect(unknown).not.toBe(refused);
+    utility.message({ type: 'quiesce-refused', reason: 'streaming-unknown', message: 'The store is busy.' });
+    await expect(unknown).resolves.toEqual({ status: 'streaming-unknown', message: 'The store is busy.' });
+
+    const anyway = broker.quiesce(5000, { quitIfStreamingUnknown: true });
+    expect(utility.postMessage).toHaveBeenLastCalledWith({ type: 'quiesce', quitIfStreamingUnknown: true });
+    utility.message({ type: 'quiesced' });
+    await expect(anyway).resolves.toEqual({ status: 'quiesced' });
   });
 
   it('cuts at the bound when the utility never answers, so quit is never held open', async () => {

@@ -4,10 +4,11 @@
  * Machines belong to this computer, not a project: the host behind the app's
  * machines facet owns every binding, so a machine set up here is available in
  * every project, and the card works with no project open. Everything it offers
- * comes from the providers the host serves: a real machine's model, where it is
- * (an address on the network or a serial port, by the manifest's transport),
- * its binding fields and whether it takes an access code all come from its
- * provider. It discovers through that facet, begins a binding through it, and
+ * comes from the providers the host serves: a real machine's model, its binding
+ * fields and whether it takes an access code all come from its provider; where
+ * it is (an address on the network or a serial port, by the manifest's
+ * transport) is the contract's `MachineEndpoint`, never a binding field. A
+ * provider this host cannot serve is named with the host's reason. It discovers through that facet, begins a binding through it, and
  * completes the ceremony through the desktop shell, so a typed access code goes
  * to the host, which keeps it in the OS keychain, and never into page state. A
  * machine whose code is already saved binds without one. A simulator binds
@@ -28,12 +29,14 @@ import type {
   MachineClient,
   MachineDirectoryEntry,
   MachineDiscoverInput,
+  MachineEndpoint,
   MachineManifest,
   MachineProvider,
 } from '@taucad/runtime/machine';
 import { Button } from '@taucad/ui/components/button';
 import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { PasswordInput } from '@taucad/ui/components/password-input';
 import { Switch } from '@taucad/ui/components/switch';
@@ -49,6 +52,8 @@ type BindInput = {
   readonly name: string;
   /** Binding fields chosen through the provider's own declaration, without the name. */
   readonly fields: Readonly<Record<string, unknown>>;
+  /** Where the person said the machine is; absent for a simulator, which needs no place. */
+  readonly endpoint?: MachineEndpoint;
   /** The code the person typed, `''` when they left it empty; absent for a provider whose binding takes none. */
   readonly accessCode?: string;
 };
@@ -58,18 +63,31 @@ type HeardCandidate = Readonly<{ providerId: string; candidate: MachineCandidate
 
 type Transport = MachineManifest['connection']['transport'];
 
-/** The binding field that says where a machine is, by how its provider reaches it. */
-const endpointFields: Readonly<Record<Transport, string>> = { network: 'address', serial: 'port' };
-const endpointLabels: Readonly<Record<Transport, string>> = { network: 'address', serial: 'serial port' };
+const noPlace = '';
 
-const endpointFieldOf = (provider: MachineProvider): string => endpointFields[provider.manifest.connection.transport];
+/** What the card calls where a machine is, by how its provider reaches it. */
+const placeLabels: Readonly<Record<Transport, string>> = { network: 'Address', serial: 'Serial port' };
 
 /**
- * How the hosts behind this card can reach a real machine. ponytail: no host ships a serial driver yet (C2-6), so a
- * serial machine is named with the reason instead of offered; read this from the host once its provider listing says
- * which transports it serves.
+ * The endpoint the person typed, in the transport the provider reaches its machines by. ponytail: no port is asked;
+ * each network provider dials its own fixed ports (Bambu refuses an entered one). Add a port field when a provider
+ * declares that it takes one.
+ *
+ * @param transport - The provider's `manifest.connection.transport`.
+ * @param place - What the person typed: an address, or a serial port's path.
+ * @returns The endpoint, or a sentence saying what to fix.
  */
-const servedTransports: ReadonlySet<Transport> = new Set<Transport>(['network']);
+const endpointOf = (transport: Transport, place: string): MachineEndpoint | string => {
+  const where = place.trim();
+  if (where === '') {
+    return `Enter ${transport === 'network' ? 'an address' : 'a serial port'}.`;
+  }
+  return transport === 'serial' ? { transport, path: where } : { transport, address: where };
+};
+
+/** Where a discovered candidate is, as the form takes it. */
+const placeOf = (endpoint: MachineCandidate['endpoint']): string =>
+  endpoint.transport === 'serial' ? endpoint.path : endpoint.address;
 
 /** Whether binding takes an access code: the host's ceremony asks one only of a real machine that authenticates. */
 const takesCode = (manifest: MachineManifest): boolean =>
@@ -153,7 +171,12 @@ const bind = async (client: MachineClient, input: BindInput): Promise<MachineBin
   const abort = new AbortController();
   let candidate;
   try {
-    for await (const frame of client.discover({ providerId: input.providerId, configuration, signal: abort.signal })) {
+    for await (const frame of client.discover({
+      providerId: input.providerId,
+      configuration,
+      ...(input.endpoint === undefined ? {} : { endpoint: input.endpoint }),
+      signal: abort.signal,
+    })) {
       if (frame.type === 'found' || frame.type === 'updated') {
         candidate = frame.candidate;
         break;
@@ -456,7 +479,7 @@ const chosenFields = (values: Readonly<Record<string, unknown>>): Record<string,
     }),
   );
 
-/** How the bind form lays out one provider's fields: the name and where it is up front, the rest under details. */
+/** How the bind form lays out one provider's fields: the name up front, the rest under details. */
 const formLayout = (
   provider: MachineProvider | undefined,
 ): Readonly<{
@@ -468,7 +491,7 @@ const formLayout = (
   if (provider === undefined) {
     return { noun: 'machine', details: 'Machine details', primary: [], others: [] };
   }
-  const primary = ['logicalId', endpointFieldOf(provider)];
+  const primary = ['logicalId'];
   const noun = nounOf(provider.manifest);
   return {
     noun,
@@ -495,8 +518,8 @@ const statusAfterFind = (current: string | undefined, heardNothing: boolean): st
   return current === listeningForMore || current === lookingForMachines ? undefined : current;
 };
 
-/** Why the real machines this host cannot reach are not offered, by name; nothing when it reaches them all. */
-function UnreachableMachines({
+/** Why the machines this host cannot serve are not offered, each by name with the host's reason. */
+function UnavailableMachines({
   providers,
 }: {
   readonly providers: readonly MachineProvider[];
@@ -504,14 +527,42 @@ function UnreachableMachines({
   if (providers.length === 0) {
     return undefined;
   }
-  const names = new Intl.ListFormat('en', { type: 'conjunction' }).format(
-    providers.map(({ manifest }) => manifest.identity.displayName),
-  );
-  const one = providers.length === 1;
   return (
-    <p className='text-xs text-muted-foreground'>
-      {`${names} connect${one ? 's' : ''} by a serial cable, which Tau can't use on this computer yet, so ${one ? 'it' : 'they'} can't be added here.`}
-    </p>
+    <ul aria-label='Machines that cannot be added here' className='flex flex-col gap-1 text-xs text-muted-foreground'>
+      {providers.map(({ id, manifest, unavailable }) => (
+        <li key={id}>
+          {manifest.identity.displayName} can&apos;t be added here. {unavailable?.reason}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Where the machine is, as its provider reaches it: an address on the network, or a serial port's path. */
+function PlaceField({
+  transport,
+  place,
+  onChange,
+}: {
+  readonly transport: Transport;
+  readonly place: string;
+  readonly onChange: (place: string) => void;
+}): React.JSX.Element {
+  return (
+    <div className='grid gap-1.5'>
+      <Label htmlFor='machines-bind-place'>{placeLabels[transport]}</Label>
+      <Input
+        id='machines-bind-place'
+        value={place}
+        maxLength={256}
+        autoComplete='off'
+        spellCheck={false}
+        placeholder={transport === 'network' ? '192.168.1.20' : '/dev/ttyUSB0'}
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+      />
+    </div>
   );
 }
 
@@ -530,6 +581,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
   const [selectedProviderId, setSelectedProviderId] = useState<string>();
   const [isBinding, setIsBinding] = useState(false);
   const [bindFields, setBindFields] = useState<Record<string, unknown>>({});
+  const [place, setPlace] = useState(noPlace);
   const [candidates, setCandidates] = useState<readonly HeardCandidate[]>();
   const bindForm = useRef<HTMLFormElement>(null);
   const bindButton = useRef<HTMLButtonElement>(null);
@@ -538,10 +590,11 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     () => new Map(directory.providers.map((provider) => [provider.id, provider])),
     [directory.providers],
   );
-  const simulators = directory.providers.filter(({ manifest }) => isSimulatedMachine(manifest));
-  const realProviders = directory.providers.filter(({ manifest }) => !isSimulatedMachine(manifest));
-  const physicalProviders = realProviders.filter(({ manifest }) => servedTransports.has(manifest.connection.transport));
-  const unreachable = realProviders.filter(({ manifest }) => !servedTransports.has(manifest.connection.transport));
+  /* The host says which providers it cannot serve here, and why; those are named, never offered. */
+  const offered = directory.providers.filter(({ unavailable }) => unavailable === undefined);
+  const unavailable = directory.providers.filter((provider) => provider.unavailable !== undefined);
+  const simulators = offered.filter(({ manifest }) => isSimulatedMachine(manifest));
+  const physicalProviders = offered.filter(({ manifest }) => !isSimulatedMachine(manifest));
   /* Until the person picks a model, the first one the host serves. */
   const selected = selectedProviderId === undefined ? physicalProviders[0] : providers.get(selectedProviderId);
 
@@ -612,10 +665,10 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     const declared = new Set(fieldNames(provider.bindingConfiguration));
     const heard: Record<string, string | undefined> = {
       logicalId: candidate.name.slice(0, 64),
-      [endpointFieldOf(provider)]: candidate.endpoint.address,
       serial: candidate.claimedIdentity.serial,
     };
     setBindFields(chosenFields(Object.fromEntries(Object.entries(heard).filter(([key]) => declared.has(key)))));
+    setPlace(placeOf(candidate.endpoint));
     (isSaved || !takesCode(provider.manifest) ? bindButton.current : formInput('accessCode'))?.focus();
   };
 
@@ -654,20 +707,31 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
       return;
     }
     const form = event.currentTarget;
-    const { transport } = selected.manifest.connection;
     const { logicalId: name, ...fields } = chosenFields(bindFields);
-    if (typeof name !== 'string' || fields[endpointFields[transport]] === undefined) {
-      say(undefined, `Enter a name and ${endpointLabels[transport]} for the ${nounOf(selected.manifest)}.`);
+    if (typeof name !== 'string') {
+      say(undefined, `Enter a name for the ${nounOf(selected.manifest)}.`);
+      return;
+    }
+    const endpoint = endpointOf(selected.manifest.connection.transport, place);
+    if (typeof endpoint === 'string') {
+      say(undefined, endpoint);
       return;
     }
     const accessCode = typedCode(form, selected.manifest);
     /* The code leaves the document before the ceremony runs; it is never state. The rest stays for a retry. */
     clearCode();
     if (
-      await run(name, { providerId: selected.id, name, fields, ...(accessCode === undefined ? {} : { accessCode }) })
+      await run(name, {
+        providerId: selected.id,
+        name,
+        fields,
+        endpoint,
+        ...(accessCode === undefined ? {} : { accessCode }),
+      })
     ) {
       form.reset();
       setBindFields({});
+      setPlace(noPlace);
       setIsCodeSaved(false);
       setIsBinding(false);
     }
@@ -707,7 +771,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
         <h3 id='machines-add-title' className='text-sm font-medium'>
           Add a machine
         </h3>
-        <UnreachableMachines providers={unreachable} />
+        <UnavailableMachines providers={unavailable} />
         <div className='flex flex-wrap gap-2'>
           <Button
             type='button'
@@ -729,6 +793,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             onClick={() => {
               setIsBinding(true);
               setBindFields({});
+              setPlace(noPlace);
               setIsCodeSaved(false);
             }}
           >
@@ -753,7 +818,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
               <span className='flex flex-wrap items-baseline gap-x-2'>
                 <span>{candidate.name}</span>
                 <span className='text-xs text-muted-foreground'>
-                  {model} · {candidate.endpoint.address}
+                  {model} · {placeOf(candidate.endpoint)}
                   {existing ? ' · Already added' : ''}
                 </span>
               </span>
@@ -780,11 +845,12 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
               onChange={(event) => {
                 const next = providers.get(event.target.value);
                 setSelectedProviderId(event.target.value);
-                /* The name and where it is carry over; every other field belongs to the model left behind. */
-                const endpoint = next === undefined ? undefined : endpointFieldOf(next);
-                setBindFields(({ logicalId, ...rest }) =>
-                  chosenFields({ logicalId, ...(endpoint === undefined ? {} : { [endpoint]: rest[endpoint] }) }),
-                );
+                /* The name carries over, and where it is while the transport stays; every other field belongs to the
+                 * model left behind. */
+                if (next?.manifest.connection.transport !== selected.manifest.connection.transport) {
+                  setPlace(noPlace);
+                }
+                setBindFields(({ logicalId }) => chosenFields({ logicalId }));
                 setIsCodeSaved(false);
                 clearCode();
               }}
@@ -808,6 +874,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
               onChange={setBindFields}
             />
           </div>
+          <PlaceField transport={selected.manifest.connection.transport} place={place} onChange={setPlace} />
           {otherFields.length === 0 ? null : (
             <Collapsible className='lg:col-span-2'>
               <CollapsibleTrigger className='flex min-h-8 items-center gap-2 text-xs text-muted-foreground'>
@@ -860,6 +927,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
               onClick={() => {
                 setIsBinding(false);
                 setBindFields({});
+                setPlace(noPlace);
                 setIsCodeSaved(false);
               }}
             >

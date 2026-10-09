@@ -21,10 +21,9 @@ import {
 
 const bindingConfiguration = defineConfiguration({
   id: 'bambu.machine.binding',
-  version: '1.0.0',
+  version: '2.0.0',
   schema: z.object({
     logicalId: z.string().min(1).max(64),
-    address: z.string().min(1).max(253).optional(),
     serial: z.string().min(1).max(64).optional(),
   }),
   ui: { version: 1, rjsf: {} },
@@ -88,10 +87,9 @@ export const simulatorProvider: MachineProvider = parseMachineProvider({
 
 const grblBindingConfiguration = defineConfiguration({
   id: 'grbl.machine.binding',
-  version: '1.0.0',
+  version: '2.0.0',
   schema: z.object({
     logicalId: z.string().min(1).max(64),
-    port: z.string().min(1).max(512).optional().meta({ title: 'Serial port' }),
     baudRate: z.number().int().positive().default(115_200).meta({ title: 'Baud rate' }),
   }),
   ui: { version: 1, rjsf: {} },

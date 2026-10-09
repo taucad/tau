@@ -14,6 +14,7 @@ import {
   House,
   LoaderCircle,
   Move,
+  OctagonX,
   RefreshCw,
   Wrench,
 } from 'lucide-react';
@@ -247,7 +248,17 @@ export function ActionButton({
 }
 
 /**
- * What clears a refusal: an action remedy is its own button, a person's remedy is an instruction.
+ * The id of a machine's Stop control in the pane's header, so a `stop` remedy can lead to it.
+ *
+ * @param machineId - The machine.
+ * @returns The element id.
+ * @public
+ */
+export const stopControlId = (machineId: string): string => `machine-stop-${machineId}`;
+
+/**
+ * What clears a refusal: an action remedy is its own button, a person's remedy is an instruction, and a `stop`
+ * remedy says what Stop costs with a link to the pane's one Stop control, never a second Stop.
  *
  * @param properties - The control and the remedy.
  * @returns The remedy.
@@ -265,6 +276,29 @@ export function RemedyButton({
       <p className='flex items-start gap-1.5 text-xs'>
         <Hand aria-hidden className='mt-0.5 size-3 shrink-0 text-information' />
         <span>At the machine: {remedy.instruction}</span>
+      </p>
+    );
+  }
+  if (remedy.type === 'stop') {
+    return (
+      <p className='flex flex-wrap items-baseline gap-x-1.5 text-xs'>
+        <OctagonX aria-hidden className='size-3 shrink-0 self-center text-destructive' />
+        {/* ponytail: Stop is in the header whenever something can be stopped, which a stop remedy implies. */}
+        <Button
+          type='button'
+          variant='link'
+          size='xs'
+          className='h-auto p-0'
+          onClick={() => {
+            /* An attribute selector, as a machine id may hold characters an `#id` selector reads as syntax. */
+            document
+              .querySelector<HTMLElement>(`[id=${JSON.stringify(stopControlId(control.entry.machineId))}]`)
+              ?.focus();
+          }}
+        >
+          Go to Stop
+        </Button>
+        <span>{remedy.consequence}</span>
       </p>
     );
   }

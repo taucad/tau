@@ -222,8 +222,19 @@ const describeComponent = (component: MachineComponent): string => {
   }
 };
 
-const describeRemedy = (remedy: MachineRemedy): string =>
-  remedy.type === 'person' ? remedy.instruction : `${remedy.action} on ${remedy.componentId}`;
+const describeRemedy = (remedy: MachineRemedy): string => {
+  switch (remedy.type) {
+    case 'person': {
+      return remedy.instruction;
+    }
+    case 'stop': {
+      return `Stop (${remedy.consequence})`;
+    }
+    case 'action': {
+      return `${remedy.action} on ${remedy.componentId}`;
+    }
+  }
+};
 
 const whoMayUse = ({ safety }: Pick<MachineActionDescriptor, 'safety'>): string =>
   `${authorityLabels[safety.authority]}${safety.attended ? ', at the machine' : ''}`;

@@ -48,8 +48,8 @@ describe('MachineDetails', () => {
       'Stop Motion halts at once, heaters turn off, the position is kept.',
       'Controls 3 qualified · 14 designed',
       'Observation freshness 4 groups · 15 s to 30 s',
-      'Binding settings 3 fields · Read-only',
-      'Job options 9 fields · Set per job',
+      'Binding settings 2 fields · Read-only',
+      'Job options 10 fields · Set per job',
     ]);
     for (const part of parts) {
       expect(part).toHaveAttribute('aria-expanded', 'false');
@@ -206,14 +206,14 @@ describe('MachineDetails', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const binding = openPart('Binding settings');
-    expect(binding).toHaveTextContent('Declared by bambu.machine.binding 1.0.0');
+    expect(binding).toHaveTextContent('Declared by bambu.machine.binding 2.0.0');
     expect(binding).not.toHaveTextContent('Only the simulator reads these');
     const logicalId = await within(binding).findByRole('textbox', { name: 'Input for Logical Id' });
     expect(
       within(binding)
         .getAllByRole('textbox')
         .map((input) => input.getAttribute('aria-label')),
-    ).toEqual(['Input for Address', 'Input for Logical Id', 'Input for Serial']);
+    ).toEqual(['Input for Logical Id', 'Input for Serial']);
     for (const input of within(binding).getAllByRole('textbox')) {
       expect(input).toHaveAttribute('readonly');
     }
@@ -244,7 +244,7 @@ describe('MachineDetails', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const options = openPart('Job options');
-    expect(options).toHaveTextContent('Declared by fixture.submission 1');
+    expect(options).toHaveTextContent('Declared by fixture.submission 1.3.0');
     const bedLeveling = await within(options).findByRole('switch', { name: 'Toggle for Bed Leveling' });
     expect(bedLeveling).toBeChecked();
     expect(bedLeveling).toBeDisabled();

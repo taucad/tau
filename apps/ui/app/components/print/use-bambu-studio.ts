@@ -72,8 +72,8 @@ export const bambuPreferencesOf = (
 };
 
 /**
- * Remember Prepare's submission choices in Bambu's preferences: the start flags, the plate, and the slot each of
- * the slice's colours prints from (one default slot for a single colour).
+ * Remember Prepare's submission choices in Bambu's preferences: the start flags and the slot each of the slice's
+ * colours prints from (one default slot for a single colour). The plate is the print intent's, saved apart.
  *
  * @param prior - The preferences before.
  * @param next - The submission as Prepare now holds it.
@@ -110,11 +110,9 @@ export const rememberBambuSubmission = (
           },
         }
       : { ...prior.material, defaultSlot: mapping[0] };
-  const plate = typeof next['expectedBedType'] === 'string' ? next['expectedBedType'] : prior.plate;
   return bambuSettingsConfiguration.schema.parse({
     ...rest,
     ...flags,
-    ...(plate ? { plate } : {}),
     ...(material ? { material } : {}),
   });
 };

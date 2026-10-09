@@ -45,7 +45,7 @@ const { MachinesSettings } = await import('./machines-settings.js');
 const candidate: MachineCandidate = {
   id: 'bambu:simulated-x1c',
   name: 'simulated-x1c',
-  endpoint: { address: 'simulator', interface: 'lo' },
+  endpoint: { transport: 'network', address: 'simulator', interface: 'lo' },
   claimedIdentity: {},
   observedAt: '2026-09-24T00:00:00.000Z',
   expiresAt: '2026-09-24T00:01:00.000Z',
@@ -56,7 +56,7 @@ const savedCandidate: MachineCandidate = {
   ...candidate,
   id: 'bambu:00M1',
   name: 'Workshop X1C',
-  endpoint: { address: '192.168.0.112', interface: 'udp4' },
+  endpoint: { transport: 'network', address: '192.168.0.112', interface: 'udp4' },
   claimedIdentity: { model: 'X1C', serial: '00M1' },
   credential: 'saved',
 };
@@ -107,6 +107,9 @@ const renderSettings = (): ReturnType<typeof render> =>
 
 const bindingField = (name: string): HTMLElement =>
   screen.getByRole('textbox', { name: new RegExp(`^Input for ${name.split(' ')[0]}`, 'u') });
+
+/** Where the machine is: the card's own field, not one of the provider's binding fields. */
+const addressField = (): HTMLElement => screen.getByRole('textbox', { name: 'Address' });
 
 afterEach(() => {
   state.facet = undefined;
@@ -221,7 +224,7 @@ describe('MachinesSettings', () => {
     });
     await screen.findByRole('textbox', { name: 'Input for Name' });
     fireEvent.change(bindingField('Name'), { target: { value: 'shop-x1c' } });
-    fireEvent.change(bindingField('Address'), { target: { value: '10.0.0.5' } });
+    fireEvent.change(addressField(), { target: { value: '10.0.0.5' } });
     const accessCode = screen.getByLabelText('Access code');
     fireEvent.change(accessCode, { target: { value: '12345678' } });
     /* Masked by default; the toggle reveals it for checking and masks it again. */
@@ -236,8 +239,13 @@ describe('MachinesSettings', () => {
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent('shop-x1c is bound as bambu:sim.');
     });
+    /* Where it is travels as the contract's endpoint, by the provider's transport; the configuration holds only its own fields. */
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ providerId: 'bambu', configuration: { logicalId: 'shop-x1c', address: '10.0.0.5' } }),
+      expect.objectContaining({
+        providerId: 'bambu',
+        configuration: { logicalId: 'shop-x1c' },
+        endpoint: { transport: 'network', address: '10.0.0.5' },
+      }),
     );
     /* The shell pins from the provider's own endpoint: only the ceremony and the code travel. */
     expect(state.completeBinding).toHaveBeenCalledExactlyOnceWith({ ceremonyId: 'ceremony-1', accessCode: '12345678' });
@@ -250,7 +258,7 @@ describe('MachinesSettings', () => {
       ...candidate,
       id: `bambu:${serial}`,
       name,
-      endpoint: { address, interface: 'udp4' },
+      endpoint: { transport: 'network', address, interface: 'udp4' },
       claimedIdentity: { model: 'X1C', serial },
     });
     facet.discover.mockImplementation(async function* () {
@@ -273,13 +281,14 @@ describe('MachinesSettings', () => {
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ providerId: 'bambu', configuration: { logicalId: 'discovery' } }),
     );
+    expect(facet.discover.mock.calls[0]?.[0]).not.toHaveProperty('endpoint');
 
     fireEvent.click(office);
 
     await screen.findByRole('textbox', { name: 'Input for Name' });
 
     expect(bindingField('Name')).toHaveValue('Office X1C');
-    expect(bindingField('Address')).toHaveValue('192.168.0.113');
+    expect(addressField()).toHaveValue('192.168.0.113');
     fireEvent.click(screen.getByRole('button', { name: 'Printer details' }));
     expect(await screen.findByRole('textbox', { name: /^Input for Serial/u })).toHaveValue('00M2');
     expect(screen.getByLabelText('Access code')).toHaveFocus();
@@ -295,7 +304,7 @@ describe('MachinesSettings', () => {
           ...candidate,
           id: 'bambu:00M1',
           name: 'Workshop X1C',
-          endpoint: { address: '192.168.0.112', interface: 'udp4' },
+          endpoint: { transport: 'network', address: '192.168.0.112', interface: 'udp4' },
           claimedIdentity: { model: 'X1C', serial: '00M1' },
         },
       };
@@ -312,7 +321,7 @@ describe('MachinesSettings', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Workshop X1C X1 Carbon · 192.168.0.112' }));
     await waitFor(() => {
-      expect(bindingField('Address')).toHaveValue('192.168.0.112');
+      expect(addressField()).toHaveValue('192.168.0.112');
     });
     expect(bindingField('Name')).toHaveValue('Workshop X1C');
     expect(screen.getByRole('status')).toHaveTextContent('Listening for more machines…');
@@ -333,7 +342,7 @@ describe('MachinesSettings', () => {
       ...savedCandidate,
       id: 'bambu-a1-mini:0300EA652800550',
       name: 'Mini',
-      endpoint: { address: '192.0.2.145', interface: 'udp4' },
+      endpoint: { transport: 'network', address: '192.0.2.145', interface: 'udp4' },
       claimedIdentity: { model: 'A1 mini', serial: '0300EA652800550' },
       credential: undefined,
     };
@@ -366,16 +375,22 @@ describe('MachinesSettings', () => {
     expect(facet.discover).toHaveBeenLastCalledWith(
       expect.objectContaining({
         providerId: 'bambu-a1-mini',
-        configuration: { logicalId: 'My Mini', address: '192.0.2.145', serial: '0300EA652800550' },
+        configuration: { logicalId: 'My Mini', serial: '0300EA652800550' },
+        endpoint: { transport: 'network', address: '192.0.2.145' },
       }),
     );
     expect(accessCode).toHaveValue('');
   });
 
-  /* No host ships a serial driver yet (C2-6): a serial machine is named with the reason, never offered or asked. */
-  it("should say why a serial machine can't be added here, and ask only the providers the host can reach", async () => {
+  /* The host says which providers it cannot serve (no serial driver yet, C2-6): named with its reason, never offered. */
+  it("should say why the host can't serve a machine, and ask only the providers it can", async () => {
     const facet = facetWith([]);
-    facet.listProviders.mockResolvedValue([x1cProvider, grblProvider, simulatorProvider]);
+    const reason = 'This Tau cannot reach serial ports yet, so it cannot find or connect a machine on one.';
+    facet.listProviders.mockResolvedValue([
+      x1cProvider,
+      { ...grblProvider, unavailable: { reason } },
+      simulatorProvider,
+    ]);
     state.facet = facet;
     renderSettings();
     const find = screen.getByRole('button', { name: 'Find machines' });
@@ -384,10 +399,8 @@ describe('MachinesSettings', () => {
     });
 
     expect(
-      screen.getByText(
-        `${grblProvider.manifest.identity.displayName} connects by a serial cable, which Tau can't use on this computer yet, so it can't be added here.`,
-      ),
-    ).toBeInTheDocument();
+      within(screen.getByRole('list', { name: 'Machines that cannot be added here' })).getByRole('listitem'),
+    ).toHaveTextContent(`${grblProvider.manifest.identity.displayName} can't be added here. ${reason}`);
     fireEvent.click(find);
 
     await waitFor(() => {
@@ -416,7 +429,7 @@ describe('MachinesSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Enter details' }));
     await screen.findByRole('textbox', { name: 'Input for Name' });
     fireEvent.change(bindingField('Name'), { target: { value: 'shop-x1c' } });
-    fireEvent.change(bindingField('Address'), { target: { value: '10.0.0.5' } });
+    fireEvent.change(addressField(), { target: { value: '10.0.0.5' } });
     fireEvent.change(screen.getByLabelText('Access code'), { target: { value: '12345678' } });
 
     fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
@@ -438,8 +451,37 @@ describe('MachinesSettings', () => {
 
     fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Enter a name and address for the printer.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter an address.');
     expect(facet.discover).not.toHaveBeenCalled();
+  });
+
+  it('should send a serial machine its typed path as a serial endpoint when the host serves it', async () => {
+    const facet = facetWith([]);
+    facet.listProviders.mockResolvedValue([grblProvider]);
+    facet.discover.mockImplementation(async function* () {
+      yield { type: 'found', candidate: { ...candidate, endpoint: { transport: 'serial', path: '/dev/ttyUSB0' } } };
+    });
+    state.facet = facet;
+    renderSettings();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Enter details' })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Enter details' }));
+    await screen.findByRole('textbox', { name: 'Input for Name' });
+    fireEvent.change(bindingField('Name'), { target: { value: 'LongMill' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Serial port' }), { target: { value: '/dev/ttyUSB0' } });
+
+    fireEvent.submit(screen.getByRole('form', { name: 'Connect a Sienci Labs machine' }));
+
+    await waitFor(() => {
+      expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          providerId: 'grbl',
+          configuration: { logicalId: 'LongMill' },
+          endpoint: { transport: 'serial', path: '/dev/ttyUSB0' },
+        }),
+      );
+    });
   });
 
   it('should list bound machines as one line each, marking the simulator, and explain a missing facet', async () => {
@@ -572,7 +614,8 @@ describe('MachinesSettings', () => {
 
   describe('saved access codes', () => {
     /** Render with every discovery answering `heard`, then find it on the network. */
-    const findSaved = async (heard: MachineCandidate = savedCandidate) => {
+    const findSaved = async () => {
+      const heard = savedCandidate;
       const facet = facetWith([]);
       facet.discover.mockImplementation(async function* () {
         yield { type: 'found', candidate: heard };
@@ -589,7 +632,7 @@ describe('MachinesSettings', () => {
       });
       fireEvent.click(
         await screen.findByRole('button', {
-          name: `${heard.name} X1 Carbon · ${heard.endpoint.address}`,
+          name: `${heard.name} X1 Carbon · 192.168.0.112`,
         }),
       );
       await screen.findByRole('textbox', { name: 'Input for Name' });
@@ -635,7 +678,7 @@ describe('MachinesSettings', () => {
       expect(screen.getByLabelText('Access code')).not.toBeRequired();
       await screen.findByRole('textbox', { name: 'Input for Name' });
       fireEvent.change(bindingField('Name'), { target: { value: 'shop-x1c' } });
-      fireEvent.change(bindingField('Address'), { target: { value: '10.0.0.5' } });
+      fireEvent.change(addressField(), { target: { value: '10.0.0.5' } });
 
       submit();
 
@@ -646,7 +689,7 @@ describe('MachinesSettings', () => {
       expect(state.completeBinding).not.toHaveBeenCalled();
       /* Only the code is cleared, so the retry needs nothing but the code. */
       expect(bindingField('Name')).toHaveValue('shop-x1c');
-      expect(bindingField('Address')).toHaveValue('10.0.0.5');
+      expect(addressField()).toHaveValue('10.0.0.5');
     });
 
     it('should send a newly typed code over the saved one after "Use a different code"', async () => {

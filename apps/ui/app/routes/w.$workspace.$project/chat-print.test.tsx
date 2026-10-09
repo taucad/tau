@@ -72,6 +72,7 @@ import {
   timestamp,
 } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { submissionDefaults } from '#routes/w.$workspace.$project/chat-print-prepare.js';
+import { programExtensions } from '#routes/w.$workspace.$project/chat-print-program.js';
 import { startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
 import {
   PrintPanel,
@@ -131,11 +132,15 @@ const renderPane = (client: MachineClient, bridge: MachineApprovalBridge = creat
     </TooltipProvider>,
   );
 
-/** What the fixture X1C fixes under every slice: its observed plate, nozzle, filament and recommended temperatures. */
+/**
+ * What the fixture X1C fixes under every slice: its observed plate, nozzle, filament, the material of the tray the
+ * print feeds from (recorded so the printer's filament check can read it) and recommended temperatures.
+ */
 const machineSliceOptions = {
   plate: 'textured-pei',
   nozzleDiameter: 0.4,
   filamentDiameter: 1.75,
+  filamentType: 'PLA',
   nozzleTemperature: 220,
   bedTemperature: 55,
 };
@@ -1035,12 +1040,10 @@ describe('Print pane prepare and send', () => {
 
   it("starts the machine mapping from the provider schema's own defaults, so bed leveling and flow calibration show on", async () => {
     // Bambu declares both flags `.default(true)` in its submission schema; its declared defaults stay empty.
-    expect(submissionDefaults(provider, entry(), { manifest: x1cManifest })).toMatchObject({
-      bedLeveling: true,
-      flowCalibration: true,
-      timelapse: false,
-      expectedBedType: 'textured-pei',
-    });
+    const defaults = submissionDefaults(provider, entry(), {});
+    expect(defaults).toMatchObject({ bedLeveling: true, flowCalibration: true, timelapse: false });
+    // The plate the slice was made for is the provider's to read from the program (R5), never a default here.
+    expect(defaults).not.toHaveProperty('expectedBedType');
     const user = userEvent.setup();
     renderPane(createFixture().client);
     await findMachine('Ready');
@@ -1251,10 +1254,10 @@ describe('Print pane external spool', () => {
     expect(send).toBeDisabled();
     const checks = prepareActions().getByRole('list', { name: 'Checks' });
     expect(checks).toHaveTextContent('At the machine: Load PETG on the external spool.');
-    // The machine was asked with the person's choices only; it completes the rest from what it reports.
+    // The machine was asked with the person's choices only: what the slice was made for it reads from the program.
     const asked = fixture.checkJob.mock.lastCall?.[0];
     expect(asked?.machineId).toBe('machine-1');
-    expect(asked?.configuration).not.toHaveProperty('expectedMaterials');
+    expect(Object.keys(asked?.configuration ?? {}).filter((key) => key.startsWith('expected'))).toEqual([]);
     expect(fixture.requestJob).not.toHaveBeenCalled();
   });
 
@@ -1722,6 +1725,36 @@ describe('Print pane monitor and controls', () => {
     renderPane(createFixture({ entries: [entry({ snapshot: { ...idle.snapshot, ...snapshot } })] }).client);
     await findMachine(status);
     expect(screen.queryByRole('button', { name: 'Stop' }) !== null).toBe(isShown);
+  });
+
+  it('leads a stop remedy to the one Stop control and says what stopping costs', async () => {
+    const consequence = 'The machine halts and loses its position, so home it after.';
+    const busy = entry({
+      snapshot: {
+        ...entry().snapshot,
+        state: { status: 'active' },
+        alerts: [
+          {
+            code: 'TIMED_RUN',
+            severity: 'info',
+            message: 'The spindle is on a timed run and stops by itself.',
+            blocks: 'nothing',
+            remedies: [{ type: 'stop', consequence }],
+          },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    renderPane(createFixture({ entries: [busy] }).client);
+    await findMachine('Busy');
+    const alert = screen.getByRole('alert', { name: 'Machine alert' });
+    expect(alert).toHaveTextContent(`Go to Stop${consequence}`);
+    // One Stop: the remedy leads to it rather than offering its own.
+    expect(screen.getAllByRole('button', { name: 'Stop' })).toHaveLength(1);
+
+    await user.click(within(alert).getByRole('button', { name: 'Go to Stop' }));
+
+    expect(screen.getByRole('button', { name: 'Stop' })).toHaveFocus();
   });
 
   it.each([
@@ -3441,6 +3474,13 @@ describe('Print pane program files', () => {
     },
   );
 
+  it('offers programs by the extensions each container declares, and by its media type where it declares none', () => {
+    expect(programExtensions([{ ...bambuContainer, extensions: ['.nc'] }, bambuContainer])).toEqual([
+      'nc',
+      'gcode.3mf',
+    ]);
+  });
+
   it('checks the chosen file with the machine and shows a blocked check with its remedy', async () => {
     const fixture = createFixture({ entries: [router()] });
     fixture.checkJob.mockResolvedValue({
@@ -3476,7 +3516,7 @@ describe('Print pane program files', () => {
     expect(checked?.artifact).toMatchObject({
       projectId,
       path: 'jobs/pocket.gcode',
-      mediaType: 'text/x-gcode',
+      mediaType: 'text/x.gcode',
       selectedMember: 'jobs/pocket.gcode',
     });
     expect(checked?.artifact.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
@@ -3557,7 +3597,7 @@ describe('Print pane program files', () => {
     await findMachine('Ready', 'Desk Carvera');
     expect(
       await within(programRegion()).findByText(
-        'No program files in this project. Desk Carvera runs .gcode, .nc, .ngc, .tap, .cnc, .gc files.',
+        'No program files in this project. Desk Carvera runs .gcode, .nc, .ngc, .tap files.',
       ),
     ).toBeInTheDocument();
     expect(within(programRegion()).getByRole('button', { name: 'Review job' })).toBeDisabled();

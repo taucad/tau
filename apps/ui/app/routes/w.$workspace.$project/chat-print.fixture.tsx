@@ -392,8 +392,10 @@ const isFields = (value: MachineCheckJobInput['configuration']): value is Fields
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
- * The start form completed as the Bambu provider completes it: the machine's model and nozzle, the filament
- * diameter, the material in each mapped slot, Bambu Studio's start defaults; what the caller gave wins.
+ * The start form completed as the Bambu provider completes it (R5 amended): what the program was sliced for comes
+ * from the program, never from the caller (the fixture's slices are made for this machine's model, nozzle, filament
+ * and the Textured PEI Plate), the material in each mapped slot from what the machine holds, and Bambu Studio's start
+ * defaults; the caller's choices (mapping, stated plate, start flags) win.
  *
  * @param machine - The machine as the directory reports it.
  * @param configuration - The partial form the pane sent.
@@ -411,17 +413,18 @@ const completeConfiguration = (
   const nozzle = machine === undefined ? undefined : toolheadOf(machine.descriptor.capabilities)?.nozzles[0];
   const filament = machine === undefined ? undefined : fffProcessOf(machine.descriptor.capabilities)?.filamentDiameter;
   return {
-    ...(machine === undefined ? {} : { expectedModel: machine.descriptor.model }),
-    ...(nozzle === undefined ? {} : { expectedNozzleDiameter: nozzle.diameter.value }),
-    ...(filament === undefined ? {} : { expectedFilamentDiameter: filament.value }),
-    expectedMaterials: mapping.flatMap((slot) => {
-      const materialId = trays.find((tray) => tray.slot === slot)?.materialId;
-      return materialId === undefined ? [] : [{ slot, materialId }];
-    }),
     bedLeveling: true,
     flowCalibration: true,
     timelapse: false,
     ...given,
+    ...(machine === undefined ? {} : { expectedModel: machine.descriptor.model }),
+    ...(nozzle === undefined ? {} : { expectedNozzleDiameter: nozzle.diameter.value }),
+    ...(filament === undefined ? {} : { expectedFilamentDiameter: filament.value }),
+    expectedBedType: 'textured-pei',
+    expectedMaterials: mapping.flatMap((slot) => {
+      const materialId = trays.find((tray) => tray.slot === slot)?.materialId;
+      return materialId === undefined ? [] : [{ slot, materialId }];
+    }),
   };
 };
 

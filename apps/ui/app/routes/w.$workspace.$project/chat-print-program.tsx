@@ -26,16 +26,8 @@ import {
 } from '#routes/w.$workspace.$project/chat-print-send.js';
 
 /**
- * The file extensions a program of each media type is saved under. CNC controllers read the same G-code text under
- * several names; any other media type takes the extensions Tau's own table gives it.
- *
- * ponytail: a container declares a media type, not extensions; add extensions to `MachineAcceptedContainer` when a
- * provider accepts a format this table cannot name.
- */
-const gcodeExtensions = ['gcode', 'nc', 'ngc', 'tap', 'cnc', 'gc'] as const;
-
-/**
- * The extensions a machine's accepted containers are saved under.
+ * The extensions a machine's accepted containers are saved under: each container's own `extensions`, or, for one that
+ * declares none, the extensions Tau's file table gives its media type.
  *
  * @param accepts - What the machine accepts.
  * @returns Lower-case extensions without the dot.
@@ -43,10 +35,10 @@ const gcodeExtensions = ['gcode', 'nc', 'ngc', 'tap', 'cnc', 'gc'] as const;
  */
 export const programExtensions = (accepts: readonly MachineAcceptedContainer[]): readonly string[] => [
   ...new Set(
-    accepts.flatMap(({ mediaType }): readonly string[] =>
-      mediaType === 'text/x-gcode' || mediaType === 'text/x.gcode'
-        ? gcodeExtensions
-        : fileExtensions.filter((extension) => mimeTypes[extension] === mediaType),
+    accepts.flatMap(({ mediaType, extensions }): readonly string[] =>
+      extensions === undefined
+        ? fileExtensions.filter((extension) => mimeTypes[extension] === mediaType)
+        : extensions.map((extension) => extension.slice(1)),
     ),
   ),
 ];

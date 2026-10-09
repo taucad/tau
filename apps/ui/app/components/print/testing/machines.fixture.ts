@@ -75,23 +75,31 @@ const fffCancel: MachineHaltOutcome = {
   recovery: [],
 };
 
-/** The submission form a Bambu job carries; mirrors `bambu.machine.submission` without depending on the plugin. */
+/**
+ * The submission form a Bambu job carries; mirrors `bambu.machine.submission` 1.3.0 without depending on the plugin:
+ * the `expected*` facts are optional because the provider reads them from the program, never from the sender.
+ */
 export const bambuSubmission = defineConfiguration({
   id: 'fixture.submission',
-  version: '1',
+  version: '1.3.0',
   schema: z.object({
     amsMapping: z.array(z.number().int()).default([]),
     bedLeveling: z.boolean().default(true),
     flowCalibration: z.boolean().default(true),
-    expectedBedType: z.string().min(1),
-    expectedMaterials: z.array(z.object({ slot: z.number().int(), materialId: z.string() })).min(1),
+    expectedBedType: z.string().min(1).optional(),
+    expectedMaterials: z.array(z.object({ slot: z.number().int(), materialId: z.string() })).default([]),
     expectedFilamentDiameter: quantity({
       unit: 'mm',
       quantityKind: quantityKinds.diameter,
       space: 'linear',
-    }).positive(),
-    expectedNozzleDiameter: quantity({ unit: 'mm', quantityKind: quantityKinds.diameter, space: 'linear' }).positive(),
-    expectedModel: z.literal('X1C'),
+    })
+      .positive()
+      .optional(),
+    expectedNozzleDiameter: quantity({ unit: 'mm', quantityKind: quantityKinds.diameter, space: 'linear' })
+      .positive()
+      .optional(),
+    expectedModel: z.literal('X1C').optional(),
+    operatorConfirmedBedType: z.string().min(1).optional(),
     timelapse: z.boolean().default(false),
   }),
   ui: { version: 1, rjsf: {} },
@@ -115,7 +123,8 @@ export const bambuContainer = {
 
 const gcodeContainer = {
   contract: { id: 'manufacturing.toolpath.gcode', version: 1 },
-  mediaType: 'text/x-gcode',
+  mediaType: 'text/x.gcode',
+  extensions: ['.gcode', '.nc', '.ngc', '.tap'],
   requiredMembers: [],
   payloadSelection: 'single',
   technology: 'subtractive.milling',

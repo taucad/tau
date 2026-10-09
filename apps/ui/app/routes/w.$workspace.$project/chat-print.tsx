@@ -26,6 +26,7 @@ import {
   ControlStage,
   asksPresenceAtPane,
   isRunOwned,
+  stopControlId,
 } from '#routes/w.$workspace.$project/chat-print-controls.js';
 import { PressureAdvanceStage } from '#routes/w.$workspace.$project/chat-print-materials.js';
 import {
@@ -335,6 +336,7 @@ function StopButton({ control }: { readonly control: MachineControl }): React.JS
   return (
     <>
       <Button
+        id={stopControlId(entry.machineId)}
         type='button'
         size='xs'
         variant='destructive'

@@ -10,6 +10,7 @@ import type {
   MachineOperation,
   MachineProvider,
   MachineReading,
+  MachineRemedy,
 } from '@taucad/runtime/machine';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -118,6 +119,21 @@ const toneOf = ({ severity }: MachineAlert): AlertTone =>
 
 const alertGlyph = { error: OctagonAlert, warning: TriangleAlert, neutral: Info } as const;
 
+/** One alert's remedies are distinct, so each one's own words key it. */
+const remedyKey = (remedy: MachineRemedy): string => {
+  switch (remedy.type) {
+    case 'action': {
+      return `${remedy.componentId}:${remedy.action}`;
+    }
+    case 'person': {
+      return remedy.instruction;
+    }
+    case 'stop': {
+      return `stop:${remedy.consequence}`;
+    }
+  }
+};
+
 const severityLabel: Readonly<Record<NonNullable<MachineAlert['severity']>, string>> = {
   fatal: 'Fatal',
   serious: 'Serious',
@@ -186,11 +202,7 @@ export function MachineAlerts({ control }: { readonly control: MachineControl })
                 {alert.remedies === undefined || alert.remedies.length === 0 ? null : (
                   <div className='flex flex-wrap items-center gap-2'>
                     {alert.remedies.map((remedy) => (
-                      <RemedyButton
-                        key={remedy.type === 'action' ? `${remedy.componentId}:${remedy.action}` : remedy.instruction}
-                        control={control}
-                        remedy={remedy}
-                      />
+                      <RemedyButton key={remedyKey(remedy)} control={control} remedy={remedy} />
                     ))}
                   </div>
                 )}

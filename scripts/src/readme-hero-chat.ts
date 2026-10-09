@@ -4,15 +4,19 @@
  * The chat is a genuine agent-host log: a scripted model transport and scripted
  * tool verdicts run through `createTauAgentHost`, so `events.jsonl` carries
  * exactly the rows a real run writes and the desktop app renders it like any
- * other chat. The files the turn "creates" are the example's own sources.
+ * other chat. The files the turn "creates" are the example's own sources, and
+ * `--mint` records the turn's revision through the native git port with the
+ * placement's own provenance, so the turn's card reads `Rev N saved · 3 files`.
  *
  * Usage (from the workspace root, Node 24):
  *   node --import @oxc-node/core/register scripts/src/readme-hero-chat.ts \
- *     --project <directory holding the example's tau.json> \
- *     [--chat-id chat_readme_hero] [--revision <revisionId>] [--checkout <checkoutId>] [--at <ISO time>]
+ *     --project <project directory the app created> \
+ *     [--chat-id <chat id>] [--mint | --revision <revisionId>] [--checkout <checkoutId>] \
+ *     [--step-file <a STEP export of the model>] [--at <ISO time>]
  */
 
-import { readdir, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readdir, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -29,8 +33,22 @@ import type {
   TurnPlacementPort,
 } from '../../packages/agent-host/src/index.ts';
 import { createNodeEventLog } from '../../packages/agent-host/src/node.ts';
+import { classify } from '../../packages/filesystem/src/path-registry.ts';
+import { ImmutableRevisionTree } from '../../packages/revisions/src/algorithms/index.ts';
+import type { RevisionTreeInput } from '../../packages/revisions/src/algorithms/revision-tree.ts';
+import { createNativeGitRevisionPort } from '../../packages/revisions/src/node/index.ts';
+import { revisionId } from '../../packages/core/project/src/revision-id.ts';
+import type { RevisionId } from '../../packages/core/project/src/revision-id.ts';
+import type { ViewerNode } from '../../packages/workbench/src/records.schema.ts';
+import type { RevisionProvenance } from '../../packages/revisions/src/revision-authority.ts';
+import type { RevisionPort } from '../../packages/revisions/src/revision-port.ts';
+import { workbenchPaths, workbenchRecords } from '../../packages/workbench/src/records.ts';
 import { serializeChatRecord } from '../../libs/chat/src/schemas/chat-record.schema.ts';
 import { toProviderToolJsonSchema } from '../../libs/chat/src/schemas/provider-tool-schemas.ts';
+import {
+  arrangeWorkbenchInputSchema,
+  arrangeWorkbenchOutputSchema,
+} from '../../libs/chat/src/schemas/tools/arrange-workbench.tool.schema.ts';
 import {
   createFileInputSchema,
   createFileOutputSchema,
@@ -40,6 +58,10 @@ import {
   evaluateModelInputSchema,
   evaluateModelOutputSchema,
 } from '../../libs/chat/src/schemas/tools/evaluate-model.tool.schema.ts';
+import {
+  exportModelInputSchema,
+  exportModelOutputSchema,
+} from '../../libs/chat/src/schemas/tools/export-model.tool.schema.ts';
 import {
   screenshotInputSchema,
   screenshotOutputSchema,
@@ -54,47 +76,85 @@ import type { ZodType } from 'zod';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../..');
 const exampleDir = join(repoRoot, 'libs/tau-examples/src/kernels/replicad/planetary-gear-system');
-const skillDir = join(repoRoot, '.agents/skills/brep-design');
 
 const { values } = parseArgs({
   options: {
     project: { type: 'string' },
-    'chat-id': { type: 'string', default: 'chat_readme_hero' },
+    'chat-id': { type: 'string' },
     revision: { type: 'string' },
+    mint: { type: 'boolean', default: false },
     checkout: { type: 'string', default: 'checkout-live' },
+    'step-file': { type: 'string' },
     at: { type: 'string' },
   },
 });
 
 if (values.project === undefined) {
-  throw new Error('Pass --project <directory holding the example tau.json>.');
+  throw new Error('Pass --project <directory holding the project tau.json>.');
+}
+if (values.mint && values.revision !== undefined) {
+  throw new Error('Pass either --mint or --revision, not both.');
 }
 
 const projectDir = resolve(values.project);
-const chatId = values['chat-id'];
 const checkoutId = values.checkout;
 const modelId = 'anthropic-claude-fable-5.1';
 
 // ---------------------------------------------------------------------------
-// Sources: the example's own files, the skill the agent loads, the capture.
+// Sources: the project, the example's own files, the skills the agent loads.
 // ---------------------------------------------------------------------------
+
+const projectManifest = JSON.parse(await readFile(join(projectDir, 'tau.json'), 'utf8')) as {
+  id: string;
+  name: string;
+};
+const projectId = projectManifest.id;
 
 const mainTs = await readFile(join(exampleDir, 'main.ts'), 'utf8');
 const geospecTs = await readFile(join(exampleDir, 'main.geospec.ts'), 'utf8');
 const designMd = await readFile(join(exampleDir, 'DESIGN.md'), 'utf8');
-const manifest = JSON.parse(await readFile(join(exampleDir, 'tau.json'), 'utf8')) as { id: string; name: string };
 const thumbnail = await readFile(join(exampleDir, 'thumbnail.webp'));
-const skillMd = await readFile(join(skillDir, 'SKILL.md'), 'utf8');
-const skillFiles = (await readdir(skillDir)).filter((name) => name !== 'SKILL.md').sort();
-const skillDescription =
-  /^description:\s*>-\n((?:\s{2}.*\n)+)/mu
-    .exec(skillMd)?.[1]
-    ?.split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join(' ') ?? '';
+const stepBytes = values['step-file'] === undefined ? undefined : await readFile(resolve(values['step-file']));
 
-const projectId = manifest.id;
+/* The same djb2 digest the skill resolver records, so the card never says the bundle changed. */
+const fingerprintOf = (content: string): string => {
+  let hash = 5381;
+  for (let index = 0; index < content.length; index++) {
+    // oxlint-disable-next-line unicorn/prefer-math-trunc, no-bitwise -- unsigned 32-bit wraparound is the resolver's own.
+    hash = (hash * 33 + content.codePointAt(index)!) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+};
+
+/* A shipped system skill, read back the way `use_skill` answers for one. */
+const systemSkill = async (slug: string, directory: string) => {
+  const content = await readFile(join(directory, 'SKILL.md'), 'utf8');
+  const baseDirectory = `.agents/skills/${slug}`;
+  const supportingFiles = (await readdir(directory))
+    .filter((name) => name !== 'SKILL.md')
+    .sort()
+    .map((name) => `${baseDirectory}/${name}`);
+  const frontmatter: Record<string, string> = {};
+  for (const line of (/^---\n([\S\s]*?)\n---/u.exec(content)?.[1] ?? '').split('\n')) {
+    const separator = line.indexOf(':');
+    if (separator !== -1) {
+      frontmatter[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+    }
+  }
+  return {
+    skillName: slug,
+    resourceUri: `system:skills/${slug}/SKILL.md`,
+    skillPath: `${baseDirectory}/SKILL.md`,
+    baseDirectory,
+    source: 'system',
+    fingerprint: fingerprintOf(content),
+    frontmatter,
+    content,
+    supportingFiles,
+  };
+};
+const replicadSkill = await systemSkill('cad-replicad', join(repoRoot, 'packages/plugins/replicad/agent/cad-replicad'));
+const geospecSkill = await systemSkill('geospec-authoring', join(repoRoot, 'packages/geospec/agent/geospec-authoring'));
 
 /* The first draft of main.ts meshes the ring at phase 0; GeoSpec catches the clash and the fix phases it by 2.5°. */
 const phasedRing =
@@ -108,6 +168,101 @@ const draftMainTs = mainTs.replace(phasedRing, unphasedRing);
 const lineCount = (text: string): number => (text === '' ? 0 : text.split('\n').length);
 
 const dataUrl = `data:image/webp;base64,${thumbnail.toString('base64')}`;
+const geospecFile = 'main.geospec.ts';
+/* What the turn leaves in the checkout: the result revision records exactly these. */
+const turnFiles: ReadonlyArray<readonly [path: string, content: string]> = [
+  ['main.ts', mainTs],
+  [geospecFile, geospecTs],
+  ['DESIGN.md', designMd],
+];
+
+// ---------------------------------------------------------------------------
+// The chat: an existing one of the project's (the app seeds "Initial design"), or a fresh id.
+// ---------------------------------------------------------------------------
+
+const chatsDir = join(projectDir, '.tau', 'chats');
+const existingChats = await readdir(chatsDir, { withFileTypes: true })
+  .then((entries) => entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name))
+  .catch((): string[] => []);
+let chatId = values['chat-id'];
+if (chatId === undefined) {
+  if (existingChats.length > 1) {
+    throw new Error(`The project has ${String(existingChats.length)} chats; pass --chat-id.`);
+  }
+  chatId = existingChats[0] ?? 'chat_readme_hero';
+}
+
+// ---------------------------------------------------------------------------
+// The workbench the agent arranges: the project's view, then Model, Kinematics and Parameters stacked.
+// ---------------------------------------------------------------------------
+
+const digestOf = (bytes: Uint8Array | string): `sha256:${string}` =>
+  `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+const layoutFile = join(projectDir, workbenchPaths.layout);
+const existingLayout = await readFile(layoutFile).catch((): undefined => undefined);
+const firstView = (node: ViewerNode): string | undefined =>
+  node.kind === 'group' ? node.tabs[0]?.view : node.children.map(firstView).find((id) => id !== undefined);
+let viewId: string;
+let newViewRecord: { path: string; bytes: string } | undefined;
+if (existingLayout === undefined) {
+  viewId = `v-${createHash('sha256').update(projectId).digest('hex').slice(0, 8)}`;
+  newViewRecord = {
+    path: join(projectDir, workbenchPaths.view(viewId)),
+    bytes: workbenchRecords.view.serialize({ version: 1, entryPath: 'main.ts' }),
+  };
+} else {
+  const read = workbenchRecords.layout.read(new Uint8Array(existingLayout));
+  if (read.status !== 'current') {
+    throw new Error(`The project's layout.json is not readable: ${read.message}`);
+  }
+  const found = firstView(read.record.viewer);
+  if (found === undefined) {
+    throw new Error("The project's layout.json shows no view.");
+  }
+  viewId = found;
+}
+const arrangedWorkbench = {
+  kind: 'split' as const,
+  direction: 'column' as const,
+  children: [
+    { kind: 'group' as const, size: 2, tabs: [{ kind: 'pane' as const, pane: 'model' as const }] },
+    { kind: 'group' as const, size: 2, tabs: [{ kind: 'pane' as const, pane: 'kinematics' as const }] },
+    { kind: 'group' as const, size: 1, tabs: [{ kind: 'pane' as const, pane: 'parameters' as const }] },
+  ],
+};
+const arrangedLayout = workbenchRecords.layout.serialize({
+  version: 1,
+  lanes: { chat: true, workbench: true },
+  viewer: { kind: 'group', tabs: [{ kind: 'view', view: viewId }] },
+  workbench: arrangedWorkbench,
+});
+const arrangeOutput = {
+  status: 'written' as const,
+  revisions: [
+    ...(newViewRecord === undefined
+      ? []
+      : [
+          {
+            path: workbenchPaths.view(viewId),
+            digest: digestOf(newViewRecord.bytes),
+            previousDigest: 'missing' as const,
+          },
+        ]),
+    {
+      path: workbenchPaths.layout,
+      digest: digestOf(arrangedLayout),
+      previousDigest: existingLayout === undefined ? ('missing' as const) : digestOf(existingLayout),
+    },
+  ],
+  visible: [
+    { kind: 'view' as const, view: viewId },
+    { kind: 'pane' as const, pane: 'model' as const },
+    { kind: 'pane' as const, pane: 'kinematics' as const },
+    { kind: 'pane' as const, pane: 'parameters' as const },
+  ],
+};
+
+const stepArtifactPath = '.tau/artifacts/exports/main.step';
 
 // ---------------------------------------------------------------------------
 // The clock the run is recorded on: every row and reasoning timing reads it.
@@ -133,7 +288,6 @@ const geospecNames = [...geospecTs.matchAll(/^\s{2}it\('([^']+)'/gmu)].map((matc
 if (geospecNames.length !== 10) {
   throw new Error(`Expected the example to declare 10 GeoSpec tests, found ${String(geospecNames.length)}.`);
 }
-const geospecFile = 'main.geospec.ts';
 const interferenceOrdinal = geospecNames.indexOf('has no gear or hardware interference') + 1;
 
 const geospecRun = (failedOrdinals: readonly number[]) => {
@@ -221,40 +375,71 @@ type ScriptedStep = {
 
 const evaluated = { status: 'ready' as const, views: ['model'], exports: { stl: 'stl', step: 'step', glb: 'glb' } };
 
+const exportStep: ScriptedStep[] =
+  stepBytes === undefined
+    ? []
+    : [
+        {
+          calls: [
+            {
+              id: 'call_export_step',
+              name: 'export_model',
+              input: { targetFile: 'main.ts', to: 'step' },
+              result: {
+                to: 'step',
+                exportId: 'step',
+                files: [
+                  {
+                    name: 'main.step',
+                    artifactPath: stepArtifactPath,
+                    mimeType: 'application/step',
+                    byteLength: stepBytes.byteLength,
+                  },
+                ],
+              },
+              ms: 6_400,
+            },
+          ],
+          usage: [49_600, 60],
+        },
+      ];
+
 const steps: readonly ScriptedStep[] = [
   {
     thinking: [
       'Fixed-ring planetary with i = 1 + Zr/Zs = 4, so Zr = 3·Zs. Module 2 with Zs = 24 gives Zr = 72 and Zp = (Zr − Zs)/2 = 24: the sun and the planets share one 24-tooth blank and one hob. Three planets need (Zs + Zr)/3 to be an integer: 96/3 = 32, so 120° spacing works.',
       'Pitch radii 24 / 24 / 72 mm put the planet centres at 48 mm. Ring OD 174 mm with a continuous rim and six counterbored M5 holes on a 162 mm PCD. Involute flanks as single B-spline edges rather than polygonal teeth; thin each external gear 0.10 mm tangentially and widen the ring spaces 0.10 mm for 0.20 mm pair backlash; standard addenda, 1.25-module dedenda, 0.5 mm × 45° tip chamfers on both faces.',
       'Carrier: two relieved three-arm spiders on hardened stepped pins, SAE 660 bronze flanged bushings and thrust washers, ISO 4762 M5 socket screws. Keyed Ø16 input shaft with a retaining-screw bore, keyed Ø12 output bore in the front hub.',
-      'Mechanism: sun drives; carrier follows at θs/4; planets at −3θs/4 relative to the carrier. Verify envelope, the 22 named parts, the planet pitch circle, interference at the nominal and an advanced pose, and exact millimetre BRep validity. Load the brep-design skill for the feature-tree and DFM checklist first.',
+      'Mechanism: sun drives; carrier follows at θs/4; planets at −3θs/4 relative to the carrier. Verify envelope, the 22 named parts, the planet pitch circle, interference at the nominal and an advanced pose, and exact millimetre BRep validity. Load the cad-replicad skill for the model envelope and mechanism contract, and geospec-authoring for the test shape, first.',
     ].join('\n\n'),
     thinkingMs: 38_000,
     text: [
       '**Design brief — Planetary Gear System**',
       '',
-      '- Single-stage, ring-fixed planetary: module 2, 20° pressure angle, $Z_s = 24$, $Z_p = 24$, $Z_r = Z_s + 2Z_p = 72$; three planets at 120° since $(Z_s + Z_r)/3 = 32$; ratio $i = 1 + Z_r/Z_s = 4$.',
-      '- True involute flanks as single B-spline edges, 0.20 mm pair backlash at the pitch circle, 0.5 mm × 45° tip chamfers; the sun and planets share one 24-tooth blank.',
-      '- Fixed 72-tooth ring with six counterbored M5 holes, keyed Ø16 input shaft, twin-plate carrier on hardened stepped pins with bronze flanged bushings and thrust washers, keyed Ø12 output hub: 22 named parts.',
+      '- Ring-fixed stage, module 2, 20° pressure angle: $Z_s = 24$, $Z_p = 24$, $Z_r = 72$, so $i = 1 + Z_r/Z_s = 4$ with three planets at 120°.',
+      '- True involute flanks as single B-spline edges, 0.20 mm pair backlash, 0.5 mm × 45° tip chamfers; the sun and planets share one 24-tooth blank.',
+      '- Fixed ring on six counterbored M5 holes, keyed Ø16 input shaft, twin-plate carrier on hardened pins with bronze bushings, keyed Ø12 output hub: 22 named parts.',
     ].join('\n'),
     calls: [
       {
-        id: 'call_use_skill_1',
+        id: 'call_use_skill_replicad',
         name: 'use_skill',
         input: {
-          skillName: 'brep-design',
-          reason:
-            'A gear stage with fastened carrier hardware: feature-tree BRep modelling and the DFM checklists apply.',
+          skillName: 'cad-replicad',
+          reason: 'A Replicad assembly with named parts, materials and a declared mechanism.',
         },
-        result: {
-          skillName: 'brep-design',
-          resourceUri: 'system:brep-design',
-          source: 'system',
-          frontmatter: { name: 'brep-design', description: skillDescription },
-          content: skillMd,
-          supportingFiles: skillFiles,
+        result: replicadSkill,
+        ms: 700,
+      },
+      {
+        id: 'call_use_skill_geospec',
+        name: 'use_skill',
+        input: {
+          skillName: 'geospec-authoring',
+          reason: 'The stage is proven with a GeoSpec suite before it ships.',
         },
-        ms: 800,
+        result: geospecSkill,
+        ms: 500,
       },
     ],
     usage: [18_400, 1_310],
@@ -385,7 +570,23 @@ const steps: readonly ScriptedStep[] = [
     usage: [48_000, 1_960],
   },
   {
-    text: 'All 10 requirements pass. `mechanism()` declares the joints, so the sun drives the carrier at $\\theta_c = \\theta_s/4$ and each planet at $-3\\theta_s/4$; the *Four sun turns* clip runs one carrier revolution in 8 s. Module, face width and input angle are live parameters, and the brief is in DESIGN.md.',
+    calls: [
+      {
+        id: 'call_arrange_workbench',
+        name: 'arrange_workbench',
+        input: { workbench: arrangedWorkbench, lanes: { chat: true, workbench: true } },
+        result: arrangeOutput,
+        ms: 300,
+      },
+    ],
+    usage: [48_900, 210],
+  },
+  ...exportStep,
+  {
+    text: [
+      'All 10 requirements pass. `mechanism()` declares the joints, so the sun drives the carrier at $\\theta_c = \\theta_s/4$ and each planet at $-3\\theta_s/4$; press Play in Kinematics to run *Four sun turns*.',
+      `Module, face width and input angle are live parameters, and the brief is in DESIGN.md${stepBytes === undefined ? '.' : '; main.step is ready for the shop.'}`,
+    ].join(' '),
     usage: [50_200, 140],
   },
 ];
@@ -405,6 +606,12 @@ const contracts: Record<string, { readonly input: ZodType; readonly output: ZodT
   },
   test_model: { input: testModelInputSchema, output: testModelOutputSchema, description: 'Run GeoSpec tests.' },
   screenshot: { input: screenshotInputSchema, output: screenshotOutputSchema, description: 'Capture the model.' },
+  arrange_workbench: {
+    input: arrangeWorkbenchInputSchema,
+    output: arrangeWorkbenchOutputSchema,
+    description: 'Arrange the workbench.',
+  },
+  export_model: { input: exportModelInputSchema, output: exportModelOutputSchema, description: 'Export the model.' },
 };
 
 const calls = new Map<string, ScriptedCall>();
@@ -425,6 +632,89 @@ const definitions: HostToolDefinition[] = Object.entries(contracts).map(([name, 
   description: contract.description,
   inputSchema: toProviderToolJsonSchema(contract.input) as JsonObject,
 }));
+
+// ---------------------------------------------------------------------------
+// The revision the placement mints: the pre-turn tree when the line is unborn, then the turn's result.
+// ---------------------------------------------------------------------------
+
+const turnKey = { turnId: 'msg_hero_user_1', runId: 'run_hero_1', attempt: 1 } as const;
+const port: RevisionPort | undefined = values.mint
+  ? createNativeGitRevisionPort({ repositoryPath: projectDir })
+  : undefined;
+let baseHead: RevisionId | undefined;
+let minted: { revisionId: string; treeId: string | undefined } | undefined;
+
+const provenanceOf = (turnCut: 'base' | 'result'): RevisionProvenance => ({
+  source: 'agent',
+  actorId: projectId,
+  runId: turnKey.runId,
+  attempt: turnKey.attempt,
+  turnCut,
+  turnId: turnKey.turnId,
+  trigger: 'turn',
+  createdAt: nowMs,
+});
+const revisionSummary = { generated: `Agent turn ${turnKey.turnId}` };
+
+/* The checkout's versioned files, as the registry classifies them: the first revision of a new project. */
+const versionedFilesOnDisk = async (): Promise<RevisionTreeInput[]> => {
+  const files: RevisionTreeInput[] = [];
+  for (const entry of await readdir(projectDir, { withFileTypes: true })) {
+    if (entry.isFile() && classify(entry.name).versioned) {
+      files.push([entry.name, new Uint8Array(await readFile(join(projectDir, entry.name)))]);
+    }
+  }
+  return files;
+};
+
+const publish = async (store: RevisionPort, expectedHead: RevisionId | undefined, head: RevisionId): Promise<void> => {
+  const moved = await store.updateRef({ name: 'main', expectedHead, head });
+  if (moved.status !== 'updated') {
+    throw new Error(`main did not move to ${head}: ${moved.status}.`);
+  }
+};
+
+const mintBase = async (store: RevisionPort): Promise<RevisionId> => {
+  await store.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+  const receipt = await store.writeRevision({
+    parents: [],
+    tree: new ImmutableRevisionTree(await versionedFilesOnDisk()),
+    provenance: provenanceOf('base'),
+    summary: revisionSummary,
+  });
+  const base = revisionId(receipt.commitId);
+  await publish(store, undefined, base);
+  await store.setHead('main');
+  return base;
+};
+
+const mintResult = async (
+  store: RevisionPort,
+  base: RevisionId,
+): Promise<{ revisionId: RevisionId; treeId: string | undefined }> => {
+  const baseTree = await store.readTree(base);
+  if (baseTree === undefined) {
+    throw new Error(`The base revision ${base} has no tree.`);
+  }
+  const turnPaths = new Set(turnFiles.map(([path]) => path));
+  const entries: RevisionTreeInput[] = [
+    ...baseTree
+      .entries()
+      .filter((entry) => !turnPaths.has(entry.path))
+      .map((entry): RevisionTreeInput => [entry.path, entry.content, entry.mode]),
+    ...turnFiles.map(([path, content]): RevisionTreeInput => [path, content]),
+  ];
+  const receipt = await store.writeRevision({
+    parents: [base],
+    tree: new ImmutableRevisionTree(entries),
+    provenance: provenanceOf('result'),
+    summary: revisionSummary,
+  });
+  const result = revisionId(receipt.commitId);
+  await publish(store, base, result);
+  const record = await store.readRevision(result);
+  return { revisionId: result, treeId: record?.treeId };
+};
 
 // ---------------------------------------------------------------------------
 // The transport, the tools and the placement the host runs the turn against.
@@ -488,6 +778,39 @@ let wake: () => void = () => undefined;
 let changedKey: { turnId: string; runId: string; chatId: string; attempt: number } | undefined;
 let changeReported = false;
 
+/* What each tool leaves on disk: the files the turn writes, the records it arranges, the export it keeps. */
+const applyToolEffect = async (call: ScriptedCall): Promise<void> => {
+  const input = call.input as { targetFile?: string; content?: string };
+  switch (call.name) {
+    case 'create_file': {
+      await writeFile(join(projectDir, input.targetFile!), input.content!);
+      return;
+    }
+    case 'edit_file': {
+      await writeFile(join(projectDir, 'main.ts'), mainTs);
+      return;
+    }
+    case 'arrange_workbench': {
+      if (newViewRecord !== undefined) {
+        await mkdir(dirname(newViewRecord.path), { recursive: true });
+        await writeFile(newViewRecord.path, newViewRecord.bytes);
+      }
+      await mkdir(dirname(layoutFile), { recursive: true });
+      await writeFile(layoutFile, arrangedLayout);
+      return;
+    }
+    case 'export_model': {
+      const artifact = join(projectDir, stepArtifactPath);
+      await mkdir(dirname(artifact), { recursive: true });
+      await writeFile(artifact, stepBytes!);
+      return;
+    }
+    default: {
+      return;
+    }
+  }
+};
+
 const registry: ToolRegistry = {
   list: () => definitions,
   invoke: async ({ toolCallId, toolName }) => {
@@ -496,6 +819,7 @@ const registry: ToolRegistry = {
       throw new Error(`Unscripted tool call ${toolName} (${toolCallId}).`);
     }
     advance(call.ms);
+    await applyToolEffect(call);
     if (!changeReported && (toolName === 'create_file' || toolName === 'edit_file') && changedKey !== undefined) {
       changeReported = true;
       facts.push({ kind: 'changed', key: changedKey, checkoutId });
@@ -508,6 +832,9 @@ const registry: ToolRegistry = {
 const placement: TurnPlacementPort = {
   admit: async ({ requestId, key }) => {
     changedKey = key;
+    if (port !== undefined) {
+      baseHead = (await port.readRef('main')) ?? (await mintBase(port));
+    }
     return {
       requestId,
       status: 'applied',
@@ -515,6 +842,19 @@ const placement: TurnPlacementPort = {
     };
   },
   complete: async ({ requestId, key }) => {
+    if (port !== undefined && baseHead !== undefined) {
+      minted = await mintResult(port, baseHead);
+    }
+    const revision =
+      minted === undefined
+        ? values.revision === undefined
+          ? {}
+          : { revisionId: values.revision }
+        : {
+            revisionId: minted.revisionId,
+            branch: 'main',
+            ...(minted.treeId === undefined ? {} : { treeId: minted.treeId }),
+          };
     facts.push({
       kind: 'settled',
       key,
@@ -526,8 +866,8 @@ const placement: TurnPlacementPort = {
         chatId: key.chatId,
         projectId,
         checkoutId,
-        ...(values.revision === undefined ? {} : { revisionId: values.revision }),
-        changedPaths: ['DESIGN.md', 'main.geospec.ts', 'main.ts'],
+        ...revision,
+        changedPaths: turnFiles.map(([path]) => path).toSorted(),
         trigger: 'turn',
         runIds: [key.runId],
       },
@@ -565,9 +905,13 @@ const placement: TurnPlacementPort = {
 // Run the turn into `.tau/chats/<chatId>/events.jsonl`, then write chat.json.
 // ---------------------------------------------------------------------------
 
-const chatDir = join(projectDir, '.tau', 'chats', chatId);
+const chatDir = join(chatsDir, chatId);
 await mkdir(chatDir, { recursive: true });
 const logPath = join(chatDir, 'events.jsonl');
+/* A staged fixture replaces whatever the app or an earlier run logged for this chat. */
+for (const stale of ['events.jsonl', 'events', 'authority.writer.lock']) {
+  await rm(join(chatDir, stale), { recursive: true, force: true });
+}
 
 let messageSerial = 0;
 let epochSerial = 0;
@@ -583,13 +927,16 @@ const host = createTauAgentHost({
   placement,
 });
 
-const prompt = 'an open 4:1 planetary gear stage: fixed ring, keyed input shaft, twin-plate carrier, ready to machine';
+const prompt = [
+  'Design an open 4:1 planetary stage in @main.ts: fixed 72T ring, 24T sun on a keyed input shaft, three planets on a twin-plate carrier.',
+  `Declare the mechanism and prove it with GeoSpec${stepBytes === undefined ? '.' : ', then export a STEP.'}`,
+].join(' ');
 try {
   await host.admit({
     chatId,
-    runId: 'run_hero_1',
+    runId: turnKey.runId,
     trigger: 'submit',
-    message: { id: 'msg_hero_user_1', role: 'user', content: prompt, metadata: { timestamp: nowMs } },
+    message: { id: turnKey.turnId, role: 'user', content: prompt, metadata: { timestamp: nowMs } },
     config: {
       systemPrompt: '',
       toolChoice: 'auto',
@@ -619,8 +966,7 @@ await writeFile(join(chatDir, 'chat.json'), serializeChatRecord(record));
 // Report what the log holds, folded the way a reader folds it.
 // ---------------------------------------------------------------------------
 
-const bytes = await readFile(logPath);
-const events = parseEventLog(bytes);
+const events = parseEventLog(await readFile(logPath, 'utf8'));
 const messages = reduceEventLog(events);
 const describe = (content: JsonValue): string => {
   if (typeof content === 'string') {
@@ -653,5 +999,9 @@ for (const message of messages) {
       ? `${message.role} ${message.toolName}`
       : message.role;
   console.log(`- ${label}: ${describe(message.content)}`);
+}
+console.log(`Project ${projectId}, chat ${chatId}, view ${viewId}`);
+if (minted !== undefined) {
+  console.log(`Minted the turn's revision ${minted.revisionId} on main (base ${baseHead ?? 'none'})`);
 }
 console.log(`Run recorded from ${new Date(startedAtMs).toISOString()} to ${new Date(endedAtMs).toISOString()}`);

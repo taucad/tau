@@ -412,7 +412,7 @@ export const recordSettledGenAiUsage = (
     }
   }
 };
-/* eslint-enable max-params-no-constructor/max-params-no-constructor */
+/* eslint-enable max-params-no-constructor/max-params-no-constructor -- one settled operation */
 
 @Injectable()
 export class CreditLedgerService {

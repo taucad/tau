@@ -40,6 +40,8 @@ export const user = pgTable('user', {
   image: text('image'),
   /** Whether the user allows their AI prompts and designs to be used for AI service improvement */
   allowsAiTraining: boolean('allows_ai_training').default(true).notNull(),
+  /** Whether the user allows anonymous, content-free usage metrics about agent turns to be reported for product improvement */
+  allowsUsageMetrics: boolean('allows_usage_metrics').default(true).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()

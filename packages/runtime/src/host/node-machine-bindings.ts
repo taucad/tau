@@ -24,15 +24,15 @@ import type { NodeMachineSupervision } from '#host/node-machine-supervision.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type { MachineBindingRemoval } from '#machines/machine-client.js';
 import { machineCredentialReference } from '#machines/machine-credential.js';
-import { machineEndpointSchema, storedCandidateEndpointSchema } from '#machines/machine.js';
+import { machineCandidateEndpointSchema, machineEndpointSchema } from '#machines/machine.js';
 import type { MachineBindingOutcome, MachineCandidate } from '#machines/machine.js';
 
-// ponytail: reads a provider candidate without `transport` as a network one until every provider names it; the same
-// schema reads bindings stored before R17, which is the part that stays.
+/* A live discovery candidate: every provider names its endpoint's transport. Bindings stored before R17 are read by
+ * the store's own, lenient schema. */
 const candidateSchema = z.strictObject({
   id: identity,
   name: identity,
-  endpoint: storedCandidateEndpointSchema,
+  endpoint: machineCandidateEndpointSchema,
   claimedIdentity: z.strictObject({
     serial: identity.optional(),
     model: identity.optional(),

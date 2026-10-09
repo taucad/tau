@@ -159,7 +159,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
   const includeDeleted = options?.includeDeleted ?? false;
   const {
     getChatsForResource,
-    metadataObservationError,
+    getMetadataObservationError,
     refreshFilesystemObservations,
     getChat,
     createChat: createChatInManager,
@@ -293,7 +293,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
   return {
     chats,
     isLoading,
-    error: metadataObservationError ?? (error instanceof Error ? error.message : undefined),
+    error: getMetadataObservationError(resourceId) ?? (error instanceof Error ? error.message : undefined),
     retry: async (): ReturnType<typeof refetch> => {
       refreshFilesystemObservations();
       return refetch();

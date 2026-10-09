@@ -547,6 +547,7 @@ vi.mock('#hooks/use-cookie.js', () => ({
 }));
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
+const { useChatRecords } = await import('#hooks/use-chat-records.js');
 const { tauCloudIntent } = await import('#hooks/use-cloud-projects.js');
 
 const createWrapper = () => {
@@ -1718,6 +1719,100 @@ describe('useProjectManager.createProject', () => {
       }
     },
   );
+
+  it('keeps scoped chat health independent and retains its own fault through acknowledged retry', async () => {
+    const siblingReady = Promise.withResolvers<void>();
+    const healthyClosed = Promise.withResolvers<void>();
+    const retryReady = Promise.withResolvers<void>();
+    const open = new Promise<void>(() => {
+      /* The remaining watches stay open until disposal. */
+    });
+    let healthyRegistrations = 0;
+    mockWatchRecordFile.mockImplementation((path) => {
+      if (path.includes(unrelatedProject.id)) {
+        return { ready: siblingReady.promise, closed: open, dispose: vi.fn() };
+      }
+      healthyRegistrations++;
+      return {
+        ready: healthyRegistrations === 1 ? Promise.resolve() : retryReady.promise,
+        closed: healthyRegistrations === 1 ? healthyClosed.promise : open,
+        dispose: vi.fn(),
+      };
+    });
+    const record: ChatRecord = {
+      id: 'c',
+      resourceId: fakeProject.id,
+      name: 'Retained metadata',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    mockReadChatRecords.mockResolvedValue([record]);
+    const { wrapper, queryClient } = createInspectableWrapper();
+    queryClient.setQueryData<ProjectListing>(['projects'], {
+      projects: [
+        { manifest: fakeProject, library: { projectId: fakeProject.id, lastActivityAt: 1 }, locator: fakeLocator },
+        {
+          manifest: unrelatedProject,
+          library: { projectId: unrelatedProject.id, lastActivityAt: 1 },
+          locator: unrelatedLocator,
+        },
+      ],
+      conflicts: [],
+      recoveries: [],
+      workspaceBindingRepairs: [],
+    });
+    const view = renderHook(
+      () => ({
+        manager: useProjectManager(),
+        records: useChatRecords(fakeProject.id),
+      }),
+      { wrapper },
+    );
+    let pendingRetry: Promise<unknown> | undefined;
+    try {
+      await waitFor(() => {
+        expect(view.result.current.records.chats).toEqual([record]);
+      });
+      await act(async () => {
+        siblingReady.reject(new Error('Sibling watch refused'));
+      });
+      await waitFor(() => {
+        expect(view.result.current.manager.metadataObservationError).toContain('Sibling watch refused');
+      });
+      expect(view.result.current.records.error).toBeUndefined();
+      await act(async () => {
+        healthyClosed.resolve();
+      });
+      await waitFor(() => {
+        expect(view.result.current.records.error).toBe('Observation connection closed.');
+      });
+      expect(view.result.current.records.chats).toEqual([record]);
+      act(() => {
+        pendingRetry = view.result.current.records.retry();
+      });
+      await waitFor(() => {
+        expect(healthyRegistrations).toBe(2);
+      });
+      expect(view.result.current.records.error).toBe('Observation connection closed.');
+      await act(async () => {
+        retryReady.resolve();
+        await pendingRetry;
+      });
+      await waitFor(() => {
+        expect(view.result.current.records.error).toBeUndefined();
+      });
+      expect(view.result.current.records.chats).toEqual([record]);
+      expect(view.result.current.manager.metadataObservationError).toContain('Sibling watch refused');
+    } finally {
+      siblingReady.resolve();
+      retryReady.resolve();
+      view.unmount();
+      await Promise.allSettled(pendingRetry ? [pendingRetry] : []);
+      queryClient.clear();
+      mockWatchRecordFile.mockImplementation(recordWatch);
+      mockReadChatRecords.mockImplementation(async () => []);
+    }
+  });
 
   it('should observe an explicit project before the project inventory is populated', async () => {
     const ready = Promise.withResolvers<void>();

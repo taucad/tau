@@ -210,6 +210,7 @@ export type ConnectedWorkspace = {
 type ProjectManagerContextType = {
   discoveryObservationError: string | undefined;
   metadataObservationError: string | undefined;
+  getMetadataObservationError: (resourceId: string) => string | undefined;
   refreshFilesystemObservations: () => void;
   isLoading: boolean;
   error: Error | undefined;
@@ -802,6 +803,13 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const metadataObservationRef = useRef<ObservationService<void> | undefined>(undefined);
   const [discoveryObservationError, setDiscoveryObservationError] = useState<string>();
   const [metadataObservationError, setMetadataObservationError] = useState<string>();
+  const [metadataObservationErrors, setMetadataObservationErrors] = useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
+  const getMetadataObservationError = useCallback(
+    (resourceId: string): string | undefined => metadataObservationErrors.get(resourceId),
+    [metadataObservationErrors],
+  );
   const refreshFilesystemObservations = useCallback(() => {
     discoveryObservationRef.current?.refresh();
     metadataObservationRef.current?.refresh();
@@ -867,9 +875,24 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     discoveryObservationRef.current = discovery;
     const resources = new Map<string, Set<string>>();
     const projectMetadata = new Map<string, ObservationService<void>>();
+    const publishMetadataHealth = (id: string, error: string | undefined): void => {
+      setMetadataObservationErrors((previous) => {
+        if (previous.get(id) === error) {
+          return previous;
+        }
+        const next = new Map(previous);
+        if (error === undefined) {
+          next.delete(id);
+        } else {
+          next.set(id, error);
+        }
+        return next;
+      });
+    };
     const projectSource = (id: string): ObservationService<void> => {
       let source = projectMetadata.get(id);
       if (!source) {
+        let unsubscribeHealth = (): void => undefined;
         source = new ObservationService<void>({
           resource: `/projects/${id}/.tau/chats`,
           watch: (invalidate, reset) => {
@@ -912,8 +935,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
               closed: watch.closed,
               dispose: () => {
                 watch.dispose();
-                if (source?.activeLeaseCount === 0 && projectMetadata.get(id) === source) {
-                  projectMetadata.delete(id);
+                if (source?.activeLeaseCount === 0) {
+                  unsubscribeHealth();
+                  if (projectMetadata.get(id) === source) {
+                    projectMetadata.delete(id);
+                    publishMetadataHealth(id, undefined);
+                  }
                 }
               },
             };
@@ -956,6 +983,17 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           },
         });
         projectMetadata.set(id, source);
+        unsubscribeHealth = source.subscribe(() => {
+          if (!source || projectMetadata.get(id) !== source) {
+            return;
+          }
+          const snapshot = source.getSnapshot();
+          if (snapshot.status === 'ready') {
+            publishMetadataHealth(id, undefined);
+          } else if (snapshot.status === 'error' || snapshot.status === 'closed') {
+            publishMetadataHealth(id, snapshot.error ?? 'Chat updates unavailable.');
+          }
+        });
       }
       return source;
     };
@@ -1130,6 +1168,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       metadataLease.release();
       disconnect();
       projectMetadata.clear();
+      setMetadataObservationErrors((previous) => (previous.size === 0 ? previous : new Map()));
       metadataReadOwner.fail(new Error('Chat observation was disposed.'));
     };
   }, [fileManager.workerChangeChannel, fileManager.watchRecordFile, metadataReadOwner, queryClient]);
@@ -2860,6 +2899,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       error,
       discoveryObservationError,
       metadataObservationError,
+      getMetadataObservationError,
       refreshFilesystemObservations,
       projectManagerRef: actorRef,
       workspaceConnection,
@@ -2912,6 +2952,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     error,
     discoveryObservationError,
     metadataObservationError,
+    getMetadataObservationError,
     refreshFilesystemObservations,
     actorRef,
     workspaceConnection,

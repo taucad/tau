@@ -16,7 +16,7 @@ export function useChatRecords(
   const {
     getChatRecordsForResource,
     isLoading: isWorkerLoading,
-    metadataObservationError,
+    getMetadataObservationError,
     refreshFilesystemObservations,
   } = useProjectManager();
   const includeDeleted = options?.includeDeleted ?? false;
@@ -38,7 +38,7 @@ export function useChatRecords(
   return {
     chats,
     isLoading: isWorkerLoading || isLoading,
-    error: metadataObservationError ?? (error instanceof Error ? error.message : undefined),
+    error: getMetadataObservationError(resourceId) ?? (error instanceof Error ? error.message : undefined),
     retry: async () => {
       refreshFilesystemObservations();
       return refetch();

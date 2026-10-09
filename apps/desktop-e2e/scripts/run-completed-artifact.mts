@@ -100,6 +100,7 @@ const main = async (): Promise<void> => {
 
   const projectionInputs = z
     .object({
+      TAU_E2E_TRACE_SNAPSHOTS: z.enum(['true', 'false']).optional(),
       TAU_E2E_PROJECTION_IMPORT_ROOT: z.string().min(1).refine(isAbsolute).optional(),
       TAU_E2E_PROJECTION_ARTIFACT_ROOT: z.string().min(1).refine(isAbsolute).optional(),
       TAU_E2E_NATIVE_CORE_MANUAL: z.enum(['true', 'false']).optional(),
@@ -113,6 +114,12 @@ const main = async (): Promise<void> => {
       TAU_E2E_ONE_SHOT_MANUAL: z.enum(['fix', 'linked', 'thumbnail']).optional(),
     })
     .parse(process.env);
+  if (
+    projectionInputs.TAU_E2E_TRACE_SNAPSHOTS === 'false' &&
+    Object.entries(projectionInputs).some(([key, value]) => key.endsWith('_MANUAL') && value !== 'false')
+  ) {
+    throw new Error('Manual completed-artifact runs require full tracing snapshots.');
+  }
   if (projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT !== undefined) {
     const input = realpathSync(projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT);
     if (!statSync(input).isDirectory()) {

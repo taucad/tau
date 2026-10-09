@@ -219,6 +219,17 @@ export const launchDesktopApp = async (options: {
   ) {
     throw new Error('A completed-artifact run cannot override Node or packaged runtime resource paths.');
   }
+  const configuredSnapshots = process.env['TAU_E2E_TRACE_SNAPSHOTS'];
+  if (configuredSnapshots !== undefined && configuredSnapshots !== 'true' && configuredSnapshots !== 'false') {
+    throw new Error('TAU_E2E_TRACE_SNAPSHOTS must be true or false.');
+  }
+  const manual =
+    options.visible === true ||
+    Object.entries(process.env).some(
+      ([key, value]) =>
+        key.startsWith('TAU_E2E_') && key.endsWith('_MANUAL') && value !== undefined && value !== 'false',
+    );
+  const snapshots = manual || configuredSnapshots !== 'false';
   const userData = options.profileRoot ?? (await mkdtemp(join(tmpdir(), 'tau-desktop-e2e-user-')));
   const startupNetworkLogPath = options.captureStartupNetwork ? join(userData, 'startup-network.json') : undefined;
   /* A fixed, already-lowercase leaf inside the random parent: the workspace
@@ -406,8 +417,9 @@ export const launchDesktopApp = async (options: {
       }
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
+    console.info('DESKTOP TRACE OPTIONS', JSON.stringify({ screenshots: true, snapshots, manual }));
     recordStartupPhase('tracing.before');
-    await page.context().tracing.start({ screenshots: true, snapshots: true });
+    await page.context().tracing.start({ screenshots: true, snapshots });
     recordStartupPhase('tracing.after');
   } catch (error) {
     child.kill('SIGKILL');

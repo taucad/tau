@@ -116,3 +116,59 @@ describe('explicit manual desktop window identity', () => {
     },
   );
 });
+
+describe('explicit automated trace snapshot accommodation', () => {
+  it.each([
+    { configured: undefined, visible: false, manual: undefined, snapshots: true },
+    { configured: 'true', visible: false, manual: undefined, snapshots: true },
+    { configured: 'false', visible: false, manual: undefined, snapshots: false },
+    { configured: 'false', visible: true, manual: undefined, snapshots: true },
+    { configured: 'false', visible: false, manual: 'plugins', snapshots: true },
+  ])(
+    'should preserve trace controls for $configured / visible=$visible / manual=$manual',
+    async ({ configured, visible, manual, snapshots }) => {
+      vi.stubEnv('TAU_E2E_TRACE_SNAPSHOTS', configured);
+      vi.stubEnv('TAU_E2E_OBSERVATION_MANUAL', manual);
+      const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-trace-test-'));
+      const stopped = new Error('Fixture stops at trace initialization.');
+      const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+      application.process.mockReturnValue(mockDeep<ReturnType<typeof application.process>>());
+      application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
+      const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
+      const context = mockDeep<ReturnType<typeof page.context>>();
+      context.tracing.start.mockRejectedValueOnce(stopped);
+      page.context.mockReturnValue(context);
+      application.firstWindow.mockResolvedValue(page);
+      const launch = vi.spyOn(electron, 'launch').mockResolvedValueOnce(application);
+      try {
+        await expect(launchDesktopApp({ token: 'fixture-token', profileRoot, visible })).rejects.toThrow(
+          'The desktop shell did not survive launch.',
+        );
+        expect(context.tracing.start).toHaveBeenCalledWith({ screenshots: true, snapshots });
+        expect(page.setDefaultTimeout).toHaveBeenCalledWith(60_000);
+      } finally {
+        const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+        launch.mockRestore();
+        vi.unstubAllEnvs();
+        await rm(profileRoot, { recursive: true, force: true });
+        if (picked) {
+          await rm(dirname(picked), { recursive: true, force: true });
+        }
+      }
+    },
+  );
+
+  it('should reject an invalid trace selector before launching', async () => {
+    vi.stubEnv('TAU_E2E_TRACE_SNAPSHOTS', 'off');
+    const launch = vi.spyOn(electron, 'launch');
+    try {
+      await expect(launchDesktopApp({ token: 'fixture-token' })).rejects.toThrow(
+        'TAU_E2E_TRACE_SNAPSHOTS must be true or false.',
+      );
+      expect(launch).not.toHaveBeenCalled();
+    } finally {
+      launch.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+});

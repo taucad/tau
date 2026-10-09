@@ -1,5 +1,11 @@
 import { base64ToUint8Array } from 'uint8array-extras';
-import { agentLogEventSchema } from '@taucad/agent-host';
+import {
+  agentLogEventSchema,
+  emptyChatLedger,
+  foldChatLedger,
+  parseEventLog,
+  reduceEventLog,
+} from '@taucad/agent-host';
 import type { ProjectionBenchmarkFixture } from '#support/filesystem-projection.js';
 import { decodeProjectionFile } from '#support/filesystem-projection-writer.js';
 import { expect, test } from 'vitest';
@@ -1581,3 +1587,82 @@ test.skipIf(!multichatDiagnostic)(
     }
   },
 );
+
+const captureToolSeeds =
+  (import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> }).env[
+    'VITE_TAU_E2E_PROJECTION_CAPTURE_TOOL_SEEDS'
+  ] === 'true';
+
+for (const byteLength of [256, 65_536]) {
+  test.skipIf(!captureToolSeeds)(`captures authentic projection tool seed with ${byteLength} ASCII bytes`, async () => {
+    const targetFile = 'projection-tool-seed.txt';
+    const content = `${'x'.repeat(63)}\n`.repeat(byteLength / 64);
+    const finalReply = `Completed authentic ${byteLength} byte projection tool seed.`;
+    const [chatId] = await openChat([
+      reply('Creating the projection seed file.', {
+        toolCalls: [{ name: 'create_file', args: { targetFile, content } }],
+      }),
+      reply('Reading the projection seed file.', {
+        toolCalls: [{ name: 'read_file', args: { targetFile } }],
+      }),
+      reply(finalReply),
+    ]);
+    expect(chatId).toBeDefined();
+    await sendDraft(`Create and read the ${byteLength} byte projection seed file.`);
+    await target.expectVisible(selectors.getByText(finalReply, { exact: true }), 30_000);
+    await expectLogInvariant(chatId!, { runs: 1, settlements: ['turn.finalized'] });
+    const closure = await exportProjectionProjectClosure(await projectionProject());
+    const prefix = `projection-tool-seed-${byteLength}`;
+    await target.writeArtifact(`${prefix}-closure.json`, JSON.stringify(closure));
+    const file = closure.files.find((entry) => entry.path === targetFile);
+    expect(file).toBeDefined();
+    const actualBytes = decodeProjectionFile(file!);
+    expect(actualBytes).toEqual(new TextEncoder().encode(content));
+    expect(actualBytes.byteLength).toBe(byteLength);
+    const logFile = closure.files.find((entry) => entry.path === `.tau/chats/${chatId!}/events.jsonl`);
+    expect(logFile).toBeDefined();
+    const log = new TextDecoder().decode(decodeProjectionFile(logFile!));
+    await target.writeArtifact(`${prefix}-events.jsonl`, log);
+    const rows = parseEventLog(log);
+    expect(rows.filter((row) => row.type === 'turn.history-projection-committed')).toHaveLength(1);
+    const ledger = foldChatLedger(emptyChatLedger, rows);
+    expect(ledger.historyIntact).toBe(true);
+    expect(ledger.anomalies).toEqual([]);
+    expect(Object.keys(ledger.runs)).toHaveLength(1);
+    const messages = reduceEventLog(rows);
+    expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
+    const inputs = messages.filter((message) => message.role === 'tool-input');
+    const outputs = messages.filter((message) => message.role === 'tool-output');
+    expect(inputs.map((message) => message.toolName)).toEqual(['create_file', 'read_file']);
+    expect(outputs.map((message) => message.toolName)).toEqual(['create_file', 'read_file']);
+    expect(new Set(inputs.map((message) => message.toolCallId)).size).toBe(2);
+    expect(outputs.map((message) => message.toolCallId)).toEqual(inputs.map((message) => message.toolCallId));
+    expect(outputs.every((message) => !message.isError)).toBe(true);
+    const outputShapes = outputs.map((message) => {
+      const serialized = JSON.stringify(message.content);
+      return {
+        toolName: message.toolName,
+        messageId: message.id,
+        toolCallId: message.toolCallId,
+        serializedContentBytes: new TextEncoder().encode(serialized).byteLength,
+        containsTruncationMarker: serialized.includes('truncated'),
+        containsPersistedOutputMarker: serialized.includes('persisted-output'),
+      };
+    });
+    await target.writeArtifact(
+      `${prefix}-shape.json`,
+      JSON.stringify({
+        chatId,
+        fileBytes: actualBytes.byteLength,
+        fileSha256: file!.sha256,
+        rows: rows.length,
+        messages: messages.length,
+        messageIds: messages.map((message) => message.id),
+        outputs: outputShapes,
+        closureFiles: closure.files.map((entry) => ({ path: entry.path, sha256: entry.sha256 })),
+        qualification:
+          'Actual create_file then read_file in one settled turn; output clipping and persisted references are retained, not synthesized. Expansion is a later gate.',
+      }),
+    );
+  });
+}

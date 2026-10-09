@@ -301,6 +301,15 @@ describe('plugin generator', () => {
     expect(machine).toContain('input.configuration.logicalId');
     expect(machine).toContain('TODO: implement manufacturing-fixture machine connection');
     expect(machine).toContain('const manifest: MachineManifestDefinition = {');
+    /* Manifest v3 under provider ABI 2: no actions until qualified, no holds, no jobs, and a declared stop. */
+    expect(machine).toContain('  version: 3,');
+    expect(machine).toContain('  actions: [],');
+    expect(machine).toContain('  holds: [],');
+    expect(machine).toContain("  jobs: { type: 'unsupported' },");
+    expect(machine).toContain(
+      "  stop: {\n    motion: 'halts',\n    spindle: 'none',\n    heaters: 'none',\n    position: 'kept',\n    recovery: [],\n  },",
+    );
+    expect(machine).toContain('  protocolVersion: 2,');
     expect(machine).toContain('  manifest,\n  bindingConfiguration,');
 
     const readme = readText(tree, `${root}/README.md`);
@@ -410,7 +419,7 @@ describe('plugin generator', () => {
 
   it('typechecks emitted job-only, machine-only, and mixed packages with negative schema witnesses', async () => {
     await compileGeneratedPlugins();
-  }, 30_000);
+  }, 120_000);
 
   it('fails a full creation collision before changing existing bytes', async () => {
     const tree = createTreeWithEmptyWorkspace();

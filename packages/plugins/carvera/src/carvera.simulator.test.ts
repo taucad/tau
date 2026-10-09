@@ -75,7 +75,7 @@ const connect = async (simulator = createCarveraSimulator({ speed: 25, tickInter
       candidate: {
         id: 'carvera-simulator',
         name: 'Simulated Carvera',
-        endpoint: { address: 'simulator.invalid', interface: 'simulator' },
+        endpoint: { transport: 'network', address: 'simulator.invalid', interface: 'simulator' },
         claimedIdentity: { model: 'Carvera' },
         observedAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -661,9 +661,8 @@ describe('carvera simulator through the real session', () => {
       expect(sent.slice(at, at + 3)).toEqual(['M3 S10000', 'G4 P300.0', 'M5']);
       const turning = await machine.waitFor((report) => report.state.status === 'active', 'the timed run');
       const stopRemedy = {
-        type: 'person',
-        instruction:
-          'To end it now, press Stop: the Carvera halts and loses its position, so unlock and home it after.',
+        type: 'stop',
+        consequence: 'The Carvera halts and loses its position, so unlock and home it after.',
       };
       expect(turning.availability.find(({ id }) => id === 'spindle.set')).toMatchObject({
         state: 'unavailable',

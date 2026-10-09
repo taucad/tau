@@ -1,23 +1,16 @@
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine } from '@taucad/runtime/machine';
-import type { MachineDiscoveryEvent } from '@taucad/runtime/machine';
+import type { MachineDiscoveryEvent, MachineFailureCode } from '@taucad/runtime/machine';
 import { z } from 'zod';
 
 import { carveraManifest, carveraSubmissionConfiguration } from '#carvera.manifest.js';
 import { carveraDiscoveryPort, carveraIdleDrop, carveraTcpPort, parseCarveraBroadcast } from '#carvera.protocol.js';
 
-/** The address a binding is pinned to; absent while discovering every Carvera on the network. @internal */
+/** Nothing beyond where the machine is, which is the discovery endpoint. @internal */
 export const carveraBindingConfiguration = defineConfiguration({
   id: 'makera.carvera.binding',
-  version: '1.0.0',
-  schema: z.object({
-    address: z
-      .string()
-      .min(1)
-      .max(253)
-      .optional()
-      .meta({ title: 'Address', description: 'The machine’s IPv4 address.' }),
-  }),
+  version: '2.0.0',
+  schema: z.object({}),
   ui: { version: 1, rjsf: {} },
 });
 
@@ -25,6 +18,8 @@ export const carveraBindingConfiguration = defineConfiguration({
 const discoveryListen = 5000;
 /** Milliseconds a found machine stays a candidate without another broadcast. */
 const candidateLifetime = 5000;
+/** Milliseconds an entered address stays a candidate: long enough to bind it. */
+const manualCandidateLifetime = 30_000;
 
 /** Makera Carvera C1 on stock firmware 1.0.7, over its LAN protocol (TCP 2222, UDP 3333 discovery). @public */
 export const carveraMachine = defineMachine({
@@ -37,6 +32,26 @@ export const carveraMachine = defineMachine({
   bindingConfiguration: carveraBindingConfiguration,
   submissionConfiguration: carveraSubmissionConfiguration,
   async *discover(input, runtime): AsyncIterable<MachineDiscoveryEvent> {
+    if (input.endpoint !== undefined) {
+      // A person's entry is taken as it is, as broadcasts do not cross subnets; connecting proves a Carvera answers.
+      // A serial endpoint finds nothing: the host refuses one before it reaches a network provider.
+      if (input.endpoint.transport !== 'network') {
+        return;
+      }
+      const observedAt = runtime.clock.now();
+      yield {
+        type: 'found',
+        candidate: {
+          id: `carvera:${input.endpoint.address}`,
+          name: `Carvera at ${input.endpoint.address}`,
+          endpoint: { ...input.endpoint, interface: 'manual' },
+          claimedIdentity: { model: 'Carvera' },
+          observedAt,
+          expiresAt: new Date(Date.parse(observedAt) + manualCandidateLifetime).toISOString(),
+        },
+      };
+      return;
+    }
     const seen = new Set<string>();
     for await (const datagram of runtime.listenDatagrams({
       port: carveraDiscoveryPort,
@@ -48,10 +63,7 @@ export const carveraMachine = defineMachine({
       const broadcast = parseCarveraBroadcast(datagram.bytes);
       // The observed sender is the address; the broadcast's own field is a claim and may name the other subnet.
       const { address } = datagram.peer;
-      if (
-        broadcast === undefined ||
-        (input.configuration.address !== undefined && input.configuration.address !== address)
-      ) {
+      if (broadcast === undefined) {
         continue;
       }
       const observedAt = runtime.clock.now();
@@ -61,7 +73,7 @@ export const carveraMachine = defineMachine({
         candidate: {
           id,
           name: broadcast.name,
-          endpoint: { address, interface: datagram.peer.interface },
+          endpoint: { transport: 'network', address, interface: datagram.peer.interface },
           claimedIdentity: { model: 'Carvera' },
           observedAt,
           expiresAt: new Date(Date.parse(observedAt) + candidateLifetime).toISOString(),
@@ -71,8 +83,13 @@ export const carveraMachine = defineMachine({
     }
   },
   async connect(input, runtime) {
+    const { endpoint } = input.candidate;
+    if (endpoint.transport !== 'network') {
+      throw Object.assign(new Error('A Carvera is reached over the network, not a serial port.'), {
+        code: 'MACHINE_UNAVAILABLE' satisfies MachineFailureCode,
+      });
+    }
     const { connectCarveraSession } = await import('#carvera.session.js');
-    const address = input.configuration.address ?? input.candidate.endpoint.address;
     return connectCarveraSession({
       id: input.candidate.id,
       name: input.candidate.name,
@@ -84,7 +101,7 @@ export const carveraMachine = defineMachine({
       log: async (entry) => runtime.log(entry),
       open: async (signal) =>
         runtime.connectStream({
-          endpoint: { address, port: carveraTcpPort },
+          endpoint: { address: endpoint.address, port: endpoint.port ?? carveraTcpPort },
           transport: 'tcp',
           trust: { type: 'system' },
           connectTimeout: 5000,

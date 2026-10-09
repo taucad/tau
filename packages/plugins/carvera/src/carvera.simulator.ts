@@ -1196,7 +1196,7 @@ const defineSimulator = (input: Readonly<{ simulator?: CarveraSimulator; pollInt
         candidate: {
           id: 'carvera-simulator',
           name: 'Simulated Carvera',
-          endpoint: { address: 'simulator.invalid', interface: 'simulator' },
+          endpoint: { transport: 'network', address: 'simulator.invalid', interface: 'simulator' },
           claimedIdentity: { model: 'Carvera' },
           observedAt,
           expiresAt: new Date(Date.parse(observedAt) + 5 * 60_000).toISOString(),

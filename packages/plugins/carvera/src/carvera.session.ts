@@ -1124,9 +1124,8 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
           state: 'unavailable',
           ...failure('MACHINE_ACTION_BUSY', 'The spindle is on a timed run and stops by itself when the time is up.'),
           remedy: {
-            type: 'person',
-            instruction:
-              'To end it now, press Stop: the Carvera halts and loses its position, so unlock and home it after.',
+            type: 'stop',
+            consequence: 'The Carvera halts and loses its position, so unlock and home it after.',
           },
         };
       }

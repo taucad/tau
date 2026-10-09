@@ -76,6 +76,7 @@ describe('carveraMachine', () => {
           contract: { id: 'tau.toolpath.gcode', version: 1 },
           mediaType: 'text/x.gcode',
           technology: 'subtractive.milling',
+          extensions: ['.cnc', '.nc', '.gcode', '.ngc', '.tap'],
         },
       ],
       safety: { authority: 'person', attended: true, interlocks: ['cover', 'estop'] },
@@ -111,6 +112,65 @@ describe('carveraMachine', () => {
     ]);
   });
 
+  it('should take an entered address and port as the candidate without listening, and connect to that port', async () => {
+    const definition = await resolveRuntimePluginDefinition('machine', carveraMachine());
+    const events = [];
+    for await (const event of definition.discover(
+      {
+        configuration: {},
+        endpoint: { transport: 'network', address: '10.0.5.7', port: 2223 },
+        signal: new AbortController().signal,
+      },
+      {
+        clock,
+        // oxlint-disable-next-line require-yield -- an addressed discovery must not listen
+        async *listenDatagrams() {
+          throw new Error('listened');
+        },
+      },
+    )) {
+      events.push(event);
+    }
+    expect(events).toMatchObject([
+      {
+        type: 'found',
+        candidate: {
+          id: 'carvera:10.0.5.7',
+          endpoint: { transport: 'network', address: '10.0.5.7', port: 2223, interface: 'manual' },
+        },
+      },
+    ]);
+    const simulator = createCarveraSimulator({ speed: 25, tickInterval: 10 });
+    simulators.push(simulator);
+    const requests: MachineNetworkRequest[] = [];
+    const [found] = events;
+    if (found?.type !== 'found') {
+      throw new Error('no candidate');
+    }
+    const session = await definition.connect(
+      {
+        candidate: found.candidate,
+        configuration: {},
+        connection: { secretRef: 'none', serviceTrust: {} },
+        signal: new AbortController().signal,
+      },
+      {
+        clock,
+        log: async () => undefined,
+        connectStream: async (request) => {
+          requests.push(request);
+          return simulator.open();
+        },
+        async *readArtifact() {
+          yield new Uint8Array();
+        },
+        resolveSecret: async () => '',
+      },
+    );
+    sessions.push(session);
+    expect(requests).toMatchObject([{ endpoint: { address: '10.0.5.7', port: 2223 } }]);
+  });
+
   it('should connect over TCP 2222 to the bound address and identify the firmware', async () => {
     const simulator = createCarveraSimulator({ speed: 25, tickInterval: 10 });
     simulators.push(simulator);
@@ -133,12 +193,12 @@ describe('carveraMachine', () => {
         candidate: {
           id: 'carvera:192.168.1.50',
           name: 'Workshop Carvera',
-          endpoint: { address: '192.168.1.99', interface: 'en0' },
+          endpoint: { transport: 'network', address: '192.168.1.50', interface: 'en0' },
           claimedIdentity: { model: 'Carvera' },
           observedAt: clock.now(),
           expiresAt: clock.now(),
         },
-        configuration: { address: '192.168.1.50' },
+        configuration: {},
         connection: { secretRef: 'none', serviceTrust: {} },
         signal: new AbortController().signal,
       },

@@ -464,6 +464,8 @@ export const carveraManifest = (profile?: MachineQualificationProfile): MachineM
           payloadSelection: 'single',
           requiredMembers: [],
           technology: 'subtractive.milling',
+          // The firmware's `play` takes any file name; Makera's own posts write `.cnc` (CarveraProfiles `Carvera.cps:21`).
+          extensions: ['.cnc', '.nc', '.gcode', '.ngc', '.tap'],
         },
       ],
       // The machine plays the file from its SD card and keeps running if the link drops.

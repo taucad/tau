@@ -306,6 +306,7 @@ describe('native model loader ownership', () => {
     expect(exportModel).toHaveBeenCalledTimes(3);
     expect(vi.mocked(runtime.open).mock.calls[2]?.[0]).toMatchObject({
       source: { files: { 'main.ts': 'model B' } },
+      watch: false,
     });
     await loader.releaseAll();
     expect(releaseSubject).toHaveBeenCalledTimes(1);

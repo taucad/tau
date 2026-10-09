@@ -140,14 +140,14 @@ const fakeRuntime = (options?: {
     connected: number;
     terminated: number;
     rendered: number;
-    exports: Array<{ source?: unknown; parameters?: unknown; exportOptions?: unknown }>;
+    exports: Array<{ source?: unknown; parameters?: unknown; watch?: unknown; exportOptions?: unknown }>;
   };
 } => {
   const state: {
     connected: number;
     terminated: number;
     rendered: number;
-    exports: Array<{ source?: unknown; parameters?: unknown; exportOptions?: unknown }>;
+    exports: Array<{ source?: unknown; parameters?: unknown; watch?: unknown; exportOptions?: unknown }>;
   } = { connected: 0, terminated: 0, rendered: 0, exports: [] };
   const client = {
     connect: async () => {
@@ -156,13 +156,14 @@ const fakeRuntime = (options?: {
     terminate: () => {
       state.terminated += 1;
     },
-    open(openRequest: { source?: unknown; parameters?: unknown }) {
+    open(openRequest: { source?: unknown; parameters?: unknown; watch?: unknown }) {
       return {
         close: vi.fn(),
         export: async (format: string, request: { options?: unknown }) => {
           state.exports.push({
             source: openRequest.source,
             parameters: openRequest.parameters,
+            watch: openRequest.watch,
             exportOptions: request.options,
           });
           if (options?.throws !== undefined) {
@@ -689,7 +690,11 @@ describe('loadModel — the runtime branch', () => {
     const subject = await loadModel({ file: 'main.ts', runtime, parameters: { seed: 3 } });
     expect(runtime.state.rendered).toBe(0);
     expect(runtime.state.exports).toHaveLength(1);
-    expect(runtime.state.exports[0]).toMatchObject({ source: { path: 'main.ts' }, parameters: { seed: 3 } });
+    expect(runtime.state.exports[0]).toMatchObject({
+      source: { path: 'main.ts' },
+      parameters: { seed: 3 },
+      watch: false,
+    });
     expect(subject.mesh.stats.triangleCount).toBe(1);
   });
 

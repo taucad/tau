@@ -739,9 +739,11 @@ export const createGeoSpecNativeModelLoader = (
       throw failure(requested.diagnostics);
     }
     const exportOptions = structuredClone(requested.options);
+    // One export, then close: a file watcher would outlive the worker that tears it down.
     const document = runtime.open({
       source: runtimeSource(options),
       ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
+      watch: false,
     });
     const exported = await (async () => {
       try {

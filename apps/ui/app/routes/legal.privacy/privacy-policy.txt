@@ -1,6 +1,6 @@
 # Privacy Policy - TauCAD Limited
 
-*Effective date: September 14, 2026*
+*Effective date: October 9, 2026*
 
 ## 1. Introduction
 
@@ -36,6 +36,11 @@ Financial information such as payment method details is collected and stored by 
 ### 3.3 Usage Data
 
 On the web, we collect product analytics such as browser type, pages visited, interaction and feature-use events, and session replay only after analytics consent. The desktop app does not run PostHog analytics. Operational security and service logs may still process network information when you use online features.
+
+When you are signed in, the web and desktop apps also report two kinds of metrics to Tau's own API. Neither includes prompts, messages, code, file contents, file or project names, or error message text, and neither is labelled by account, workspace, project or chat:
+
+- **Operational telemetry**: performance and outcome metrics such as kernel execution timing, sync outcomes, agent turn counts and durations, tool-call counts by kind, token counts, and error codes. We use these to keep the Service healthy, and they are sent regardless of the setting below.
+- **Anonymous usage metrics** (Optional): counts describing how the AI agent works during a turn, such as the CAD kernel, which built-in skills were used, how many calls and reference lookups happened before the first model change, lookup outcomes, evaluation outcome classes, and GeoSpec test pass and fail counts. We use these to improve Tau. They are on by default; switch them off under **Settings → General → Privacy** by disabling "Share anonymous usage metrics." On the web, an active Global Privacy Control signal also switches them off.
 
 ### 3.4 Location Data
 

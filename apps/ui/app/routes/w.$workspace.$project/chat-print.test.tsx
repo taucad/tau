@@ -12,6 +12,7 @@ import { fffProcessOf } from '@taucad/runtime/machine';
 import type { MachineClient, MachineDirectoryEntry, MaterialSlotSnapshot } from '@taucad/runtime/machine';
 import { machineSettingsPath, serializeMachineSettings, readMachineSettings } from '@taucad/runtime/machine/settings';
 import type { MachineSettingsRecord, MachineSettingsValue } from '@taucad/types';
+import type { JSONSchema7 } from '@taucad/json-schema';
 import { slicingPreferences } from '@taucad/slicer/preferences';
 import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
 import { writeBambuContainer } from '@taucad/slicer/container';
@@ -1095,6 +1096,48 @@ describe('Print pane prepare and send', () => {
     expect(screen.getByRole('button', { name: /^Start options/u })).toHaveTextContent(/timelapse/u);
   });
 
+  it('leaves a start option the provider does not declare as on/off in Advanced, with its own control', async () => {
+    // A provider whose timelapse is a mode, not a flag: a toggle would send true/false, which it refuses.
+    const { jobs } = simulatorProvider.manifest;
+    if (jobs.type !== 'supported') {
+      throw new Error('The simulator takes jobs.');
+    }
+    // The legacy projection is draft-07 (its `dialect`), read the way Prepare reads it.
+    const inputSchema = jobs.submission.legacyProjection.inputSchema as JSONSchema7;
+    const timelapseModes = {
+      ...simulatorProvider,
+      settingsConfiguration: undefined,
+      manifest: {
+        ...simulatorProvider.manifest,
+        jobs: {
+          ...jobs,
+          submission: {
+            ...jobs.submission,
+            legacyProjection: {
+              ...jobs.submission.legacyProjection,
+              inputSchema: {
+                ...inputSchema,
+                properties: {
+                  ...inputSchema.properties,
+                  timelapse: { type: 'string', enum: ['off', 'layer', 'smooth'], default: 'off' },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const user = userEvent.setup();
+    renderPane({ ...createFixture().client, listProviders: async () => [timelapseModes] });
+    await findMachine('Ready');
+    openDisclosure(/^Start options/u);
+    expect(await screen.findByRole('switch', { name: 'Toggle for Bed levelling' })).toBeChecked();
+    expect(screen.queryByRole('switch', { name: 'Toggle for Timelapse' })).not.toBeInTheDocument();
+    await openAdvancedSettings(user);
+    const mapping = await screen.findByLabelText('Machine mapping');
+    expect(within(mapping).getByLabelText('Parameter: Timelapse')).toBeInTheDocument();
+  });
+
   it('invalidates a slice when a prestart choice changes and submits the new value', async () => {
     const fixture = createFixture();
     const user = userEvent.setup();
@@ -1737,6 +1780,23 @@ describe('Print pane monitor and controls', () => {
       expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
     });
     expect(screen.queryByText(/did not confirm the stop/u)).not.toBeInTheDocument();
+  });
+
+  it('stops reading Stopping… for a Stop the host never lists, and says to use the machine’s own stop', async () => {
+    // A corrupt journal or a refused append: the host answers `unknown` without listing the stop, so nothing settles it.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      await unconfirmedStop();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(
+        screen.getByText('Workshop X1C did not confirm the stop. Use the machine’s own stop if it is still moving.'),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('says plainly when the host gives up confirming a Stop', async () => {

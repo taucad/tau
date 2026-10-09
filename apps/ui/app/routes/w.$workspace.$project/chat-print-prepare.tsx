@@ -252,10 +252,15 @@ export type SlicedArtifact = Readonly<{
 const noColors: readonly string[] = [];
 /**
  * Values owned by the machine or the visible Prepare controls, not separate Advanced choices: Bambu's own keys, and the
- * start options any provider declares, which Start options shows.
+ * start options the provider declares as on/off, which Start options shows.
  */
 const preparedFields = (provider: MachineProvider | undefined): ReadonlySet<string> =>
-  new Set([...bambuOwnedSubmissionFields(provider), ...startOptions.map(({ key }) => key)]);
+  new Set([
+    ...bambuOwnedSubmissionFields(provider),
+    ...startOptionsOf(provider && (submissionOf(provider).legacyProjection.inputSchema as JSONSchema7)).map(
+      ({ key }) => key,
+    ),
+  ]);
 const observedDiameterFields = new Set(['expectedFilamentDiameter', 'expectedNozzleDiameter']);
 
 /** The submission schema's own defaults, by key. */
@@ -1678,11 +1683,19 @@ const startOptions = [
   { key: 'timelapse', label: 'Timelapse', short: 'Timelapse', description: 'Record a frame every layer.' },
 ] as const;
 
+/**
+ * The start options a submission schema declares as booleans. A key of another type (a timelapse mode, say) is not a
+ * toggle: it stays in Advanced with the control its schema asks for.
+ */
+const startOptionsOf = (schema: JSONSchema7 | undefined): ReadonlyArray<(typeof startOptions)[number]> =>
+  startOptions.filter(({ key }) => {
+    const property = schema?.properties?.[key];
+    return typeof property === 'object' && property.type === 'boolean';
+  });
+
 /** The host's prestart options, a stage summarised by what is on, preserved in the submission projection. */
 function StartOptionsStage({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element | undefined {
-  const declared = startOptions.filter(({ key }) =>
-    Object.hasOwn(prepare.submissionSchema?.schema.properties ?? {}, key),
-  );
+  const declared = startOptionsOf(prepare.submissionSchema?.schema);
   if (declared.length === 0) {
     return undefined;
   }

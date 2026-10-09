@@ -76,6 +76,14 @@ type HoldLease = {
  * @param componentId - The held component.
  * @returns The check, as for a new press.
  */
+/**
+ * How long an unconfirmed stop may stay unlisted before the pane stops saying "Stopping…". The host publishes a stop it
+ * journals before its receipt returns, so it is listed within a directory frame; one still unlisted after one tick of
+ * the host's 5-second escalation clock was never journaled (a corrupt journal, a refused append), and the 180-second
+ * `confirmationWindow` that would move it to `attention` never reaches it.
+ */
+const unlistedStopWait = 5000;
+
 const checkHeld = (entry: MachineDirectoryEntry, componentId: string): MachineActionCheck => {
   const { state } = entry.snapshot;
   const moving: MachineDirectoryEntry['snapshot'] | undefined =
@@ -113,7 +121,10 @@ export type MachineControl = Readonly<{
   /** The last refusal, in the person's words. */
   error: string | undefined;
   stop: () => Promise<void>;
-  /** A stop is in flight, or its receipt was `unknown` and the host has not settled it from a report yet. */
+  /**
+   * A stop is in flight, or its receipt was `unknown` and the host has not settled it from a report yet (a stop the host
+   * does not list reads as stopping for a few seconds only).
+   */
   isStopping: boolean;
   beginHold: (componentId: string, parameters: MachineJogHoldParameters) => void;
   endHold: () => void;
@@ -151,6 +162,8 @@ export const useMachineControl = ({
   /* The last stop whose receipt was `unknown`: the machine may still be stopping (a filament change, a tag read, a
    * busy AMS), so it reads "Stopping…" until the host settles its operation from a report. */
   const [unconfirmedStop, setUnconfirmedStop] = useState<string>();
+  /* The unconfirmed stop stayed unlisted past {@link unlistedStopWait}: the host never journaled it. */
+  const [isStopUnlisted, setIsStopUnlisted] = useState(false);
   const [hold, setHold] = useState<ActiveHold>();
   /** The hold in force: its id once granted, its renewal timer, and whether the press already ended. */
   const holdRef = useRef<HoldLease>(undefined);
@@ -221,6 +234,7 @@ export const useMachineControl = ({
     setStopping((count) => count + 1);
     setError(undefined);
     setUnconfirmedStop(undefined);
+    setIsStopUnlisted(false);
     try {
       const receipt = await client.stop({
         machineId: entry.machineId,
@@ -379,17 +393,34 @@ export const useMachineControl = ({
 
   useEffect(() => endHold, [endHold]);
 
-  /* An unconfirmed stop is still stopping until its operation settles: not yet listed, sending or confirming. It
-   * succeeds silently once accepted; a refusal, or a stop the host gave up confirming, is said. */
+  /* An unconfirmed stop is still stopping until its operation settles: not yet listed (for a bounded wait), sending
+   * or confirming. It succeeds silently once accepted; a refusal, a stop the host gave up confirming, or one the host
+   * never listed, is said. */
   const stopOperation =
     unconfirmedStop === undefined
       ? undefined
       : entry.snapshot.operations.find((operation) => operation.operationId === unconfirmedStop);
+  const isStopListed = stopOperation !== undefined;
+  useEffect(() => {
+    if (unconfirmedStop === undefined || isStopListed) {
+      return undefined;
+    }
+    const timer = setTimeout(() => {
+      setIsStopUnlisted(true);
+    }, unlistedStopWait);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [unconfirmedStop, isStopListed]);
   const isStopUnsettled =
     unconfirmedStop !== undefined &&
-    (stopOperation === undefined || ['planned', 'sending', 'confirming'].includes(stopOperation.state));
+    (stopOperation === undefined
+      ? !isStopUnlisted
+      : ['planned', 'sending', 'confirming'].includes(stopOperation.state));
   const stopNotice =
-    stopOperation?.state === 'attention' || stopOperation?.state === 'rejected'
+    stopOperation?.state === 'attention' ||
+    stopOperation?.state === 'rejected' ||
+    (unconfirmedStop !== undefined && stopOperation === undefined && isStopUnlisted)
       ? `${entry.name} did not confirm the stop. Use the machine’s own stop if it is still moving.`
       : undefined;
 

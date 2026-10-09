@@ -11,6 +11,7 @@ import type { ChatSidebarState } from '#types/chat-sidebar.types.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
+import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions.machine.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
@@ -959,6 +960,122 @@ describe('use-sidebar-status — pin (P64): sync remains a project fact', () => 
 });
 
 describe('use-sidebar-status — pin (R3/R4): the bind key carries what the row is bound to', () => {
+  it('binds each live project session once and releases the replaced actor', () => {
+    const first = createActor(projectSessionMachine, { input: { projectId: 'enclosure' } });
+    const replacement = createActor(projectSessionMachine, { input: { projectId: 'enclosure' } });
+    first.start();
+    replacement.start();
+    for (const actor of [first, replacement]) {
+      for (const region of ['views', 'runtime', 'agentHost', 'compute'] as const) {
+        actor.send({ type: 'childReady', region });
+      }
+    }
+    liveProject('enclosure');
+    fakeRegistry.refs['enclosure'] = first;
+    const firstSubscribe = vi.spyOn(first, 'subscribe');
+    const replacementSubscribe = vi.spyOn(replacement, 'subscribe');
+    function Row(): React.JSX.Element {
+      const row = useProjectSidebarRow('enclosure');
+      return <span>{row.runtimeFailure ?? 'healthy'}</span>;
+    }
+    const view = render(<Row />);
+    try {
+      expect(firstSubscribe).toHaveBeenCalledOnce();
+      act(() => {
+        notifyRegistry();
+      });
+      expect(firstSubscribe).toHaveBeenCalledOnce();
+      act(() => {
+        first.send({ type: 'childFailed', region: 'runtime', reason: 'first runtime failed' });
+      });
+      expect(screen.getByText('first runtime failed')).toBeTruthy();
+      act(() => {
+        fakeRegistry.refs['enclosure'] = replacement;
+        notifyRegistry();
+      });
+      expect(replacementSubscribe).toHaveBeenCalledOnce();
+      expect(screen.getByText('healthy')).toBeTruthy();
+      const replacementReads = vi.spyOn(replacement, 'getSnapshot');
+      act(() => {
+        first.send({ type: 'childFailed', region: 'runtime', reason: 'retired runtime failed' });
+      });
+      expect(replacementReads).not.toHaveBeenCalled();
+      act(() => {
+        replacement.send({ type: 'childFailed', region: 'runtime', reason: 'current runtime failed' });
+      });
+      expect(screen.getByText('current runtime failed')).toBeTruthy();
+      view.unmount();
+      replacementReads.mockClear();
+      replacement.send({ type: 'childFailed', region: 'runtime', reason: 'unmounted runtime failed' });
+      expect(replacementReads).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      first.stop();
+      replacement.stop();
+    }
+  });
+
+  it('rebinds a replaced revision client while its project session stays live', () => {
+    liveProject('enclosure');
+    const client = () => {
+      revisions('enclosure');
+      const initial = fakeRegistry.revisionClients.get('enclosure')?.status();
+      if (!initial) {
+        throw new Error('Expected the revision fixture projection.');
+      }
+      let projection = initial;
+      const listeners = new Set<() => void>();
+      return {
+        listeners,
+        status: vi.fn(() => projection),
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+        conflict: () => {
+          projection = { ...projection, sync: { ...projection.sync, state: 'conflicted' } };
+          for (const listener of listeners) {
+            listener();
+          }
+        },
+      };
+    };
+    const first = client();
+    const replacement = client();
+    fakeRegistry.revisionClients.set('enclosure', first);
+    function Row(): React.JSX.Element {
+      const row = useProjectSidebarRow('enclosure');
+      return <span>{row.conflicted ? 'conflicted' : 'healthy'}</span>;
+    }
+    const view = render(<Row />);
+    try {
+      expect(first.listeners.size).toBe(1);
+      expect(screen.getByText('healthy')).toBeTruthy();
+      act(() => {
+        fakeRegistry.revisionClients.set('enclosure', replacement);
+        notifyRegistry();
+      });
+      expect(first.listeners.size).toBe(0);
+      expect(replacement.listeners.size).toBe(1);
+      expect(screen.getByText('healthy')).toBeTruthy();
+      replacement.status.mockClear();
+      act(() => {
+        first.conflict();
+      });
+      expect(replacement.status).not.toHaveBeenCalled();
+      act(() => {
+        replacement.conflict();
+      });
+      expect(screen.getByText('conflicted')).toBeTruthy();
+      view.unmount();
+      expect(replacement.listeners.size).toBe(0);
+    } finally {
+      view.unmount();
+    }
+  });
+
   it('subscribes to a revision client that appears after the first bind', () => {
     liveProject('enclosure');
     function Row(): React.JSX.Element {

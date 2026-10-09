@@ -51,7 +51,7 @@ import { createMachineDirectory } from '#machines/machine-directory.js';
 import { machineStartWaitMilliseconds } from '#machines/machine-jobs.js';
 import type { MachineDirectory, MachineDirectoryEntry } from '#machines/machine-directory.js';
 import type { MachineJob } from '#machines/machine-jobs.js';
-import type { MachineAlert } from '#machines/machine-observation.js';
+import type { MachineAlert, MachineRun } from '#machines/machine-observation.js';
 import { isSimulatedMachine } from '#machines/machine-manifest.js';
 import { parseMachineProvider } from '#machines/machine.js';
 import type {
@@ -146,8 +146,21 @@ export type NodeMachineHost = Readonly<{
    * up: a launcher that closes anyway just closes, and one that calls its close off calls the error's `resume`.
    */
   quiesce(input?: Readonly<{ /** Milliseconds. */ startTimeout?: number }>): Promise<() => void>;
+  /**
+   * The machines a streamed run is feeding now. This host feeds a streamed program line by line for its whole run, so
+   * a launcher keeps the computer awake while any is listed and refuses to close under one (Q-streamed-host). A run
+   * the machine reports as starting, running, paused or finishing counts, and so does a streamed start recorded on its
+   * job as running, so a provider that answers before its report shows the run is never read as idle; a run the host
+   * marked `interrupted` (its session was lost, or the host restarted) does not. Reads only: nothing is sent to a
+   * machine, so a launcher may ask on a timer.
+   * @returns Each machine's id and name; none once the host is closed.
+   */
+  streamingMachines(): Promise<ReadonlyArray<Readonly<{ machineId: string; name: string }>>>;
   close(): Promise<void>;
 }>;
+
+/** The reported run states in which a streamed program still has lines to send or in flight. */
+const streamingRunStates: ReadonlySet<MachineRun['state']> = new Set(['starting', 'running', 'paused', 'finishing']);
 
 /**
  * `quiesce()` waited `startTimeout` and a start was still in flight, so the launcher cannot know whether a run is
@@ -882,6 +895,26 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         clearTimeout(timer);
       }
       return resume;
+    },
+    async streamingMachines() {
+      if (closed) {
+        return [];
+      }
+      const { entries } = await ownedDirectory.snapshot();
+      const running = new Set(
+        [...jobs.values()]
+          .filter(({ state, run }) => state === 'started' && run?.outcome === 'running')
+          .map(({ machineId }) => machineId),
+      );
+      return entries
+        .filter(({ machineId, descriptor, snapshot: { run } }) => {
+          if (run?.delivery === 'streamed' && streamingRunStates.has(run.state)) {
+            return true;
+          }
+          const facts = running.has(machineId) ? descriptor.capabilities.jobs : undefined;
+          return facts?.type === 'supported' && facts.delivery === 'streamed';
+        })
+        .map(({ machineId, name }) => ({ machineId, name }));
     },
     async close() {
       if (closing) {

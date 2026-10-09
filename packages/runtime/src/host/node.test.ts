@@ -1772,7 +1772,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     await fixture.close();
   });
 
-  it('should record a streamed run as interrupted when the session that fed it is lost', async () => {
+  it('should list a streamed run as streaming until the session that fed it is lost, then record it interrupted', async () => {
     const lose = Promise.withResolvers<void>();
     const prepare = vi.fn(async (input: Readonly<{ operationId: string }>) =>
       readyPreparation(input, { plate: 'smooth' }),
@@ -1795,16 +1795,53 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       },
     );
     await request(fixture.client, 'job-1');
+    await expect(fixture.host.streamingMachines()).resolves.toEqual([]);
     await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({
       state: 'started',
       run: { runId: 'run-start-job-1', outcome: 'running' },
     });
+    /* The machine's report shows no run yet; the start recorded on the job is enough. */
+    await expect(fixture.host.streamingMachines()).resolves.toEqual([{ machineId, name: machineId }]);
     lose.resolve();
     await vi.waitFor(async () => {
       const [latest] = await fixture.client.listJobs({});
       expect(latest).toMatchObject({ state: 'started', run: { runId: 'run-start-job-1', outcome: 'interrupted' } });
     });
+    await expect(fixture.host.streamingMachines()).resolves.toEqual([]);
     expect(start).toHaveBeenCalledOnce();
+    await fixture.close();
+  });
+
+  it('should list as streaming only a machine whose streamed run still has lines to send', async () => {
+    const feed = reportFeed();
+    const fixture = await boundPrinter(storedJobs().facet, { observe: feed.observe });
+    const streaming = async (): Promise<readonly string[]> => {
+      const machines = await fixture.host.streamingMachines();
+      return machines.map(({ name }) => name);
+    };
+    /* A stored job runs on the machine by itself: nothing here feeds it. */
+    await request(fixture.client, 'job-1');
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ run: { outcome: 'running' } });
+    await expect(streaming()).resolves.toEqual([]);
+    const reported = [
+      ['streamed', 'finishing', [machineId]],
+      ['streamed', 'completed', []],
+      ['streamed', 'paused', [machineId]],
+      ['stored', 'running', []],
+    ] as const;
+    for (const [delivery, state, expected] of reported) {
+      feed.push({
+        type: 'snapshot',
+        snapshot: fixtureReport({
+          state: { status: 'active' },
+          run: { runId: 'run-1', origin: 'external', delivery, state, progress: { basis: 'executed', counters: [] } },
+        }),
+      });
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each report is read before the next replaces it.
+      await vi.waitFor(async () => {
+        await expect(streaming()).resolves.toEqual(expected);
+      });
+    }
     await fixture.close();
   });
 
@@ -3183,6 +3220,8 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     const fixture = await openServedHost(await storeRoot(), resetting, runtime);
     await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
     await expect(fixture.client.get(machine)).resolves.toMatchObject({ snapshot: { run: { state: 'running' } } });
+    /* A streamed run the machine reports counts, with no job of this host behind it. */
+    await expect(fixture.host.streamingMachines()).resolves.toEqual([{ machineId, name: machineId }]);
     useFakeTimers();
     lose.resolve();
     await until(() =>

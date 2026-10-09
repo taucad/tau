@@ -207,7 +207,8 @@ export const useCloudPaymentActionReturn = (): void => {
           },
         });
       } else {
-        toast.warning('Your payment needs attention. Reopen billing to continue.');
+        // Billing is still waiting on Stripe; nothing here needs the customer, so the toast says so.
+        toast.warning('Billing has not confirmed your payment yet. Check back in a few minutes.');
       }
     };
     const inspectReturn = async (): Promise<void> => {

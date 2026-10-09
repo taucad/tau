@@ -241,7 +241,7 @@ describe('useCloudPaymentActionReturn', () => {
     }
   });
 
-  it('should say a payment needs attention only once the re-check runs out without hearing its outcome', async () => {
+  it('should say billing has not confirmed a payment only once the re-check runs out without hearing its outcome', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
     try {
       getPaymentAction.mockResolvedValue(outcomeUnknown);
@@ -256,7 +256,9 @@ describe('useCloudPaymentActionReturn', () => {
       await vi.advanceTimersByTimeAsync(2000);
 
       await waitFor(() => {
-        expect(toast.warning).toHaveBeenCalledWith('Your payment needs attention. Reopen billing to continue.');
+        expect(toast.warning).toHaveBeenCalledWith(
+          'Billing has not confirmed your payment yet. Check back in a few minutes.',
+        );
       });
       expect(getPaymentAction).toHaveBeenCalledTimes(11);
       expect(toast.dismiss).toHaveBeenCalledWith('processing');

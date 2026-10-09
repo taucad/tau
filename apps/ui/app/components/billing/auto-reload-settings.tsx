@@ -72,6 +72,7 @@ const isConfirmingSetup = (consent: WireAutoReloadConsent | undefined): boolean 
 export function AutoReloadSettings({
   binding,
 }: {
+  /** Carries the account subject once known, so the consent read is the entry `useAutoReloadEnabled` shares. */
   readonly binding: PaymentActionBinding | undefined;
 }): React.JSX.Element {
   const financial = useFinancialSession();

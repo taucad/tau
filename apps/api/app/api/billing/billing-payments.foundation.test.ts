@@ -26,6 +26,7 @@ import {
   subscription,
   user,
 } from '#database/schema.js';
+import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingService } from '#api/billing/billing.service.js';
 import type { Environment } from '#config/environment.config.js';
@@ -57,6 +58,8 @@ const requests: string[] = [];
 const stripeAccountId = 'acct_payments_foundation';
 let latestCustomerId = `cus_${randomUUID().replaceAll('-', '')}`;
 let latestCustomerMetadata: Record<string, string> = {};
+/** The contact fields of the last Customer create, as Stripe received them. */
+let latestCustomerContact: { email?: string; name?: string } | undefined;
 const latestCustomerAddress = {
   city: 'Wellington',
   country: 'NZ',
@@ -92,6 +95,10 @@ let taxTransactionPosts = 0;
 let paymentIntentFixtureId = 'pi_foundation_paid';
 let paymentChargeFixtureId = 'ch_foundation_paid';
 let ambiguousCustomerSearch = false;
+/** Milliseconds Stripe takes to answer a Customer create, so concurrent first purchases overlap it. */
+let customerCreateLatency = 0;
+/** Stripe refuses Customer searches with a 429, as it refuses part of a burst of them. */
+let customerSearchRateLimited = false;
 // Hosted Checkout saves a card without setting the customer's invoice default.
 let customerInvoiceDefaultCard = true;
 const foundationCard = {
@@ -151,6 +158,10 @@ const server = createServer((request, response) => {
     checkoutExpirePosts += 1;
     const session = checkoutSessions.get(expiring) ?? {};
     session['status'] = 'expired';
+    // Expiring a Session cancels the PaymentIntent a declined attempt left on it.
+    if (session['payment_intent'] === paymentIntentFixtureId && paymentStatus !== 'succeeded') {
+      paymentStatus = 'canceled';
+    }
     sessionReply(session);
     return;
   }
@@ -196,17 +207,28 @@ const server = createServer((request, response) => {
         tau_account_id: form.get('metadata[tau_account_id]') ?? '',
         tau_customer_binding_id: form.get('metadata[tau_customer_binding_id]') ?? '',
       };
-      response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(
-        JSON.stringify({
-          id: latestCustomerId,
-          object: 'customer',
-          address: latestCustomerAddress,
-          livemode: false,
-          metadata: latestCustomerMetadata,
-        }),
-      );
+      latestCustomerContact = { email: form.get('email') ?? undefined, name: form.get('name') ?? undefined };
+      const customer = JSON.stringify({
+        id: latestCustomerId,
+        object: 'customer',
+        address: latestCustomerAddress,
+        livemode: false,
+        metadata: latestCustomerMetadata,
+      });
+      setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(customer);
+      }, customerCreateLatency);
     });
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v1/customers/search' && customerSearchRateLimited) {
+    response.writeHead(429, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        error: { type: 'invalid_request_error', code: 'rate_limit', message: 'Request rate limit exceeded.' },
+      }),
+    );
     return;
   }
   if (url.pathname === '/v1/tax/calculations' && request.method === 'POST') {
@@ -712,12 +734,83 @@ describe('billing payments PostgreSQL foundation', () => {
       .from(billingStripeCustomer)
       .where(eq(billingStripeCustomer.accountId, owner!.accountId));
     expect(binding?.stripeCustomerId).toBe(latestCustomerId);
+    // Stripe addresses receipts, invoices and the portal to the owner; the leg keeps the same request for a replay.
+    const contact = { email: `${userId}@test.invalid`, name: 'Payment Foundation' };
+    expect(latestCustomerContact).toStrictEqual(contact);
+    const [customerLeg] = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(and(eq(billingProviderLeg.customerBindingId, binding!.id), eq(billingProviderLeg.kind, 'customer')));
+    expect(customerLeg?.request).toMatchObject({
+      ...contact,
+      metadata: { tau_account_id: owner!.accountId, tau_customer_binding_id: binding!.id },
+    });
     const purchases = await database
       .select()
       .from(billingPurchase)
       .where(and(eq(billingPurchase.accountId, owner!.accountId), eq(billingPurchase.requestId, requestId)));
     expect(purchases).toHaveLength(1);
     expect(requests.filter((request) => request === 'POST /v1/customers')).toHaveLength(1);
+  });
+
+  // Staging, 2026-10-09: 50 concurrent first top-ups answered one 200, 47 409s and two 500s.
+  it('should answer concurrent first top-ups with one prepared action and typed conflicts only', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Concurrent Top-ups', email: `${userId}@test.invalid`, emailVerified: true });
+    const posts = requests.filter((request) => request === 'POST /v1/customers').length;
+    const searches = requests.filter((request) => request === 'GET /v1/customers/search').length;
+    // Stripe takes a moment to create the Customer, and refuses the burst of searches waiting requests would send.
+    customerCreateLatency = 250;
+    customerSearchRateLimited = true;
+    const settled = await Promise.allSettled(
+      Array.from({ length: 50 }, async () =>
+        payments.prepareTopup(userId, {
+          requestId: randomUUID(),
+          returnPath: '/settings/billing',
+          amountMinor: '537',
+          method: 'checkout',
+        }),
+      ),
+    ).finally(() => {
+      customerCreateLatency = 0;
+      customerSearchRateLimited = false;
+    });
+    const answers = settled.map((result) => {
+      if (result.status === 'fulfilled') {
+        return result.value.state;
+      }
+      const reason: unknown = result.reason;
+      if (!(reason instanceof ConflictException)) {
+        return reason;
+      }
+      const body = reason.getResponse();
+      return typeof body === 'object' && 'code' in body ? body.code : body;
+    });
+    expect(answers.filter((answer) => answer === 'prepared')).toHaveLength(1);
+    // Requests that arrive while the Customer create is in flight are refused before any search.
+    expect(answers).toContain('customer_creation_outcome_unknown');
+    expect(
+      answers.filter(
+        (answer) =>
+          answer !== 'prepared' &&
+          answer !== 'action_already_pending' &&
+          answer !== 'customer_creation_outcome_unknown',
+      ),
+    ).toEqual([]);
+    const [owner] = await database
+      .select()
+      .from(billingOwnerBinding)
+      .where(and(eq(billingOwnerBinding.authUserId, userId), eq(billingOwnerBinding.environment, 'development')));
+    const purchases = await database
+      .select()
+      .from(billingPurchase)
+      .where(eq(billingPurchase.accountId, owner?.accountId ?? ''));
+    expect(purchases.map((purchase) => purchase.state)).toEqual(['prepared']);
+    expect(requests.filter((request) => request === 'POST /v1/customers')).toHaveLength(posts + 1);
+    // A request that finds the Customer still being created answers without asking Stripe for it.
+    expect(requests.filter((request) => request === 'GET /v1/customers/search')).toHaveLength(searches);
   });
 
   it('reclaims expired source and inbox leases with a new generation and rejects a stale claimant write', async () => {
@@ -1793,11 +1886,15 @@ describe('billing payments PostgreSQL foundation', () => {
       return { userId, actionId: prepared.actionId, leg, customerId: binding.stripeCustomerId, session };
     };
 
-    /** Stripe completes the Session and settles its charge; the webhook endpoint never receives the events. */
-    const payHostedTopup = (topup: Awaited<ReturnType<typeof openHostedTopup>>): void => {
+    /**
+     * Stripe completes the Session and settles its charge; the webhook endpoint never receives the events. A Session
+     * whose earlier attempt was declined completes on that attempt's PaymentIntent.
+     */
+    const payHostedTopup = (topup: Awaited<ReturnType<typeof openHostedTopup>>, paymentIntentId?: string): void => {
       const suffix = randomUUID().replaceAll('-', '');
-      paymentIntentFixtureId = `pi_hosted_${suffix}`;
+      paymentIntentFixtureId = paymentIntentId ?? `pi_hosted_${suffix}`;
       paymentChargeFixtureId = `ch_hosted_${suffix}`;
+      paymentStatus = 'succeeded';
       paymentFixture = {
         purchaseId: topup.actionId,
         providerLegId: topup.leg.id,
@@ -1920,6 +2017,18 @@ describe('billing payments PostgreSQL foundation', () => {
       const second = await payments.recoverAction(topup.userId, topup.actionId);
       expect(second).toMatchObject({ state: 'fulfilled', receipt: first.receipt });
       expect(requests.length).toBe(stripeRequests);
+      // A later real delivery of the success event finds the recovered purchase already fulfilled.
+      await onlyDue(topup.leg.id);
+      await deliverLater('payment_intent.succeeded', { id: paymentIntentFixtureId, object: 'payment_intent' });
+      await expect(payments.recoverPayments({ environment: 'development', limit: 1 })).resolves.toMatchObject({
+        processed: [expect.any(String)],
+        pending: [],
+        failed: [],
+      });
+      await expect(payments.getAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+        receipt: first.receipt,
+      });
       const grants = await database
         .select()
         .from(creditTransaction)
@@ -1934,6 +2043,220 @@ describe('billing payments PostgreSQL foundation', () => {
         redirectUrl: topup.session['url'],
       });
     });
+
+    /** A second hosted top-up request for the same customer. */
+    const anotherTopup = async (userId: string) =>
+      payments.prepareTopup(userId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+        amountMinor: '537',
+        method: 'checkout',
+      });
+
+    it('should close an expired hosted top-up from the provider-leg sweep and let its customer buy again', async () => {
+      const topup = await openHostedTopup('Hosted Expired Sweep');
+      // Stripe expired the Session after 24 hours; its `checkout.session.expired` event never arrives.
+      Object.assign(topup.session, { status: 'expired', url: null });
+      await expect(anotherTopup(topup.userId)).rejects.toMatchObject({ response: { code: 'action_already_pending' } });
+      await onlyDue(topup.leg.id);
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      const diagnostic = JSON.stringify({ errorCode: await legError(topup.leg.id), requests: requests.slice(-20) });
+      expect(swept, diagnostic).toEqual({ processed: [topup.leg.id], pending: [], failed: [] });
+      await expect(payments.getAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'failed',
+        redirectUrl: null,
+      });
+      const [closed] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, topup.leg.id));
+      expect(closed).toMatchObject({
+        state: 'expired',
+        terminalEvidence: { version: 'stripe-payment-checkout-expired-v1', amountReceived: '0' },
+        nextAttemptAt: new Date('9999-12-31T00:00:00Z'),
+      });
+      // The closed leg is never due again, so a later pass reads nothing from Stripe.
+      const stripeRequests = requests.length;
+      await expect(payments.recoverPayments({ environment: 'development', limit: 1 })).resolves.toEqual({
+        processed: [],
+        pending: [],
+        failed: [],
+      });
+      expect(requests.length).toBe(stripeRequests);
+      await expect(anotherTopup(topup.userId)).resolves.toMatchObject({ state: 'prepared' });
+    });
+
+    it('should cancel an expired hosted top-up when its customer recovers it', async () => {
+      const topup = await openHostedTopup('Hosted Expired Recover');
+      Object.assign(topup.session, { status: 'expired', url: null });
+      await expect(payments.recoverAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'canceled',
+        redirectUrl: null,
+      });
+      const [closed] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, topup.leg.id));
+      expect(closed).toMatchObject({
+        state: 'expired',
+        terminalEvidence: { version: 'stripe-payment-checkout-expired-v1', amountReceived: '0' },
+      });
+      await expect(anotherTopup(topup.userId)).resolves.toMatchObject({ state: 'prepared' });
+    });
+
+    /** The issuer declines the card the customer entered: Stripe keeps the Session open on a waiting PaymentIntent. */
+    const declineHostedTopup = (topup: Awaited<ReturnType<typeof openHostedTopup>>): string => {
+      paymentIntentFixtureId = `pi_hosted_declined_${randomUUID().replaceAll('-', '')}`;
+      paymentStatus = 'requires_payment_method';
+      paymentFixture = {
+        purchaseId: topup.actionId,
+        providerLegId: topup.leg.id,
+        customerBindingId: topup.leg.customerBindingId,
+        customerId: topup.customerId,
+      };
+      topup.session['payment_intent'] = paymentIntentFixtureId;
+      return paymentIntentFixtureId;
+    };
+
+    /** Delivers the decline's own event and settles it alone, as the webhook worker would. */
+    const deliverDecline = async (topup: Awaited<ReturnType<typeof openHostedTopup>>, paymentIntentId: string) => {
+      await onlyDue(topup.leg.id);
+      await deliverLater('payment_intent.payment_failed', { id: paymentIntentId, object: 'payment_intent' });
+      const pass = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      // The open Session still decides the payment, so the PaymentIntent's source waits rather than settling it.
+      expect(pass, JSON.stringify({ errorCode: await legError(topup.leg.id), requests: requests.slice(-20) })).toEqual({
+        processed: [],
+        pending: [expect.any(String)],
+        failed: [],
+      });
+    };
+
+    /** The PaymentIntent's queued source, read back after the pass that settled it. */
+    const paymentIntentSource = async (paymentIntentId: string) => {
+      const [source] = await database
+        .select()
+        .from(billingStripeSource)
+        .where(
+          and(eq(billingStripeSource.sourceType, 'payment_intent'), eq(billingStripeSource.sourceId, paymentIntentId)),
+        );
+      return source;
+    };
+
+    it('should keep a hosted top-up resumable at its Checkout link after a declined card', async () => {
+      const topup = await openHostedTopup('Hosted Declined');
+      const paymentIntentId = declineHostedTopup(topup);
+      await deliverDecline(topup, paymentIntentId);
+      // The provider-leg sweep re-reads the open Session and leaves the purchase where its customer can pay.
+      await onlyDue(topup.leg.id);
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      const diagnostic = JSON.stringify({ errorCode: await legError(topup.leg.id), requests: requests.slice(-20) });
+      expect(swept, diagnostic).toEqual({ processed: [topup.leg.id], pending: [], failed: [] });
+      const resumable = { state: 'redirect_required', redirectUrl: topup.session['url'], attention: null };
+      await expect(payments.getAction(topup.userId, topup.actionId)).resolves.toMatchObject(resumable);
+      await expect(payments.recoverAction(topup.userId, topup.actionId)).resolves.toMatchObject(resumable);
+      const [purchase] = await database.select().from(billingPurchase).where(eq(billingPurchase.id, topup.actionId));
+      expect(purchase?.state).toBe('pending');
+      const [leg] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, topup.leg.id));
+      expect(leg).toMatchObject({ state: 'known', errorCode: null });
+
+      // Its customer can still walk away: cancelling expires the Session, which cancels its PaymentIntent.
+      await expect(payments.cancelAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'canceled',
+        redirectUrl: null,
+      });
+      // The cancellation's own event finds the purchase closed and settles the waiting source.
+      await onlyDue(topup.leg.id);
+      await deliverLater('payment_intent.canceled', { id: paymentIntentId, object: 'payment_intent' });
+      await expect(payments.recoverPayments({ environment: 'development', limit: 1 })).resolves.toEqual({
+        processed: [expect.any(String)],
+        pending: [],
+        failed: [],
+      });
+      await expect(paymentIntentSource(paymentIntentId)).resolves.toMatchObject({ state: 'done', errorCode: null });
+      await expect(anotherTopup(topup.userId)).resolves.toMatchObject({ state: 'prepared' });
+    });
+
+    it('should fulfil a hosted top-up its customer pays in the same Checkout after a declined card', async () => {
+      const topup = await openHostedTopup('Hosted Declined Then Paid');
+      const paymentIntentId = declineHostedTopup(topup);
+      await deliverDecline(topup, paymentIntentId);
+      await expect(payments.getAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'redirect_required',
+      });
+      // A second card succeeds on the same PaymentIntent and Stripe completes the Session.
+      payHostedTopup(topup, paymentIntentId);
+      await deliverLater('payment_intent.succeeded', { id: paymentIntentId, object: 'payment_intent' });
+      await deliverLater('checkout.session.completed', {
+        id: topup.leg.providerObjectId ?? '',
+        object: 'checkout.session',
+      });
+      const settled = await payments.recoverPayments({ environment: 'development', limit: 4 });
+      expect(settled, JSON.stringify(requests.slice(-20))).toEqual({
+        processed: [expect.any(String), expect.any(String)],
+        pending: [],
+        failed: [],
+      });
+      await expect(payments.getAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+        receipt: { grantedCreditAtoms: '5370000' },
+      });
+      await expect(paymentIntentSource(paymentIntentId)).resolves.toMatchObject({ state: 'done', errorCode: null });
+      const grants = await database
+        .select()
+        .from(creditTransaction)
+        .where(eq(creditTransaction.purchaseId, topup.actionId));
+      expect(grants).toHaveLength(1);
+    });
+
+    it.each([
+      ['payment_intent.canceled', 'checkout.session.expired'],
+      ['checkout.session.expired', 'payment_intent.canceled'],
+    ] as const)(
+      'should fail a declined hosted top-up when its Checkout expires, %s first, and let its account close',
+      async (first, second) => {
+        const topup = await openHostedTopup(`Hosted Declined Expired ${first}`);
+        const paymentIntentId = declineHostedTopup(topup);
+        await deliverDecline(topup, paymentIntentId);
+        const closure = new BillingAccountClosureService(
+          { database: runtimeDatabase },
+          { recoverAndCancel: async () => ({ status: 'not_created' }) },
+          'development',
+        );
+        await expect(closure.prepare({ authUserId: topup.userId, requestId: randomUUID() })).rejects.toMatchObject({
+          response: { code: 'payment_action_pending' },
+        });
+        // Stripe expires the abandoned Session after 24 hours and cancels its PaymentIntent.
+        Object.assign(topup.session, { status: 'expired', url: null });
+        paymentStatus = 'canceled';
+        const objects = {
+          'payment_intent.canceled': { id: paymentIntentId, object: 'payment_intent' },
+          'checkout.session.expired': { id: topup.leg.providerObjectId ?? '', object: 'checkout.session' },
+        };
+        /** Delivers one of the two events and settles it in a pass of its own. */
+        const settle = async (type: typeof first) => {
+          await deliverLater(type, objects[type]);
+          const pass = await payments.recoverPayments({ environment: 'development', limit: 1 });
+          const diagnostic = JSON.stringify({
+            type,
+            errorCode: await legError(topup.leg.id),
+            requests: requests.slice(-20),
+          });
+          expect(pass, diagnostic).toEqual({ processed: [expect.any(String)], pending: [], failed: [] });
+        };
+        await settle(first);
+        await settle(second);
+        await expect(payments.getAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+          state: 'failed',
+          redirectUrl: null,
+        });
+        const [closed] = await database
+          .select()
+          .from(billingProviderLeg)
+          .where(eq(billingProviderLeg.id, topup.leg.id));
+        expect(closed).toMatchObject({
+          state: 'expired',
+          terminalEvidence: { version: 'stripe-payment-checkout-expired-v1', paymentIntentId, amountReceived: '0' },
+        });
+        await expect(paymentIntentSource(paymentIntentId)).resolves.toMatchObject({ state: 'done', errorCode: null });
+        await expect(closure.prepare({ authUserId: topup.userId, requestId: randomUUID() })).resolves.toMatchObject({
+          state: 'ready_for_auth_deletion',
+        });
+      },
+    );
 
     // A payment_intent leg carries no Checkout session, so the charge-time fallback never applies to it: this
     // pins that a settled saved-card charge still waits for its event. The extra conjunct on the fallback (a
@@ -2138,6 +2461,31 @@ describe('billing payments PostgreSQL foundation', () => {
         .where(eq(creditTransaction.periodId, period?.id ?? ''));
       expect(grants).toHaveLength(1);
       await expect(billing.getEntitlements(userId)).resolves.toMatchObject({ tier: 'pro' });
+    });
+
+    it('should end an expired Pro Checkout from the provider-leg sweep so its customer can subscribe again', async () => {
+      const pro = await openHostedPro('Hosted Pro Expired');
+      // Stripe expired the Session after 24 hours; its `checkout.session.expired` event never arrives.
+      Object.assign(pro.session, { status: 'expired', url: null });
+      const request = () => ({ requestId: randomUUID(), returnPath: '/settings/billing' });
+      await expect(payments.prepareSubscription(pro.userId, request())).rejects.toMatchObject({
+        response: { code: 'action_already_pending' },
+      });
+      await onlyDue(pro.leg.id);
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      const diagnostic = JSON.stringify({ errorCode: await legError(pro.leg.id), requests: requests.slice(-20) });
+      expect(swept, diagnostic).toEqual({ processed: [pro.leg.id], pending: [], failed: [] });
+      const [ended] = await database.select().from(subscription).where(eq(subscription.id, pro.action.actionId));
+      expect(ended).toMatchObject({ slotState: 'ended', status: 'incomplete_expired', stripeSubscriptionId: null });
+      const [closed] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, pro.leg.id));
+      expect(closed).toMatchObject({
+        state: 'expired',
+        terminalEvidence: { version: 'stripe-subscription-checkout-expired-v1' },
+        nextAttemptAt: new Date('9999-12-31T00:00:00Z'),
+      });
+      const again = await payments.prepareSubscription(pro.userId, request());
+      expect(again).toMatchObject({ state: 'redirect_required' });
+      expect(again.actionId).not.toBe(pro.action.actionId);
     });
   });
 });

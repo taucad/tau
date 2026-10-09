@@ -119,3 +119,10 @@ it('redacts recorder Meta and network URLs before replay compression', () => {
   });
   expect(redacted?.name).toBe('https://tau.new/auth?redirectTo=%2Finvitations%2F[redacted]');
 });
+
+it('masks all replay text and inputs while still blocking invitation links', () => {
+  const recording = posthogConfig.options.session_recording;
+  expect(recording?.maskTextSelector).toBe('*');
+  expect(recording?.maskAllInputs).toBe(true);
+  expect(recording?.blockSelector).toContain('a[href*="/invitations/"]');
+});

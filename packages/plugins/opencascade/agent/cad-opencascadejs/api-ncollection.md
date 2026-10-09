@@ -1,6 +1,6 @@
 # libcascade — NCollection
 
-31 top-level symbols. Signatures are verbatim typescript.
+30 top-level symbols. Signatures are verbatim typescript.
 
 NCollection_AccAllocator: declare class NCollection_AccAllocator extends NCollection_BaseAllocator
 
@@ -230,6 +230,10 @@ NCollection_Buffer: declare class NCollection_Buffer extends Standard_Transient
 
 NCollection_CellFilter_Action: typeof NCollection_CellFilter_Action[keyof typeof NCollection_CellFilter_Action]
 
+  readonly CellFilter_Keep: 'CellFilter_Keep'
+
+  readonly CellFilter_Purge: 'CellFilter_Purge'
+
 NCollection_ForwardRangeSentinel: declare class NCollection_ForwardRangeSentinel
 
   // NCollection_ForwardRangeSentinel.constructor (constructor)
@@ -308,6 +312,16 @@ NCollection_IncAllocator_IBlock: interface NCollection_IncAllocator_IBlock
   [Symbol.dispose](): void;
 
 NCollection_IncAllocator_IBlockSizeLevel: typeof NCollection_IncAllocator_IBlockSizeLevel[keyof typeof NCollection_IncAllocator_IBlockSizeLevel]
+
+  readonly Min: 'Min'
+
+  readonly Small: 'Small'
+
+  readonly Medium: 'Medium'
+
+  readonly Large: 'Large'
+
+  readonly Max: 'Max'
 
 NCollection_SparseArrayBase: declare class NCollection_SparseArrayBase
 
@@ -1189,87 +1203,4 @@ NCollection_Array1_BRepGraph_RefId: declare class NCollection_Array1_BRepGraph_R
   delete(): void;
 
   // NCollection_Array1_BRepGraph_RefId.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-NCollection_Array1_BRepGraph_ShellRefId: declare class NCollection_Array1_BRepGraph_ShellRefId
-
-  // NCollection_Array1_BRepGraph_ShellRefId.constructor (constructor)
-  constructor();
-  constructor(theSize: number);
-  constructor(theOther: NCollection_Array1_BRepGraph_ShellRefId);
-  constructor(theLower: number, theUpper: number);
-  constructor(theBegin: BRepGraph_ShellRefId, theSize: number, theUseBuffer: boolean);
-  constructor(theBegin: BRepGraph_ShellRefId, theLower: number, theUpper: number, theUseBuffer?: boolean);
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Init (method)
-  Init(theValue: BRepGraph_ShellRefId): void;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Size (method)
-  Size(): number;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Length (method)
-  Length(): number;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.IsEmpty (method)
-  IsEmpty(): boolean;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Lower (method)
-  Lower(): number;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Upper (method)
-  Upper(): number;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Assign (method)
-  Assign(theOther: NCollection_Array1_BRepGraph_ShellRefId): NCollection_Array1_BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.CopyValues (method)
-  CopyValues(theOther: NCollection_Array1_BRepGraph_ShellRefId): NCollection_Array1_BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Move (method)
-  Move(theOther: NCollection_Array1_BRepGraph_ShellRefId): NCollection_Array1_BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.First (method)
-  First(): BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.ChangeFirst (method)
-  ChangeFirst(): BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Last (method)
-  Last(): BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.ChangeLast (method)
-  ChangeLast(): BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Value (method)
-  Value(theIndex: number): BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.ChangeValue (method)
-  ChangeValue(theIndex: number): BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.At (method)
-  At(theIndex: number): BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.ChangeAt (method)
-  ChangeAt(theIndex: number): BRepGraph_ShellRefId;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.SetValue (method)
-  SetValue(theIndex: number, theItem: BRepGraph_ShellRefId): void;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.UpdateLowerBound (method)
-  UpdateLowerBound(theLower: number): void;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.UpdateUpperBound (method)
-  UpdateUpperBound(theUpper: number): void;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.Resize (method)
-  Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-  Resize(theSize: number, theToCopyData: boolean): void;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.IsDeletable (method)
-  IsDeletable(): boolean;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.delete (method)
-  delete(): void;
-
-  // NCollection_Array1_BRepGraph_ShellRefId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

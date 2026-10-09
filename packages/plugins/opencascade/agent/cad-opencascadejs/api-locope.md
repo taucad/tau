@@ -329,6 +329,12 @@ LocOpe_LinearForm: declare class LocOpe_LinearForm
 
 LocOpe_Operation: typeof LocOpe_Operation[keyof typeof LocOpe_Operation]
 
+  readonly LocOpe_FUSE: 'LocOpe_FUSE'
+
+  readonly LocOpe_CUT: 'LocOpe_CUT'
+
+  readonly LocOpe_INVALID: 'LocOpe_INVALID'
+
 LocOpe_Pipe: declare class LocOpe_Pipe
 
   // LocOpe_Pipe.constructor (constructor)

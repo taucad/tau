@@ -1,11 +1,12 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement, ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { entitlementsFromTier } from '@taucad/billing';
 import { GeneralSettings } from '#components/settings/general-settings.js';
 import type { ThemeOption } from '#hooks/use-theme.js';
 
+const clientEnvironment = globalThis.window.ENV;
 const useEntitlementsMock = vi.hoisted(() => vi.fn());
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
   useEntitlements: useEntitlementsMock,
@@ -31,9 +32,11 @@ vi.mock('react-router', () => ({
   useSearchParams: (): [URLSearchParams, () => void] => [new URLSearchParams(), vi.fn()],
 }));
 
+let mockAllowsUsageMetrics: boolean;
+
 vi.mock('#hooks/use-privacy-preferences.js', () => ({
   usePrivacyPreferences: () => ({
-    preferences: { allowsAiTraining: false },
+    preferences: { allowsAiTraining: false, allowsUsageMetrics: mockAllowsUsageMetrics },
     isLoading: false,
     error: undefined,
     updatePreferences: mockUpdatePreferences,
@@ -155,6 +158,12 @@ describe('GeneralSettings', () => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
     mockCodeInlayHintsValue = false;
     mockPointerCursorsValue = false;
+    mockAllowsUsageMetrics = true;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    globalThis.window.ENV = clientEnvironment;
   });
 
   it('replaces the consent toggle with the no-train guarantee on paid tiers (T15/AD15)', () => {
@@ -176,7 +185,7 @@ describe('GeneralSettings', () => {
   });
 
   it.each(['free', 'pro'] as const)(
-    'links privacy details to the public website so desktop never opens a removed route (%s)',
+    'should link privacy details to the privacy page of the deployment serving the app (%s)',
     (tier) => {
       useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
 
@@ -185,11 +194,65 @@ describe('GeneralSettings', () => {
       const links = screen.getAllByRole('link', { name: 'Learn more' });
       expect(links.length).toBeGreaterThan(0);
       for (const link of links) {
-        expect(link).toHaveAttribute('href', 'https://tau.new/legal/privacy#9.2.1');
+        expect(link).toHaveAttribute('href', '/legal/privacy#9.2.1');
         expect(link).toHaveAttribute('target', '_blank');
       }
     },
   );
+
+  it.each(['free', 'pro'] as const)(
+    'should link privacy details to the bound web deployment on desktop, which ships no legal pages (%s)',
+    (tier) => {
+      useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
+      vi.stubEnv('TAU_TARGET', 'desktop');
+      globalThis.window.ENV = {
+        ...clientEnvironment,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+        TAU_FRONTEND_URL: 'https://taucad.dev',
+      };
+
+      render(<GeneralSettings />);
+
+      const links = screen.getAllByRole('link', { name: 'Learn more' });
+      expect(links.length).toBeGreaterThan(0);
+      for (const link of links) {
+        expect(link).toHaveAttribute('href', 'https://taucad.dev/legal/privacy#9.2.1');
+      }
+    },
+  );
+
+  it.each(['free', 'pro'] as const)(
+    'should offer the usage metrics switch beside the training choice on every tier (%s)',
+    (tier) => {
+      useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
+
+      render(<GeneralSettings />);
+
+      const toggle = screen.getByRole('switch', { name: 'Share anonymous usage metrics' });
+      expect(toggle).toHaveAttribute('data-state', 'checked');
+      expect(toggle).toHaveAccessibleDescription(/no prompts, code, file names or identity/i);
+    },
+  );
+
+  it('should persist switching usage metrics off', async () => {
+    render(<GeneralSettings />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('switch', { name: 'Share anonymous usage metrics' }));
+
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowsUsageMetrics: false });
+  });
+
+  it('should render usage metrics as off when the user switched them off', () => {
+    mockAllowsUsageMetrics = false;
+
+    render(<GeneralSettings />);
+
+    expect(screen.getByRole('switch', { name: 'Share anonymous usage metrics' })).toHaveAttribute(
+      'data-state',
+      'unchecked',
+    );
+  });
 
   it('should render code inlay hints disabled by default', () => {
     render(<GeneralSettings />);

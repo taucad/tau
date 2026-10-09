@@ -625,6 +625,10 @@ StepVisual_CameraUsage: declare class StepVisual_CameraUsage extends StepRepr_Re
 
 StepVisual_CentralOrParallel: typeof StepVisual_CentralOrParallel[keyof typeof StepVisual_CentralOrParallel]
 
+  readonly StepVisual_copCentral: 'StepVisual_copCentral'
+
+  readonly StepVisual_copParallel: 'StepVisual_copParallel'
+
 StepVisual_CharacterizedObjAndRepresentationAndDraughtingModel: declare class StepVisual_CharacterizedObjAndRepresentationAndDraughtingModel extends StepVisual_DraughtingModel
 
   // StepVisual_CharacterizedObjAndRepresentationAndDraughtingModel.constructor (constructor)

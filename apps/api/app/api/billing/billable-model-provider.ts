@@ -1,14 +1,5 @@
 import { withBillableEvidenceCollector } from '#api/billing/billable-model-qualification.js';
-import { calculatePreliminarySupplierCost } from '#api/billing/billable-model-cost.js';
-import {
-  invocationEvidenceDigest,
-  rejectedSupplierSourceRevision,
-  serializeInvocationEvidence,
-} from '#api/billing/credit-ledger.service.js';
-import type {
-  BillableModelProviderAdapter,
-  SupplierFinalityClassification,
-} from '#api/billing/billable-model-invocation.types.js';
+import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
 import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
 import {
@@ -60,18 +51,6 @@ export const createBillableModelInputCounters = (input: {
   );
 };
 
-/** Zero USD, complete and final: what a supplier that refused before running the call is owed. */
-const rejectedSupplierEvidence = (
-  payloadDigest: string,
-): NonNullable<SupplierFinalityClassification['supplierEvidence']> => ({
-  sourceRevision: rejectedSupplierSourceRevision,
-  payloadDigest,
-  currency: 'usd',
-  numerator: '0',
-  denominator: '1',
-  completeness: 'complete',
-});
-
 /** Creates the route-keyed, single-attempt production transport adapters. */
 export const createBillableModelProviderAdapters = (
   config: { get(key: string): unknown },
@@ -99,23 +78,6 @@ export const createBillableModelProviderAdapters = (
               signal,
               fetch: fetchOnce,
             });
-          },
-          classifyFinality: ({ qualification, evidence }) => {
-            const payloadDigest = invocationEvidenceDigest(serializeInvocationEvidence(evidence));
-            // A refusal with a status is final supplier evidence of zero cost: the supplier ran nothing.
-            if (evidence.kind === 'provider_rejected') {
-              return { state: 'final', supplierEvidence: rejectedSupplierEvidence(payloadDigest) };
-            }
-            const supplierEvidence = calculatePreliminarySupplierCost({
-              invocation: qualification.invocation,
-              evidence,
-              payloadDigest,
-            });
-            return {
-              state: supplierEvidence ? 'preliminary' : 'unknown',
-              providerRequestId: evidence.normalizationEvidence?.providerRequestId,
-              supplierEvidence,
-            };
           },
         },
       );

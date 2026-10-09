@@ -1,6 +1,36 @@
 # libcascade — GeomFill (3)
 
-16 top-level symbols. Signatures are verbatim typescript.
+17 top-level symbols. Signatures are verbatim typescript.
+
+GeomFill_SectionGenerator: declare class GeomFill_SectionGenerator extends GeomFill_Profiler
+
+  // GeomFill_SectionGenerator.constructor (constructor)
+  constructor();
+
+  // GeomFill_SectionGenerator.SetParam (method)
+  SetParam(Params: NCollection_HArray1_double): void;
+
+  // GeomFill_SectionGenerator.GetShape (method)
+  GetShape(NbPoles?: number, NbKnots?: number, Degree?: number, NbPoles2d?: number): { NbPoles: number; NbKnots: number; Degree: number; NbPoles2d: number };
+
+  // GeomFill_SectionGenerator.Knots (method)
+  Knots(TKnots: NCollection_Array1_double): void;
+
+  // GeomFill_SectionGenerator.Mults (method)
+  Mults(TMults: NCollection_Array1_int): void;
+
+  // GeomFill_SectionGenerator.Section (method)
+  Section(P: number, Poles: NCollection_Array1_gp_Pnt, DPoles: NCollection_Array1_gp_Vec, Poles2d: NCollection_Array1_gp_Pnt2d, DPoles2d: NCollection_Array1_gp_Vec2d, Weigths: NCollection_Array1_double, DWeigths: NCollection_Array1_double): boolean;
+  Section(P: number, Poles: NCollection_Array1_gp_Pnt, Poles2d: NCollection_Array1_gp_Pnt2d, Weigths: NCollection_Array1_double): void;
+
+  // GeomFill_SectionGenerator.Parameter (method)
+  Parameter(P: number): number;
+
+  // GeomFill_SectionGenerator.delete (method)
+  delete(): void;
+
+  // GeomFill_SectionGenerator.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 GeomFill_SectionLaw: declare class GeomFill_SectionLaw extends Standard_Transient
 
@@ -450,6 +480,26 @@ GeomFill_TgtOnCoons: declare class GeomFill_TgtOnCoons extends GeomFill_TgtField
   [Symbol.dispose](): void;
 
 GeomFill_Trihedron: typeof GeomFill_Trihedron[keyof typeof GeomFill_Trihedron]
+
+  readonly GeomFill_IsCorrectedFrenet: 'GeomFill_IsCorrectedFrenet'
+
+  readonly GeomFill_IsFixed: 'GeomFill_IsFixed'
+
+  readonly GeomFill_IsFrenet: 'GeomFill_IsFrenet'
+
+  readonly GeomFill_IsConstantNormal: 'GeomFill_IsConstantNormal'
+
+  readonly GeomFill_IsDarboux: 'GeomFill_IsDarboux'
+
+  readonly GeomFill_IsGuideAC: 'GeomFill_IsGuideAC'
+
+  readonly GeomFill_IsGuidePlan: 'GeomFill_IsGuidePlan'
+
+  readonly GeomFill_IsGuideACWithContact: 'GeomFill_IsGuideACWithContact'
+
+  readonly GeomFill_IsGuidePlanWithContact: 'GeomFill_IsGuidePlanWithContact'
+
+  readonly GeomFill_IsDiscreteTrihedron: 'GeomFill_IsDiscreteTrihedron'
 
 GeomFill_TrihedronLaw: declare class GeomFill_TrihedronLaw extends Standard_Transient
 

@@ -54,14 +54,16 @@ const defaultPreviewTessellation = renderTessellationSchema.parse({}).tessellati
 /** Render-time OpenSCAD tessellation options. @public */
 export const openrscadRenderSchema = renderTessellationSchema;
 
+// Unset fields keep the script's own `$fn`/`$fa`/`$fs`, so exports measure what the preview shows.
 const exportTessellationSchema = z.object({
   tessellation: z
     .object({
-      segments: z.number().int().min(3).default(32),
-      minimumAngle: minimumAngle().default(12),
-      minimumSize: minimumSize().default(2),
+      segments: z.number().int().min(3).optional(),
+      minimumAngle: minimumAngle().optional(),
+      minimumSize: minimumSize().optional(),
     })
-    .default({ segments: 32, minimumAngle: 12, minimumSize: 2 }),
+    .describe("Leave a field empty to use the model's own $fn, $fa or $fs.")
+    .default({}),
 });
 
 /** Native OpenRSCAD 3D export options. @public */

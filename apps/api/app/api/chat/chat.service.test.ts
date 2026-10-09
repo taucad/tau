@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import { HttpStatus } from '@nestjs/common';
 import { convertToModelMessages, DefaultChatTransport, readUIMessageStream } from 'ai';
 import { ChatService } from '#api/chat/chat.service.js';
+import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import type { ModelInvocationIntent, ModelInvocationService } from '#api/llm/model-invocation.types.js';
 import { CodeOwnedBillableModelQualificationResolver } from '#api/billing/billable-model-qualification.js';
 import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
@@ -238,6 +240,96 @@ it('returns bounded commit text from a max-output response without retrying', as
     },
   });
   await result.completion;
+});
+
+/**
+ * The text a client reads from a helper result, through the same SDK transport the page's name clients use.
+ *
+ * @param response - The helper's response.
+ * @returns The assembled text.
+ */
+const helperText = async (response: Response): Promise<string> => {
+  const transport = new DefaultChatTransport({ api: 'http://fixture.invalid/chat', fetch: async () => response });
+  const stream = await transport.sendMessages({
+    chatId: 'chat',
+    messages: [],
+    trigger: 'submit-message',
+    messageId: undefined,
+    abortSignal: new AbortController().signal,
+  });
+  let text = '';
+  for await (const message of readUIMessageStream({ stream })) {
+    text = message.parts
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('');
+  }
+  return text;
+};
+
+/* T-U5 (W6, W11a): the helpers run on one fixed route, so a paused route or a restricted account refuses every call.
+ * Naming is a courtesy: the helper answers an empty suggestion, which the page turns into its default name
+ * (`use-project-manager.tsx`, `generated.trim() || defaultProjectName`), and no refusal reaches the client. */
+describe('secondary generator route and account refusals', () => {
+  const routePaused = (): LlmGatewayError =>
+    new LlmGatewayError(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      'MODEL_ROUTE_PAUSED',
+      "This model route is paused by Tau's operators.",
+      { routeId: 'fixture-route' },
+    );
+  const accountRestricted = (): LlmGatewayError =>
+    new LlmGatewayError(HttpStatus.FORBIDDEN, 'BILLING_ACCOUNT_RESTRICTED', 'This Tau billing account is restricted.');
+
+  it.each([
+    { method: 'getBuildNameGenerator', code: 'MODEL_ROUTE_PAUSED', refusal: routePaused },
+    { method: 'getCommitMessageGenerator', code: 'MODEL_ROUTE_PAUSED', refusal: routePaused },
+    { method: 'getBuildNameGenerator', code: 'BILLING_ACCOUNT_RESTRICTED', refusal: accountRestricted },
+    { method: 'getCommitMessageGenerator', code: 'BILLING_ACCOUNT_RESTRICTED', refusal: accountRestricted },
+  ] as const)('should answer $method with no text when admission refuses $code', async ({ method, refusal }) => {
+    const owner = mock<ModelInvocationService>();
+    owner.invoke.mockRejectedValue(refusal());
+    let admitted = false;
+
+    const result = await new ChatService(owner)[method](
+      [{ role: 'user', content: 'Name this part' }],
+      'owner',
+      'attempt',
+      { projectHint: 'project' },
+      new AbortController().signal,
+      () => {
+        admitted = true;
+      },
+    );
+
+    if (result.state !== 'streaming') {
+      throw new Error('Expected the unnamed stream');
+    }
+    expect(result.operationId).toBeUndefined();
+    expect(result.response.status).toBe(200);
+    expect(await helperText(result.response)).toBe('');
+    await expect(result.completion).resolves.toBeUndefined();
+    expect(admitted).toBe(false);
+    expect(owner.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('should still surface a refusal the client can act on', async () => {
+    const owner = mock<ModelInvocationService>();
+    owner.invoke.mockRejectedValue(
+      new LlmGatewayError(HttpStatus.SERVICE_UNAVAILABLE, 'PROVIDER_UNAVAILABLE', 'Model admission failed.'),
+    );
+
+    await expect(
+      new ChatService(owner).getBuildNameGenerator(
+        [{ role: 'user', content: 'Name this part' }],
+        'owner',
+        'attempt',
+        { projectHint: 'project' },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ name: 'LlmGatewayError', message: 'Model admission failed.' });
+    expect(owner.invoke).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('secondary generator admission outcomes', () => {

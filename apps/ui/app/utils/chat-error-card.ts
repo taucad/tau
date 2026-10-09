@@ -23,7 +23,8 @@ export type CodeCardCategory =
   | 'historyInvalid'
   | 'externalRestart'
   | 'fundedLimit'
-  | 'billingRecovery';
+  | 'billingRecovery'
+  | 'accountRestricted';
 
 type CodeCard = Readonly<{
   category: CodeCardCategory;
@@ -49,6 +50,8 @@ const codeCards = {
   WIRE_VERSION_UNSUPPORTED: { category: 'updateHost' },
   INVALID_REQUEST: { category: 'switchModel' },
   EXTERNAL_AGENT_MODEL_UNAVAILABLE: { category: 'switchModel' },
+  MODEL_ROUTE_PAUSED: { category: 'switchModel' },
+  BILLING_ACCOUNT_RESTRICTED: { category: 'accountRestricted' },
   RESUME_UNAVAILABLE: { category: 'nothingToResume' },
   LEADERSHIP_LOST: { category: 'otherTab' },
   LEADER_VERSION_MISMATCH: { category: 'otherBuild' },

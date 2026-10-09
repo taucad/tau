@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { setTimeout as wait } from 'node:timers/promises';
-import type { DownloadItem, Event } from 'electron';
+import type { BrowserWindow, DownloadItem, Event } from 'electron';
 import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
 import { expect } from 'vitest';
@@ -201,6 +201,10 @@ export const launchDesktopApp = async (options: {
   readonly profileRoot?: string | undefined;
   /** The caller will relaunch this profile and dispose it after the final run. */
   readonly preserveProfile?: boolean | undefined;
+  /** Show the isolated fixture window for a manual operator session. */
+  readonly visible?: boolean | undefined;
+  /** Give the isolated operator window a persistent, unambiguous title. */
+  readonly windowTitle?: string | undefined;
   /** Capture startup traffic before Playwright can attach its request listener. */
   readonly captureStartupNetwork?: boolean | undefined;
   /** WAV input for Chromium's fake capture driver; leaves the OS microphone unchanged. */
@@ -285,7 +289,7 @@ export const launchDesktopApp = async (options: {
        * throwaway profile too, never the person's own. */
       TAU_CONFIG_DIR: join(userData, 'config'),
       ...options.env,
-      TAU_E2E_HIDE_WINDOW: '1',
+      TAU_E2E_HIDE_WINDOW: options.visible === true ? '0' : '1',
       ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
     },
   });
@@ -314,6 +318,16 @@ export const launchDesktopApp = async (options: {
      * Configure the main-process test overrides only after that startup boundary. */
     page = await application.firstWindow();
     await page.waitForLoadState('domcontentloaded');
+    if (options.windowTitle !== undefined) {
+      const ownedWindow = await application.browserWindow(page);
+      await ownedWindow.evaluate((window: BrowserWindow, title) => {
+        window.setTitle(title);
+        window.on('page-title-updated', (event: { preventDefault: () => void }) => {
+          event.preventDefault();
+          window.setTitle(title);
+        });
+      }, options.windowTitle);
+    }
     if (options.fakeMicrophonePath) {
       // Chromium recommends disabling DSP for calibrated file microphone input.
       // Keep the real capture driver; change only its audio-processing constraints.

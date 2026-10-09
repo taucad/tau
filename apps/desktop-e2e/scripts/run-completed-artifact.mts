@@ -5,7 +5,8 @@
  * Purpose: Run packaged desktop smoke tests against disposable Postgres, Redis, and MinIO services.
  * Why: Completed-package proof must not use the shared development database or storage stack.
  * Required env vars: TAU_E2E_DESKTOP_EXECUTABLE (absolute packaged Tau executable path).
- * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only).
+ * Optional env vars: PATH, HOME, TMPDIR, DOCKER_HOST (tool discovery only); TAU_E2E_PROJECTION_IMPORT_ROOT,
+ * TAU_E2E_PROJECTION_ARTIFACT_ROOT, and the explicitly validated projection manual selectors below.
  * Usage: pnpm nx run desktop-e2e:test:e2e:desktop:completed-artifact [--args='--test-name-pattern="pattern" [--isolated-cloud-gateway]']
  * Exit codes: 0 when package tests pass; non-zero on preflight, infrastructure, migration, or test failure.
  */
@@ -13,7 +14,16 @@
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -35,6 +45,40 @@ const main = async (): Promise<void> => {
   const executable = process.env['TAU_E2E_DESKTOP_EXECUTABLE'];
   if (!executable || !isAbsolute(executable) || !existsSync(executable)) {
     throw new Error('TAU_E2E_DESKTOP_EXECUTABLE must name an existing absolute packaged executable.');
+  }
+
+  const projectionInputs = z
+    .object({
+      TAU_E2E_PROJECTION_IMPORT_ROOT: z.string().min(1).refine(isAbsolute).optional(),
+      TAU_E2E_PROJECTION_ARTIFACT_ROOT: z.string().min(1).refine(isAbsolute).optional(),
+      TAU_E2E_NATIVE_CORE_MANUAL: z.enum(['true', 'false']).optional(),
+      TAU_E2E_RETAINED_MANUAL: z.enum(['true', 'false']).optional(),
+      TAU_E2E_REVISIONS_MANUAL: z.enum(['true', 'false']).optional(),
+      TAU_E2E_REVISIONS_ACCEPTANCE: z.enum(['true', 'false']).optional(),
+      TAU_E2E_METADATA_MANUAL: z.enum(['true', 'false']).optional(),
+      TAU_E2E_OBSERVATION_MANUAL: z
+        .enum(['files', 'directory', 'catalog', 'settings', 'drafts', 'media', 'parameters', 'todo', 'plugins'])
+        .optional(),
+      TAU_E2E_ONE_SHOT_MANUAL: z.enum(['fix', 'linked', 'thumbnail']).optional(),
+    })
+    .parse(process.env);
+  if (projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT !== undefined) {
+    const input = realpathSync(projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT);
+    if (!statSync(input).isDirectory()) {
+      throw new Error('TAU_E2E_PROJECTION_IMPORT_ROOT must be an existing fixture directory.');
+    }
+    projectionInputs.TAU_E2E_PROJECTION_IMPORT_ROOT = input;
+  }
+  if (projectionInputs.TAU_E2E_PROJECTION_ARTIFACT_ROOT !== undefined) {
+    const output = resolve(projectionInputs.TAU_E2E_PROJECTION_ARTIFACT_ROOT);
+    if (
+      ![resolve(workspaceRoot, 'out'), resolve(tmpdir())].some(
+        (root) => output === root || output.startsWith(`${root}/`),
+      )
+    ) {
+      throw new Error('TAU_E2E_PROJECTION_ARTIFACT_ROOT must be inside workspace out or system temp.');
+    }
+    projectionInputs.TAU_E2E_PROJECTION_ARTIFACT_ROOT = output;
   }
 
   const toolEnvironment = Object.fromEntries(
@@ -281,6 +325,7 @@ const main = async (): Promise<void> => {
       OTEL_METRICS_PORT: String(await freePort()),
       TAU_E2E_API_URL: apiUrl,
       TAU_E2E_API_CWD: directory,
+      ...projectionInputs,
       TAU_E2E_COMPLETED_ARTIFACT: 'true',
       TAU_E2E_ACP_PACKAGED: 'true',
       TAU_E2E_COMPOSE_PROJECT: project,
@@ -376,26 +421,58 @@ const main = async (): Promise<void> => {
     if (applied !== expected) {
       throw new Error('Disposable database migration checkpoint does not match the consumed journal.');
     }
+    const selectedSpecs = [
+      'src/desktop-build123d.spec.ts',
+      'src/desktop-assimp.spec.ts',
+      'src/desktop-main-editor-kernels.spec.ts',
+      'src/desktop-converter.spec.ts',
+      'src/desktop-ephemeral-isolation.spec.ts',
+      'src/desktop-image-geospec.spec.ts',
+      'src/desktop-geometry-host.spec.ts',
+      'src/desktop-chat-replay.spec.ts',
+      'src/desktop-chat-in-project.spec.ts',
+      'src/desktop-chat-acp.spec.ts',
+      'src/desktop-measurement-exact.spec.ts',
+      'src/desktop-thumbnail-lifecycle.spec.ts',
+      'src/desktop-native-payload.spec.ts',
+      'src/desktop-community-preview.spec.ts',
+      'src/filesystem-projection-live.spec.ts',
+      'src/filesystem-projection-metadata.spec.ts',
+      'src/filesystem-projection-observation.spec.ts',
+      'src/filesystem-projection-one-shot.spec.ts',
+      'src/filesystem-projection-retained.spec.ts',
+    ];
+    const resultDirectory = join(
+      projectionInputs.TAU_E2E_PROJECTION_ARTIFACT_ROOT ?? join(workspaceRoot, 'out/desktop-e2e/completed-artifact'),
+      project,
+    );
+    mkdirSync(resultDirectory, { recursive: true });
+    const testReport = join(resultDirectory, 'vitest-results.json');
+    const selection = {
+      executable: realpathSync(executable),
+      executableSha256: createHash('sha256').update(readFileSync(executable)).digest('hex'),
+      testNamePattern: values['test-name-pattern'],
+      specs: selectedSpecs.map((path) => ({
+        path,
+        sha256: createHash('sha256')
+          .update(readFileSync(join(desktopE2ERoot, path)))
+          .digest('hex'),
+      })),
+      projectionInputs,
+      testReport,
+    };
+    writeFileSync(join(resultDirectory, 'selection.json'), JSON.stringify(selection, null, 2));
+    console.info('Completed-artifact selection', JSON.stringify(selection));
     const vitest = spawn(
       resolve(workspaceRoot, 'node_modules/.bin/vitest'),
       [
         'run',
         '--config',
         'vitest.config.ts',
-        'src/desktop-build123d.spec.ts',
-        'src/desktop-assimp.spec.ts',
-        'src/desktop-main-editor-kernels.spec.ts',
-        'src/desktop-converter.spec.ts',
-        'src/desktop-ephemeral-isolation.spec.ts',
-        'src/desktop-image-geospec.spec.ts',
-        'src/desktop-geometry-host.spec.ts',
-        'src/desktop-chat-replay.spec.ts',
-        'src/desktop-chat-in-project.spec.ts',
-        'src/desktop-chat-acp.spec.ts',
-        'src/desktop-measurement-exact.spec.ts',
-        'src/desktop-thumbnail-lifecycle.spec.ts',
-        'src/desktop-native-payload.spec.ts',
-        'src/desktop-community-preview.spec.ts',
+        '--reporter=default',
+        '--reporter=json',
+        `--outputFile.json=${testReport}`,
+        ...selectedSpecs,
         '-t',
         values['test-name-pattern'],
       ],
@@ -416,6 +493,27 @@ const main = async (): Promise<void> => {
     activeChild = undefined;
     if (status !== 0) {
       throw new Error(`Completed-artifact Vitest failed with status ${String(status)}.`);
+    }
+    if (!existsSync(testReport)) {
+      throw new Error('Completed-artifact Vitest did not produce its required case report.');
+    }
+    const result = z
+      .object({
+        numTotalTests: z.number().int().nonnegative(),
+        numPassedTests: z.number().int().nonnegative(),
+        numFailedTests: z.number().int().nonnegative(),
+        numPendingTests: z.number().int().nonnegative(),
+      })
+      .parse(JSON.parse(readFileSync(testReport, 'utf8')));
+    const executedCases = result.numPassedTests + result.numFailedTests;
+    console.info('Completed-artifact selected case counts', JSON.stringify({ ...result, executedCases }));
+    if (executedCases === 0 || result.numPassedTests === 0) {
+      throw new Error(
+        'Completed-artifact selection executed no passing cases; listed or skipped cases do not qualify the package.',
+      );
+    }
+    if (result.numFailedTests > 0) {
+      throw new Error('Completed-artifact case report contains failed cases.');
     }
   } finally {
     await cleanup();

@@ -183,7 +183,7 @@ const calibrationSafety = { authority: 'person', attended: false, interlocks: []
 const fanLabels = { 'part-fan': 'Part fan', 'aux-fan': 'Auxiliary fan', 'chamber-fan': 'Chamber fan' } as const;
 
 const actions = (model: BambuModel): readonly MachineActionDefinition[] => {
-  const { chamber, flowRatioCalibration } = bambuModels[model];
+  const { chamber } = bambuModels[model];
   const { controls, runControl, homing, calibrationConsequence } = manifestFacts[model];
   const runQualification = runControl === undefined ? {} : { qualification: runControl };
   return [
@@ -315,14 +315,11 @@ const actions = (model: BambuModel): readonly MachineActionDefinition[] => {
       requires: material,
       safety: calibrationSafety,
       consequence: calibrationConsequence,
-      ...(flowRatioCalibration
-        ? {}
-        : {
-            // Flow ratio is measured automatically only by the X1 series' lidar.
-            schema: standardMachineActions['material.calibration.run'].schema.extend({
-              method: z.enum(['pressure-advance']).meta({ title: 'What to measure' }),
-            }),
-          }),
+      // Pressure advance only, on every model: the X1 series' lidar can measure flow ratio, but its result belongs in
+      // the slicer's filament preset and Tau has no preset writer yet, so a run would spend filament for nothing kept.
+      schema: standardMachineActions['material.calibration.run'].schema.extend({
+        method: z.enum(['pressure-advance']).meta({ title: 'What to measure' }),
+      }),
     }),
     standardMachineAction({
       id: 'interaction.respond',

@@ -872,8 +872,8 @@ describe('Simulated X1C calibration', () => {
     expect(save.confirm()).toBe('confirmed');
   });
 
-  it('should refuse flow ratio on the A1 mini', async () => {
-    const { simulator } = await open({ model: 'A1 mini' });
+  it.each(['X1C', 'A1 mini'] as const)('should refuse flow ratio on the %s', async (model) => {
+    const { simulator } = await open({ model });
     await expect(
       act(simulator, 'filament:material.calibration.run', {
         method: 'flow-ratio',

@@ -11,6 +11,7 @@ import {
   bambuA1MiniManifest,
   bambuA1MiniSubmissionConfiguration,
   bambuA1MiniTestingProfile,
+  bambuDefinitions,
   bambuServicePort,
   bambuSubmissionConfiguration,
   bambuX1cHardwareProfile,
@@ -236,6 +237,15 @@ describe.each(manifests)('the %s manifest', (name, manifest, submission) => {
     for (const { safety } of calibrations) {
       expect(safety).toEqual({ authority: 'person', attended: false, interlocks: [] });
     }
+  });
+
+  it('should accept only pressure-advance runs until Tau can write a flow-ratio result to the slicer preset', async () => {
+    const run = bambuDefinitions[name].actions.find(({ id }) => id === 'material.calibration.run');
+    const parameters = { nozzleId: 'nozzle-0.4', slots: [{ unitId: 'ams-a', slotId: 'a1' }] };
+    expect(await run?.schema['~standard'].validate({ ...parameters, method: 'pressure-advance' })).not.toHaveProperty(
+      'issues',
+    );
+    expect(await run?.schema['~standard'].validate({ ...parameters, method: 'flow-ratio' })).toHaveProperty('issues');
   });
 
   it('should halt on stop with the heaters off and ask for the plate to be cleared', () => {

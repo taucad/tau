@@ -1487,8 +1487,13 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       }
       case 'filament:material.calibration.run': {
         const method = parameters['method'] === 'flow-ratio' ? 'flow-ratio' : 'pressure-advance';
-        if (method === 'flow-ratio' && !facts.flowRatioCalibration) {
-          return refusal('MACHINE_ACTION_UNSUPPORTED', 'Only the X1 series measures flow ratio automatically.');
+        if (method === 'flow-ratio') {
+          return refusal(
+            'MACHINE_ACTION_UNSUPPORTED',
+            facts.flowRatioCalibration
+              ? 'Tau cannot keep a flow-ratio result yet: it belongs in the slicer’s filament preset.'
+              : 'Only the X1 series measures flow ratio automatically.',
+          );
         }
         if (parameters['nozzleId'] !== `nozzle-${String(nozzleDiameter())}`) {
           return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'That nozzle is not the one installed.');

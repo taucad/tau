@@ -506,6 +506,9 @@ struct Proof {
     broad_phase: Json,
     final_evidence: Json,
     diagnostics: Vec<Diagnostic>,
+    /// The diagnostic refers to the single full certificate in the result row
+    /// instead of copying it (C1/C2/C3 face routes and box insertion).
+    compact: bool,
 }
 
 fn clearance_byte_sum(values: impl IntoIterator<Item = u64>) -> u64 {
@@ -726,19 +729,10 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
     // Only selected-face routes use the 256 KiB cylindrical-band/finite-contact
     // capacity. Occurrence-to-occurrence contact, insertion and clearance use
     // the selected continuous-domain proofs and their continuous output bound.
-    let band_claim = prepared.relationships.iter().any(|relationship| {
-        let Some((subject, target)) = relationship.resolved.as_ref() else {
-            return false;
-        };
-        let ([subject], [target]) = (subject.entities.as_slice(), target.entities.as_slice())
-        else {
-            return false;
-        };
-        matches!(
-            (endpoint_entity(subject), endpoint_entity(target)),
-            (Some(subject), Some(target)) if uses_band_route(relationship, subject, target)
-        )
-    });
+    let band_claim = prepared
+        .relationships
+        .iter()
+        .any(relationship_uses_band_route);
     let caller_reservation = if band_claim {
         let bytes = clearance_caller_reservation(prepared, context);
         if let Err(error) = context.set_cylindrical_band_output_bytes(bytes) {
@@ -838,7 +832,9 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                 return evaluation;
             }
         };
-        if band_claim {
+        // Only this row's own band route spends band capacity; a box row in a
+        // mixed claim stays on the continuous output bound.
+        if relationship_uses_band_route(relationship) {
             let proof_bytes = clearance_byte_sum([
                 super::json_owned_bytes(&proof.broad_phase),
                 super::json_owned_bytes(&proof.final_evidence),
@@ -846,7 +842,7 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
             ]);
             // Each projected diagnostic can clone both final evidence and its
             // witness array. Reserve those before constructing the projection.
-            let projections = if is_compact_nominal_proof(&proof) {
+            let projections = if proof.compact {
                 0 // Compact diagnostic refers to the single full result certificate.
             } else {
                 proof_bytes
@@ -1164,7 +1160,7 @@ fn project_relationship_diagnostic(
         relationship_label(index, relationship),
         source.message
     );
-    if is_compact_nominal_proof(proof) {
+    if proof.compact {
         // The complete C1/C2/C3 or box insertion certificate occurs once in the relationship
         // result. Duplicating it in both diagnostic.final and witnesses would
         // defeat the bounded projection. Keep identities and measurements here
@@ -1231,21 +1227,6 @@ fn project_relationship_diagnostic(
     diagnostic
 }
 
-fn is_compact_nominal_proof(proof: &Proof) -> bool {
-    matches!(json_field_ref(&proof.final_evidence, "method"),
-        Some(Json::String(method)) if matches!(method.as_str(), "exact-nominal-cylindrical-band-clearance" | "exact-nominal-finite-contact" | "exact-local-band-engagement" | "continuous-centerline"))
-        && !is_box_contact_proof(proof)
-}
-/// Box-to-box contact carries one bounded box-clearance witness, so its
-/// diagnostic keeps the full measured/witness/spatial shape like box clearance.
-fn is_box_contact_proof(proof: &Proof) -> bool {
-    let Some(Json::Array(witnesses)) = json_field_ref(&proof.final_evidence, "witnesses") else {
-        return false;
-    };
-    matches!(witnesses.as_slice(), [witness]
-        if matches!(json_field_ref(witness, "kind"), Some(Json::String(kind)) if kind == "nominal-box-clearance"))
-}
-
 fn endpoint_entity(entity: &Entity) -> Option<BrepEntity> {
     entity
         .face
@@ -1266,6 +1247,20 @@ fn uses_band_route(relationship: &Relationship, subject: BrepEntity, target: Bre
         Kind::Insertion => relationship.axis.is_some() && face(subject) && face(target),
         _ => false,
     }
+}
+
+/// [`uses_band_route`] for a prepared single-pair row; other rows never do.
+fn relationship_uses_band_route(relationship: &Relationship) -> bool {
+    let Some((subject, target)) = relationship.resolved.as_ref() else {
+        return false;
+    };
+    let ([subject], [target]) = (subject.entities.as_slice(), target.entities.as_slice()) else {
+        return false;
+    };
+    matches!(
+        (endpoint_entity(subject), endpoint_entity(target)),
+        (Some(subject), Some(target)) if uses_band_route(relationship, subject, target)
+    )
 }
 
 fn endpoints(
@@ -1399,6 +1394,7 @@ fn contact_proof(
 ) -> Proof {
     Proof {
         positive,
+        compact: center.is_none(),
         broad_phase: broad_phase(
             subject,
             target,
@@ -1447,38 +1443,25 @@ fn prove_contact(
                 "Box contact requires two complete occurrences.",
             ));
         };
-        let da = context
-            .selected_continuous_domain(ai)
-            .map_err(ProofError::Refused)?;
-        let db = context
-            .selected_continuous_domain(bi)
-            .map_err(ProofError::Refused)?;
-        return match continuous::clearance(continuous::ClearanceRequest {
-            subject: &da,
-            target: &db,
-            minimum: None,
-            maximum: Some(tolerance),
-            tolerance: 0.,
-        }) {
-            Outcome::Decided { positive, evidence } => {
-                context
-                    .check_continuous_output(evidence.owned_bytes() as u64)
-                    .map_err(ProofError::Refused)?;
-                Ok(contact_proof(
+        // FINITE_CONTACT_UNITS was charged above for both contact routes.
+        return nominal_box_clearance(
+            context,
+            (ai, bi),
+            0,
+            (None, Some(tolerance), 0.),
+            finite_contact_failure,
+            |positive, evidence, measured, witness| {
+                contact_proof(
                     positive,
-                    Json::object([("distance", Json::Number(evidence.distance))]),
-                    Json::object([
-                        ("kind", Json::string("nominal-box-clearance")),
-                        ("value", evidence.to_json()),
-                    ]),
+                    measured,
+                    witness,
                     Some(evidence.diagnostic_point),
                     relationship,
                     subject,
                     target,
-                ))
-            }
-            Outcome::Unsupported { reason, .. } => Err(finite_contact_failure(&reason.message)),
-        };
+                )
+            },
+        );
     }
     context
         .check_cylindrical_band_capacity(&[
@@ -1649,87 +1632,118 @@ fn prove_clearance(
     else {
         return Err(ProofError::Refused(nominal_box_clearance_refusal()));
     };
-    let subject_domain = context
+    let band = relationship.tolerance.unwrap_or(0.0);
+    nominal_box_clearance(
+        context,
+        (subject_id, target_id),
+        continuous::CLEARANCE_PAIR_UNITS,
+        (relationship.min, relationship.max, band),
+        |reason| {
+            ProofError::Refused(relationship_unsupported(
+                reason,
+                "Use two qualified complete nominal box occurrences; general BRep clearance remains unqualified.",
+            ))
+        },
+        |positive, evidence, measured, witness| {
+            let expected = optional_numbers(&[
+                ("min", relationship.min),
+                ("max", relationship.max),
+                ("tolerance", relationship.tolerance),
+            ]);
+            let final_evidence = final_json(
+                "exact-nominal-box-clearance",
+                measured,
+                expected.clone(),
+                vec![witness],
+            );
+            let diagnostics = (!positive)
+                .then(|| {
+                    let direction = if evidence.below_minimum {
+                        "too tight"
+                    } else {
+                        "too loose"
+                    };
+                    mismatch(
+                        format!(
+                            "Clearance between '{}' and '{}' is {direction} for the declared band {}.",
+                            selector_label(&relationship.subject_raw),
+                            selector_label(&relationship.target_raw),
+                            json_string(&expected)
+                        ),
+                        if evidence.below_minimum {
+                            "Open the fit, or lower the declared minimum if the tighter clearance is intended."
+                        } else {
+                            "Close the fit, or raise the declared maximum if the looser clearance is intended."
+                        },
+                        Some(evidence.diagnostic_point),
+                    )
+                })
+                .into_iter()
+                .collect();
+            let margin = relationship
+                .max
+                .map(|maximum| maximum + band)
+                .filter(|value| value.is_finite())
+                .unwrap_or(DEFAULT_LINEAR_TOLERANCE);
+            Proof {
+                positive,
+                compact: false,
+                broad_phase: broad_phase(subject, target, margin),
+                final_evidence,
+                diagnostics,
+            }
+        },
+    )
+}
+
+/// Box-to-box clearance shared by box contact and box clearance: the selected
+/// continuous domains, one exact clearance with its `{distance}` measurement
+/// and `nominal-box-clearance` witness, and the continuous output bound on the
+/// typed evidence before and with the route's final evidence.
+fn nominal_box_clearance(
+    context: &mut EvaluationContext<'_>,
+    (subject_id, target_id): (u32, u32),
+    units: u64,
+    (minimum, maximum, tolerance): (Option<f64>, Option<f64>, f64),
+    unsupported: impl FnOnce(&str) -> ProofError,
+    proof: impl FnOnce(bool, &continuous::ClearanceEvidence, Json, Json) -> Proof,
+) -> Result<Proof, ProofError> {
+    let subject = context
         .selected_continuous_domain(subject_id)
         .map_err(ProofError::Refused)?;
-    let target_domain = context
+    let target = context
         .selected_continuous_domain(target_id)
         .map_err(ProofError::Refused)?;
-    charge(context, continuous::CLEARANCE_PAIR_UNITS)?;
-    let band = relationship.tolerance.unwrap_or(0.0);
+    charge(context, units)?;
     let (positive, evidence) = match continuous::clearance(continuous::ClearanceRequest {
-        subject: &subject_domain,
-        target: &target_domain,
-        minimum: relationship.min,
-        maximum: relationship.max,
-        tolerance: band,
+        subject: &subject,
+        target: &target,
+        minimum,
+        maximum,
+        tolerance,
     }) {
         Outcome::Decided { positive, evidence } => (positive, evidence),
-        Outcome::Unsupported { reason, .. } => {
-            return Err(ProofError::Refused(relationship_unsupported(
-                &reason.message,
-                "Use two qualified complete nominal box occurrences; general BRep clearance remains unqualified.",
-            )))
-        }
+        Outcome::Unsupported { reason, .. } => return Err(unsupported(&reason.message)),
     };
     let typed_bytes = evidence.owned_bytes() as u64;
     context
         .check_continuous_output(typed_bytes)
         .map_err(ProofError::Refused)?;
-    let expected = optional_numbers(&[
-        ("min", relationship.min),
-        ("max", relationship.max),
-        ("tolerance", relationship.tolerance),
-    ]);
-    let final_evidence = final_json(
-        "exact-nominal-box-clearance",
+    let proof = proof(
+        positive,
+        &evidence,
         Json::object([("distance", Json::Number(evidence.distance))]),
-        expected.clone(),
-        vec![Json::object([
+        Json::object([
             ("kind", Json::string("nominal-box-clearance")),
             ("value", evidence.to_json()),
-        ])],
+        ]),
     );
     context
         .check_continuous_output(
-            typed_bytes.saturating_add(super::json_owned_bytes(&final_evidence)),
+            typed_bytes.saturating_add(super::json_owned_bytes(&proof.final_evidence)),
         )
         .map_err(ProofError::Refused)?;
-    let diagnostics = (!positive)
-        .then(|| {
-            let direction = if evidence.below_minimum {
-                "too tight"
-            } else {
-                "too loose"
-            };
-            mismatch(
-                format!(
-                    "Clearance between '{}' and '{}' is {direction} for the declared band {}.",
-                    selector_label(&relationship.subject_raw),
-                    selector_label(&relationship.target_raw),
-                    json_string(&expected)
-                ),
-                if evidence.below_minimum {
-                    "Open the fit, or lower the declared minimum if the tighter clearance is intended."
-                } else {
-                    "Close the fit, or raise the declared maximum if the looser clearance is intended."
-                },
-                Some(evidence.diagnostic_point),
-            )
-        })
-        .into_iter()
-        .collect();
-    let margin = relationship
-        .max
-        .map(|maximum| maximum + band)
-        .filter(|value| value.is_finite())
-        .unwrap_or(DEFAULT_LINEAR_TOLERANCE);
-    Ok(Proof {
-        positive,
-        broad_phase: broad_phase(subject, target, margin),
-        final_evidence,
-        diagnostics,
-    })
+    Ok(proof)
 }
 
 fn nominal_box_clearance_refusal() -> Evaluation {
@@ -1838,6 +1852,7 @@ fn prove_cylindrical_band_clearance(
         .unwrap_or(DEFAULT_LINEAR_TOLERANCE);
     Ok(Proof {
         positive,
+        compact: true,
         broad_phase: broad_phase(subject, target, margin),
         final_evidence,
         diagnostics,
@@ -2033,6 +2048,7 @@ fn prove_nominal_analytic(
     )).into_iter().collect();
     Ok(Proof {
         positive,
+        compact: false,
         broad_phase: broad_phase(subject, target, tolerance),
         final_evidence,
         diagnostics,
@@ -2163,6 +2179,7 @@ fn prove_containment(
     }
     Ok(Proof {
         positive: outside == 0,
+        compact: false,
         broad_phase: broad,
         final_evidence,
         diagnostics,
@@ -2207,6 +2224,7 @@ fn prove_containment_in_bore(
     let diagnostics = (!positive).then(|| mismatch(if fit.engagement > 0.0 { format!("'{}' does not fit the bore '{}': it overruns the bore radius by {:.4} mm.", selector_label(&relationship.subject_raw), selector_label(&relationship.target_raw), -fit.clearance) } else { format!("'{}' never enters the bore '{}': the two axial extents do not overlap.", selector_label(&relationship.subject_raw), selector_label(&relationship.target_raw)) }, "Re-position the part along the bore axis, or assert the relationship against the bore the part actually engages.", Some(fit.witness))).into_iter().collect();
     Ok(Proof {
         positive,
+        compact: false,
         broad_phase,
         final_evidence,
         diagnostics,
@@ -2325,6 +2343,7 @@ fn prove_local_band_engagement(
     );
     Ok(Proof {
         positive,
+        compact: true,
         broad_phase: broad_phase(
             subject,
             target,
@@ -2347,8 +2366,8 @@ fn prove_continuous_insertion(
     target: &[Endpoint],
     context: &mut EvaluationContext<'_>,
 ) -> Result<Proof, ProofError> {
-    let ([subject_endpoint], [target_endpoint], Some(axis)) = (subject, target, relationship.axis)
-    else {
+    // The band route's axis requirement lives in `uses_band_route` alone.
+    let ([subject_endpoint], [target_endpoint]) = (subject, target) else {
         return Err(ProofError::Refused(sampled_insertion_refusal()));
     };
     if uses_band_route(
@@ -2358,9 +2377,11 @@ fn prove_continuous_insertion(
     ) {
         return prove_local_band_engagement(relationship, subject, target, context);
     }
-    let (BrepEntity::Occurrence(subject_id), BrepEntity::Occurrence(target_id)) =
-        (subject_endpoint.entity, target_endpoint.entity)
-    else {
+    let (BrepEntity::Occurrence(subject_id), BrepEntity::Occurrence(target_id), Some(axis)) = (
+        subject_endpoint.entity,
+        target_endpoint.entity,
+        relationship.axis,
+    ) else {
         return Err(ProofError::Refused(sampled_insertion_refusal()));
     };
     let subject_domain = context
@@ -2429,6 +2450,7 @@ fn prove_continuous_insertion(
         .collect();
     Ok(Proof {
         positive,
+        compact: true,
         broad_phase: broad_phase(subject, target, DEFAULT_LINEAR_TOLERANCE),
         final_evidence,
         diagnostics,
@@ -2523,6 +2545,7 @@ fn prove_interference(
     )).into_iter().collect();
     Ok(Proof {
         positive,
+        compact: false,
         broad_phase: broad_phase(subject, target, DEFAULT_LINEAR_TOLERANCE),
         final_evidence,
         diagnostics,
@@ -2943,6 +2966,7 @@ mod tests {
             };
             let proof = Proof {
                 positive: false,
+                compact: true,
                 broad_phase: empty_object(),
                 final_evidence: final_json(method, empty_object(), empty_object(), vec![]),
                 diagnostics: vec![],
@@ -3541,6 +3565,7 @@ mod tests {
                 let broad_phase = json!({"candidateCount": 1});
                 let proof = Proof {
                     positive: false,
+                    compact: false,
                     broad_phase: decode(&broad_phase),
                     final_evidence: decode(&final_record),
                     diagnostics: Vec::new(),

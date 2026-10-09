@@ -489,3 +489,119 @@ fn occurrence_contact_is_not_charged_to_a_full_cylindrical_band_capacity() {
         "Simultaneous cylindrical-band clearance capacity exceeds 256 KiB."
     );
 }
+
+fn resolved(kind: &str, axis: bool, a: BrepEntity, b: BrepEntity) -> Relationship {
+    let selected = |entity: BrepEntity| Selection {
+        status: SelectionStatus::Resolved,
+        entities: vec![Entity {
+            id: format!("{entity:?}"),
+            entity_type: EntityType::Occurrence,
+            occurrence_path: None,
+            occurrence: Some(match entity {
+                BrepEntity::Occurrence(id) => id,
+                _ => 0,
+            }),
+            face: (!matches!(entity, BrepEntity::Occurrence(_))).then_some(entity),
+            facts: EntityFacts::default(),
+            topology_ref: None,
+        }],
+        expected: crate::analysis::selection::Cardinality::One,
+        stability: Stability::Authored,
+        candidates: vec![],
+        diagnostics: vec![],
+    };
+    let mut r = relationship(kind);
+    r.axis = axis.then_some([0., 0., 1.]);
+    r.resolved = Some((selected(a), selected(b)));
+    r.resolved_bores = Some((vec![None], vec![None]));
+    r
+}
+
+#[test]
+fn only_selected_face_rows_use_the_cylindrical_band_route() {
+    let face = BrepEntity::Face {
+        occurrence: 0,
+        face: 7,
+    };
+    let occurrence = BrepEntity::Occurrence(0);
+    for (kind, axis, a, b, expected) in [
+        ("contact", false, occurrence, occurrence, false),
+        ("contact", false, BrepEntity::Whole, occurrence, true),
+        ("contact", false, BrepEntity::WholeFace(1), occurrence, true),
+        ("clearance", false, face, occurrence, true),
+        ("insertion", true, face, face, true),
+        ("insertion", false, face, face, false),
+        ("insertion", true, face, occurrence, false),
+    ] {
+        let r = resolved(kind, axis, a, b);
+        assert_eq!(
+            relationship_uses_band_route(&r),
+            expected,
+            "{kind} {axis} {a:?} {b:?}"
+        );
+    }
+}
+
+#[test]
+fn box_contact_and_box_clearance_claim_takes_no_cylindrical_band_reservation() {
+    let mut subject = Subject::new("box-closeout".into(), SubjectFormat::Step, "mm".into());
+    let identity = crate::identity::SubjectIdentity::step(
+        b"nominal-box-closeout-control",
+        "millimetre",
+        1.0,
+        crate::backend::brep::BrepIdentityProfile {
+            ingest_profile: "core-control",
+            backend_profile: "core-control",
+        },
+        None,
+    )
+    .unwrap();
+    subject.content_hash = identity.primary_hash().into();
+    subject.semantic_identity.set(identity).unwrap();
+    subject.brep = Some(Box::new(BoxControl { bad: false }));
+    let subjects = [Rc::new(subject)];
+    let budget = Budget::new(1_000_000);
+    let normalized = Json::Null;
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::ToHaveSpatialRelationships,
+        "box-closeout",
+        &normalized,
+        &budget,
+        None,
+    );
+    // Earlier band rows own exactly the whole 256 KiB band capacity.
+    let header = std::mem::size_of::<Vec<Rc<crate::backend::brep::NominalCylindricalBand>>>();
+    assert!(context
+        .set_cylindrical_band_output_bytes((256 * 1024 - header) as u64)
+        .is_ok());
+    let mut clearance = resolved(
+        "clearance",
+        false,
+        BrepEntity::Occurrence(0),
+        BrepEntity::Occurrence(3),
+    );
+    clearance.min = Some(1.);
+    clearance.max = Some(3.);
+    let prepared = Prepared {
+        relationships: vec![
+            resolved(
+                "contact",
+                false,
+                BrepEntity::Occurrence(1),
+                BrepEntity::Occurrence(3),
+            ),
+            clearance,
+        ],
+    };
+    let Evaluation::Geometric {
+        positive_satisfied,
+        diagnostics,
+        ..
+    } = evaluate(&prepared, &mut context)
+    else {
+        panic!("a box-only claim must not be refused by band capacity");
+    };
+    assert!(positive_satisfied);
+    assert!(diagnostics.is_empty());
+}

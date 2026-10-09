@@ -214,6 +214,138 @@ describe('ObservationService', () => {
 });
 
 describe('captured observation incarnation', () => {
+  it.each(['invalidate', 'reset'] as const)(
+    'ignores a retired watch %s callback while a reacquired owner stages its result',
+    async (operation) => {
+      const callbacks: Array<{ invalidate(): void; reset(): void }> = [];
+      const held = Promise.withResolvers<string>();
+      const invalidateDomain = vi.fn();
+      const disposeValue = vi.fn();
+      const publish = vi.fn();
+      const read = vi.fn().mockResolvedValueOnce('old').mockReturnValueOnce(held.promise).mockResolvedValue('fresh');
+      const service = new ObservationService<string>({
+        actorOptions: guardedOptions(),
+        resource: 'same-path',
+        watch: (invalidate, reset) => {
+          callbacks.push({ invalidate, reset });
+          return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() };
+        },
+        read,
+        invalidate: invalidateDomain,
+        disposeValue,
+        publish,
+      });
+      const old = service.acquire();
+      await flush();
+      old.release();
+      const current = service.acquire();
+      try {
+        await flush();
+        const invalidationsBeforeOldCallback = invalidateDomain.mock.calls.length;
+        const diagnosticsBeforeOldCallback = service.diagnostics.invalidations;
+        held.resolve('current');
+        queueMicrotask(() => {
+          callbacks[0]![operation]();
+        });
+        await flush();
+        expect.soft(current.getSnapshot()).toEqual({ status: 'ready', value: 'current' });
+        expect.soft(publish.mock.calls).toEqual([['old'], ['current']]);
+        expect.soft(disposeValue.mock.calls).toEqual([['old']]);
+        expect.soft(invalidateDomain).toHaveBeenCalledTimes(invalidationsBeforeOldCallback);
+        expect.soft(service.diagnostics.invalidations).toBe(diagnosticsBeforeOldCallback);
+        expect.soft(read).toHaveBeenCalledTimes(2);
+        callbacks[1]![operation]();
+        await flush();
+        expect(current.getSnapshot()).toEqual({ status: 'ready', value: 'fresh' });
+        expect(read).toHaveBeenCalledTimes(3);
+        expect(invalidateDomain).toHaveBeenCalledTimes(invalidationsBeforeOldCallback + 1);
+      } finally {
+        current.release();
+        service.dispose();
+      }
+    },
+  );
+
+  it.each(['invalidate', 'reset'] as const)('ignores watch %s callbacks after terminal disposal', async (operation) => {
+    const callbacks = { invalidate: (): void => undefined, reset: (): void => undefined };
+    const invalidateDomain = vi.fn();
+    const read = vi.fn().mockResolvedValue('old');
+    const service = new ObservationService<string>({
+      actorOptions: guardedOptions(),
+      resource: 'terminal-watch',
+      read,
+      invalidate: invalidateDomain,
+      watch: (invalidate, reset) => {
+        Object.assign(callbacks, { invalidate, reset });
+        return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() };
+      },
+    });
+    const lease = service.acquire();
+    await flush();
+    service.dispose();
+    const invalidationsAtDispose = invalidateDomain.mock.calls.length;
+    const diagnosticsAtDispose = service.diagnostics.invalidations;
+    callbacks[operation]();
+    await flush();
+    expect.soft(invalidateDomain).toHaveBeenCalledTimes(invalidationsAtDispose);
+    expect.soft(service.diagnostics.invalidations).toBe(diagnosticsAtDispose);
+    expect.soft(lease.getSnapshot()).toEqual({ status: 'closed' });
+    expect.soft(read).toHaveBeenCalledOnce();
+    lease.release();
+  });
+
+  it.each(['invalidate', 'reset'] as const)(
+    'ignores synchronous %s delivery from watch disposal',
+    async (operation) => {
+      const invalidateDomain = vi.fn();
+      const service = new ObservationService<string>({
+        actorOptions: guardedOptions(),
+        resource: 'closing-watch',
+        read: vi.fn().mockResolvedValue('old'),
+        invalidate: invalidateDomain,
+        watch: (invalidate, reset) => ({
+          ready: Promise.resolve(),
+          closed: Promise.withResolvers<void>().promise,
+          dispose: () => {
+            ({ invalidate, reset })[operation]();
+          },
+        }),
+      });
+      const lease = service.acquire();
+      await flush();
+      lease.release();
+      expect.soft(invalidateDomain).toHaveBeenCalledOnce();
+      expect.soft(service.diagnostics.invalidations).toBe(0);
+      expect.soft(service.getSnapshot()).toEqual({ status: 'closed' });
+      service.dispose();
+    },
+  );
+
+  it.each(['invalidate', 'reset'] as const)('accepts synchronous current watch registration %s', async (operation) => {
+    const invalidateDomain = vi.fn();
+    const read = vi.fn().mockResolvedValue('current');
+    const service = new ObservationService<string>({
+      actorOptions: guardedOptions(),
+      resource: 'registering-watch',
+      read,
+      invalidate: invalidateDomain,
+      watch: (invalidate, reset) => {
+        ({ invalidate, reset })[operation]();
+        return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() };
+      },
+    });
+    const lease = service.acquire();
+    try {
+      await flush();
+      expect(invalidateDomain).toHaveBeenCalledOnce();
+      expect(service.diagnostics.invalidations).toBe(1);
+      expect(lease.getSnapshot()).toEqual({ status: 'ready', value: 'current' });
+      expect(read).toHaveBeenCalledOnce();
+    } finally {
+      lease.release();
+    }
+  });
+
   it('should dispose a late value after final release and never publish it into reacquired observation', async () => {
     const old = Promise.withResolvers<string>();
     const publish = vi.fn();

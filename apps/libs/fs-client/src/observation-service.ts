@@ -202,20 +202,26 @@ export class ObservationService<T> {
     const epoch = ++this.epoch;
     const actors = {
       observationDriver: createCallbackLogic<ObservationMachineEvent, { resource: string }>(({ sendBack }) => {
+        let disposed = false;
         const invalidate = (): void => {
+          if (disposed || this.disposed || epoch !== this.epoch) {
+            return;
+          }
           this.countInvalidation();
           this.discardStaged();
           this.options.invalidate?.();
           sendBack({ type: 'invalidate' });
         };
         const reset = (): void => {
+          if (disposed || this.disposed || epoch !== this.epoch) {
+            return;
+          }
           this.countInvalidation();
           this.discardStaged();
           this.options.invalidate?.();
           sendBack({ type: 'reset' });
         };
         const watch = this.options.watch?.(invalidate, reset);
-        let disposed = false;
         const register = async (): Promise<void> => {
           try {
             await watch?.ready;

@@ -91,12 +91,12 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — fifty-one today', () => {
+  it('is every non-private type:package project, sorted — fifty-three today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    expect(names).toHaveLength(51);
+    expect(names).toHaveLength(53);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
     for (const name of ['runtime', 'runtime-testing', 'geospec-engine']) {

@@ -1315,6 +1315,166 @@ describe('FileTreeService listDirectory / subscribePath', () => {
 });
 
 describe('directory observation bootstrap and shared cancellation', () => {
+  it('should preserve a selected directory owner until its delayed first acquisition after cache pressure', async () => {
+    const ready = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('initial.ts')]);
+    const unsubscribe = vi.fn();
+    let onWatch = (_event: WatchEvent): void => undefined;
+    const watchReady = vi
+      .fn<NonNullable<WorkerChangeChannelTransport['watchReady']>>()
+      .mockImplementation((_request, handler) => {
+        onWatch = handler;
+        return { ready: ready.promise, closed: closed.promise, unsubscribe };
+      });
+    const { tree, emitFileChanged, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+      watchReady,
+    });
+    try {
+      const selected = tree.observeDirectory('source');
+      for (let index = 0; index < 501; index++) {
+        tree.observeDirectory(`unmounted-${index}`);
+      }
+      expect(watchReady).not.toHaveBeenCalled();
+      expect(readDirectory).not.toHaveBeenCalled();
+      const lease = selected.acquire();
+      const peer = tree.observeDirectory('source').acquire();
+      const notified = vi.fn();
+      const off = lease.subscribe(notified);
+      try {
+        expect.soft(tree.observeDirectory('source')).toBe(selected);
+        expect(watchReady).toHaveBeenCalledOnce();
+        expect(lease.getSnapshot().status).toBe('registering');
+        expect(readDirectory).not.toHaveBeenCalled();
+        ready.resolve();
+        await vi.waitFor(() => {
+          expect(lease.getSnapshot()).toMatchObject({
+            status: 'ready',
+            value: { kind: 'ready', entries: [{ name: 'initial.ts' }] },
+          });
+        });
+        expect(peer.getSnapshot()).toBe(lease.getSnapshot());
+        expect(readDirectory).toHaveBeenCalledOnce();
+        notified.mockClear();
+        readDirectory.mockResolvedValue([textNode('current.ts')]);
+        emitFileChanged({ type: 'directoryChanged', path: 'source', backend: 'indexeddb' });
+        onWatch({ type: 'reset' });
+        await vi.waitFor(() => {
+          expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'current.ts' }] });
+        });
+        expect.soft(notified).toHaveBeenCalled();
+        expect(peer.getSnapshot()).toBe(lease.getSnapshot());
+        expect(readDirectory).toHaveBeenCalledTimes(2);
+        peer.release();
+        expect(unsubscribe).not.toHaveBeenCalled();
+        closed.resolve();
+        await vi.waitFor(() => {
+          expect(lease.getSnapshot().status).toBe('closed');
+        });
+      } finally {
+        off();
+        peer.release();
+        lease.release();
+      }
+      expect(unsubscribe).toHaveBeenCalledOnce();
+    } finally {
+      ready.resolve();
+      closed.resolve();
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should retain released directory identity while disposing active watches on root replacement and teardown', async () => {
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('initial.ts')]);
+    const unsubscribe = vi.fn();
+    const watchReady = vi.fn<NonNullable<WorkerChangeChannelTransport['watchReady']>>().mockImplementation(() => ({
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      unsubscribe,
+    }));
+    const { tree, disposeChannel } = createTreeHarness({
+      proxy: mock<ComposedViewClient>({ readDirectory }),
+      watchReady,
+    });
+    try {
+      const selected = tree.observeDirectory('source');
+      const first = selected.acquire();
+      await vi.waitFor(() => {
+        expect(first.getSnapshot().status).toBe('ready');
+      });
+      for (let index = 0; index < 501; index++) {
+        tree.observeDirectory(`active-peer-${index}`);
+      }
+      expect(tree.observeDirectory('source')).toBe(selected);
+      expect(watchReady).toHaveBeenCalledOnce();
+      first.release();
+      expect(unsubscribe).toHaveBeenCalledOnce();
+      for (let index = 0; index < 501; index++) {
+        tree.observeDirectory(`released-peer-${index}`);
+      }
+      expect(tree.observeDirectory('source')).toBe(selected);
+      readDirectory.mockResolvedValue([textNode('fresh.ts')]);
+      const second = selected.acquire();
+      await vi.waitFor(() => {
+        expect(second.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'fresh.ts' }] });
+      });
+      tree.reset('/projects/replacement');
+      expect(unsubscribe).toHaveBeenCalledTimes(2);
+      second.release();
+      expect(unsubscribe).toHaveBeenCalledTimes(2);
+      const replacement = tree.observeDirectory('source');
+      expect(replacement).not.toBe(selected);
+      const third = replacement.acquire();
+      await vi.waitFor(() => {
+        expect(third.getSnapshot().status).toBe('ready');
+      });
+      tree.dispose();
+      expect(unsubscribe).toHaveBeenCalledTimes(3);
+      third.release();
+      expect(unsubscribe).toHaveBeenCalledTimes(3);
+    } finally {
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should ignore stale finalized directory identity after root replacement', () => {
+    const callbacks: Array<(held: unknown) => void> = [];
+    const registrations: unknown[] = [];
+    const nativeRegistry = globalThis.FinalizationRegistry;
+    class ControlledRegistry extends nativeRegistry<unknown> {
+      public constructor(callback: (held: unknown) => void) {
+        super(callback);
+        callbacks.push(callback);
+      }
+
+      public override register(...args: Parameters<FinalizationRegistry<unknown>['register']>): void {
+        registrations.push(args[1]);
+        super.register(...args);
+      }
+    }
+    vi.stubGlobal('FinalizationRegistry', ControlledRegistry);
+    const { tree, disposeChannel } = createTreeHarness({ proxy: mock<ComposedViewClient>() });
+    try {
+      const old = tree.observeDirectory('source');
+      expect(registrations).toHaveLength(1);
+      const stale = registrations[0];
+      tree.reset('/projects/replacement');
+      const current = tree.observeDirectory('source');
+      expect(current).not.toBe(old);
+      expect(registrations).toHaveLength(2);
+      callbacks[0]!(stale);
+      expect(tree.observeDirectory('source')).toBe(current);
+      expect(current.getSnapshot().status).toBe('registering');
+    } finally {
+      tree.dispose();
+      disposeChannel();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('should read fresh rows after reacquisition acknowledges without background refresh', async () => {
     const ready = Promise.withResolvers<void>();
     const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('old.ts')]);

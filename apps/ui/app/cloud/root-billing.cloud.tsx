@@ -173,7 +173,12 @@ export const useCloudPaymentActionReturn = (): void => {
         }
         case 'failed':
         case 'canceled': {
-          return toast.warning('Payment was not completed.');
+          // A card setup moves no money, so it is left or refused rather than unpaid.
+          return toast.warning(
+            action.purpose === 'reload_setup'
+              ? 'Card setup for automatic reload was not completed.'
+              : 'Payment was not completed.',
+          );
         }
         default: {
           return undefined;

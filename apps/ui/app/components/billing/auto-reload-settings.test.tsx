@@ -127,6 +127,39 @@ describe('AutoReloadSettings', () => {
     expect(screen.queryByRole('button', { name: 'Review automatic reload' })).toBeNull();
   });
 
+  it.each([
+    ['paused_terms', 'redirect_required', 'Continue setup'],
+    ['paused_terms', 'prepared', 'Accept these limits'],
+    ['disabled_failures', 'redirect_required', 'Continue setup'],
+    ['disabled_failures', 'prepared', 'Accept these limits'],
+  ])(
+    'should not offer the old card setup of a %s consent that still reads %s beside its review',
+    async (state, setupState, control) => {
+      getReloadConsent.mockResolvedValue({
+        ...consentIn(state),
+        setupAction: { ...setupInCheckout, state: setupState },
+      });
+      renderSettings();
+      expect(await screen.findByRole('button', { name: 'Review automatic reload' })).toBeEnabled();
+      expect(screen.queryByRole('button', { name: control })).toBeNull();
+    },
+  );
+
+  it('should offer the limits of a new review in place of the old card setup', async () => {
+    const newLimits = { ...setupInCheckout, state: 'prepared', redirectUrl: null };
+    getReloadConsent
+      .mockResolvedValueOnce({ ...consentIn('paused_terms'), setupAction: setupInCheckout })
+      .mockResolvedValue({ ...consentIn('pending_setup'), setupAction: newLimits });
+    prepareReloadConsent.mockResolvedValue(newLimits);
+    renderSettings();
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Review automatic reload' }));
+
+    expect(await screen.findByRole('button', { name: 'Accept these limits' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Continue setup' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review automatic reload' })).toBeNull();
+  });
+
   it('should share the consent with useAutoReloadEnabled and refresh when billing is invalidated', async () => {
     const queryClient = new QueryClient();
     getReloadConsent.mockResolvedValue({ ...consentIn('pending_setup'), setupAction: setupInCheckout });

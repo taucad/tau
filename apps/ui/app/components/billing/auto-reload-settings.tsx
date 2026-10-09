@@ -100,7 +100,11 @@ export function AutoReloadSettings({
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const consent = reload.data ?? undefined;
-  const action = answer?.readAt === reload.dataUpdatedAt ? answer.action : (consent?.setupAction ?? undefined);
+  const answered = answer?.readAt === reload.dataUpdatedAt ? answer.action : undefined;
+  /* The setup the controls act on: a control's fresh answer, else the open setup of a consent still waiting
+   * for its card. A paused or disabled consent still reports the setup that once enabled it, and offering to
+   * continue that beside the review of new terms would send the customer back into a finished Checkout. */
+  const action = answered ?? (consent?.state === 'pending_setup' ? (consent.setupAction ?? undefined) : undefined);
   const load = loadState(reload);
   const canReview = load === 'loaded' && (!consent || reviewableStates.has(consent.state));
 

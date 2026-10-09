@@ -305,6 +305,19 @@ describe('useCloudPaymentActionReturn', () => {
     expect(toast.success).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ['a card setup', 'reload_setup', 'Card setup for automatic reload was not completed.'],
+    ['a purchase', 'manual_topup', 'Payment was not completed.'],
+  ])('should say %s was not completed when the customer left its Checkout', async (_, purpose, copy) => {
+    getPaymentAction.mockResolvedValue({ ...checkoutAction('canceled'), purpose });
+    returnFromCheckout();
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(copy);
+    });
+    expect(toast.warning).toHaveBeenCalledOnce();
+    expect(recoverPaymentAction).not.toHaveBeenCalled();
+  });
+
   it('should not recover an action that already settled', async () => {
     getPaymentAction.mockResolvedValue(checkoutAction('fulfilled', { grantedCreditAtoms: '5370000' }));
     returnFromCheckout();

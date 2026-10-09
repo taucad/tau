@@ -54,7 +54,11 @@ duplicate that workflow here.
 
 Author jobs through `@taucad/runtime/job`, machines through
 `@taucad/runtime/machine`, and their schemas through the pure
-`@taucad/runtime/configuration` entrypoint. Retain Zod as a peer only when selected
+`@taucad/runtime/configuration` entrypoint. A machine declares a manifest
+`version: 3` under `protocolVersion: 2`: its actions come from
+`standardMachineAction` or `defineMachineAction`, each `designed` until a
+qualification profile names it, with `holds`, `jobs` and `stop` declared
+explicitly. Retain Zod as a peer only when selected
 capabilities import it. Job and machine roles belong to host composition, not
 the four-role CAD executor. ABI 2 plugins must declare a runtime peer range that
 excludes ABI 1 releases before publication; a generated range is not release

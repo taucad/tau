@@ -727,19 +727,17 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
     // capacity. Occurrence-to-occurrence contact, insertion and clearance use
     // the selected continuous-domain proofs and their continuous output bound.
     let band_claim = prepared.relationships.iter().any(|relationship| {
+        let Some((subject, target)) = relationship.resolved.as_ref() else {
+            return false;
+        };
+        let ([subject], [target]) = (subject.entities.as_slice(), target.entities.as_slice())
+        else {
+            return false;
+        };
         matches!(
-            relationship.kind,
-            Kind::Contact | Kind::Insertion | Kind::Clearance
-        ) && relationship
-            .resolved
-            .as_ref()
-            .is_some_and(|(subject, target)| {
-                subject
-                    .entities
-                    .iter()
-                    .chain(&target.entities)
-                    .any(|entity| matches!(entity.face, Some(BrepEntity::Face { .. })))
-            })
+            (endpoint_entity(subject), endpoint_entity(target)),
+            (Some(subject), Some(target)) if uses_band_route(relationship, subject, target)
+        )
     });
     let caller_reservation = if band_claim {
         let bytes = clearance_caller_reservation(prepared, context);
@@ -1041,15 +1039,20 @@ fn evaluate_mesh(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Ev
                     let scalar = |value| exact::rational(value).map_err(arithmetic_error);
                     match relationship.kind {
                         Kind::Containment => {
-                            let volume = owner.region_overlap(a, a, context.budget, pending_bytes)?;
+                            let volume =
+                                owner.region_overlap(a, a, context.budget, pending_bytes)?;
                             Ok(volume == overlap)
                         }
                         Kind::Interference => Ok(overlap
                             >= scalar(relationship.min_volume.unwrap_or(0.0))?
                             && overlap <= scalar(relationship.max_volume.unwrap_or(0.0))?),
                         Kind::Contact | Kind::Clearance => {
-                            let (distance, witness) =
-                                owner.region_boundary_distance(a, b, context.budget, pending_bytes)?;
+                            let (distance, witness) = owner.region_boundary_distance(
+                                a,
+                                b,
+                                context.budget,
+                                pending_bytes,
+                            )?;
                             fields.push((
                                 "distanceSquaredNumerator".into(),
                                 Json::String(distance.numer().to_string()),
@@ -1231,6 +1234,38 @@ fn project_relationship_diagnostic(
 fn is_compact_nominal_proof(proof: &Proof) -> bool {
     matches!(json_field_ref(&proof.final_evidence, "method"),
         Some(Json::String(method)) if matches!(method.as_str(), "exact-nominal-cylindrical-band-clearance" | "exact-nominal-finite-contact" | "exact-local-band-engagement" | "continuous-centerline"))
+        && !is_box_contact_proof(proof)
+}
+/// Box-to-box contact carries one bounded box-clearance witness, so its
+/// diagnostic keeps the full measured/witness/spatial shape like box clearance.
+fn is_box_contact_proof(proof: &Proof) -> bool {
+    let Some(Json::Array(witnesses)) = json_field_ref(&proof.final_evidence, "witnesses") else {
+        return false;
+    };
+    matches!(witnesses.as_slice(), [witness]
+        if matches!(json_field_ref(witness, "kind"), Some(Json::String(kind)) if kind == "nominal-box-clearance"))
+}
+
+fn endpoint_entity(entity: &Entity) -> Option<BrepEntity> {
+    entity
+        .face
+        .or_else(|| entity.occurrence.map(BrepEntity::Occurrence))
+}
+
+/// Whether a single-pair contact/clearance/insertion row dispatches to a
+/// selected-face proof that uses the 256 KiB cylindrical-band capacity. The
+/// claim budget and the proof dispatch both use this, so they cannot drift.
+fn uses_band_route(relationship: &Relationship, subject: BrepEntity, target: BrepEntity) -> bool {
+    let face = |entity| matches!(entity, BrepEntity::Face { .. });
+    match relationship.kind {
+        Kind::Contact => !matches!(
+            (subject, target),
+            (BrepEntity::Occurrence(_), BrepEntity::Occurrence(_))
+        ),
+        Kind::Clearance => face(subject) || face(target),
+        Kind::Insertion => relationship.axis.is_some() && face(subject) && face(target),
+        _ => false,
+    }
 }
 
 fn endpoints(
@@ -1243,10 +1278,7 @@ fn endpoints(
     }
     let mut endpoints = Vec::with_capacity(selection.entities.len());
     for (entity, bore) in selection.entities.iter().zip(bores) {
-        let brep_entity = entity
-            .face
-            .or_else(|| entity.occurrence.map(BrepEntity::Occurrence));
-        let Some(brep_entity) = brep_entity else {
+        let Some(brep_entity) = endpoint_entity(entity) else {
             return Err(relationship_unsupported(
                 &format!("The relationship {role} resolved to '{}', which carries no occurrence this subject's STEP-XDE structure knows.", entity.id),
                 "Re-export the artifact so selector facts and exact BRep operands come from the same STEP graph.",
@@ -1358,7 +1390,9 @@ fn finite_contact_failure(reason: &str) -> ProofError {
 }
 fn contact_proof(
     positive: bool,
-    certificate: Json,
+    measured: Json,
+    witness: Json,
+    center: Option<[f64; 3]>,
     relationship: &Relationship,
     subject: &[Endpoint],
     target: &[Endpoint],
@@ -1372,7 +1406,7 @@ fn contact_proof(
         ),
         final_evidence: final_json(
             "exact-nominal-finite-contact",
-            empty_object(),
+            measured,
             optional_numbers(&[
                 ("tolerance", relationship.tolerance),
                 (
@@ -1380,7 +1414,7 @@ fn contact_proof(
                     relationship.angular_tolerance_degrees,
                 ),
             ]),
-            vec![certificate],
+            vec![witness],
         ),
         diagnostics: if positive {
             vec![]
@@ -1388,7 +1422,7 @@ fn contact_proof(
             vec![mismatch(
             format!("Finite contact between '{}' and '{}' violates the exact seating or separation bound.",
                 selector_label(&relationship.subject_raw),selector_label(&relationship.target_raw)),
-            "Align opposing face normals and close the certified finite gap.",None)]
+            "Align opposing face normals and close the certified finite gap.",center)]
         },
     }
 }
@@ -1405,9 +1439,14 @@ fn prove_contact(
     };
     let tolerance = relationship.tolerance.unwrap_or(DEFAULT_LINEAR_TOLERANCE);
     charge(context, continuous::FINITE_CONTACT_UNITS)?;
-    if let (BrepEntity::Occurrence(ai), BrepEntity::Occurrence(bi)) = (a.entity, b.entity) {
+    if !uses_band_route(relationship, a.entity, b.entity) {
         // Box-to-box contact is the continuous clearance proof; it never holds
         // finite-contact records, so it is bounded like nominal box clearance.
+        let (BrepEntity::Occurrence(ai), BrepEntity::Occurrence(bi)) = (a.entity, b.entity) else {
+            return Err(finite_contact_failure(
+                "Box contact requires two complete occurrences.",
+            ));
+        };
         let da = context
             .selected_continuous_domain(ai)
             .map_err(ProofError::Refused)?;
@@ -1427,7 +1466,12 @@ fn prove_contact(
                     .map_err(ProofError::Refused)?;
                 Ok(contact_proof(
                     positive,
-                    evidence.to_json(),
+                    Json::object([("distance", Json::Number(evidence.distance))]),
+                    Json::object([
+                        ("kind", Json::string("nominal-box-clearance")),
+                        ("value", evidence.to_json()),
+                    ]),
+                    Some(evidence.diagnostic_point),
                     relationship,
                     subject,
                     target,
@@ -1519,7 +1563,9 @@ fn prove_contact(
                 ]);
                 return Ok(contact_proof(
                     positive,
+                    empty_object(),
                     certificate,
+                    None,
                     relationship,
                     subject,
                     target,
@@ -1591,9 +1637,11 @@ fn prove_clearance(
     let ([subject_endpoint], [target_endpoint]) = (subject, target) else {
         return Err(ProofError::Refused(nominal_box_clearance_refusal()));
     };
-    if matches!(subject_endpoint.entity, BrepEntity::Face { .. })
-        || matches!(target_endpoint.entity, BrepEntity::Face { .. })
-    {
+    if uses_band_route(
+        relationship,
+        subject_endpoint.entity,
+        target_endpoint.entity,
+    ) {
         return prove_cylindrical_band_clearance(relationship, subject, target, context);
     }
     let (BrepEntity::Occurrence(subject_id), BrepEntity::Occurrence(target_id)) =
@@ -2303,9 +2351,11 @@ fn prove_continuous_insertion(
     else {
         return Err(ProofError::Refused(sampled_insertion_refusal()));
     };
-    if matches!(subject_endpoint.entity, BrepEntity::Face { .. })
-        && matches!(target_endpoint.entity, BrepEntity::Face { .. })
-    {
+    if uses_band_route(
+        relationship,
+        subject_endpoint.entity,
+        target_endpoint.entity,
+    ) {
         return prove_local_band_engagement(relationship, subject, target, context);
     }
     let (BrepEntity::Occurrence(subject_id), BrepEntity::Occurrence(target_id)) =

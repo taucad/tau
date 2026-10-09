@@ -285,6 +285,7 @@ impl BrepSubject for BoxControl {
         Ok(match id {
             0 => continuous::nominal_analytic_box_control(id, [0.; 3], [10.; 3]),
             1 => continuous::nominal_analytic_box_control(id, [8., 0., 0.], [12., 10., 10.]),
+            3 => continuous::nominal_analytic_box_control(id, [12., 0., 0.], [20., 10., 10.]),
             _ => continuous::nominal_analytic_box_control(id, [9., 0., 0.], [12., 10., 10.]),
         })
     }
@@ -446,6 +447,35 @@ fn occurrence_contact_is_not_charged_to_a_full_cylindrical_band_capacity() {
     assert_eq!(
         json_field_ref(&proof.final_evidence, "method"),
         Some(&Json::string("exact-nominal-finite-contact"))
+    );
+    // A separated box contact reports the measured gap, its witness and a
+    // spatial center like box clearance, not the compact face-contact shape.
+    let Ok(proof) = prove_contact(&r, &[occurrence(0)], &[occurrence(3)], &mut context) else {
+        panic!("separated box contact must be decided");
+    };
+    assert!(!proof.positive);
+    let selected = Selection {
+        status: SelectionStatus::Resolved,
+        entities: vec![],
+        expected: crate::analysis::selection::Cardinality::One,
+        stability: Stability::Authored,
+        candidates: vec![],
+        diagnostics: vec![],
+    };
+    let diagnostic =
+        project_relationship_diagnostic(0, &r, &selected, &selected, &proof, &proof.diagnostics[0]);
+    let actual: serde_json::Value =
+        serde_json::from_slice(&crate::codec::encode(&diagnostic.to_json()).unwrap()).unwrap();
+    assert_eq!(actual["code"], "GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH");
+    assert_eq!(
+        actual["spatial"]["center"].as_array().map(Vec::len),
+        Some(3)
+    );
+    assert_eq!(actual["spatial"].as_object().map(|o| o.len()), Some(1));
+    assert_eq!(actual["details"]["measured"]["distance"].as_f64(), Some(2.));
+    assert_eq!(
+        actual["details"]["witnesses"][0]["kind"],
+        "nominal-box-clearance"
     );
     // A selected-face contact still needs band capacity, and is refused first.
     let face = endpoint(entity([0.; 3], [0., 0., 1.], true, false));

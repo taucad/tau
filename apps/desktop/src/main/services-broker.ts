@@ -328,12 +328,14 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         if (type === 'machine-binding-completed') {
           pending.resolve(record['outcome'] as MachineBindingOutcome);
         } else {
+          const failure = new Error(
+            typeof record['message'] === 'string'
+              ? record['message']
+              : 'The desktop machine host could not complete this binding.',
+          );
+          /* The host's typed refusal code travels with it, so the renderer never reads one out of a message. */
           pending.reject(
-            new Error(
-              typeof record['message'] === 'string'
-                ? record['message']
-                : 'The desktop machine host could not complete this binding.',
-            ),
+            typeof record['code'] === 'string' ? Object.assign(failure, { code: record['code'] }) : failure,
           );
         }
       }

@@ -30,6 +30,7 @@ import {
 import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
+import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import {
   defaultConfigDirectory,
@@ -103,7 +104,7 @@ import {
   servicesPortRelayTag,
   slicersChannels,
 } from '#shared/desktop-bootstrap.js';
-import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
+import type { AppIconTheme, DesktopMachineBindingFailure } from '#shared/desktop-bootstrap.js';
 import { generatedImageIpcChannel, openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
 import type { QuickLookResult } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
@@ -225,11 +226,13 @@ const quitMarginMilliseconds = 3000;
  * drain, then the live-checkout wait, the close cuts and the sync quiesce — so
  * rule 9's nesting holds whatever those bounds become: the host's reason
  * lands before this wait's. Projects close in parallel, so the per-project
- * bound is the whole bound. After it the durable queue is the guarantee (D28).
+ * bound is the whole bound. The utility's quiesce first waits for machine job
+ * starts already admitted, before any project closes, so that wait adds on.
+ * After it the durable queue is the guarantee (D28).
  *
  * @internal
  */
-export const quitQuiesceMilliseconds = projectCloseMilliseconds + quitMarginMilliseconds;
+export const quitQuiesceMilliseconds = projectCloseMilliseconds + machineStartWaitMilliseconds + quitMarginMilliseconds;
 
 /*
  * The page's own close steps before its sync flush: `cancelRuns`, then
@@ -251,9 +254,10 @@ const machineBindingMilliseconds = 60_000;
 
 /**
  * How long quit waits for the utility to say whether a program is streaming. The utility first quiesces the machine
- * host, which waits up to 10 s for job starts already admitted, so this bound sits above that wait.
+ * host, which waits up to {@link machineStartWaitMilliseconds} for job starts already admitted, so this bound sits
+ * above that wait.
  */
-const machineStreamingMilliseconds = 12_000;
+const machineStreamingMilliseconds = machineStartWaitMilliseconds + 2000;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
@@ -770,14 +774,28 @@ const bootstrapElectronApp = async (): Promise<void> => {
     ) {
       throw new Error('Desktop shell refused invalid machine binding completion.');
     }
-    return services.completeMachineBinding(
-      {
-        ceremonyId,
-        ...(address === undefined ? {} : { address }),
-        ...(accessCode === undefined ? {} : { accessCode }),
-      },
-      machineBindingMilliseconds,
-    );
+    try {
+      return await services.completeMachineBinding(
+        {
+          ceremonyId,
+          ...(address === undefined ? {} : { address }),
+          ...(accessCode === undefined ? {} : { accessCode }),
+        },
+        machineBindingMilliseconds,
+      );
+    } catch (error) {
+      /* Resolved, not thrown: an error crossing the context bridge keeps only its message, and the host's typed code
+       * is what the renderer reads. */
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+          ? error.code
+          : undefined;
+      return {
+        status: 'failed',
+        ...(code === undefined ? {} : { code }),
+        message: error instanceof Error ? error.message : String(error),
+      } satisfies DesktopMachineBindingFailure;
+    }
   });
   registeredProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot);
   const publishRoots = (): void => {

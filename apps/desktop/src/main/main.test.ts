@@ -6,6 +6,7 @@ import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
+import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -923,7 +924,8 @@ describe('desktop quit bounds', () => {
 
     /* The utility's launchers drain their runs before they release. */
     expect(host.projectCloseMilliseconds).toBeGreaterThan(host.projectReleaseMilliseconds);
-    expect(quitQuiesceMilliseconds).toBeGreaterThan(host.projectCloseMilliseconds);
+    /* The utility's quiesce first waits for machine job starts in flight, then closes its projects. */
+    expect(quitQuiesceMilliseconds).toBeGreaterThan(host.projectCloseMilliseconds + machineStartWaitMilliseconds);
     /* The page cancels runs and flushes producers (10 s each) before the host's close. */
     expect(quitRendererMilliseconds).toBeGreaterThan(2 * 10_000 + host.projectReleaseMilliseconds);
   }, 60_000);
@@ -1211,6 +1213,24 @@ describe('desktop main machine binding channel', () => {
         { ceremonyId: 'ceremony-2', address: '10.0.0.5', accessCode: '12345678' },
       ]);
       expect(JSON.stringify(state.log.mock.calls)).not.toContain('12345678');
+
+      /* A refusal resolves as data, so the host's typed code crosses the context bridge, which keeps only an error's
+       * message. */
+      state.servicesCompleteBinding.mockRejectedValueOnce(
+        Object.assign(new Error('Enter the access code shown on the machine.'), {
+          code: 'MACHINE_CREDENTIAL_REQUIRED',
+        }),
+      );
+      await expect(complete({ senderFrame: {} }, { ceremonyId: 'ceremony-4' })).resolves.toEqual({
+        status: 'failed',
+        code: 'MACHINE_CREDENTIAL_REQUIRED',
+        message: 'Enter the access code shown on the machine.',
+      });
+      state.servicesCompleteBinding.mockRejectedValueOnce(new Error('The desktop machine binding timed out.'));
+      await expect(complete({ senderFrame: {} }, { ceremonyId: 'ceremony-5' })).resolves.toEqual({
+        status: 'failed',
+        message: 'The desktop machine binding timed out.',
+      });
     },
     bootMilliseconds,
   );

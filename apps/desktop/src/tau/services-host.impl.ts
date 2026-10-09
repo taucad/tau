@@ -66,8 +66,9 @@ import type {
 import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
-import { createNodeMachineHost } from '@taucad/runtime/host/node';
+import { createNodeMachineHost, MachineHostStartInFlightError } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
+import { machineChannelProtocolVersion } from '@taucad/runtime/machine';
 import type { MachineArtifactReference, MachineBindingOutcome, MachineRun } from '@taucad/runtime/machine';
 import type { HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -289,7 +290,7 @@ export type ServicesHostOptions = {
   /** Reply to main with one binding ceremony's outcome, or why it failed. */
   readonly machineBindingCompleted?: (
     requestId: string,
-    result: Readonly<{ outcome: MachineBindingOutcome }> | Readonly<{ error: string }>,
+    result: Readonly<{ outcome: MachineBindingOutcome }> | Readonly<{ error: string; code?: string }>,
   ) => void;
   /** Reply to main with the machines a streamed run is feeding now, by name, so quit can refuse (Q-streamed-host). */
   readonly machinesStreaming?: (requestId: string, machines: readonly string[]) => void;
@@ -698,7 +699,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
   /**
    * The machines a streamed run is feeding now, by name. This utility feeds such a program line by line for its
-   * whole run, so quitting would cut it mid-run (Q-streamed-host); `finishing` still has lines in flight.
+   * whole run, so quitting would cut it mid-run (Q-streamed-host); `finishing` still has lines in flight. A run the
+   * machine reports counts, and so does a streamed start the host recorded on its job from the start's receipt, so a
+   * provider that answers before its report shows the run is never read as idle.
    *
    * @returns The machines' names; none while the store is not open here.
    */
@@ -710,16 +713,30 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const { host, admission } = await pending;
     const session = host.issueSession({
       actor: { kind: 'user', id: 'desktop' },
-      grants: [{ route: 'machines', operation: 'machines.list' }],
+      grants: [
+        { route: 'machines', operation: 'machines.list' },
+        { route: 'machines', operation: 'machines.listJobs' },
+      ],
     });
     const facet = localMachineFacet((port) => host.serve({ port, session }));
     try {
       if (!facet.available) {
         return [];
       }
-      const { entries } = await facet.list({});
+      const [{ entries }, jobs] = await Promise.all([facet.list({}), facet.listJobs({})]);
+      const running = new Set(
+        jobs
+          .filter(({ state, run }) => state === 'started' && run?.outcome === 'running')
+          .map(({ machineId }) => machineId),
+      );
       return entries
-        .filter(({ snapshot: { run } }) => run?.delivery === 'streamed' && streamingRunStates.has(run.state))
+        .filter(({ machineId, descriptor, snapshot: { run } }) => {
+          if (run?.delivery === 'streamed' && streamingRunStates.has(run.state)) {
+            return true;
+          }
+          const facts = running.has(machineId) ? descriptor.capabilities.jobs : undefined;
+          return facts?.type === 'supported' && facts.delivery === 'streamed';
+        })
         .map(({ name }) => name);
     } finally {
       facet.close();
@@ -733,9 +750,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * a moment after its first refusal, so the next call dials again and retries
    * the store.
    *
-   * ponytail: repeats the machines protocol's hello literal, which the client
-   * checks; if that protocol's version moves, a refusal reads as a failed
-   * handshake instead of its code.
+   * Says the machines protocol's own hello, so the client reads the refusal's
+   * code rather than a failed handshake.
    *
    * @param port - The utility's leg of main's `MessageChannelMain`.
    * @param reason - Why the store is unavailable; its `code`, when it has one, travels with it.
@@ -756,7 +772,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const server = createChannelServer({
       port: wrapMessagePortMain(port),
       sessionKey: 'machines-refused',
-      hello: { server: 'machines', protocolVersion: 2 },
+      hello: { server: 'machines', protocolVersion: machineChannelProtocolVersion },
       impl: {
         call: async () => {
           throw refusal();
@@ -1194,6 +1210,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             }
             machinesStreaming?.(requestId, machines);
           } catch (error) {
+            /* A start still in flight: its gate is still up, and this question lets go of it as of any other hold. */
+            if (error instanceof MachineHostStartInFlightError) {
+              resume = error.resume;
+            }
             letGo();
             /* Unanswered, main's bound decides; the reason stays in the log. */
             log('machines.streaming-unread', error instanceof Error ? error.message : String(error), 'warn');
@@ -1232,8 +1252,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             machineBindingCompleted?.(requestId, { outcome });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            const code =
+              typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+                ? error.code
+                : undefined;
             log('machines.binding-failed', message, 'warn');
-            machineBindingCompleted?.(requestId, { error: message });
+            machineBindingCompleted?.(requestId, { error: message, ...(code === undefined ? {} : { code }) });
           }
         })();
         return;
@@ -1386,6 +1410,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       }
       streaming = held === undefined ? await streamingMachines() : [];
     } catch (error) {
+      /* A start still in flight keeps the gate up: *Quit anyway* closes with no start admitted; a refusal lifts it. */
+      if (error instanceof MachineHostStartInFlightError) {
+        resumeStarts = error.resume;
+      }
       if (!quitIfStreamingUnknown) {
         refuse({
           type: 'quiesce-refused',

@@ -327,6 +327,19 @@ describe('createServicesBroker', () => {
       message: 'MACHINE_BINDING_UNKNOWN',
     });
     await expect(failed).rejects.toThrow('MACHINE_BINDING_UNKNOWN');
+
+    /* The host's typed code survives the relay beside its message. */
+    const refused = broker.completeMachineBinding({ ceremonyId: 'ceremony-3' }, 1000);
+    spawns[0]?.message({
+      type: 'machine-binding-complete-failed',
+      requestId: bindingFrames()[2]?.['requestId'],
+      message: 'Enter the access code shown on the machine.',
+      code: 'MACHINE_CREDENTIAL_REQUIRED',
+    });
+    await expect(refused).rejects.toMatchObject({
+      message: 'Enter the access code shown on the machine.',
+      code: 'MACHINE_CREDENTIAL_REQUIRED',
+    });
   });
 
   it('should ask a running utility which machines a program streams to, and answer none without one', async () => {
@@ -350,6 +363,14 @@ describe('createServicesBroker', () => {
       machines: ['LongMill'],
     });
     await expect(asked).resolves.toEqual(['LongMill']);
+
+    /* Main calls the quit off: the running utility hears it once. */
+    broker.resumeMachineStarts();
+    const resumes = (spawns[0]?.posted ?? []).filter(
+      (message) =>
+        typeof message === 'object' && message !== null && 'type' in message && message.type === 'machines-resume',
+    );
+    expect(resumes).toEqual([{ type: 'machines-resume' }]);
   });
 
   it('should never replay or log an access code, and complete without one when none was typed', async () => {

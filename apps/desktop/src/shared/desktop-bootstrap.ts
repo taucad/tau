@@ -60,6 +60,13 @@ export const machinesChannels = {
 } as const;
 
 /**
+ * What `completeBinding` resolves when the ceremony fails: the host's typed `code`, when it has one, beside its
+ * message. A failure resolves as data rather than rejecting, because an error crossing the context bridge keeps only
+ * its message.
+ */
+export type DesktopMachineBindingFailure = Readonly<{ status: 'failed'; code?: string; message: string }>;
+
+/**
  * Read-only Bambu Studio presets and settings for the Print pane (blueprint D12).
  *
  * Request/response only: the slice itself runs in the kernel utility on the

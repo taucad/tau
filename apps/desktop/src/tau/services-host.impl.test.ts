@@ -1135,7 +1135,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       await expect(facet.resolveJob({ jobId: 'any', decision: 'deny', resolvedBy: person })).rejects.toThrow(
         'ROUTE_DENIED',
       );
-      const discovery = facet.discover({ providerId: 'bambu-simulator', configuration: { logicalId: 'discovery' } });
+      const discovery = facet.discover({ providerId: 'bambu-simulator', configuration: {} });
       await expect(discovery[Symbol.asyncIterator]().next()).rejects.toThrow('ROUTE_DENIED');
     } finally {
       vi.unstubAllEnvs();

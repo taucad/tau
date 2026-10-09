@@ -142,7 +142,7 @@ const host = createServicesHost({
   machineBindingCompleted: (requestId, result) => {
     parentPort.postMessage(
       'error' in result
-        ? { type: 'machine-binding-complete-failed', requestId, message: result.error }
+        ? { type: 'machine-binding-complete-failed', requestId, message: result.error, code: result.code }
         : { type: 'machine-binding-completed', requestId, outcome: result.outcome },
     );
   },

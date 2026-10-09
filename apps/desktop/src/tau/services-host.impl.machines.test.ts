@@ -23,11 +23,18 @@ const runtimeOptions = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.cr
 /* A directory a case lists in place of the store's, for runs no simulator can be left in. */
 const listed = vi.hoisted(() => ({
   entries: undefined as undefined | readonly unknown[],
+  /* The jobs a case lists in place of the store's. */
+  jobs: undefined as undefined | readonly unknown[],
   /* A directory read that fails, as a busy store does. */
   error: undefined as undefined | Error,
 }));
 /* The order in which quiescing gates the machine host's starts, reads its runs and lets starts go again. */
 const gate = vi.hoisted(() => [] as string[]);
+/* How the machine host's quiesce behaves: held until `release` settles, or timed out with a start still in flight. */
+const quiescing = vi.hoisted(() => ({
+  release: undefined as undefined | Promise<void>,
+  isStartInFlight: false,
+}));
 
 vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
   const actual = await importOriginal<typeof RuntimeHostNode>();
@@ -39,6 +46,13 @@ vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
         ...host,
         quiesce: async () => {
           gate.push('quiesce');
+          await quiescing.release;
+          if (quiescing.isStartInFlight) {
+            /* The real host's timeout: its gate stays up until the error's `resume`. */
+            throw new actual.MachineHostStartInFlightError(() => {
+              gate.push('resume');
+            });
+          }
           const resume = await host.quiesce();
           return () => {
             gate.push('resume');
@@ -59,8 +73,9 @@ vi.mock('@taucad/host', async (importOriginal) => {
       return actual.createNodeMachineRuntime(options);
     },
     localMachineFacet: (serve: Parameters<typeof TauHost.localMachineFacet>[0]) => {
-      const facet = actual.localMachineFacet(serve);
-      const { entries, error } = listed;
+      const real = actual.localMachineFacet(serve);
+      const { entries, error, jobs } = listed;
+      const facet = jobs === undefined ? real : { ...real, listJobs: async () => jobs };
       if (error !== undefined) {
         return {
           ...facet,
@@ -227,7 +242,7 @@ const machinesHarness = async () => {
     let candidate: MachineCandidate | undefined;
     for await (const event of client.discover({
       providerId,
-      configuration: { logicalId: 'simulated-x1c' },
+      configuration: {},
     })) {
       if (event.type === 'found') {
         candidate = event.candidate;
@@ -399,7 +414,7 @@ describe('createServicesHost — machines', () => {
         'makera-carvera-simulator',
       ]) {
         /* A simulator's provider declares only simulation, so the ceremony asks it no code. */
-        for await (const event of client.discover({ providerId, configuration: { logicalId: providerId } })) {
+        for await (const event of client.discover({ providerId, configuration: {} })) {
           if (event.type === 'found') {
             const { endpoint } = event.candidate;
             expect(endpoint.transport === 'network' ? endpoint.address : endpoint.path).toMatch(/\.invalid$/u);
@@ -435,8 +450,28 @@ describe('createServicesHost — machines', () => {
         entry('Idle', undefined),
       ];
       await expect(machines.streaming('streaming')).resolves.toEqual(['Router', 'Mill']);
+
+      /* A streamed start the host recorded running from its receipt counts before the machine's report shows it. */
+      const recorded = (machineId: string, name: string, delivery: 'streamed' | 'stored') => ({
+        machineId,
+        name,
+        descriptor: { capabilities: { jobs: { type: 'supported', delivery } } },
+        snapshot: {},
+      });
+      listed.entries = [
+        recorded('router', 'Router', 'streamed'),
+        recorded('printer', 'Printer', 'stored'),
+        recorded('mill', 'Mill', 'streamed'),
+      ];
+      listed.jobs = [
+        { machineId: 'router', state: 'started', run: { runId: 'run-1', outcome: 'running' } },
+        { machineId: 'printer', state: 'started', run: { runId: 'run-2', outcome: 'running' } },
+        { machineId: 'mill', state: 'started', run: { runId: 'run-3', outcome: 'completed' } },
+      ];
+      await expect(machines.streaming('recorded')).resolves.toEqual(['Router']);
     } finally {
       listed.entries = undefined;
+      listed.jobs = undefined;
       await machines.cleanup();
     }
   }, 30_000);
@@ -501,6 +536,75 @@ describe('createServicesHost — machines', () => {
       expect(gate).toEqual(['quiesce', 'list']);
       await expect(client.list({})).rejects.toThrow();
     } finally {
+      listed.entries = undefined;
+      await machines.cleanup();
+    }
+  }, 30_000);
+
+  /* A4-1: a start still in flight when the machine host's wait ends keeps its gate up until someone calls the quit off. */
+  it('should keep starts held when a start outlasts the wait, lifting them only when the quit is refused', async () => {
+    const machines = await machinesHarness();
+    try {
+      const client = machines.connect();
+      await machines.bindSimulator(client);
+      quiescing.isStartInFlight = true;
+
+      gate.length = 0;
+      await expect(machines.host.quiesce()).rejects.toMatchObject({
+        refusal: { reason: 'streaming-unknown', message: 'MACHINE_HOST_START_IN_FLIGHT' },
+      });
+      expect(gate).toEqual(['quiesce', 'resume']);
+
+      /* *Quit anyway*: the machine host closes with the rest, and starts stay held until it does. */
+      gate.length = 0;
+      await machines.host.quiesce({ quitIfStreamingUnknown: true });
+      expect(gate).toEqual(['quiesce']);
+      await expect(client.list({})).rejects.toThrow();
+    } finally {
+      quiescing.isStartInFlight = false;
+      await machines.cleanup();
+    }
+  }, 30_000);
+
+  /* A4-7: main's question when the machine host cannot say, and when main calls the quit off before it answers. */
+  it("should let go of main's question's hold when the host cannot say, or when main calls the quit off first", async () => {
+    const machines = await machinesHarness();
+    try {
+      const client = machines.connect();
+      await machines.bindSimulator(client);
+      listed.entries = [];
+
+      quiescing.isStartInFlight = true;
+      gate.length = 0;
+      /* Unanswered: main's bound asks the person; this question holds nothing meanwhile. */
+      void machines.streaming('unknown');
+      await vi.waitFor(() => {
+        expect(gate).toEqual(['quiesce', 'resume']);
+      });
+      expect(machines.log).toHaveBeenCalledWith('machines.streaming-unread', 'MACHINE_HOST_START_IN_FLIGHT', 'warn');
+      quiescing.isStartInFlight = false;
+
+      /* Main calls the quit off while the host still waits: the late hold is let go at once, and never kept. */
+      const release = Promise.withResolvers<void>();
+      quiescing.release = release.promise;
+      gate.length = 0;
+      void machines.streaming('called-off');
+      await vi.waitFor(() => {
+        expect(gate).toEqual(['quiesce']);
+      });
+      machines.host.handleMessage(frame({ type: 'machines-resume' }));
+      quiescing.release = undefined;
+      release.resolve();
+      await vi.waitFor(() => {
+        expect(gate).toEqual(['quiesce', 'resume']);
+      });
+      /* Nothing is held: a later quit asks afresh and gates once. */
+      gate.length = 0;
+      await expect(machines.streaming('again')).resolves.toEqual([]);
+      expect(gate).toEqual(['quiesce', 'list']);
+    } finally {
+      quiescing.isStartInFlight = false;
+      quiescing.release = undefined;
       listed.entries = undefined;
       await machines.cleanup();
     }

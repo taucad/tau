@@ -1920,6 +1920,18 @@ describe('billing payments PostgreSQL foundation', () => {
       const second = await payments.recoverAction(topup.userId, topup.actionId);
       expect(second).toMatchObject({ state: 'fulfilled', receipt: first.receipt });
       expect(requests.length).toBe(stripeRequests);
+      // A later real delivery of the success event finds the recovered purchase already fulfilled.
+      await onlyDue(topup.leg.id);
+      await deliverLater('payment_intent.succeeded', { id: paymentIntentFixtureId, object: 'payment_intent' });
+      await expect(payments.recoverPayments({ environment: 'development', limit: 1 })).resolves.toMatchObject({
+        processed: [expect.any(String)],
+        pending: [],
+        failed: [],
+      });
+      await expect(payments.getAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'fulfilled',
+        receipt: first.receipt,
+      });
       const grants = await database
         .select()
         .from(creditTransaction)
@@ -1933,6 +1945,60 @@ describe('billing payments PostgreSQL foundation', () => {
         state: 'redirect_required',
         redirectUrl: topup.session['url'],
       });
+    });
+
+    /** A second hosted top-up request for the same customer. */
+    const anotherTopup = async (userId: string) =>
+      payments.prepareTopup(userId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+        amountMinor: '537',
+        method: 'checkout',
+      });
+
+    it('should close an expired hosted top-up from the provider-leg sweep and let its customer buy again', async () => {
+      const topup = await openHostedTopup('Hosted Expired Sweep');
+      // Stripe expired the Session after 24 hours; its `checkout.session.expired` event never arrives.
+      Object.assign(topup.session, { status: 'expired', url: null });
+      await expect(anotherTopup(topup.userId)).rejects.toMatchObject({ response: { code: 'action_already_pending' } });
+      await onlyDue(topup.leg.id);
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      const diagnostic = JSON.stringify({ errorCode: await legError(topup.leg.id), requests: requests.slice(-20) });
+      expect(swept, diagnostic).toEqual({ processed: [topup.leg.id], pending: [], failed: [] });
+      await expect(payments.getAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'failed',
+        redirectUrl: null,
+      });
+      const [closed] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, topup.leg.id));
+      expect(closed).toMatchObject({
+        state: 'expired',
+        terminalEvidence: { version: 'stripe-payment-checkout-expired-v1', amountReceived: '0' },
+        nextAttemptAt: new Date('9999-12-31T00:00:00Z'),
+      });
+      // The closed leg is never due again, so a later pass reads nothing from Stripe.
+      const stripeRequests = requests.length;
+      await expect(payments.recoverPayments({ environment: 'development', limit: 1 })).resolves.toEqual({
+        processed: [],
+        pending: [],
+        failed: [],
+      });
+      expect(requests.length).toBe(stripeRequests);
+      await expect(anotherTopup(topup.userId)).resolves.toMatchObject({ state: 'prepared' });
+    });
+
+    it('should cancel an expired hosted top-up when its customer recovers it', async () => {
+      const topup = await openHostedTopup('Hosted Expired Recover');
+      Object.assign(topup.session, { status: 'expired', url: null });
+      await expect(payments.recoverAction(topup.userId, topup.actionId)).resolves.toMatchObject({
+        state: 'canceled',
+        redirectUrl: null,
+      });
+      const [closed] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, topup.leg.id));
+      expect(closed).toMatchObject({
+        state: 'expired',
+        terminalEvidence: { version: 'stripe-payment-checkout-expired-v1', amountReceived: '0' },
+      });
+      await expect(anotherTopup(topup.userId)).resolves.toMatchObject({ state: 'prepared' });
     });
 
     // A payment_intent leg carries no Checkout session, so the charge-time fallback never applies to it: this
@@ -2138,6 +2204,31 @@ describe('billing payments PostgreSQL foundation', () => {
         .where(eq(creditTransaction.periodId, period?.id ?? ''));
       expect(grants).toHaveLength(1);
       await expect(billing.getEntitlements(userId)).resolves.toMatchObject({ tier: 'pro' });
+    });
+
+    it('should end an expired Pro Checkout from the provider-leg sweep so its customer can subscribe again', async () => {
+      const pro = await openHostedPro('Hosted Pro Expired');
+      // Stripe expired the Session after 24 hours; its `checkout.session.expired` event never arrives.
+      Object.assign(pro.session, { status: 'expired', url: null });
+      const request = () => ({ requestId: randomUUID(), returnPath: '/settings/billing' });
+      await expect(payments.prepareSubscription(pro.userId, request())).rejects.toMatchObject({
+        response: { code: 'action_already_pending' },
+      });
+      await onlyDue(pro.leg.id);
+      const swept = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      const diagnostic = JSON.stringify({ errorCode: await legError(pro.leg.id), requests: requests.slice(-20) });
+      expect(swept, diagnostic).toEqual({ processed: [pro.leg.id], pending: [], failed: [] });
+      const [ended] = await database.select().from(subscription).where(eq(subscription.id, pro.action.actionId));
+      expect(ended).toMatchObject({ slotState: 'ended', status: 'incomplete_expired', stripeSubscriptionId: null });
+      const [closed] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, pro.leg.id));
+      expect(closed).toMatchObject({
+        state: 'expired',
+        terminalEvidence: { version: 'stripe-subscription-checkout-expired-v1' },
+        nextAttemptAt: new Date('9999-12-31T00:00:00Z'),
+      });
+      const again = await payments.prepareSubscription(pro.userId, request());
+      expect(again).toMatchObject({ state: 'redirect_required' });
+      expect(again.actionId).not.toBe(pro.action.actionId);
     });
   });
 });

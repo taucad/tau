@@ -1756,8 +1756,20 @@ export class BillingPaymentsService {
             },
             { id: leg.id, leaseUntil },
           );
-        if (recovered.object.kind === 'checkout')
-          await this.linkRecoveredCheckout(leg, leaseUntil, recovered.object.object);
+        if (recovered.object.kind === 'checkout') {
+          const session = recovered.object.object;
+          // An expired Session whose `checkout.session.expired` event never arrived is closed the way that event
+          // closes it: otherwise its purchase or Pro slot stays pending, refusing a new one, and this sweep reads
+          // the Session again every lease. The leg now carries the Session even when this pass just linked it.
+          if (
+            session.status === 'expired' &&
+            (await this.closeExpiredCheckout({ ...leg, providerObjectId: session.id }, session, 'failed'))
+          ) {
+            result.processed.push(leg.id);
+            continue;
+          }
+          await this.linkRecoveredCheckout(leg, leaseUntil, session);
+        }
         result.processed.push(leg.id);
       } catch (error) {
         await this.releaseProviderLegClaim(leg.id, leaseUntil, paymentRecoveryErrorCode(error));

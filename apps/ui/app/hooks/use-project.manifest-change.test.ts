@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { projectToManifest, serializeProjectManifest } from '@taucad/types';
+import { projectToManifest, readProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
 import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
@@ -43,6 +43,57 @@ const observe = ({
 };
 
 describe('createProjectManifestChangeObserver', () => {
+  it('should retain the mounted manifest through malformed JSON and clear its issue when identical valid bytes return', async () => {
+    const retained = projectToManifest({
+      ...project('Retained details'),
+      assets: { main: { entryPath: 'assembly.scad' } },
+    });
+    const validBytes = serializeProjectManifest(retained);
+    let bytes = validBytes;
+    const current: { project: ProjectManifest; issue: ProjectManifestParseIssue | undefined } = {
+      project: retained,
+      issue: undefined,
+    };
+    const reload = vi.fn(() => {
+      const read = readProjectManifestBytes(bytes, { id: retained.id });
+      if (!read.success) {
+        throw new Error('Expected a scoped manifest reading');
+      }
+      current.project = read.data;
+      current.issue = read.issue;
+    });
+    const report = vi.fn((issue: ProjectManifestParseIssue) => {
+      current.issue = issue;
+    });
+    const observer = createProjectManifestChangeObserver({
+      projectId: retained.id,
+      getCurrent: () => current,
+      reload,
+      report,
+    });
+    const readManifest = async (): Promise<Uint8Array<ArrayBuffer>> => bytes;
+    try {
+      await observer.check({ readManifest });
+      expect(reload).not.toHaveBeenCalled();
+      bytes = new TextEncoder().encode('{');
+      await observer.check({ readManifest });
+      expect.soft(current.project).toBe(retained);
+      expect.soft(current.issue?.code).toBe('manifest-invalid-json');
+      expect.soft(report).toHaveBeenCalledOnce();
+      expect.soft(reload).not.toHaveBeenCalled();
+
+      bytes = validBytes;
+      await observer.check({ readManifest });
+      expect(current.project).toEqual(retained);
+      expect(current.issue).toBeUndefined();
+      expect(reload).toHaveBeenCalledOnce();
+      await observer.check({ readManifest });
+      expect(reload).toHaveBeenCalledOnce();
+    } finally {
+      observer.dispose();
+    }
+  });
+
   it('does not report or reload a read invalidated before it resolves', async () => {
     const gate = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
     const {

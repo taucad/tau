@@ -230,9 +230,10 @@ const idMismatchIssue = (expected: string, found: string): ProjectManifestParseI
 /**
  * Follow `tau.json` while its project is open, never silently (blueprint R5).
  *
- * Bytes that still identify this project (strict or degraded) reload when they
- * differ from what the workspace holds, so a degraded write shows its issue at
- * once. Bytes that no longer identify it — missing, unreadable, oversize, a
+ * Valid JSON that still identifies this project (strict or degraded) reloads
+ * when it differs from what the workspace holds, so a degraded declaration
+ * shows its issue at once. Syntax-invalid JSON retains the mounted manifest
+ * and reports its issue. Bytes that no longer identify it — missing, unreadable, oversize, a
  * foreign `$schema` or another project's id — are reported instead: the
  * workspace keeps its last good manifest open so the person can fix the file.
  */
@@ -292,12 +293,16 @@ export const createProjectManifestChangeObserver = ({
         reportIssue(idMismatchIssue(projectId, read.data.id));
         return;
       }
+      const current = getCurrent();
+      if (current.project !== undefined && read.issue?.code === 'manifest-invalid-json') {
+        reportIssue(read.issue);
+        return;
+      }
       const observed = manifestStateKey({ project: read.data, issue: read.issue });
       if (observed === lastObserved) {
         return;
       }
       lastObserved = observed;
-      const current = getCurrent();
       if (current.project === undefined || manifestStateKey(current) !== observed) {
         reload();
       }

@@ -1567,6 +1567,71 @@ describe('directory observation bootstrap and shared cancellation', () => {
     disposeChannel();
   });
 
+  it('should surface a current scheduled refresh failure and recover on explicit retry', async () => {
+    const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('safe.ts')]);
+    const { tree, disposeChannel } = createTreeHarness({ proxy: mock<ComposedViewClient>({ readDirectory }) });
+    const lease = tree.observeDirectory('source').acquire();
+    try {
+      await vi.waitFor(() => {
+        expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready' });
+      });
+      readDirectory.mockRejectedValueOnce(new Error('current scheduled failure'));
+      tree.scheduleRefresh('source');
+      await vi.waitFor(() => {
+        expect(lease.getSnapshot().value).toMatchObject({ kind: 'error' });
+      });
+      readDirectory.mockResolvedValue([textNode('recovered.ts')]);
+      lease.refresh();
+      await vi.waitFor(() => {
+        expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'recovered.ts' }] });
+      });
+      expect(readDirectory).toHaveBeenCalledTimes(3);
+    } finally {
+      lease.release();
+      tree.dispose();
+      disposeChannel();
+    }
+  });
+
+  it('should ignore an older scheduled refresh failure after an observed listing publishes newer rows', async () => {
+    const held = Promise.withResolvers<FileTreeNode[]>();
+    const readDirectory = vi
+      .fn<ComposedViewClient['readDirectory']>()
+      .mockReturnValueOnce(held.promise)
+      .mockResolvedValue([textNode('fresh.ts')]);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { tree, disposeChannel } = createTreeHarness({ proxy: mock<ComposedViewClient>({ readDirectory }) });
+    tree.scheduleRefresh('source');
+    await vi.waitFor(() => {
+      expect(readDirectory).toHaveBeenCalledOnce();
+    });
+    const lease = tree.observeDirectory('source').acquire();
+    try {
+      await vi.waitFor(() => {
+        expect(lease.getSnapshot().value).toMatchObject({ kind: 'ready', entries: [{ name: 'fresh.ts' }] });
+      });
+      const fresh = lease.getSnapshot().value;
+      const failure = new Error('obsolete scheduled refresh');
+      held.reject(failure);
+      await vi.waitFor(() => {
+        expect(logged).toHaveBeenCalledWith('[FileTreeService] refresh failed:', failure);
+      });
+      for (let index = 0; index < 12; index++) {
+        // oxlint-disable-next-line no-await-in-loop -- Drain the rejected refresh notification and its causal observation read.
+        await Promise.resolve();
+      }
+      expect(lease.getSnapshot()).toEqual({ status: 'ready', value: fresh });
+      expect(lease.getSnapshot().value).toBe(fresh);
+      expect(readDirectory).toHaveBeenCalledTimes(2);
+      await expect(tree.listDirectory('source')).resolves.toMatchObject([{ name: 'fresh.ts' }]);
+    } finally {
+      lease.release();
+      tree.dispose();
+      disposeChannel();
+      logged.mockRestore();
+    }
+  });
+
   it('should preserve explicit scheduled refresh for an actively observed directory', async () => {
     const readDirectory = vi.fn<ComposedViewClient['readDirectory']>().mockResolvedValue([textNode('safe.ts')]);
     const { tree, disposeChannel } = createTreeHarness({ proxy: mock<ComposedViewClient>({ readDirectory }) });

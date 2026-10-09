@@ -1228,10 +1228,12 @@ export class FileTreeService {
       return;
     }
 
+    let refresh: { path: string; generation: number } | undefined;
     try {
       const absolutePath = this.paths.toAbsoluteWorkspacePath(path);
       const relativeDirectory = this.relativeDirectoryKeyFromUserPath(path);
       const generation = this._refreshGuard.begin(relativeDirectory);
+      refresh = { path: relativeDirectory, generation };
       const entries = await this.proxy.readDirectory(absolutePath);
       if (this._epoch !== epoch || !this._refreshGuard.isCurrent(relativeDirectory, generation)) {
         return;
@@ -1255,9 +1257,13 @@ export class FileTreeService {
         });
         return;
       }
-      if (this._epoch === epoch) {
-        this.directoryErrors.set(this.relativeDirectoryKeyFromUserPath(path), error);
-        this._listingPathSubscribers.notifyPath(this.relativeDirectoryKeyFromUserPath(path), undefined);
+      if (
+        this._epoch === epoch &&
+        refresh !== undefined &&
+        this._refreshGuard.isCurrent(refresh.path, refresh.generation)
+      ) {
+        this.directoryErrors.set(refresh.path, error);
+        this._listingPathSubscribers.notifyPath(refresh.path, undefined);
       }
       console.error('[FileTreeService] refresh failed:', error);
     }

@@ -24,6 +24,7 @@ import {
   user,
 } from '#database/schema.js';
 import { allocateSources, creditDebtFirst, CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { CodeOwnedBillableModelQualificationResolver } from '#api/billing/billable-model-qualification.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { seedPaidPurchase, fulfillPaidFixture } from '#testing/billing-payment.fixture.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
@@ -31,12 +32,7 @@ import { initialOracleState, oracleAuthorizedAtoms, step } from '#testing/credit
 import type { OracleCommand, OracleEvidence, OracleState } from '#testing/credit-operation-oracle.js';
 import { qualifiedMeterContracts, validateCommercialPolicy } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy } from '#api/billing/billing-policy.js';
-import type {
-  AccountSnapshot,
-  QualifiedAdmissionInput,
-  TerminalEvidence,
-  SupplierEvidenceInput,
-} from '#api/billing/credit-ledger.types.js';
+import type { AccountSnapshot, QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl) {
@@ -106,18 +102,12 @@ const createFixture = async (
   const environment: QualifiedAdmissionInput['environment'] = 'development';
   const userId = `user-${suffix}`;
   const activationId = `activation-${suffix}`;
-  const spendFundingId = `spend-funding-${suffix}`;
-  const riskFundingId = `risk-funding-${suffix}`;
-  const spendBudgetId = `spend-budget-${suffix}`;
-  const riskBudgetId = `risk-budget-${suffix}`;
   const promotionProgramId = `promo-${suffix}`;
   const promotionFundingId = `promo-funding-${suffix}`;
   const promotionBudgetId = `promo-budget-${suffix}`;
   const now = new Date();
   const promotionPeriodStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const promotionPeriodEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  const start = new Date('2020-01-01T00:00:00.000Z');
-  const end = new Date('2030-01-01T00:00:00.000Z');
   const sku = `sku-${suffix}`;
   const meterContractId = `meter-${suffix}`;
   ledgerMeterContracts.push(meterContractId);
@@ -150,8 +140,6 @@ const createFixture = async (
           partitionRates.length === 1 ? `rate-${suffix}` : `rate-${partition.dimension}-${suffix}`,
         ),
         enabled: true,
-        spendBudgetId,
-        riskBudgetId,
       },
     ],
     offers: [
@@ -191,64 +179,25 @@ const createFixture = async (
     email: `${suffix}@test.invalid`,
     emailVerified: true,
   });
-  await firstDatabase.insert(billingBudgetFunding).values([
-    {
-      id: spendFundingId,
-      environment,
-      kind: 'spend',
-      scope: suffix,
-      fundedLifetime: 1_000_000n,
-    },
-    {
-      id: riskFundingId,
-      environment,
-      kind: 'risk',
-      scope: suffix,
-      fundedLifetime: 1_000_000n,
-    },
-    {
-      id: promotionFundingId,
-      environment,
-      kind: 'promotion_issuance',
-      scope: promotionProgramId,
-      fundedLifetime: 50n,
-    },
-  ]);
-  await firstDatabase.insert(billingBudget).values([
-    {
-      id: spendBudgetId,
-      environment,
-      fundingId: spendFundingId,
-      kind: 'spend',
-      scope: suffix,
-      periodStart: start,
-      periodEnd: end,
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    },
-    {
-      id: riskBudgetId,
-      environment,
-      fundingId: riskFundingId,
-      kind: 'risk',
-      scope: suffix,
-      periodStart: start,
-      periodEnd: end,
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    },
-    {
-      id: promotionBudgetId,
-      environment,
-      fundingId: promotionFundingId,
-      kind: 'promotion_issuance',
-      scope: promotionProgramId,
-      periodStart: promotionPeriodStart,
-      periodEnd: promotionPeriodEnd,
-      quantum: 'credit_atoms',
-      approvedCap: 50n,
-    },
-  ]);
+  // The promotion cap is the one budget left: supplier spend is metered after settlement.
+  await firstDatabase.insert(billingBudgetFunding).values({
+    id: promotionFundingId,
+    environment,
+    kind: 'promotion_issuance',
+    scope: promotionProgramId,
+    fundedLifetime: 50n,
+  });
+  await firstDatabase.insert(billingBudget).values({
+    id: promotionBudgetId,
+    environment,
+    fundingId: promotionFundingId,
+    kind: 'promotion_issuance',
+    scope: promotionProgramId,
+    periodStart: promotionPeriodStart,
+    periodEnd: promotionPeriodEnd,
+    quantum: 'credit_atoms',
+    approvedCap: 50n,
+  });
   const publication = await seedBillingFixturePolicy({
     database: firstDatabase,
     policy: validated.canonicalContent,
@@ -266,8 +215,6 @@ const createFixture = async (
     userId,
     accountId,
     activationId,
-    spendBudgetId,
-    riskBudgetId,
     sku,
     meterContractId,
     promotionProgramId,
@@ -293,7 +240,6 @@ const admission = (fixture: Fixture, attemptKey: string, authorizedAtoms: bigint
     activity: 'test',
     sku: fixture.sku,
     maximumQuantities: [{ dimension: 'uncached_input', tier: null, quantity: authorizedAtoms }],
-    supplierMaximumPicoUsd: authorizedAtoms,
     replica: { schemaVersion: 1, meterContractIds: ledgerMeterContracts },
     executionDeadline: new Date(Date.now() + 300_000),
   };
@@ -393,39 +339,51 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     expect(bindings[0]?.accountId).toBe(accountId);
   });
 
-  it('denies new funded work for an unresolved cash case and resumes after resolution', async () => {
+  it('should deny new funded work only for a spend-blocking case and resume after its resolution', async () => {
     const fixture = await createFixture();
-    const caseId = randomUUID();
-    await firstDatabase.insert(schema.billingFinancialCase).values({
-      id: caseId,
-      environment: fixture.environment,
-      stripeAccountId: 'acct_fixture',
-      livemode: false,
-      accountId: fixture.accountId,
-      kind: 'missing_local_payment',
-      dedupeKey: caseId,
-      sourceType: 'charge',
-      sourceId: `ch_${caseId}`,
-      evidence: {},
-      owner: 'finance',
-      nextStep: 'reconcile',
-      firstEffectiveAt: new Date(),
-    });
-    expect(await firstLedger.admitOperation(admission(fixture, 'cash-paused', 1n))).toEqual({
-      status: 'denied',
-      reason: 'account_restricted',
-    });
-    await firstDatabase
-      .update(schema.billingFinancialCase)
-      .set({
-        state: 'resolved',
-        resolvedAt: new Date(),
-        resolutionEvidence: { fixture: true },
-      })
-      .where(eq(schema.billingFinancialCase.id, caseId));
-    expect(await firstLedger.admitOperation(admission(fixture, 'cash-resumed', 1n))).toMatchObject({
-      status: 'admitted',
-    });
+    const caseIds = [randomUUID(), randomUUID()];
+    const openCase = async (id: string, kind: string): Promise<void> => {
+      await firstDatabase.insert(schema.billingFinancialCase).values({
+        id,
+        environment: fixture.environment,
+        stripeAccountId: 'acct_fixture',
+        livemode: false,
+        accountId: fixture.accountId,
+        kind,
+        dedupeKey: id,
+        sourceType: 'charge',
+        sourceId: `ch_${id}`,
+        evidence: {},
+        owner: 'finance',
+        nextStep: 'reconcile',
+        firstEffectiveAt: new Date(),
+      });
+    };
+    try {
+      // A payment Tau has not yet credited is money Tau owes the customer: it never stops their spending.
+      await openCase(caseIds[0] ?? '', 'missing_local_payment');
+      expect(await firstLedger.admitOperation(admission(fixture, 'cash-owed', 1n))).toMatchObject({
+        status: 'admitted',
+      });
+      // A dispute may withdraw credited cash, so the account it names stops spending until it resolves.
+      await openCase(caseIds[1] ?? '', 'dispute_unresolved');
+      expect(await firstLedger.admitOperation(admission(fixture, 'cash-paused', 1n))).toEqual({
+        status: 'denied',
+        reason: 'account_restricted',
+      });
+      await firstDatabase
+        .update(schema.billingFinancialCase)
+        .set({ state: 'resolved', resolvedAt: new Date(), resolutionEvidence: { fixture: true } })
+        .where(eq(schema.billingFinancialCase.id, caseIds[1] ?? ''));
+      expect(await firstLedger.admitOperation(admission(fixture, 'cash-resumed', 1n))).toMatchObject({
+        status: 'admitted',
+      });
+    } finally {
+      await firstDatabase
+        .update(schema.billingFinancialCase)
+        .set({ state: 'resolved', resolvedAt: new Date(), resolutionEvidence: { fixture: true } })
+        .where(and(inArray(schema.billingFinancialCase.id, caseIds), sql`state <> 'resolved'`));
+    }
   });
 
   it('restricts only the account a cash case names and keeps admitting other customers', async () => {
@@ -447,10 +405,10 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
         stripeAccountId,
         livemode: false,
         accountId,
-        kind: 'refund_unresolved',
+        kind: 'dispute_unresolved',
         dedupeKey: id,
-        sourceType: 'refund',
-        sourceId: `re_${id}`,
+        sourceType: 'dispute',
+        sourceId: `dp_${id}`,
         evidence: {},
         owner: 'finance',
         nextStep: 'reconcile',
@@ -458,7 +416,7 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
       });
     };
     try {
-      // Another customer's unattributed refund once denied every account holding a Stripe Customer here.
+      // Another customer's unattributed dispute once denied every account holding a Stripe Customer here.
       await openCase(caseIds[0] ?? '', undefined);
       expect(await firstLedger.admitOperation(admission(fixture, 'scope-unattributed', 1n))).toMatchObject({
         status: 'admitted',
@@ -799,16 +757,13 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     ).rejects.toThrow('account');
   });
 
-  it('should retain absorbed lifetime exposure until linked final supplier evidence', async () => {
-    const fixture = await createFixture({
-      promoAtoms: 0n,
-      planAtoms: 0n,
-      purchasedAtoms: 200n,
-    });
+  it('should absorb a dispatched turn at zero with an unpriced supplier cost and no supplier state', async () => {
+    const fixture = await createFixture();
     const admitted = await firstLedger.admitOperation(admission(fixture, 'absorbed', 100n));
     if (admitted.status !== 'admitted') {
       throw new Error('operation was not admitted');
     }
+    expect(await firstLedger.markDispatchIntent(admitted.operationId, 1n)).toBe(true);
     const absorbedReceipt = await firstLedger.terminalizeOperation({
       operationId: admitted.operationId,
       accountId: fixture.accountId,
@@ -817,77 +772,30 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
       evidence: { kind: 'absorbed_unknown' },
       resolvedAt: fixture.now,
     });
+    expect(absorbedReceipt).toMatchObject({ customerState: 'absorbed', chargedAtoms: 0n, supplierCostPicoUsd: null });
     const [operation] = await firstDatabase
       .select()
       .from(creditOperation)
       .where(eq(creditOperation.id, admitted.operationId));
-    const [riskHold] = await firstDatabase
-      .select()
-      .from(billingBudgetHold)
-      .where(eq(billingBudgetHold.id, required(operation, 'operation').riskBudgetHoldId));
-    expect(riskHold).toMatchObject({
-      remainingHeld: 0n,
-      consumed: 100n,
-      finalityState: 'absorbed',
+    expect(operation).toMatchObject({
+      supplierState: null,
+      spendBudgetHoldId: null,
+      riskBudgetHoldId: null,
+      supplierCostPicoUsd: null,
+      supplierCostUnpricedReason: 'absorbed',
     });
-    const sourceObjectId = `source-${randomUUID()}`;
     expect(
-      await firstLedger.appendSupplierEvidence({
-        operationId: admitted.operationId,
-        environment: fixture.environment,
-        provider: 'test',
-        credentialAccount: 'test',
-        sourceObjectId,
-        sourceRevision: '1',
-        payloadDigest: 'sha256:evidence',
-        currency: 'usd',
-        numerator: 60n,
-        denominator: 1_000_000_000_000n,
-        completeness: 'complete',
-        finality: 'final',
-        receivedAt: fixture.now,
-      }),
-    ).toBe('inserted');
-    const [evidence] = await firstDatabase
-      .select()
-      .from(supplierCostEvidence)
-      .where(eq(supplierCostEvidence.sourceObjectId, sourceObjectId));
+      await firstDatabase
+        .select()
+        .from(billingBudgetHold)
+        .where(eq(billingBudgetHold.operationId, admitted.operationId)),
+    ).toEqual([]);
     expect(
-      await firstLedger.finalizeSupplier({
-        evidenceId: required(evidence, 'evidence').id,
-        operationId: admitted.operationId,
-        accountId: fixture.accountId,
-        requestDigest: 'sha256:absorbed',
-        expectedGeneration: 1n,
-      }),
-    ).toBe('final');
-    const [riskBudget] = await firstDatabase
-      .select()
-      .from(billingBudget)
-      .where(eq(billingBudget.id, fixture.riskBudgetId));
-    const [riskFunding] = await firstDatabase
-      .select()
-      .from(billingBudgetFunding)
-      .where(eq(billingBudgetFunding.id, required(riskBudget, 'risk budget').fundingId));
-    expect(riskBudget).toMatchObject({ held: 0n, consumed: 60n });
-    expect(riskFunding).toMatchObject({ held: 0n, consumed: 60n });
-    const successorBudgetId = `successor-${randomUUID()}`;
-    await firstDatabase.insert(billingBudget).values({
-      id: successorBudgetId,
-      environment: fixture.environment,
-      fundingId: required(riskBudget, 'risk budget').fundingId,
-      kind: 'risk',
-      scope: required(riskBudget, 'risk budget').scope,
-      periodStart: new Date('2030-01-01T00:00:00.000Z'),
-      periodEnd: new Date('2031-01-01T00:00:00.000Z'),
-      quantum: 'pico_usd',
-      approvedCap: 1_000_000n,
-    });
-    const [successorBudget] = await firstDatabase
-      .select()
-      .from(billingBudget)
-      .where(eq(billingBudget.id, successorBudgetId));
-    expect(successorBudget).toMatchObject({ held: 0n, consumed: 0n });
+      await firstDatabase
+        .select()
+        .from(supplierCostEvidence)
+        .where(eq(supplierCostEvidence.operationId, admitted.operationId)),
+    ).toEqual([]);
     const lateReplay = await firstLedger.terminalizeOperation({
       operationId: admitted.operationId,
       accountId: fixture.accountId,
@@ -1148,7 +1056,7 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     expect(issuanceRows).toHaveLength(1);
   });
 
-  it('should cap an actual retail overrun, retain its evidence, and pause the route', async () => {
+  it('should cap an actual retail overrun at the authorization, retain its evidence, and pause no route', async () => {
     const fixture = await createFixture({
       promoAtoms: 0n,
       planAtoms: 0n,
@@ -1180,13 +1088,13 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     expect(operation).toMatchObject({
       actualRetailAtoms: 150n,
       chargedAtoms: 100n,
-      supplierState: 'unresolved',
+      supplierState: null,
     });
     const pauses = await firstDatabase
       .select()
       .from(billingRoutePause)
       .where(eq(billingRoutePause.operationId, admitted.operationId));
-    expect(pauses).toHaveLength(1);
+    expect(pauses).toEqual([]);
     expect(
       await firstDatabase
         .select()
@@ -1200,8 +1108,10 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
         maximum: 100n,
       }),
     ]);
-    const pausedAdmission = await firstLedger.admitOperation(admission(fixture, 'paused', 1n));
-    expect(pausedAdmission.status).toBe('denied');
+    // The overrun is the operator's to review; the route keeps admitting.
+    expect(await firstLedger.admitOperation(admission(fixture, 'after-overrun', 1n))).toMatchObject({
+      status: 'admitted',
+    });
   });
 
   it('should pin an admitted tariff across a later policy activation', async () => {
@@ -1260,80 +1170,6 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     expect(nextOperation?.authorizedAtoms).toBe(5n);
   });
 
-  it('should retain a supplier-only overrun without changing the customer receipt', async () => {
-    const fixture = await createFixture({ promoAtoms: 0n, planAtoms: 0n, purchasedAtoms: 200n });
-    const admitted = await firstLedger.admitOperation(admission(fixture, 'supplier-overrun', 100n));
-    if (admitted.status !== 'admitted') {
-      throw new Error('operation was not admitted');
-    }
-    // GI-R2: a settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
-    await firstLedger.markDispatchIntent(admitted.operationId, 1n);
-    const receipt = await firstLedger.terminalizeOperation({
-      operationId: admitted.operationId,
-      accountId: fixture.accountId,
-      requestDigest: 'sha256:supplier-overrun',
-      expectedGeneration: 1n,
-      evidence: {
-        kind: 'final_usage',
-        usageOccurredAt: new Date(),
-        meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 50n }],
-      },
-      resolvedAt: new Date(),
-    });
-    await firstLedger.appendSupplierEvidence({
-      operationId: admitted.operationId,
-      environment: fixture.environment,
-      provider: 'test',
-      credentialAccount: 'supplier-overrun',
-      sourceObjectId: randomUUID(),
-      sourceRevision: '1',
-      payloadDigest: 'sha256:supplier-overrun',
-      currency: 'usd',
-      numerator: 150n,
-      denominator: 1_000_000_000_000n,
-      completeness: 'complete',
-      finality: 'final',
-      receivedAt: new Date(),
-    });
-    const [evidence] = await firstDatabase
-      .select()
-      .from(supplierCostEvidence)
-      .where(eq(supplierCostEvidence.payloadDigest, 'sha256:supplier-overrun'));
-    expect(
-      await firstLedger.finalizeSupplier({
-        evidenceId: required(evidence, 'evidence').id,
-        operationId: admitted.operationId,
-        accountId: fixture.accountId,
-        requestDigest: 'sha256:supplier-overrun',
-        expectedGeneration: 1n,
-      }),
-    ).toBe('unresolved');
-    const replay = await firstLedger.terminalizeOperation({
-      operationId: admitted.operationId,
-      accountId: fixture.accountId,
-      requestDigest: 'sha256:supplier-overrun',
-      expectedGeneration: 1n,
-      evidence: { kind: 'provider_rejected' },
-      resolvedAt: new Date(),
-    });
-    expect(replay).toEqual(receipt);
-    const [operation] = await firstDatabase
-      .select()
-      .from(creditOperation)
-      .where(eq(creditOperation.id, admitted.operationId));
-    const [riskHold] = await firstDatabase
-      .select()
-      .from(billingBudgetHold)
-      .where(eq(billingBudgetHold.id, required(operation, 'operation').riskBudgetHoldId));
-    expect(operation?.supplierState).toBe('unresolved');
-    expect(riskHold).toMatchObject({ initialBound: 100n, remainingHeld: 100n, consumed: 0n });
-    const pauses = await firstDatabase
-      .select()
-      .from(billingRoutePause)
-      .where(eq(billingRoutePause.operationId, admitted.operationId));
-    expect(pauses).toHaveLength(1);
-  });
-
   it('should preserve and cap retail evidence above signed 64-bit storage', async () => {
     const fixture = await createFixture({
       promoAtoms: 0n,
@@ -1367,7 +1203,10 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     expect(operation).toMatchObject({
       actualRetailAtoms: actual,
       inputTokens: null,
-      supplierState: 'unresolved',
+      supplierState: null,
+      // This operation pinned no supplier valuation, so its usage stays unpriced rather than guessed.
+      supplierCostPicoUsd: null,
+      supplierCostUnpricedReason: 'missing_rate',
     });
     expect(operation?.meterItems?.[0]?.quantity).toBe(actual.toString());
   });
@@ -1723,6 +1562,12 @@ describe('credit ledger source arithmetic', () => {
   });
 });
 
+/** The SQLSTATE a driver error carries beneath the query builder's own error. */
+const databaseCode = (error: unknown): unknown =>
+  error instanceof Error && typeof error.cause === 'object' && error.cause !== null && 'code' in error.cause
+    ? error.cause.code
+    : undefined;
+
 const readInvocationOperation = async (operationId: string) => {
   const [row] = await firstDatabase.select().from(creditOperation).where(eq(creditOperation.id, operationId));
   return required(row, 'operation');
@@ -1753,7 +1598,7 @@ const fundedInvocation = (fixture: Fixture, key: string): QualifiedAdmissionInpu
 
 describe('LLM durable evidence and fenced recovery', () => {
   it.each([3n, 11n])(
-    'should recover retained usage %s and preserve supplier overrun evidence after a foreground crash',
+    'should recover retained usage %s and meter its supplier cost once after a foreground crash',
     async (quantity) => {
       const fixture = await createFixture();
       const request = fundedInvocation(fixture, randomUUID());
@@ -1801,7 +1646,10 @@ describe('LLM durable evidence and fenced recovery', () => {
       expect(row).toMatchObject({
         customerState: 'settled',
         chargedAtoms: quantity > 10n ? 10n : quantity,
-        supplierState: quantity > 10n ? 'unresolved' : 'preliminary',
+        // One pico-USD per token at the pinned valuation, whatever the customer was capped at.
+        supplierCostPicoUsd: quantity,
+        supplierCostUnpricedReason: null,
+        supplierState: null,
         generation: 2n,
       });
       await expect(
@@ -1812,36 +1660,34 @@ describe('LLM durable evidence and fenced recovery', () => {
           resolvedAt: new Date(),
         }),
       ).rejects.toThrow('Stale credit operation generation');
-      const supplierRows = await firstDatabase
-        .select()
-        .from(supplierCostEvidence)
-        .where(eq(supplierCostEvidence.operationId, admitted.operationId));
-      expect(supplierRows).toHaveLength(1);
-      expect(supplierRows[0]).toMatchObject({
-        numerator: quantity,
-        denominator: 1_000_000_000_000n,
-        finality: 'preliminary',
-      });
-      if (quantity > 10n) {
-        const pauses = await firstDatabase
+      expect(
+        await firstDatabase
+          .select()
+          .from(supplierCostEvidence)
+          .where(eq(supplierCostEvidence.operationId, admitted.operationId)),
+      ).toEqual([]);
+      expect(
+        await firstDatabase
           .select()
           .from(billingRoutePause)
-          .where(eq(billingRoutePause.operationId, admitted.operationId));
-        expect(pauses).toHaveLength(1);
-        expect(pauses[0]?.reason).toBe('supplier_bound_exceeded');
-      }
-
+          .where(eq(billingRoutePause.operationId, admitted.operationId)),
+      ).toEqual([]);
+      const exceptions = await firstDatabase
+        .select()
+        .from(billingOperationException)
+        .where(eq(billingOperationException.operationId, admitted.operationId));
+      expect(exceptions.map(({ kind }) => kind)).toEqual(quantity > 10n ? ['customer_bound'] : []);
       expect(
         await firstDatabase
           .select()
           .from(billingBudgetHold)
           .where(eq(billingBudgetHold.operationId, admitted.operationId)),
-      ).toEqual(expect.arrayContaining([expect.objectContaining({ remainingHeld: 10n, consumed: 0n })]));
+      ).toEqual([]);
     },
   );
 
   it.each([false, true])(
-    'should recover cancellation with supplier risk preserved when dispatched=%s',
+    'should recover cancellation at zero with a known or unpriced supplier cost when dispatched=%s',
     async (dispatched) => {
       const fixture = await createFixture();
       const request = fundedInvocation(fixture, randomUUID());
@@ -1888,13 +1734,17 @@ describe('LLM durable evidence and fenced recovery', () => {
       expect(row).toMatchObject({
         customerState: dispatched ? 'absorbed' : 'released',
         chargedAtoms: 0n,
-        supplierState: dispatched ? 'unresolved' : 'final',
+        supplierState: null,
+        // An undispatched call cost the supplier nothing; a cut stream reported nothing to price.
+        supplierCostPicoUsd: dispatched ? null : 0n,
+        supplierCostUnpricedReason: dispatched ? 'absorbed' : null,
       });
-      const holds = await firstDatabase
-        .select()
-        .from(billingBudgetHold)
-        .where(eq(billingBudgetHold.operationId, admitted.operationId));
-      expect(holds).toHaveLength(2);
+      expect(
+        await firstDatabase
+          .select()
+          .from(billingBudgetHold)
+          .where(eq(billingBudgetHold.operationId, admitted.operationId)),
+      ).toEqual([]);
       if (dispatched) {
         expect(row.normalizationEvidence).toEqual({
           version: 'partial-v1',
@@ -1902,16 +1752,6 @@ describe('LLM durable evidence and fenced recovery', () => {
           fields: { input: '2' },
         });
         expect(row.meterItems).toEqual([expect.objectContaining({ dimension: 'uncached_input', quantity: '2' })]);
-        expect(holds.find((hold) => hold.id === row.spendBudgetHoldId)).toMatchObject({
-          remainingHeld: 10n,
-          consumed: 0n,
-        });
-        expect(holds.find((hold) => hold.id === row.riskBudgetHoldId)).toMatchObject({
-          remainingHeld: 0n,
-          consumed: 10n,
-        });
-      } else {
-        expect(holds.every((hold) => hold.remainingHeld === 0n && hold.consumed === 0n)).toBe(true);
       }
       await firstLedger.recordInvocationEvidence({
         ...identity,
@@ -2009,7 +1849,6 @@ describe('LLM durable evidence and fenced recovery', () => {
       replica: { schemaVersion: 1, meterContractIds: ledgerMeterContracts },
       executionTimeout: 300_000,
       minimumOutput: 10n,
-      minimumSupplierPicoUsd: 10n,
     };
     await expect(firstLedger.inputCountEligibility({ ...eligibility, activity: 'title' })).resolves.toEqual({
       status: 'denied',
@@ -2114,66 +1953,6 @@ describe('LLM durable evidence and fenced recovery', () => {
   });
 });
 
-it('should retain a preliminary supplier overrun and pause before invoice finality without changing money', async () => {
-  const fixture = await createFixture();
-  const request = fundedInvocation(fixture, randomUUID());
-  const admitted = await firstLedger.admitOperation(request);
-  if (admitted.status !== 'admitted') {
-    throw new Error('Invocation was not admitted');
-  }
-  const before = await firstDatabase.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId));
-  const input: SupplierEvidenceInput = {
-    operationId: admitted.operationId,
-    environment: fixture.environment,
-    provider: 'controlled',
-    credentialAccount: 'controlled-account',
-    sourceObjectId: randomUUID(),
-    sourceRevision: 'response-v1',
-    payloadDigest: randomUUID(),
-    currency: 'usd',
-    numerator: 21n,
-    denominator: 2_000_000_000_000n,
-    completeness: 'complete',
-    finality: 'preliminary',
-    receivedAt: new Date(),
-  };
-  expect(await firstLedger.appendSupplierEvidence(input)).toBe('inserted');
-  expect(await secondLedger.appendSupplierEvidence(input)).toBe('replay');
-  expect(await firstDatabase.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId))).toEqual(
-    before,
-  );
-  expect(
-    await firstDatabase
-      .select()
-      .from(billingOperationException)
-      .where(eq(billingOperationException.operationId, admitted.operationId)),
-  ).toEqual([
-    expect.objectContaining({
-      kind: 'supplier_bound',
-      observedNumerator: '21000000000000',
-      observedDenominator: 2_000_000_000_000n,
-      maximum: 10n,
-    }),
-  ]);
-  expect(
-    await firstDatabase.select().from(billingRoutePause).where(eq(billingRoutePause.operationId, admitted.operationId)),
-  ).toHaveLength(1);
-  const [retained] = await firstDatabase
-    .select()
-    .from(supplierCostEvidence)
-    .where(eq(supplierCostEvidence.sourceObjectId, input.sourceObjectId));
-  const evidence = required(retained, 'evidence');
-  await expect(
-    firstLedger.finalizeSupplier({
-      operationId: admitted.operationId,
-      accountId: fixture.accountId,
-      requestDigest: request.requestDigest,
-      expectedGeneration: admitted.generation,
-      evidenceId: evidence.id,
-    }),
-  ).rejects.toThrow('Qualified final supplier evidence not found');
-});
-
 it('should execute a bounded recovery batch through the built DB-only runtime-role command', async () => {
   const fixture = await createFixture();
   const admitted = await firstLedger.admitOperation(fundedInvocation(fixture, randomUUID()));
@@ -2212,7 +1991,13 @@ it('should execute a bounded recovery batch through the built DB-only runtime-ro
   expect(child.status).toBe(0);
   expect(JSON.parse(child.stdout)).toMatchObject({ failedOperationIds: [] });
   const operation = await readInvocationOperation(admitted.operationId);
-  expect(operation).toMatchObject({ customerState: 'released', supplierState: 'final', chargedAtoms: 0n });
+  expect(operation).toMatchObject({
+    customerState: 'released',
+    chargedAtoms: 0n,
+    supplierState: null,
+    supplierCostPicoUsd: 0n,
+    supplierCostUnpricedReason: null,
+  });
 });
 
 it('should reject expired supplier rates using database admission time despite a regressed process clock', async () => {
@@ -2233,145 +2018,16 @@ it('should reject expired supplier rates using database admission time despite a
   ).toEqual([]);
 });
 
-it('should convert exact USD evidence to pico-USD once before consuming supplier budgets', async () => {
-  const fixture = await createFixture();
-  const budgetIds = [fixture.spendBudgetId, fixture.riskBudgetId];
-  const budgets = await firstDatabase.select().from(billingBudget).where(inArray(billingBudget.id, budgetIds));
-  await firstDatabase
-    .update(billingBudgetFunding)
-    .set({ fundedLifetime: 20_000_000_000n })
-    .where(
-      inArray(
-        billingBudgetFunding.id,
-        budgets.map(({ fundingId }) => fundingId),
-      ),
-    );
-  await firstDatabase
-    .update(billingBudget)
-    .set({ approvedCap: 20_000_000_000n })
-    .where(inArray(billingBudget.id, budgetIds));
-  const request = { ...admission(fixture, randomUUID(), 1000n), supplierMaximumPicoUsd: 10_000_000_000n };
-  const admitted = await firstLedger.admitOperation(request);
-  if (admitted.status !== 'admitted') {
-    throw new Error('Invocation was not admitted');
-  }
-  await firstLedger.appendSupplierEvidence({
-    operationId: admitted.operationId,
-    environment: fixture.environment,
-    provider: 'controlled',
-    credentialAccount: 'controlled-account',
-    sourceObjectId: admitted.operationId,
-    sourceRevision: 'final-usd',
-    payloadDigest: 'sha256:one-cent',
-    currency: 'usd',
-    numerator: 1n,
-    denominator: 100n,
-    completeness: 'complete',
-    finality: 'final',
-    receivedAt: new Date(),
-  });
-  const [retained] = await firstDatabase
-    .select()
-    .from(supplierCostEvidence)
-    .where(eq(supplierCostEvidence.operationId, admitted.operationId));
-  expect(required(retained, 'evidence')).toMatchObject({ numerator: 1n, denominator: 100n, currency: 'usd' });
-  expect(
-    await firstLedger.finalizeSupplier({
-      operationId: admitted.operationId,
-      accountId: fixture.accountId,
-      requestDigest: request.requestDigest,
-      expectedGeneration: admitted.generation,
-      evidenceId: required(retained, 'evidence').id,
-    }),
-  ).toBe('final');
-  const holds = await firstDatabase
-    .select()
-    .from(billingBudgetHold)
-    .where(eq(billingBudgetHold.operationId, admitted.operationId));
-  expect(holds).toHaveLength(2);
-  expect(holds.every(({ consumed, remainingHeld }) => consumed === 10_000_000_000n && remainingHeld === 0n)).toBe(true);
-});
-
-it('should serialize supplier route pauses with admissions even when no pause row existed', async () => {
-  const fixture = await createFixture();
-  const original = await firstLedger.admitOperation(fundedInvocation(fixture, randomUUID()));
-  if (original.status !== 'admitted') {
-    throw new Error('Invocation was not admitted');
-  }
-  const [firstBackend] = await firstClient<Array<{ pid: number }>>`select pg_backend_pid() as pid`;
-  const [secondBackend] = await secondClient<Array<{ pid: number }>>`select pg_backend_pid() as pid`;
-  const observer = postgres(databaseUrl, { max: 2 });
-  const locked = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
-  const blocking = observer.begin(async (tx) => {
-    await tx`select id from billing.billing_budget_funding where id =
-      (select funding_id from billing.billing_budget where id = ${fixture.spendBudgetId}) for update`;
-    locked.resolve();
-    await release.promise;
-  });
-  const pending: Array<Promise<unknown>> = [blocking];
-  try {
-    await locked.promise;
-    const admissionResult = firstLedger.admitOperation(fundedInvocation(fixture, randomUUID()));
-    pending.push(admissionResult);
-    await vi.waitFor(
-      async () => {
-        const [state] =
-          await observer`select wait_event_type from pg_stat_activity where pid = ${required(firstBackend, 'first backend').pid}`;
-        expect(state?.['wait_event_type']).toBe('Lock');
-      },
-      { timeout: 5000 },
-    );
-    const pauseResult = secondLedger.appendSupplierEvidence({
-      operationId: original.operationId,
-      environment: fixture.environment,
-      provider: 'controlled',
-      credentialAccount: 'controlled-account',
-      sourceObjectId: original.operationId,
-      sourceRevision: 'racing-overrun',
-      payloadDigest: 'sha256:racing-overrun',
-      currency: 'usd',
-      numerator: 11n,
-      denominator: 1_000_000_000_000n,
-      completeness: 'complete',
-      finality: 'preliminary',
-      receivedAt: new Date(),
-    });
-    pending.push(pauseResult);
-    await vi.waitFor(
-      async () => {
-        const [state] =
-          await observer`select wait_event from pg_stat_activity where pid = ${required(secondBackend, 'second backend').pid}`;
-        expect(state?.['wait_event']).toBe('advisory');
-      },
-      { timeout: 5000 },
-    );
-    release.resolve();
-    await blocking;
-    expect(await admissionResult).toMatchObject({ status: 'admitted' });
-    expect(await pauseResult).toBe('inserted');
-    expect(await firstLedger.admitOperation(fundedInvocation(fixture, randomUUID()))).toEqual({
-      status: 'denied',
-      reason: 'policy_unavailable',
-    });
-  } finally {
-    release.resolve();
-    await Promise.allSettled(pending);
-    await observer.end();
-  }
-});
-
 it.each([
-  { quantity: 3n, basis: true, numerator: 3n },
-  { quantity: 7n, basis: true, numerator: 14n },
-  { quantity: 3n, basis: false, numerator: 0n },
-])('recovers actual tariff without reinterpreting legacy supplier maximum: $quantity / $basis', async (sample) => {
+  { quantity: 3n, basis: true, supplierCostPicoUsd: 3n, reason: null },
+  { quantity: 7n, basis: true, supplierCostPicoUsd: 14n, reason: null },
+  { quantity: 3n, basis: false, supplierCostPicoUsd: null, reason: 'missing_rate' },
+])('should recover the supplier cost at the pinned valuation band: $quantity / valued $basis', async (sample) => {
   const fixture = await createFixture();
   const request = fundedInvocation(fixture, randomUUID());
   if (!request.invocation) {
     throw new Error('Missing invocation');
   }
-  request.supplierMaximumPicoUsd = 20n;
   request.invocation.supplierRates[0]!.numeratorPicoUsd = '2';
   if (sample.basis) {
     request.invocation.supplierValuation = {
@@ -2409,20 +2065,12 @@ it.each([
   const recovery = await secondLedger.recoverDueLlmOperations({ environment: fixture.environment, limit: 100 });
   expect(recovery.failedOperationIds).not.toContain(admitted.operationId);
   const operation = await readInvocationOperation(admitted.operationId);
-  expect(operation.chargedAtoms).toBe(sample.quantity);
-  const costs = await firstDatabase
-    .select()
-    .from(supplierCostEvidence)
-    .where(eq(supplierCostEvidence.operationId, admitted.operationId));
-  expect(costs).toHaveLength(sample.basis ? 1 : 0);
-  if (sample.basis) {
-    expect(BigInt(costs[0]!.numerator) * 1_000_000_000_000n).toBe(sample.numerator * costs[0]!.denominator);
-  }
-  const holds = await firstDatabase
-    .select()
-    .from(billingBudgetHold)
-    .where(eq(billingBudgetHold.operationId, admitted.operationId));
-  expect(holds.every((hold) => hold.remainingHeld === 20n && hold.consumed === 0n)).toBe(true);
+  // The customer charge is untouched by whether the supplier cost could be priced.
+  expect(operation).toMatchObject({
+    chargedAtoms: sample.quantity,
+    supplierCostPicoUsd: sample.supplierCostPicoUsd,
+    supplierCostUnpricedReason: sample.reason,
+  });
 });
 
 it.each([
@@ -2450,7 +2098,6 @@ it.each([
       tier: item.tier,
       quantity: item.dimension === 'output' ? 1n : 10n,
     }));
-    request.supplierMaximumPicoUsd = 201n;
     if (!request.invocation) {
       throw new Error('Missing invocation');
     }
@@ -2468,14 +2115,6 @@ it.each([
       baseRates: request.invocation.supplierRates,
       longContextRates: null,
     };
-    await expect(firstLedger.admitOperation({ ...request, supplierMaximumPicoUsd: 202n })).rejects.toThrow(
-      'independently pinned tariff',
-    );
-    const deniedWrites = await firstDatabase
-      .select()
-      .from(creditOperation)
-      .where(eq(creditOperation.attemptKey, request.attemptKey));
-    expect(deniedWrites).toHaveLength(0);
     const admitted = await firstLedger.admitOperation(request);
     if (admitted.status !== 'admitted') {
       throw new Error('Expected admission');
@@ -2518,7 +2157,9 @@ it.each([
     expect(operation).toMatchObject({
       chargedAtoms: 2n * partitionQuantity + 1n,
       authorizedAtoms: 101n,
-      supplierState: partitionQuantity > 5n ? 'unresolved' : recover ? 'preliminary' : 'reserved',
+      supplierState: null,
+      // Every reported partition is priced at its own rate: q + 0 + 20q + 1.
+      supplierCostPicoUsd: 21n * partitionQuantity + 1n,
     });
     const exceptions = await firstDatabase
       .select()
@@ -2536,16 +2177,13 @@ it.each([
           ]
         : [],
     );
-    const pauses = await firstDatabase
-      .select()
-      .from(billingRoutePause)
-      .where(eq(billingRoutePause.operationId, admitted.operationId));
-    expect(pauses[0]?.reason).toBe(partitionQuantity > 5n ? 'input_bound_exceeded' : undefined);
-    const holds = await firstDatabase
-      .select()
-      .from(billingBudgetHold)
-      .where(eq(billingBudgetHold.operationId, admitted.operationId));
-    expect(holds.every((hold) => hold.remainingHeld === 201n && hold.consumed === 0n)).toBe(true);
+    // The input overflow is the operator's evidence; it pauses nothing.
+    expect(
+      await firstDatabase
+        .select()
+        .from(billingRoutePause)
+        .where(eq(billingRoutePause.operationId, admitted.operationId)),
+    ).toEqual([]);
   },
 );
 
@@ -2587,8 +2225,6 @@ it('should deny only the SKU whose meter contract this replica retired', async (
         meterContractId: retiredContract,
         rateIds: [retiredRateId],
         enabled: true,
-        spendBudgetId: fixture.spendBudgetId,
-        riskBudgetId: fixture.riskBudgetId,
       },
     ],
   });
@@ -2603,7 +2239,6 @@ it('should deny only the SKU whose meter contract this replica retired', async (
     activity: 'agent',
     executionTimeout: 300_000,
     minimumOutput: 10n,
-    minimumSupplierPicoUsd: 10n,
   };
   await expect(firstLedger.inputCountEligibility({ ...eligibility, sku: retiredSku })).resolves.toEqual({
     status: 'denied',
@@ -2676,8 +2311,6 @@ it('should settle a long-context downgrade from a pinned policy naming a route t
         meterContractId: fixture.meterContractId,
         rateIds: [`long-rate-${suffix}`],
         enabled: true,
-        spendBudgetId: fixture.spendBudgetId,
-        riskBudgetId: fixture.riskBudgetId,
       },
       {
         routeId: `settle-retired-route-${suffix}`,
@@ -2685,8 +2318,6 @@ it('should settle a long-context downgrade from a pinned policy naming a route t
         meterContractId: retiredContract,
         rateIds: [`retired-rate-${suffix}`],
         enabled: true,
-        spendBudgetId: fixture.spendBudgetId,
-        riskBudgetId: fixture.riskBudgetId,
       },
     ],
   });
@@ -2696,7 +2327,6 @@ it('should settle a long-context downgrade from a pinned policy naming a route t
   if (!request.invocation) {
     throw new Error('Missing invocation');
   }
-  request.supplierMaximumPicoUsd = 20n;
   request.invocation.supplierRates = [
     { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '2', denominatorUnits: '1' },
   ];
@@ -3118,8 +2748,298 @@ describe('credit operation model (GI-S2, GI-A4)', () => {
     );
     const seeds = Array.from({ length: 200 }, (_, index) => baseSeed + index);
     for (const seed of seeds) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- sequences share the fixture's policy and budgets
+      // oxlint-disable-next-line eslint/no-await-in-loop -- sequences share the fixture's policy
       await runSequence(fixture, seed);
     }
   }, 600_000);
+});
+
+describe('admission without supplier state', () => {
+  it('should admit as the runtime role with no read access to supplier budgets, holds or evidence', async () => {
+    const fixture = await createFixture();
+    const rolledBack = new Error('roll back the revoked grants');
+    await expect(
+      firstDatabase.transaction(async (transaction) => {
+        // Revoked by the owner login that granted them, so the revocation binds the runtime role.
+        await transaction.execute(sql`REVOKE SELECT ON billing.billing_budget, billing.billing_budget_funding,
+          billing.billing_budget_hold, billing.supplier_cost_evidence FROM tau_billing_runtime`);
+        await transaction.execute(sql`SET LOCAL ROLE tau_billing_runtime`);
+        const transactionDatabase = Object.assign(transaction, { $client: firstDatabase.$client });
+        const transactionLedger = new CreditLedgerService(
+          { database: transactionDatabase },
+          new BillingPolicyService({ database: transactionDatabase }),
+        );
+        // The case gate and the attempt-void fence still read their own tables.
+        await expect(
+          transaction.execute(sql`select count(*) from billing.billing_financial_case`),
+        ).resolves.toBeDefined();
+        await expect(transaction.execute(sql`select count(*) from billing.credit_attempt_void`)).resolves.toBeDefined();
+        // A savepoint keeps the refused read from aborting the admission that follows.
+        await expect(
+          transaction.transaction(async (inner) =>
+            inner.execute(sql`select count(*) from billing.billing_budget_hold`),
+          ),
+        ).rejects.toSatisfy((error: unknown) => databaseCode(error) === '42501');
+        expect(await transactionLedger.admitOperation(fundedInvocation(fixture, 'runtime-no-budgets'))).toMatchObject({
+          status: 'admitted',
+        });
+        throw rolledBack;
+      }),
+    ).rejects.toBe(rolledBack);
+  });
+
+  it('should deny insufficient credit with its shortfall and create no operation', async () => {
+    const fixture = await createFixture({ promoAtoms: 2n, planAtoms: 0n, purchasedAtoms: 3n });
+    await firstDatabase
+      .update(creditAccount)
+      .set({ promoHeldAtoms: 1n })
+      .where(eq(creditAccount.id, fixture.accountId));
+    const before = await readInvocationAccount(fixture.accountId);
+
+    expect(await firstLedger.admitOperation(admission(fixture, 'short', 10n))).toEqual({
+      status: 'denied',
+      reason: 'insufficient_credit',
+      requiredCreditAtoms: 10n,
+      availableCreditAtoms: 4n,
+    });
+    expect(
+      await firstDatabase.select().from(creditOperation).where(eq(creditOperation.accountId, fixture.accountId)),
+    ).toEqual([]);
+    expect(await readInvocationAccount(fixture.accountId)).toEqual(before);
+  });
+
+  it('should never write the retired supplier state through admission, settlement or recovery', async () => {
+    const fixture = await createFixture();
+    const settledRequest = fundedInvocation(fixture, randomUUID());
+    const settled = await firstLedger.admitOperation(settledRequest);
+    const recovered = await firstLedger.admitOperation(fundedInvocation(fixture, randomUUID()));
+    if (settled.status !== 'admitted' || recovered.status !== 'admitted') {
+      throw new Error('operations were not admitted');
+    }
+    const admittedRow = await readInvocationOperation(settled.operationId);
+    expect(admittedRow.supplierState).toBeNull();
+    await firstLedger.markDispatchIntent(settled.operationId, settled.generation);
+    const evidence: TerminalEvidence = {
+      kind: 'final_usage',
+      usageOccurredAt: new Date(),
+      meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 2n }],
+    };
+    const identity = {
+      operationId: settled.operationId,
+      accountId: fixture.accountId,
+      requestDigest: settledRequest.requestDigest,
+    };
+    await firstLedger.recordInvocationEvidence({ ...identity, evidence });
+    await firstLedger.terminalizeOperation({
+      ...identity,
+      expectedGeneration: settled.generation,
+      evidence,
+      resolvedAt: new Date(),
+    });
+    await firstDatabase
+      .update(creditOperation)
+      .set({ dueAt: sql`clock_timestamp() - interval '1 second'` })
+      .where(eq(creditOperation.id, recovered.operationId));
+    await secondLedger.recoverDueLlmOperations({ environment: fixture.environment, limit: 100 });
+    for (const operationId of [settled.operationId, recovered.operationId]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- two reads
+      const row = await readInvocationOperation(operationId);
+      expect(row.customerState).not.toBe('pending');
+      expect(row.supplierState).toBeNull();
+    }
+    /* The runtime role keeps its supplier_state grant until the 0050 contract step, so old-image Machines can
+     * settle during the expand step's rolling deploy (billing-foundation.test.ts, the 0048 upgrade suite). */
+  });
+});
+
+describe('post-hoc supplier metering', () => {
+  const resolver = new CodeOwnedBillableModelQualificationResolver({
+    adapters: new Map(
+      ['anthropic-claude-haiku-4.5', 'openai-gpt-5.6-luna', 'google-gemini-3.5-flash', 'together-glm-5.2'].map(
+        (routeId) => [
+          routeId,
+          {
+            createEvidenceCollector: () => {
+              throw new Error('Metering fixtures never dispatch');
+            },
+            executeOnce: async () => {
+              throw new Error('Metering fixtures never dispatch');
+            },
+          },
+        ],
+      ),
+    ),
+    credentialAccounts: new Map(
+      ['anthropic', 'openai', 'vertexai', 'together'].map((provider) => [provider, `${provider}-metering`]),
+    ),
+    executionTimeout: 300_000,
+  });
+  const usage = (dimensions: ReadonlySet<string>, cacheWriteTier: string) =>
+    [
+      { dimension: 'uncached_input', tier: null, quantity: 1000n },
+      { dimension: 'cache_read', tier: null, quantity: 2000n },
+      { dimension: 'cache_write', tier: cacheWriteTier, quantity: 300n },
+      { dimension: 'output', tier: null, quantity: 400n },
+    ].filter(({ dimension, tier }) => dimensions.has(`${dimension}:${tier ?? ''}`));
+
+  /** Admits a fixture account on the route's real pinned tariff and valuation, with retail at one atom a token. */
+  const admitOnRoute = async (route: {
+    routeId: string;
+    providerWire: 'anthropic' | 'openai-responses' | 'openai-completions';
+    body: Record<string, unknown>;
+    priceHeaders?: Record<string, string>;
+  }) => {
+    const qualified = resolver.resolve({
+      environment: 'development',
+      surface: 'gateway',
+      attempt: { version: 1, key: randomUUID() },
+      providerWire: route.providerWire,
+      body: { ...route.body, model: route.routeId, stream: true },
+      priceHeaders: route.priceHeaders ?? {},
+      activity: 'agent',
+    });
+    const partitions = qualified.maximumQuantities.map(({ dimension, tier }) => ({
+      dimension,
+      tier,
+      numerator: '1',
+      denominator: '1',
+    }));
+    const fixture = await createFixture(
+      { promoAtoms: 0n, planAtoms: 0n, purchasedAtoms: 1_000_000n },
+      undefined,
+      partitions,
+    );
+    const request: QualifiedAdmissionInput = {
+      ...admission(fixture, randomUUID(), 1n),
+      surface: 'gateway',
+      providerId: qualified.providerId,
+      maximumQuantities: qualified.maximumQuantities,
+      invocation: { ...qualified.invocation, supplierRates: [...qualified.invocation.supplierRates] },
+    };
+    qualifiedMeterContracts.set(
+      fixture.meterContractId,
+      new Set(partitions.map(({ dimension, tier }) => `${dimension}:${tier ?? ''}`)),
+    );
+    const admitted = await firstLedger.admitOperation(request);
+    if (admitted.status !== 'admitted') {
+      throw new Error(`${route.routeId} was not admitted: ${JSON.stringify(admitted)}`);
+    }
+    await firstLedger.markDispatchIntent(admitted.operationId, admitted.generation);
+    return {
+      fixture,
+      admitted,
+      dimensions: new Set(partitions.map(({ dimension, tier }) => `${dimension}:${tier ?? ''}`)),
+      identity: {
+        operationId: admitted.operationId,
+        accountId: fixture.accountId,
+        requestDigest: request.requestDigest,
+      },
+    };
+  };
+
+  /* eslint-disable @typescript-eslint/naming-convention -- request bodies use the providers' own wire fields */
+  it.each([
+    {
+      // $1, $0.10, $1.25 (5m write) and $5 per million.
+      routeId: 'anthropic-claude-haiku-4.5',
+      providerWire: 'anthropic',
+      body: { messages: [{ role: 'user', content: 'hello' }], max_tokens: 500 },
+      priceHeaders: { 'anthropic-version': '2023-06-01' },
+      cacheWriteTier: '5m',
+      supplierCostPicoUsd: 3_575_000_000n,
+    },
+    {
+      // The base tier of a tiered route: $0.20, $0.02, $0.25 (30m write) and $1.20 per million.
+      routeId: 'openai-gpt-5.6-luna',
+      providerWire: 'openai-responses',
+      body: { input: 'hello', max_output_tokens: 500 },
+      cacheWriteTier: '30m',
+      supplierCostPicoUsd: 795_000_000n,
+    },
+    {
+      // $1.50, $0.15 and $9 per million; no cache write meter.
+      routeId: 'google-gemini-3.5-flash',
+      providerWire: 'openai-completions',
+      body: { messages: [{ role: 'user', content: 'hello' }], max_completion_tokens: 500 },
+      cacheWriteTier: 'none',
+      supplierCostPicoUsd: 5_400_000_000n,
+    },
+    {
+      // $1.40, $0.26 and $4.40 per million: a route that carried no valuation before.
+      routeId: 'together-glm-5.2',
+      providerWire: 'openai-completions',
+      body: { messages: [{ role: 'user', content: 'hello' }], max_completion_tokens: 500 },
+      cacheWriteTier: 'none',
+      supplierCostPicoUsd: 3_680_000_000n,
+    },
+  ] as const)(
+    /* eslint-enable @typescript-eslint/naming-convention -- wire-field table ends */
+    'should write the $routeId supplier cost once at settlement and leave it on replay',
+    async ({ routeId, providerWire, body, cacheWriteTier, supplierCostPicoUsd, ...rest }) => {
+      const { admitted, dimensions, identity } = await admitOnRoute({
+        routeId,
+        providerWire,
+        body,
+        ...('priceHeaders' in rest ? { priceHeaders: rest.priceHeaders } : {}),
+      });
+      const evidence: TerminalEvidence = {
+        kind: 'final_usage',
+        usageOccurredAt: new Date(),
+        meterItems: usage(dimensions, cacheWriteTier),
+      };
+      await firstLedger.recordInvocationEvidence({ ...identity, evidence });
+      const receipt = await firstLedger.terminalizeOperation({
+        ...identity,
+        expectedGeneration: admitted.generation,
+        evidence,
+        resolvedAt: new Date(),
+      });
+      expect(receipt).toMatchObject({ customerState: 'settled', supplierCostPicoUsd });
+      const settled = await readInvocationOperation(admitted.operationId);
+      expect(settled).toMatchObject({ supplierCostPicoUsd, supplierCostUnpricedReason: null });
+
+      const replay = await secondLedger.terminalizeOperation({
+        ...identity,
+        expectedGeneration: admitted.generation,
+        evidence,
+        resolvedAt: new Date(),
+      });
+      expect(replay).toEqual(receipt);
+      expect(await readInvocationOperation(admitted.operationId)).toEqual(settled);
+      // A terminal receipt's supplier cost is as immutable as the rest of it.
+      await expect(
+        firstDatabase
+          .update(creditOperation)
+          .set({ supplierCostPicoUsd: 1n })
+          .where(eq(creditOperation.id, admitted.operationId)),
+      ).rejects.toSatisfy((error: unknown) => databaseCode(error) === '23514');
+    },
+  );
+
+  it('should leave a cut stream with partial meters unpriced as dimension_mismatch without changing its charge', async () => {
+    const { admitted, identity } = await admitOnRoute({
+      routeId: 'google-gemini-3.5-flash',
+      providerWire: 'openai-completions',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- native completions ceiling field
+      body: { messages: [{ role: 'user', content: 'hello' }], max_completion_tokens: 500 },
+    });
+    // Vertex reported its input before the cut but never its cache or output counts.
+    const evidence: TerminalEvidence = {
+      kind: 'authorized_exhausted',
+      usageOccurredAt: new Date(),
+      meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 1000n }],
+    };
+    await firstLedger.recordInvocationEvidence({ ...identity, evidence });
+    const receipt = await firstLedger.terminalizeOperation({
+      ...identity,
+      expectedGeneration: admitted.generation,
+      evidence,
+      resolvedAt: new Date(),
+    });
+    expect(receipt).toMatchObject({ customerState: 'settled', chargedAtoms: 0n, supplierCostPicoUsd: null });
+    expect(await readInvocationOperation(admitted.operationId)).toMatchObject({
+      supplierCostPicoUsd: null,
+      supplierCostUnpricedReason: 'dimension_mismatch',
+    });
+  });
 });

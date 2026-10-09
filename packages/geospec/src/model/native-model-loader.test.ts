@@ -339,6 +339,39 @@ describe('native model loader ownership', () => {
     expect(terminate).toHaveBeenCalledTimes(1);
   });
 
+  it('should keep releaseAll pending until an owned Runtime shutdown settles', async () => {
+    const { engine } = testEngine();
+    const closed = Promise.withResolvers<void>();
+    const terminate = vi.fn();
+    const shutdown = vi.fn(async () => closed.promise);
+    const exported: Awaited<ReturnType<RuntimeDocument['export']>> = {
+      success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation-1',
+      files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.of(9) }],
+      issues: [],
+    };
+    const document = mock<RuntimeDocument>({ export: vi.fn(async () => exported) });
+    const runtime: GeoSpecRuntimeClient = {
+      connect: vi.fn(async () => undefined),
+      open: vi.fn(() => document),
+      terminate,
+      shutdown,
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime: async () => runtime });
+    await loader({ code: { 'main.ts': 'model' }, file: 'main.ts', format: 'glb' });
+
+    const cleanup = loader.releaseAll();
+    await vi.waitFor(() => {
+      expect(shutdown).toHaveBeenCalledTimes(1);
+    });
+    const pending = Symbol('pending');
+    await expect(Promise.race([cleanup, Promise.resolve(pending)])).resolves.toBe(pending);
+    closed.resolve();
+    await expect(cleanup).resolves.toBeUndefined();
+    expect(terminate).not.toHaveBeenCalled();
+  });
+
   it('should settle an in-flight admission before releasing its subject', async () => {
     const hash = 'a'.repeat(64);
     const source = Promise.withResolvers<Uint8Array<ArrayBuffer>>();

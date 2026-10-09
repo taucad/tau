@@ -275,7 +275,7 @@ maths
     declare function add(out: Vec2, a: Vec2, b: Vec2): Vec2
 
     // maths.vec2.angle (function)
-    declare function angleRadians(vector: Vec2): number
+    declare function angle(vector: Vec2): number
 
     // maths.vec2.angleDegrees (function)
     declare function angleDegrees(vector: Vec2): number
@@ -411,7 +411,7 @@ maths
     declare function fromValues(x: number, y: number, z: number): Vec3
 
     // maths.vec3.fromVec2 (function)
-    declare function fromVector2(out: Vec3, vector: Vec2, z?: number): Vec3
+    declare function fromVec2(out: Vec3, vector: Vec2, z?: number): Vec3
 
     // maths.vec3.length (function)
     declare function length(vector: Vec3): number

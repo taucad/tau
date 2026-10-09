@@ -93,6 +93,17 @@ export class EmailService {
     await this.send({ to: args.email, template: { kind: 'payment-failed', ...args } });
   }
 
+  public async sendAutoReloadDisabled(args: { readonly email: string; readonly billingUrl: string }): Promise<void> {
+    await this.send({ to: args.email, template: { kind: 'auto-reload-disabled', ...args } });
+  }
+
+  public async sendAutoReloadActionRequired(args: {
+    readonly email: string;
+    readonly billingUrl: string;
+  }): Promise<void> {
+    await this.send({ to: args.email, template: { kind: 'auto-reload-action-required', ...args } });
+  }
+
   public async sendPublicationInvite(args: {
     readonly recipientEmail: string;
     readonly ownerName: string;

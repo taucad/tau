@@ -48,7 +48,8 @@ type DesktopShell = {
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
   readonly generatedImages: DesktopBridge['generatedImages'];
-  readonly quickLook: {
+  /** Absent while the desktop's `isQuickLookEnabled()` flag is off. */
+  readonly quickLook?: {
     readonly directPreviewExtensions: readonly string[];
     previewPath(request: { readonly path: string; readonly displayName?: string }): Promise<DesktopQuickLookResult>;
     previewUsdz(request: {
@@ -279,7 +280,8 @@ export type DesktopBridge = {
   readonly generatedImages: {
     read(path: string): Promise<{ readonly path: string; readonly bytes: Uint8Array<ArrayBuffer> }>;
   };
-  readonly quickLook: DesktopShell['quickLook'];
+  /** Absent while the desktop's `isQuickLookEnabled()` flag is off. */
+  readonly quickLook?: NonNullable<DesktopShell['quickLook']>;
   /** Slicers that need the desktop host; absent on a shell built before them. */
   readonly slicers?: { readonly bambuStudio: DesktopBambuStudio };
   /**
@@ -404,7 +406,7 @@ export const desktopBridge = (): DesktopBridge | undefined => {
     dialog: shell.dialog,
     openFiles: shell.openFiles,
     generatedImages: shell.generatedImages,
-    quickLook: shell.quickLook,
+    ...(shell.quickLook === undefined ? {} : { quickLook: shell.quickLook }),
     ...(shell.slicers === undefined ? {} : { slicers: { bambuStudio: bambuStudioBridge(shell.slicers.bambuStudio) } }),
   };
   return built;

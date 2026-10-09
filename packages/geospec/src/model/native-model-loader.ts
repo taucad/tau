@@ -977,7 +977,12 @@ export const createGeoSpecNativeModelLoader = (
       }
       for (const runtime of ownedRuntimes) {
         try {
-          runtime.terminate();
+          if (runtime.shutdown) {
+            // oxlint-disable-next-line no-await-in-loop -- Each owned runtime must close before release settles.
+            await runtime.shutdown();
+          } else {
+            runtime.terminate();
+          }
         } catch (error) {
           errors.push(error);
         }

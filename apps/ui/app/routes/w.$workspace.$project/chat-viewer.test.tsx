@@ -467,7 +467,7 @@ vi.mock('#routes/w.$workspace.$project/chat-stack-trace.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer-status.js', () => ({
-  ChatViewerStatus: () => null,
+  ChatViewerStatus: () => <span data-testid='chat-viewer-status' />,
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
@@ -1276,6 +1276,27 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(screen.getByRole('group', { name: 'Viewer controls' })).toBeInTheDocument();
     expect(screen.queryByText(/section view|measur/i)).not.toBeInTheDocument();
+  });
+
+  it('should centre the build status in an empty viewer, where the model will appear', () => {
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ rendering: undefined, tags: ['cad-loading'] }));
+
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    expect(screen.queryByTestId('cad-viewer-canvas')).not.toBeInTheDocument();
+    const overlay = screen.getByTestId('chat-viewer-status').parentElement!;
+    expect(overlay).toHaveClass('absolute', 'top-1/2', '-translate-y-1/2');
+  });
+
+  it('should keep the build status in the upper band over a model, below the gizmo and above its middle', () => {
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+
+    renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
+    const overlay = screen.getByTestId('chat-viewer-status').parentElement!;
+    expect(overlay).toHaveClass('absolute', 'top-[clamp(5rem,16%,8rem)]');
+    expect(overlay).not.toHaveClass('top-1/2');
   });
 
   it('anchors the gizmo to the clipped canvas region', () => {

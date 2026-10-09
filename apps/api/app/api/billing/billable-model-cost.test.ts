@@ -1,91 +1,73 @@
 import { describe, expect, it } from 'vitest';
-import { calculatePreliminarySupplierCost } from '#api/billing/billable-model-cost.js';
-import type { SupplierValuation, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
+import { calculateSupplierCost } from '#api/billing/billable-model-cost.js';
+import type { NormalizedMeterItem, SupplierValuation } from '#api/billing/credit-ledger.types.js';
 
-describe('calculatePreliminarySupplierCost', () => {
-  it('keeps exact mixed-denominator USD economics', () => {
+const untiered = (baseRates: SupplierValuation['baseRates']): SupplierValuation => ({
+  version: 'supplier-valuation-v1',
+  sourceRevision: 'official-pricing-2026-09-06',
+  longContextMinimumInputTokens: null,
+  baseRates,
+  longContextRates: null,
+});
+
+describe('calculateSupplierCost', () => {
+  it('should price mixed-denominator usage exactly and round the sum up once', () => {
     expect(
-      calculatePreliminarySupplierCost({
-        invocation: {
-          supplierValuation: {
-            version: 'supplier-valuation-v1',
-            sourceRevision: 'official-pricing-2026-09-06',
-            longContextMinimumInputTokens: null,
-            baseRates: [
-              { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '3', denominatorUnits: '2' },
-              { dimension: 'output', tier: null, numeratorPicoUsd: '5', denominatorUnits: '3' },
-            ],
-            longContextRates: null,
-          },
-        },
-        evidence: {
-          kind: 'final_usage',
-          usageOccurredAt: new Date(0),
-          meterItems: [
-            { dimension: 'uncached_input', tier: null, quantity: 2n },
-            { dimension: 'output', tier: null, quantity: 3n },
-          ],
-        },
-        payloadDigest: 'sha256:evidence',
+      calculateSupplierCost({
+        valuation: untiered([
+          { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '3', denominatorUnits: '2' },
+          { dimension: 'output', tier: null, numeratorPicoUsd: '5', denominatorUnits: '3' },
+        ]),
+        meterItems: [
+          { dimension: 'uncached_input', tier: null, quantity: 2n },
+          { dimension: 'output', tier: null, quantity: 3n },
+        ],
       }),
-    ).toEqual({
-      sourceRevision: 'official-pricing-2026-09-06:normalized-usage:sha256:evidence',
-      payloadDigest: 'sha256:evidence',
-      currency: 'usd',
-      numerator: '1',
-      denominator: '125000000000',
-      completeness: 'complete',
-    });
+    ).toEqual({ picoUsd: 8n });
+    // 1/3 + 1/3 rounds up to 1 pico-USD, where rounding each meter first would give 2.
+    expect(
+      calculateSupplierCost({
+        valuation: untiered([
+          { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '3' },
+          { dimension: 'output', tier: null, numeratorPicoUsd: '1', denominatorUnits: '3' },
+        ]),
+        meterItems: [
+          { dimension: 'uncached_input', tier: null, quantity: 1n },
+          { dimension: 'output', tier: null, quantity: 1n },
+        ],
+      }),
+    ).toEqual({ picoUsd: 1n });
   });
 
-  it('selects the inclusive long-context band from the complete input partition', () => {
-    const makeEvidence = (uncached: bigint, read: bigint, write: bigint): TerminalEvidence => ({
-      kind: 'final_usage',
-      usageOccurredAt: new Date(0),
-      meterItems: [
-        { dimension: 'uncached_input', tier: null, quantity: uncached },
-        { dimension: 'cache_read', tier: null, quantity: read },
-        { dimension: 'cache_write', tier: '30m', quantity: write },
-        { dimension: 'output', tier: null, quantity: 1n },
-      ],
-    });
-    const supplierValuation: SupplierValuation = {
+  it('should select the inclusive long-context band from the complete input partition', () => {
+    const meters = (uncached: bigint, read: bigint, write: bigint): NormalizedMeterItem[] => [
+      { dimension: 'uncached_input', tier: null, quantity: uncached },
+      { dimension: 'cache_read', tier: null, quantity: read },
+      { dimension: 'cache_write', tier: '30m', quantity: write },
+      { dimension: 'output', tier: null, quantity: 1n },
+    ];
+    const rate = (numeratorPicoUsd: string): SupplierValuation['baseRates'] => [
+      { dimension: 'uncached_input', tier: null, numeratorPicoUsd, denominatorUnits: '1' },
+      { dimension: 'cache_read', tier: null, numeratorPicoUsd, denominatorUnits: '1' },
+      { dimension: 'cache_write', tier: '30m', numeratorPicoUsd, denominatorUnits: '1' },
+      { dimension: 'output', tier: null, numeratorPicoUsd, denominatorUnits: '1' },
+    ];
+    const valuation: SupplierValuation = {
       version: 'supplier-valuation-v1',
       sourceRevision: 'tiered',
       longContextMinimumInputTokens: '3',
-      baseRates: [
-        { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
-        { dimension: 'cache_read', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
-        { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '1', denominatorUnits: '1' },
-        { dimension: 'output', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
-      ],
-      longContextRates: [
-        { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '2', denominatorUnits: '1' },
-        { dimension: 'cache_read', tier: null, numeratorPicoUsd: '2', denominatorUnits: '1' },
-        { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '2', denominatorUnits: '1' },
-        { dimension: 'output', tier: null, numeratorPicoUsd: '2', denominatorUnits: '1' },
-      ],
+      baseRates: rate('1'),
+      longContextRates: rate('2'),
     };
-    expect(
-      calculatePreliminarySupplierCost({
-        invocation: { supplierValuation },
-        evidence: makeEvidence(1n, 1n, 0n),
-        payloadDigest: 'base',
-      })?.numerator,
-    ).toBe('3');
-    expect(
-      calculatePreliminarySupplierCost({
-        invocation: { supplierValuation },
-        evidence: makeEvidence(1n, 1n, 1n),
-        payloadDigest: 'long',
-      })?.numerator,
-    ).toBe('1');
+
+    expect(calculateSupplierCost({ valuation, meterItems: meters(1n, 1n, 0n) })).toEqual({ picoUsd: 3n });
+    expect(calculateSupplierCost({ valuation, meterItems: meters(1n, 1n, 1n) })).toEqual({ picoUsd: 8n });
   });
 
-  it('uses the pinned inclusive xAI boundary at 199999, 200000, and 200001 input tokens', () => {
-    const supplierValuation: SupplierValuation = {
+  it('should use the pinned inclusive boundary at 199999, 200000 and 200001 input tokens', () => {
+    const valuation: SupplierValuation = {
       version: 'supplier-valuation-v1',
-      sourceRevision: 'xai-pricing-discrepancy-2026-09-06',
+      sourceRevision: 'pricing-boundary-2026-09-06',
       longContextMinimumInputTokens: '200000',
       baseRates: [
         { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '0', denominatorUnits: '1' },
@@ -99,76 +81,53 @@ describe('calculatePreliminarySupplierCost', () => {
       ],
     };
     const cost = (quantity: bigint) =>
-      calculatePreliminarySupplierCost({
-        invocation: { supplierValuation },
-        evidence: {
-          kind: 'final_usage',
-          usageOccurredAt: new Date(0),
-          meterItems: [
-            { dimension: 'uncached_input', tier: null, quantity },
-            { dimension: 'cache_read', tier: null, quantity: 0n },
-            { dimension: 'output', tier: null, quantity: 0n },
-          ],
-        },
-        payloadDigest: quantity.toString(),
+      calculateSupplierCost({
+        valuation,
+        meterItems: [
+          { dimension: 'uncached_input', tier: null, quantity },
+          { dimension: 'cache_read', tier: null, quantity: 0n },
+          { dimension: 'output', tier: null, quantity: 0n },
+        ],
       });
 
-    expect(cost(199_999n)).toMatchObject({ numerator: '0', denominator: '1' });
-    expect(cost(200_000n)).toMatchObject({ numerator: '1', denominator: '5000000' });
-    expect(cost(200_001n)).toMatchObject({ numerator: '200001', denominator: '1000000000000' });
+    expect(cost(199_999n)).toEqual({ picoUsd: 0n });
+    expect(cost(200_000n)).toEqual({ picoUsd: 200_000n });
+    expect(cost(200_001n)).toEqual({ picoUsd: 200_001n });
   });
 
-  it('fails closed for legacy maximum rates, incomplete partitions, and wrong cache TTL', () => {
+  it('should name a missing valuation or an unrated reported meter as missing_rate', () => {
+    const meterItems: NormalizedMeterItem[] = [
+      { dimension: 'uncached_input', tier: null, quantity: 1n },
+      { dimension: 'cache_write', tier: '5m', quantity: 1n },
+      { dimension: 'output', tier: null, quantity: 1n },
+    ];
+    expect(calculateSupplierCost({ valuation: undefined, meterItems })).toEqual({ unpriced: 'missing_rate' });
+    // The reported cache write carries a TTL the valuation has no rate for.
     expect(
-      calculatePreliminarySupplierCost({
-        invocation: {},
-        evidence: {
-          kind: 'final_usage',
-          usageOccurredAt: new Date(0),
-          meterItems: [{ dimension: 'output', tier: null, quantity: 1n }],
-        },
-        payloadDigest: 'sha256:evidence',
+      calculateSupplierCost({
+        valuation: untiered([
+          { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
+          { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '1', denominatorUnits: '1' },
+          { dimension: 'output', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
+        ]),
+        meterItems,
       }),
-    ).toBeUndefined();
-    const supplierValuation: SupplierValuation = {
-      version: 'supplier-valuation-v1',
-      sourceRevision: 'ttl',
-      longContextMinimumInputTokens: null,
-      baseRates: [
-        { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
-        { dimension: 'cache_write', tier: '30m', numeratorPicoUsd: '1', denominatorUnits: '1' },
-        { dimension: 'output', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
-      ],
-      longContextRates: null,
-    };
+    ).toEqual({ unpriced: 'missing_rate' });
+  });
+
+  it('should name a schedule pricing a meter the supplier did not report as dimension_mismatch', () => {
     expect(
-      calculatePreliminarySupplierCost({
-        invocation: { supplierValuation },
-        evidence: {
-          kind: 'final_usage',
-          usageOccurredAt: new Date(0),
-          meterItems: [
-            { dimension: 'uncached_input', tier: null, quantity: 1n },
-            { dimension: 'output', tier: null, quantity: 1n },
-          ],
-        },
-        payloadDigest: 'partial',
+      calculateSupplierCost({
+        valuation: untiered([
+          { dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
+          { dimension: 'cache_read', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
+          { dimension: 'output', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' },
+        ]),
+        meterItems: [
+          { dimension: 'uncached_input', tier: null, quantity: 1n },
+          { dimension: 'output', tier: null, quantity: 1n },
+        ],
       }),
-    ).toBeUndefined();
-    expect(
-      calculatePreliminarySupplierCost({
-        invocation: { supplierValuation },
-        evidence: {
-          kind: 'final_usage',
-          usageOccurredAt: new Date(0),
-          meterItems: [
-            { dimension: 'uncached_input', tier: null, quantity: 1n },
-            { dimension: 'cache_write', tier: '5m', quantity: 1n },
-            { dimension: 'output', tier: null, quantity: 1n },
-          ],
-        },
-        payloadDigest: 'ttl',
-      }),
-    ).toBeUndefined();
+    ).toEqual({ unpriced: 'dimension_mismatch' });
   });
 });

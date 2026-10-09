@@ -28,6 +28,46 @@ ShapeProcess: declare class ShapeProcess
 
 ShapeProcess_Operation: typeof ShapeProcess_Operation[keyof typeof ShapeProcess_Operation]
 
+  readonly First: 'First'
+
+  readonly DirectFaces: 'DirectFaces'
+
+  readonly SameParameter: 'SameParameter'
+
+  readonly SetTolerance: 'SetTolerance'
+
+  readonly SplitAngle: 'SplitAngle'
+
+  readonly BSplineRestriction: 'BSplineRestriction'
+
+  readonly ElementaryToRevolution: 'ElementaryToRevolution'
+
+  readonly SweptToElementary: 'SweptToElementary'
+
+  readonly SurfaceToBSpline: 'SurfaceToBSpline'
+
+  readonly ToBezier: 'ToBezier'
+
+  readonly SplitContinuity: 'SplitContinuity'
+
+  readonly SplitClosedFaces: 'SplitClosedFaces'
+
+  readonly FixWireGaps: 'FixWireGaps'
+
+  readonly FixFaceSize: 'FixFaceSize'
+
+  readonly DropSmallSolids: 'DropSmallSolids'
+
+  readonly DropSmallEdges: 'DropSmallEdges'
+
+  readonly FixShape: 'FixShape'
+
+  readonly SplitClosedEdges: 'SplitClosedEdges'
+
+  readonly SplitCommonVertex: 'SplitCommonVertex'
+
+  readonly Last: 'Last'
+
 ShapeProcess_Context: declare class ShapeProcess_Context extends Standard_Transient
 
   // ShapeProcess_Context.constructor (constructor)

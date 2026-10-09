@@ -358,4 +358,64 @@ describe('ParametersWidget authoritative commits', () => {
     fireEvent.change(input, { target: { value: '4' } });
     expect(onChange).toHaveBeenCalledWith(4);
   });
+
+  const withBinding = (
+    props: ReturnType<typeof widgetProps>,
+    binding: Readonly<{ representation: 'binary64' | 'safe-integer'; unit: string }>,
+    displaySymbol = 'mm',
+  ) => {
+    props.registry.formContext = {
+      ...formContext,
+      units: { length: { displaySymbol } },
+      parameterManifest: {
+        bindings: {
+          '/width': {
+            parameter: { value: 'width', stability: 'stable' },
+            schema: { resource: 'urn:taucad:test:configuration', pointer: '/properties/width' },
+            optional: true,
+            nullable: false,
+            space: 'linear',
+            constraints: {},
+            ...binding,
+          },
+        },
+        bindingDeclarations: {},
+        provenance: {},
+      } as unknown as RJSFContext['parameterManifest'],
+    };
+    return props;
+  };
+
+  it('shows an unset length default in the display unit beside it', () => {
+    const onChange = vi.fn();
+    renderWidget(
+      withBinding(
+        widgetProps({ value: undefined, schema: { type: 'number', default: 20 }, onChange }),
+        { representation: 'binary64', unit: 'mm' },
+        'cm',
+      ),
+    );
+    const input = screen.getByRole('spinbutton', { name: 'Input for Width' });
+
+    expect(input).toHaveAttribute('placeholder', '2');
+    expect(screen.getByText('cm')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '3' } });
+    expect(onChange).toHaveBeenCalledWith(30);
+  });
+
+  it('refuses a fraction typed into an unset integer field instead of rounding it', () => {
+    const onChange = vi.fn();
+    renderWidget(
+      withBinding(widgetProps({ value: undefined, schema: { type: 'integer' }, onChange }), {
+        representation: 'safe-integer',
+        unit: '1',
+      }),
+    );
+    const input = screen.getByRole('spinbutton', { name: 'Input for Width' });
+
+    fireEvent.change(input, { target: { value: '1.5' } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: '2' } });
+    expect(onChange).toHaveBeenCalledWith(2);
+  });
 });

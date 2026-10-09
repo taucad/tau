@@ -1221,6 +1221,24 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         })();
         return;
       }
+      case 'machines-streaming-peek': {
+        /* Whether a program streams now, so main keeps the computer awake while one does. Unlike the quit
+         * question, it holds no start: it only reads. */
+        const { requestId } = frame;
+        if (typeof requestId !== 'string') {
+          return;
+        }
+        // async-iife: bootstrap -- a control frame has no caller to await the directory read.
+        void (async () => {
+          try {
+            machinesStreaming?.(requestId, await streamingMachines());
+          } catch (error) {
+            /* Unanswered, main's bound decides and keeps what it held; the reason stays in the log. */
+            log('machines.streaming-unread', error instanceof Error ? error.message : String(error), 'warn');
+          }
+        })();
+        return;
+      }
       case 'machines-resume': {
         /* Main called its quit off after asking: admit starts again. */
         quitAttempt += 1;

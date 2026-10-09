@@ -142,6 +142,14 @@ export type ServicesBroker = {
   streamingMachines(boundMilliseconds: number): Promise<readonly string[]>;
   /** Quit was called off after {@link ServicesBroker.streamingMachines}: the utility starts machine jobs again. */
   resumeMachineStarts(): void;
+  /**
+   * The same answer as {@link ServicesBroker.streamingMachines}, holding nothing: what keeps the computer awake
+   * while a program streams. No utility, no stream; it never forks one.
+   *
+   * @param boundMilliseconds - How long to wait for the utility's answer before rejecting.
+   * @returns The machines' names.
+   */
+  peekStreamingMachines(boundMilliseconds: number): Promise<readonly string[]>;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
   /** Original project identity retained for an admitted execution root. */
@@ -216,6 +224,35 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   let quiescence: Promise<ServicesQuiesceOutcome> | undefined;
   let settleQuiescence: ((outcome: ServicesQuiesceOutcome) => void) | undefined;
   let disposal: Promise<void> | undefined;
+
+  /**
+   * Ask the utility which machines a streamed run is feeding. `machines-streaming` is quit's question and holds
+   * starts; `machines-streaming-peek` only reads. No utility, no stream.
+   */
+  const askStreaming = async (
+    type: 'machines-streaming' | 'machines-streaming-peek',
+    boundMilliseconds: number,
+  ): Promise<readonly string[]> => {
+    const spawned = utility;
+    if (spawned === undefined) {
+      return [];
+    }
+    streamingRequest += 1;
+    const requestId = `machines-streaming-${String(streamingRequest)}`;
+    const pending = Promise.withResolvers<readonly string[]>();
+    streamingWaiters.set(requestId, pending);
+    const bound = setTimeout(() => {
+      pending.reject(new Error('The desktop machine host did not say whether a program is streaming.'));
+    }, boundMilliseconds);
+    bound.unref();
+    try {
+      spawned.postMessage({ type, requestId });
+      return await pending.promise;
+    } finally {
+      clearTimeout(bound);
+      streamingWaiters.delete(requestId);
+    }
+  };
 
   const isStrictDescendant = (parent: string, candidate: string): boolean => {
     const child = relative(parent, candidate);
@@ -709,25 +746,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       }
     },
     async streamingMachines(boundMilliseconds) {
-      const spawned = utility;
-      if (spawned === undefined) {
-        return [];
-      }
-      streamingRequest += 1;
-      const requestId = `machines-streaming-${String(streamingRequest)}`;
-      const pending = Promise.withResolvers<readonly string[]>();
-      streamingWaiters.set(requestId, pending);
-      const bound = setTimeout(() => {
-        pending.reject(new Error('The desktop machine host did not say whether a program is streaming.'));
-      }, boundMilliseconds);
-      bound.unref();
-      try {
-        spawned.postMessage({ type: 'machines-streaming', requestId });
-        return await pending.promise;
-      } finally {
-        clearTimeout(bound);
-        streamingWaiters.delete(requestId);
-      }
+      return askStreaming('machines-streaming', boundMilliseconds);
+    },
+    async peekStreamingMachines(boundMilliseconds) {
+      return askStreaming('machines-streaming-peek', boundMilliseconds);
     },
     resumeMachineStarts() {
       utility?.postMessage({ type: 'machines-resume' });

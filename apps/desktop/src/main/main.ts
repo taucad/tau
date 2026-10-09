@@ -19,6 +19,7 @@ import {
   ipcMain,
   MessageChannelMain,
   net,
+  powerSaveBlocker,
   protocol,
   safeStorage,
   screen,
@@ -75,6 +76,7 @@ import {
   sanitizeServicesContext,
 } from '#main/project-roots.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
+import { keepAwakeWhileStreaming } from '#main/keep-awake.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
@@ -263,6 +265,12 @@ const machineBindingMilliseconds = 60_000;
  * above that wait.
  */
 const machineStreamingMilliseconds = machineStartWaitMilliseconds + 2000;
+
+/**
+ * How often main asks whether a program is streaming, to keep the computer awake while one does: well inside the
+ * shortest idle-sleep timer an operating system offers (one minute).
+ */
+const keepAwakeIntervalMilliseconds = 20_000;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
@@ -730,6 +738,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     onSpawn: (utility) => {
       forwardUtilityDiagnostics('services', utility, log);
     },
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
+  });
+  /* Q-streamed-host: a streamed program needs this computer awake for its whole run. */
+  const stopKeepingAwake = keepAwakeWhileStreaming({
+    streamingMachines: async () => services.peekStreamingMachines(keepAwakeIntervalMilliseconds / 2),
+    blocker: powerSaveBlocker,
+    intervalMilliseconds: keepAwakeIntervalMilliseconds,
     log: (level, event, detail) => {
       log.log(level, event, detail);
     },
@@ -1479,6 +1496,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
         } catch (error) {
           log.log('error', 'main.shutdown', error);
         }
+        stopKeepingAwake();
         try {
           await services.dispose();
         } catch (error) {

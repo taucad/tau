@@ -234,6 +234,12 @@ const machinesHarness = async () => {
     return answer(requestId).promise as Promise<readonly string[]>;
   };
 
+  /** Main's keep-awake poll: the same answer, holding nothing. */
+  const peek = async (requestId: string): Promise<readonly string[]> => {
+    host.handleMessage(frame({ type: 'machines-streaming-peek', requestId }));
+    return answer(requestId).promise as Promise<readonly string[]>;
+  };
+
   const bindSimulator = async (
     client: MachineChannelClient,
     code?: string,
@@ -274,7 +280,21 @@ const machinesHarness = async () => {
     host.dispose();
     await rm(sandbox, { recursive: true, force: true });
   };
-  return { alpha, beta, bindSimulator, cleanup, completeCeremony, connect, host, log, rootA, rootB, store, streaming };
+  return {
+    alpha,
+    beta,
+    bindSimulator,
+    cleanup,
+    completeCeremony,
+    connect,
+    host,
+    log,
+    peek,
+    rootA,
+    rootB,
+    store,
+    streaming,
+  };
 };
 
 describe('createServicesHost — machines', () => {
@@ -474,6 +494,23 @@ describe('createServicesHost — machines', () => {
     } finally {
       listed.entries = undefined;
       listed.jobs = undefined;
+      await machines.cleanup();
+    }
+  }, 30_000);
+
+  it("should answer main's keep-awake poll with the machines a streamed run feeds, holding no start", async () => {
+    const machines = await machinesHarness();
+    try {
+      await expect(machines.peek('before-open')).resolves.toEqual([]);
+      const client = machines.connect();
+      await machines.bindSimulator(client);
+      listed.entries = [{ name: 'Router', snapshot: { run: { delivery: 'streamed', state: 'running' } } }];
+      gate.length = 0;
+      await expect(machines.peek('streaming')).resolves.toEqual(['Router']);
+      /* Read only: unlike the quit question, starts were never stopped. */
+      expect(gate).toEqual(['list']);
+    } finally {
+      listed.entries = undefined;
       await machines.cleanup();
     }
   }, 30_000);

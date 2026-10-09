@@ -191,6 +191,7 @@ vi.mock('electron', () => ({
   },
   MessageChannelMain: vi.fn(() => ({ port1: {}, port2: {} })),
   net: { fetch: vi.fn() },
+  powerSaveBlocker: { start: vi.fn(() => 1), stop: vi.fn() },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: vi.fn() },
   safeStorage: { isEncryptionAvailable: vi.fn(() => false), encryptString: vi.fn(), decryptString: vi.fn() },
   screen: {
@@ -290,6 +291,7 @@ vi.mock('#main/services-broker.js', () => ({
       connect: state.servicesConnect,
       completeMachineBinding: state.servicesCompleteBinding,
       streamingMachines: state.servicesStreaming,
+      peekStreamingMachines: vi.fn(async () => []),
       resumeMachineStarts: state.servicesResumeStarts,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,

@@ -373,6 +373,34 @@ describe('createServicesBroker', () => {
     expect(resumes).toEqual([{ type: 'machines-resume' }]);
   });
 
+  it('should peek at the streaming machines for keep-awake with a read-only question, never forking a utility', async () => {
+    const { broker, spawns } = brokerHarness();
+    await expect(broker.peekStreamingMachines(1000)).resolves.toEqual([]);
+    expect(spawns).toHaveLength(0);
+
+    broker.connect('nodeFs');
+    const peeked = broker.peekStreamingMachines(1000);
+    const types = (spawns[0]?.posted ?? []).map((message) =>
+      typeof message === 'object' && message !== null && 'type' in message ? message.type : undefined,
+    );
+    /* Never quit's question, which would hold the utility's starts. */
+    expect(types).toContain('machines-streaming-peek');
+    expect(types).not.toContain('machines-streaming');
+    const question = (spawns[0]?.posted ?? []).find(
+      (message): message is Record<string, unknown> =>
+        typeof message === 'object' &&
+        message !== null &&
+        'type' in message &&
+        message.type === 'machines-streaming-peek',
+    );
+    spawns[0]?.message({
+      type: 'machines-streaming-answered',
+      requestId: question?.['requestId'],
+      machines: ['Router'],
+    });
+    await expect(peeked).resolves.toEqual(['Router']);
+  });
+
   it('should never replay or log an access code, and complete without one when none was typed', async () => {
     const { broker, log, spawns } = brokerHarness();
     const bindingFrames = (spawned: Spawned | undefined): Array<Record<string, unknown>> =>

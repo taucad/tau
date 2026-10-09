@@ -37,6 +37,8 @@ export type CarveraSimulatorOptions = Readonly<{
   tickInterval?: number;
   /** The model the status line reports: 1 is the C1, 2 the Carvera Air. */
   model?: number;
+  /** Simulated milliseconds a `play` keeps the machine busy before the run shows, as a slow start might. */
+  playDelay?: number;
 }>;
 
 /** A virtual Carvera and the levers a test or a demo pulls at the machine. @internal */
@@ -797,17 +799,26 @@ export const createCarveraSimulator = (options: CarveraSimulatorOptions = {}): C
           return;
         }
         const program = summarizeCarveraProgram(text);
-        player = {
-          name: argument,
-          lines: text.split(/\r?\n/u),
-          next: 0,
-          line: 0,
-          started: clock,
-          scale: runDuration / Math.max(1000, program.estimatedDuration),
-          suspend: 'none',
-          aborting: false,
+        const begin = (): void => {
+          player = {
+            name: argument,
+            lines: text.split(/\r?\n/u),
+            next: 0,
+            line: 0,
+            started: clock,
+            scale: runDuration / Math.max(1000, program.estimatedDuration),
+            suspend: 'none',
+            aborting: false,
+          };
+          relative = false;
         };
-        relative = false;
+        if (options.playDelay === undefined) {
+          begin();
+        } else {
+          queue.push(
+            timed({ label: 'opening the file', duration: options.playDelay, source: 'console', finish: begin }),
+          );
+        }
         return;
       }
       case 'buffer': {

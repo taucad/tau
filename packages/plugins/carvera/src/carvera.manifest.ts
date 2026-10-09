@@ -239,7 +239,8 @@ const actions = (qualification?: MachineActionQualification): readonly MachineAc
       when: idle,
       requires: inputs,
       safety: { interlocks: ['cover'], maximumDuration: 300_000 },
-      consequence: 'The spindle runs for the time you set, then stops by itself.',
+      consequence:
+        'The spindle runs for the time you set, then stops by itself. Only Stop ends it sooner, and the Carvera then needs homing.',
       schema: carveraSpindleSchema,
       ...qualified,
     }),
@@ -459,7 +460,7 @@ export const carveraManifest = (profile?: MachineQualificationProfile): MachineM
       accepts: [
         {
           contract: { id: 'tau.toolpath.gcode', version: 1 },
-          mediaType: 'text/x-gcode',
+          mediaType: 'text/x.gcode',
           payloadSelection: 'single',
           requiredMembers: [],
           technology: 'subtractive.milling',

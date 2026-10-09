@@ -38,7 +38,7 @@ const artifact: MachineArtifactReference = {
   path: 'cam/pocket.nc',
   digest: `sha256:${'ab'.repeat(32)}` as MachineArtifactReference['digest'],
   length: program.length,
-  mediaType: 'text/x-gcode',
+  mediaType: 'text/x.gcode',
   contract: { id: 'tau.toolpath.gcode', version: 1 },
   selectedMember: '',
 };
@@ -634,6 +634,50 @@ describe('carvera simulator through the real session', () => {
       expect(paused.run?.paused).toEqual({ by: 'program', reason: 'Paused by the program or at the machine' });
       const resume = await machine.act('controller', 'run.resume');
       expect(resume.receipt).toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_PRECONDITION_FAILED' });
+    },
+  );
+
+  it('should keep a start the machine showed late as Tau’s run', { timeout: 30_000 }, async () => {
+    // Four real seconds of a busy machine before `P:`: longer than the session waits for the run to show.
+    const machine = await connect(createCarveraSimulator({ speed: 25, tickInterval: 10, playDelay: 100_000 }));
+    await machine.waitFor(ready, 'the boot homing');
+    const { start } = await machine.runJob(plain);
+    expect(start).toMatchObject({ status: 'unknown', runId: expect.any(String) as unknown });
+    const running = await machine.waitFor((report) => report.run !== undefined, 'the late run', 10_000);
+    expect(running.run).toMatchObject({ origin: 'tau', runId: start.status === 'unknown' ? start.runId : '' });
+  });
+
+  it(
+    'should queue a timed spindle run whole and refuse to switch it off early, naming Stop',
+    { timeout: 30_000 },
+    async () => {
+      const machine = await connect();
+      await machine.waitFor(ready, 'the boot homing');
+      const spin = await machine.act('spindle', 'spindle.set', { mode: 'clockwise', speed: 10_000, duration: 300 });
+      expect(await spin.settled()).toEqual({ status: 'confirmed' });
+      // The stop goes to the machine with the dwell, so the run ends there even if Tau never sends another byte.
+      const sent = machine.simulator.commands();
+      const at = sent.indexOf('M3 S10000');
+      expect(sent.slice(at, at + 3)).toEqual(['M3 S10000', 'G4 P300.0', 'M5']);
+      const turning = await machine.waitFor((report) => report.state.status === 'active', 'the timed run');
+      const stopRemedy = {
+        type: 'person',
+        instruction:
+          'To end it now, press Stop: the Carvera halts and loses its position, so unlock and home it after.',
+      };
+      expect(turning.availability.find(({ id }) => id === 'spindle.set')).toMatchObject({
+        state: 'unavailable',
+        code: 'MACHINE_ACTION_BUSY',
+        remedy: stopRemedy,
+      });
+      await expect(machine.act('spindle', 'spindle.set', { mode: 'off' })).resolves.toMatchObject({
+        receipt: {
+          status: 'rejected',
+          code: 'MACHINE_ACTION_BUSY',
+          message: 'The spindle is on a timed run and stops by itself when the time is up.',
+        },
+      });
+      expect(machine.simulator.commands().filter((line) => line === 'M5')).toHaveLength(1);
     },
   );
 

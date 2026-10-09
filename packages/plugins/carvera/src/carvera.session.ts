@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto';
 
 import {
-  checkMachineAction,
+  checkMachineActionAtSend,
   machineManifestOf,
   standardMachineActions,
   standardMachineHolds,
@@ -27,6 +27,7 @@ import type {
   MachineComponentValue,
   MachineConnectionRuntime,
   MachineFailure,
+  MachineFailureCode,
   MachineHoldCapability,
   MachineJobCapability,
   MachineManifestDefinition,
@@ -143,6 +144,16 @@ type Upload = {
   watchdog?: ReturnType<typeof setTimeout>;
 };
 
+/**
+ * A failure as the Grbl and Bambu providers throw one: a person-readable message, the code on `code`.
+ * @param message - What a person reads.
+ * @returns The error to throw.
+ */
+const unavailable = (message: string): Error & Readonly<{ code: MachineFailureCode }> => {
+  const code: MachineFailureCode = 'MACHINE_UNAVAILABLE';
+  return Object.assign(new Error(message), { code });
+};
+
 /* eslint-disable @typescript-eslint/naming-convention -- keyed by the controller's own state words. */
 const statusOf: Readonly<Record<CarveraStatus['state'], MachineStatus>> = {
   Idle: 'ready',
@@ -222,9 +233,33 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
   let endedAt = 0;
   let externalRuns = 0;
   let toolWaits = 0;
-  let pendingStart: { runId: string; name: string; lines: number; procedure?: Procedure } | undefined;
+  /**
+   * Tau's start until its run shows. One the machine did not show within {@link startWait} stays, so a run that appears
+   * later is still Tau's, until the machine is seen idle without a run, halts or the link drops.
+   */
+  let pendingStart:
+    | { runId: string; name: string; lines: number; procedure?: Procedure; unconfirmed?: true }
+    | undefined;
+  /** Drop a start the machine never showed, and end its before-program activity as unknown. */
+  const forgetUnconfirmedStart = (): void => {
+    const procedure = pendingStart?.unconfirmed === true ? pendingStart.procedure : undefined;
+    if (pendingStart?.unconfirmed !== true) {
+      return;
+    }
+    pendingStart = undefined;
+    if (procedure?.state === 'in-progress') {
+      procedure.state = 'unknown';
+      procedure.message = 'The machine did not show the run starting.';
+      procedure.endedAt = now();
+    }
+  };
   const procedures: Procedure[] = [];
   const receipts = new Map<string, MachineCommandReceipt>();
+  /**
+   * Tau's timed spindle run, queued whole on the machine (`M3`, `G4 P<duration>`, `M5`) so it ends there even if Tau
+   * goes away; over once a report shows the machine idle after it was busy (or two seconds on), a halt, or Stop.
+   */
+  let timedSpindle: { sentAt: number; seenBusy: boolean } | undefined;
   const expectations = new Map<string, () => MachineActionConfirmation>();
   let upload: Upload | undefined;
   let holding = false;
@@ -263,7 +298,7 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
 
   const write = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
     if (stream === undefined) {
-      throw new Error('MACHINE_UNAVAILABLE');
+      throw unavailable('The Carvera is not connected.');
     }
     await stream.write(bytes);
   };
@@ -327,6 +362,21 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
     }
     if (next.state === 'Tool' && previous?.state !== 'Tool') {
       toolWaits += 1;
+    }
+    if (timedSpindle !== undefined) {
+      const isOver = timedSpindle.seenBusy || now() - timedSpindle.sentAt > 2000;
+      if (next.state === 'Alarm' || (next.state === 'Idle' && isOver)) {
+        timedSpindle = undefined;
+      } else if (next.state !== 'Idle') {
+        timedSpindle.seenBusy = true;
+      }
+    }
+    if (
+      pendingStart?.unconfirmed === true &&
+      next.playing === undefined &&
+      ((next.state === 'Idle' && next.atc === undefined) || next.state === 'Alarm')
+    ) {
+      forgetUnconfirmedStart();
     }
     if (next.playing !== undefined && run === undefined) {
       const startedAt = new Date(now() - next.playing.elapsed * 1000).toISOString();
@@ -392,9 +442,9 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
       } else if (trimmed.startsWith('[G')) {
         workOffset = /\bG5[4-9]\b/u.exec(trimmed)?.[0] ?? workOffset;
       }
-      const version = /version\s*[=:]\s*(\S+)/iu.exec(trimmed);
-      if (version !== null) {
-        firmware = version[1]!;
+      const version = /version\s*[=:]\s*(\S+)/iu.exec(trimmed)?.[1];
+      if (version !== undefined) {
+        firmware = version;
       }
       for (const waiter of textWaiters) {
         waiter(trimmed);
@@ -481,6 +531,7 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
     }
     stream = undefined;
     upload?.reject(new Error('CARVERA_LINK_LOST'));
+    forgetUnconfirmedStart();
     if (sessionLifetime.signal.aborted || opening) {
       return;
     }
@@ -943,7 +994,7 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
   const activities = (): readonly MachineActivity[] => {
     const cutoff = now() - activityRetention;
     for (let index = procedures.length - 1; index >= 0; index -= 1) {
-      const endedTime = procedures[index]!.endedAt;
+      const endedTime = procedures[index]?.endedAt;
       if (endedTime !== undefined && endedTime < cutoff) {
         procedures.splice(index, 1);
       }
@@ -1063,6 +1114,20 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
           state: 'unavailable',
           ...failure('MACHINE_ACTION_PRECONDITION_FAILED', 'The wireless probe is not responding.'),
           remedy: { type: 'action', componentId: 'probe', action: 'makera.probe.pair' },
+        };
+      }
+      // The firmware takes no command mid-dwell short of a halt, so the run cannot be switched off early.
+      if (id === 'spindle.set' && timedSpindle !== undefined) {
+        return {
+          componentId,
+          id,
+          state: 'unavailable',
+          ...failure('MACHINE_ACTION_BUSY', 'The spindle is on a timed run and stops by itself when the time is up.'),
+          remedy: {
+            type: 'person',
+            instruction:
+              'To end it now, press Stop: the Carvera halts and loses its position, so unlock and home it after.',
+          },
         };
       }
       if ((id === 'spindle.set' || id === 'tool.measure') && current.tool.active < 1) {
@@ -1491,9 +1556,12 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         }
         const speed = Math.round(spindle.speed);
         const seconds = spindle.duration;
-        // The stop is queued behind the dwell, so the spindle stops by itself even if Tau loses the machine.
+        // The stop is queued behind the dwell, so the spindle stops by itself even if Tau loses the machine (R18).
         return {
           lines: [`M3 S${String(speed)}`, `G4 P${seconds.toFixed(1)}`, 'M5'],
+          after: () => {
+            timedSpindle = { sentAt: now(), seenBusy: false };
+          },
           confirm: when((next) => (next.spindle?.current ?? 0) > 0),
         };
       }
@@ -1601,14 +1669,15 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
       expectedRunId: string | null;
     }>,
   ): MachineFailure | undefined => {
-    const check = checkMachineAction({
-      entry: { name: 'The Carvera', testing: true, descriptor: { capabilities: serialized }, snapshot: report() },
+    const refused = checkMachineActionAtSend({
+      name: 'The Carvera',
+      capabilities: serialized,
+      report: report(),
+      observations: serialized.observations,
       ...target,
-      caller: 'person',
-      attended: true,
       now: now(),
     });
-    return check.status === 'unavailable' ? failure(check.code, check.message) : undefined;
+    return refused === undefined ? undefined : failure(refused.code, refused.message);
   };
 
   const interlocked = (interlocks: readonly string[]): string | undefined =>
@@ -1731,12 +1800,12 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
       if (current.playing !== undefined || holding) {
         return failure('MACHINE_ACTION_PRECONDITION_FAILED', 'The machine must be idle to jog.');
       }
-      if (!isAxis(axis)) {
+      const limits = travel[axis];
+      if (!isAxis(axis) || limits === undefined) {
         return failure('MACHINE_ACTION_PARAMETERS_INVALID', `This machine has no ${axis.toUpperCase()} axis.`);
       }
       const feed = Math.min(parsed.data.feed, 3000);
       const segment = (feed / 60_000) * jogSegment;
-      const limits = travel[axis]!;
       let target = current.machine[axis];
       let released = false;
       holding = true;
@@ -1877,8 +1946,9 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
           }),
     });
     const offset = offsets.get(configuration.workOffset);
-    const xy = program.extents['x'] !== undefined && program.extents['y'] !== undefined;
-    if (offset === undefined || !xy) {
+    const { x: xExtent, y: yExtent } = program.extents;
+    const xy = xExtent === undefined || yExtent === undefined ? undefined : { x: xExtent, y: yExtent };
+    if (offset === undefined || xy === undefined) {
       add({
         id: 'travel',
         label: 'The program stays inside the travel',
@@ -1890,9 +1960,9 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
             : 'The program has no X/Y moves.',
       });
     } else {
-      const reach = (axis: Axis): Readonly<{ min: number; max: number }> => ({
-        min: program.extents[axis]!.min + offset[axis],
-        max: program.extents[axis]!.max + offset[axis],
+      const reach = (axis: 'x' | 'y'): Readonly<{ min: number; max: number }> => ({
+        min: xy[axis].min + offset[axis],
+        max: xy[axis].max + offset[axis],
       });
       const fits = (['x', 'y'] as const).every(
         (axis) => inTravel({ [axis]: reach(axis).min }) && inTravel({ [axis]: reach(axis).max }),
@@ -2161,12 +2231,13 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
               // The file waits while the machine runs these; its first line marks the end.
               done: (next) => (next.playing?.line ?? 0) > 0,
             });
-      pendingStart = {
+      const pending: NonNullable<typeof pendingStart> = {
         runId,
         name: job.remoteName.split('/').at(-1) ?? job.remoteName,
         lines: data.lines ?? 0,
         ...(procedure === undefined ? {} : { procedure }),
       };
+      pendingStart = pending;
       // Listen before sending: the machine refuses a `play` only in text, or halts with 15 when not homed.
       const listening = new AbortController();
       const answer = startAnswer(runId, AbortSignal.any([job.signal, listening.signal]));
@@ -2199,8 +2270,12 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         return settle(rejected('MACHINE_JOB_START_REFUSED', outcome.message));
       }
       if (outcome.type === 'silent') {
+        // Not refused: a run that shows later is still this one, until the machine is seen idle without it.
         const reason = 'The machine did not show the run starting.';
-        abandon('unknown', reason);
+        // The run may have shown, and taken the start, while the answer was awaited.
+        if (pendingStart === pending) {
+          pending.unconfirmed = true;
+        }
         return settle({ status: 'unknown', reason, runId, observedAt: iso() });
       }
       log('info', `Started ${job.remoteName}.`);
@@ -2213,7 +2288,7 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
   const reached = await open();
   if (reached === 'unreachable') {
     sessionLifetime.abort();
-    throw new Error('MACHINE_UNAVAILABLE');
+    throw unavailable('The Carvera did not answer. Check it is on and on this network.');
   }
   if (reached !== 'connected') {
     scheduleReconnect(5000);
@@ -2307,6 +2382,7 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         run.endedBy = 'stop';
       }
       upload?.reject(new Error('CARVERA_STOPPED'));
+      timedSpindle = undefined;
       try {
         // The realtime halt: motion stops at once and the machine needs unlocking and homing.
         await write(carveraRealtime('\u0018'));

@@ -533,3 +533,29 @@ export const stripePortal = (page: Page): StripePortal => ({
     return 'link';
   },
 });
+
+/**
+ * Loads the marketing page at `path` and reads the hrefs of `links` as a visitor's browser shows them, each resolved
+ * against the page. The site serves one build to tau.new and taucad.dev, so its HTML names tau.new; on staging its own
+ * script (apps/www `client.mjs`) then points those links at taucad.dev.
+ *
+ * @param page - The page to load it in.
+ * @param path - The marketing path, such as `/pricing/`.
+ * @param links - The links to read, located on `page`.
+ * @returns The page's status and the hrefs in document order.
+ */
+export const marketingLinks = async (
+  page: Page,
+  path: string,
+  links: Locator,
+): Promise<{ readonly status: number | undefined; readonly hrefs: readonly string[] }> => {
+  // The page loads that script as a module, which runs once the document is parsed and before DOMContentLoaded, and it
+  // rewrites the links at its top level: from that event on they read as a visitor sees them.
+  const response = await page.goto(`${baseUrl}${path}`, { waitUntil: 'domcontentloaded' });
+  const anchors = await links.all();
+  const hrefs = await Promise.all(anchors.map(async (anchor) => anchor.getAttribute('href')));
+  return {
+    status: response?.status(),
+    hrefs: hrefs.flatMap((href) => (href === null ? [] : [new URL(href, page.url()).href])),
+  };
+};

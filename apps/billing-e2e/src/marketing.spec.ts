@@ -2,9 +2,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { closeAccount, createAccount } from '#support/account.js';
 import type { Account } from '#support/account.js';
 import { baseUrl } from '#support/api.js';
-import { openBrowser, screenshot, visibleText } from '#support/checkout.js';
+import { openBrowser, screenshot, visibleText, withBrowser } from '#support/checkout.js';
 import type { Browsing } from '#support/checkout.js';
-import { billingSettings, topupModal } from '#support/pages.js';
+import { billingSettings, marketingLinks, topupModal } from '#support/pages.js';
 import { matrixRow, runId } from '#support/results.js';
 import type { Verdict } from '#support/results.js';
 
@@ -22,10 +22,11 @@ const atomsPerCredit = 10_000;
 const dollars = (minor: number): string => (minor / 100).toLocaleString('en-US');
 const credits = (atoms: number): string => (atoms / atomsPerCredit).toLocaleString('en-US');
 
-/** The marketing page's text with tags dropped and whitespace folded. */
-const pageCopy = async (
-  path: string,
-): Promise<{ readonly status: number; readonly html: string; readonly text: string }> => {
+/**
+ * The marketing page's text as served, with tags dropped and whitespace folded. The served links name tau.new on every
+ * host, so rows read links through `marketingLinks`, as a browser shows them.
+ */
+const pageCopy = async (path: string): Promise<{ readonly status: number; readonly text: string }> => {
   const response = await fetch(`${baseUrl}${path}`);
   const html = await response.text();
   const text = html
@@ -33,7 +34,7 @@ const pageCopy = async (
     .replaceAll(/<[^>]+>/gu, ' ')
     .replaceAll('&amp;', '&')
     .replaceAll(/\s+/gu, ' ');
-  return { status: response.status, html, text };
+  return { status: response.status, text };
 };
 
 /** The expected sentences missing from `text`, as one evidence line. */
@@ -44,16 +45,22 @@ describe('marketing funnel', () => {
   it(
     'should send "Choose Pro in Tau" to Settings → Billing on this host [MK-01 P0]',
     matrixRow('MK-01', 'P0', async (evidence): Promise<Verdict> => {
-      const pricing = await pageCopy('/pricing/');
-      const href = /<a[^>]*href="([^"]+)"[^>]*>\s*Choose Pro in Tau/u.exec(pricing.html)?.[1];
-      evidence.push(`/pricing/ ${pricing.status}: "Choose Pro in Tau" → ${href ?? 'no such link'}`);
+      const pricing = await withBrowser(undefined, async ({ page }) =>
+        marketingLinks(page, '/pricing/', page.getByRole('link', { name: 'Choose Pro in Tau' })),
+      );
+      const [href] = pricing.hrefs;
+      evidence.push(
+        `/pricing/ ${pricing.status ?? 'no response'} in the browser: "Choose Pro in Tau" → ${href ?? 'no such link'}`,
+      );
       if (href === undefined) {
         return { outcome: 'fail', defect: 'unclassified', evidence };
       }
-      const target = new URL(href, `${baseUrl}/pricing/`);
+      const target = new URL(href);
       if (target.origin !== baseUrl) {
         // Never followed: the harness does not drive another host, and tau.new is production.
-        evidence.push(`the CTA leaves ${baseUrl} for ${target.origin} (apps/www environment.mjs fixes appOrigin)`);
+        evidence.push(
+          `the CTA leaves ${baseUrl} for ${target.origin} as the browser shows it (apps/www client.mjs did not point it here)`,
+        );
         return { outcome: 'fail', defect: 'unclassified', evidence };
       }
       const response = await fetch(target, { redirect: 'manual' });
@@ -111,20 +118,19 @@ describe('marketing copy in the app', () => {
         evidence.push('Add credits modal has no "Terms" link with an href', await screenshot(page, 'mk-03-terms'));
         return { outcome: 'fail', defect: 'unclassified', evidence };
       }
-      const pricing = await pageCopy('/pricing/');
-      const marketing = [...pricing.html.matchAll(/href="([^"]*\/legal\/[^"]*)"/gu)].map(([, target]) => target ?? '');
+      const { hrefs: marketing } = await withBrowser(undefined, async (visitor) =>
+        marketingLinks(visitor.page, '/pricing/', visitor.page.locator('a[href*="/legal/"]')),
+      );
       const legal = await fetch(`${baseUrl}/legal/terms`);
       evidence.push(
         `Add credits "Terms" → ${href}`,
-        `/pricing/ legal links ${marketing.join(', ')}`,
+        `/pricing/ legal links in the browser: ${marketing.join(', ')}`,
         `${baseUrl}/legal/terms answers ${legal.status}`,
         await screenshot(page, 'mk-03-terms'),
       );
       const foreign = [href, ...marketing].filter((link) => new URL(link, baseUrl).origin !== baseUrl);
       if (foreign.length > 0) {
-        evidence.push(
-          `${foreign.length} legal links leave ${baseUrl}: legalUrl() and the marketing footer name tau.new`,
-        );
+        evidence.push(`${foreign.length} legal links leave ${baseUrl}: ${foreign.join(', ')}`);
         return { outcome: 'fail', defect: 'unclassified', evidence };
       }
       return { outcome: 'pass', evidence };

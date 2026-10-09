@@ -16,7 +16,8 @@ export type Priority = 'P0' | 'P1' | 'P2';
  * endpoint; H-03 an earlier row left no state for this one; H-04 (retired) the harness did not pay the subscription
  * Checkout; H-05 no Stripe read key, so a Stripe-side assertion cannot be made; H-06 the row has spent its payment
  * allowance for this run id, so a re-run needs a new run id; H-07 (driver fixed after Run 1) Stripe's cancellation
- * survey covered the portal's confirm button.
+ * survey covered the portal's confirm button; H-08 (rows fixed after Run 1) MK-01 and MK-03 read the served HTML,
+ * whose links name tau.new on every host until the site's own script points them at this one.
  */
 export type Verdict = { readonly outcome: Outcome; readonly defect?: string; readonly evidence: readonly string[] };
 

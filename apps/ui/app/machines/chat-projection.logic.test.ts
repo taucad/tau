@@ -11,7 +11,9 @@ import { createAgentLauncher } from '@taucad/agent-host/launcher';
 import { createNodeChatStore } from '@taucad/agent-host/node';
 import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createUIMessageStream, readUIMessageStream } from 'ai';
+import type { UIMessage, UIMessageChunk } from 'ai';
 import { createActor } from 'xstate';
 import { foreignEventChanges } from '@taucad/xstate-testing/paths';
 import type { AgentLogEvent } from '@taucad/agent-host';
@@ -1735,4 +1737,269 @@ it('should isolate tool input and output blocks from previously published snapsh
     event: { ...identity, type: 'tool-output-update', output: 'ignored', isError: false },
   }).state;
   expect(late.live?.blocks[key]).toBe(settled.live?.blocks[key]);
+});
+
+describe('completed long-run public SDK reconstruction controls', () => {
+  const callbackMessage = async (chunks: readonly UIMessageChunk[]): Promise<UIMessage | undefined> => {
+    let message: UIMessage | undefined;
+    const stream = createUIMessageStream({
+      generateId: () => 'diagnostic-fallback',
+      execute({ writer }) {
+        for (const chunk of chunks) {
+          writer.write(chunk);
+        }
+      },
+      onError(error) {
+        throw error;
+      },
+      onFinish({ responseMessage }) {
+        message = structuredClone(responseMessage);
+      },
+    });
+    const reader = stream.getReader();
+    try {
+      for (;;) {
+        // oxlint-disable-next-line no-await-in-loop -- Drain the public processor through its final callback.
+        const { done } = await reader.read();
+        if (done) {
+          break;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return message;
+  };
+
+  it.each([
+    { rounds: 64, outputBytes: 256, dynamic: false },
+    { rounds: 64, outputBytes: 256, dynamic: true },
+    { rounds: 1, outputBytes: 256, dynamic: false },
+    { rounds: 1, outputBytes: 256, dynamic: true },
+    { rounds: 1, outputBytes: 65_536, dynamic: false },
+    { rounds: 1, outputBytes: 65_536, dynamic: true },
+  ])(
+    'counts actual projected $rounds-round/$outputBytes-byte tools with dynamic=$dynamic and preserves snapshots',
+    async ({ rounds, outputBytes, dynamic }) => {
+      const rows = [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running')];
+      for (let index = 0; index < rounds; index++) {
+        rows.push(
+          logRow(rows.length, {
+            type: 'message.appended',
+            message: {
+              id: `assistant-${index}`,
+              role: 'assistant',
+              content: [
+                { type: 'thinking', thinking: `reason-${index}` },
+                { type: 'text', text: `text-${index}` },
+              ],
+              metadata: {
+                reasoningTimings: [{ contentIndex: 0, startedAtMs: 1000 + index * 2, endedAtMs: 1001 + index * 2 }],
+              },
+            },
+          }),
+        );
+        rows.push(
+          logRow(rows.length, {
+            type: 'message.appended',
+            message: {
+              id: `input-${index}`,
+              role: 'tool-input',
+              toolCallId: `call-${index}`,
+              toolName: 'read_file',
+              content: { targetFile: `file-${index}.txt` },
+              ...(dynamic ? { metadata: { tauInternal: { kind: 'acp', origin: 'external' } } } : {}),
+            },
+          }),
+        );
+        rows.push(
+          logRow(rows.length, {
+            type: 'message.appended',
+            message: {
+              id: `output-${index}`,
+              role: 'tool-output',
+              toolCallId: `call-${index}`,
+              toolName: 'read_file',
+              content: { value: String(index % 10).repeat(outputBytes) },
+              isError: false,
+              ...(dynamic ? { metadata: { tauInternal: { kind: 'acp', origin: 'external' } } } : {}),
+            },
+          }),
+        );
+      }
+      rows.push(lifecycleRow(rows.length, 'completed'));
+      const projection = project(rows, 16);
+      const run = selectTranscriptSource(projection)[0];
+      expect(run).toBeDefined();
+      if (!run) {
+        throw new Error('Expected projected completed run');
+      }
+      const chunks = chunksOf(run.chunks);
+      expect(chunks).toHaveLength(rounds * (dynamic ? 9 : 11) + 3);
+      expect(chunks.filter((chunk) => chunk.type === 'start-step')).toHaveLength(dynamic ? 1 : rounds + 1);
+      expect(chunks.filter((chunk) => chunk.type === 'finish-step')).toHaveLength(rounds * (dynamic ? 1 : 2));
+      expect(chunks.at(-1)).toMatchObject({ type: 'finish', messageMetadata: { status: 'success' } });
+      const before = JSON.stringify(chunks);
+      const clones = vi.spyOn(globalThis, 'structuredClone');
+      try {
+        const existing = await materializeTranscript(projection);
+        const ordinaryClones = clones.mock.calls.length;
+        clones.mockClear();
+        const message = await callbackMessage(chunks);
+        expect(clones).toHaveBeenCalledOnce();
+        expect(ordinaryClones).toBe(1);
+        expect(message).toEqual(existing[0]);
+        expect(message).toMatchObject({ id: 'run_1', role: 'assistant', metadata: { status: 'success' } });
+        expect(message?.parts).toHaveLength(rounds * (dynamic ? 3 : 4) + 1);
+        expect(message?.parts.filter((part) => part.type === 'reasoning').map((part) => part.text)).toEqual(
+          Array.from({ length: rounds }, (_, index) => `reason-${index}`),
+        );
+        expect(message?.parts.filter((part) => part.type === 'text').map((part) => part.text)).toEqual(
+          Array.from({ length: rounds }, (_, index) => `text-${index}`),
+        );
+        expect(
+          message?.parts.filter((part) => part.type === (dynamic ? 'dynamic-tool' : 'tool-read_file')),
+        ).toMatchObject(
+          Array.from({ length: rounds }, (_, index) => ({
+            toolCallId: `call-${index}`,
+            state: 'output-available',
+            input: { targetFile: `file-${index}.txt` },
+            output: { value: String(index % 10).repeat(outputBytes) },
+          })),
+        );
+        expect(JSON.stringify(chunks)).toBe(before);
+        const output = chunks.find((chunk) => chunk.type === 'tool-output-available');
+        if (output?.type !== 'tool-output-available') {
+          throw new Error('Expected projected tool output');
+        }
+        if (typeof output.output !== 'object' || output.output === null || !('value' in output.output)) {
+          throw new Error('Expected nested output object');
+        }
+        output.output.value = 'changed after reconstruction';
+        expect(JSON.stringify(message)).not.toContain('changed after reconstruction');
+        expect(JSON.stringify(existing)).not.toContain('changed after reconstruction');
+        const sourceSnapshot = JSON.stringify(chunks);
+        const replyTool = message?.parts.find((part) => part.type === (dynamic ? 'dynamic-tool' : 'tool-read_file'));
+        if (
+          !replyTool ||
+          !('output' in replyTool) ||
+          typeof replyTool.output !== 'object' ||
+          replyTool.output === null ||
+          !('value' in replyTool.output)
+        ) {
+          throw new Error('Expected independent returned tool output');
+        }
+        replyTool.output.value = 'returned snapshot mutation';
+        expect(JSON.stringify(chunks)).toBe(sourceSnapshot);
+      } finally {
+        clones.mockRestore();
+      }
+    },
+  );
+
+  it.each(['trailing step', 'metadata-free finish'] as const)('retains the reader distinction for %s', async (tail) => {
+    const chunks: UIMessageChunk[] = [
+      { type: 'start', messageId: 'run_1' },
+      { type: 'text-start', id: 'text' },
+      { type: 'text-delta', id: 'text', delta: 'answer' },
+      { type: 'text-end', id: 'text' },
+      { type: 'finish', messageMetadata: { status: 'success' } },
+      { type: 'start-step' },
+      ...(tail === 'metadata-free finish' ? [{ type: 'finish' } as const] : []),
+    ];
+    let ordinary: UIMessage | undefined;
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+    for await (const message of readUIMessageStream({ stream, terminateOnError: true })) {
+      ordinary = message;
+    }
+    const final = await callbackMessage(chunks);
+    expect(ordinary?.parts).toEqual([{ type: 'text', text: 'answer', state: 'done', providerMetadata: undefined }]);
+    expect(final?.parts).toEqual([
+      { type: 'text', text: 'answer', state: 'done', providerMetadata: undefined },
+      { type: 'step-start' },
+    ]);
+  });
+
+  it.each(['no start', 'missing start ID', 'trailing step', 'metadata-free finish'] as const)(
+    'should preserve actual materializer reader semantics for %s',
+    async (shape) => {
+      const chunks: UIMessageChunk[] = [
+        ...(shape === 'no start'
+          ? []
+          : shape === 'missing start ID'
+            ? [{ type: 'start' } as const]
+            : [{ type: 'start', messageId: 'run_1' } as const]),
+        { type: 'text-start', id: 'text' },
+        { type: 'text-delta', id: 'text', delta: 'answer' },
+        { type: 'text-end', id: 'text' },
+        { type: 'finish', messageMetadata: { status: 'success' } },
+        ...(shape === 'trailing step' || shape === 'metadata-free finish' ? [{ type: 'start-step' } as const] : []),
+        ...(shape === 'metadata-free finish' ? [{ type: 'finish' } as const] : []),
+      ];
+      const before = structuredClone(chunks);
+      const runId = 'run_1';
+      const projection: ChatProjection = {
+        ...initialChatProjection,
+        views: { [runId]: { admittedAt: '2026-10-01T00:00:00.000Z', terminal: 'completed', chunks } },
+      };
+      const messages = await materializeTranscript(projection);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.id).toBe(shape === 'no start' || shape === 'missing start ID' ? '' : 'run_1');
+      expect(messages[0]?.parts).toEqual([
+        { type: 'text', text: 'answer', state: 'done', providerMetadata: undefined },
+      ]);
+      expect(chunks).toEqual(before);
+      expect(await materializeTranscript(projection)).toEqual(messages);
+    },
+  );
+
+  it.each([undefined, 'completed', 'failed', 'cancelled'] as const)(
+    'should preserve actual materializer pending-tool finalization for terminal=%s',
+    async (terminal) => {
+      const rows = [
+        lifecycleRow(0, 'admitted'),
+        logRow(1, {
+          type: 'message.appended',
+          message: {
+            id: 'input',
+            role: 'tool-input',
+            toolCallId: 'pending',
+            toolName: 'read_file',
+            content: { targetFile: 'main.ts' },
+          },
+        }),
+        ...(terminal === undefined ? [] : [lifecycleRow(2, terminal)]),
+      ];
+      const projection = project(rows, 1);
+      const messages = await materializeTranscript(projection);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.parts).toContainEqual(
+        expect.objectContaining({
+          type: 'tool-read_file',
+          toolCallId: 'pending',
+          input: { targetFile: 'main.ts' },
+          state: terminal === undefined ? 'input-available' : 'output-error',
+        }),
+      );
+      const again = await materializeTranscript(projection);
+      expect(again[0]).toBe(messages[0]);
+    },
+  );
+
+  it('rejects malformed projected-style deltas before returning a partial final state', async () => {
+    await expect(
+      callbackMessage([
+        { type: 'start', messageId: 'run_1' },
+        { type: 'text-delta', id: 'missing', delta: 'invalid' },
+        { type: 'finish', messageMetadata: { status: 'success' } },
+      ]),
+    ).rejects.toThrow();
+  });
 });

@@ -12,8 +12,8 @@
  */
 
 import { createLogic } from 'xstate';
-import { readUIMessageStream } from 'ai';
-import type { UIMessageChunk } from 'ai';
+import { createUIMessageStream, readUIMessageStream } from 'ai';
+import type { InferUIMessageChunk, UIMessageChunk } from 'ai';
 import {
   agentLogEventSchema,
   emptyChatLedger,
@@ -1218,6 +1218,54 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
     pending = (async () => {
       if (view.chunks.length === 0) {
         return undefined;
+      }
+      const [last] = chunksSince(view.chunks, view.chunks.length - 1);
+      let eligible = false;
+      if (last?.type === 'finish' && last.messageMetadata !== undefined && last.messageMetadata !== null) {
+        let hasStart = false;
+        let explicitStarts = true;
+        for (const chunk of chunksSince(view.chunks)) {
+          if (chunk.type === 'start') {
+            hasStart = true;
+            explicitStarts &&= typeof chunk.messageId === 'string';
+          }
+        }
+        eligible = hasStart && explicitStarts;
+      }
+      if (eligible) {
+        let message: MyUIMessage | undefined;
+        const completed = createUIMessageStream<MyUIMessage>({
+          // Eligible starts always provide their own ID; the generated fallback is never published.
+          generateId: () => '',
+          execute({ writer }) {
+            for (const chunk of chunksSince(view.chunks)) {
+              if (chunk.type !== 'error') {
+                // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- The owned projector produces MyUIMessage chunks; this writer narrows the existing reader's generic chunk input.
+                writer.write(chunk as InferUIMessageChunk<MyUIMessage>);
+              }
+            }
+          },
+          onError(error) {
+            // oxlint-disable-next-line @typescript-eslint/only-throw-error -- Preserve the SDK processor's exact rejection.
+            throw error;
+          },
+          onFinish({ responseMessage }) {
+            message = structuredClone(responseMessage);
+          },
+        });
+        const reader = completed.getReader();
+        try {
+          for (;;) {
+            // oxlint-disable-next-line no-await-in-loop -- Drain the public processor before publishing its final snapshot.
+            const { done } = await reader.read();
+            if (done) {
+              break;
+            }
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        return message;
       }
       const stream = new ReadableStream<UIMessageChunk>({
         start(controller) {

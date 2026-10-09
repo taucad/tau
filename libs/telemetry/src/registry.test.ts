@@ -6,7 +6,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(71);
+    expect(metrics).toHaveLength(80);
   });
 
   it('should bound funded-operation telemetry to content-free dimensions', () => {
@@ -120,6 +120,33 @@ describe('TauMetrics', () => {
     expect(TauMetrics.genAiContextBudgetTokens.type).toBe('histogram');
     expect(TauMetrics.genAiContextCompactionDecisions.name).toBe('gen_ai.context_compaction.decisions');
     expect(TauMetrics.genAiContextCompactionDecisions.type).toBe('counter');
+  });
+
+  it('should bound agent context labels to the ingest vocabularies', () => {
+    expect(
+      TauMetrics.agentEvaluations.attributes.safeParse({
+        'agent.id': 'tau',
+        'kernel.id': 'replicad',
+        'evaluation.class': 'api_misuse',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.agentReferenceLookups.attributes.safeParse({
+        'agent.id': 'codex',
+        'kernel.id': 'my-kernel',
+        'lookup.outcome': 'ok',
+      }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.agentToolCalls.attributes.safeParse({
+        'agent.id': 'codex',
+        'tool.kind': 'execute',
+        'tool.name': 'Bash',
+        status: 'completed',
+      }).success,
+    ).toBe(false);
+    expect(TauMetrics.agentTurns.attributes.shape).toHaveProperty(['kernel.id']);
+    expect(TauMetrics.agentErrors.attributes.shape).not.toHaveProperty(['kernel.id']);
   });
 
   it('should use lowercase dot-delimited names for all metrics', () => {

@@ -1,4 +1,6 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Toaster } from '@taucad/ui/components/sonner';
 import { afterEach, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { FileContentResult } from '@taucad/fs-client/file-content-service';
@@ -379,5 +381,128 @@ it('clears a successful local patch before a later same-key external change desp
   } finally {
     mounted.unmount();
     content.dispose();
+  }
+});
+
+it('retries closed export settings in the same mounted toast surface through held acknowledgment with its local patch retained', async () => {
+  type Manager = ReturnType<typeof useFileManager>;
+  const path = '.tau/export/preferences.json';
+  const provider = new MemoryProvider();
+  await provider.writeFile(
+    path,
+    new TextEncoder().encode(JSON.stringify({ shouldDownload: true, zipMultiple: false })),
+  );
+  const paths = new WorkspacePathResolver('/project');
+  const proxy = mock<ComposedViewClient>();
+  proxy.readFile.mockImplementation(async (absolute) => {
+    const relative = paths.toRelativePath(absolute);
+    if (relative === undefined) {
+      throw new Error(`Unexpected preferences read: ${absolute}`);
+    }
+    return provider.readFile(relative);
+  });
+  proxy.writeFiles.mockImplementation(async (files) => {
+    await Promise.all(
+      Object.entries(files).map(async ([absolute, file]) => {
+        const relative = paths.toRelativePath(absolute);
+        if (relative === undefined) {
+          throw new Error(`Unexpected preferences write: ${absolute}`);
+        }
+        await provider.writeFile(relative, file.content);
+      }),
+    );
+  });
+  const closed = Promise.withResolvers<void>();
+  const ready = Promise.withResolvers<void>();
+  let held = false;
+  const registrations = vi.fn();
+  const channel = new WorkerChangeChannel({
+    transport: {
+      listen: () => () => undefined,
+      watchReady: () => {
+        registrations();
+        return {
+          ready: held ? ready.promise : Promise.resolve(),
+          closed: held
+            ? new Promise<void>(() => {
+                /* Replacement remains connected. */
+              })
+            : closed.promise,
+          unsubscribe: () => undefined,
+        };
+      },
+    },
+  });
+  const content = new FileContentService({ proxy, paths, channel, refreshGuard: new RefreshGenerationGuard() });
+  function readFile(file: string): Promise<Uint8Array<ArrayBuffer>>;
+  function readFile(file: string, options: 'utf8'): Promise<string>;
+  async function readFile(file: string, options?: 'utf8') {
+    const bytes = await content.resolveBytes(file);
+    return options === 'utf8' ? new TextDecoder().decode(bytes) : bytes;
+  }
+  const writeFiles = vi.fn<Manager['writeFiles']>(async (files) => content.writeFiles(files, 'user'));
+  const manager: Manager = {
+    ...mock<Manager>(),
+    contentService: content,
+    readFile,
+    writeFiles,
+    exists: async () => true,
+  };
+  toast.dismiss();
+  const mounted = renderHook(() => useExportPreferences(manager), {
+    wrapper: ({ children }) => (
+      <>
+        <Toaster theme='light' />
+        {children}
+      </>
+    ),
+  });
+  try {
+    await waitFor(() => {
+      expect(content.observeContent(path).getSnapshot().status).toBe('ready');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const initialRegistrations = registrations.mock.calls.length;
+    await act(async () => {
+      closed.resolve();
+    });
+    act(() => {
+      mounted.result.current[1]({ ...mounted.result.current[0], shouldDownload: false });
+    });
+    expect(mounted.result.current[0].shouldDownload).toBe(false);
+    expect(writeFiles).not.toHaveBeenCalled();
+    held = true;
+    const retry = await screen.findByRole('button', { name: 'Retry', exact: true });
+    retry.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(registrations).toHaveBeenCalledTimes(initialRegistrations + 1);
+    await provider.writeFile(
+      path,
+      new TextEncoder().encode(JSON.stringify({ shouldDownload: true, zipMultiple: true })),
+    );
+    expect(mounted.result.current[0]).toMatchObject({ shouldDownload: false, zipMultiple: false });
+    expect(writeFiles).not.toHaveBeenCalled();
+    await act(async () => {
+      ready.resolve();
+    });
+    await waitFor(() => {
+      expect(mounted.result.current[0]).toMatchObject({ shouldDownload: false, zipMultiple: true });
+    });
+    await waitFor(() => {
+      expect(writeFiles).toHaveBeenCalledOnce();
+    });
+    await expect
+      .poll(async () => {
+        const value: unknown = JSON.parse(new TextDecoder().decode(await provider.readFile(path)));
+        return value;
+      })
+      .toMatchObject({ shouldDownload: false, zipMultiple: true });
+    expect(content.observeContent(path).activeLeaseCount).toBe(1);
+  } finally {
+    mounted.unmount();
+    content.dispose();
+    toast.dismiss();
   }
 });

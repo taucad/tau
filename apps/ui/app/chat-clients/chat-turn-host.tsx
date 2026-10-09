@@ -18,6 +18,8 @@ import { externalAdmissionConfig, wireAdmissionConfig } from '#services/agent-ho
 import { buildUserMessage } from '#utils/chat.utils.js';
 import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
 import { createAgentUsageTelemetry } from '#chat-clients/_internal/agent-usage-telemetry.js';
+import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
+import { isGlobalPrivacyControlEnabled } from '#lib/cookie-consent.lib.js';
 
 /** The route publishes command composition; project-scoped host observation lives in ProjectSessionBinding. */
 export function ChatTurnHost(): ReactNode {
@@ -30,6 +32,10 @@ export function ChatTurnHost(): ReactNode {
     execution: { setActiveExecution },
   } = useChatComposer();
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
+  /* Usage metrics (the turn's context and Tau tool names) need the stored preference; unknown reads as off. */
+  const { preferences } = usePrivacyPreferences();
+  const allowsUsageMetrics = preferences?.allowsUsageMetrics === true && !isGlobalPrivacyControlEnabled();
+  const allowsUsageMetricsRef = useRef(allowsUsageMetrics);
   const agentRef = useRef(agent);
   const resolveModelRef = useRef(resolveModel);
   const setActiveExecutionRef = useRef(setActiveExecution);
@@ -44,9 +50,10 @@ export function ChatTurnHost(): ReactNode {
   );
   useEffect(() => {
     agentRef.current = agent;
+    allowsUsageMetricsRef.current = allowsUsageMetrics;
     resolveModelRef.current = resolveModel;
     setActiveExecutionRef.current = setActiveExecution;
-  }, [agent, resolveModel, setActiveExecution]);
+  }, [agent, allowsUsageMetrics, resolveModel, setActiveExecution]);
 
   const admit = useCallback(
     async (gesture: ChatTurnGesture): Promise<ChatTurn> => {
@@ -57,7 +64,10 @@ export function ChatTurnHost(): ReactNode {
       const projectedRun =
         projection !== undefined && selectCaughtUp(projection) ? selectCurrentRun(projection) : undefined;
       const messages = Array.isArray(chat.messages) ? chat.messages : [];
-      const turnTelemetry = telemetry.begin(execution);
+      const turnTelemetry = telemetry.begin(execution, {
+        kernelId: turnAgent.kernel,
+        allowsUsageMetrics: allowsUsageMetricsRef.current,
+      });
       const track = (turn: ChatTurn & { runId: string }): ChatTurn => {
         turnTelemetry.admitted(turn.runId);
         return turn;

@@ -7,9 +7,10 @@ import { useCloudPaymentActionReturn } from '#cloud/root-billing.cloud.js';
 
 const getPaymentAction = vi.hoisted(() => vi.fn());
 const recoverPaymentAction = vi.hoisted(() => vi.fn());
+const followPaymentRedirect = vi.hoisted(() => vi.fn());
 vi.mock('#lib/billing-payment-client.js', () => ({
   getPaymentAction,
-  followPaymentRedirect: vi.fn(),
+  followPaymentRedirect,
   recoverPaymentAction,
 }));
 vi.mock('@taucad/billing/hooks/billing-session', () => ({
@@ -21,10 +22,10 @@ const financial = vi.hoisted(() => ({
 vi.mock('#providers/financial-session-provider.js', () => ({ useFinancialSession: () => financial }));
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), warning: vi.fn(), dismiss: vi.fn() }) }));
 
-const returnFromCheckout = (): void => {
+const returnFromCheckout = (queryClient = new QueryClient()): void => {
   renderHook(useCloudPaymentActionReturn, {
     wrapper: ({ children }) => (
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={['/?payment_action=action_1']}>{children}</MemoryRouter>
       </QueryClientProvider>
     ),
@@ -39,6 +40,25 @@ const checkoutAction = (state: string, receipt: unknown = null) => ({
   receipt,
   subjectId: 'account-a',
 });
+
+/** The card setup Checkout that turns automatic reload on. */
+const cardSetup = (state: string) => ({ ...checkoutAction(state), purpose: 'reload_setup' });
+
+/** A toast button as the code under test builds it; its click handlers ignore the event. */
+type ToastButton = { readonly onClick: () => unknown };
+
+/** Whether a toast's `action` is a button rather than a custom node. */
+const isToastButton = (offer: unknown): offer is ToastButton =>
+  typeof offer === 'object' && offer !== null && 'onClick' in offer && typeof offer.onClick === 'function';
+
+/** The button on the latest warning; the mocked toast never renders it. */
+const warningButton = (): ToastButton => {
+  const offer: unknown = vi.mocked(toast.warning).mock.lastCall?.[1]?.action;
+  if (!isToastButton(offer)) {
+    throw new TypeError('Expected the warning to offer a button');
+  }
+  return offer;
+};
 
 const expectResumeOffer = async (): Promise<void> => {
   await waitFor(() => {
@@ -124,12 +144,70 @@ describe('useCloudPaymentActionReturn', () => {
   });
 
   it('should not recover a reload-setup Checkout, which has nothing to settle', async () => {
-    getPaymentAction.mockResolvedValue({ ...checkoutAction('redirect_required'), purpose: 'reload_setup' });
+    getPaymentAction.mockResolvedValue(cardSetup('redirect_required'));
     returnFromCheckout();
     await waitFor(() => {
-      expect(toast.warning).toHaveBeenCalledWith('Checkout is ready to continue.', expect.anything());
+      expect(toast).toHaveBeenCalledWith('Confirming your card for automatic reload.');
     });
     expect(recoverPaymentAction).not.toHaveBeenCalled();
+    // A finished setup reads the same until billing confirms it, so continuing is not offered yet.
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('should say automatic reload is on once billing confirms the card setup', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      getPaymentAction.mockResolvedValueOnce(cardSetup('redirect_required')).mockResolvedValue(cardSetup('completed'));
+      vi.mocked(toast).mockReturnValueOnce('confirming');
+      const queryClient = new QueryClient();
+      const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+      returnFromCheckout(queryClient);
+      await waitFor(() => {
+        expect(toast).toHaveBeenCalledWith('Confirming your card for automatic reload.');
+      });
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await waitFor(() => {
+        expect(toast.success).toHaveBeenCalledWith('Automatic reload is on.');
+      });
+      expect(toast.dismiss).toHaveBeenCalledWith('confirming');
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['billing'] });
+      expect(toast.warning).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should offer to continue a card setup that billing has not confirmed once the re-check runs out', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const setup = cardSetup('redirect_required');
+      getPaymentAction.mockResolvedValue(setup);
+      vi.mocked(toast).mockReturnValueOnce('confirming');
+      returnFromCheckout();
+      await waitFor(() => {
+        expect(toast).toHaveBeenCalledWith('Confirming your card for automatic reload.');
+      });
+
+      await vi.advanceTimersByTimeAsync(18_000);
+      expect(toast.warning).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await waitFor(() => {
+        expect(toast.warning).toHaveBeenCalledWith(
+          'Automatic reload is waiting for card setup.',
+          expect.objectContaining({ action: expect.objectContaining({ label: 'Continue setup' }) as unknown }),
+        );
+      });
+      expect(getPaymentAction).toHaveBeenCalledTimes(11);
+      expect(toast.dismiss).toHaveBeenCalledWith('confirming');
+      expect(followPaymentRedirect).not.toHaveBeenCalled();
+      warningButton().onClick();
+      expect(followPaymentRedirect).toHaveBeenCalledWith(setup);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('should not recover an action that already settled', async () => {

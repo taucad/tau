@@ -7,13 +7,13 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { once } from 'node:events';
 import { ConfigService } from '@nestjs/config';
-import { ConflictException, VersioningType } from '@nestjs/common';
+import { ConflictException, Logger, VersioningType } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import type { Auth } from 'better-auth';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -1615,13 +1615,25 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
         surface: 'gateway',
         attemptKey,
       });
-    for (const state of [
-      { status: 'closed', purchasedAtoms: 100n, debtAtoms: 0n },
-      { status: 'open', purchasedAtoms: 100n, debtAtoms: 1n },
-      { status: 'open', purchasedAtoms: 0n, debtAtoms: 0n },
-    ]) {
-      await database.update(creditAccount).set(state).where(eq(creditAccount.id, fixture.accountId));
-      await expect(call()).rejects.toThrow();
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    try {
+      for (const state of [
+        { status: 'closed', purchasedAtoms: 100n, debtAtoms: 0n },
+        { status: 'open', purchasedAtoms: 100n, debtAtoms: 1n },
+        { status: 'open', purchasedAtoms: 0n, debtAtoms: 0n },
+      ]) {
+        await database.update(creditAccount).set(state).where(eq(creditAccount.id, fixture.accountId));
+        await expect(call()).rejects.toThrow();
+      }
+      // The empty account is refused by the count's own credit check, which records the denial for reload,
+      // not by a second admission at the byte bound after a failed count.
+      expect(warn.mock.calls.map(([message]) => String(message))).not.toContainEqual(
+        expect.stringContaining('admitting at the byte bound'),
+      );
+    } finally {
+      warn.mockRestore();
     }
     expect(counts).toBe(0);
     await database

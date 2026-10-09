@@ -236,8 +236,8 @@ const describeRemedy = (remedy: MachineRemedy): string => {
   }
 };
 
-const whoMayUse = ({ safety }: Pick<MachineActionDescriptor, 'safety'>): string =>
-  `${authorityLabels[safety.authority]}${safety.attended ? ', at the machine' : ''}`;
+const whoMayUse = (authority: MachineAuthority, attended: boolean): string =>
+  `${authorityLabels[authority]}${attended ? ', at the machine' : ''}`;
 
 /** Keywords whose values are instances rather than schemas. */
 const instanceKeywords = new Set(['const', 'default', 'enum', 'examples']);
@@ -414,7 +414,7 @@ function ActionRow({
   const notes = [
     action.description,
     action.effects.map((effect) => effectLabels[effect]).join(', '),
-    whoMayUse(action),
+    whoMayUse(action.safety.authority, action.safety.attended),
     takes.length > 0 ? `Takes ${takes.join(', ')}` : undefined,
     qualification.status === 'qualified' ? `Proven in ${qualification.profileId}` : qualification.reason,
   ].filter((note) => note !== undefined && note !== '');
@@ -581,7 +581,8 @@ function JobFacts({ jobs }: { readonly jobs: MachineManifest['jobs'] }): React.J
         {jobs.start === 'remote' ? 'Tau starts the run' : 'A person presses start at the machine'}
       </Fact>
       <Fact label='Accepts'>{jobs.accepts.map(({ mediaType }) => mediaType).join(', ')}</Fact>
-      <Fact label='Who may start'>{whoMayUse(jobs)}</Fact>
+      {/* A person approves every job; an agent may only ask for one. */}
+      <Fact label='Who may start'>{whoMayUse('approved-agent', jobs.safety.attended)}</Fact>
       {jobs.attestations.map((attestation) => (
         <Fact key={attestation.id} label='Vouched before a start'>
           {attestation.label}

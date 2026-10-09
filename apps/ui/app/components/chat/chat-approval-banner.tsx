@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ShieldQuestion } from 'lucide-react';
 import { getToolPartName, isAnyToolPart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
@@ -14,8 +14,7 @@ import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
 import { answerDeny, pendingMachineActionOf, recordMachineAction } from '#components/print/machine-action-approval.js';
 import { useMachinesFacet } from '#hooks/use-machines.js';
 import { operator } from '#hooks/use-machine-control.js';
-import { personOnlyJobApproval } from '@taucad/runtime/machine';
-import type { MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
+import type { MachineClient } from '@taucad/runtime/machine';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 
@@ -172,16 +171,6 @@ const continuationNote = (execution: CadAgentExecution | undefined, name: string
 
 const unreachable = 'This computer cannot reach its machines, so Tau cannot record your answer.';
 
-/**
- * Whether approving a job needs what only the Print pane takes (the person's attestations or their presence), by the
- * contract's one rule. The chat banner cannot collect either, so it sends the person there instead of offering Approve.
- *
- * @param machine - The machine the job is for.
- * @returns True when only the Print pane can approve its jobs.
- */
-const needsPrintPane = (machine: MachineDirectoryEntry): boolean =>
-  personOnlyJobApproval(machine.descriptor.capabilities) !== undefined;
-
 type AgentJob = Readonly<{ jobId: string; machineId: string }>;
 
 /** The job, when it still waits on the person; one already settled elsewhere is left alone. */
@@ -191,36 +180,10 @@ const isAwaiting = async (client: MachineClient, { jobId, machineId }: AgentJob)
 };
 
 /**
- * Approve an agent's job on the person's own machines session (R16): the agent's session can never approve one.
- *
- * @param client - The person's machines client.
- * @param job - The job and its machine.
- * @returns `print-pane` when only the Print pane can approve it (nothing is recorded), else `recorded`.
- */
-const approveAgentJob = async (client: MachineClient, job: AgentJob): Promise<'recorded' | 'print-pane'> => {
-  if (!(await isAwaiting(client, job))) {
-    return 'recorded';
-  }
-  if (needsPrintPane(await client.get({ machineId: job.machineId }))) {
-    return 'print-pane';
-  }
-  await client.resolveJob({
-    jobId: job.jobId,
-    decision: 'approve',
-    resolvedBy: operator,
-    attestations: [],
-    // Named by the job, so a second click finds the same operations rather than sending twice.
-    transferOperationId: `${job.jobId}:transfer`,
-    startOperationId: `${job.jobId}:start`,
-  });
-  return 'recorded';
-};
-
-/**
  * Answer one interrupt. An agent's machine action or job is recorded on the host through the person's own machines
  * session first (R15, R16), so the paused tool finds the person's decision; any other interrupt is answered directly.
- * A deny is always answered, recorded or not ({@link answerDeny}). A job only the Print pane can approve is left
- * unanswered.
+ * A deny is always answered, recorded or not ({@link answerDeny}). A job is approved only in the Print pane, which
+ * takes the attestations every job asks for (`work-area-clear` at least), so approving one here leaves it unanswered.
  *
  * @param input - The interrupt, the decision, this computer's machines and how the chat is answered.
  * @returns `print-pane` when the approval must be given there; the interrupt is then still open.
@@ -245,76 +208,30 @@ const answerInterrupt = async ({
     await respond();
     return 'answered';
   }
+  if (action === undefined && approved) {
+    return 'print-pane';
+  }
   const reachable = (): MachineClient => {
     if (!machines.available) {
       throw new Error(unreachable);
     }
     return machines;
   };
-  const record = async (): Promise<'recorded' | 'print-pane'> => {
+  const record = async (): Promise<void> => {
     const client = reachable();
     if (action !== undefined) {
       await recordMachineAction(client, action, approved);
-      return 'recorded';
+    } else if (job !== undefined && (await isAwaiting(client, job))) {
+      await client.resolveJob({ jobId: job.jobId, decision: 'deny', resolvedBy: operator });
     }
-    if (job !== undefined && !approved) {
-      if (await isAwaiting(client, job)) {
-        await client.resolveJob({ jobId: job.jobId, decision: 'deny', resolvedBy: operator });
-      }
-      return 'recorded';
-    }
-    return job === undefined ? 'recorded' : approveAgentJob(client, job);
   };
   if (!approved) {
-    await answerDeny(async () => {
-      await record();
-    }, respond);
+    await answerDeny(record, respond);
     return 'answered';
   }
-  if ((await record()) === 'print-pane') {
-    return 'print-pane';
-  }
+  await record();
   await respond();
   return 'answered';
-};
-
-/**
- * Whether the pending job interrupt can only be approved in the Print pane, read once per machine. Until it is known
- * the banner offers Approve, whose click reads the machine again, so a slow or failed read never approves a job here
- * that needs the pane.
- *
- * @param machines - This computer's machines.
- * @param approval - The pending interrupt, if any.
- * @returns True once the machine is known to need the Print pane.
- */
-const usePrintPaneOnly = (
-  machines: RuntimeTransportFacet<MachineClient>,
-  approval: PendingAgentHostApproval | undefined,
-): boolean => {
-  const machineId = approval?.context?.jobId === undefined ? undefined : approval.context.machineId;
-  const [paneOnly, setPaneOnly] = useState<Readonly<{ machineId: string; value: boolean }>>();
-  useEffect(() => {
-    if (machineId === undefined || !machines.available) {
-      return undefined;
-    }
-    let isCurrent = true;
-    const read = async (): Promise<void> => {
-      try {
-        const machine = await machines.get({ machineId });
-        if (isCurrent) {
-          setPaneOnly({ machineId, value: needsPrintPane(machine) });
-        }
-      } catch {
-        // A failed read leaves Approve, whose click reads the machine again and says the failure.
-      }
-    };
-    // async-iife: bootstrap -- a React effect cannot await; cleanup drops a late answer.
-    void read();
-    return () => {
-      isCurrent = false;
-    };
-  }, [machines, machineId]);
-  return paneOnly !== undefined && paneOnly.machineId === machineId && paneOnly.value;
 };
 
 /**
@@ -338,7 +255,6 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   const [busyId, setBusyId] = useState<string>();
   // A paused run has exactly one unresolved interrupt: it stopped on it.
   const approval = pendingAgentHostApprovals(messages)[0];
-  const isPrintPaneOnly = usePrintPaneOnly(machines, approval);
   const login = currentRunLogin(messages);
   if (login) {
     /* Not a decision: nothing here is approved or denied, so the banner hands
@@ -374,9 +290,8 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
     // async-iife: the banner clears when the durable resolution arrives, not here.
     void resolve();
   };
-  /* Approving a job sends it, which can take as long as its upload: the person sees that, and a second click cannot
-   * answer the interrupt early. */
-  const busyText = approval.context?.jobId === undefined ? 'Sending your answer…' : 'Sending the job to the machine…';
+  /* Every job asks for attestations the banner cannot take, so a job is approved only in the Print pane. */
+  const isPrintPaneOnly = approval.context?.jobId !== undefined;
 
   return (
     <section
@@ -393,7 +308,7 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
       </p>
       {isBusy ? (
         <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
-          {busyText}
+          Sending your answer…
         </p>
       ) : undefined}
       {approval.options.some((option) => option.kind === 'allow_always') ? (

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { Activity, Bot, History, Info, LoaderCircle, OctagonAlert, Play, TriangleAlert } from 'lucide-react';
 import { componentValue, fffProcessOf, millingProcessOf } from '@taucad/runtime/machine';
 import type {
@@ -350,6 +350,9 @@ function OtherReadings({
 
 const trustWords = { homed: 'Homed', kept: 'Kept since homing', lost: 'Lost', unknown: 'Not homed' } as const;
 
+/** Position trust from least to most trusted. */
+const trustOrder = ['lost', 'unknown', 'kept', 'homed'] as const;
+
 /**
  * The position readout: work and machine coordinates per axis, with how far the position can be trusted.
  *
@@ -360,11 +363,13 @@ function Position({
   entry,
   motionId,
   axes,
+  title,
   now,
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly motionId: string;
   readonly axes: readonly string[];
+  readonly title: string;
   readonly now: number;
 }): React.JSX.Element {
   const motion = componentValue(entry.snapshot.components, motionId, 'motion');
@@ -375,7 +380,7 @@ function Position({
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex items-center justify-between gap-2 text-xs'>
-        <h4 className='font-medium'>Position</h4>
+        <h4 className='font-medium'>{title}</h4>
         <span className='flex items-center gap-2'>
           {isObservationStale({ entry, componentId: motionId, group: positionGroup, now }) ? <StaleBadge /> : null}
           <Badge
@@ -437,34 +442,42 @@ function Position({
 function MillingRows({ entry }: { readonly entry: MachineDirectoryEntry }): React.JSX.Element {
   const { components } = entry.descriptor.capabilities;
   const observed = entry.snapshot.components;
-  const motion = components.find((component) => component.kind === 'motion');
-  const motionValue = motion === undefined ? undefined : componentValue(observed, motion.id, 'motion');
+  const motions = components.filter((component) => component.kind === 'motion');
   return (
     <dl className='flex flex-col gap-1'>
-      {motionValue === undefined ? null : (
-        <>
-          <PrintRow label='Work offset'>
-            {motionValue.workOffset.id} · revision {motionValue.workOffset.revision}
-          </PrintRow>
-          {motionValue.mode === 'normal' ? null : (
-            <PrintRow label='Mode'>
-              {motionValue.mode === 'tool-centre-point' ? 'Tool centre point' : 'Tilted plane'}
+      {motions.map((motion) => {
+        const motionValue = componentValue(observed, motion.id, 'motion');
+        if (motionValue === undefined) {
+          return null;
+        }
+        /* Several motion groups each keep their own offset, mode and limits: rows say whose. */
+        const named = (label: string): string =>
+          motions.length > 1 ? `${motion.label} ${label.toLowerCase()}` : label;
+        return (
+          <Fragment key={motion.id}>
+            <PrintRow label={named('Work offset')}>
+              {motionValue.workOffset.id} · revision {motionValue.workOffset.revision}
             </PrintRow>
-          )}
-          {motionValue.limits.length === 0 ? null : (
-            <PrintRow
-              label='Limits'
-              badge={
-                <Badge variant='outline' className='border-transparent bg-feature/10 text-feature'>
-                  Pressed
-                </Badge>
-              }
-            >
-              {motionValue.limits.map((axis) => axis.toUpperCase()).join(', ')}
-            </PrintRow>
-          )}
-        </>
-      )}
+            {motionValue.mode === 'normal' ? null : (
+              <PrintRow label={named('Mode')}>
+                {motionValue.mode === 'tool-centre-point' ? 'Tool centre point' : 'Tilted plane'}
+              </PrintRow>
+            )}
+            {motionValue.limits.length === 0 ? null : (
+              <PrintRow
+                label={named('Limits')}
+                badge={
+                  <Badge variant='outline' className='border-transparent bg-feature/10 text-feature'>
+                    Pressed
+                  </Badge>
+                }
+              >
+                {motionValue.limits.map((axis) => axis.toUpperCase()).join(', ')}
+              </PrintRow>
+            )}
+          </Fragment>
+        );
+      })}
       {components.map((component) => {
         if (component.kind === 'spindle') {
           const value = componentValue(observed, component.id, 'spindle');
@@ -552,10 +565,13 @@ function MillingRows({ entry }: { readonly entry: MachineDirectoryEntry }): Reac
  * @public
  */
 export const monitorSummary = (entry: MachineDirectoryEntry): string => {
-  const motion = entry.descriptor.capabilities.components.find((component) => component.kind === 'motion');
+  const trusts = entry.descriptor.capabilities.components
+    .filter((component) => component.kind === 'motion')
+    .map((motion) => componentValue(entry.snapshot.components, motion.id, 'motion')?.trust ?? 'unknown');
   const isMilling = millingProcessOf(entry.descriptor.capabilities) !== undefined;
-  if (isMilling && motion !== undefined) {
-    const trust = componentValue(entry.snapshot.components, motion.id, 'motion')?.trust ?? 'unknown';
+  if (isMilling && trusts.length > 0) {
+    /* The least trusted motion group speaks for the machine: one lost group is enough to stop motion. */
+    const trust = trustOrder.find((candidate) => trusts.includes(candidate)) ?? 'unknown';
     const spindle = entry.descriptor.capabilities.components.find((component) => component.kind === 'spindle');
     const spindleValue =
       spindle === undefined ? undefined : componentValue(entry.snapshot.components, spindle.id, 'spindle');
@@ -588,7 +604,7 @@ export const monitorSummary = (entry: MachineDirectoryEntry): string => {
 export function MonitorStage({ control }: { readonly control: MachineControl }): React.JSX.Element {
   const { entry } = control;
   const now = useNow();
-  const motion = entry.descriptor.capabilities.components.find(
+  const motions = entry.descriptor.capabilities.components.filter(
     (component): component is Extract<typeof component, { kind: 'motion' }> => component.kind === 'motion',
   );
   const isMilling = millingProcessOf(entry.descriptor.capabilities) !== undefined;
@@ -599,9 +615,18 @@ export function MonitorStage({ control }: { readonly control: MachineControl }):
       {entry.snapshot.state.reason === undefined ? null : (
         <p className='text-xs text-muted-foreground'>{entry.snapshot.state.reason}</p>
       )}
-      {isMilling && motion !== undefined ? (
-        <Position entry={entry} motionId={motion.id} axes={motion.axes} now={now} />
-      ) : null}
+      {isMilling
+        ? motions.map((motion) => (
+            <Position
+              key={motion.id}
+              entry={entry}
+              motionId={motion.id}
+              axes={motion.axes}
+              title={motions.length > 1 ? `${motion.label} position` : 'Position'}
+              now={now}
+            />
+          ))
+        : null}
       <TemperatureGroup entry={entry} now={now} />
       <OtherReadings entry={entry} now={now} />
       {isMilling ? <MillingRows entry={entry} /> : null}

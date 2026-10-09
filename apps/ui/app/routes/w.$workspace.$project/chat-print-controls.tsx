@@ -636,9 +636,14 @@ function JogPad({
 function MotionGroup({
   control,
   motion,
+  title,
+  hasController,
 }: {
   readonly control: MachineControl;
   readonly motion: MotionComponent;
+  readonly title: string;
+  /** Whether this group carries the controller's Unlock and Wake: only the first of several motion groups does. */
+  readonly hasController: boolean;
 }): React.JSX.Element | undefined {
   const { entry } = control;
   const has = (componentId: string, action: string): boolean =>
@@ -649,8 +654,8 @@ function MotionGroup({
     has(motion.id, 'motion.jog') ||
     machineActionOf(entry, { componentId: motion.id, action: 'motion.jog', kind: 'hold' }) !== undefined;
   const offered = [
-    has(controllerId, 'controller.unlock'),
-    has(controllerId, 'controller.wake'),
+    hasController && has(controllerId, 'controller.unlock'),
+    hasController && has(controllerId, 'controller.wake'),
     has(motion.id, 'motion.home'),
     has(motion.id, 'motion.move'),
     hasJog,
@@ -664,12 +669,16 @@ function MotionGroup({
   );
   const offset = componentValue(entry.snapshot.components, motion.id, 'motion')?.workOffset.id;
   return group(
-    'Motion',
+    title,
     <>
       {hasJog ? <Blocked control={control} componentId={motion.id} action='motion.jog' hasRemedy={false} /> : null}
       <div className='flex flex-wrap gap-2'>
-        <ActionButton control={control} componentId={controllerId} action='controller.unlock' />
-        <ActionButton control={control} componentId={controllerId} action='controller.wake' />
+        {hasController ? (
+          <>
+            <ActionButton control={control} componentId={controllerId} action='controller.unlock' />
+            <ActionButton control={control} componentId={controllerId} action='controller.wake' />
+          </>
+        ) : null}
         {hasJog ? null : <ActionButton control={control} componentId={motion.id} action='motion.home' />}
         <ActionButton
           control={control}
@@ -701,8 +710,8 @@ function MotionGroup({
       ) : null}
       <Consequences
         descriptors={[
-          declaredAction(entry, controllerId, 'controller.unlock'),
-          declaredAction(entry, controllerId, 'controller.wake'),
+          hasController ? declaredAction(entry, controllerId, 'controller.unlock') : undefined,
+          hasController ? declaredAction(entry, controllerId, 'controller.wake') : undefined,
           declaredAction(entry, motion.id, 'motion.home'),
         ]}
       />
@@ -1031,7 +1040,8 @@ export function ControlStage({
 }): React.JSX.Element {
   const { entry } = control;
   const { components, actions } = entry.descriptor.capabilities;
-  const motion = components.find((component): component is MotionComponent => component.kind === 'motion');
+  /* Every motion group: a rotary unit or a second head homes and jogs on its own, so none stands for the others. */
+  const motions = components.filter((component): component is MotionComponent => component.kind === 'motion');
   const spindle = components.find((component): component is SpindleComponent => component.kind === 'spindle');
   const camera = components.find((component) => component.kind === 'camera');
   const accessories = actions.filter((descriptor) => accessoryFamilies.has(descriptor.id));
@@ -1039,12 +1049,22 @@ export function ControlStage({
   return (
     <PrintStage icon={Move} title='Control' summary={controlSummary(entry)} isDefaultOpen={isOwned}>
       {camera === undefined ? null : <CameraView client={client} entry={entry} />}
-      {isOwned && motion !== undefined && declaredAction(entry, motion.id, 'motion.jog') !== undefined ? (
+      {isOwned && motions.some((motion) => declaredAction(entry, motion.id, 'motion.jog') !== undefined) ? (
         <p className='text-xs text-muted-foreground'>
           Motion, tools and the spindle stay with the job until it ends or is stopped.
         </p>
       ) : null}
-      {motion === undefined || isOwned ? null : <MotionGroup control={control} motion={motion} />}
+      {isOwned
+        ? null
+        : motions.map((motion, index) => (
+            <MotionGroup
+              key={motion.id}
+              control={control}
+              motion={motion}
+              title={motions.length > 1 ? motion.label : 'Motion'}
+              hasController={index === 0}
+            />
+          ))}
       {isOwned ? null : <ToolsGroup control={control} />}
       {spindle === undefined || isOwned ? null : <SpindleGroup control={control} spindle={spindle} />}
       {accessories.length === 0
@@ -1072,17 +1092,35 @@ const resultWords: Readonly<Record<'good' | 'uncertain' | 'failed', string>> = {
 };
 
 /**
- * A measured value as the person reads it: a pressure advance as "K 0.020", anything else as text.
+ * The pressure advance a measured value carries: the only result Tau can keep, as a machine profile. A flow ratio
+ * belongs in the slicer's filament preset, which Tau does not write yet.
+ *
+ * @param value - The result's value.
+ * @returns The K value, or `undefined` for any other result.
+ */
+const pressureAdvanceOf = (value: unknown): number | undefined =>
+  typeof value === 'number'
+    ? value
+    : isRecord(value) && typeof value['pressureAdvance'] === 'number'
+      ? value['pressureAdvance']
+      : undefined;
+
+/**
+ * A measured value as the person reads it: a pressure advance as "K 0.020", a flow ratio as "Flow ratio 0.980",
+ * anything else as text.
  *
  * @param value - The result's value.
  * @returns The words.
  */
-const describeResult = (value: unknown): string =>
-  typeof value === 'number'
-    ? `K ${value.toFixed(3)}`
-    : isRecord(value) && typeof value['pressureAdvance'] === 'number'
-      ? `K ${value['pressureAdvance'].toFixed(3)}`
-      : JSON.stringify(value);
+const describeResult = (value: unknown): string => {
+  const pressureAdvance = pressureAdvanceOf(value);
+  if (pressureAdvance !== undefined) {
+    return `K ${pressureAdvance.toFixed(3)}`;
+  }
+  return isRecord(value) && typeof value['flowRatio'] === 'number'
+    ? `Flow ratio ${value['flowRatio'].toFixed(3)}`
+    : JSON.stringify(value);
+};
 
 /**
  * Whether an activity still belongs in front of the person.
@@ -1094,7 +1132,8 @@ const isShownActivity = (activity: MachineActivity): boolean =>
   activity.state !== 'succeeded' || (activity.results?.length ?? 0) > 0;
 
 /**
- * Keep a measured calibration result: a name and Save, or Discard.
+ * Keep a measured calibration result: a name and Save, or Discard. A result Tau cannot keep (a flow ratio) is shown
+ * read-only with Discard.
  *
  * @param properties - The control, the activity and the dismissal.
  * @returns The form.
@@ -1109,7 +1148,9 @@ function CalibrationResults({
   readonly onDiscard: () => void;
 }): React.JSX.Element {
   const results = activity.results ?? [];
-  const usable = results.filter((result) => result.confidence !== 'failed');
+  const usable = results.filter(
+    (result) => result.confidence !== 'failed' && pressureAdvanceOf(result.value) !== undefined,
+  );
   const [resultId, setResultId] = useState(usable[0]?.id ?? '');
   const [name, setName] = useState(`${activity.label} (measured)`.slice(0, 40));
   return (
@@ -1158,24 +1199,32 @@ function CalibrationResults({
         </div>
       )}
       <div className='flex flex-wrap gap-2'>
-        <ActionButton
-          control={control}
-          componentId={activity.componentId}
-          action='material.calibration.save'
-          parameters={{ source: 'measured', activityId: activity.activityId, resultId, name: name.trim() }}
-          label='Save as a profile'
-          variant='default'
-          onDone={(isAccepted) => {
-            if (isAccepted) {
-              onDiscard();
-            }
-          }}
-        />
+        {usable.length === 0 ? null : (
+          <ActionButton
+            control={control}
+            componentId={activity.componentId}
+            action='material.calibration.save'
+            parameters={{ source: 'measured', activityId: activity.activityId, resultId, name: name.trim() }}
+            label='Save as a profile'
+            variant='default'
+            onDone={(isAccepted) => {
+              if (isAccepted) {
+                onDiscard();
+              }
+            }}
+          />
+        )}
         <Button type='button' size='sm' variant='outline' onClick={onDiscard}>
           Discard
         </Button>
       </div>
-      <p className='text-muted-foreground'>Nothing changes on the machine until you save a result.</p>
+      <p className='text-muted-foreground'>
+        {usable.length > 0
+          ? 'Nothing changes on the machine until you save a result.'
+          : results.some((result) => result.confidence !== 'failed')
+            ? 'Tau can’t keep this result yet. Enter it in your slicer’s filament settings.'
+            : 'No result is good enough to keep.'}
+      </p>
     </div>
   );
 }
@@ -1387,26 +1436,21 @@ const stillFailures: ReadonlyMap<string, string> = new Map([
 const unknownStillFailure = 'The camera could not capture a still; capture again in a moment.';
 
 /**
- * A failed still capture in the person's words. The machine channel carries the code as the
- * message and a desktop shell may wrap it in its own words, so the code is looked for anywhere in
- * the message, after the error's own `code`. A failure that names no known code keeps a generic
- * sentence plus the code, or the message when it names none.
+ * A failed still capture in the person's words, by the error's typed `code` (the machine channel carries it; a
+ * message is never searched). A failure without a known code keeps a generic sentence plus its code, or its message
+ * when it has none.
  *
  * @param error - What `captureStill` rejected with.
  * @returns One sentence saying what happened and what to do.
  * @public
  */
 export const describeStillFailure = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : String(error);
-  const codes = [
-    ...[failureCodeOf(error)].filter((code) => code !== undefined),
-    ...(message.match(/\b[A-Z][\dA-Z]*(?:_[\dA-Z]+)+\b/gu) ?? []),
-  ];
-  const sentence = codes.map((code) => stillFailures.get(code)).find((candidate) => candidate !== undefined);
+  const code = failureCodeOf(error);
+  const sentence = code === undefined ? undefined : stillFailures.get(code);
   if (sentence !== undefined) {
     return sentence;
   }
-  const detail = codes[0] ?? message.trim();
+  const detail = code ?? (error instanceof Error ? error.message : String(error)).trim();
   return detail === '' ? unknownStillFailure : `${unknownStillFailure} (${detail})`;
 };
 

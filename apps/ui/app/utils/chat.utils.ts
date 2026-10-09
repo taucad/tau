@@ -27,6 +27,9 @@ const maxSnippetLength = 200;
 
 const joinLines = (...lines: Array<string | undefined | false>): string => lines.filter(Boolean).join('\n');
 
+/* A job on a simulator reads as one in Copy and export, as the job card says it. */
+const simulatedMark = (simulated: boolean | undefined): string => (simulated === true ? ' (simulated)' : '');
+
 type SerializableFileMetadata =
   | {
       readonly size: number;
@@ -326,7 +329,7 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
       ),
     output: (output) =>
       joinLines(
-        `${output.job.program.name} on ${output.machineName ?? output.job.machineId}: ${output.job.state}`,
+        `${output.job.program.name} on ${output.machineName ?? output.job.machineId}${simulatedMark(output.simulated)}: ${output.job.state}`,
         output.job.failure?.message,
         output.nextStep,
       ),
@@ -338,7 +341,10 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
         input.machineId === undefined ? undefined : `machineId: ${input.machineId}`,
       ),
     output: (output) =>
-      joinLines(`${output.status}${output.program ? `: ${output.program.name}` : ''}`, output.message),
+      joinLines(
+        `${output.status}${simulatedMark(output.simulated)}${output.program ? `: ${output.program.name}` : ''}`,
+        output.message,
+      ),
   },
   [toolName.revisions]: {
     input: (input) => `action: ${input.action}`,

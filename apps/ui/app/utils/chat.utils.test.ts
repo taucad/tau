@@ -537,6 +537,36 @@ describe('serializeMessage', () => {
       );
     });
 
+    it.each([
+      { simulated: true, mark: ' (simulated)' },
+      { simulated: false, mark: '' },
+    ])('marks a request_job and check_job on a simulator: simulated $simulated', ({ simulated, mark }) => {
+      const program = { name: 'part' };
+      const message = baseMessage([
+        {
+          type: 'tool-request_job',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { artifact: 'out/part.gcode.3mf' },
+          output: {
+            job: { jobId: 'job-1', machineId: 'x1c', state: 'started', program },
+            machineName: 'Workshop X1C',
+            simulated,
+          },
+        },
+        {
+          type: 'tool-check_job',
+          toolCallId: 'c2',
+          state: 'output-available',
+          input: { artifact: 'out/part.gcode.3mf' },
+          output: { status: 'ready', simulated, program },
+        },
+      ]);
+      const text = serializeMessage(message);
+      expect(text).toContain(`<tool_result>\npart on Workshop X1C${mark}: started\n</tool_result>`);
+      expect(text).toContain(`<tool_result>\nready${mark}: part\n</tool_result>`);
+    });
+
     it('serializes tool with output-error state', () => {
       const message = baseMessage([
         {

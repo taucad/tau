@@ -203,7 +203,7 @@ const bambuJobs = {
   start: 'remote',
   submission: bambuSubmission.manifest,
   attestations: [{ id: 'work-area-clear', label: 'The build plate is clear' }],
-  safety: { authority: 'approved-agent', attended: false, interlocks: [] },
+  safety: { attended: false, interlocks: [] },
 } as const;
 
 /** Bambu Lab X1 Carbon, manifest v3: enclosed CoreXY with a four-slot AMS and an external spool. */
@@ -578,7 +578,7 @@ export const routerManifest: MachineManifest = parseMachineManifest({
       { id: 'router-on', label: 'The router is switched on at its own switch, dial set' },
       { id: 'work-area-clear', label: 'The previous part is removed and the bed is clear' },
     ],
-    safety: { authority: 'person', attended: true, interlocks: [] },
+    safety: { attended: true, interlocks: [] },
   },
   stop: { motion: 'decelerates', spindle: 'stops', heaters: 'none', position: 'kept', recovery: [] },
   observations: [
@@ -730,7 +730,7 @@ export const carveraManifest: MachineManifest = parseMachineManifest({
       { id: 'rack-loaded', label: 'Each pocket holds the tool the program expects' },
       { id: 'work-area-clear', label: 'The previous part is removed' },
     ],
-    safety: { authority: 'person', attended: true, interlocks: ['cover', 'estop'] },
+    safety: { attended: true, interlocks: ['cover', 'estop'] },
   },
   stop: {
     motion: 'halts',

@@ -7,7 +7,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { CombinedChatState } from '#hooks/use-chat.js';
-import { agentJob, createFixture, entry } from '#routes/w.$workspace.$project/chat-print.fixture.js';
+import { agentJob, createFixture } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 
 const respondToToolApproval = vi.fn(async () => undefined);
@@ -299,20 +299,6 @@ describe('ChatApprovalBanner', () => {
     expect(respondToToolApproval).not.toHaveBeenCalled();
   });
 
-  /** The X1C as listed, asking the person for nothing only the Print pane takes. */
-  const chatApprovable = () => {
-    const listed = entry();
-    const { jobs } = listed.descriptor.capabilities;
-    if (jobs.type !== 'supported') {
-      throw new Error('The fixture machine runs jobs.');
-    }
-    return entry({
-      descriptor: {
-        ...listed.descriptor,
-        capabilities: { ...listed.descriptor.capabilities, jobs: { ...jobs, attestations: [] } },
-      },
-    });
-  };
   const jobInterrupt = () =>
     approvalMessage({
       ...pendingInput,
@@ -321,37 +307,31 @@ describe('ChatApprovalBanner', () => {
       context: { jobId: 'job-agent-1', machineId: 'machine-1', fileName: 'pyramid.gcode.3mf' },
     });
 
-  it.each([
-    ['Approve', 'approve', true],
-    ['Deny', 'deny', false],
-  ] as const)(
-    "resolves an agent's job on the person's session before answering (%s)",
-    async (button, decision, approved) => {
-      const fixture = createFixture({ entries: [chatApprovable()], jobs: [agentJob()] });
-      machines = { available: true, ...fixture.client };
-      messages = [jobInterrupt()];
-      const user = userEvent.setup();
+  it("denies an agent's job on the person's session before answering", async () => {
+    const fixture = createFixture({ jobs: [agentJob()] });
+    machines = { available: true, ...fixture.client };
+    messages = [jobInterrupt()];
+    const user = userEvent.setup();
 
-      render(<ChatApprovalBanner />);
-      await user.click(screen.getByRole('button', { name: button }));
+    render(<ChatApprovalBanner />);
+    await user.click(screen.getByRole('button', { name: 'Deny' }));
 
-      await vi.waitFor(() => {
-        expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', approved, { optionId: undefined });
-      });
-      expect(fixture.resolveJob).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          jobId: 'job-agent-1',
-          decision,
-          resolvedBy: expect.objectContaining({ kind: 'user' }) as Record<string, unknown>,
-        }) as Record<string, unknown>,
-      );
-      expect(fixture.resolveJob.mock.invocationCallOrder[0]).toBeLessThan(
-        respondToToolApproval.mock.invocationCallOrder[0]!,
-      );
-    },
-  );
+    await vi.waitFor(() => {
+      expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', false, { optionId: undefined });
+    });
+    expect(fixture.resolveJob).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        jobId: 'job-agent-1',
+        decision: 'deny',
+        resolvedBy: expect.objectContaining({ kind: 'user' }) as Record<string, unknown>,
+      }) as Record<string, unknown>,
+    );
+    expect(fixture.resolveJob.mock.invocationCallOrder[0]).toBeLessThan(
+      respondToToolApproval.mock.invocationCallOrder[0]!,
+    );
+  });
 
-  it('offers no Approve for a job that needs what only the Print pane takes, and leaves the interrupt open', async () => {
+  it('offers no Approve for a job: every job asks for attestations only the Print pane takes', async () => {
     const fixture = createFixture({ jobs: [agentJob()] });
     machines = { available: true, ...fixture.client };
     messages = [jobInterrupt()];
@@ -366,28 +346,12 @@ describe('ChatApprovalBanner', () => {
     expect(fixture.resolveJob).not.toHaveBeenCalled();
   });
 
-  it('sends a job that needs only the person at the machine to the Print pane, by the contract rule', async () => {
-    const plain = chatApprovable();
-    const { jobs } = plain.descriptor.capabilities;
-    if (jobs.type !== 'supported') {
-      throw new Error('The fixture machine runs jobs.');
-    }
-    const attended = entry({
-      descriptor: {
-        ...plain.descriptor,
-        capabilities: {
-          ...plain.descriptor.capabilities,
-          jobs: { ...jobs, safety: { ...jobs.safety, attended: true } },
-        },
-      },
-    });
-    const fixture = createFixture({ entries: [attended], jobs: [agentJob()] });
-    machines = { available: true, ...fixture.client };
+  it('sends a job to the Print pane without reading the machine, even where no machines are reachable', () => {
     messages = [jobInterrupt()];
 
     render(<ChatApprovalBanner />);
 
-    expect(await screen.findByRole('button', { name: 'Review in the Print pane' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Review in the Print pane' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
   });
 
@@ -430,30 +394,6 @@ describe('ChatApprovalBanner', () => {
 
     await vi.waitFor(() => {
       expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', false, { optionId: undefined });
-    });
-  });
-
-  it('disables the decision and says the job is being sent while the approval runs', async () => {
-    const fixture = createFixture({ entries: [chatApprovable()], jobs: [agentJob()] });
-    const { promise: sent, resolve: finishSending } = Promise.withResolvers<void>();
-    fixture.resolveJob.mockImplementationOnce(async () => {
-      await sent;
-      return agentJob({ state: 'started' });
-    });
-    machines = { available: true, ...fixture.client };
-    messages = [jobInterrupt()];
-    const user = userEvent.setup();
-
-    render(<ChatApprovalBanner />);
-    await user.click(screen.getByRole('button', { name: 'Approve' }));
-
-    expect(await screen.findByRole('status')).toHaveTextContent('Sending the job to the machine…');
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
-    expect(respondToToolApproval).not.toHaveBeenCalled();
-    finishSending();
-    await vi.waitFor(() => {
-      expect(respondToToolApproval).toHaveBeenCalledOnce();
     });
   });
 

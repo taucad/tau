@@ -486,6 +486,29 @@ describe('MachinesSettings', () => {
     });
   });
 
+  it.each([
+    { credential: 'secret', isAsked: true },
+    { credential: undefined, isAsked: false },
+  ] as const)(
+    'asks for an access code by the declared credential, not identity: $credential',
+    async ({ credential, isAsked }) => {
+      const facet = facetWith([]);
+      /* Grbl's identity is `claimed`: only the declared credential says binding takes a secret. */
+      const { connection } = grblProvider.manifest;
+      facet.listProviders.mockResolvedValue([
+        { ...grblProvider, manifest: { ...grblProvider.manifest, connection: { ...connection, credential } } },
+      ]);
+      state.facet = facet;
+      renderSettings();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Enter details' })).toBeEnabled();
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Enter details' }));
+      await screen.findByRole('textbox', { name: 'Name' });
+      expect(screen.queryByLabelText('Access code') !== null).toBe(isAsked);
+    },
+  );
+
   it('should list bound machines as one line each, marking the simulator, and explain a missing facet', async () => {
     state.facet = facetWith([simulatedEntry]);
     const { unmount } = renderSettings();

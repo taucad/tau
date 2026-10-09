@@ -401,6 +401,11 @@ export const useMachineControl = ({
       ? undefined
       : entry.snapshot.operations.find((operation) => operation.operationId === unconfirmedStop);
   const isStopListed = stopOperation !== undefined;
+  /* An accepted stop is settled, so forget it: the host lists only its most recent operations, and a stop pushed out of
+   * that window later must not re-arm the unlisted wait and read as unconfirmed. */
+  if (stopOperation?.state === 'accepted') {
+    setUnconfirmedStop(undefined);
+  }
   useEffect(() => {
     if (unconfirmedStop === undefined || isStopListed) {
       return undefined;

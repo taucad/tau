@@ -14,6 +14,7 @@ import type { MachineControl } from '#hooks/use-machine-control.js';
 import {
   Activities,
   ControlStage,
+  describeStillFailure,
   formChoices,
   formNumber,
 } from '#routes/w.$workspace.$project/chat-print-controls.js';
@@ -282,6 +283,55 @@ describe('Control on a milling machine', () => {
     const table = within(screen.getByRole('region', { name: 'Monitor' })).getByRole('table');
     expect(within(table).getByRole('row', { name: /^Machine/u })).toHaveTextContent('Machine———');
     expect(screen.getByText('Lost')).toBeInTheDocument();
+  });
+
+  it('reads and controls every motion group, and sums up by the least trusted one', () => {
+    // A second head with its own axis, homed apart from the first: its position is lost.
+    const home = routerManifest.actions.find((action) => action.id === 'motion.home');
+    const twoHeads: typeof routerManifest = {
+      ...routerManifest,
+      axes: [
+        ...routerManifest.axes,
+        {
+          id: 'u',
+          label: 'U',
+          kind: 'linear',
+          unit: 'mm',
+          travel: { min: 0, max: 100 },
+          carries: 'tool',
+          reference: 'cycle',
+        },
+      ],
+      components: [...routerManifest.components, { id: 'head-2', label: 'Second head', kind: 'motion', axes: ['u'] }],
+      actions: [...routerManifest.actions, ...(home === undefined ? [] : [{ ...home, componentId: 'head-2' }])],
+    };
+    const observations = [
+      ...millingComponents(twoHeads),
+      known('head-2', 'position', {
+        kind: 'motion',
+        homed: { u: false },
+        trust: 'lost',
+        position: { machine: { u: 0 }, work: { u: 0 } },
+        workOffset: { id: 'G54', revision: 'wo-2', origin: { u: 0 } },
+        mode: 'normal',
+        feed: 0,
+        limits: [],
+      }),
+    ];
+    renderControl(router({ manifest: twoHeads, snapshot: machineSnapshot(observations) }));
+    const monitor = screen.getByRole('region', { name: 'Monitor' });
+    expect(within(monitor).getByRole('heading', { name: 'Axes position' })).toBeInTheDocument();
+    expect(within(monitor).getByRole('heading', { name: 'Second head position' })).toBeInTheDocument();
+    expect(within(monitor).getAllByRole('table')).toHaveLength(2);
+    expect(monitor).toHaveTextContent('Second head work offsetG54 · revision wo-2');
+    expect(screen.getByRole('button', { name: /^Monitor/u })).toHaveTextContent('Lost · Router off');
+
+    const control = openStage('Control');
+    expect(within(control).getByRole('group', { name: 'Axes' })).toBeInTheDocument();
+    const second = within(control).getByRole('group', { name: 'Second head' });
+    expect(within(second).getByRole('button', { name: /^Home/u })).toBeInTheDocument();
+    // The controller's own buttons stay with the first group, not once per head.
+    expect(within(second).queryByRole('button', { name: /^Unlock/u })).not.toBeInTheDocument();
   });
 
   it('offers an alert’s action remedy as its button and a person’s remedy as words', async () => {
@@ -819,6 +869,52 @@ describe('Activities', () => {
     );
     expect(screen.queryByRole('group', { name: 'Calibration result' })).not.toBeInTheDocument();
     expect(again.fixture.applyAction).not.toHaveBeenCalled();
+  });
+
+  it('shows a flow-ratio result read-only, since Tau cannot keep it yet', async () => {
+    const user = userEvent.setup();
+    const { fixture } = renderControl(
+      activity({
+        kind: 'material.calibration.run',
+        label: 'Flow-ratio calibration',
+        state: 'needs-person',
+        steps: [],
+        results: [
+          {
+            id: 'result-1',
+            label: 'A1 · PLA',
+            confidence: 'good',
+            value: { unitId: 'ams-a', slotId: 'a1', profileId: 'GFA00', flowRatio: 0.98 },
+          },
+        ],
+      }),
+    );
+    const card = screen.getByRole('region', { name: 'Flow-ratio calibration' });
+    expect(card).toHaveTextContent('Flow ratio 0.980');
+    expect(card).toHaveTextContent('Tau can’t keep this result yet. Enter it in your slicer’s filament settings.');
+    expect(within(card).queryByRole('button', { name: /^Save as a profile/u })).not.toBeInTheDocument();
+    expect(within(card).queryByRole('textbox', { name: 'Profile name' })).not.toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: 'Discard' }));
+    expect(screen.queryByRole('group', { name: 'Calibration result' })).not.toBeInTheDocument();
+    expect(fixture.applyAction).not.toHaveBeenCalled();
+  });
+});
+
+describe('describeStillFailure', () => {
+  const failure = (message: string, code?: string): Error =>
+    code === undefined ? new Error(message) : Object.assign(new Error(message), { code });
+
+  it('words a failure by its typed code, never by a code its message names', () => {
+    expect(describeStillFailure(failure('slow down', 'MACHINE_STILL_RATE_LIMITED'))).toBe(
+      'Stills are limited to one every 5 seconds; wait a moment, then capture again.',
+    );
+    expect(describeStillFailure(failure('MACHINE_STILL_RATE_LIMITED'))).toBe(
+      'The camera could not capture a still; capture again in a moment. (MACHINE_STILL_RATE_LIMITED)',
+    );
+    expect(describeStillFailure(failure('Lost', 'MACHINE_OTHER'))).toBe(
+      'The camera could not capture a still; capture again in a moment. (MACHINE_OTHER)',
+    );
+    expect(describeStillFailure(failure(' '))).toBe('The camera could not capture a still; capture again in a moment.');
   });
 });
 

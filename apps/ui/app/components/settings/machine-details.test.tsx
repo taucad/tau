@@ -131,7 +131,7 @@ describe('MachineDetails', () => {
     const jobs = factsOf(openPart('Jobs'));
     expect(jobs).toContain('Delivery: Streamed by this computer, which must stay connected until the run ends');
     expect(jobs).toContain('Start: A person presses start at the machine');
-    expect(jobs).toContain('Who may start: A person only, at the machine');
+    expect(jobs).toContain('Who may start: A person, or an agent a person approved, at the machine');
     expect(factsOf(openPart('Stop'))[0]).toBe(
       'What Stop does: Motion slows to a stop, the spindle stops, the position is kept.',
     );

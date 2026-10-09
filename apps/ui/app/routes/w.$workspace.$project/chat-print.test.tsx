@@ -798,8 +798,10 @@ describe('Print pane prepare and send', () => {
     await waitFor(() => {
       expect(quality).toHaveTextContent('Fine0.12 mm');
     });
-    // The choice is the project's: saved as the only changed key beside the printer model.
-    expect(preferencesText()).toBe('{\n  "preset": "fine"\n}\n');
+    // The choice is the project's: saved as the only changed key beside the printer model. The save is async.
+    await waitFor(() => {
+      expect(preferencesText()).toBe('{\n  "preset": "fine"\n}\n');
+    });
 
     const material = screen.getByRole('group', { name: 'Material' });
     expect(within(material).getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
@@ -1749,22 +1751,26 @@ describe('Print pane monitor and controls', () => {
     await user.click(screen.getByRole('button', { name: 'Stop' }));
     expect(await screen.findByText('Stopping…')).toHaveAttribute('role', 'status');
     expect(screen.queryByText(/did not confirm the stop/u)).not.toBeInTheDocument();
-    const settle = (state: 'confirming' | 'accepted' | 'attention'): void => {
+    /* No state: the stop has left the host's bounded window of recent operations. */
+    const settle = (state?: 'confirming' | 'accepted' | 'attention'): void => {
       const current = printing();
       fixture.observe({
         ...current,
         snapshot: {
           ...current.snapshot,
-          operations: [
-            {
-              operationId: 'stop-1',
-              machineId: 'machine-1',
-              kind: 'stop',
-              inputDigest: artifact.digest,
-              state,
-              updatedAt: later,
-            },
-          ],
+          operations:
+            state === undefined
+              ? []
+              : [
+                  {
+                    operationId: 'stop-1',
+                    machineId: 'machine-1',
+                    kind: 'stop',
+                    inputDigest: artifact.digest,
+                    state,
+                    updatedAt: later,
+                  },
+                ],
         },
       });
     };
@@ -1793,6 +1799,26 @@ describe('Print pane monitor and controls', () => {
       expect(
         screen.getByText('Workshop X1C did not confirm the stop. Use the machine’s own stop if it is still moving.'),
       ).toBeInTheDocument();
+      expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never reads an accepted Stop as unconfirmed once it leaves the host’s recent operations', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const settle = await unconfirmedStop();
+      settle('accepted');
+      await waitFor(() => {
+        expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
+      });
+      // 64 newer operations later, the host no longer lists the stop.
+      settle();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(screen.queryByText(/did not confirm the stop/u)).not.toBeInTheDocument();
       expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();

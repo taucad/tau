@@ -22,7 +22,7 @@ import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { flushSync } from 'react-dom';
 import { ChevronDown, CircleAlert, LoaderCircle, Trash2 } from 'lucide-react';
-import { fffProcessOf, isSimulatedMachine } from '@taucad/runtime/machine';
+import { fffProcessOf, isSimulatedMachine, machineCredentialOf } from '@taucad/runtime/machine';
 import type {
   MachineBindingOutcome,
   MachineCandidate,
@@ -90,9 +90,9 @@ const endpointOf = (transport: Transport, place: string): MachineEndpoint | stri
 const placeOf = (endpoint: MachineCandidate['endpoint']): string =>
   endpoint.transport === 'serial' ? endpoint.path : endpoint.address;
 
-/** Whether binding takes an access code: the host's ceremony asks one only of a real machine that authenticates. */
+/** Whether binding takes an access code: the host's ceremony asks one only of a real machine that declares a secret. */
 const takesCode = (manifest: MachineManifest): boolean =>
-  !isSimulatedMachine(manifest) && manifest.connection.identity === 'authenticated';
+  !isSimulatedMachine(manifest) && machineCredentialOf(manifest.connection) === 'secret';
 
 /** What the card calls one of this provider's machines. */
 const nounOf = (manifest: MachineManifest): 'printer' | 'machine' =>
@@ -100,8 +100,8 @@ const nounOf = (manifest: MachineManifest): 'printer' | 'machine' =>
 
 /**
  * What a person reads for the host's binding and removal refusals, by code; `undefined` means say nothing.
- * The machine channel carries the typed code, read first; the desktop shell's invoke drops it and keeps it only
- * inside its own message, so the message is the fallback. A provider's own refusal is shown in its own words.
+ * The machine channel and the desktop ceremony both carry the typed code; a provider's own refusal is shown in its own
+ * words.
  */
 const refusals: ReadonlyMap<string, string | undefined> = new Map([
   ['MACHINE_CREDENTIAL_REQUIRED', 'Enter the access code shown on the machine.'],

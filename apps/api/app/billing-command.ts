@@ -2,7 +2,7 @@ import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import --
 import { readFile } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
-import { runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
+import { assertRefundKey, runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
@@ -34,19 +34,26 @@ import * as schema from '#database/schema.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { EmailService } from '#email/email.service.js';
-import { createOperationsGaugeSource, recordOpenCases, runHourlyOperationsJobs } from '#billing-command.operations.js';
+import {
+  createOperationsGaugeSource,
+  deliverRecoveryNotices,
+  recordOpenCases,
+  recoveryNoticeEmailOrigin,
+  runHourlyOperationsJobs,
+} from '#billing-command.operations.js';
 import type { DatabaseService } from '#database/database.service.js';
 
 /**
- * Recovery notices become email only when this worker knows where the app lives and how to send.
- * Without both the notices stay pending, which is the correct outcome: a link to nowhere is worse
- * than a delayed one, and `deliverRecoveryNotices` keeps retrying every pass.
+ * Recovery notices become email only when this worker knows where the app lives (`TAU_FRONTEND_URL`) and
+ * how to send (`RESEND_API_KEY`). Without both the notices stay pending, which is the correct outcome: a
+ * link to nowhere is worse than a delayed one, a send that silently renders and returns would mark the
+ * notice delivered, and `deliverRecoveryNotices` keeps retrying every pass.
  */
 const createRecoveryNoticeTransport = (
   database: Pick<DatabaseService, 'database'>,
 ): BillingRecoveryNoticeEmailTransport | undefined => {
-  const frontendURL = process.env.TAU_FRONTEND_URL;
-  if (!frontendURL) {
+  const frontendURL = recoveryNoticeEmailOrigin(process.env);
+  if (frontendURL === undefined) {
     return undefined;
   }
   // EmailService reads its configuration through the Nest ConfigService shape; this worker has no
@@ -149,6 +156,11 @@ async function main(): Promise<void> {
         }
         // Outside the fixture, the deployment's write key performs mutations only where it collects.
         const writeKey = process.env.STRIPE_SECRET_KEY;
+        // A refund goes out only under the operator-held Refunds-Write key; Stripe refuses the create key.
+        const refundKey = process.env.STRIPE_REFUND_SECRET_KEY;
+        if (refundKey) {
+          assertRefundKey({ refundKey, livemode: mode === 'true', createKey: writeKey, readKey: secretKey });
+        }
         const collection = protectedKey
           ? null
           : resolveBillingCollection({
@@ -167,9 +179,13 @@ async function main(): Promise<void> {
                 protectedStripe: createBillingStripeClient({ secretKey: protectedKey, fixtureUrl }),
                 fixture: { monthlyPriceId, topupProductId },
               }
-            : writeKey && collection
-              ? { protectedStripe: createBillingStripeClient({ secretKey: writeKey, fixtureUrl }), collection }
-              : {}),
+            : {
+                ...(collection ? { collection } : {}),
+                ...(writeKey && collection
+                  ? { protectedStripe: createBillingStripeClient({ secretKey: writeKey, fixtureUrl }) }
+                  : {}),
+                ...(refundKey ? { refundStripe: createBillingStripeClient({ secretKey: refundKey, fixtureUrl }) } : {}),
+              }),
           environment: financialEnvironmentSchema.parse(environment),
           stripeAccountId,
           livemode: mode === 'true',
@@ -629,11 +645,11 @@ async function main(): Promise<void> {
             await runJob('billing.renewal_recovery', async () =>
               payments.recoverRenewalOffers({ environment: billingEnvironment, limit }),
             );
-            // Drains the dunning outbox `recordRenewalFailure` fills; a send failure leaves the row
-            // pending with its own backoff rather than failing the pass.
+            // Drains the notice outbox: renewal dunning and automatic-reload notices. A send failure leaves
+            // the row pending with its own backoff rather than failing the pass; its last failure alerts.
             // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
             await runJob('billing.recovery_notices', async () =>
-              payments.deliverRecoveryNotices({ environment: billingEnvironment, limit }),
+              deliverRecoveryNotices({ payments, environment: billingEnvironment, limit }),
             );
             if (Date.now() - lastScanAt >= scanIntervalMilliseconds) {
               lastScanAt = Date.now();

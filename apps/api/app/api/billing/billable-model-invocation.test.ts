@@ -19,7 +19,9 @@ import type {
   QualifiedBillableInvocation,
 } from '#api/billing/billable-model-invocation.types.js';
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
-import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
+import type { DatabaseService } from '#database/database.service.js';
 import type { TerminalEvidence, TerminalReceipt } from '#api/billing/credit-ledger.types.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
@@ -911,6 +913,86 @@ describe('BillableModelInvocationService', () => {
     expect(qualified.adapter.executeOnce).toHaveBeenCalledOnce();
   });
 
+  it('should record an exact-count credit denial and refuse with its shortfall, not fall back to the byte bound', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    const counted: Record<string, string> = { qualification: 'controlled-local-zero' };
+    const qualified: QualifiedBillableInvocation = {
+      ...qualification(),
+      inputCount: { capability: counted as unknown as InputCountCapability },
+      maximumQuantities: [
+        { dimension: 'uncached_input', tier: null, quantity: 10n },
+        { dimension: 'output', tier: null, quantity: 4n },
+      ],
+      invocation: {
+        ...qualification().invocation,
+        jointInputMaximum: { version: 'joint-input-v1', quantity: '10' },
+      },
+    };
+    // The real denial recorder, over an owner lookup that finds no binding: it checks the digest, then stops.
+    const ownerLookup = vi.fn(async () => []);
+    const owners = new CreditLedgerService(
+      { database: { select: () => ({ from: () => ({ where: ownerLookup }) }) } } as unknown as Pick<
+        DatabaseService,
+        'database'
+      >,
+      {} as BillingPolicyService,
+    );
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      inputCountEligibility: vi.fn(async () => ({
+        status: 'denied',
+        reason: 'insufficient_credit',
+        requiredCreditAtoms: 8n,
+        availableCreditAtoms: 1n,
+      })),
+      recordFundedWorkDenial: vi.fn(async (input: Parameters<CreditLedgerService['recordFundedWorkDenial']>[0]) =>
+        owners.recordFundedWorkDenial(input),
+      ),
+      // What the byte bound would answer: the same refusal, with a larger requirement.
+      admitOperation: vi.fn(async () => ({
+        status: 'denied',
+        reason: 'insufficient_credit',
+        requiredCreditAtoms: 48n,
+        availableCreditAtoms: 1n,
+      })),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      genAiMetrics() as unknown as MetricsService,
+    );
+
+    try {
+      const refusal: unknown = await service.invoke(intent()).catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(LlmGatewayError);
+      expect((refusal as LlmGatewayError).getStatus()).toBe(402);
+      expect((refusal as LlmGatewayError).getResponse()).toMatchObject({
+        error: {
+          type: 'INSUFFICIENT_CREDIT',
+          details: { requiredCreditAtoms: '8', availableCreditAtoms: '1', routeId: 'route' },
+        },
+      });
+      expect(ledger.recordFundedWorkDenial).toHaveBeenCalledExactlyOnceWith({
+        environment: 'development',
+        authUserId: 'user',
+        attemptKey: 'attempt_0000000001',
+        requestDigest: expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u) as unknown,
+      });
+      expect(ownerLookup).toHaveBeenCalledOnce();
+      expect(ledger.admitOperation).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('recovers an expired owner pool and retries the same admission once before dispatch', async () => {
     const qualified = qualification();
     const metrics = {
@@ -1455,7 +1537,8 @@ describe('BillableModelInvocationService', () => {
   });
 
   /* R1 in-stream + V4 (Cloud): the relayed frame carries Tau's code, and the turn that
-   * carried no usage settles absorbed — no meter item, no customer charge. */
+   * carried no usage settles rejected at once — no meter item, no customer charge, no hold
+   * left to the recovery deadline. */
   it('should rewrite the captured in-stream supplier refusal and settle the turn at zero charge', async () => {
     const qualified = { ...qualification(), maximumResponseBytes: 64 * 1024 };
     qualified.adapter.createEvidenceCollector = () =>
@@ -1476,14 +1559,20 @@ describe('BillableModelInvocationService', () => {
       `event: error\ndata: {"type":"error","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider's account is unavailable.","error":{"type":"tau_gateway","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider's account is unavailable.","details":{"providerId":"openai","providerCode":"credit_balance_exhausted","accountOwner":"tau"}}}\n\n`,
     );
     expect(relayed).not.toContain('You have no credits remaining');
-    // No usage was reported, so nothing is metered onto the customer and nothing terminalizes.
+    // No usage was reported before the supplier failed: the turn is released now, like a pre-stream refusal.
+    const rejected = {
+      kind: 'provider_rejected',
+      executionStatus: 'rejected',
+      normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_failed', fields: {} },
+    };
     const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
-    expect(recorded?.evidence).toMatchObject({ kind: 'absorbed_unknown', executionStatus: 'unknown' });
-    expect(Object.keys(recorded?.evidence ?? {})).not.toContain('meterItems');
-    expect(ledger.terminalizeOperation).not.toHaveBeenCalled();
+    expect(recorded?.evidence).toEqual(rejected);
+    expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ evidence: rejected }),
+    );
     expect(metrics.billingFundedOperationTerminals.add).toHaveBeenCalledWith(
       1,
-      expect.objectContaining({ 'tau.billing.terminal.kind': 'absorbed_unknown' }),
+      expect.objectContaining({ 'tau.billing.terminal.kind': 'provider_rejected' }),
     );
   });
 

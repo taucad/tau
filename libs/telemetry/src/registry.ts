@@ -1,7 +1,16 @@
 /* eslint-disable @typescript-eslint/naming-convention -- OTEL attribute names use dot-notation */
 import { z } from 'zod';
 import { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from '#define-metric.js';
-import { agentPlacements, agentToolKinds } from '#ingest.js';
+import {
+  agentPlacements,
+  agentToolKinds,
+  builtInSkillSlugs,
+  evaluationClasses,
+  geospecRunStatuses,
+  kernelIds,
+  lookupOutcomes,
+  tauToolNames,
+} from '#ingest.js';
 
 /**
  * Canonical metric registry for Tau.
@@ -700,6 +709,8 @@ export const TauMetrics = {
       'agent.id': z.string(),
       'agent.placement': z.enum(agentPlacements),
       outcome: z.enum(['completed', 'cancelled', 'error', 'refused']),
+      /** Present only when the turn reported its context (usage metrics allowed). */
+      'kernel.id': z.enum(kernelIds).optional(),
     }),
   }),
 
@@ -733,6 +744,8 @@ export const TauMetrics = {
     attributes: z.object({
       'agent.id': z.string(),
       'tool.kind': z.enum(agentToolKinds),
+      /** Tau's own tools only; absent (`""` in PromQL) for ACP rows and turns without usage metrics. */
+      'tool.name': z.enum(tauToolNames).optional(),
       status: z.enum(['completed', 'failed']),
     }),
   }),
@@ -754,6 +767,105 @@ export const TauMetrics = {
     attributes: z.object({
       'agent.id': z.string(),
       'error.code': z.string(),
+    }),
+  }),
+
+  // --- Client-reported: agent context (agent usage telemetry blueprint) ---
+  // Recorded only from turns that carry `detail.context`; every label is a bounded vocabulary from `ingest.ts`.
+
+  agentCallsBeforeFirstWrite: defineHistogram({
+    name: 'tau.agent.calls_before_first_write',
+    unit: '{call}',
+    description: 'Tool calls an agent made before its first model-file write in a turn (reported by client)',
+    buckets: [0, 1, 2, 3, 5, 8, 13, 20, 30, 50, 100],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+    }),
+  }),
+
+  agentTimeToFirstWrite: defineHistogram({
+    name: 'tau.agent.time_to_first_write',
+    unit: 's',
+    description: 'Agent turn admission to its first model-file write (reported by client)',
+    buckets: [5, 10, 20, 30, 60, 120, 300, 600, 1800],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+    }),
+  }),
+
+  agentReferenceLookups: defineCounter({
+    name: 'tau.agent.reference_lookups',
+    unit: '{call}',
+    description: 'Skill-reference lookups an agent made, by outcome (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+      'lookup.outcome': z.enum(lookupOutcomes),
+    }),
+  }),
+
+  agentReferenceBytes: defineHistogram({
+    name: 'tau.agent.reference_bytes',
+    unit: 'By',
+    description: "Skill-reference bytes Tau's own tools read in a turn (reported by client)",
+    buckets: [1024, 4096, 16_384, 32_768, 65_536, 131_072, 262_144, 1_048_576],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+    }),
+  }),
+
+  agentSkillActivations: defineCounter({
+    name: 'tau.agent.skill_activations',
+    unit: '{activation}',
+    description: 'Skills an agent activated in a turn; user-authored skills count as custom (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      skill: z.enum([...builtInSkillSlugs, 'custom']),
+    }),
+  }),
+
+  agentEvaluations: defineCounter({
+    name: 'tau.agent.evaluations',
+    unit: '{evaluation}',
+    description: 'Model evaluations an agent ran, by how they ended (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+      'evaluation.class': z.enum(evaluationClasses),
+    }),
+  }),
+
+  agentCorrectionsAfterError: defineHistogram({
+    name: 'tau.agent.corrections_after_error',
+    unit: '{write}',
+    description: 'Model-file writes that followed a failed evaluation in a turn (reported by client)',
+    buckets: [0, 1, 2, 3, 5, 10],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+    }),
+  }),
+
+  agentGeospecAssertions: defineCounter({
+    name: 'tau.agent.geospec_assertions',
+    unit: '{assertion}',
+    description: 'GeoSpec assertions an agent ran, by result (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      result: z.enum(['passed', 'failed']),
+    }),
+  }),
+
+  agentGeospecRuns: defineCounter({
+    name: 'tau.agent.geospec_runs',
+    unit: '{run}',
+    description: 'GeoSpec test runs an agent started, by run status (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'run.status': z.enum(geospecRunStatuses),
     }),
   }),
 

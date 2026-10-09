@@ -147,6 +147,11 @@ export type TerminalHistoryEvidence = {
      * stream because it was stopping).
      */
     terminalReason?: string;
+    /**
+     * Measured quantities as decimal strings (`input`, `output`, `responseBytes`, …). The
+     * ledger's persisted-evidence schema accepts nothing else here, so a code or a name
+     * belongs in `terminalReason` or in a log line, never in a field.
+     */
     fields: Record<string, string>;
   };
 };

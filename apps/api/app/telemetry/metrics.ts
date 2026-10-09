@@ -378,6 +378,63 @@ export class MetricsService {
     unit: TauMetrics.agentErrors.unit,
   });
 
+  // --- Client-reported: agent context ---
+
+  public readonly agentCallsBeforeFirstWrite = this.clientMeter.createHistogram(
+    TauMetrics.agentCallsBeforeFirstWrite.name,
+    {
+      description: TauMetrics.agentCallsBeforeFirstWrite.description,
+      unit: TauMetrics.agentCallsBeforeFirstWrite.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.agentCallsBeforeFirstWrite.buckets] },
+    },
+  );
+
+  public readonly agentTimeToFirstWrite = this.clientMeter.createHistogram(TauMetrics.agentTimeToFirstWrite.name, {
+    description: TauMetrics.agentTimeToFirstWrite.description,
+    unit: TauMetrics.agentTimeToFirstWrite.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.agentTimeToFirstWrite.buckets] },
+  });
+
+  public readonly agentReferenceLookups = this.clientMeter.createCounter(TauMetrics.agentReferenceLookups.name, {
+    description: TauMetrics.agentReferenceLookups.description,
+    unit: TauMetrics.agentReferenceLookups.unit,
+  });
+
+  public readonly agentReferenceBytes = this.clientMeter.createHistogram(TauMetrics.agentReferenceBytes.name, {
+    description: TauMetrics.agentReferenceBytes.description,
+    unit: TauMetrics.agentReferenceBytes.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.agentReferenceBytes.buckets] },
+  });
+
+  public readonly agentSkillActivations = this.clientMeter.createCounter(TauMetrics.agentSkillActivations.name, {
+    description: TauMetrics.agentSkillActivations.description,
+    unit: TauMetrics.agentSkillActivations.unit,
+  });
+
+  public readonly agentEvaluations = this.clientMeter.createCounter(TauMetrics.agentEvaluations.name, {
+    description: TauMetrics.agentEvaluations.description,
+    unit: TauMetrics.agentEvaluations.unit,
+  });
+
+  public readonly agentCorrectionsAfterError = this.clientMeter.createHistogram(
+    TauMetrics.agentCorrectionsAfterError.name,
+    {
+      description: TauMetrics.agentCorrectionsAfterError.description,
+      unit: TauMetrics.agentCorrectionsAfterError.unit,
+      advice: { explicitBucketBoundaries: [...TauMetrics.agentCorrectionsAfterError.buckets] },
+    },
+  );
+
+  public readonly agentGeospecAssertions = this.clientMeter.createCounter(TauMetrics.agentGeospecAssertions.name, {
+    description: TauMetrics.agentGeospecAssertions.description,
+    unit: TauMetrics.agentGeospecAssertions.unit,
+  });
+
+  public readonly agentGeospecRuns = this.clientMeter.createCounter(TauMetrics.agentGeospecRuns.name, {
+    description: TauMetrics.agentGeospecRuns.description,
+    unit: TauMetrics.agentGeospecRuns.unit,
+  });
+
   // --- Tau Sync ---
 
   public readonly syncOperations = this.apiMeter.createCounter(TauMetrics.syncOperations.name, {

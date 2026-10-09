@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { legalUrl } from '#constants/meta.constants.js';
+import { legalUrl } from '#lib/legal-url.js';
 import { CreditCard } from 'lucide-react';
 import { formatCreditAtoms, topupPrincipalBoundsMinor } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';

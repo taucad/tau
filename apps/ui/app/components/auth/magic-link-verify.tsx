@@ -19,7 +19,6 @@ type MagicLinkVerifyClient = {
     readonly verify: (args: {
       readonly query: {
         readonly token: string;
-        readonly callbackURL: string;
       };
       // oxlint-disable-next-line typescript/no-restricted-types -- Better Auth answers a successful call with `error: null`.
     }) => Promise<{ readonly error?: { readonly message?: string } | null }>;
@@ -50,8 +49,10 @@ export function MagicLinkVerify({ className }: MagicLinkVerifyProps): React.JSX.
 
     const verifyMagicLink = async (): Promise<void> => {
       try {
+        /* No `callbackURL`: Better Auth would resolve it against its own base URL, the API host, and redirect
+         * there after signing the user in. Without one it answers with the session, and the page navigates itself. */
         const result = await magicLinkClient.magicLink.verify({
-          query: { token, callbackURL: redirectTo },
+          query: { token },
         });
 
         if (result.error) {

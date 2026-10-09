@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-import { defaultConfigDirectory, startHostDaemon } from '@taucad/host';
+import { defaultConfigDirectory, defaultMachineProviders, startHostDaemon } from '@taucad/host';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import type { HostDaemonAgentOptions, HostDaemonEvent } from '@taucad/host';
@@ -37,33 +37,6 @@ const computeStoreWorkerModulePath = (): string =>
       import.meta.url,
     ),
   );
-
-/**
- * The machine providers `--machines` serves: the Bambu Lab X1C and A1 mini, a
- * Grbl router and a Makera Carvera, each beside its socket-free simulator. Loaded
- * on demand so a daemon without the flag never touches the vendor packages.
- *
- * @returns The daemon's machines option.
- */
-const machineProviders = async (): Promise<NonNullable<HostDaemonAgentOptions['machines']>> => {
-  const [bambu, grbl, carvera] = await Promise.all([
-    import('@taucad/bambu'),
-    import('@taucad/grbl'),
-    import('@taucad/carvera'),
-  ]);
-  return {
-    providers: [
-      bambu.bambuMachine(),
-      bambu.bambuA1MiniMachine(),
-      bambu.bambuSimulatorMachine(),
-      bambu.bambuA1MiniSimulatorMachine(),
-      grbl.grblMachine(),
-      grbl.grblSimulatorMachine(),
-      carvera.carveraMachine(),
-      carvera.carveraSimulatorMachine(),
-    ],
-  };
-};
 
 const childArguments = (options: { readonly plugin: unknown; readonly config?: string }): string[] => {
   const plugins = Array.isArray(options.plugin)
@@ -339,7 +312,7 @@ export const serveCommand = defineCommand({
     if (args.machines && !agent) {
       throw new TypeError('--machines serves beside the agent channel: pass --agentPort or --ui as well');
     }
-    const machines = args.machines ? await machineProviders() : undefined;
+    const machines = args.machines ? { providers: await defaultMachineProviders() } : undefined;
     let computeWorker: Worker | undefined;
     let computeConnection: ReturnType<typeof connectSqliteComputeStoreWorker> | undefined;
     const computeWorkspaceRoot = agent?.workspaceRoot;

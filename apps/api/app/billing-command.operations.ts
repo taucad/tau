@@ -2,6 +2,7 @@ import type postgres from 'postgres';
 import { cashBlockingFinancialCaseKinds } from '#api/billing/billing-cash-reconciliation.service.js';
 import type { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
 import type { BillingPurchaseReconciliationService } from '#api/billing/billing-purchase-reconciliation.service.js';
+import type { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 
@@ -85,6 +86,40 @@ export const recordOpenCases = async (input: {
       'tau.billing.unpriced.reason': row.reason,
     });
   }
+};
+
+/**
+ * The worker turns recovery notices into email only when it knows where the app lives and how to send.
+ * Without either, no transport is built and the notices stay pending, untouched: `EmailService` without
+ * `RESEND_API_KEY` renders and returns, which would mark a notice delivered that nobody received.
+ */
+export const recoveryNoticeEmailOrigin = (env: Readonly<Record<string, string | undefined>>): string | undefined => {
+  const frontendURL = env['TAU_FRONTEND_URL']?.trim() ?? '';
+  const resendApiKey = env['RESEND_API_KEY']?.trim() ?? '';
+  return frontendURL !== '' && resendApiKey !== '' ? frontendURL : undefined;
+};
+
+/**
+ * Drains the recovery-notice outbox once. A notice that used its last attempt is a `billing.alert`:
+ * its customer was never told, and only an operator can re-queue it.
+ */
+export const deliverRecoveryNotices = async (input: {
+  readonly payments: Pick<BillingPaymentsService, 'deliverRecoveryNotices'>;
+  readonly environment: FinancialEnvironment;
+  readonly limit: number;
+}): Promise<Awaited<ReturnType<BillingPaymentsService['deliverRecoveryNotices']>>> => {
+  const report = await input.payments.deliverRecoveryNotices({ environment: input.environment, limit: input.limit });
+  if (report.abandoned.length > 0) {
+    console.error(
+      JSON.stringify({
+        event: 'billing.alert',
+        environment: input.environment,
+        kind: 'recovery_notice_abandoned',
+        notices: report.abandoned,
+      }),
+    );
+  }
+  return report;
 };
 
 /** Everything the hourly reconciliation needs from the operations worker. */

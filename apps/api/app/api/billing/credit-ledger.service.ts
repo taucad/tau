@@ -501,7 +501,8 @@ export class CreditLedgerService {
     requestDigest: string;
   }): Promise<void> {
     financialIdentitySchema.parse(input.attemptKey);
-    if (!/^[a-f0-9]{64}$/u.test(input.requestDigest)) {
+    // The form `BillableModelInvocationService` builds and admission stores on the same reload wake.
+    if (!/^hmac-sha256:[a-f0-9]{64}$/u.test(input.requestDigest)) {
       throw new Error('Invalid funded request digest');
     }
     const [binding] = await this.databaseService.database

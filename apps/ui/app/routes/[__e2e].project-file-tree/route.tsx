@@ -15,7 +15,7 @@ import type { ProjectCreationLocation } from '#types/project-creation-location.t
 const validWorkspaceFixture = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 
 /** The Anthropic-wire model the agent-host gateway fixture answers for. */
-const seededModel = 'anthropic-claude-haiku-4.5';
+const seededModel = 'anthropic-claude-haiku-5.5';
 
 const encoder = new TextEncoder();
 

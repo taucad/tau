@@ -22,8 +22,8 @@ const fable = {
   support: { reasoning: { levels: ['low', 'medium', 'high', 'xhigh'] } },
 } as unknown as Model;
 const haiku = {
-  id: 'anthropic-claude-haiku-4.5',
-  name: 'Haiku 4.5',
+  id: 'anthropic-claude-haiku-5.5',
+  name: 'Haiku 5.5',
   provider: { id: 'anthropic', name: 'Anthropic' },
   details: { family: 'claude', cost: { ...cost, outputTokens: 5 }, contextWindow: 200_000 },
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Anthropic wire key
@@ -228,10 +228,10 @@ describe('ChatAgentSheet', () => {
     state.execution = { kind: 'tau', model: haiku.id };
     renderSheet();
 
-    const trigger = screen.getByRole('button', { name: 'Agent and model: Haiku 4.5' });
+    const trigger = screen.getByRole('button', { name: 'Agent and model: Haiku 5.5' });
     await userEvent.click(trigger);
     expect(screen.queryByRole('tablist', { name: /Reasoning/u })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Model: Haiku 4.5. Change' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Model: Haiku 5.5. Change' })).toHaveFocus();
   });
 
   it('drills into the model list and returns to the sheet with the chosen model', async () => {
@@ -241,7 +241,7 @@ describe('ChatAgentSheet', () => {
 
     expect(screen.getByRole('group', { name: 'Frontier' })).toBeInTheDocument();
     /* Level controls are tabs, never options: options are only ever models (Finding 8). */
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Haiku 4.5', 'Fable 5.1High']);
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['Haiku 5.5', 'Fable 5.1High']);
     await userEvent.click(screen.getByRole('option', { name: /Haiku/u }));
 
     expect(setActiveModel).toHaveBeenCalledWith(haiku.id);
@@ -313,7 +313,7 @@ describe('ChatAgentSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
     await userEvent.click(screen.getByRole('button', { name: /^Agent: Codex/u }));
     await userEvent.click(screen.getByRole('option', { name: /^Tau/u }));
-    await userEvent.click(screen.getByRole('option', { name: /^Haiku 4\.5/u }));
+    await userEvent.click(screen.getByRole('option', { name: /^Haiku 5\.5/u }));
 
     expect(setActiveExecution).toHaveBeenCalledWith({ kind: 'tau', model: haiku.id, effort: 'low' });
   });

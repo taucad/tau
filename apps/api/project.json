@@ -140,7 +140,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Drive every instrumented part of the LOCAL API (auth, telemetry ingest, Tau Sync, publications, Haiku 4.5 via the gateway, WebSockets) so the Grafana dashboards fill. Spends real Anthropic credit, capped by the harness user's promotional credit."
+        "description": "Drive every instrumented part of the LOCAL API (auth, telemetry ingest, Tau Sync, publications, Haiku 5.5 via the gateway, WebSockets) so the Grafana dashboards fill. Spends real Anthropic credit, capped by the harness user's promotional credit."
       },
       "options": {
         "command": "node apps/api/scripts/exercise-observability.mts"

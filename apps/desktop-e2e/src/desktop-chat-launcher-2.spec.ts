@@ -38,7 +38,7 @@ import {
  * D16 is asserted in both directions:
  *
  * - **Forwarded.** The stub refuses anything but the supplier id
- *   `claude-haiku-4-5-20251001`, so a served turn is proof the gateway rewrote
+ *   `claude-haiku-5-5`, so a served turn is proof the gateway rewrote
  *   the catalog route id the client sent.
  * - **Inbound.** The gateway is asked directly for the *supplier* id and refuses
  *   it, so the catalog vocabulary is the only one it accepts.

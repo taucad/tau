@@ -211,9 +211,11 @@ export const exportCommand = defineCommand({
     process.once('SIGTERM', onSignal);
     let document: ReturnType<typeof client.open> | undefined;
     try {
+      // One export, then exit: a file watcher would only race the shutdown.
       const opened = client.open({
         source: { path: inputFilename },
         parameters: suppliedParameters,
+        watch: false,
       });
       document = opened;
       const exportOutcome = async (): Promise<{

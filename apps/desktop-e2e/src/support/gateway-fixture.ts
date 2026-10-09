@@ -34,11 +34,11 @@ import { desktopE2EProviderStubUrl } from '#support/config.js';
  */
 
 /** The catalog row the deterministic specs drive, and the wire it speaks. */
-export const gatewayFixtureModelName = 'Haiku 4.5';
+export const gatewayFixtureModelName = 'Haiku 5.5';
 /** The same row's catalog id — what a client sends, and all the gateway accepts. */
-export const gatewayFixtureModelId = 'anthropic-claude-haiku-4.5';
+export const gatewayFixtureModelId = 'anthropic-claude-haiku-5.5';
 /** The supplier id the gateway rewrites that row to; what this stub must receive. */
-export const gatewayFixtureSupplierModelId = 'claude-haiku-4-5-20251001';
+export const gatewayFixtureSupplierModelId = 'claude-haiku-5-5';
 
 /** The assistant's opening line, before the tool call. */
 export const gatewayFixtureOpeningText = 'Browser host started the workspace change.';

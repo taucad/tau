@@ -431,8 +431,7 @@ export const selectProjectRow = (status: ProjectSidebarStatus, idleWindowMillise
   /* One conflict, counted once (R2). It is the project's checkout that is
    * conflicted, not each of its chats. */
   const conflicted = revisions?.sync.state === 'conflicted';
-  /* A read still retrying is the trigger's quiet state, not a reason to call the person. */
-  const settings = summarizeRecordIssues(status.settings.filter((issue) => issue.state !== 'reading'));
+  const settings = summarizeRecordIssues(status.settings);
   const closing = session.live && session.status?.state === 'closing';
   return {
     projectId: session.projectId,

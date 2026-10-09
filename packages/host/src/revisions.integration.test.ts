@@ -1264,9 +1264,10 @@ for (const row of ports) {
 
       await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
       await held.settlementFor('run-1');
-      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-2' });
+      /* Asserted, as in the descends case: a refusal fails here with its code, not as a timeout. */
+      expect(await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-2' })).toMatchObject({ status: 'applied' });
       await held.settlementFor('run-2');
-      await startTurn(held.launcher, { chatId: 'chat-2', runId: 'run-3' });
+      expect(await startTurn(held.launcher, { chatId: 'chat-2', runId: 'run-3' })).toMatchObject({ status: 'applied' });
       await held.settlementFor('run-3');
 
       await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);

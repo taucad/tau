@@ -121,6 +121,8 @@ vi.mock('@taucad/fs-bridge', () => ({
     closed: new Promise<void>((resolve) => {
       proxyDeaths.push(resolve);
     }),
+    ready: Promise.resolve(),
+    hello: { payload: { state: 'ready' } },
     configureProjectRoots: mockConfigureProjectRoots,
     mount: mockMount,
     unmount: mockUnmount,

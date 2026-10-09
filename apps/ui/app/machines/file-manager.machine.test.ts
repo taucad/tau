@@ -95,6 +95,8 @@ const mockOpenFileSystemBridge = vi.fn((_worker: Worker, _options?: { root?: str
 const mockWorkspaceReadDirectory = vi.fn<(path: string) => Promise<unknown[]>>();
 const mockWorkspaceStat = vi.fn<(path: string) => Promise<unknown>>();
 const mockViewReaddirWithStats = vi.fn<(path: string) => Promise<unknown[]>>();
+/* What a rooted view's hello reports; `unavailable` is a root registered after worker boot. */
+let mockViewHelloState: 'ready' | 'unavailable' = 'ready';
 
 vi.mock('@taucad/fs-bridge', () => ({
   createFileSystemBridge: () => mockCreateFileSystemBridge(),
@@ -114,6 +116,8 @@ vi.mock('@taucad/fs-bridge', () => ({
       get watchReady() {
         return mockAuthorityWatch;
       },
+      ready: Promise.resolve(),
+      hello: { payload: { state: mockViewHelloState } },
       pollExternalChanges: vi.fn(async () => undefined),
       configureProjectRoots: mockConfigureProjectRoots,
       mount: mockMount,
@@ -197,6 +201,7 @@ describe('fileManagerMachine', () => {
     mockConfigureProjectRoots.mockResolvedValue(undefined);
     mockWorkspaceReadDirectory.mockResolvedValue([]);
     mockViewReaddirWithStats.mockResolvedValue([]);
+    mockViewHelloState = 'ready';
     /* No dependency mount in this harness: the OPFS mount is the worker's. */
     mockWorkspaceStat.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
     mockDesktopBridge = undefined;
@@ -423,6 +428,33 @@ describe('fileManagerMachine', () => {
     const snapshot = actor.getSnapshot();
     expect(snapshot.context.contentService).toBeDefined();
     expect(snapshot.context.treeService).toBeDefined();
+
+    actor.stop();
+  });
+
+  it('should reach ready without listing a root registered after worker boot', async () => {
+    mockViewHelloState = 'unavailable';
+    mockViewReaddirWithStats.mockRejectedValue(new Error('The requested filesystem root is unavailable.'));
+    const actor = createActor(fileManagerMachine, {
+      input: { rootDirectory: '/test', shouldInitializeOnStart: true },
+    });
+    actor.start();
+
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
+    expect(mockViewReaddirWithStats).not.toHaveBeenCalledWith('');
+
+    // Once the root is registered, the reload the provider dispatches lists it.
+    mockViewHelloState = 'ready';
+    mockViewReaddirWithStats.mockResolvedValue([]);
+    actor.send({ type: 'reloadWorkspace' });
+    await vi.waitFor(() => {
+      expect(mockViewReaddirWithStats).toHaveBeenCalledWith('');
+    });
+    await vi.waitFor(() => {
+      expect(actor.getSnapshot().value).toBe('ready');
+    });
 
     actor.stop();
   });

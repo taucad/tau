@@ -63,7 +63,7 @@ test('scripts each turn from its own index', async () => {
 test('refuses a request the gateway did not rewrite to the supplier id', async () => {
   fixture = await startGatewayFixture();
 
-  await expect(forward('anthropic-claude-haiku-4.5')).rejects.toThrow();
+  await expect(forward('anthropic-claude-haiku-5.5')).rejects.toThrow();
   expect(fixture.supplierModels).toStrictEqual([]);
 });
 

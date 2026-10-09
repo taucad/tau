@@ -37,6 +37,7 @@ const readHashedDownloads = async () => {
 test('adopts independent rooted layout and view records in the retained browser document', async () => {
   await target.navigate('/__e2e/project-file-tree');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
+  const initialTimeOrigin = await target.evaluate(() => performance.timeOrigin);
   const route = await target.evaluate(() => location.pathname.split('/').at(-1));
   const state = await readProjectStorageState();
   const config = state.configs.find(
@@ -84,10 +85,25 @@ test('adopts independent rooted layout and view records in the retained browser 
     }
     throw error;
   }
+  // The route resolves its default chat asynchronously and replaces the URL once that durable chat is ready.
+  await expect
+    .poll(
+      async () => {
+        const chatId = await target.evaluate(() => new URL(location.href).searchParams.get('chat'));
+        if (!chatId) {
+          return false;
+        }
+        const physical = await readProjectTree(config);
+        return physical[`/.tau/chats/${chatId}/chat.json`] !== undefined;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
   const before = await target.evaluate(() => ({
     href: location.href,
     timeOrigin: performance.timeOrigin,
   }));
+  expect(before.timeOrigin).toBe(initialTimeOrigin);
   const layoutPath = '/.tau/workbench/layout.json';
   await expect
     .poll(

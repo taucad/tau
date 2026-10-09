@@ -8,6 +8,7 @@
  * Usage: pnpm nx run scripts:validate-grafana
  */
 import { readdirSync, readFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -37,6 +38,33 @@ export const grafanaUidProblems = (sources: readonly UidSource[]): string[] => {
 
 type RuleGroup = { readonly rules?: ReadonlyArray<{ readonly uid?: string }> };
 
+/** A rule with every string's whitespace squashed, so YAML line folding is not a difference. */
+const comparable = (rule: unknown): unknown =>
+  JSON.parse(
+    JSON.stringify(rule, (_key, value: unknown) =>
+      typeof value === 'string' ? value.replaceAll(/\s+/gu, ' ').trim() : value,
+    ),
+  );
+
+/**
+ * The local provisioning copy must carry exactly the Grafana Cloud rules, field for field: queries,
+ * thresholds, waits, no-data handling, labels and annotations. A local stack otherwise cannot show a
+ * page Cloud would send, or shows one it would not.
+ */
+export const alertParityProblems = (provisioned: readonly RuleGroup[], cloud: readonly RuleGroup[]): string[] => {
+  const byUid = (groups: readonly RuleGroup[]) =>
+    new Map(groups.flatMap((group) => group.rules ?? []).map((rule) => [rule.uid ?? '', rule] as const));
+  const local = byUid(provisioned);
+  const remote = byUid(cloud);
+  return [
+    ...[...remote.keys()].filter((uid) => !local.has(uid)).map((uid) => `alert rule "${uid}" is missing locally`),
+    ...[...local.keys()].filter((uid) => !remote.has(uid)).map((uid) => `alert rule "${uid}" is missing in Cloud`),
+    ...[...remote]
+      .filter(([uid, rule]) => local.has(uid) && !isDeepStrictEqual(comparable(local.get(uid)), comparable(rule)))
+      .map(([uid]) => `alert rule "${uid}" differs between alerts.yaml and infra/grafana/alerts`),
+  ];
+};
+
 const ruleUids = (groups: readonly RuleGroup[]): string[] =>
   groups.flatMap((group) => (group.rules ?? []).flatMap((rule) => (rule.uid === undefined ? [] : [rule.uid])));
 
@@ -63,7 +91,13 @@ const main = (): void => {
     ),
   ];
 
-  const problems = grafanaUidProblems(sources);
+  const problems = [
+    ...grafanaUidProblems(sources),
+    ...alertParityProblems(
+      provisioned.groups ?? [],
+      jsonFiles(join(grafanaRoot, 'alerts')).map((file) => read(file)),
+    ),
+  ];
   if (problems.length > 0) {
     throw new Error(`Invalid Grafana provisioning:\n${problems.map((problem) => `  - ${problem}`).join('\n')}`);
   }

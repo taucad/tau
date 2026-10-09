@@ -1292,6 +1292,184 @@ describe('Simulated X1C start form', () => {
       blocked: [expect.objectContaining({ id: 'plate', detail: 'Say which plate is on the printer.' })],
     });
   });
+
+  const pla = (color: string) => ({
+    materialType: 'PLA',
+    color,
+    preset: { profileId: 'GFL99', settingId: 'GFSL99' },
+    nozzleTemperature: { min: 190, max: 230 },
+  });
+
+  it('should map to a loaded AMS tray before the external spool’s remembered setting, unless the spool feeds now', async () => {
+    const { simulator, after } = await open({ readArtifact: readSlices });
+    await act(simulator, 'filament:material.set', { slot: spool, material: pla('#000000FF') });
+    // Tray a1 holds white PLA; the holder only remembers black PLA and cannot report a spool.
+    const black = sliced({ ...x1cSlice, filament_colour: '#000000' });
+    await expect(check(simulator, black, {})).resolves.toMatchObject({ completed: { amsMapping: [0] } });
+    await act(simulator, 'filament:material.load', { slot: spool, toolheadId: 'tool-0' });
+    const waiting = await after(20);
+    const asking = waiting.activities.find(({ awaiting }) => awaiting !== undefined);
+    await act(simulator, 'filament:interaction.respond', {
+      activityId: asking?.activityId,
+      promptId: promptIdOf(asking?.awaiting),
+      answer: 'done',
+    });
+    expect(valueOf(await after(10), 'filament')).toMatchObject({ routes: [{ current: spool }] });
+    await expect(check(simulator, black, {})).resolves.toMatchObject({ completed: { amsMapping: [254] } });
+  });
+
+  it('should block a mapping onto a slot that reports no spool, even when the slot still names the material', async () => {
+    const { simulator } = await open({ readArtifact: readSlices });
+    await act(simulator, 'filament:material.set', { slot: a(4), material: pla('#F2F2F2FF') });
+    await expect(check(simulator, sliced(), { amsMapping: [3] })).resolves.toMatchObject({
+      blocked: [
+        expect.objectContaining({
+          id: 'filament',
+          detail: 'No spool is reported in the slot mapped to the PLA filament.',
+        }),
+      ],
+    });
+  });
+
+  it('should say a file states no filament diameter rather than call it a mismatch', async () => {
+    const { simulator } = await open({ readArtifact: readSlices });
+    const { filament_diameter: _diameter, ...unstated } = x1cSlice;
+    await expect(check(simulator, sliced(unstated), {})).resolves.toMatchObject({
+      blocked: [
+        expect.objectContaining({
+          id: 'nozzle',
+          detail: 'The file does not say which filament diameter it was sliced for.',
+        }),
+      ],
+    });
+  });
+
+  it('should keep a hole in a stated mapping where it is', async () => {
+    const { simulator } = await open({ readArtifact: readSlices });
+    const program = sliced(
+      { ...x1cSlice, filament_type: 'PETG;PLA', filament_colour: '#1E5AA8;#F2F2F2', filament_diameter: '1.75,1.75' },
+      [2],
+    );
+    await expect(check(simulator, program, { amsMapping: [null, 0] })).resolves.toMatchObject({
+      completed: { amsMapping: [-1, 0] },
+      blocked: [],
+    });
+  });
+});
+
+describe('Simulated X1C operations it never sent, stops during filament work and repeated ids', () => {
+  it('should leave every confirmation pending for an operation this session never sent', async () => {
+    const { simulator } = await open();
+    const actions = actionsOf(simulator);
+    const never = (target: `${string}:${string}`, parameters: unknown, expectedRunId?: string) => {
+      const [componentId = '', action = ''] = target.split(':');
+      return actions.confirm({
+        operationId: `never-${target}`,
+        componentId,
+        action,
+        version: 1,
+        expectedRunId: expectedRunId ?? null,
+        parameters,
+      });
+    };
+    // Each of these reads as done or refused from an idle printer's report alone.
+    expect(never('controller:run.cancel', {}, 'old-run')).toEqual({ status: 'pending' });
+    expect(never('controller:run.pause', {}, 'old-run')).toEqual({ status: 'pending' });
+    expect(never('filament:material.load', { slot: a(1), toolheadId: 'tool-0' })).toEqual({ status: 'pending' });
+    expect(never('filament:bambu.filament.abort', {})).toEqual({ status: 'pending' });
+  });
+
+  it('should stop a filament load with the AMS abort Bambu Studio sends, and accept once the AMS is idle', async () => {
+    const { simulator, after } = await open();
+    const load = await act(simulator, 'filament:material.load', { slot: a(2), toolheadId: 'tool-0' });
+    await after(1);
+    await expect(simulator.session.stop({ operationId: 'stop-load', signal })).resolves.toMatchObject({
+      status: 'accepted',
+    });
+    expect(lastRequest(simulator, 'stop')).toBeDefined();
+    expect(lastRequest(simulator, 'ams_control')).toMatchObject({ param: 'abort' });
+    await after(40);
+    expect(load.confirm()).toBe('refuted');
+  });
+
+  it('should not call a stop done while a tag read runs on, and reconcile it once the read ends', async () => {
+    const { simulator, after } = await open();
+    await act(simulator, 'filament:material.unload', { slot: a(1), toolheadId: 'tool-0' });
+    await after(30);
+    await act(simulator, 'filament:bambu.ams.read-tag', a(2));
+    const reconcile = async () => simulator.session.reconcile({ operationId: 'stop-read', kind: 'stop', signal });
+    await expect(simulator.session.stop({ operationId: 'stop-read', signal })).resolves.toMatchObject({
+      status: 'unknown',
+    });
+    // A tag read has no abort.
+    expect(lastRequest(simulator, 'ams_control')).toBeUndefined();
+    await expect(reconcile()).resolves.toMatchObject({ status: 'unknown' });
+    await after(5);
+    await expect(reconcile()).resolves.toMatchObject({ status: 'accepted' });
+  });
+
+  it('should read a later pause as the person’s once an agent’s acknowledged pause never showed', async () => {
+    const { simulator, after } = await open({ faults: ['pause-ignored-once'] });
+    const { runId } = await startJob(simulator);
+    await expect(actOnRun(simulator, 'controller:run.pause', { runId, requester: 'agent' })).resolves.toMatchObject({
+      receipt: { status: 'accepted' },
+    });
+    // The reply window (100 ms here) passes with the run still printing.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 150);
+    });
+    const printing = await after(1);
+    expect(printing.run?.state).not.toBe('paused');
+    const screen = await simulator.connect();
+    if (screen.actions.type !== 'supported') {
+      throw new Error('expected actions');
+    }
+    await screen.actions.apply({
+      operationId: 'screen-pause',
+      componentId: 'controller',
+      action: 'run.pause',
+      version: 1,
+      expectedRunId: runId,
+      parameters: {},
+      requestedBy: { kind: 'user' },
+      signal,
+    });
+    await settle();
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { paused: { by: 'person' } },
+    });
+    await screen.close();
+  });
+
+  it('should send one upload and one start for two calls under one operation id', async () => {
+    const { simulator } = await open();
+    const { jobs } = simulator.session;
+    if (jobs.type !== 'supported' || jobs.delivery !== 'stored') {
+      throw new Error('expected stored jobs');
+    }
+    const base = { operationId: 'job-1', expectedMachineId: 'simulated-x1c', artifact, configuration, signal };
+    const prepared = await jobs.prepare(base);
+    if (prepared.status !== 'ready' || prepared.remoteName === undefined) {
+      throw new Error('expected a ready preparation');
+    }
+    const { remoteName, providerData } = prepared;
+    const transfer = { ...base, operationId: 'transfer-1', remoteName, providerData };
+    const transfers = await Promise.all([jobs.transfer(transfer), jobs.transfer(transfer)]);
+    expect(transfers).toMatchObject([{ status: 'accepted' }, { status: 'unknown', reason: 'sending' }]);
+    const start = { ...base, operationId: 'start-1', remoteName, providerData, transferId: remoteName };
+    const starts = await Promise.all([jobs.start(start), jobs.start(start)]);
+    expect(starts).toMatchObject([{ status: 'accepted' }, { status: 'unknown', reason: 'sending' }]);
+    expect(simulator.writes().filter((write) => write.startsWith('upload:') || write === 'project_file')).toEqual([
+      `upload:${remoteName}`,
+      'project_file',
+    ]);
+    // Once settled, the id hands back its receipt; under another kind it is a conflict.
+    await expect(jobs.start(start)).resolves.toEqual(starts[0]);
+    await expect(jobs.transfer({ ...transfer, operationId: 'start-1' })).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_OPERATION_ID_CONFLICT',
+    });
+  });
 });
 
 /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */

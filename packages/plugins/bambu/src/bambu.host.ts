@@ -9,7 +9,6 @@ import type {
   MachineDiscoveryEvent,
   MachineDiscoveryInput,
   MachineDiscoveryRuntime,
-  MachineManifest,
   MachineNetworkStream,
   MachineSession,
   MachineTransportTrust,
@@ -19,10 +18,11 @@ import type { MqttClient as MqttClientConstructor } from 'mqtt';
 
 import { prepareBambuArtifact } from '#bambu.archive.js';
 import type { BambuWireForm } from '#bambu.commands.js';
-import { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
+import { bambuFtpsPort, bambuManifests, bambuServicePort } from '#bambu.manifest.js';
 import type { BambuModel } from '#bambu.protocol.js';
 import {
   BambuProtocolError,
+  bambuModels,
   bambuTopic,
   isBambuSerial,
   parseBambuDiscoveryDatagram,
@@ -97,7 +97,7 @@ export async function* discoverBambuMachines(
     yield Object.freeze({
       type: 'found',
       candidate: Object.freeze({
-        id: `${model === 'X1C' ? 'bambu' : 'bambu-a1-mini'}:${input.configuration.serial ?? address}`,
+        id: `${bambuModels[model].providerId}:${input.configuration.serial ?? address}`,
         name: input.configuration.logicalId,
         endpoint: Object.freeze({ transport: 'network', address, interface: 'manual' }),
         claimedIdentity: Object.freeze({
@@ -277,17 +277,17 @@ const resolveAccessCode = async (
  *
  * @param input - Admitted connection input naming the printer.
  * @param runtime - Host network authority.
- * @param trust - The MQTT service's pinned trust.
+ * @param service - The MQTT service's pinned trust, and its port as the manifest declares it.
  * @returns The open stream.
  */
 const openMqttStream = async (
   input: MachineConnectInput<Binding>,
   runtime: MachineConnectionRuntime,
-  trust: MachineTransportTrust,
+  { trust, port }: Readonly<{ trust: MachineTransportTrust; port: number }>,
 ): Promise<MachineNetworkStream> => {
   try {
     return await runtime.connectStream({
-      endpoint: { address: bambuCandidateAddress(input.candidate), port: 8883 },
+      endpoint: { address: bambuCandidateAddress(input.candidate), port },
       transport: 'tls',
       trust,
       connectTimeout: 10_000,
@@ -306,16 +306,17 @@ const openMqttStream = async (
   }
 };
 
-/** Capture one bounded A1 mini JPEG frame over its pinned TLS camera service.
+/** Capture one bounded JPEG frame over a pinned TLS camera service (the A1 mini's framed JPEG stream).
  * @param input - Admitted connection input.
  * @param runtime - Host-owned network and secret authority.
- * @param signal - Cancels this capture independently of the observation session.
+ * @param capture - The camera service's port as the manifest declares it, and the signal that cancels this capture
+ *   independently of the observation session.
  * @returns The first complete JPEG frame.
  */
-const captureA1MiniStill = async (
+const captureJpegStill = async (
   input: MachineConnectInput<Binding>,
   runtime: MachineConnectionRuntime,
-  signal: AbortSignal,
+  { port, signal }: Readonly<{ port: number; signal: AbortSignal }>,
 ) => {
   const accessCode = await resolveAccessCode(input, runtime);
   if (Buffer.byteLength(accessCode) > 32) {
@@ -327,7 +328,7 @@ const captureA1MiniStill = async (
   }
   const captureSignal = AbortSignal.any([signal, input.signal, AbortSignal.timeout(60_000)]);
   const stream = await runtime.connectStream({
-    endpoint: { address: bambuCandidateAddress(input.candidate), port: 6000 },
+    endpoint: { address: bambuCandidateAddress(input.candidate), port },
     transport: 'tls',
     trust,
     connectTimeout: 10_000,
@@ -380,29 +381,31 @@ const captureA1MiniStill = async (
 };
 
 /**
- * An X1C's still: the host captures one frame from the pinned RTSPS camera. Another model's camera needs its own
- * manifest and pin; the A1 mini uses framed JPEG over TLS instead.
+ * A printer's still, by its model's camera: the host captures one RTSPS frame (X1C), or the provider reads one framed
+ * JPEG over TLS (A1 mini). Either way from the pinned camera service the manifest declares.
  *
  * @param input - Admitted connection input with the camera trust and secret.
  * @param runtime - Host capture authority.
- * @param model - The printer's model, from its status or its discovery.
+ * @param model - The printer's model; its manifest declares the camera's port.
  * @returns The session's still capability.
  */
 const bambuStillCapture = (
   input: MachineConnectInput<Binding>,
   runtime: MachineConnectionRuntime,
-  model: string | undefined,
+  model: BambuModel,
 ): MachineSession<BambuSubmission>['stillCapture'] => {
   const trust = input.connection.serviceTrust['camera'];
   const { captureNetworkStill } = runtime;
-  if (trust?.type !== 'pinned' || (model !== 'A1 mini' && (model !== 'X1C' || !captureNetworkStill))) {
+  const { camera } = bambuModels[model];
+  if (trust?.type !== 'pinned' || (camera === 'rtsps' && !captureNetworkStill)) {
     return Object.freeze({ type: 'unsupported' });
   }
+  const port = bambuServicePort(bambuManifests[model], 'camera');
   return Object.freeze({
     type: 'supported',
     async capture(captureInput: Readonly<{ signal: AbortSignal }>) {
-      if (model === 'A1 mini') {
-        return captureA1MiniStill(input, runtime, captureInput.signal);
+      if (camera === 'jpeg-tls') {
+        return captureJpegStill(input, runtime, { port, signal: captureInput.signal });
       }
       if (!captureNetworkStill) {
         throw new Error('BAMBU_CAMERA_UNSUPPORTED');
@@ -410,7 +413,7 @@ const bambuStillCapture = (
       return captureNetworkStill({
         endpoint: {
           address: bambuCandidateAddress(input.candidate),
-          port: 322,
+          port,
         },
         trust,
         secretRef: input.connection.secretRef,
@@ -435,7 +438,7 @@ export const connectBambuMachine = async (
   runtime: MachineConnectionRuntime,
   model: BambuModel = 'X1C',
 ): Promise<MachineSession<BambuSubmission>> => {
-  const manifest: MachineManifest = model === 'X1C' ? bambuX1cManifest : bambuA1MiniManifest;
+  const manifest = bambuManifests[model];
   // The bound serial fences the printer; an advertisement that names another one is a different printer.
   const bound = input.configuration.serial;
   const claimed = input.candidate.claimedIdentity.serial;
@@ -454,7 +457,7 @@ export const connectBambuMachine = async (
     throw new Error('BAMBU_MQTT_PIN_REQUIRED');
   }
   const accessCode = await resolveAccessCode(input, runtime);
-  const network = await openMqttStream(input, runtime, trust);
+  const network = await openMqttStream(input, runtime, { trust, port: bambuServicePort(manifest, 'mqtt') });
   let client: MqttClientConstructor;
   try {
     const { mqttClient: mqttClientConstructor } = await loadBambuHostLibraries();
@@ -554,7 +557,7 @@ export const connectBambuMachine = async (
         throw new BambuProtocolError('MACHINE_TRANSFER_UNAVAILABLE');
       }
       const { bytesWritten } = await runtime.uploadFile({
-        endpoint: { address: bambuCandidateAddress(input.candidate), port: 990 },
+        endpoint: { address: bambuCandidateAddress(input.candidate), port: bambuFtpsPort },
         trust: input.connection.serviceTrust['ftp'] ?? trust,
         secretRef: input.connection.secretRef,
         username: 'bblp',

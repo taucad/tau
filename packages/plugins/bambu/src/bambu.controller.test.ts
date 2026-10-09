@@ -19,7 +19,7 @@ import { zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 
 import { bambuA1MiniMachine, bambuMachine } from '#bambu.machine.js';
-import { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
+import { bambuA1MiniManifest, bambuServicePort, bambuX1cManifest } from '#bambu.manifest.js';
 
 const report =
   '{"print":{"sequence_id":"8","printer_type":"BL-P001","nozzle_diameter":"0.4","nozzle_temper":215,"nozzle_target_temper":220,"bed_temper":60,"bed_target_temper":65,"gcode_state":"RUNNING","mc_percent":42,"mc_remaining_time":3,"subtask_id":"run-1","subtask_name":"Cube","layer_num":12,"total_layer_num":120,"spd_lvl":2,"spd_mag":100,"stg_cur":1,"hms":[{"attr":201327360,"code":196619}],"cooling_fan_speed":"15","wifi_signal":"-47dBm","sdcard":true,"lights_report":[{"node":"chamber_light","mode":"on"}],"ams":{"tray_exist_bits":"1","tray_now":"0","tray_tar":"0","ams":[{"humidity":"3","temp":"22","tray":[{"tray_type":"PLA","tray_info_idx":"GFA00"},{},{},{}]}]}}}';
@@ -291,7 +291,8 @@ describe('Bambu read-only controller', () => {
     expect(resolveSecret).toHaveBeenCalledWith(expect.objectContaining({ reference: 'vault:bambu-x1c' }));
     expect(connectStream).toHaveBeenCalledWith(
       expect.objectContaining({
-        endpoint: { address: '192.0.2.10', port: 8883 },
+        // The ports the provider dials are the ones its manifest declares and the binding pins.
+        endpoint: { address: '192.0.2.10', port: bambuServicePort(bambuX1cManifest, 'mqtt') },
         transport: 'tls',
         trust: { type: 'pinned', digest: pinnedDigest },
       }),
@@ -332,7 +333,7 @@ describe('Bambu read-only controller', () => {
     await expect(session.stillCapture.capture({ signal })).resolves.toMatchObject({ mediaType: 'image/jpeg' });
     expect(captureNetworkStill).toHaveBeenCalledWith(
       expect.objectContaining({
-        endpoint: { address: '192.0.2.10', port: 322 },
+        endpoint: { address: '192.0.2.10', port: bambuServicePort(bambuX1cManifest, 'camera') },
         connectTimeout: 60_000,
         path: '/streaming/live/1',
         secretRef: 'vault:bambu-x1c',
@@ -1053,7 +1054,7 @@ describe('Bambu read-only controller', () => {
       expect(still.bytes).toEqual(jpeg);
       expect(connectStream).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          endpoint: { address: '192.0.2.10', port: 6000 },
+          endpoint: { address: '192.0.2.10', port: bambuServicePort(bambuA1MiniManifest, 'camera') },
           trust: { type: 'pinned', digest: pinnedDigest },
           maximumWriteBytes: 80,
         }),

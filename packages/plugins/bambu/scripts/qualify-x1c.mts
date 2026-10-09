@@ -76,14 +76,20 @@ import { z } from 'zod';
 
 import { bambuCandidateAddress } from '#bambu.host.js';
 import { bambuMachine } from '#bambu.machine.js';
+import { bambuFtpsPort, bambuServicePort, bambuX1cManifest } from '#bambu.manifest.js';
 import { parseBambuDiscoveryDatagram } from '#bambu.protocol.js';
 
+// oxlint-disable-next-line no-restricted-imports -- The operator script's own sibling module; scripts have no `#` alias.
+import { printCubeOutcome } from './print-cube-outcome.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The operator script's own sibling module; scripts have no `#` alias.
 import { tapProjectFileReplies } from './project-file-reply.mjs';
 // oxlint-disable-next-line no-restricted-imports -- The same sibling module's reply type.
 import type { ProjectFileReply } from './project-file-reply.mjs';
 
 const execFileAsync = promisify(execFile);
+// The X1C's ports, read from its manifest as the provider reads them.
+const mqttPort = bambuServicePort(bambuX1cManifest, 'mqtt');
+const cameraPort = bambuServicePort(bambuX1cManifest, 'camera');
 const cameraReconnectDelay = 5000;
 /** The live view's pause between captures; each capture is its own camera session. Milliseconds. */
 const cameraCaptureInterval = 1000;
@@ -312,7 +318,7 @@ const resolveCurrentConfiguration = async (
   if (!configuration.trust) {
     throw new QualificationError('X1C_APPROVED_TRUST_PINS_REQUIRED');
   }
-  const configuredAddressMatches = await readCertificate(configuration.address, 8883, 1500).then(
+  const configuredAddressMatches = await readCertificate(configuration.address, mqttPort, 1500).then(
     (certificate) => matchesPin(certificate, configuration.trust?.mqtt ?? ''),
     () => false,
   );
@@ -347,8 +353,8 @@ const prepareReadOnlyConfiguration = async (): Promise<void> => {
     throw new QualificationError('X1C_DISCOVERY_SERIAL_MISSING');
   }
   const [observedMqtt, observedCamera] = await Promise.all([
-    probeCertificate(bambuCandidateAddress(candidate), 8883),
-    probeCertificate(bambuCandidateAddress(candidate), 322),
+    probeCertificate(bambuCandidateAddress(candidate), mqttPort),
+    probeCertificate(bambuCandidateAddress(candidate), cameraPort),
   ]);
   if (observedMqtt !== mqtt || observedCamera !== camera) {
     throw new QualificationError('X1C_APPROVED_TRUST_PIN_MISMATCH');
@@ -416,7 +422,7 @@ const certificatePem = (bytes: Uint8Array<ArrayBuffer>): string => {
 };
 
 const resolveFtpTrust = async (configuration: QualificationConfiguration): Promise<PinnedTrust> => {
-  const certificate = await readCertificate(configuration.address, 990);
+  const certificate = await readCertificate(configuration.address, bambuFtpsPort);
   const approved = [configuration.trust?.mqtt, configuration.trust?.camera].find(
     (candidate) => candidate && matchesPin(certificate, candidate),
   );
@@ -436,7 +442,7 @@ const uploadBambuFile = async (
   }
   if (
     input.endpoint.address !== configuration.address ||
-    input.endpoint.port !== 990 ||
+    input.endpoint.port !== bambuFtpsPort ||
     input.username !== 'bblp' ||
     input.secretRef !== 'keychain:x1c-qualification' ||
     !/^tau-[A-Za-z0-9_-]{1,64}\.gcode\.3mf$/u.test(input.remoteName) ||
@@ -446,7 +452,7 @@ const uploadBambuFile = async (
     throw new QualificationError('X1C_FTPS_UPLOAD_REQUEST_INVALID');
   }
   input.signal.throwIfAborted();
-  const certificate = await readCertificate(configuration.address, 990);
+  const certificate = await readCertificate(configuration.address, bambuFtpsPort);
   if (!matchesPin(certificate, trust.digest)) {
     throw new QualificationError('X1C_TLS_PIN_MISMATCH');
   }
@@ -458,7 +464,7 @@ const uploadBambuFile = async (
   try {
     await client.access({
       host: configuration.address,
-      port: 990,
+      port: bambuFtpsPort,
       user: input.username,
       password: await readAccessCode(configuration),
       secure: 'implicit',
@@ -503,7 +509,7 @@ const uploadBambuFile = async (
 const validateRtspsStillInput = (input: MachineNetworkStillInput, configuration: QualificationConfiguration): void => {
   if (
     input.endpoint.address !== configuration.address ||
-    input.endpoint.port !== 322 ||
+    input.endpoint.port !== cameraPort ||
     input.path !== '/streaming/live/1' ||
     input.username !== 'bblp' ||
     input.secretRef !== 'keychain:x1c-qualification' ||
@@ -614,7 +620,7 @@ const configuredX1cStillInput = (
     throw new QualificationError('X1C_APPROVED_TRUST_PINS_REQUIRED');
   }
   return {
-    endpoint: { address: configuration.address, port: 322 },
+    endpoint: { address: configuration.address, port: cameraPort },
     trust: pinned(configuration.trust.camera),
     secretRef: 'keychain:x1c-qualification',
     username: 'bblp',
@@ -1484,6 +1490,8 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     }
     let observedActive = false;
     let lastProgress = -1;
+    // The run this stage started: the receipt's, else the first live run after the start (the printer was idle).
+    let runId = receipt.status === 'accepted' && receipt.kind === 'start' ? receipt.runId : undefined;
     const deadline = Date.now() + 90 * 60_000;
     while (Date.now() < deadline) {
       // oxlint-disable-next-line no-await-in-loop -- supervised monitoring reads one durable machine projection serially.
@@ -1492,22 +1500,31 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
         signal: cancellation.signal,
       });
       const { run } = current.snapshot;
-      const active = ['starting', 'running', 'paused', 'finishing'].includes(run?.state ?? '');
-      if (active) {
+      if (runId === undefined && (run?.state === 'starting' || run?.state === 'running' || run?.state === 'paused')) {
+        ({ runId } = run);
+      }
+      const outcome = printCubeOutcome(run, runId);
+      if (outcome !== 'waiting') {
         observedActive = true;
       }
       if (receipt.status === 'unknown' && !observedActive) {
         throw new QualificationError('X1C_START_UNCONFIRMED');
       }
-      const completed = current.snapshot.state.status === 'ready' && run === undefined;
-      if (observedActive && completed) {
+      if (outcome === 'completed') {
         process.stdout.write(
           `${JSON.stringify({ stage: 'print-cube', status: 'completed', completedAt: new Date().toISOString() })}\n`,
         );
         return;
       }
-      if (observedActive && (run?.state === 'failed' || current.snapshot.state.status === 'alarm')) {
+      if (outcome === 'cancelled') {
+        throw new QualificationError('X1C_PRINT_CANCELLED');
+      }
+      if (outcome === 'failed' || (observedActive && current.snapshot.state.status === 'alarm')) {
         throw new QualificationError('X1C_PRINT_FAILED');
+      }
+      // The printer reports its last run until the next one, so losing this one means another run replaced it.
+      if (observedActive && outcome === 'waiting') {
+        throw new QualificationError('X1C_PRINT_RUN_LOST');
       }
       const progress = Math.floor((run?.progress.fraction ?? 0) * 100);
       if (observedActive && progress !== lastProgress) {
@@ -1655,8 +1672,8 @@ const main = async (): Promise<void> => {
             ? digest(Uint8Array.from(Buffer.from(candidate.claimedIdentity.serial)))
             : undefined,
           endpointSha256: digest(Uint8Array.from(Buffer.from(bambuCandidateAddress(candidate)))),
-          mqtt: await probeCertificate(bambuCandidateAddress(candidate), 8883),
-          camera: await probeCertificate(bambuCandidateAddress(candidate), 322),
+          mqtt: await probeCertificate(bambuCandidateAddress(candidate), mqttPort),
+          camera: await probeCertificate(bambuCandidateAddress(candidate), cameraPort),
         })}\n`,
       );
       return;
@@ -1669,8 +1686,8 @@ const main = async (): Promise<void> => {
     if (stage === 'probe-read-only') {
       process.stdout.write(
         `${JSON.stringify({
-          mqtt: await probeCertificate(configuration.address, 8883),
-          camera: await probeCertificate(configuration.address, 322),
+          mqtt: await probeCertificate(configuration.address, mqttPort),
+          camera: await probeCertificate(configuration.address, cameraPort),
         })}\n`,
       );
       return;

@@ -19,7 +19,8 @@ import type {
 import { quantityKinds } from '@taucad/units/quantity';
 import { z } from 'zod';
 
-import { bambuExternalSpoolSlot } from '#bambu.protocol.js';
+import type { BambuModel } from '#bambu.protocol.js';
+import { BambuProtocolError, bambuExternalSpoolSlot, bambuModels } from '#bambu.protocol.js';
 
 const millimetres = (value: number) => ({ value, unit: 'mm' });
 const celsius = (value: number) => ({ value, unit: 'Cel' });
@@ -181,11 +182,12 @@ const calibrationSafety = { authority: 'person', attended: false, interlocks: []
 
 const fanLabels = { 'part-fan': 'Part fan', 'aux-fan': 'Auxiliary fan', 'chamber-fan': 'Chamber fan' } as const;
 
-const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] => {
-  const x1c = model === 'X1C';
-  const runQualification = x1c ? { qualification: proven } : {};
+const actions = (model: BambuModel): readonly MachineActionDefinition[] => {
+  const { chamber, flowRatioCalibration } = bambuModels[model];
+  const { controls, runControl, homing, calibrationConsequence } = manifestFacts[model];
+  const runQualification = runControl === undefined ? {} : { qualification: runControl };
   return [
-    ...(x1c
+    ...(chamber
       ? [
           standardMachineAction({
             componentId: 'chamber-light',
@@ -195,7 +197,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
             when: anyState,
             effects: ['illumination'],
             schema: standardMachineActions['switch.set'].schema,
-            qualification: provenInTesting,
+            qualification: controls,
           }),
         ]
       : []),
@@ -239,7 +241,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       outcome: halts,
       ...runQualification,
     }),
-    ...(x1c ? (['part-fan', 'aux-fan', 'chamber-fan'] as const) : (['part-fan'] as const)).map((componentId) =>
+    ...(chamber ? (['part-fan', 'aux-fan', 'chamber-fan'] as const) : (['part-fan'] as const)).map((componentId) =>
       standardMachineAction({
         id: 'level.set',
         componentId,
@@ -247,7 +249,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
         when: anyState,
         effects: ['thermal'],
         schema: fanLevel,
-        qualification: x1c ? provenInTesting : provenOnMini,
+        qualification: controls,
       }),
     ),
     standardMachineAction({
@@ -312,10 +314,8 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       when: idle,
       requires: material,
       safety: calibrationSafety,
-      consequence: x1c
-        ? 'The printer heats, prints test lines on the plate and scans them.'
-        : 'The printer heats and purges filament at the wiper to measure it.',
-      ...(x1c
+      consequence: calibrationConsequence,
+      ...(flowRatioCalibration
         ? {}
         : {
             // Flow ratio is measured automatically only by the X1 series' lidar.
@@ -370,7 +370,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       consequence: 'The toolhead and the bed move to their end stops.',
       confirms: 'acknowledgement',
       schema: z.strictObject({}),
-      ...(x1c ? { qualification: provenInTesting } : {}),
+      ...(homing === undefined ? {} : { qualification: homing }),
     }),
     standardMachineAction({
       id: 'motion.jog',
@@ -380,7 +380,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       consequence: 'One relative move inside the printer’s soft limits.',
       confirms: 'acknowledgement',
       schema: bambuJogSchema,
-      qualification: x1c ? provenInTesting : provenOnMini,
+      qualification: controls,
     }),
     defineMachineAction(
       {
@@ -401,79 +401,6 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
   ];
 };
 
-const fffProcess = (model: 'X1C' | 'A1 mini') =>
-  model === 'X1C'
-    ? ({
-        type: 'fff',
-        version: 1,
-        geometry: {
-          unit: 'mm',
-          buildVolume: { x: 256, y: 256, z: 256 },
-          enclosure: { outer: { x: 389, y: 389, z: 457 }, enclosed: true, doors: ['front', 'top'] },
-          kinematics: 'corexy',
-          bedMotion: 'z',
-          origin: 'front-left',
-          toolheadHome: { x: 1, y: 1, z: 256 },
-          materialSystemMount: 'top',
-        },
-        filamentDiameter: millimetres(1.75),
-        bed: {
-          maximumTemperature: celsius(120),
-          plates: [
-            { id: 'cool', label: 'Cool plate' },
-            { id: 'engineering', label: 'Engineering plate' },
-            { id: 'high-temperature', label: 'High temperature plate' },
-            { id: 'textured-pei', label: 'Textured PEI plate' },
-          ],
-        },
-        chamber: { enclosed: true, heated: false },
-        speedProfiles,
-        slicing: {
-          recommended: {
-            layerHeight: millimetres(0.2),
-            walls: 2,
-            infillPercent: 15,
-            nozzleTemperature: celsius(250),
-            bedTemperature: celsius(70),
-          },
-          presets,
-        },
-      } as const)
-    : ({
-        type: 'fff',
-        version: 1,
-        geometry: {
-          unit: 'mm',
-          buildVolume: { x: 180, y: 180, z: 180 },
-          enclosure: { outer: { x: 347, y: 315, z: 365 }, enclosed: false, doors: [] },
-          kinematics: 'cartesian-bedslinger',
-          bedMotion: 'y',
-          origin: 'front-left',
-          toolheadHome: { x: 1, y: 1, z: 180 },
-          materialSystemMount: 'external',
-        },
-        filamentDiameter: millimetres(1.75),
-        bed: {
-          maximumTemperature: celsius(80),
-          plates: [
-            { id: 'high-temperature', label: 'Smooth PEI plate' },
-            { id: 'textured-pei', label: 'Textured PEI plate' },
-          ],
-        },
-        chamber: { enclosed: false, heated: false },
-        speedProfiles,
-        slicing: {
-          recommended: {
-            layerHeight: millimetres(0.2),
-            walls: 2,
-            infillPercent: 15,
-            nozzleTemperature: celsius(215),
-            bedTemperature: celsius(60),
-          },
-          presets,
-        },
-      } as const);
-
 const speedProfiles = [
   { id: 'silent', label: 'Silent', percent: 50 },
   { id: 'standard', label: 'Standard', percent: 100 },
@@ -485,6 +412,78 @@ const presets = [
   { id: 'standard', label: 'Standard', layerHeight: millimetres(0.2) },
   { id: 'fine', label: 'Fine', layerHeight: millimetres(0.12) },
 ] as const;
+
+const x1cProcess = {
+  type: 'fff',
+  version: 1,
+  geometry: {
+    unit: 'mm',
+    buildVolume: { x: 256, y: 256, z: 256 },
+    enclosure: { outer: { x: 389, y: 389, z: 457 }, enclosed: true, doors: ['front', 'top'] },
+    kinematics: 'corexy',
+    bedMotion: 'z',
+    origin: 'front-left',
+    toolheadHome: { x: 1, y: 1, z: 256 },
+    materialSystemMount: 'top',
+  },
+  filamentDiameter: millimetres(1.75),
+  bed: {
+    maximumTemperature: celsius(120),
+    plates: [
+      { id: 'cool', label: 'Cool plate' },
+      { id: 'engineering', label: 'Engineering plate' },
+      { id: 'high-temperature', label: 'High temperature plate' },
+      { id: 'textured-pei', label: 'Textured PEI plate' },
+    ],
+  },
+  chamber: { enclosed: true, heated: false },
+  speedProfiles,
+  slicing: {
+    recommended: {
+      layerHeight: millimetres(0.2),
+      walls: 2,
+      infillPercent: 15,
+      nozzleTemperature: celsius(250),
+      bedTemperature: celsius(70),
+    },
+    presets,
+  },
+} as const;
+
+const a1MiniProcess = {
+  type: 'fff',
+  version: 1,
+  geometry: {
+    unit: 'mm',
+    buildVolume: { x: 180, y: 180, z: 180 },
+    enclosure: { outer: { x: 347, y: 315, z: 365 }, enclosed: false, doors: [] },
+    kinematics: 'cartesian-bedslinger',
+    bedMotion: 'y',
+    origin: 'front-left',
+    toolheadHome: { x: 1, y: 1, z: 180 },
+    materialSystemMount: 'external',
+  },
+  filamentDiameter: millimetres(1.75),
+  bed: {
+    maximumTemperature: celsius(80),
+    plates: [
+      { id: 'high-temperature', label: 'Smooth PEI plate' },
+      { id: 'textured-pei', label: 'Textured PEI plate' },
+    ],
+  },
+  chamber: { enclosed: false, heated: false },
+  speedProfiles,
+  slicing: {
+    recommended: {
+      layerHeight: millimetres(0.2),
+      walls: 2,
+      infillPercent: 15,
+      nozzleTemperature: celsius(215),
+      bedTemperature: celsius(60),
+    },
+    presets,
+  },
+} as const;
 
 type MaterialUnit = Extract<MachineComponent, { kind: 'material-system' }>['units'][number];
 
@@ -528,24 +527,136 @@ export const bambuNozzle = (diameter: number, hardened: boolean) =>
     material: hardened ? 'hardened' : 'stainless',
   }) as const;
 
-const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
-  const x1c = model === 'X1C';
-  const travel = x1c ? 256 : 180;
+/** What a model's manifest declares beyond `bambuModels`, one row per model, so a new model must state each fact. */
+type ManifestFacts = Readonly<{
+  identity: MachineManifestDefinition['identity'];
+  /** Travel of every axis, millimetres. */
+  travel: number;
+  /** The axis that carries the bed. */
+  bedAxis: 'y' | 'z';
+  /** The camera service's port, which the binding pins. */
+  cameraPort: number;
+  cameraLabel: string;
+  materialLabel: string;
+  /** The AMS units it takes. */
+  amsUnits: number;
+  hardenedNozzle: boolean;
+  process: MachineManifestDefinition['processes'][number];
+  /** The qualification of its accessories, fans and jogging. */
+  controls: MachineActionQualification;
+  /** The qualification of pause, resume and cancel, once proven. */
+  runControl?: MachineActionQualification;
+  /** The qualification of homing, once proven. */
+  homing?: MachineActionQualification;
+  calibrationConsequence: string;
+  qualifications: MachineManifestDefinition['qualifications'];
+}>;
+
+const manifestFacts: Readonly<Record<BambuModel, ManifestFacts>> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+  X1C: {
+    identity: { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'x1c', displayName: 'X1 Carbon', family: 'X1' },
+    travel: 256,
+    bedAxis: 'z',
+    cameraPort: 322,
+    cameraLabel: 'Chamber camera',
+    materialLabel: 'AMS and external spool',
+    amsUnits: 4,
+    hardenedNozzle: true,
+    process: x1cProcess,
+    controls: provenInTesting,
+    runControl: proven,
+    homing: provenInTesting,
+    calibrationConsequence: 'The printer heats, prints test lines on the plate and scans them.',
+    qualifications: [
+      {
+        id: bambuX1cHardwareProfile,
+        environment: 'hardware',
+        model: 'X1C',
+        firmware: ['01.12.00.00'],
+        attachments: ['filament', 'camera'],
+        evidence:
+          'qualify-x1c print-cube runs on the workshop X1C at firmware 01.12.00.00 with Developer Mode on (2026-09-15, agentic-manufacturing runway br10-print-attempt; machines production readiness program): start, pause, resume, cancel, stop and camera still.',
+      },
+      {
+        id: bambuX1cTestingProfile,
+        environment: 'hardware',
+        model: 'X1C',
+        firmware: ['01.12.00.00'],
+        attachments: ['filament', 'camera'],
+        evidence:
+          'The operator switched the chamber light, homed and jogged X, Y and Z, and set the part, auxiliary and chamber fans on the workshop X1C at firmware 01.12.00.00 from the Print pane in Testing mode (2026-10-05).',
+      },
+    ],
+  },
+  'A1 mini': {
+    identity: { typeId: 'bambu.a1-mini', vendor: 'Bambu Lab', model: 'a1-mini', displayName: 'A1 mini', family: 'A1' },
+    travel: 180,
+    bedAxis: 'y',
+    cameraPort: 6000,
+    cameraLabel: 'Camera',
+    materialLabel: 'AMS lite and external spool',
+    amsUnits: 1,
+    hardenedNozzle: false,
+    process: a1MiniProcess,
+    controls: provenOnMini,
+    calibrationConsequence: 'The printer heats and purges filament at the wiper to measure it.',
+    qualifications: [
+      {
+        id: bambuA1MiniTestingProfile,
+        environment: 'hardware',
+        model: 'A1 mini',
+        firmware: ['01.03.30.01'],
+        attachments: ['camera'],
+        evidence:
+          'The operator set the part fan and jogged X, Y and Z on the workshop A1 mini (no AMS lite) at firmware 01.03.30.01 from the Print pane in Testing mode (2026-10-05).',
+      },
+    ],
+  },
+};
+
+/**
+ * Implicit FTPS, where the printer takes uploads. Not a pinned service (`connection.services` lists only what binding
+ * pins, and declaring it would add a probe at bind); uploads reuse the MQTT pin. @internal
+ */
+export const bambuFtpsPort = 990;
+
+/**
+ * A pinned service's port, as the manifest declares it: the one place a Bambu service port is written.
+ * @param manifest - The model's manifest.
+ * @param id - The service, by the `serviceTrust` name the host pins it under.
+ * @returns Its port.
+ * @throws BambuProtocolError when the manifest does not declare the service.
+ * @internal
+ */
+export const bambuServicePort = (
+  manifest: Pick<MachineManifestDefinition, 'connection'>,
+  id: 'mqtt' | 'camera',
+): number => {
+  const port = manifest.connection.services?.find((service) => service.id === id)?.port;
+  if (port === undefined) {
+    throw new BambuProtocolError('BAMBU_SERVICE_UNDECLARED', `This printer declares no ${id} service.`);
+  }
+  return port;
+};
+
+const definition = (model: BambuModel): MachineManifestDefinition => {
+  const { chamber } = bambuModels[model];
+  const facts = manifestFacts[model];
+  const units = Array.from({ length: facts.amsUnits }, (_, index) => bambuAmsUnit(index));
   return {
     version: 3,
-    identity: x1c
-      ? { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'x1c', displayName: 'X1 Carbon', family: 'X1' }
-      : { typeId: 'bambu.a1-mini', vendor: 'Bambu Lab', model: 'a1-mini', displayName: 'A1 mini', family: 'A1' },
+    identity: facts.identity,
     connection: {
       transport: 'network',
       exclusive: false,
       opening: 'nothing',
       identity: 'authenticated',
-      // The binding pins these under the ids the host reads (`serviceTrust['mqtt' | 'camera']`). Uploads (FTPS 990)
-      // reuse the MQTT pin, so no ftp service: declaring one would add a probe. Simulated bindings pin nothing.
+      // The binding pins these under the ids the host reads (`serviceTrust['mqtt' | 'camera']`); see `bambuFtpsPort`
+      // for uploads. Simulated bindings pin nothing.
       services: [
         { id: 'mqtt', port: 8883, required: true },
-        { id: 'camera', port: x1c ? 322 : 6000, required: false },
+        { id: 'camera', port: facts.cameraPort, required: false },
       ],
     },
     axes: (['x', 'y', 'z'] as const).map((id) => ({
@@ -553,40 +664,36 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
       label: id.toUpperCase(),
       kind: 'linear',
       unit: 'mm',
-      travel: { min: 0, max: travel },
-      // The X1C's bed rides Z; the A1 mini's bed rides Y.
-      carries: (x1c ? id === 'z' : id === 'y') ? 'work' : 'tool',
+      travel: { min: 0, max: facts.travel },
+      carries: id === facts.bedAxis ? 'work' : 'tool',
       reference: 'cycle',
     })),
     components: [
       { id: 'controller', kind: 'controller', label: 'Printer' },
-      ...(x1c ? [{ id: 'chamber-light', kind: 'light', label: 'Chamber light' } as const] : []),
+      ...(chamber ? [{ id: 'chamber-light', kind: 'light', label: 'Chamber light' } as const] : []),
       { id: 'speed', kind: 'speed-profile', label: 'Print speed' },
       { id: 'motion', kind: 'motion', label: 'Axes', axes: ['x', 'y', 'z'] },
-      { id: 'tool-0', kind: 'toolhead', label: 'Toolhead', nozzles: [bambuNozzle(0.4, x1c)] },
+      { id: 'tool-0', kind: 'toolhead', label: 'Toolhead', nozzles: [bambuNozzle(0.4, facts.hardenedNozzle)] },
       { id: 'bed', kind: 'heater', label: 'Bed' },
-      ...(x1c ? [{ id: 'chamber', kind: 'enclosure', label: 'Chamber' } as const] : []),
+      ...(chamber ? [{ id: 'chamber', kind: 'enclosure', label: 'Chamber' } as const] : []),
       { id: 'part-fan', kind: 'fan', label: 'Part fan', parentId: 'tool-0' },
-      ...(x1c
+      ...(chamber
         ? ([
             { id: 'aux-fan', kind: 'fan', label: 'Auxiliary fan' },
             { id: 'chamber-fan', kind: 'fan', label: 'Chamber fan' },
           ] as const)
         : []),
-      { id: 'camera', kind: 'camera', label: x1c ? 'Chamber camera' : 'Camera' },
+      { id: 'camera', kind: 'camera', label: facts.cameraLabel },
       {
         id: 'filament',
         kind: 'material-system',
-        label: x1c ? 'AMS and external spool' : 'AMS lite and external spool',
-        // The X1C takes up to four AMS units, the A1 mini one AMS lite; a connected printer reports the ones it has.
-        units: [...(x1c ? [0, 1, 2, 3] : [0]).map((index) => bambuAmsUnit(index)), bambuExternalUnit],
-        routes: [...(x1c ? ['ams-a', 'ams-b', 'ams-c', 'ams-d'] : ['ams-a']), 'external'].map((unitId) => ({
-          unitId,
-          toolheadIds: ['tool-0'],
-        })),
+        label: facts.materialLabel,
+        // The units the model takes; a connected printer reports the ones it has.
+        units: [...units, bambuExternalUnit],
+        routes: [...units, bambuExternalUnit].map(({ id: unitId }) => ({ unitId, toolheadIds: ['tool-0'] })),
       },
     ],
-    processes: [fffProcess(model)],
+    processes: [facts.process],
     actions: actions(model),
     holds: [],
     jobs: {
@@ -605,38 +712,7 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
       { group: 'material', label: 'Filament', staleAfter: seconds(90), delivery: 'retained' },
       { group: 'position', label: 'Axes', staleAfter: seconds(60), delivery: 'retained' },
     ],
-    qualifications: x1c
-      ? [
-          {
-            id: bambuX1cHardwareProfile,
-            environment: 'hardware',
-            model: 'X1C',
-            firmware: ['01.12.00.00'],
-            attachments: ['filament', 'camera'],
-            evidence:
-              'qualify-x1c print-cube runs on the workshop X1C at firmware 01.12.00.00 with Developer Mode on (2026-09-15, agentic-manufacturing runway br10-print-attempt; machines production readiness program): start, pause, resume, cancel, stop and camera still.',
-          },
-          {
-            id: bambuX1cTestingProfile,
-            environment: 'hardware',
-            model: 'X1C',
-            firmware: ['01.12.00.00'],
-            attachments: ['filament', 'camera'],
-            evidence:
-              'The operator switched the chamber light, homed and jogged X, Y and Z, and set the part, auxiliary and chamber fans on the workshop X1C at firmware 01.12.00.00 from the Print pane in Testing mode (2026-10-05).',
-          },
-        ]
-      : [
-          {
-            id: bambuA1MiniTestingProfile,
-            environment: 'hardware',
-            model: 'A1 mini',
-            firmware: ['01.03.30.01'],
-            attachments: ['camera'],
-            evidence:
-              'The operator set the part fan and jogged X, Y and Z on the workshop A1 mini (no AMS lite) at firmware 01.03.30.01 from the Print pane in Testing mode (2026-10-05).',
-          },
-        ],
+    qualifications: facts.qualifications,
   };
 };
 
@@ -655,7 +731,7 @@ export const bambuA1MiniDefinition: MachineManifestDefinition = definition('A1 m
  */
 export const bambuSimulatedDefinition = (
   manifest: MachineManifestDefinition,
-  model: 'X1C' | 'A1 mini',
+  model: BambuModel,
 ): MachineManifestDefinition => ({
   ...manifest,
   identity: { ...manifest.identity, displayName: `Simulated ${model}` },
@@ -695,3 +771,24 @@ export const bambuA1MiniManifest: MachineManifest = machineManifestOf(
   bambuA1MiniDefinition,
   bambuA1MiniSubmissionConfiguration.manifest,
 );
+
+/** Each model's hardware definition, for code handed a model. @internal */
+export const bambuDefinitions: Readonly<Record<BambuModel, MachineManifestDefinition>> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+  X1C: bambuX1cDefinition,
+  'A1 mini': bambuA1MiniDefinition,
+};
+
+/** Each model's submission form. @internal */
+export const bambuSubmissionConfigurations = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+  X1C: bambuSubmissionConfiguration,
+  'A1 mini': bambuA1MiniSubmissionConfiguration,
+} as const satisfies Readonly<Record<BambuModel, unknown>>;
+
+/** Each model's manifest. @internal */
+export const bambuManifests: Readonly<Record<BambuModel, MachineManifest>> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+  X1C: bambuX1cManifest,
+  'A1 mini': bambuA1MiniManifest,
+};

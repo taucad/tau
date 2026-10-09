@@ -6,7 +6,14 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { z } from 'zod';
 
 import { plugin, bambu, bambuMachine } from '#index.js';
-import type { bambuSubmissionConfiguration } from '#bambu.manifest.js';
+import type {
+  bambuDefinitions,
+  bambuManifests,
+  bambuSubmissionConfiguration,
+  bambuSubmissionConfigurations,
+} from '#bambu.manifest.js';
+import type { BambuModel } from '#bambu.protocol.js';
+import { bambuModels } from '#bambu.protocol.js';
 import type { BambuSubmission } from '#bambu.session.js';
 import { bambuAddressOf, bambuSlotOf } from '#bambu.settings.js';
 import type { BambuSlotAddress, bambuSettingsConfiguration } from '#bambu.settings.js';
@@ -39,3 +46,12 @@ expectTypeOf(bambuAddressOf).returns.toEqualTypeOf<BambuSlotAddress>();
 expectTypeOf<z.output<typeof bambuSettingsConfiguration.schema>['material']>().toExtend<
   { defaultSlot?: number; slotsByColor?: Record<string, number> } | undefined
 >();
+
+// Every per-model table covers every model, so a new model fails to compile instead of taking another's values.
+expectTypeOf<keyof typeof bambuModels>().toEqualTypeOf<BambuModel>();
+expectTypeOf<keyof typeof bambuDefinitions>().toEqualTypeOf<BambuModel>();
+expectTypeOf<keyof typeof bambuManifests>().toEqualTypeOf<BambuModel>();
+expectTypeOf<keyof typeof bambuSubmissionConfigurations>().toEqualTypeOf<BambuModel>();
+// @ts-expect-error -- a table without a model's row does not compile.
+const missingRow: typeof bambuModels = { 'A1 mini': bambuModels['A1 mini'] };
+void missingRow;

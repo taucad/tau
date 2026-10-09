@@ -10,6 +10,69 @@ const identifier = /^[A-Za-z0-9_-]{1,64}$/u;
 /** Models qualified for this LAN adapter. @internal */
 export type BambuModel = 'X1C' | 'A1 mini';
 
+/** What Tau knows of one model that the protocol, the session and the host read. @internal */
+export type BambuModelFacts = Readonly<{
+  /** The provider id, which also prefixes its candidates' ids. */
+  providerId: string;
+  /** The names the printer gives itself (`printer_type`, `project_name`, `devmodel`); the first is `printer_type`. */
+  reportedNames: readonly [string, ...string[]];
+  /** The product prefix of its serials. */
+  serialPrefix: string;
+  /** `printer_model` in a slice Bambu Studio made for it. */
+  sliceName: string;
+  /** Its build plates in `bambu.plate.ts`. */
+  plateFamily: 'x1c' | 'a1-mini';
+  /** Its camera: RTSPS through the host, or framed JPEG over TLS read by the provider. */
+  camera: 'rtsps' | 'jpeg-tls';
+  /** An enclosed chamber: a chamber sensor and light, and auxiliary and chamber fans. */
+  chamber: boolean;
+  /** The pressure-advance profiles it keeps per nozzle, when it caps them. */
+  calibrationCapacity?: number;
+  /** Measures flow ratio itself (the X1 series' lidar). */
+  flowRatioCalibration: boolean;
+  /** Its automatic calibration is reliable with a 0.2 mm nozzle. */
+  fineNozzleCalibration: boolean;
+  /** Takes `layer_inspect` (a first-layer scan) in a start. */
+  layerInspect: boolean;
+}>;
+
+/**
+ * Each model's facts, one row per model: a model added to `BambuModel` does not compile until its row states every
+ * one, so it never falls through to another model's values.
+ * @internal
+ */
+export const bambuModels: Readonly<Record<BambuModel, BambuModelFacts>> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+  X1C: {
+    providerId: 'bambu',
+    reportedNames: ['BL-P001', 'X1 Carbon', 'Bambu Lab X1 Carbon'],
+    serialPrefix: '00M',
+    sliceName: 'Bambu Lab X1 Carbon',
+    plateFamily: 'x1c',
+    camera: 'rtsps',
+    chamber: true,
+    flowRatioCalibration: true,
+    fineNozzleCalibration: true,
+    layerInspect: true,
+  },
+  'A1 mini': {
+    providerId: 'bambu-a1-mini',
+    reportedNames: ['N1', 'A1 mini'],
+    serialPrefix: '030',
+    sliceName: 'Bambu Lab A1 mini',
+    plateFamily: 'a1-mini',
+    camera: 'jpeg-tls',
+    chamber: false,
+    calibrationCapacity: 16,
+    flowRatioCalibration: false,
+    fineNozzleCalibration: false,
+    layerInspect: false,
+  },
+};
+
+const isBambuModel = (value: string | undefined): value is BambuModel =>
+  value !== undefined && Object.hasOwn(bambuModels, value);
+
 /** Admit a serial only for its model's product prefix.
  * @param serial - Advertised or authenticated serial.
  * @param model - Qualified model.
@@ -17,14 +80,12 @@ export type BambuModel = 'X1C' | 'A1 mini';
  * @internal
  */
 export const isBambuSerial = (serial: string, model: BambuModel): boolean =>
-  identifier.test(serial) && serial.startsWith(model === 'X1C' ? '00M' : '030') && serial.length > 3;
+  identifier.test(serial) && serial.startsWith(bambuModels[model].serialPrefix) && serial.length > 3;
 
 const normalizeBambuModel = (value: string | undefined): string | undefined =>
-  value === 'BL-P001' || value === 'X1 Carbon' || value === 'Bambu Lab X1 Carbon'
-    ? 'X1C'
-    : value === 'N1' || value === 'A1 mini'
-      ? 'A1 mini'
-      : value;
+  value === undefined
+    ? undefined
+    : (Object.entries(bambuModels).find(([, facts]) => facts.reportedNames.includes(value))?.[0] ?? value);
 
 /** Normalized X1C run state; unknown provider values remain unknown. @internal */
 export type BambuRunState =
@@ -570,12 +631,12 @@ export const parseBambuDiscoveryDatagram = (
   const model = normalizeBambuModel(boundedString(headers.get('devmodel.bambu.com'), 64));
   const serial = boundedString(headers.get('usn') ?? headers.get('devid.bambu.com'), 64);
   const name = boundedString(headers.get('devname.bambu.com'), 128) ?? 'Bambu printer';
-  if ((model !== 'X1C' && model !== 'A1 mini') || (serial !== undefined && !isBambuSerial(serial, model))) {
+  if (!isBambuModel(model) || (serial !== undefined && !isBambuSerial(serial, model))) {
     return protocolError('BAMBU_DISCOVERY_INVALID');
   }
   const { address, interface: networkInterface } = input.datagram.peer;
   return Object.freeze({
-    id: `${model === 'X1C' ? 'bambu' : 'bambu-a1-mini'}:${serial ?? address}`,
+    id: `${bambuModels[model].providerId}:${serial ?? address}`,
     name,
     endpoint: Object.freeze({ transport: 'network', address, interface: networkInterface }),
     claimedIdentity: Object.freeze({ model, ...(serial ? { serial } : {}) }),

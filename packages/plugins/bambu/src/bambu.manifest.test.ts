@@ -11,6 +11,7 @@ import {
   bambuA1MiniManifest,
   bambuA1MiniSubmissionConfiguration,
   bambuA1MiniTestingProfile,
+  bambuServicePort,
   bambuSubmissionConfiguration,
   bambuX1cHardwareProfile,
   bambuX1cManifest,
@@ -187,6 +188,13 @@ describe('provider registrations', () => {
       { id: 'mqtt', port: 8883, required: true },
       { id: 'camera', port: 6000, required: false },
     ]);
+  });
+
+  it('should read a service port from the manifest and refuse one it does not declare', () => {
+    expect(bambuServicePort(bambuA1MiniManifest, 'camera')).toBe(6000);
+    expect(() => bambuServicePort({ connection: { ...bambuX1cManifest.connection, services: [] } }, 'mqtt')).toThrow(
+      expect.objectContaining({ code: 'BAMBU_SERVICE_UNDECLARED' }),
+    );
   });
 });
 

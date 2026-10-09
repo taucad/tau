@@ -23,15 +23,9 @@ import { z } from 'zod';
 import type { BambuPreparedArtifact } from '#bambu.archive.js';
 import { bambuExternalSpoolFields } from '#bambu.commands.js';
 import type { BambuExternalSpoolCommand, BambuWireForm } from '#bambu.commands.js';
-import {
-  bambuA1MiniDefinition,
-  bambuA1MiniSubmissionConfiguration,
-  bambuSimulatedDefinition,
-  bambuSubmissionConfiguration,
-  bambuX1cDefinition,
-} from '#bambu.manifest.js';
+import { bambuDefinitions, bambuSimulatedDefinition, bambuSubmissionConfigurations } from '#bambu.manifest.js';
 import type { BambuModel } from '#bambu.protocol.js';
-import { BambuProtocolError, bambuExternalSpoolSlot, parseBambuStill } from '#bambu.protocol.js';
+import { BambuProtocolError, bambuExternalSpoolSlot, bambuModels, parseBambuStill } from '#bambu.protocol.js';
 import { openBambuSession } from '#bambu.session.js';
 import type { BambuLink, BambuSubmission } from '#bambu.session.js';
 import { bambuSettingsConfiguration } from '#bambu.settings.js';
@@ -44,6 +38,8 @@ export type BambuSimulatorFault =
   | 'camera-unavailable'
   | 'certificate-changed'
   | 'partial-transfer'
+  /** Acknowledge the first pause and keep printing; later pauses apply. */
+  | 'pause-ignored-once'
   /** Report no `plate_type`, as a printer that cannot tell which plate is on its bed. */
   | 'plate-unreported'
   | 'protected-mode'
@@ -325,6 +321,13 @@ const heaterRates = { nozzle: { rise: 5, fall: 1.5 }, bed: { rise: 0.5, fall: 0.
 /** Milliseconds between reports while idle or paused; inside the manifest's 30 s budgets. */
 const steadyCadence = 10_000;
 const fixedClock: MachineClock = Object.freeze({ now: () => '2026-09-14T00:00:00.000Z' });
+
+/**
+ * The serial a simulated printer reports.
+ * @param model - The model it plays.
+ * @returns `simulated-` and the model's manifest slug, such as `simulated-x1c`.
+ */
+const simulatedSerial = (model: BambuModel): string => `simulated-${bambuDefinitions[model].identity.model}`;
 const untagged = '0000000000000000';
 const unset = (present: boolean): Tray => ({
   type: '',
@@ -428,7 +431,8 @@ export const createBambuSimulator = async (
   const { clock = fixedClock, speed = 1, readArtifact } = input;
   const model = input.model ?? 'X1C';
   const x1c = model === 'X1C';
-  const serial = x1c ? 'simulated-x1c' : 'simulated-a1-mini';
+  const facts = bambuModels[model];
+  const serial = simulatedSerial(model);
   const faults = new Set(input.faults ?? []);
   const externalForms: ReadonlySet<BambuWireForm> = new Set(input.externalForms ?? ['a']);
   /** Whether a request addresses the external spool in a form this printer applies. */
@@ -653,14 +657,14 @@ export const createBambuSimulator = async (
     return {
       command: 'push_status',
       sequence_id: String(sequence),
-      printer_type: x1c ? 'BL-P001' : 'N1',
+      printer_type: facts.reportedNames[0],
       nozzle_diameter: '0.4',
       nozzle_type: x1c ? 'hardened_steel' : 'stainless_steel',
       nozzle_temper: Math.round((reading('nozzle', at) + wobble) * 10) / 10,
       nozzle_target_temper: heaters.nozzle.setPoint,
       bed_temper: Math.round((bed + wobble) * 10) / 10,
       bed_target_temper: heaters.bed.setPoint,
-      ...(x1c ? { chamber_temper: Math.round((ambient + (bed - ambient) / 3) * 10) / 10 } : {}),
+      ...(facts.chamber ? { chamber_temper: Math.round((ambient + (bed - ambient) / 3) * 10) / 10 } : {}),
       gcode_state: run
         ? run.pausedAt === undefined
           ? heating
@@ -715,8 +719,8 @@ export const createBambuSimulator = async (
       spd_lvl: speedLevel,
       spd_mag: [50, 100, 124, 166][speedLevel - 1],
       cooling_fan_speed: fan('part'),
-      ...(x1c ? { big_fan1_speed: fan('auxiliary'), big_fan2_speed: fan('chamber') } : {}),
-      ...(x1c ? { lights_report: [{ node: 'chamber_light', mode: light ? 'on' : 'off' }] } : {}),
+      ...(facts.chamber ? { big_fan1_speed: fan('auxiliary'), big_fan2_speed: fan('chamber') } : {}),
+      ...(facts.chamber ? { lights_report: [{ node: 'chamber_light', mode: light ? 'on' : 'off' }] } : {}),
       ...(faults.has('plate-unreported') ? {} : { plate_type: 'textured_plate' }),
       wifi_signal: '-45dBm',
       sdcard: true,
@@ -824,6 +828,9 @@ export const createBambuSimulator = async (
         if (!run) {
           return { fail: 'no print' };
         }
+        if (faults.delete('pause-ignored-once')) {
+          return {};
+        }
         run.pausedAt ??= at;
         return {};
       }
@@ -835,7 +842,9 @@ export const createBambuSimulator = async (
         return {};
       }
       case 'stop': {
-        // An X1C ends a stopped print or calibration in FAILED with print_error 0500-400E, not IDLE.
+        // An X1C ends a stopped print or calibration in FAILED with print_error 0500-400E, not IDLE. A filament load,
+        // unload or tag read runs on: `stop` ends a print, and Bambu Studio ends a filament change with
+        // `ams_control abort` instead (below).
         setHeater('nozzle', 0, at);
         setHeater('bed', 0, at);
         if (run) {
@@ -1132,7 +1141,7 @@ export const createBambuSimulator = async (
               sw_ver: input.firmware ?? 'simulator-2',
               hw_ver: 'OTA',
               sn: serial,
-              project_name: x1c ? 'BL-P001' : 'N1',
+              project_name: facts.reportedNames[0],
             },
           ],
           result: 'success',
@@ -1198,7 +1207,7 @@ export const createBambuSimulator = async (
         plate: new Uint8Array(0),
         // The reference plate is sliced for this printer, its 0.4 mm nozzle, the textured plate and tray 0's PLA.
         slice: {
-          printerModel: x1c ? 'Bambu Lab X1 Carbon' : 'Bambu Lab A1 mini',
+          printerModel: facts.sliceName,
           nozzleDiameter: 0.4,
           bedType: 'Textured PEI Plate',
           filaments: [{ type: 'PLA', color: '#F2F2F2', diameter: 1.75, used: true }],
@@ -1209,8 +1218,8 @@ export const createBambuSimulator = async (
     return prepareBambuArtifact({ artifact, runtime: { readArtifact }, signal });
   };
   const manifest = machineManifestOf(
-    bambuSimulatedDefinition(x1c ? bambuX1cDefinition : bambuA1MiniDefinition, model),
-    (x1c ? bambuSubmissionConfiguration : bambuA1MiniSubmissionConfiguration).manifest,
+    bambuSimulatedDefinition(bambuDefinitions[model], model),
+    bambuSubmissionConfigurations[model].manifest,
   );
   const connect = async (): Promise<MachineSession<BambuSubmission>> => {
     let open = true;
@@ -1345,16 +1354,22 @@ const simulatorBindingConfiguration = defineConfiguration({
   ui: { version: 1, rjsf: {} },
 });
 
+/** Each model's simulator provider id. */
+const simulatorIds = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+  X1C: 'bambu-simulator',
+  'A1 mini': 'bambu-a1-mini-simulator',
+} as const satisfies Readonly<Record<BambuModel, string>>;
+
 const simulatorParts = (model: BambuModel, input: Readonly<{ simulator?: BambuSimulator }>) => {
-  const x1c = model === 'X1C';
-  const id = x1c ? 'bambu-simulator' : 'bambu-a1-mini-simulator';
+  const id = simulatorIds[model];
   return {
     id,
     name: `Simulated ${model}`,
     version: '2.0.0',
     protocolVersion: 2,
     vendor: 'Bambu Lab',
-    manifest: bambuSimulatedDefinition(x1c ? bambuX1cDefinition : bambuA1MiniDefinition, model),
+    manifest: bambuSimulatedDefinition(bambuDefinitions[model], model),
     bindingConfiguration: simulatorBindingConfiguration,
     settingsConfiguration: bambuSettingsConfiguration,
     async *discover(
@@ -1369,7 +1384,7 @@ const simulatorParts = (model: BambuModel, input: Readonly<{ simulator?: BambuSi
           id,
           name: `Simulated ${model}`,
           endpoint: { transport: 'network', address: 'simulator.invalid', interface: 'simulator' },
-          claimedIdentity: { serial: x1c ? 'simulated-x1c' : 'simulated-a1-mini', model },
+          claimedIdentity: { serial: simulatedSerial(model), model },
           observedAt,
           expiresAt: new Date(Date.parse(observedAt) + 5 * 60_000).toISOString(),
         },
@@ -1408,12 +1423,19 @@ const simulatorParts = (model: BambuModel, input: Readonly<{ simulator?: BambuSi
 export const defineBambuSimulatorMachine = (
   input: Readonly<{ simulator?: BambuSimulator; model?: BambuModel }> = {},
 ): ReturnType<typeof defineMachine> =>
-  input.model === 'A1 mini'
-    ? defineMachine({
-        ...simulatorParts('A1 mini', input),
-        submissionConfiguration: bambuA1MiniSubmissionConfiguration,
-      })
-    : defineMachine({ ...simulatorParts('X1C', input), submissionConfiguration: bambuSubmissionConfiguration });
+  // One factory per model: each submission form is its own type, and a model without one does not compile.
+  (
+    ({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+      X1C: () =>
+        defineMachine({ ...simulatorParts('X1C', input), submissionConfiguration: bambuSubmissionConfigurations.X1C }),
+      'A1 mini': () =>
+        defineMachine({
+          ...simulatorParts('A1 mini', input),
+          submissionConfiguration: bambuSubmissionConfigurations['A1 mini'],
+        }),
+    }) satisfies Readonly<Record<BambuModel, () => ReturnType<typeof defineMachine>>>
+  )[input.model ?? 'X1C']();
 
 /** Selectable, explicitly labelled simulated X1C provider; no sockets, no hardware. @public */
 export const bambuSimulatorMachine = defineBambuSimulatorMachine();

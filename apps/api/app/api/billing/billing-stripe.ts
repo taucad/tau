@@ -505,6 +505,22 @@ export async function cancelStripeSubscription(
   return stripe.subscriptions.cancel(input.stripeSubscriptionId, {}, { idempotencyKey: input.idempotencyKey });
 }
 
+/**
+ * Whether a Stripe subscription is scheduled to end instead of renewing.
+ *
+ * Classic billing mode records a period-end cancellation as `cancel_at_period_end: true`.
+ * Flexible billing mode, which every subscription Tau creates uses and which the Customer
+ * Portal schedules against, leaves that field false and sets `cancel_at` to the period's end
+ * instead (Stripe changelog 2025-05-28, `cancel_at` enums; the parameter is deprecated since).
+ * On staging (2026-10-09, PR-04) a portal cancellation reached Tau as `cancel_at` alone, so the
+ * account kept announcing its renewal. Both spellings mean one thing to Tau: the plan ends.
+ */
+export function isStripeSubscriptionEnding(
+  subscription: Pick<Stripe.Subscription, 'cancel_at' | 'cancel_at_period_end'>,
+): boolean {
+  return subscription.cancel_at_period_end || subscription.cancel_at !== null;
+}
+
 /* eslint-disable @typescript-eslint/naming-convention -- Stripe schedule fields preserve provider wire names. */
 /** Creates one schedule wrapper for an existing owned subscription. */
 export async function createStripeSubscriptionScheduleOnce(

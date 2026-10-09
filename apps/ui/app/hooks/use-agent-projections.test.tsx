@@ -99,6 +99,9 @@ const buildSession = ({
 }): ChatSession =>
   ({
     chatId: chatEntity.id,
+    get messages() {
+      return chatEntity.messages;
+    },
     chat: { messages: chatEntity.messages, error: undefined },
     persistenceActorRef: {
       getSnapshot: () => ({ context: { activeExecution } }),
@@ -411,7 +414,7 @@ describe('useAgentProjections', () => {
     const beforeText = result.current.agents;
 
     act(() => {
-      session.chat.messages = [message('tail', 120, [{ type: 'text', text: 'more' }])];
+      source.messages = [message('tail', 120, [{ type: 'text', text: 'more' }])];
       for (const listener of listeners) {
         listener();
       }
@@ -419,7 +422,7 @@ describe('useAgentProjections', () => {
     expect(result.current.agents).toBe(beforeText);
 
     act(() => {
-      session.chat.messages = [usageMessage('tail', 120, 'operation-new')];
+      source.messages = [usageMessage('tail', 120, 'operation-new')];
       for (const listener of listeners) {
         listener();
       }

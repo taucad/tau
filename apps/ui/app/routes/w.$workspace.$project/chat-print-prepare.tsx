@@ -16,6 +16,7 @@ import type {
   MachineManifest,
   MachineProgramSummary,
   MachineProvider,
+  MaterialSlotAddress,
 } from '@taucad/runtime/machine';
 import { fffProcessOf } from '@taucad/runtime/machine';
 import { slicingPreferencesSchema } from '@taucad/slicer/preferences';
@@ -33,12 +34,19 @@ import { buildGltfComponentManifest } from '#components/geometry/graphics/metada
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
 import { BambuStudioPresets, shortPresetName } from '#components/print/bambu-studio-presets.js';
-import type { BambuTray } from '#components/print/bambu-studio-presets.js';
 import { FilamentSlots } from '#components/print/filament-slots.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { SearchInput } from '#components/search-input.js';
-import { bambuPreferencesOf, rememberBambuSubmission, useBambuStudio } from '#components/print/use-bambu-studio.js';
-import type { BambuQualityPreset, BambuStudioChosen, BambuStudioMode } from '#components/print/use-bambu-studio.js';
+import {
+  bambuPreferencesOf,
+  bambuSubmissionSlots,
+  chosenBambuFilament,
+  rememberBambuSubmission,
+  savedBambuSlots,
+  useBambuStudio,
+  withBambuSubmissionSlots,
+} from '#components/print/use-bambu-studio.js';
+import type { BambuQualityPreset, BambuStudioMode } from '#components/print/use-bambu-studio.js';
 import { useMachineSettings } from '#components/print/use-machine-settings.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -59,10 +67,11 @@ import {
   formatQuantity,
   materialSystemValue,
   observedPlate,
-  observedTrays,
+  observedSlots,
   sameSlot,
+  slotKey,
 } from '#components/print/machine-facts.js';
-import type { ObservedTray } from '#components/print/machine-facts.js';
+import type { ObservedSlot } from '#components/print/machine-facts.js';
 import { JobChecks, describePrintError, startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import {
@@ -71,7 +80,6 @@ import {
   formatFilament,
   formatProducer,
   formatSize,
-  materialSlotLabel,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
 import type { PlateFit } from '#routes/w.$workspace.$project/chat-print-summary.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
@@ -290,35 +298,35 @@ const advancedSubmissionValues = (values: Record<string, unknown>): Record<strin
   Object.fromEntries(Object.entries(values).filter(([key]) => !prepareSubmissionFields.has(key)));
 
 /**
- * The slot each filament prints from unless someone chooses: the first loaded tray for one, as the agent's planner
- * maps several over the trays that can change filament mid-print ({@link defaultFilamentSlots}), `-1` where no free
- * tray of the print's material is left.
+ * The slot each filament prints from unless someone chooses: the first loaded slot for one, as the agent's planner
+ * maps several over the slots that can change filament mid-print ({@link defaultFilamentSlots}), undefined where no
+ * free slot of the print's material is left.
  */
 const defaultMapping = (
-  trays: readonly ObservedTray[],
-  loaded: ObservedTray | undefined,
+  slots: readonly ObservedSlot[],
+  loaded: ObservedSlot | undefined,
   filamentColors: readonly string[],
-): readonly number[] => {
+): ReadonlyArray<MaterialSlotAddress | undefined> => {
   if (loaded?.materialId === undefined) {
     return [];
   }
-  return filamentColors.length > 1
-    ? defaultFilamentSlots(filamentColors, trays, loaded.materialId).map((slot) => slot ?? -1)
-    : [loaded.slot];
-};
-
-/** The slot numbers of a configuration's `amsMapping`, in filament order. */
-const mappingOf = (configuration: Readonly<Record<string, unknown>>): readonly number[] => {
-  const mapping = configuration['amsMapping'];
-  return Array.isArray(mapping) ? mapping.filter((slot): slot is number => typeof slot === 'number') : [];
+  if (filamentColors.length < 2) {
+    return [loaded.address];
+  }
+  // The planner numbers slots only to tell them apart; its numbers here are positions in `slots`.
+  const numbered = slots.map((slot, index) => ({ ...slot, slot: index }));
+  return defaultFilamentSlots(filamentColors, numbered, loaded.materialId).map((index) =>
+    index === undefined ? undefined : slots[index]?.address,
+  );
 };
 
 /**
  * The person's starting choices for a submission: the schema's own defaults, the provider's declared defaults and the
  * slot each filament prints from. What the program was sliced for (its model, nozzle, plate and materials) the
  * provider reads from the program when it checks the job ({@link MachineJobCheck}), so the pane never writes it.
- * Only keys the provider's schema names are written, so a provider without an AMS never receives a mapping. A slice of several filaments maps each to a loaded slot as the agent's planner does
- * ({@link defaultFilamentSlots}); `-1` marks one no free tray can take.
+ * The mapping is written in the provider's own words ({@link withBambuSubmissionSlots}), so a provider whose form names
+ * none never receives one. A slice of several filaments maps each to a loaded slot as the agent's planner does
+ * ({@link defaultFilamentSlots}); a filament no free slot can take is left unmapped.
  *
  * @param provider - The provider that owns the submission schema.
  * @param entry - The machine as observed.
@@ -333,25 +341,22 @@ export const submissionDefaults = (
 ): Record<string, unknown> => {
   const projection = submissionOf(provider).parameters.input;
   const declared = projection.status === 'usable' ? { ...projection.declaration.defaults } : {};
-  const schema = submissionOf(provider).legacyProjection.inputSchema as JSONSchema7;
-  const properties = schema.properties ?? {};
   // A provider's optional flags may keep their defaults only in the schema (Bambu: bed leveling and flow calibration
   // on); Prepare shows them, and sends none it only repeats ({@link chosenSubmission}).
   const schemaDefaults = schemaDefaultsOf(provider);
-  const observed: Record<string, unknown> = {};
-  const loaded = observedTrays(entry).find(
+  const loaded = observedSlots(entry).find(
     (material) => material.state === 'loaded' && material.materialId !== undefined,
   );
-  // Only the AMS changes filament mid-print; the external spool feeds one-filament prints.
-  const trays = observedTrays(entry).filter((material) => !material.isExternal);
-  const mapping = defaultMapping(trays, loaded, filamentColors);
-  // ponytail: the slot mapping is the Bambu submission's name for the choice Prepare shows; a provider whose form
-  // names it otherwise needs its own line here.
-  if ('amsMapping' in properties && mapping.length > 0) {
-    observed['amsMapping'] = mapping;
-  }
+  // Only a feeder changes filament mid-print; the external spool feeds one-filament prints.
+  const feeders = observedSlots(entry).filter((material) => !material.isExternal);
+  const mapping = defaultMapping(feeders, loaded, filamentColors);
+  const defaults = { ...schemaDefaults, ...declared };
+  // ponytail: the slot mapping is the Bambu submission's (`amsMapping`); a provider whose form names it otherwise
+  // needs its own codec beside Bambu's.
   return Object.fromEntries(
-    Object.entries({ ...schemaDefaults, ...declared, ...observed }).filter(([, value]) => value !== undefined),
+    Object.entries(mapping.length > 0 ? withBambuSubmissionSlots(provider, defaults, mapping) : defaults).filter(
+      ([, value]) => value !== undefined,
+    ),
   );
 };
 
@@ -436,8 +441,12 @@ export type PrintPrepare = Readonly<{
   studio: BambuStudioMode;
   /** The colours of the filaments the last slice prints, in filament order; one row each when there are several. */
   filamentColors: readonly string[];
+  /** The slot each filament prints from, in filament order; undefined for a filament given none yet. */
+  slots: ReadonlyArray<MaterialSlotAddress | undefined>;
   /** Print one filament from another slot; a filament already there takes this one's slot. */
-  selectFilamentSlot: (filament: number, slot: number) => void;
+  selectFilamentSlot: (filament: number, slot: MaterialSlotAddress) => void;
+  /** Print a one-filament slice from this slot. */
+  selectMaterial: (slot: MaterialSlotAddress) => void;
   /** Whether Bambu Studio slices, rather than the slicer route's own engine. */
   isBambuStudio: boolean;
   /** The project's print settings in `.tau/machines/settings/<typeId>.json`. */
@@ -589,26 +598,24 @@ export const usePrintPrepare = ({
   const preferenceKey = `${machineSettings.typeId ?? ''}:${machineSettings.record?.activeProfile ?? 'default'}:${entry?.machineId ?? ''}`;
   const submission = useMemo<Record<string, unknown>>(() => {
     const preferences = bambuPreferencesOf(provider, machineSettings.machine);
-    const { material, plate: _plate, ...flags } = preferences ?? {};
-    const fallback = entry && provider ? mappingOf(submissionDefaults(provider, entry, { filamentColors })) : [];
+    const { material: _material, plate: _plate, ...flags } = preferences ?? {};
+    const fallback =
+      entry && provider ? bambuSubmissionSlots(provider, submissionDefaults(provider, entry, { filamentColors })) : [];
     /* Saved slots are the machine type's; one this printer has not loaded (another X1C's A4 on the simulator)
      * gives way to the default rather than selecting nothing. */
-    const isLoaded = (slot: number | undefined): slot is number =>
+    const isLoaded = (slot: MaterialSlotAddress | undefined): slot is MaterialSlotAddress =>
       slot !== undefined &&
       entry !== undefined &&
-      observedTrays(entry).some((tray) => tray.slot === slot && tray.state === 'loaded');
-    const saved = filamentColors.map((color) => material?.slotsByColor?.[color.toLowerCase()]);
+      observedSlots(entry).some((observed) => sameSlot(slot, observed.address) && observed.state === 'loaded');
+    const saved = savedBambuSlots(preferences, filamentColors);
     const mapping =
       filamentColors.length > 1
         ? saved.some((slot) => isLoaded(slot))
-          ? saved.map((slot, index) => (isLoaded(slot) ? slot : (fallback[index] ?? -1)))
-          : undefined
-        : isLoaded(material?.defaultSlot)
-          ? [material.defaultSlot]
-          : undefined;
+          ? saved.map((slot, index) => (isLoaded(slot) ? slot : fallback[index]))
+          : []
+        : saved.filter((slot) => isLoaded(slot));
     return {
-      ...flags,
-      ...(mapping ? { amsMapping: mapping } : {}),
+      ...withBambuSubmissionSlots(provider, flags, mapping),
       ...(transientSubmission?.key === preferenceKey ? transientSubmission.values : {}),
     };
   }, [machineSettings.machine, filamentColors, entry, provider, manifest, transientSubmission, preferenceKey]);
@@ -651,14 +658,15 @@ export const usePrintPrepare = ({
     }
     /* A mapping made for another number of filaments (a material picked before the slice showed several colours)
      * gives way to the defaults for this slice's filaments. */
-    const { amsMapping: ownMapping, ...own } = submission;
+    const ownMapping = bambuSubmissionSlots(provider, submission);
+    const own = withBambuSubmissionSlots(provider, submission, []);
     const colorsConfirmed =
       slice?.rendering !== rendering ||
       modelColors.length === 0 ||
       (modelColors.length === filamentColors.length &&
         modelColors.every((color, index) => color === filamentColors[index]));
     const isOwnMapping =
-      (filamentColors.length < 2 || !Array.isArray(ownMapping) || ownMapping.length === filamentColors.length) &&
+      (filamentColors.length < 2 || ownMapping.length === 0 || ownMapping.length === filamentColors.length) &&
       colorsConfirmed;
     const effective: Record<string, unknown> = {
       ...submissionDefaults(provider, entry, { filamentColors }),
@@ -674,20 +682,31 @@ export const usePrintPrepare = ({
     }
     return effective;
   }, [entry, filamentColors, manifest, modelColors, plate, provider, slice?.rendering, submission, submissionSchema]);
-  const slotsKey = mappingOf(effectiveSubmission).join(',');
-  const slots = useMemo(() => (slotsKey === '' ? [] : slotsKey.split(',').map(Number)), [slotsKey]);
+  /* The slot each filament prints from, kept while its content is the same so a telemetry frame reloads nothing. */
+  const currentSlots = bambuSubmissionSlots(provider, effectiveSubmission);
+  const slotsKey = JSON.stringify(currentSlots);
+  // oxlint-disable-next-line react-hooks/exhaustive-deps -- keyed by content: a new array with the same slots is the same mapping
+  const slots = useMemo(() => currentSlots, [slotsKey]);
   const studio = useBambuStudio({ provider, entry, manifest, plate, mapping: slots, intent, update: updateIntent });
   const selectFilamentSlot = useCallback(
-    (filament: number, slot: number) => {
+    (filament: number, slot: MaterialSlotAddress) => {
       if (!entry) {
         return;
       }
       /* Slots stay one filament's each: the filament that held this slot takes the one given up. */
-      const previous = slots[filament] ?? -1;
-      const next = slots.map((current, index) => (index === filament ? slot : current === slot ? previous : current));
-      setSubmission({ ...submission, amsMapping: next });
+      const previous = slots[filament];
+      const next = slots.map((current, index) =>
+        index === filament ? slot : current !== undefined && sameSlot(slot, current) ? previous : current,
+      );
+      setSubmission(withBambuSubmissionSlots(provider, submission, next));
     },
-    [entry, slots, submission, setSubmission],
+    [entry, provider, slots, submission, setSubmission],
+  );
+  const selectMaterial = useCallback(
+    (slot: MaterialSlotAddress) => {
+      setSubmission(withBambuSubmissionSlots(provider, submission, [slot]));
+    },
+    [provider, setSubmission, submission],
   );
   const isBambuStudio = studio.status === 'ready' || studio.status === 'checking';
   /* The machine's own slicer options under the person's, so the Advanced form and the slice agree. */
@@ -699,7 +718,7 @@ export const usePrintPrepare = ({
    * filament check. It is read when slicing and is not a slice option the slice goes stale on: a spool changed later
    * is the machine's check to report against what the file says. */
   const material =
-    entry === undefined ? undefined : observedTrays(entry).find((tray) => tray.slot === slots[0])?.materialId;
+    entry === undefined ? undefined : observedSlots(entry).find((slot) => sameSlot(slot.address, slots[0]))?.materialId;
   const optionsSchema = useMemo<ResolvedSchema | undefined>(
     () =>
       route && Object.keys(route.exportOptions.schema).length > 0
@@ -894,22 +913,15 @@ export const usePrintPrepare = ({
       const warnings = result.issues.filter(({ severity }) => severity === 'warning').map(({ message }) => message);
       const defaults =
         provider && entry ? submissionDefaults(provider, entry, { filamentColors: summary.filamentColors }) : {};
-      const ownMapping = mappingOf(submission);
+      const ownMapping = bambuSubmissionSlots(provider, submission);
       const colorsMatch =
         modelColors.length === 0 ||
         (modelColors.length === summary.filamentColors.length &&
           modelColors.every((color, index) => color === summary.filamentColors[index]));
       const mapping =
-        Array.isArray(submission['amsMapping']) &&
-        ownMapping.length === Math.max(1, summary.filamentColors.length) &&
-        colorsMatch
+        ownMapping.length === Math.max(1, summary.filamentColors.length) && colorsMatch
           ? ownMapping
-          : mappingOf(defaults);
-      const submissionProperties = (
-        (provider === undefined ? undefined : submissionOf(provider).legacyProjection.inputSchema) as
-          | JSONSchema7
-          | undefined
-      )?.properties;
+          : bambuSubmissionSlots(provider, defaults);
       setSlice({
         path,
         fileName,
@@ -917,8 +929,7 @@ export const usePrintPrepare = ({
         length: file.bytes.byteLength,
         mimeType: file.mimeType,
         rendering: sliceRendering,
-        materialConfiguration:
-          entry === undefined || !('amsMapping' in (submissionProperties ?? {})) ? {} : { amsMapping: mapping },
+        materialConfiguration: entry === undefined ? {} : withBambuSubmissionSlots(provider, {}, mapping),
         optionsKey,
         summary,
         /* A plate too large to preview has no bounds to check; the printer checks its own. */
@@ -983,7 +994,9 @@ export const usePrintPrepare = ({
   /* What the machine holds in each slot: a spool changed after the check is checked again, a reading that changes
    * nothing else is not. */
   const traysKey = JSON.stringify(
-    entry === undefined ? [] : observedTrays(entry).map(({ slot, state, materialId }) => [slot, state, materialId]),
+    entry === undefined
+      ? []
+      : observedSlots(entry).map(({ address, state, materialId }) => [address, state, materialId]),
   );
   const checkKey = JSON.stringify([slice?.digest, machineId, configurationKey, traysKey]);
   const [checked, setChecked] = useState<Readonly<{ key: string; check: MachineJobCheck }>>();
@@ -1055,7 +1068,7 @@ export const usePrintPrepare = ({
     if (slice.fit && !slice.fit.fits) {
       return slice.fit.message;
     }
-    const unmapped = filamentColors.length > 1 ? slots.indexOf(-1) : -1;
+    const unmapped = filamentColors.length > 1 ? slots.indexOf(undefined) : -1;
     if (unmapped >= 0) {
       return `Filament ${String(unmapped + 1)} has no slot. Choose a loaded slot for it before sending.`;
     }
@@ -1141,7 +1154,9 @@ export const usePrintPrepare = ({
     route,
     studio,
     filamentColors,
+    slots,
     selectFilamentSlot,
+    selectMaterial,
     isBambuStudio,
     machineSettings,
     sliceBlocker,
@@ -1213,29 +1228,27 @@ function QualityChoice({
 
 function MaterialSelect({
   entry,
-  submission,
-  filamentPresets,
+  selected,
+  override,
   onSelect,
   isModified,
   onReset,
 }: {
   readonly entry: MachineDirectoryEntry;
-  readonly submission: Record<string, unknown>;
-  /** Bambu Studio filament presets chosen over the printer's, by tray. */
-  readonly filamentPresets: BambuStudioChosen['filaments'];
-  readonly onSelect: (slot: number) => void;
+  /** The slot the print feeds from, when one is chosen. */
+  readonly selected: MaterialSlotAddress | undefined;
+  /** The Bambu Studio filament preset chosen over the printer's for that slot. */
+  readonly override: string | undefined;
+  readonly onSelect: (slot: MaterialSlotAddress) => void;
   readonly isModified: boolean;
   readonly onReset: () => void;
 }): React.JSX.Element {
-  const mapping = submission['amsMapping'];
-  const selectedSlot: unknown = Array.isArray(mapping) ? mapping[0] : undefined;
-  const materials = observedTrays(entry);
+  const materials = observedSlots(entry);
   const remaining = materialSystemValue(entry)?.slots;
   if (materials.length === 0) {
     return <p className='text-xs text-muted-foreground'>No material slots observed.</p>;
   }
-  // The tray and how it is sliced are one choice; an override set in Advanced settings is named here.
-  const override = typeof selectedSlot === 'number' ? filamentPresets?.[selectedSlot] : undefined;
+  // The slot and how it is sliced are one choice; an override set in Advanced settings is named here.
   return (
     <PrintSetupRow
       label='Material'
@@ -1245,11 +1258,11 @@ function MaterialSelect({
     >
       <ParameterSelect
         label='Material'
-        value={typeof selectedSlot === 'number' ? String(selectedSlot) : ''}
+        value={selected === undefined ? '' : slotKey(selected)}
         groups={[
           {
             options: materials.map((material) => ({
-              value: String(material.slot),
+              value: slotKey(material.address),
               label: `${material.label} · ${material.materialId ?? (material.state === 'empty' ? 'Empty' : 'Unknown')}`,
               ...withRemaining(remaining?.find((slot) => sameSlot(slot.slot, material.address))?.remainingPercent),
               ...(material.color === undefined ? {} : { swatch: material.color.slice(0, 7) }),
@@ -1258,9 +1271,9 @@ function MaterialSelect({
           },
         ]}
         onChange={(value) => {
-          const material = materials.find((candidate) => candidate.slot === Number(value));
+          const material = materials.find((candidate) => slotKey(candidate.address) === value);
           if (material?.materialId) {
-            onSelect(material.slot);
+            onSelect(material.address);
           }
         }}
       />
@@ -1272,20 +1285,22 @@ function MaterialSelect({
 function MaterialChoice({
   entry,
   filamentColors,
-  submission,
-  ownSubmission,
-  filamentPresets,
+  slots,
+  override,
+  isModified,
   onSelectMaterial,
   onSelectFilamentSlot,
   onResetMaterial,
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly filamentColors: readonly string[];
-  readonly submission: Record<string, unknown>;
-  readonly ownSubmission: Record<string, unknown>;
-  readonly filamentPresets: BambuStudioChosen['filaments'];
-  readonly onSelectMaterial: (slot: number) => void;
-  readonly onSelectFilamentSlot: (filament: number, slot: number) => void;
+  /** The slot each filament prints from, in filament order. */
+  readonly slots: ReadonlyArray<MaterialSlotAddress | undefined>;
+  /** The Bambu Studio filament preset chosen over the printer's for a one-filament print's slot. */
+  readonly override: string | undefined;
+  readonly isModified: boolean;
+  readonly onSelectMaterial: (slot: MaterialSlotAddress) => void;
+  readonly onSelectFilamentSlot: (filament: number, slot: MaterialSlotAddress) => void;
   readonly onResetMaterial: () => void;
 }): React.JSX.Element {
   if (filamentColors.length < 2) {
@@ -1293,37 +1308,23 @@ function MaterialChoice({
       <div role='group' aria-label='Material'>
         <MaterialSelect
           entry={entry}
-          submission={submission}
-          filamentPresets={filamentPresets}
-          isModified={Object.hasOwn(ownSubmission, 'amsMapping')}
+          selected={slots[0]}
+          override={override}
+          isModified={isModified}
           onReset={onResetMaterial}
           onSelect={onSelectMaterial}
         />
       </div>
     );
   }
-  const observed = observedTrays(entry);
-  // Only the AMS changes filament mid-print; the external spool feeds one-filament prints.
-  const trays = observed.flatMap((material): BambuTray[] =>
-    material.state === 'loaded' && material.materialId !== undefined && !material.isExternal
-      ? [
-          {
-            slot: material.slot,
-            label: material.label,
-            materialId: material.materialId,
-            ...(material.color === undefined ? {} : { color: material.color }),
-          },
-        ]
-      : [],
+  const observed = observedSlots(entry);
+  // Only a feeder changes filament mid-print; the external spool feeds one-filament prints.
+  const feeders = observed.filter(
+    (material) => material.state === 'loaded' && material.materialId !== undefined && !material.isExternal,
   );
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
-      <FilamentSlots
-        colors={filamentColors}
-        mapping={mappingOf(submission)}
-        trays={trays}
-        onChange={onSelectFilamentSlot}
-      />
+      <FilamentSlots colors={filamentColors} mapping={slots} slots={feeders} onChange={onSelectFilamentSlot} />
       {observed.some((material) => material.isExternal) ? (
         <p className='text-xs text-muted-foreground'>The external spool feeds one-filament prints only.</p>
       ) : null}
@@ -1636,27 +1637,14 @@ function PlateSelect({
 /** Bambu Studio's presets for the used trays, and what a preset change did to the person's settings. */
 function BambuStudioChoices({
   studio,
-  entry,
-  manifest,
   mode = 'primary',
 }: {
   readonly studio: BambuStudioMode;
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
   readonly mode?: 'primary' | 'printer';
 }): React.JSX.Element {
-  const trays = studio.slots.map((slot): BambuTray => {
-    const tray = observedTrays(entry).find((material) => material.slot === slot);
-    return {
-      slot,
-      label: materialSlotLabel(slot, manifest),
-      ...(tray?.materialId === undefined ? {} : { materialId: tray.materialId }),
-      ...(tray?.color === undefined ? {} : { color: tray.color }),
-    };
-  });
   return (
     <>
-      <BambuStudioPresets studio={studio} trays={trays} mode={mode} />
+      <BambuStudioPresets studio={studio} trays={studio.trays} mode={mode} />
       {mode === 'primary' && studio.dropped > 0 ? (
         <PrintNotice tone='neutral' role='status'>
           {studio.dropped === 1
@@ -1926,18 +1914,16 @@ const prepareSummary = (prepare: PrintPrepare, deferred: string | undefined): st
  * Advanced settings: the full slicer form (Bambu Studio's printer and filament overrides and settings, or
  * the kernel's slicer options) and the machine mapping, behind one filter.
  *
- * @param properties - The machine, its provider and manifest, and the prepare state.
+ * @param properties - The machine, its provider, and the prepare state.
  * @returns The stage.
  */
 function AdvancedSettingsStage({
   entry,
   provider,
-  manifest,
   prepare,
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly provider: MachineProvider | undefined;
-  readonly manifest: MachineManifest | undefined;
   readonly prepare: PrintPrepare;
 }): React.JSX.Element {
   const [advancedFilter, setAdvancedFilter] = useState('');
@@ -2002,7 +1988,7 @@ function AdvancedSettingsStage({
             setAdvancedFilter('');
           }}
         />
-        {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' /> : null}
+        {isBambuStudio ? <BambuStudioChoices studio={studio} mode='printer' /> : null}
         {isBambuStudio ? (
           <BambuStudioSettings studio={studio} filterTerm={advancedFilter} />
         ) : optionsSchema ? (
@@ -2103,14 +2089,15 @@ export function PrepareStages({
     setEntryPath,
     studio,
     filamentColors,
+    slots,
     selectFilamentSlot,
+    selectMaterial,
     isBambuStudio,
     optionsSchema,
     options,
     setOptions,
     submission,
     setSubmission,
-    effectiveSubmission,
     plate,
     machineSettings,
   } = prepare;
@@ -2125,12 +2112,6 @@ export function PrepareStages({
       }
     },
     [choosePreset, isBambuStudio, options, optionsSchema, setOptions],
-  );
-  const selectMaterial = useCallback(
-    (slot: number) => {
-      setSubmission({ ...submission, amsMapping: [slot] });
-    },
-    [setSubmission, submission],
   );
   const selectPlate = useCallback(
     (value: string) => {
@@ -2185,9 +2166,9 @@ export function PrepareStages({
               <MaterialChoice
                 entry={entry}
                 filamentColors={filamentColors}
-                submission={effectiveSubmission}
-                ownSubmission={submission}
-                filamentPresets={isBambuStudio ? studio.chosen.filaments : undefined}
+                slots={slots}
+                override={isBambuStudio ? chosenBambuFilament(studio.chosen, slots[0]) : undefined}
+                isModified={Object.hasOwn(submission, 'amsMapping')}
                 onResetMaterial={() => {
                   setSubmission(
                     Object.fromEntries(
@@ -2207,7 +2188,7 @@ export function PrepareStages({
                   onReset={resetPreset}
                 />
               ) : null}
-              {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
+              {isBambuStudio ? <BambuStudioChoices studio={studio} /> : null}
             </div>
           </fieldset>
         </div>
@@ -2218,7 +2199,7 @@ export function PrepareStages({
         </fieldset>
       </PrintStage>
       <StartOptionsStage prepare={prepare} />
-      <AdvancedSettingsStage entry={entry} provider={provider} manifest={manifest} prepare={prepare} />
+      <AdvancedSettingsStage entry={entry} provider={provider} prepare={prepare} />
     </>
   );
 }

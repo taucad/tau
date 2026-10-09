@@ -19,7 +19,13 @@ import { ToolpathParseError, parseGcode } from '@taucad/slicer/toolpath';
 import type * as Toolpath from '@taucad/slicer/toolpath';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { projectFiles } from '#components/print/testing/project-files.js';
-import { bambuPreferencesOf } from '#components/print/use-bambu-studio.js';
+import {
+  bambuPreferencesOf,
+  bambuSubmissionSlots,
+  chosenBambuFilament,
+  savedBambuSlots,
+  withBambuSubmissionSlots,
+} from '#components/print/use-bambu-studio.js';
 import { pendingMachineActionOf } from '#components/print/machine-action-approval.js';
 import { useMachineSettings } from '#components/print/use-machine-settings.js';
 import {
@@ -3671,6 +3677,38 @@ describe('Print settings from the provider’s own form', () => {
 
   it('reads no Bambu preferences for a provider whose form is not Bambu’s', () => {
     expect(bambuPreferencesOf({ ...provider, settingsConfiguration: undefined }, { plate: 'cool' })).toBeUndefined();
+  });
+
+  it('writes the slot each filament prints from as Bambu tray numbers and reads them back as addresses', () => {
+    const slots = [{ unitId: 'ams-a', slotId: 'a2' }, undefined, { unitId: 'external', slotId: 'spool' }];
+    const written = withBambuSubmissionSlots(provider, { timelapse: true }, slots);
+    expect(written).toEqual({ timelapse: true, amsMapping: [1, -1, 254] });
+    expect(bambuSubmissionSlots(provider, written)).toEqual(slots);
+    expect(withBambuSubmissionSlots(provider, written, [])).toEqual({ timelapse: true });
+  });
+
+  it('leaves the submission of a provider whose form is not Bambu’s untouched', () => {
+    const other = { ...provider, settingsConfiguration: undefined };
+    expect(withBambuSubmissionSlots(other, { amsMapping: [0] }, [{ unitId: 'ams-a', slotId: 'a2' }])).toEqual({
+      amsMapping: [0],
+    });
+    expect(bambuSubmissionSlots(other, { amsMapping: [0] })).toEqual([]);
+  });
+
+  it('reads the saved slots by colour for several filaments and the default slot for one', () => {
+    const preferences = { material: { defaultSlot: 1, slotsByColor: { '#ff0000': 254 } } };
+    expect(savedBambuSlots(preferences, ['#FF0000', '#00FF00'])).toEqual([
+      { unitId: 'external', slotId: 'spool' },
+      undefined,
+    ]);
+    expect(savedBambuSlots(preferences, ['#FF0000'])).toEqual([{ unitId: 'ams-a', slotId: 'a2' }]);
+  });
+
+  it('finds the Bambu Studio filament picked for a slot by its tray', () => {
+    const chosen = { filaments: { 254: 'Bambu PETG Basic @BBL X1C' } };
+    expect(chosenBambuFilament(chosen, { unitId: 'external', slotId: 'spool' })).toBe('Bambu PETG Basic @BBL X1C');
+    expect(chosenBambuFilament(chosen, { unitId: 'ams-a', slotId: 'a1' })).toBeUndefined();
+    expect(chosenBambuFilament(chosen, undefined)).toBeUndefined();
   });
 });
 

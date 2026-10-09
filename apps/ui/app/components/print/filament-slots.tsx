@@ -1,42 +1,49 @@
-/** Map each model filament to a loaded AMS tray before slicing or sending. */
+/** Map each model filament to a loaded material slot before slicing or sending. */
+import type { MaterialSlotAddress } from '@taucad/runtime/machine';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
-import type { BambuTray } from '#components/print/bambu-studio-presets.js';
+import { slotKey } from '#components/print/machine-facts.js';
+import type { ObservedSlot } from '#components/print/machine-facts.js';
 
 /** One row per model filament; external spool eligibility is decided by the caller. @public */
 export function FilamentSlots({
   colors,
   mapping,
-  trays,
+  slots,
   onChange,
 }: {
   readonly colors: readonly string[];
-  readonly mapping: readonly number[];
-  readonly trays: readonly BambuTray[];
-  readonly onChange: (filament: number, slot: number) => void;
+  /** The slot each filament prints from, in filament order; undefined for none yet. */
+  readonly mapping: ReadonlyArray<MaterialSlotAddress | undefined>;
+  /** The slots a filament may print from. */
+  readonly slots: readonly ObservedSlot[];
+  readonly onChange: (filament: number, slot: MaterialSlotAddress) => void;
 }): React.JSX.Element {
   return (
     <div role='group' aria-label='Filaments' className='flex min-w-0 flex-col gap-1'>
       {colors.map((color, index) => {
         const label = `Filament ${String(index + 1)}`;
-        const slot = mapping[index] ?? -1;
+        const selected = mapping[index];
         return (
           <PrintSetupRow key={label} label={label} swatch={color}>
             <ParameterSelect
               label={`Slot for ${label}`}
-              value={slot < 0 ? '' : String(slot)}
+              value={selected === undefined ? '' : slotKey(selected)}
               placeholder='Choose a slot'
               groups={[
                 {
-                  options: trays.map((tray) => ({
-                    value: String(tray.slot),
-                    label: [tray.label, tray.materialId].filter(Boolean).join(' · '),
-                    ...(tray.color === undefined ? {} : { swatch: tray.color }),
+                  options: slots.map((slot) => ({
+                    value: slotKey(slot.address),
+                    label: [slot.label, slot.materialId].filter(Boolean).join(' · '),
+                    ...(slot.color === undefined ? {} : { swatch: slot.color }),
                   })),
                 },
               ]}
               onChange={(value) => {
-                onChange(index, Number(value));
+                const slot = slots.find((candidate) => slotKey(candidate.address) === value);
+                if (slot !== undefined) {
+                  onChange(index, slot.address);
+                }
               }}
             />
           </PrintSetupRow>

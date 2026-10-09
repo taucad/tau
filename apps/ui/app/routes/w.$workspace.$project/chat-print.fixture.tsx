@@ -37,8 +37,8 @@ import type { DesktopBambuStudio } from '#filesystem/desktop-bridge.js';
 import type { PendingMachineAction } from '#components/print/machine-action-approval.js';
 import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { fffProcessOf } from '@taucad/runtime/machine';
-import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
-import { observedTrays, toolheadOf } from '#components/print/machine-facts.js';
+import { bambuSettingsConfiguration, bambuSlotOf } from '@taucad/bambu/settings';
+import { observedSlots, toolheadOf } from '#components/print/machine-facts.js';
 import {
   bambuContainer,
   fffComponents,
@@ -409,7 +409,7 @@ const completeConfiguration = (
   const mapping = Array.isArray(given['amsMapping'])
     ? given['amsMapping'].filter((slot): slot is number => typeof slot === 'number')
     : [];
-  const trays = machine === undefined ? [] : observedTrays(machine);
+  const slots = machine === undefined ? [] : observedSlots(machine);
   const nozzle = machine === undefined ? undefined : toolheadOf(machine.descriptor.capabilities)?.nozzles[0];
   const filament = machine === undefined ? undefined : fffProcessOf(machine.descriptor.capabilities)?.filamentDiameter;
   return {
@@ -422,7 +422,7 @@ const completeConfiguration = (
     ...(filament === undefined ? {} : { expectedFilamentDiameter: filament.value }),
     expectedBedType: 'textured-pei',
     expectedMaterials: mapping.flatMap((slot) => {
-      const materialId = trays.find((tray) => tray.slot === slot)?.materialId;
+      const materialId = slots.find(({ address }) => bambuSlotOf(address) === slot)?.materialId;
       return materialId === undefined ? [] : [{ slot, materialId }];
     }),
   };

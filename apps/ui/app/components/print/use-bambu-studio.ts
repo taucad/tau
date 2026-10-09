@@ -10,8 +10,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MachineDirectoryEntry, MachineManifest, MachineProvider } from '@taucad/runtime/machine';
-import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
+import type {
+  MachineDirectoryEntry,
+  MachineManifest,
+  MachineProvider,
+  MaterialSlotAddress,
+} from '@taucad/runtime/machine';
+import { bambuAddressOf, bambuSettingsConfiguration, bambuSlotOf } from '@taucad/bambu/settings';
 import type {
   MachinePreferences,
   PrintPreferences,
@@ -26,7 +31,8 @@ import type {
   BambuStudioSettings,
 } from '@taucad/slicer/bambu-studio';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
-import { observedTrays, toolheadOf } from '#components/print/machine-facts.js';
+import { observedSlots, toolheadOf } from '#components/print/machine-facts.js';
+import type { BambuTray } from '#components/print/bambu-studio-presets.js';
 
 const bambuPlateIds: ReadonlySet<string> = new Set<BambuPlate['id']>([
   'cool',
@@ -52,6 +58,14 @@ export const isBambuProvider = (provider: MachineProvider | undefined): boolean 
 export type BambuPreferences = ReturnType<typeof bambuSettingsConfiguration.schema.parse>;
 
 /**
+ * Whether a provider's settings form is Bambu's (by source id, never by provider id). Such a provider names material
+ * slots by Bambu tray number in its submission (`amsMapping`) and its saved preferences; this module is the one place
+ * that converts them to and from slot addresses.
+ */
+const isBambuSettings = (provider: MachineProvider | undefined): boolean =>
+  provider?.settingsConfiguration?.source.id === bambuSettingsConfiguration.manifest.source.id;
+
+/**
  * A provider's saved preferences read as Bambu's, when its settings form is Bambu's (by source id, never by provider
  * id): the slots remembered per colour and the start flags live there.
  *
@@ -64,11 +78,92 @@ export const bambuPreferencesOf = (
   provider: MachineProvider | undefined,
   values: MachinePreferences | undefined,
 ): BambuPreferences | undefined => {
-  if (provider?.settingsConfiguration?.source.id !== bambuSettingsConfiguration.manifest.source.id) {
+  if (!isBambuSettings(provider)) {
     return undefined;
   }
   const parsed = bambuSettingsConfiguration.schema.safeParse(values ?? {});
   return parsed.success ? parsed.data : undefined;
+};
+
+/**
+ * The slot each filament prints from, read from a Bambu submission's tray numbers (`amsMapping`).
+ *
+ * @param provider - The provider that owns the submission.
+ * @param configuration - The submission.
+ * @returns One address per filament, undefined for a filament given none (`-1`); none when the provider's settings
+ * are not Bambu's or the submission names no mapping.
+ * @throws RangeError for a tray number no Bambu printer has; Prepare only holds numbers this module wrote or the
+ * settings schema admitted.
+ * @public
+ */
+export const bambuSubmissionSlots = (
+  provider: MachineProvider | undefined,
+  configuration: Readonly<Record<string, unknown>>,
+): ReadonlyArray<MaterialSlotAddress | undefined> => {
+  const mapping = configuration['amsMapping'];
+  return isBambuSettings(provider) && Array.isArray(mapping)
+    ? mapping.map((tray) => (typeof tray === 'number' && tray >= 0 ? bambuAddressOf(tray) : undefined))
+    : [];
+};
+
+/**
+ * A submission with the slot each filament prints from written as Bambu tray numbers (`amsMapping`, `-1` for none).
+ *
+ * @param provider - The provider that owns the submission.
+ * @param configuration - The submission before.
+ * @param slots - One address per filament; none removes the mapping.
+ * @returns The submission after; unchanged for a provider whose settings are not Bambu's.
+ * @public
+ */
+export const withBambuSubmissionSlots = (
+  provider: MachineProvider | undefined,
+  configuration: Readonly<Record<string, unknown>>,
+  slots: ReadonlyArray<MaterialSlotAddress | undefined>,
+): Record<string, unknown> => {
+  if (!isBambuSettings(provider)) {
+    return { ...configuration };
+  }
+  const { amsMapping: _mapping, ...rest } = configuration;
+  return slots.length === 0
+    ? rest
+    : { ...rest, amsMapping: slots.map((slot) => (slot === undefined ? -1 : (bambuSlotOf(slot) ?? -1))) };
+};
+
+/**
+ * The slots Bambu's saved preferences remember for a slice: the slot per colour for several filaments, the default
+ * slot for one.
+ *
+ * @param preferences - Bambu's saved preferences ({@link bambuPreferencesOf}).
+ * @param filamentColors - The slice's filament colours, in filament order.
+ * @returns One address per filament, undefined where none is remembered.
+ * @public
+ */
+export const savedBambuSlots = (
+  preferences: BambuPreferences | undefined,
+  filamentColors: readonly string[],
+): ReadonlyArray<MaterialSlotAddress | undefined> => {
+  const material = preferences?.material;
+  const trays =
+    filamentColors.length > 1
+      ? filamentColors.map((color) => material?.slotsByColor?.[color.toLowerCase()])
+      : [material?.defaultSlot];
+  return trays.map((tray) => (tray === undefined ? undefined : bambuAddressOf(tray)));
+};
+
+/**
+ * The Bambu Studio filament preset the person picked for a slot, kept by tray number in the print intent.
+ *
+ * @param chosen - The person's Bambu Studio picks.
+ * @param slot - The slot, when one is chosen.
+ * @returns The preset name, when one was picked.
+ * @public
+ */
+export const chosenBambuFilament = (
+  chosen: BambuStudioChosen,
+  slot: MaterialSlotAddress | undefined,
+): string | undefined => {
+  const tray = slot === undefined ? undefined : bambuSlotOf(slot);
+  return tray === undefined ? undefined : chosen.filaments?.[tray];
 };
 
 /**
@@ -228,7 +323,7 @@ export type BambuStudioMode = Readonly<{
   dropped: number;
   error: string | undefined;
   /** The loaded trays the filaments print from, ascending: the order `selection.filaments` follows. */
-  slots: readonly number[];
+  trays: readonly BambuTray[];
   chosen: BambuStudioChosen;
   /** Another printer preset has its own processes and filaments, so choosing one clears those picks. */
   choosePrinter: (printer: string) => void;
@@ -299,7 +394,7 @@ const machineHints = ({
     ...(preset === undefined ? {} : { preset }),
     ...(plate === undefined ? {} : { plate }),
     materials: slots.map((slot) => {
-      const tray = observedTrays(entry).find((candidate) => candidate.slot === slot);
+      const tray = observedSlots(entry).find((candidate) => bambuSlotOf(candidate.address) === slot);
       return {
         slot,
         ...(tray?.materialId === undefined ? {} : { materialId: tray.materialId }),
@@ -365,7 +460,7 @@ export const useBambuStudio = ({
   entry,
   manifest,
   plate,
-  mapping,
+  mapping: slotMapping,
   intent,
   update,
 }: {
@@ -373,8 +468,8 @@ export const useBambuStudio = ({
   readonly entry: MachineDirectoryEntry | undefined;
   readonly manifest: MachineManifest | undefined;
   readonly plate: string | undefined;
-  /** The slot each filament prints from, in filament order; `-1` for a filament given none yet. */
-  readonly mapping: readonly number[];
+  /** The slot each filament prints from, in filament order; undefined for a filament given none yet. */
+  readonly mapping: ReadonlyArray<MaterialSlotAddress | undefined>;
   readonly intent: PrintPreferences | undefined;
   readonly update: (edit: PrintPreferencesEdit) => void;
 }): BambuStudioMode => {
@@ -392,6 +487,11 @@ export const useBambuStudio = ({
   const model = entry?.descriptor.model;
   const nozzleDiameter = manifest === undefined ? undefined : toolheadOf(manifest)?.nozzles[0]?.diameter.value;
   const bambuPlate = toBambuPlate(plate);
+  /* Bambu Studio names slots by tray number; `-1` for a filament given none. */
+  const mapping = useMemo(
+    () => slotMapping.map((slot) => (slot === undefined ? -1 : (bambuSlotOf(slot) ?? -1))),
+    [slotMapping],
+  );
   /* Presets are Bambu Studio's per tray, ascending, as it resolves them; `mapping` orders them per filament. */
   const slots = useMemo(
     () => [...new Set(mapping.filter((slot) => slot >= 0))].toSorted((left, right) => left - right),
@@ -590,6 +690,20 @@ export const useBambuStudio = ({
   const printer = selection?.printer;
   const processes = useMemo(() => compatiblePresets(catalog?.processes ?? [], printer), [catalog, printer]);
   const filaments = useMemo(() => compatiblePresets(catalog?.filaments ?? [], printer), [catalog, printer]);
+  const trays = useMemo(
+    () =>
+      slots.map((slot): BambuTray => {
+        const observed = entry === undefined ? [] : observedSlots(entry);
+        const tray = observed.find((candidate) => bambuSlotOf(candidate.address) === slot);
+        return {
+          slot,
+          label: tray?.label ?? `Slot ${String(slot + 1)}`,
+          ...(tray?.materialId === undefined ? {} : { materialId: tray.materialId }),
+          ...(tray?.color === undefined ? {} : { color: tray.color }),
+        };
+      }),
+    [entry, slots],
+  );
 
   return {
     status: modeStatus(isBambu, studio !== undefined, status),
@@ -604,7 +718,7 @@ export const useBambuStudio = ({
     setSettings,
     dropped: reconciled.dropped,
     error: failure,
-    slots,
+    trays,
     chosen,
     choosePrinter,
     chooseProcess,

@@ -8,7 +8,7 @@
 
 import { MachineSettingsOwner } from '@taucad/runtime/host';
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
-import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
+import { providerSettingsDefinitions } from '#machines/machine-settings-definitions.js';
 import { slicingPreferences } from '@taucad/slicer/preferences';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { Topic } from '@taucad/events';
@@ -144,7 +144,7 @@ export const createProjectFiles = (root = '/projects/project-1'): ProjectFiles =
   };
   const createSettings = (): { owner: MachineSettingsOwner; settings: MachineSettingsStore } => {
     const owner = new MachineSettingsOwner({
-      definitions: [slicingPreferences, bambuSettingsConfiguration],
+      definitions: [slicingPreferences, ...providerSettingsDefinitions],
       filesystem: {
         readFileStream: (path) =>
           new ReadableStream({

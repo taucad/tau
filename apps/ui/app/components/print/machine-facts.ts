@@ -5,7 +5,6 @@
  * @module
  */
 
-import { bambuSlotOf } from '@taucad/bambu/settings';
 import { componentValue } from '@taucad/runtime/machine';
 import type { Quantity } from '@taucad/units/quantity';
 import type {
@@ -141,10 +140,8 @@ export const describeOutcome = (outcome: MachineHaltOutcome): string => {
   return `${[motion, spindle, heaters, position].filter((part) => part !== undefined).join(', ')}.`;
 };
 
-/** One material slot as a Bambu printer numbers its trays, the vocabulary of Bambu Studio and the submission. @public */
-export type ObservedTray = Readonly<{
-  /** The Bambu tray number, as the provider encodes it (`bambuSlotOf`). */
-  slot: number;
+/** One declared material slot, by its contract address, with what the machine reports for it. @public */
+export type ObservedSlot = Readonly<{
   address: MaterialSlotAddress;
   label: string;
   /** On an external holder: it feeds one-filament prints only. */
@@ -159,53 +156,39 @@ export type ObservedTray = Readonly<{
 }>;
 
 /**
- * The machine's declared material slots as Bambu tray numbers, with what each reports. The provider owns the
- * numbering; a slot it cannot number is left out.
+ * The machine's declared material slots, with what each reports.
  *
  * @param entry - The machine as observed.
  * @returns Every declared slot in manifest order; none on a machine without a material system.
  * @public
  */
-export const observedTrays = (entry: MachineDirectoryEntry): readonly ObservedTray[] => {
+export const observedSlots = (entry: MachineDirectoryEntry): readonly ObservedSlot[] => {
   const system = materialSystemOf(entry.descriptor.capabilities);
-  return declaredSlots(system, materialSystemValue(entry)).flatMap((slot): ObservedTray[] => {
-    const index = bambuSlotOf(slot.slot);
-    return index === undefined
-      ? []
-      : [
-          {
-            slot: index,
-            address: slot.slot,
-            label: slotLabel(system, slot.slot),
-            isExternal: isExternalSlot(system, slot.slot),
-            state: slot.state,
-            ...(slot.material === undefined
-              ? {}
-              : {
-                  materialId: slot.material.materialType,
-                  profileId: slot.material.preset.profileId,
-                  color: slot.material.color,
-                }),
-          },
-        ];
-  });
+  return declaredSlots(system, materialSystemValue(entry)).map(
+    (slot): ObservedSlot => ({
+      address: slot.slot,
+      label: slotLabel(system, slot.slot),
+      isExternal: isExternalSlot(system, slot.slot),
+      state: slot.state,
+      ...(slot.material === undefined
+        ? {}
+        : {
+            materialId: slot.material.materialType,
+            profileId: slot.material.preset.profileId,
+            color: slot.material.color,
+          }),
+    }),
+  );
 };
 
 /**
- * The slot label of a Bambu tray index: "A1", "Ext".
+ * A slot address as one string, for a select option's value or a React key.
  *
- * @param capabilities - A manifest or installed capabilities.
- * @param index - The tray index.
- * @returns The label, or "Slot n" for an index the manifest does not declare.
+ * @param address - The slot.
+ * @returns `unitId/slotId`.
  * @public
  */
-export const trayLabel = (capabilities: WithComponents | undefined, index: number): string => {
-  const system = capabilities === undefined ? undefined : materialSystemOf(capabilities);
-  const address = (system?.units ?? [])
-    .flatMap((unit) => unit.slots.map((slot) => ({ unitId: unit.id, slotId: slot.id })))
-    .find((candidate) => bambuSlotOf(candidate) === index);
-  return address === undefined ? `Slot ${String(index + 1)}` : slotLabel(system, address);
-};
+export const slotKey = (address: MaterialSlotAddress): string => `${address.unitId}/${address.slotId}`;
 
 /**
  * The build plate the machine reports: a `plate` reading on any component, naming a manifest plate id.

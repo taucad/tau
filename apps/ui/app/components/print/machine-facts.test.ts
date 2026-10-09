@@ -5,32 +5,28 @@ import {
   formatQuantity,
   materialSystemOf,
   materialSystemValue,
-  observedTrays,
-  trayLabel,
+  observedSlots,
+  slotKey,
 } from '#components/print/machine-facts.js';
 import { fffSlots, machineEntry, x1cManifest } from '#components/print/testing/machines.fixture.js';
 
-describe('observedTrays', () => {
-  it('should number every declared slot as the provider encodes it and mark the external holder', () => {
-    const trays = observedTrays(machineEntry({ manifest: x1cManifest }));
-    expect(trays.map(({ slot, label, isExternal }) => [slot, label, isExternal])).toEqual([
-      [0, 'A1', false],
-      [1, 'A2', false],
-      [2, 'A3', false],
-      [3, 'A4', false],
-      [254, 'Ext', true],
+describe('observedSlots', () => {
+  it('should key every declared slot by its address and label, and mark the external holder', () => {
+    const slots = observedSlots(machineEntry({ manifest: x1cManifest }));
+    expect(slots.map(({ address, label, isExternal }) => [address, label, isExternal])).toEqual([
+      [{ unitId: 'ams-a', slotId: 'a1' }, 'A1', false],
+      [{ unitId: 'ams-a', slotId: 'a2' }, 'A2', false],
+      [{ unitId: 'ams-a', slotId: 'a3' }, 'A3', false],
+      [{ unitId: 'ams-a', slotId: 'a4' }, 'A4', false],
+      [{ unitId: 'external', slotId: 'spool' }, 'Ext', true],
     ]);
-    expect(trays[0]).toMatchObject({ state: 'loaded', materialId: 'PLA' });
+    expect(slots[0]).toMatchObject({ state: 'loaded', materialId: 'PLA' });
   });
 });
 
-describe('trayLabel', () => {
-  it.each([
-    { slot: 0, label: 'A1' },
-    { slot: 254, label: 'Ext' },
-    { slot: 9, label: 'Slot 10' },
-  ])('should name tray $slot as $label', ({ slot, label }) => {
-    expect(trayLabel(x1cManifest, slot)).toBe(label);
+describe('slotKey', () => {
+  it('should name a slot by its unit and slot ids', () => {
+    expect(slotKey({ unitId: 'ams-a', slotId: 'a2' })).toBe('ams-a/a2');
   });
 });
 

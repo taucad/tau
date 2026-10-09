@@ -1,5 +1,4 @@
-import type { MachineFffProcess, MachineManifest } from '@taucad/runtime/machine';
-import { trayLabel } from '#components/print/machine-facts.js';
+import type { MachineFffProcess } from '@taucad/runtime/machine';
 import type { SliceBounds } from '#components/printer/printer-summary.js';
 
 const axes = ['X', 'Y', 'Z'] as const;
@@ -184,14 +183,3 @@ export const shortDigest = (digest: string): string => {
   const [algorithm, hex] = digest.split(':', 2);
   return hex === undefined ? digest : `${algorithm ?? ''}:${hex.slice(0, 8)}…`;
 };
-
-/**
- * The material slot as the printer labels it: "A1", or "Ext" for the external spool.
- *
- * @param slot - The Bambu tray index a submission names.
- * @param manifest - The machine's manifest or capabilities, when known.
- * @returns The slot's declared label, "Slot n" otherwise.
- * @public
- */
-export const materialSlotLabel = (slot: number, manifest: Pick<MachineManifest, 'components'> | undefined): string =>
-  trayLabel(manifest, slot);

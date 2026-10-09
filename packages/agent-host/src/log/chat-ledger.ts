@@ -599,11 +599,12 @@ const createFold = (ledger: ChatLedger) => {
     return true;
   };
 
-  const stepPhysical = (classified: Parameters<typeof stepClassified>[0]): void => {
+  const stepPhysical = (classified: Parameters<typeof stepClassified>[0]): boolean => {
     const { cursor, last } = draft.position;
-    stepClassified(classified);
+    const applied = stepClassified(classified);
     const key = classified.class === 'quarantined' ? last : keyOf(classified.event);
     draft.position = { cursor: cursor + 1, ...(key === undefined ? {} : { last: key }) };
+    return applied && classified.class !== 'quarantined';
   };
   return { draft, step: (value: unknown) => stepClassified(classifyLogRow(value)), stepClassified, stepPhysical };
 };
@@ -674,20 +675,24 @@ export const foldProjectionFacts = ({ ledger, answer }: FoldProjectionFactsInput
     return { kind: 'reset', reason: 'identity-mismatch' };
   }
   const fold = createFold(ledger);
-  for (const fact of batch.facts) {
-    if (fact.classification === 'known') {
-      fold.stepPhysical({ class: 'known', event: { ...fact.row, ...fact.effect } });
-    } else {
-      fold.stepPhysical({
-        class: 'opaque',
-        event: { ...fact.row, type: fact.eventType },
-        affectsHistory: fact.affectsHistory,
-      });
+  const semanticRowIndices: number[] = [];
+  for (const [index, fact] of batch.facts.entries()) {
+    const applied =
+      fact.classification === 'known'
+        ? fold.stepPhysical({ class: 'known', event: { ...fact.row, ...fact.effect } })
+        : fold.stepPhysical({
+            class: 'opaque',
+            event: { ...fact.row, type: fact.eventType },
+            affectsHistory: fact.affectsHistory,
+          });
+    if (applied) {
+      semanticRowIndices.push(index);
     }
   }
   const last = batch.facts.at(-1)?.row ?? ledger.position.last;
   return {
     kind: 'folded',
+    semanticRowIndices,
     ledger: {
       ...fold.draft,
       position: {
@@ -714,7 +719,12 @@ export type LedgerReadAnswer =
 
 /** What a reader does with one read's answer (CL-R13). @public */
 export type ReadFold =
-  | Readonly<{ kind: 'folded'; ledger: ChatLedger }>
+  | Readonly<{
+      kind: 'folded';
+      ledger: ChatLedger;
+      /** Increasing batch-relative indices of nonduplicate known/opaque rows; excludes quarantine. Empty reads return []. */
+      semanticRowIndices: readonly number[];
+    }>
   /** The batch does not start at this cursor: discard it and read again. */
   | Readonly<{ kind: 'stale' }>
   /** Refold from `emptyChatLedger` at cursor 0. `clamped` is a version-1 server's clamp, detected. */
@@ -761,6 +771,7 @@ export const foldReadAnswer = (ledger: ChatLedger, answer: LedgerReadAnswer): Re
           };
     return {
       kind: 'folded',
+      semanticRowIndices: [],
       ledger:
         answer.sourceGeneration === ledger.position.sourceGeneration
           ? observed
@@ -770,7 +781,14 @@ export const foldReadAnswer = (ledger: ChatLedger, answer: LedgerReadAnswer): Re
             },
     };
   }
-  const rawFolded = foldPhysicalChatLedger(ledger, answer.events);
+  const physical = createFold(ledger);
+  const semanticRowIndices: number[] = [];
+  for (const [index, row] of answer.events.entries()) {
+    if (physical.stepPhysical(classifyLogRow(row))) {
+      semanticRowIndices.push(index);
+    }
+  }
+  const rawFolded = physical.draft;
   const folded =
     answer.sourceHealth === undefined
       ? rawFolded
@@ -783,6 +801,7 @@ export const foldReadAnswer = (ledger: ChatLedger, answer: LedgerReadAnswer): Re
   // The server's cursor is authoritative for an aligned batch, whatever the fold skipped.
   return {
     kind: 'folded',
+    semanticRowIndices,
     ledger: {
       ...folded,
       position: {

@@ -1067,11 +1067,12 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
       let { failure, attentionRow } = state;
       const parsedRows: readonly PresentationEvent[] =
         'facts' in answer
-          ? answer.facts.flatMap((fact): KnownProjectionEvent[] =>
-              fact.classification === 'known' ? [{ ...fact.row, ...fact.effect }] : [],
-            )
-          : answer.events.flatMap((row) => {
-              const parsed = agentLogEventSchema.safeParse(row);
+          ? fold.semanticRowIndices.flatMap((index): KnownProjectionEvent[] => {
+              const fact = answer.facts[index];
+              return fact?.classification === 'known' ? [{ ...fact.row, ...fact.effect }] : [];
+            })
+          : fold.semanticRowIndices.flatMap((index) => {
+              const parsed = agentLogEventSchema.safeParse(answer.events[index]);
               return parsed.success ? [parsed.data] : [];
             });
       for (const row of parsedRows) {

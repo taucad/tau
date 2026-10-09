@@ -1113,7 +1113,84 @@ it('should retain failed-run history and finalize its interrupted tool tail', as
 });
 
 describe('compact captured projection parity', () => {
+  const redeliveredRunning = lifecycleRow(1, 'running');
+  const redeliveredAdmission = lifecycleRow(0, 'admitted');
+  const redeliveredSteering = logRow(4, {
+    type: 'message.appended',
+    message: { id: 'steer:duplicate', role: 'user', content: 'Real steering' },
+  });
+  const redeliveredMessage = logRow(5, {
+    type: 'message.appended',
+    message: { id: 'answer-after', role: 'assistant', content: 'After steering' },
+  });
+  const duplicateCases = [
+    {
+      name: 'duplicate old lifecycle cannot reopen a completed presentation',
+      rows: [
+        redeliveredAdmission,
+        redeliveredRunning,
+        lifecycleRow(2, 'completed'),
+        redeliveredAdmission,
+        redeliveredRunning,
+      ],
+      verify(projection: ChatProjection) {
+        expect.soft(projection.ledger.runs['run_1']?.lifecycle).toBe('completed');
+        expect.soft(projection.views['run_1']?.terminal).toBe('completed');
+        expect
+          .soft(chunksOf(projection.views['run_1']?.chunks).filter((chunk) => chunk.type === 'finish'))
+          .toHaveLength(1);
+      },
+    },
+    {
+      name: 'duplicate opaque boundary cannot revive an earlier running row',
+      rows: [
+        redeliveredAdmission,
+        redeliveredRunning,
+        logRow(2, { type: 'future.presentation' }),
+        lifecycleRow(3, 'completed'),
+        logRow(2, { type: 'future.presentation' }),
+        redeliveredRunning,
+      ],
+      verify(projection: ChatProjection) {
+        expect.soft(projection.ledger.runs['run_1']?.lifecycle).toBe('completed');
+        expect.soft(projection.views['run_1']?.terminal).toBe('completed');
+        expect.soft(projection.ledger.terms['g1']?.lastSequence).toBe(3);
+        expect
+          .soft(chunksOf(projection.views['run_1']?.chunks).filter((chunk) => chunk.type === 'finish'))
+          .toHaveLength(1);
+      },
+    },
+    {
+      name: 'duplicate steering and assistant cannot add a second segment or message',
+      rows: [
+        redeliveredAdmission,
+        redeliveredRunning,
+        logRow(2, {
+          type: 'message.appended',
+          message: { id: 'original-user', role: 'user', content: 'Original prompt' },
+        }),
+        logRow(3, {
+          type: 'message.appended',
+          message: { id: 'answer-before', role: 'assistant', content: 'Before steering' },
+        }),
+        redeliveredSteering,
+        redeliveredMessage,
+        lifecycleRow(6, 'completed'),
+        redeliveredSteering,
+        redeliveredMessage,
+      ],
+      expectedTranscript: {
+        ids: ['original-user', 'run_1', 'steer:duplicate', 'run_1:steer:duplicate'],
+        texts: ['Original prompt', 'Before steering', 'Real steering', 'After steering'],
+      },
+      verify(projection: ChatProjection) {
+        expect.soft(projection.views['run_1']?.segments).toHaveLength(1);
+        expect.soft(projection.views['run_1']?.terminal).toBe('completed');
+      },
+    },
+  ];
   const compactCases = [
+    ...duplicateCases.flatMap((fixture) => [1, 16].map((pageSize) => ({ ...fixture, pageSize }))),
     ...logs.map((name) => ({ name, rows: readLog(name) })),
     {
       name: 'sealed correction, compaction and partial rewind',
@@ -1174,7 +1251,9 @@ describe('compact captured projection parity', () => {
   ];
   it.each(compactCases)(
     'should preserve all visible and ledger facts from the actual host for $name',
-    async ({ rows }) => {
+    async (fixture) => {
+      const { rows } = fixture;
+      const pageSize = 'pageSize' in fixture ? fixture.pageSize : undefined;
       const root = await mkdtemp(join(tmpdir(), 'tau-render-compact-'));
       const directory = join(root, '.tau/chats/parity');
       await mkdir(directory, { recursive: true });
@@ -1197,9 +1276,9 @@ describe('compact captured projection parity', () => {
       });
       const actor = createActor(chatProjectionLogic).start();
       try {
-        let raw = project(rows, 7);
+        let raw = project(rows, pageSize ?? 7);
         let validated = false;
-        for await (const frame of launcher.catchUp({ chatId: 'parity', limit: 1, maxBytes: 1024 * 1024 })) {
+        for await (const frame of launcher.catchUp({ chatId: 'parity', limit: pageSize ?? 1, maxBytes: 1024 * 1024 })) {
           if (frame.type === 'page') {
             const event = { type: 'facts', answer: frame.answer };
             actor.send(event);
@@ -1227,6 +1306,31 @@ describe('compact captured projection parity', () => {
         expect(validated).toBe(true);
         const compact = actor.getSnapshot().context;
         expect(compact.ledger.position.cursor).toBe(rows.length);
+        expect(raw.ledger.position.cursor).toBe(rows.length);
+        const lastPhysical = rows.at(-1);
+        expect(compact.ledger.position.last).toEqual({
+          leaderEpoch: lastPhysical?.leaderEpoch,
+          sequence: lastPhysical?.sequence,
+        });
+        if ('verify' in fixture) {
+          fixture.verify(raw);
+          fixture.verify(compact);
+        }
+        if ('expectedTranscript' in fixture && fixture.expectedTranscript !== undefined) {
+          for (const messages of await Promise.all([materializeTranscript(raw), materializeTranscript(compact)])) {
+            expect.soft(messages.map((message) => message.id)).toEqual(fixture.expectedTranscript.ids);
+            expect
+              .soft(
+                messages.map((message) =>
+                  message.parts
+                    .filter((part) => part.type === 'text')
+                    .map((part) => part.text)
+                    .join(''),
+                ),
+              )
+              .toEqual(fixture.expectedTranscript.texts);
+          }
+        }
         expect(compact.ledger).toEqual(raw.ledger);
         expect(compact.openTools).toEqual(raw.openTools);
         expect(compact.failure).toEqual(raw.failure);

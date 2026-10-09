@@ -21,7 +21,7 @@ import type {
   HostAdmissionOperation,
   HostSessionHandle,
 } from '#host/host-admission.js';
-import { isMachineJobFailureCode, machineFailureCodes } from '#machines/machine-actions.js';
+import { isMachineJobFailureCode, machineFailureCodes, withMachineCode } from '#machines/machine-actions.js';
 import type { MachineFailure } from '#machines/machine-actions.js';
 import type {
   MachineActionApproval,
@@ -720,64 +720,72 @@ export const exposeMachineChannel = (input: {
     impl: {
       // oxlint-disable-next-line eslint/max-params -- Typed ChannelServer call signature is fixed.
       async call(_context, name, args, signal) {
-        const admitted = admit(`machines.${name}`);
-        const combined = AbortSignal.any([signal, admitted.signal]);
-        combined.throwIfAborted();
-        if (name === 'listProviders') {
-          admitted.assertCurrent();
-          return providers;
-        }
-        if (name === 'list' || name === 'get') {
-          const directory = await abortable(input.directory.snapshot(), combined);
+        try {
+          const admitted = admit(`machines.${name}`);
+          const combined = AbortSignal.any([signal, admitted.signal]);
+          combined.throwIfAborted();
+          if (name === 'listProviders') {
+            admitted.assertCurrent();
+            return providers;
+          }
+          if (name === 'list' || name === 'get') {
+            const directory = await abortable(input.directory.snapshot(), combined);
+            combined.throwIfAborted();
+            admitted.assertCurrent();
+            if (name === 'list') {
+              return directory;
+            }
+            const { machineId } = args as GetInput;
+            const entry = directory.entries.find((candidate) => candidate.machineId === machineId);
+            if (!entry) {
+              throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
+            }
+            return entry;
+          }
+          // SAFETY: `name` is one of the host calls, and the channel validated `args` for it.
+          // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc cannot index the operations by the generic name.
+          const operation = input.operations[name as keyof HostCalls] as (operationInput: unknown) => Promise<unknown>;
+          const result = await abortable(operation({ ...args, admitted, signal: combined }), combined);
           combined.throwIfAborted();
           admitted.assertCurrent();
-          if (name === 'list') {
-            return directory;
-          }
-          const { machineId } = args as GetInput;
-          const entry = directory.entries.find((candidate) => candidate.machineId === machineId);
-          if (!entry) {
-            throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
-          }
-          return entry;
+          // SAFETY: the protocol's own result validator for `name` proves the value.
+          return parseResult(
+            protocolSchemas.calls[name].result,
+            result,
+          ) as unknown as MachineChannelProtocol['calls'][typeof name]['result'];
+        } catch (error) {
+          throw withMachineCode(error);
         }
-        // SAFETY: `name` is one of the host calls, and the channel validated `args` for it.
-        // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc cannot index the operations by the generic name.
-        const operation = input.operations[name as keyof HostCalls] as (operationInput: unknown) => Promise<unknown>;
-        const result = await abortable(operation({ ...args, admitted, signal: combined }), combined);
-        combined.throwIfAborted();
-        admitted.assertCurrent();
-        // SAFETY: the protocol's own result validator for `name` proves the value.
-        return parseResult(
-          protocolSchemas.calls[name].result,
-          result,
-        ) as unknown as MachineChannelProtocol['calls'][typeof name]['result'];
       },
       // oxlint-disable-next-line eslint/max-params -- Typed ChannelServer listen signature is fixed.
       async *listen(_context, name, args, signal) {
-        const admitted = admit(`machines.${name}`);
-        const combined = AbortSignal.any([signal, admitted.signal]);
-        if (name === 'discover') {
+        try {
+          const admitted = admit(`machines.${name}`);
+          const combined = AbortSignal.any([signal, admitted.signal]);
+          if (name === 'discover') {
+            yield* relay(
+              input.operations.discover({ ...(args as DiscoverInput), admitted, signal: combined }),
+              admitted,
+              combined,
+            );
+            return;
+          }
+          if (name === 'watchJobs') {
+            yield* relay(
+              input.operations.watchJobs({ ...(args as ListJobsInput), admitted, signal: combined }),
+              admitted,
+              combined,
+            );
+            return;
+          }
           yield* relay(
-            input.operations.discover({ ...(args as DiscoverInput), admitted, signal: combined }),
+            input.directory.watch({ cursor: (args as WatchInput).cursor, signal: combined }),
             admitted,
             combined,
           );
-          return;
+        } catch (error) {
+          throw withMachineCode(error);
         }
-        if (name === 'watchJobs') {
-          yield* relay(
-            input.operations.watchJobs({ ...(args as ListJobsInput), admitted, signal: combined }),
-            admitted,
-            combined,
-          );
-          return;
-        }
-        yield* relay(
-          input.directory.watch({ cursor: (args as WatchInput).cursor, signal: combined }),
-          admitted,
-          combined,
-        );
       },
     },
   });

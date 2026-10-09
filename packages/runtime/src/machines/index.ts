@@ -40,6 +40,7 @@ export {
   standardMachineAction,
   standardMachineActions,
   standardMachineHolds,
+  withMachineCode,
 } from '#machines/machine-actions.js';
 export type {
   MachineActionDefinition,

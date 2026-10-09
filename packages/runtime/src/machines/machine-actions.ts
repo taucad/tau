@@ -644,6 +644,30 @@ const providerJobCode = /^MACHINE_(?:JOB|TRANSFER)_[A-Z0-9_]{1,48}$/u;
 export const isMachineJobFailureCode = (code: string): code is MachineJobFailureCode =>
   failureCodes.has(code) || providerJobCode.test(code);
 
+/** A whole message that is itself a machine failure code, as `new Error('MACHINE_BINDING_BUSY')`. */
+const codeMessage = /^MACHINE_[A-Z0-9]+(?:_[A-Z0-9]+)*$/u;
+
+/**
+ * Give a host refusal its typed `code` before it crosses to a consumer. Many host and provider refusals are thrown as
+ * `new Error('<CODE>')`; consumers read `code` only (never parse the message), so the boundary that hands an error to
+ * a consumer (the machines channel, a relay) calls this once. An error that already has a `code`, or whose message is
+ * a sentence, is left as it is.
+ * @param error - Anything caught.
+ * @returns The same value, with `code` set to its message when that message is a machine failure code.
+ * @public
+ */
+export const withMachineCode = <Caught>(error: Caught): Caught => {
+  if (
+    error instanceof Error &&
+    (error as { code?: unknown }).code === undefined &&
+    (failureCodes.has(error.message) || codeMessage.test(error.message)) &&
+    Object.isExtensible(error)
+  ) {
+    Object.assign(error, { code: error.message });
+  }
+  return error;
+};
+
 /** A refusal a person or an agent can act on. @public */
 export type MachineFailure = Readonly<{
   code: MachineFailureCode;

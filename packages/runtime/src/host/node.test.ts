@@ -493,7 +493,11 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       mediaType: 'image/jpeg',
       capturedAt: observedAt,
     });
-    await expect(first.client.captureStill({ machineId })).rejects.toThrow('MACHINE_STILL_RATE_LIMITED');
+    /* The host's own refusal crosses the channel with its typed code. */
+    await expect(first.client.captureStill({ machineId })).rejects.toMatchObject({
+      code: 'MACHINE_STILL_RATE_LIMITED',
+      message: 'MACHINE_STILL_RATE_LIMITED',
+    });
     expect(captureStill).toHaveBeenCalledOnce();
     currentTime += 5000;
     captureStill.mockRejectedValueOnce(new Error('BAMBU_CAMERA_UNAVAILABLE'));
@@ -505,7 +509,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       capturedAt: currentTimestamp(),
       expiresAt: currentTimestamp(),
     });
-    await expect(first.client.captureStill({ machineId })).rejects.toThrow('MACHINE_STILL_INVALID');
+    await expect(first.client.captureStill({ machineId })).rejects.toMatchObject({ code: 'MACHINE_STILL_INVALID' });
     expect(await first.client.list({})).toEqual(beforeStill);
     currentTime = Date.parse(observedAt);
 
@@ -2099,7 +2103,9 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     expect(forget).toHaveBeenCalledExactlyOnceWith(reference);
     expect(saved.has(reference)).toBe(false);
     await expect(first.client.list({})).resolves.toMatchObject({ entries: [] });
-    await expect(first.client.removeBinding({ machineId })).rejects.toThrow('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
+    await expect(first.client.removeBinding({ machineId })).rejects.toMatchObject({
+      code: 'MACHINE_DIRECTORY_UNKNOWN_MACHINE',
+    });
     await first.close();
     const history = `${machineId}.removed-${Date.parse(observedAt)}`;
     expect(await sortedEntries(root)).toEqual(['authority', 'store.json', history]);
@@ -2127,7 +2133,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     await expect(
       fixture.client.requestJob({ jobId: 'job-1', machineId, artifact, configuration: {}, requestedBy: agent }),
     ).resolves.toMatchObject({ state: 'awaiting-approval' });
-    await expect(fixture.client.removeBinding({ machineId })).rejects.toThrow('MACHINE_BINDING_BUSY');
+    await expect(fixture.client.removeBinding({ machineId })).rejects.toMatchObject({ code: 'MACHINE_BINDING_BUSY' });
     expect(forget).not.toHaveBeenCalled();
     await expect(fixture.client.get({ machineId })).resolves.toMatchObject({ freshness: 'current' });
     await fixture.client.withdrawJob({ jobId: 'job-1', resolvedBy: agent });

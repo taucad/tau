@@ -53,13 +53,29 @@ export const carveraSubmissionConfiguration = defineConfiguration({
 /** The submission a provider receives. @internal */
 export type CarveraSubmission = z.output<typeof carveraSubmissionConfiguration.schema>;
 
-const probeSchema = z.strictObject({
+/** Parameters of `work-offset.select`. @internal */
+export const carveraWorkOffsetSelectSchema = z.strictObject({
+  offset: z.enum(carveraWorkOffsets).meta({ title: 'Work offset' }),
+});
+/** Parameters of `work-offset.set`. @internal */
+export const carveraWorkOffsetSetSchema = z.strictObject({
+  offset: z.enum(carveraWorkOffsets).meta({ title: 'Work offset' }),
+  // Partial: setting only Z is the common case.
+  position: z.partialRecord(z.enum(['x', 'y', 'z']), z.number()).meta({
+    title: 'Position here',
+    description: 'The work coordinates the tool has now. Millimetres.',
+  }),
+});
+/** Parameters of `probe.run`. @internal */
+export const carveraProbeSchema = z.strictObject({
   cycle: z.enum(['z-surface', 'corner', 'bore-centre']).meta({ title: 'Cycle' }),
 });
-const toolSchema = z.strictObject({
+/** Parameters of `tool.change`. @internal */
+export const carveraToolSchema = z.strictObject({
   tool: z.number().int().min(0).max(carveraRackTools).meta({ title: 'Tool', description: 'T0 is the probe.' }),
 });
-const spindleSchema = z.discriminatedUnion('mode', [
+/** Parameters of `spindle.set`. @internal */
+export const carveraSpindleSchema = z.discriminatedUnion('mode', [
   z.strictObject({ mode: z.literal('off') }),
   z.strictObject({
     mode: z.literal('clockwise'),
@@ -67,10 +83,12 @@ const spindleSchema = z.discriminatedUnion('mode', [
     duration: quantity({ unit: 's' }).positive().max(300).meta({ title: 'Stops by itself after' }),
   }),
 ]);
-const feedOverrideSchema = z.strictObject({
+/** Parameters of the feed override. @internal */
+export const carveraFeedOverrideSchema = z.strictObject({
   ratio: quantity({ unit: '1' }).min(0.1).max(4).meta({ title: 'Level', description: '1 is the programmed feed.' }),
 });
-const spindleOverrideSchema = z.strictObject({
+/** Parameters of the spindle override. @internal */
+export const carveraSpindleOverrideSchema = z.strictObject({
   ratio: quantity({ unit: '1' }).min(0.5).max(2).meta({ title: 'Level', description: '1 is the programmed speed.' }),
 });
 
@@ -170,7 +188,7 @@ const actions = (qualification?: MachineActionQualification): readonly MachineAc
       componentId: 'motion',
       label: 'Use work offset',
       when: idle,
-      schema: z.strictObject({ offset: z.enum(carveraWorkOffsets).meta({ title: 'Work offset' }) }),
+      schema: carveraWorkOffsetSelectSchema,
       ...qualified,
     }),
     standardMachineAction({
@@ -180,13 +198,7 @@ const actions = (qualification?: MachineActionQualification): readonly MachineAc
       when: idle,
       requires: position,
       consequence: 'Setting Z also re-bases the tool lengths on this machine.',
-      schema: z.strictObject({
-        offset: z.enum(carveraWorkOffsets).meta({ title: 'Work offset' }),
-        position: z.record(z.enum(['x', 'y', 'z']), z.number()).meta({
-          title: 'Position here',
-          description: 'The work coordinates the tool has now. Millimetres.',
-        }),
-      }),
+      schema: carveraWorkOffsetSetSchema,
       ...qualified,
     }),
     standardMachineAction({
@@ -197,7 +209,7 @@ const actions = (qualification?: MachineActionQualification): readonly MachineAc
       requires: [...position, ...inputs],
       safety: { interlocks: ['cover'] },
       consequence: 'The spindle swaps its tool for the probe, probes and puts the tool back.',
-      schema: probeSchema,
+      schema: carveraProbeSchema,
       ...qualified,
     }),
     standardMachineAction({
@@ -208,7 +220,7 @@ const actions = (qualification?: MachineActionQualification): readonly MachineAc
       requires: [...position, ...inputs],
       safety: { interlocks: ['cover'] },
       consequence: 'The spindle drops its tool in its pocket, picks the new one and measures it.',
-      schema: toolSchema,
+      schema: carveraToolSchema,
       ...qualified,
     }),
     standardMachineAction({
@@ -228,7 +240,7 @@ const actions = (qualification?: MachineActionQualification): readonly MachineAc
       requires: inputs,
       safety: { interlocks: ['cover'], maximumDuration: 300_000 },
       consequence: 'The spindle runs for the time you set, then stops by itself.',
-      schema: spindleSchema,
+      schema: carveraSpindleSchema,
       ...qualified,
     }),
     standardMachineAction({
@@ -262,7 +274,7 @@ const actions = (qualification?: MachineActionQualification): readonly MachineAc
       label: 'Feed override',
       when: running,
       effects: ['motion'],
-      schema: feedOverrideSchema,
+      schema: carveraFeedOverrideSchema,
       ...qualified,
     }),
     standardMachineAction({
@@ -271,7 +283,7 @@ const actions = (qualification?: MachineActionQualification): readonly MachineAc
       label: 'Spindle override',
       when: running,
       effects: ['spindle'],
-      schema: spindleOverrideSchema,
+      schema: carveraSpindleOverrideSchema,
       ...qualified,
     }),
     standardMachineAction({

@@ -12,7 +12,7 @@ Makera Carvera C1 LAN machine plugin, with a simulated Carvera
 
 - **One call composes it** — `carvera()` registers this package's capabilities with `defineRuntime`.
 - **Role factories** — `carveraMachine()` and `carveraSimulatorMachine()` support direct authoring, isolated tests, and whole-role ordering outside plugin expansion.
-- **No module-scope work** — backends load in `initialize()` and stay in capability context, one payload per worker.
+- **No module-scope work** — the session code loads only when a machine connects.
 
 ## Install
 
@@ -43,10 +43,27 @@ trusted host implementation; do not pass the host definition to the four-role CA
 | ------------------------- | --------------- | ----------------------------------------------------------------------------- |
 | `carvera`                 | toolkit factory | package-named authoring factory; presets select capabilities                  |
 | `plugin`                  | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
-| `carveraMachine`          | machine factory | direct `machines` composition, with options                                   |
+| `carveraMachine`          | machine factory | direct `machines` composition                                                 |
 | `carveraSimulatorMachine` | machine factory | a simulated C1; register beside `carveraMachine` for tests and demos          |
 
 One preset, `default`, selecting `machines.default`.
+
+## On the machine
+
+- **Stop** is the realtime halt (`0x18`): motion and spindle stop at once and the position may be lost, so the
+  machine needs **Unlock** and then **Home**. **Stop job** is the firmware's `abort`: moves already queued still run
+  before the spindle stops.
+- **Pause** waits for the queued moves and leaves the spindle turning. **Resume** returns in a straight line, so it is
+  refused while the spindle is stopped in a pause.
+- **One app at a time.** While the Carvera Controller or Makera Studio holds the machine, Tau shows it occupied,
+  blocks everything and retries every 5 s. The machine drops a silent client after 10 s; Tau polls every 250 ms.
+- **Homing.** The stock status line has no homed flag, so Tau trusts the position only after it has seen the machine
+  home, or restarted it. A machine homed before Tau connected reads "not known" and must home again before a jog or
+  a job.
+- **The end of a run.** Stock firmware never says a program finished. A run read to its end without a halt reads
+  completed; one that disappears earlier reads unknown.
+- **A refused start.** The machine refuses a missing file, a second program or an unhomed machine only in text or
+  with halt 15; Tau waits up to 3 s for the run to appear and otherwise reports the start refused or unknown.
 
 ## Environment
 

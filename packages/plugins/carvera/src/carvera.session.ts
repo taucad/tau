@@ -8,7 +8,12 @@
 
 import { createHash } from 'node:crypto';
 
-import { machineActionDefinitionOf, machineManifestOf } from '@taucad/runtime/machine';
+import {
+  checkMachineAction,
+  machineManifestOf,
+  standardMachineActions,
+  standardMachineHolds,
+} from '@taucad/runtime/machine';
 import type {
   ComponentObservation,
   MachineActionConfirmation,
@@ -38,10 +43,22 @@ import type {
 } from '@taucad/runtime/machine';
 import { createQuantity, quantityKinds } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
+import { z } from 'zod';
 
 import { summarizeCarveraProgram } from '#carvera.gcode.js';
 import type { CarveraProgram } from '#carvera.gcode.js';
-import { carveraRackTools, carveraSubmissionConfiguration, carveraWorkOffsets } from '#carvera.manifest.js';
+import {
+  carveraFeedOverrideSchema,
+  carveraProbeSchema,
+  carveraRackTools,
+  carveraSpindleOverrideSchema,
+  carveraSpindleSchema,
+  carveraSubmissionConfiguration,
+  carveraToolSchema,
+  carveraWorkOffsetSelectSchema,
+  carveraWorkOffsetSetSchema,
+  carveraWorkOffsets,
+} from '#carvera.manifest.js';
 import type { CarveraSubmission } from '#carvera.manifest.js';
 import {
   carveraCommand,
@@ -76,12 +93,18 @@ export type CarveraSessionInput = Readonly<{
 
 type Axis = 'x' | 'y' | 'z';
 const axisIds: readonly Axis[] = ['x', 'y', 'z'];
+const isAxis = (value: string): value is Axis => (axisIds as readonly string[]).includes(value);
 const maximumProgramBytes = 32 * 1024 * 1024;
 /** Milliseconds an ended run and a finished activity stay in the report. */
 const endedRetention = 600_000;
 const activityRetention = 30_000;
 /** Milliseconds a held jog's segment lasts at full feed: half the declared bound. */
 const jogSegment = 150;
+/** Milliseconds a start waits for the machine to show the run, refuse the file or halt. */
+const startWait = 3000;
+
+/** What the machine did with a `play`. */
+type StartAnswer = Readonly<{ type: 'started' } | { type: 'refused'; message: string } | { type: 'silent' }>;
 
 type Procedure = {
   activityId: string;
@@ -107,7 +130,8 @@ type RunTrack = {
   name?: string;
   lines?: number;
   startedAt: string;
-  pausedByTau: boolean;
+  /** Who paused it from Tau, while it stays paused. */
+  pausedBy?: 'person' | 'agent';
   endedBy?: 'cancel' | 'stop';
 };
 
@@ -239,7 +263,7 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
 
   const write = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
     if (stream === undefined) {
-      throw new Error('CARVERA_NOT_CONNECTED');
+      throw new Error('MACHINE_UNAVAILABLE');
     }
     await stream.write(bytes);
   };
@@ -312,7 +336,6 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
           runId: `external-${String(externalRuns)}-${String(now())}`,
           origin: 'external',
           startedAt,
-          pausedByTau: false,
         };
       } else {
         run = {
@@ -321,14 +344,22 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
           name: pendingStart.name,
           lines: pendingStart.lines,
           startedAt,
-          pausedByTau: false,
         };
         pendingStart = undefined;
       }
     } else if (next.playing === undefined && run !== undefined) {
-      // Stock firmware never reports the end of a job: the run simply disappears.
+      // Stock firmware never reports the end of a job: the run simply disappears. Read to its end with no halt and
+      // not ended from Tau, it completed. ponytail: `P:`'s line is not compared with the program's line count, which
+      // skips blank lines; the percentage alone marks the end. Compare lines too if a firmware reports 99 % early.
+      const finished = (previous?.playing?.percent ?? 0) >= 99;
       const outcome: MachineRun['state'] =
-        run.endedBy === undefined ? (next.state === 'Alarm' ? 'failed' : 'unknown') : 'cancelled';
+        run.endedBy === undefined
+          ? next.state === 'Alarm' || next.halt !== undefined
+            ? 'failed'
+            : finished
+              ? 'completed'
+              : 'unknown'
+          : 'cancelled';
       ended = {
         ...runOf(run, previous),
         state: outcome,
@@ -340,10 +371,12 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
     for (const procedure of procedures) {
       procedureFinished(procedure, next);
     }
-    for (const waiter of statusWaiters) {
+    // Each waiter hears one report; one that wants the next adds itself again.
+    const waiting = [...statusWaiters];
+    statusWaiters.clear();
+    for (const waiter of waiting) {
       waiter();
     }
-    statusWaiters.clear();
     changed();
   };
 
@@ -475,22 +508,28 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
     dropped(from);
   };
 
-  const open = async (): Promise<boolean> => {
+  /**
+   * Open the link once.
+   * @returns The connection it ended in.
+   */
+  const open = async (): Promise<MachineReport['connection']> => {
     opening = true;
     try {
-      return await openOnce();
+      await openOnce();
+      return connection;
     } finally {
       opening = false;
     }
   };
 
-  const openOnce = async (): Promise<boolean> => {
+  const openOnce = async (): Promise<void> => {
     let opened: MachineNetworkStream;
     try {
       opened = await input.open(sessionLifetime.signal);
-    } catch {
+    } catch (error) {
       connection = status === undefined ? 'unreachable' : 'disconnected';
-      return false;
+      log('warning', `The Carvera did not accept the link: ${error instanceof Error ? error.message : String(error)}`);
+      return;
     }
     stream = opened;
     status = undefined;
@@ -514,11 +553,10 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         await opened.close().catch(() => undefined);
       }
       changed();
-      return false;
+      return;
     }
     connection = 'connected';
     changed();
-    return true;
   };
 
   const scheduleReconnect = (reconnectDelay: number): void => {
@@ -529,8 +567,9 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
       reconnectTimer = undefined;
       // async-iife: bootstrap -- the timer owns the attempt and schedules the next one itself.
       void (async () => {
-        if (!(await open())) {
-          scheduleReconnect(connection === 'occupied' ? 5000 : 2000);
+        const reached = await open();
+        if (reached !== 'connected') {
+          scheduleReconnect(reached === 'occupied' ? 5000 : 2000);
         }
       })();
     }, reconnectDelay);
@@ -584,9 +623,10 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
       state,
       ...(state === 'paused'
         ? {
-            paused: track.pausedByTau
-              ? { by: 'person', reason: 'Paused from Tau' }
-              : { by: 'program', reason: 'Paused by the program or at the machine' },
+            paused:
+              track.pausedBy === undefined
+                ? { by: 'program', reason: 'Paused by the program or at the machine' }
+                : { by: track.pausedBy, reason: 'Paused from Tau' },
           }
         : {}),
       ...(track.name === undefined ? {} : { program: { name: track.name } }),
@@ -1189,14 +1229,34 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
 
   // oxlint-disable-next-line eslint/complexity -- one switch over the declared actions
   const plan = (action: MachineProviderActionInput, current: CarveraStatus): Plan | MachineCommandReceipt => {
-    const parameters = (action.parameters ?? {}) as Readonly<Record<string, unknown>>;
+    /**
+     * The action's parameters through its schema. A mismatch throws, and `apply` refuses it as invalid.
+     * @param schema - The schema the action declares.
+     * @returns The parsed parameters.
+     */
+    const parametersOf = <Schema extends z.ZodType>(schema: Schema): z.output<Schema> =>
+      schema.parse(action.parameters);
+    /**
+     * Switch an accessory and read `diagnose` back for the confirmation.
+     * @param key - The accessory, as `diagnose` reports it.
+     * @param onCode - The M-code that turns it on.
+     * @param offCode - The M-code that turns it off.
+     * @returns The lines to send and how the reports confirm them.
+     */
+    const switchPlan = (key: 'light' | 'vacuum' | 'air', onCode: string, offCode: string): Plan => {
+      const wanted = parametersOf(standardMachineActions['switch.set'].schema).on;
+      return {
+        lines: [wanted ? onCode : offCode, 'diagnose'],
+        confirm: latch(() => (diagnose?.[key] === wanted ? { status: 'confirmed' } : { status: 'pending' })),
+      };
+    };
     switch (`${action.componentId}:${action.action}`) {
       case 'controller:run.pause': {
         return {
           lines: ['suspend'],
           after: () => {
             if (run !== undefined) {
-              run.pausedByTau = true;
+              run.pausedBy = action.requestedBy.kind === 'agent' ? 'agent' : 'person';
             }
           },
           confirm: latch(() =>
@@ -1213,7 +1273,7 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
           lines: ['resume'],
           after: () => {
             if (run !== undefined) {
-              run.pausedByTau = false;
+              delete run.pausedBy;
             }
           },
           confirm: latch(() =>
@@ -1265,13 +1325,11 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         return { lines: ['$H'], procedure, confirm: byProcedure(procedure) };
       }
       case 'motion:motion.jog': {
-        const axis = String(parameters['axis']);
-        const distance = Number(parameters['distance']);
-        const feed = Number(parameters['feed']);
-        if (!axisIds.includes(axis as Axis)) {
+        const { axis, distance, feed } = parametersOf(standardMachineActions['motion.jog'].schema);
+        if (!isAxis(axis)) {
           return rejected('MACHINE_ACTION_PARAMETERS_INVALID', `This machine has no ${axis.toUpperCase()} axis.`);
         }
-        const target = current.machine[axis as Axis] + distance;
+        const target = current.machine[axis] + distance;
         if (!inTravel({ [axis]: target })) {
           return rejected('MACHINE_ACTION_PRECONDITION_FAILED', 'That jog leaves the travel.');
         }
@@ -1281,46 +1339,41 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
           confirm: latch(() =>
             status?.state === 'Alarm'
               ? halted()
-              : status?.state === 'Idle' && near(status.machine[axis as Axis], target)
+              : status?.state === 'Idle' && near(status.machine[axis], target)
                 ? { status: 'confirmed' }
                 : { status: 'pending' },
           ),
         };
       }
       case 'motion:motion.move': {
-        const frame = parameters['frame'] === 'machine' ? 'machine' : 'work';
-        const position = (parameters['position'] ?? {}) as Readonly<Record<string, number>>;
-        const feed = parameters['feed'] === undefined ? undefined : Number(parameters['feed']);
+        const { frame, position, feed } = parametersOf(standardMachineActions['motion.move'].schema);
         const entries = Object.entries(position);
-        if (entries.length === 0 || entries.some(([axis]) => !axisIds.includes(axis as Axis))) {
+        const axes = entries.flatMap(([axis, value]) => (isAxis(axis) ? [[axis, value] as const] : []));
+        if (axes.length === 0 || axes.length !== entries.length) {
           return rejected('MACHINE_ACTION_PARAMETERS_INVALID', 'Give X, Y or Z.');
         }
         const shift = origin(current);
-        const target = Object.fromEntries(
-          entries.map(([axis, value]) => [axis, frame === 'machine' ? value : value + shift[axis as Axis]]),
-        );
-        if (!inTravel(target)) {
+        const target = axes.map(([axis, value]) => [axis, frame === 'machine' ? value : value + shift[axis]] as const);
+        if (!inTravel(Object.fromEntries(target))) {
           return rejected('MACHINE_ACTION_PRECONDITION_FAILED', 'That position is outside the travel.');
         }
-        const words = entries.map(([axis, value]) => word(axis, value)).join(' ');
+        const words = axes.map(([axis, value]) => word(axis, value)).join(' ');
         return {
           lines: [
             `${frame === 'machine' ? 'G53 ' : 'G90 '}${feed === undefined ? 'G0' : 'G1'} ${words}${feed === undefined ? '' : ` F${String(Math.round(feed))}`}`,
           ],
-          confirm: latch(() =>
-            status?.state === 'Alarm'
+          confirm: latch(() => {
+            const seen = status;
+            return seen?.state === 'Alarm'
               ? halted()
-              : status?.state === 'Idle' &&
-                  Object.entries(target).every(([axis, value]) =>
-                    near(status?.machine[axis as Axis] ?? Number.NaN, value),
-                  )
+              : seen?.state === 'Idle' && target.every(([axis, value]) => near(seen.machine[axis], value))
                 ? { status: 'confirmed' }
-                : { status: 'pending' },
-          ),
+                : { status: 'pending' };
+          }),
         };
       }
       case 'motion:work-offset.select': {
-        const offset = String(parameters['offset']);
+        const { offset } = parametersOf(carveraWorkOffsetSelectSchema);
         return {
           lines: [offset, '$G'],
           confirm: latch(() =>
@@ -1329,28 +1382,31 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         };
       }
       case 'motion:work-offset.set': {
-        const offset = String(parameters['offset']);
-        const position = (parameters['position'] ?? {}) as Readonly<Record<string, number>>;
-        const entries = Object.entries(position).filter(([axis]) => axisIds.includes(axis as Axis));
+        const { offset, position } = parametersOf(carveraWorkOffsetSetSchema);
+        const entries = axisIds.flatMap((axis) => {
+          const value = position[axis];
+          return value === undefined ? [] : [[axis, value] as const];
+        });
         if (entries.length === 0) {
           return rejected('MACHINE_ACTION_PARAMETERS_INVALID', 'Give X, Y or Z.');
         }
-        const index = carveraWorkOffsets.indexOf(offset as (typeof carveraWorkOffsets)[number]) + 1;
+        const index = carveraWorkOffsets.indexOf(offset) + 1;
         const before = JSON.stringify(offsets.get(offset));
         return {
           lines: [`G10 L20 P${String(index)} ${entries.map(([axis, value]) => word(axis, value)).join(' ')}`, '$#'],
-          confirm: latch(() =>
-            (workOffset === offset &&
-              status !== undefined &&
-              entries.every(([axis, value]) => near(status!.work[axis as Axis], value))) ||
-            JSON.stringify(offsets.get(offset)) !== before
+          confirm: latch(() => {
+            const seen = status;
+            return (workOffset === offset &&
+              seen !== undefined &&
+              entries.every(([axis, value]) => near(seen.work[axis], value))) ||
+              JSON.stringify(offsets.get(offset)) !== before
               ? { status: 'confirmed' }
-              : { status: 'pending' },
-          ),
+              : { status: 'pending' };
+          }),
         };
       }
       case 'probe:probe.run': {
-        const cycle = String(parameters['cycle']);
+        const { cycle } = parametersOf(carveraProbeSchema);
         const previous = current.tool.active;
         const back = previous >= 1 ? [`M6 T${String(previous)}`] : [];
         // ponytail: corner uses the firmware's `M495.3` cycle with its defaults; the bore cycle's `M480.2` subcode is
@@ -1397,7 +1453,7 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         };
       }
       case 'tools:tool.change': {
-        const tool = Number(parameters['tool']);
+        const { tool } = parametersOf(carveraToolSchema);
         const previous = current.tool.active;
         const procedure = startProcedure({
           kind: 'tool-change',
@@ -1429,36 +1485,33 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         return { lines: ['M491'], procedure, confirm: byProcedure(procedure) };
       }
       case 'spindle:spindle.set': {
-        if (parameters['mode'] === 'off') {
+        const spindle = parametersOf(carveraSpindleSchema);
+        if (spindle.mode === 'off') {
           return { lines: ['M5'], confirm: when((next) => (next.spindle?.current ?? 0) === 0) };
         }
-        const speed = Math.round(Number(parameters['speed']));
-        const seconds = Number(parameters['duration']);
+        const speed = Math.round(spindle.speed);
+        const seconds = spindle.duration;
         // The stop is queued behind the dwell, so the spindle stops by itself even if Tau loses the machine.
         return {
           lines: [`M3 S${String(speed)}`, `G4 P${seconds.toFixed(1)}`, 'M5'],
           confirm: when((next) => (next.spindle?.current ?? 0) > 0),
         };
       }
-      case 'light:switch.set':
-      case 'vacuum:switch.set':
+      case 'light:switch.set': {
+        return switchPlan('light', 'M821', 'M822');
+      }
+      case 'vacuum:switch.set': {
+        return switchPlan('vacuum', 'M801 S100', 'M802');
+      }
       case 'air:switch.set': {
-        const on = parameters['on'] === true;
-        const lines = {
-          light: on ? 'M821' : 'M822',
-          vacuum: on ? 'M801 S100' : 'M802',
-          air: on ? 'M7' : 'M9',
-        }[action.componentId as 'light' | 'vacuum' | 'air'];
-        const key = action.componentId as 'light' | 'vacuum' | 'air';
-        return {
-          lines: [lines, 'diagnose'],
-          confirm: latch(() => (diagnose?.[key] === on ? { status: 'confirmed' } : { status: 'pending' })),
-        };
+        return switchPlan('air', 'M7', 'M9');
       }
       case 'feed-override:level.set':
       case 'spindle-override:level.set': {
-        const percent = Math.round(Number(parameters['ratio']) * 100);
         const feed = action.componentId === 'feed-override';
+        const percent = Math.round(
+          parametersOf(feed ? carveraFeedOverrideSchema : carveraSpindleOverrideSchema).ratio * 100,
+        );
         return {
           lines: [`${feed ? 'M220' : 'M223'} S${String(percent)}`],
           confirm: when(
@@ -1470,7 +1523,8 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         if (current.state !== 'Tool') {
           return rejected('MACHINE_ACTION_PROMPT_STALE', 'Nothing is waiting for an answer.');
         }
-        if (parameters['promptId'] !== `tool-wait-${String(toolWaits)}` || parameters['answer'] !== 'fitted') {
+        const { promptId, answer } = parametersOf(standardMachineActions['interaction.respond'].schema);
+        if (promptId !== `tool-wait-${String(toolWaits)}` || answer !== 'fitted') {
           return rejected('MACHINE_ACTION_PROMPT_STALE', 'That question is no longer asked.');
         }
         return { lines: ['M490.2'], confirm: when((next) => next.state !== 'Tool') };
@@ -1482,6 +1536,79 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         return rejected('MACHINE_ACTION_UNDECLARED', `${action.componentId} does not declare ${action.action}.`);
       }
     }
+  };
+
+  /**
+   * Wait for the machine to answer a `play`: the run appears, the machine refuses the file in text or halts, or it
+   * says nothing within {@link startWait}.
+   * @param runId - The run the start names.
+   * @param signal - Ends the wait as silent.
+   * @returns What the machine did.
+   */
+  const startAnswer = async (runId: string, signal: AbortSignal): Promise<StartAnswer> =>
+    new Promise((resolve) => {
+      const finish = (answer: StartAnswer): void => {
+        textWaiters.delete(onLine);
+        statusWaiters.delete(onReport);
+        clearTimeout(timer);
+        signal.removeEventListener('abort', silent);
+        resolve(answer);
+      };
+      const onLine = (line: string): void => {
+        if (/File not found|Currently printing/iu.test(line)) {
+          finish({ type: 'refused', message: `The machine refused the program: ${line}` });
+        }
+      };
+      const onReport = (): void => {
+        const current = status;
+        if (run?.runId === runId || ended?.runId === runId) {
+          finish({ type: 'started' });
+        } else if (current?.state === 'Alarm') {
+          finish({
+            type: 'refused',
+            message: current.halt === undefined ? 'The machine halted.' : carveraHalt(current.halt).label,
+          });
+        } else {
+          // Status waiters are called once; listen for the next report.
+          statusWaiters.add(onReport);
+        }
+      };
+      const silent = (): void => {
+        finish({ type: 'silent' });
+      };
+      const timer = setTimeout(silent, startWait);
+      textWaiters.add(onLine);
+      statusWaiters.add(onReport);
+      signal.addEventListener('abort', silent, { once: true });
+      if (signal.aborted) {
+        silent();
+      }
+    });
+
+  /**
+   * The host's own admission check, repeated over this session's latest report at the moment of sending: connection,
+   * declaration, availability, state, run, freshness, homing and interlocks. Qualification, authority and attendance
+   * were the host's to decide and pass here.
+   * @param target - The control, which list it is in, and the run the caller saw.
+   * @returns The refusal, or undefined to send.
+   */
+  const admission = (
+    target: Readonly<{
+      componentId: string;
+      action: string;
+      kind: 'action' | 'hold';
+      // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run.
+      expectedRunId: string | null;
+    }>,
+  ): MachineFailure | undefined => {
+    const check = checkMachineAction({
+      entry: { name: 'The Carvera', testing: true, descriptor: { capabilities: serialized }, snapshot: report() },
+      ...target,
+      caller: 'person',
+      attended: true,
+      now: now(),
+    });
+    return check.status === 'unavailable' ? failure(check.code, check.message) : undefined;
   };
 
   const interlocked = (interlocks: readonly string[]): string | undefined =>
@@ -1520,51 +1647,18 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
     if (previous !== undefined) {
       return previous;
     }
-    const definition = machineActionDefinitionOf(manifest, {
-      componentId: action.componentId,
-      id: action.action,
-      kind: 'action',
-    });
     const current = status;
     const settle = (receipt: MachineCommandReceipt): MachineCommandReceipt => {
       receipts.set(action.operationId, receipt);
       changed();
       return receipt;
     };
-    if (definition === undefined || !('scope' in definition)) {
-      return settle(rejected('MACHINE_ACTION_UNDECLARED', `${action.componentId} does not declare ${action.action}.`));
+    const refusal = admission({ ...action, kind: 'action' });
+    if (refusal !== undefined) {
+      return settle(rejected(refusal.code, refusal.message));
     }
-    if (connection !== 'connected' || current === undefined || stream === undefined) {
+    if (current === undefined || stream === undefined) {
       return settle(rejected('MACHINE_UNAVAILABLE', 'The Carvera is not connected.'));
-    }
-    if (upload !== undefined) {
-      return settle(rejected('MACHINE_ACTION_BUSY', 'A program is uploading.'));
-    }
-    if (!definition.when.includes(statusOf[current.state])) {
-      return settle(
-        rejected(
-          'MACHINE_ACTION_PRECONDITION_FAILED',
-          `${definition.label} is not possible while the machine is ${current.state}.`,
-        ),
-      );
-    }
-    if (definition.scope === 'run' && (run === undefined || run.runId !== action.expectedRunId)) {
-      return settle(rejected('MACHINE_ACTION_STALE_RUN', 'The run you saw has ended or changed.'));
-    }
-    const blocker = interlocked(definition.safety.interlocks);
-    if (blocker !== undefined) {
-      return settle(
-        rejected(
-          'MACHINE_ACTION_INTERLOCK',
-          `The ${blocker === 'cover' ? 'cover is open' : 'emergency stop is pressed'}.`,
-        ),
-      );
-    }
-    const unavailable = availability().find(
-      (entry) => entry.componentId === action.componentId && entry.id === action.action,
-    );
-    if (unavailable?.state === 'unavailable') {
-      return settle(rejected(unavailable.code, unavailable.message));
     }
     if (action.action === 'makera.probe.pair') {
       try {
@@ -1585,7 +1679,15 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         return settle({ status: 'unknown', reason: 'The link dropped while pairing.', observedAt: iso() });
       }
     }
-    const planned = plan(action, current);
+    let planned: Plan | MachineCommandReceipt;
+    try {
+      planned = plan(action, current);
+    } catch (error) {
+      if (!(error instanceof z.ZodError)) {
+        throw error;
+      }
+      return settle(rejected('MACHINE_ACTION_PARAMETERS_INVALID', 'Some values are not valid for this control.'));
+    }
     if ('status' in planned) {
       return settle(planned);
     }
@@ -1608,25 +1710,31 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
   const holdsFacet: MachineHoldCapability = {
     type: 'supported',
     async begin(hold) {
-      const parameters = hold.parameters as Readonly<{ axis: string; direction: 1 | -1; feed: number }>;
+      const parsed = standardMachineHolds['motion.jog'].schema.safeParse(hold.parameters);
+      if (!parsed.success) {
+        return failure('MACHINE_ACTION_PARAMETERS_INVALID', 'Some values are not valid for this control.');
+      }
+      const { axis, direction } = parsed.data;
+      const refusal = admission({
+        componentId: hold.componentId,
+        action: hold.hold,
+        kind: 'hold',
+        expectedRunId: null,
+      });
+      if (refusal !== undefined) {
+        return refusal;
+      }
       const current = status;
-      if (connection !== 'connected' || current === undefined || stream === undefined) {
+      if (current === undefined || stream === undefined) {
         return failure('MACHINE_UNAVAILABLE', 'The Carvera is not connected.');
       }
-      if (current.state !== 'Idle' || current.playing !== undefined || holding) {
+      if (current.playing !== undefined || holding) {
         return failure('MACHINE_ACTION_PRECONDITION_FAILED', 'The machine must be idle to jog.');
       }
-      if (trust !== 'homed' && trust !== 'kept') {
-        return failure('MACHINE_ACTION_PRECONDITION_FAILED', 'Home first.');
+      if (!isAxis(axis)) {
+        return failure('MACHINE_ACTION_PARAMETERS_INVALID', `This machine has no ${axis.toUpperCase()} axis.`);
       }
-      if (!axisIds.includes(parameters.axis as Axis)) {
-        return failure(
-          'MACHINE_ACTION_PARAMETERS_INVALID',
-          `This machine has no ${parameters.axis.toUpperCase()} axis.`,
-        );
-      }
-      const axis = parameters.axis as Axis;
-      const feed = Math.min(parameters.feed, 3000);
+      const feed = Math.min(parsed.data.feed, 3000);
       const segment = (feed / 60_000) * jogSegment;
       const limits = travel[axis]!;
       let target = current.machine[axis];
@@ -1637,7 +1745,7 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         if (released || reported === undefined || Math.abs(target - reported) > segment / 2) {
           return;
         }
-        const goal = Math.min(limits.max, Math.max(limits.min, target + parameters.direction * segment));
+        const goal = Math.min(limits.max, Math.max(limits.min, target + direction * segment));
         if (Math.abs(goal - target) < 0.001) {
           return;
         }
@@ -1818,6 +1926,14 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
   const jobsFacet: MachineJobCapability<CarveraSubmission> = {
     type: 'supported',
     delivery: 'stored',
+    async completeConfiguration({ configuration }) {
+      // Of the start form, only the work offset is the machine's to say: the one it uses now. The rest have defaults.
+      const given =
+        typeof configuration === 'object' && configuration !== null && !Array.isArray(configuration)
+          ? configuration
+          : {};
+      return { workOffset, ...given };
+    },
     async prepare(job): Promise<MachinePreparation> {
       let bytes: Uint8Array<ArrayBuffer>;
       try {
@@ -1887,6 +2003,9 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         changed();
         return receipt;
       };
+      if (job.remoteName !== remoteNameOf(job)) {
+        return settle(rejected('MACHINE_TRANSFER_NAME_MISMATCH', 'That file name was not prepared for this program.'));
+      }
       if (connection !== 'connected' || status === undefined || stream === undefined) {
         return settle(rejected('MACHINE_UNAVAILABLE', 'The Carvera is not connected.'));
       }
@@ -1921,7 +2040,9 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         });
       }
       if (outcome === 'refused') {
-        return settle(rejected('MACHINE_ACTION_BUSY', 'The machine refused the upload.'));
+        return settle(
+          rejected('MACHINE_TRANSFER_REFUSED', 'The machine refused the upload, or the bytes arrived damaged.'),
+        );
       }
       // The machine stores the MD5 we sent beside the file; reading it back proves the bytes it holds.
       const reply = waitForText(/\b[0-9a-f]{32}\b/iu, job.signal, 10_000);
@@ -1951,6 +2072,9 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         changed();
         return receipt;
       };
+      if (job.remoteName !== remoteNameOf(job)) {
+        return settle(rejected('MACHINE_JOB_NAME_MISMATCH', 'That file name was not prepared for this program.'));
+      }
       const current = status;
       if (connection !== 'connected' || current === undefined || stream === undefined) {
         return settle(rejected('MACHINE_UNAVAILABLE', 'The Carvera is not connected.'));
@@ -2043,10 +2167,41 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         lines: data.lines ?? 0,
         ...(procedure === undefined ? {} : { procedure }),
       };
+      // Listen before sending: the machine refuses a `play` only in text, or halts with 15 when not homed.
+      const listening = new AbortController();
+      const answer = startAnswer(runId, AbortSignal.any([job.signal, listening.signal]));
+      /**
+       * Forget the start, so the next run that appears is not taken for Tau's.
+       * @param state - What the before-program activity became.
+       * @param message - Why.
+       */
+      const abandon = (state: 'failed' | 'unknown', message: string): void => {
+        if (pendingStart?.runId === runId) {
+          pendingStart = undefined;
+        }
+        if (procedure?.state === 'in-progress') {
+          procedure.state = state;
+          procedure.message = message;
+          procedure.endedAt = now();
+        }
+      };
       try {
         await send(...lines);
       } catch {
+        listening.abort();
+        await answer;
+        abandon('unknown', 'The link dropped while starting.');
         return settle({ status: 'unknown', reason: 'The link dropped while starting.', runId, observedAt: iso() });
+      }
+      const outcome = await answer;
+      if (outcome.type === 'refused') {
+        abandon('failed', outcome.message);
+        return settle(rejected('MACHINE_JOB_START_REFUSED', outcome.message));
+      }
+      if (outcome.type === 'silent') {
+        const reason = 'The machine did not show the run starting.';
+        abandon('unknown', reason);
+        return settle({ status: 'unknown', reason, runId, observedAt: iso() });
       }
       log('info', `Started ${job.remoteName}.`);
       return settle(accepted({ runId, ...(procedure === undefined ? {} : { activityId: procedure.activityId }) }));
@@ -2055,12 +2210,12 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
 
   // ───────────────────────────── Session ─────────────────────────────
 
-  const connected = await open();
-  if (!connected) {
-    if ((connection as MachineReport['connection']) === 'unreachable') {
-      sessionLifetime.abort();
-      throw new Error('CARVERA_UNREACHABLE');
-    }
+  const reached = await open();
+  if (reached === 'unreachable') {
+    sessionLifetime.abort();
+    throw new Error('MACHINE_UNAVAILABLE');
+  }
+  if (reached !== 'connected') {
     scheduleReconnect(5000);
   }
   const poll = setInterval(() => {
@@ -2119,6 +2274,9 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
         // oxlint-disable-next-line eslint/no-await-in-loop -- one report per change, in order.
         await new Promise<void>((resolve) => {
           const wake = (): void => {
+            watchers.delete(wake);
+            signal.removeEventListener('abort', wake);
+            sessionLifetime.signal.removeEventListener('abort', wake);
             resolve();
           };
           watchers.add(wake);
@@ -2177,15 +2335,8 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
       type: 'supported',
       apply,
       confirm(action) {
-        const expectation = expectations.get(action.operationId);
-        if (expectation === undefined) {
-          return {
-            status: 'refuted',
-            code: 'MACHINE_ACTION_UNDECLARED',
-            message: 'This session did not send that action.',
-          };
-        }
-        return expectation();
+        // An operation this session never sent stays pending: the host escalates it for a person to reconcile.
+        return expectations.get(action.operationId)?.() ?? { status: 'pending' };
       },
     },
     holds: holdsFacet,

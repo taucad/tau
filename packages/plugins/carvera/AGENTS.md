@@ -61,4 +61,5 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.
 
 - Tests and manual checks use `createCarveraSimulator` only; never contact a real Carvera.
-- Unverified against hardware: file frame order B0–B6, cover/emergency-stop polarity in `diagnose`, the `md5sum` and `version` reply formats. Keep the simulator and the session in step when one is confirmed.
+- Position trust comes only from an observed `Home`→other transition or a Tau-sent `reset`; stock status has no homed flag, so a machine homed before Tau connected stays `unknown` until it homes again.
+- Unverified against hardware: file frame order B0–B6, cover/emergency-stop polarity in `diagnose`, the `md5sum` and `version` reply formats, the `probe.run` corner (`M495.3`) and bore (`M480.2`) subcodes, whether `P:` reaches 99 % before it disappears at the end of a file (the `completed` inference), and whether `buffer` lines survive a refused `play`. `tool.change` cannot empty the spindle (`T-1`). Keep the simulator and the session in step when one is confirmed.

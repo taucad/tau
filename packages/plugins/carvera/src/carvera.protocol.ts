@@ -229,8 +229,18 @@ export type CarveraStatus = Readonly<{
   model: Readonly<{ model: number; functions: number; inches: boolean; absolute: boolean }>;
 }>;
 
-const numbers = (text: string | undefined): readonly number[] =>
-  text === undefined || text === '' ? [] : text.split(',').map(Number);
+/**
+ * A comma list as numbers. A field with one garbled value is dropped whole, so its reader falls back to its defaults.
+ * @param text - The field's value, if the line carries it.
+ * @returns The numbers, or none.
+ */
+const numbers = (text: string | undefined): readonly number[] => {
+  if (text === undefined || text === '') {
+    return [];
+  }
+  const values = text.split(',').map(Number);
+  return values.every((value) => Number.isFinite(value)) ? values : [];
+};
 
 /**
  * Parse one status line `<Idle|MPos:…|WPos:…|…>`.
@@ -260,7 +270,7 @@ export const parseCarveraStatus = (line: string): CarveraStatus | undefined => {
   const scale = inches ? 25.4 : 1;
   const position = (key: string): CarveraPosition | undefined => {
     const [x, y, z] = numbers(fields.get(key));
-    return x === undefined || y === undefined || z === undefined || [x, y, z].some((value) => !Number.isFinite(value))
+    return x === undefined || y === undefined || z === undefined
       ? undefined
       : { x: x * scale, y: y * scale, z: z * scale };
   };

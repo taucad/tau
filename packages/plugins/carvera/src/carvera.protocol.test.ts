@@ -80,6 +80,16 @@ describe('status', () => {
     expect(status?.tool.active).toBe(-1);
   });
 
+  it('should drop a garbled field whole and keep its defaults', () => {
+    const status = parseCarveraStatus(
+      '<Run|MPos:-1.0000,-2.0000,-3.0000,0,0|WPos:1.0000,2.0000,3.0000,0,0|F:800.0,x,100|T:1?,0|P:4,5,6|C:1,4,0,1>',
+    );
+    expect(status?.feed).toEqual({ current: 0, requested: 0, override: 100 });
+    expect(status?.tool.active).toBe(-1);
+    expect(status?.playing).toEqual({ line: 4, percent: 5, elapsed: 6 });
+    expect(parseCarveraStatus('<Idle|MPos:-1.0000,nan,-3.0000,0,0|WPos:1,2,3,0,0|C:1,4,0,1>')).toBeUndefined();
+  });
+
   it('should round-trip the simulator half', () => {
     const line =
       '<Pause|MPos:-1.0000,-2.0000,-3.0000,0.0000,0.0000|WPos:4.0000,5.0000,6.0000,0.0000,0.0000|F:0.0,1000.0,100|S:9000,9000,100,0,30.0,0,0,0,0|T:3,1.250|P:9,50,12|C:1,4,0,1>';

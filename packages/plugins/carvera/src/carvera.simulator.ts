@@ -35,6 +35,8 @@ export type CarveraSimulatorOptions = Readonly<{
   runDuration?: number;
   /** Real milliseconds between simulation steps. */
   tickInterval?: number;
+  /** The model the status line reports: 1 is the C1, 2 the Carvera Air. */
+  model?: number;
 }>;
 
 /** A virtual Carvera and the levers a test or a demo pulls at the machine. @internal */
@@ -47,6 +49,12 @@ export type CarveraSimulator = Readonly<{
   setEstop(pressed: boolean): void;
   /** The machine's own auto-sleep. */
   sleep(): void;
+  /** Drop the TCP link, as a Wi-Fi outage does; the machine keeps running. */
+  drop(): void;
+  /** Play a stored file from the machine's own screen. */
+  play(path: string): void;
+  /** Store the next upload with one byte changed, as a failing SD card would, while it still reports success. */
+  damageNextUpload(): void;
   /** Every command line received, in order. */
   commands(): readonly string[];
   /** Paths on the virtual SD card. */
@@ -140,6 +148,7 @@ export const createCarveraSimulator = (options: CarveraSimulatorOptions = {}): C
   let upload: Upload | undefined;
   const log: string[] = [];
   let client: { push(bytes: Uint8Array<ArrayBuffer>): void; end(): void } | undefined;
+  let damageUpload = false;
 
   const tlo = (): number => (lengths[tool] ?? 0) - referenceLength;
   const work = (): CarveraPosition => {
@@ -206,7 +215,7 @@ export const createCarveraSimulator = (options: CarveraSimulatorOptions = {}): C
       ...(atc === undefined ? {} : { atc }),
       ...(levelling === undefined ? {} : { levelling }),
       ...(halt === undefined ? {} : { halt }),
-      model: { model: 1, functions: 4, inches: false, absolute: !relative },
+      model: { model: options.model ?? 1, functions: 4, inches: false, absolute: !relative },
     });
 
   const stopEverything = (): void => {
@@ -917,7 +926,8 @@ export const createCarveraSimulator = (options: CarveraSimulatorOptions = {}): C
         frame(carveraFrameType.fileCancel);
         return;
       }
-      files.set(current.path, bytes.toString('utf8'));
+      files.set(current.path, `${bytes.toString('utf8')}${damageUpload ? ' ' : ''}`);
+      damageUpload = false;
       frame(carveraFrameType.fileEnd);
     }
   };
@@ -1123,6 +1133,16 @@ export const createCarveraSimulator = (options: CarveraSimulatorOptions = {}): C
       if (state() === 'Idle') {
         sleeping = true;
       }
+    },
+    drop() {
+      client?.end();
+      client = undefined;
+    },
+    play(path) {
+      command(`play ${path}`);
+    },
+    damageNextUpload() {
+      damageUpload = true;
     },
     commands: () => [...log],
     files: () => [...files.keys()],

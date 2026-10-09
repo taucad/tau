@@ -130,10 +130,10 @@ GlobalFuncBeamThickness: declare class GlobalFuncBeamThickness implements BeamTh
 ImplicitLidinoid: declare class ImplicitLidinoid implements Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
   // ImplicitLidinoid.constructor (constructor)
   constructor(unitSize: number, wallThickness: number);
@@ -141,7 +141,7 @@ ImplicitLidinoid: declare class ImplicitLidinoid implements Implicit
 // Modular implicit
 ImplicitModular: declare class ImplicitModular
 
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // ImplicitModular.constructor (constructor)
   constructor(pattern: RawTpmsPattern, wallThickness: BeamThickness, trafo: CoordinateTrafo, splittingLogic: SplittingLogic);
@@ -149,7 +149,7 @@ ImplicitModular: declare class ImplicitModular
 // Gyroid unwrapped around the Z axis
 ImplicitRadialGyroid: declare class ImplicitRadialGyroid
 
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // ImplicitRadialGyroid.constructor (constructor)
   constructor(unitsPerRound: number, unitSizeInZ: number, wallThickness: number);
@@ -157,7 +157,7 @@ ImplicitRadialGyroid: declare class ImplicitRadialGyroid
 // Schwarz primitive over a randomly deformed grid
 ImplicitRandomizedSchwarzPrimitive: declare class ImplicitRandomizedSchwarzPrimitive
 
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // ImplicitRandomizedSchwarzPrimitive.constructor (constructor)
   constructor(unitSize: number, wallThickness: number, field: RandomDeformationField);
@@ -166,10 +166,10 @@ ImplicitRandomizedSchwarzPrimitive: declare class ImplicitRandomizedSchwarzPrimi
 ImplicitSchwarzDiamond: declare class ImplicitSchwarzDiamond implements Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
   // ImplicitSchwarzDiamond.constructor (constructor)
   constructor(unitSize: number, wallThickness: number);
@@ -178,10 +178,10 @@ ImplicitSchwarzDiamond: declare class ImplicitSchwarzDiamond implements Implicit
 ImplicitSchwarzPrimitive: declare class ImplicitSchwarzPrimitive implements Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
   // ImplicitSchwarzPrimitive.constructor (constructor)
   constructor(unitSize: number, wallThickness: number);
@@ -190,10 +190,10 @@ ImplicitSchwarzPrimitive: declare class ImplicitSchwarzPrimitive implements Impl
 ImplicitSplitVoidGyroid: declare class ImplicitSplitVoidGyroid implements Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
   // ImplicitSplitVoidGyroid.constructor (constructor)
   constructor(unitSize: number, wallThickness: number, side: boolean);
@@ -202,10 +202,10 @@ ImplicitSplitVoidGyroid: declare class ImplicitSplitVoidGyroid implements Implic
 ImplicitSplitWallGyroid: declare class ImplicitSplitWallGyroid implements Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
   // ImplicitSplitWallGyroid.constructor (constructor)
   constructor(unitSize: number, wallThickness: number, side: boolean);
@@ -386,7 +386,7 @@ BaseBox: declare class BaseBox extends BaseShape implements MeshBaseShape, Surfa
 // Cone
 BaseCone: declare class BaseCone extends BaseShape
 
-  cylinder: BaseCylinder
+  readonly cylinder: BaseCylinder
 
   // BaseCone.constructor (constructor)
   constructor(frame: Frame, length: number, startRadius: number, endRadius: number);
@@ -467,15 +467,15 @@ BaseLens: declare class BaseLens extends BaseShape implements MeshBaseShape, Sur
 
   heightSteps: number
 
-  innerRadius: number
+  readonly innerRadius: number
 
-  outerRadius: number
+  readonly outerRadius: number
 
   upperModulation: SurfaceModulation
 
   lowerModulation: SurfaceModulation
 
-  frame: Frame
+  readonly frame: Frame
 
   // BaseLens.constructor (constructor)
   constructor(frame: Frame, height: number, innerRadius: number, outerRadius: number);
@@ -581,9 +581,9 @@ BasePipe: declare class BasePipe extends BaseShape implements MeshBaseShape, Sur
 // Angular pipe segment
 BasePipeSegment: declare class BasePipeSegment extends BasePipe
 
-  rangeModulation: LineModulation
+  readonly rangeModulation: LineModulation
 
-  midModulation: LineModulation
+  readonly midModulation: LineModulation
 
   // BasePipeSegment.constructor (constructor)
   constructor(frameOrFrames: Frame | Frames, options: PipeSegmentOptions);
@@ -604,9 +604,9 @@ BaseRevolve: declare class BaseRevolve extends BaseShape implements MeshBaseShap
 
   radialSteps: number
 
-  frames: Frames
+  readonly frames: Frames
 
-  frame: Frame
+  readonly frame: Frame
 
   outerRadiusModulation: LineModulation
 
@@ -669,11 +669,11 @@ BaseRing: declare class BaseRing extends BaseShape implements MeshBaseShape, Sur
 
   radialSteps: number
 
-  ringRadius: number
+  readonly ringRadius: number
 
   radiusModulation: SurfaceModulation
 
-  frame: Frame
+  readonly frame: Frame
 
   // BaseRing.constructor (constructor)
   constructor(frame: Frame, ringRadius?: number, radius?: number);
@@ -724,7 +724,7 @@ BaseSphere: declare class BaseSphere extends BaseShape implements MeshBaseShape,
 
   radiusModulation: SurfaceModulation
 
-  frame: Frame
+  readonly frame: Frame
 
   // BaseSphere.constructor (constructor)
   constructor(frame: Frame, radius?: number);
@@ -783,9 +783,9 @@ CylindricalControlSpline: declare class CylindricalControlSpline implements Spli
 // Bundles a normalized line modulation with a physical length (C# `Distribution`)
 Distribution: declare class Distribution
 
-  totalLength: number
+  readonly totalLength: number
 
-  modulation: LineModulation
+  readonly modulation: LineModulation
 
   // Distribution.constructor (constructor)
   constructor(totalLength: number, modulation: LineModulation);
@@ -851,10 +851,10 @@ GenericContour: declare class GenericContour extends Distribution
 ImplicitGenus: declare class ImplicitGenus implements Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
   // ImplicitGenus.constructor (constructor)
   constructor(gap: number);
@@ -863,10 +863,10 @@ ImplicitGenus: declare class ImplicitGenus implements Implicit
 ImplicitGyroid: declare class ImplicitGyroid implements Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
   // ImplicitGyroid.constructor (constructor)
   constructor(unitSize: number, thicknessRatio: number);
@@ -879,10 +879,10 @@ ImplicitGyroid: declare class ImplicitGyroid implements Implicit
 ImplicitSphere: declare class ImplicitSphere implements Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
   // ImplicitSphere.constructor (constructor)
   constructor(centre: Vec3, radius: number);
@@ -891,10 +891,10 @@ ImplicitSphere: declare class ImplicitSphere implements Implicit
 ImplicitSuperEllipsoid: declare class ImplicitSuperEllipsoid implements Implicit
 
   // C# `IImplicit.fSignedDistance` as a picovoxel SdfFunction
-  sdf: SdfFunction
+  readonly sdf: SdfFunction
 
   // The same field as a tape expression for the parallel fill
-  expression: SdfExpression
+  readonly expression: SdfExpression
 
   // ImplicitSuperEllipsoid.constructor (constructor)
   constructor(centre: Vec3, ax: number, ay: number, az: number, epsilon1: number, epsilon2: number);
@@ -902,11 +902,11 @@ ImplicitSuperEllipsoid: declare class ImplicitSuperEllipsoid implements Implicit
 // Manifold pipe
 LatticeManifold: declare class LatticeManifold extends LatticePipe
 
-  maxPrintableRadius: number
+  readonly maxPrintableRadius: number
 
-  limitAngle: number
+  readonly limitAngle: number
 
-  extendBothSides: boolean
+  readonly extendBothSides: boolean
 
   // LatticeManifold.constructor (constructor)
   constructor(frameOrFrames: Frame | Frames, options?: LatticeManifoldOptions);

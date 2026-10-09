@@ -61,7 +61,6 @@ const laneDirectory = join(
 const rawLogDirectory = join(repositoryRoot, 'out/research/tau-cloud-credit-billing-launch-charter/C09/i3');
 /** Funds every account far above the profile's worst case so denial can only mean saturation. */
 const fundedAtomsPerAccount = 1_000_000n;
-const budgetCapPicoUsd = 1_000_000_000_000n;
 const abandonedExecutionTimeout = 2000;
 const executionTimeout = 300_000;
 
@@ -332,10 +331,8 @@ const runSurge = async (databaseUrl: string, manifest: WorkloadManifest): Promis
       }),
     );
     const [headroom] = await firstDatabase.execute(sql`select
-      (a.purchased_atoms - a.purchased_held_atoms)::text as spendable_atoms,
-      (b.approved_cap - b.consumed - b.held)::text as spend_budget_remaining_pico_usd
-      from billing.credit_account a, billing.billing_budget b
-      where a.id = ${account.accountId} and b.id = ${manifest.spendBudgetId}`);
+      (a.purchased_atoms - a.purchased_held_atoms)::text as spendable_atoms
+      from billing.credit_account a where a.id = ${account.accountId}`);
     const helper = await secondLedger.admitOperation({
       ...loadAdmission({
         manifest,
@@ -350,10 +347,9 @@ const runSurge = async (databaseUrl: string, manifest: WorkloadManifest): Promis
       admittedPrimary: admitted.length,
       deniedPrimary: results.length - admitted.length,
       sixtyFifth: extra.status === 'denied' ? { status: extra.status, reason: extra.reason } : { status: extra.status },
-      /* Saturation is genuine only if money and budget were still available at the refusal. */
+      /* Saturation is genuine only if money was still available at the refusal. */
       headroomAtRefusal: {
         spendableAtoms: text(headroom?.['spendable_atoms']),
-        spendBudgetRemainingPicoUsd: text(headroom?.['spend_budget_remaining_pico_usd']),
       },
       helperPoolAdmitted: helper.status === 'admitted',
       admissionLatencyMilliseconds: percentiles(latencies),
@@ -463,7 +459,6 @@ async function main(): Promise<void> {
       accounts: profile.accounts,
       suffix,
       fundedAtoms: fundedAtomsPerAccount,
-      budgetCapPicoUsd,
       concurrency: 8,
     });
     registerLoadMeterContract(manifest.meterContractId);
@@ -524,12 +519,10 @@ async function main(): Promise<void> {
       workload: {
         ...profile,
         fundedAtomsPerAccount: fundedAtomsPerAccount.toString(),
-        budgetCapPicoUsd: budgetCapPicoUsd.toString(),
         fundingCause: 'paid purchase via seedPaidPurchase + fulfillPaidFixture (never issueCurrentPromotion)',
         sku: manifest.sku,
         meterContractId: manifest.meterContractId,
         activationId: manifest.activationId,
-        sharedSpendBudgetId: manifest.spendBudgetId,
       },
       processes,
       distinctPids: new Set(processes.map((entry) => entry['pid'])).size === processes.length,

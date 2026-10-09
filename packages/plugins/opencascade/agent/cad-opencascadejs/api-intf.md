@@ -73,6 +73,14 @@ Intf_InterferencePolygon2d: declare class Intf_InterferencePolygon2d extends Int
 
 Intf_PIType: typeof Intf_PIType[keyof typeof Intf_PIType]
 
+  readonly Intf_EXTERNAL: 'Intf_EXTERNAL'
+
+  readonly Intf_FACE: 'Intf_FACE'
+
+  readonly Intf_EDGE: 'Intf_EDGE'
+
+  readonly Intf_VERTEX: 'Intf_VERTEX'
+
 Intf_Polygon2d: declare class Intf_Polygon2d
 
   // Intf_Polygon2d.Bounding (method)

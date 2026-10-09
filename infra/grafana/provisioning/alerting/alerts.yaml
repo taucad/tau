@@ -36,7 +36,7 @@ groups:
               maxDataPoints: 20
         for: 1m
         annotations:
-          summary: Redis connection is down. Chat RPC, session management, and adapter services are degraded.
+          summary: Redis connection is down. Host relay presence, session routing and adapter services are degraded.
           runbook_url: ''
         labels:
           severity: critical
@@ -107,6 +107,29 @@ groups:
         annotations:
           summary: 'A billing worker seen in the last 24 h has completed no successful pass in 15 min: hung, dead or failing every pass (F-10). operations stalled means paid purchases are not credited; recovery stalled means no API replica is completing its in-process recovery pass, so funded operations stay held (see chat-llm-failing.md). Grouped by Fly `app` and `tau_worker`. A worker scaled to 0 on purpose also fires until 24 h pass, so silence it.'
           runbook_url: docs/handbooks/cloud/playbooks/paid-not-credited.md
+        labels:
+          severity: critical
+          service: tau-api
+          component: billing
+
+      - uid: billing-account-spend-blocked
+        title: 'P0: Customer Chat Blocked by a Financial Case'
+        condition: account_spend_blocked
+        data:
+          - refId: account_spend_blocked
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                max by (app, kind) (tau_billing_open_financial_cases{service_name="tau-api",kind=~"dispute_unresolved|orphan_local_receipt|invalid_grant_cause|entitlement_source_disagreement|journal_.+"}) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 1h
+        annotations:
+          summary: 'A spend-blocking financial case (dispute, unbacked credit or journal drift; charter D11) has been open for more than 1 h. Every named account gets 403 BILLING_ACCOUNT_RESTRICTED on every model until an operator resolves it. Owed-money and fee kinds never block and are not in this rule. Grouped by Fly `app` and case kind.'
+          runbook_url: docs/handbooks/cloud/playbooks/ledger-drift.md
         labels:
           severity: critical
           service: tau-api
@@ -317,3 +340,118 @@ groups:
           severity: warning
           service: tau-api
           component: runtime
+
+      - uid: billing-supplier-route-margin
+        title: 'P1: Supplier Cost Above 85% of Charge'
+        condition: supplier_margin
+        data:
+          - refId: supplier_margin
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                sum by (app, gen_ai_request_model, gen_ai_provider_name) (increase(tau_billing_supplier_cost_picousd_total{service_name="tau-api"}[24h])) / (sum by (app, gen_ai_request_model, gen_ai_provider_name) (increase(gen_ai_client_cost_total{service_name="tau-api"}[24h])) * 1e12) > 0.85
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 24h
+        annotations:
+          summary: "Over 24 h, a model's metered supplier cost is above 85% of what customers were charged for it (expected about 0.77 at the 30% markup), and has stayed there for 24 h: the route's pinned supplier rate or retail price is wrong. Supplier cost is an estimate written on the terminal receipt (charter W3), live-settled operations only; recovery-settled ones are in the unpriced gauge. Grouped by Fly `app`, model and provider. Soft alert: the provider console limit is the cap (BIL-21)."
+          runbook_url: docs/handbooks/cloud/system/services/llm-suppliers.md
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+
+      - uid: billing-supplier-daily-spend
+        title: 'P1: Daily Supplier Spend Spike'
+        condition: supplier_daily_spend
+        data:
+          - refId: supplier_daily_spend
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                (sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{service_name="tau-api"}[24h])) / 1e12 > on (deployment_environment) clamp_min(3 * sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{service_name="tau-api"}[7d] offset 24h)) / 7 / 1e12, 50)) or (sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{service_name="tau-api"}[24h])) / 1e12 > 50 unless on (deployment_environment) sum by (deployment_environment) (increase(tau_billing_supplier_cost_picousd_total{service_name="tau-api"}[7d] offset 24h)))
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 15m
+        annotations:
+          summary: "Metered supplier spend in the last 24 h for one environment is above max(US$50, 3x its trailing 7-day daily mean); with no 7-day history, above US$50. A runaway agent, a mispriced route or abuse. Soft alert: the provider console hard limit is the cap (BIL-21). increase() cannot see a counter's first sample, so a new process under-counts by one call."
+          runbook_url: docs/handbooks/cloud/system/services/llm-suppliers.md
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+
+      - uid: billing-supplier-unpriced-usage
+        title: 'P1: Unpriced Supplier Usage'
+        condition: supplier_unpriced
+        data:
+          - refId: supplier_unpriced
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"}) > on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"} offset 2h)) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"}) > 0 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku, tau_billing_unpriced_reason) (tau_billing_supplier_unpriced_operations{service_name="tau-api",tau_billing_unpriced_reason=~"missing_rate|dimension_mismatch"} offset 2h))
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: "New settled operations carry no supplier-cost estimate because a route's supplier valuation is incomplete (tau_billing_supplier_unpriced_operations with reason `missing_rate` or `dimension_mismatch` grew, or a provider/SKU/reason appeared, in the last 2 h): it needs a code fix. Cut streams (`absorbed`) have their own rate rule, billing-supplier-absorbed-usage. The gauge is a running total recorded hourly by billing-operations, so this rule watches its growth, not its level. Clears 2 h after the last increase."
+          runbook_url: docs/handbooks/cloud/system/services/llm-suppliers.md
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+
+      - uid: billing-supplier-absorbed-usage
+        title: 'P1: Absorbed Supplier Usage Surge'
+        condition: supplier_absorbed
+        data:
+          - refId: supplier_absorbed
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              expr: >
+                (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name="tau-api",tau_billing_unpriced_reason="absorbed"}) - on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name="tau-api",tau_billing_unpriced_reason="absorbed"} offset 1h) > 10) or (max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name="tau-api",tau_billing_unpriced_reason="absorbed"}) > 10 unless on (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) max by (app, deployment_environment, gen_ai_provider_name, tau_billing_sku) (tau_billing_supplier_unpriced_operations{service_name="tau-api",tau_billing_unpriced_reason="absorbed"} offset 1h))
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: 'More than 10 settled operations in one provider/SKU were absorbed unpriced in the last hour (tau_billing_supplier_unpriced_operations with reason `absorbed` grew by more than 10, or appeared above 10): cut streams or expired recoveries at an unusual rate, so a client, the gateway or a provider is aborting turns. A single client abort is expected and does not fire. The gauge is a running total recorded hourly by billing-operations.'
+          runbook_url: docs/handbooks/cloud/system/services/llm-suppliers.md
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing
+
+      - uid: billing-supplier-invoice-mismatch
+        title: 'P1: Supplier Invoice Does Not Match Meter'
+        condition: supplier_invoice
+        data:
+          - refId: supplier_invoice
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              expr: >
+                max by (app, kind) (tau_billing_open_financial_cases{service_name="tau-api",kind="supplier_invoice_total_mismatch"}) > 0
+              intervalMs: 15000
+              maxDataPoints: 20
+        for: 0s
+        annotations:
+          summary: 'reconcile-supplier-invoice found a provider invoice total outside tolerance of the summed supplier cost on terminal receipts and opened a supplier_invoice_total_mismatch case. Operator work; it blocks nothing. The case evidence carries both totals and the unpriced and unattributed counts.'
+          runbook_url: docs/handbooks/cloud/operate/refunds-and-financial-cases.md
+        labels:
+          severity: warning
+          service: tau-api
+          component: billing

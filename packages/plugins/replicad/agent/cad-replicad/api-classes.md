@@ -4,13 +4,13 @@
 
 _1DShape: export declare abstract class _1DShape<Type extends TopoDS_Shape> extends Shape<Type>
 
-  repr
+  readonly repr: string
 
-  curve
+  readonly curve: Curve
 
-  startPoint
+  readonly startPoint: Vector
 
-  endPoint
+  readonly endPoint: Vector
 
   // _1DShape.tangentAt (method)
   tangentAt(position?: number): Vector;
@@ -18,17 +18,17 @@ _1DShape: export declare abstract class _1DShape<Type extends TopoDS_Shape> exte
   // _1DShape.pointAt (method)
   pointAt(position?: number): Vector;
 
-  isClosed
+  readonly isClosed: boolean
 
-  isPeriodic
+  readonly isPeriodic: boolean
 
-  period
+  readonly period: number
 
-  geomType
+  readonly geomType: CurveType
 
-  length
+  readonly length: number
 
-  orientation
+  readonly orientation: "forward" | "backward"
 
   // _1DShape.flipOrientation (method)
   flipOrientation(): Type;
@@ -107,11 +107,11 @@ BaseSketcher2d: export declare class BaseSketcher2d
 
   // Returns the current pen position as [x, y] coordinates
   // Remarks: Added By Ben Harper 5/12/2025
-  penPosition
+  readonly penPosition: Point2D
 
   // Returns the current pen angle in degrees
   // Remarks: The angle represents the tangent direction at the current pen position, based on the last drawing operation (line, arc, bezier, etc.). Returns 0 if nothing has been drawn yet.
-  penAngle
+  readonly penAngle: number
 
   // BaseSketcher2d.movePointerTo (method)
   movePointerTo(point: Point2D): this;
@@ -228,11 +228,11 @@ Blueprint: export declare class Blueprint implements DrawingInterface
   // Blueprint.clone (method)
   clone(): Blueprint;
 
-  repr
+  readonly repr: string
 
-  boundingBox
+  readonly boundingBox: BoundingBox2d
 
-  orientation
+  readonly orientation: "clockwise" | "counterClockwise"
 
   // Blueprint.stretch (method)
   stretch(ratio: number, direction: Point2D, origin?: Point2D): Blueprint;
@@ -288,9 +288,9 @@ Blueprint: export declare class Blueprint implements DrawingInterface
   // Blueprint.toSVG (method)
   toSVG(margin?: number): string;
 
-  firstPoint
+  readonly firstPoint: Point2D
 
-  lastPoint
+  readonly lastPoint: Point2D
 
   // Blueprint.isInside (method)
   isInside(point: Point2D): boolean;
@@ -308,12 +308,12 @@ Blueprints: export declare class Blueprints implements DrawingInterface
   // Blueprints.constructor (constructor)
   constructor(blueprints: Array<Blueprint | CompoundBlueprint>);
 
-  repr
+  readonly repr: string
 
   // Blueprints.clone (method)
   clone(): Blueprints;
 
-  boundingBox
+  readonly boundingBox: BoundingBox2d
 
   // Blueprints.stretch (method)
   stretch(ratio: number, direction: Point2D, origin: Point2D): Blueprints;
@@ -389,17 +389,17 @@ BoundingBox: export declare class BoundingBox extends WrappingObj<Bnd_Box>
   // BoundingBox.fromBounds (method)
   static fromBounds(min: Point, max: Point): BoundingBox;
 
-  repr
+  readonly repr: string
 
-  bounds
+  readonly bounds: [SimplePoint, SimplePoint]
 
-  center
+  readonly center: SimplePoint
 
-  width
+  readonly width: number
 
-  height
+  readonly height: number
 
-  depth
+  readonly depth: number
 
   // BoundingBox.add (method)
   add(other: BoundingBox): void;
@@ -412,15 +412,15 @@ BoundingBox2d: export declare class BoundingBox2d extends WrappingObj<Bnd_Box2d>
   // BoundingBox2d.constructor (constructor)
   constructor(wrapped?: Bnd_Box2d);
 
-  repr
+  readonly repr: string
 
-  bounds
+  readonly bounds: [Point2D, Point2D]
 
-  center
+  readonly center: Point2D
 
-  width
+  readonly width: number
 
-  height
+  readonly height: number
 
   // BoundingBox2d.outsidePoint (method)
   outsidePoint(paddingPercent?: number): Point2D;
@@ -446,9 +446,9 @@ CompoundBlueprint: export declare class CompoundBlueprint implements DrawingInte
   // CompoundBlueprint.clone (method)
   clone(): CompoundBlueprint;
 
-  boundingBox
+  readonly boundingBox: BoundingBox2d
 
-  repr
+  readonly repr: string
 
   // CompoundBlueprint.stretch (method)
   stretch(ratio: number, direction: Point2D, origin: Point2D): CompoundBlueprint;
@@ -510,11 +510,11 @@ CompoundSketch: export declare class CompoundSketch implements SketchInterface
   // CompoundSketch.delete (method)
   delete(): void;
 
-  outerSketch
+  readonly outerSketch: Sketch
 
-  innerSketches
+  readonly innerSketches: Sketch[]
 
-  wires
+  readonly wires: AnyShape
 
   // Transforms the lines into a face
   // CompoundSketch.face (method)
@@ -578,13 +578,13 @@ CornerFinder: export declare class CornerFinder extends Finder<Corner, Blueprint
 
 Curve: export declare class Curve extends WrappingObj<CurveLike>
 
-  repr
+  readonly repr: string
 
-  curveType
+  readonly curveType: CurveType
 
-  startPoint
+  readonly startPoint: Vector
 
-  endPoint
+  readonly endPoint: Vector
 
   // Curve.pointAt (method)
   pointAt(position?: number): Vector;
@@ -592,22 +592,22 @@ Curve: export declare class Curve extends WrappingObj<CurveLike>
   // Curve.tangentAt (method)
   tangentAt(position?: number): Vector;
 
-  isClosed
+  readonly isClosed: boolean
 
-  isPeriodic
+  readonly isPeriodic: boolean
 
-  period
+  readonly period: number
 
 Curve2D: export declare class Curve2D extends WrappingObj<Geom2d_Curve>
 
   // Curve2D.constructor (constructor)
   constructor(handle: Geom2d_Curve);
 
-  boundingBox
+  readonly boundingBox: BoundingBox2d
 
-  repr
+  readonly repr: string
 
-  innerCurve
+  readonly innerCurve: Geom2d_Curve
 
   // Curve2D.serialize (method)
   serialize(): string;
@@ -615,18 +615,18 @@ Curve2D: export declare class Curve2D extends WrappingObj<Geom2d_Curve>
   // Curve2D.value (method)
   value(parameter: number): Point2D;
 
-  firstPoint
+  readonly firstPoint: Point2D
 
-  lastPoint
+  readonly lastPoint: Point2D
 
-  firstParameter
+  readonly firstParameter: number
 
-  lastParameter
+  readonly lastParameter: number
 
   // Curve2D.adaptor (method)
   adaptor(): Geom2dAdaptor_Curve;
 
-  geomType
+  readonly geomType: CurveType
 
   // Curve2D.clone (method)
   clone(): Curve2D;
@@ -676,12 +676,12 @@ Drawing: export declare class Drawing implements DrawingInterface
   // Drawing.serialize (method)
   serialize(): string;
 
-  boundingBox
+  readonly boundingBox: BoundingBox2d
 
   // Drawing.stretch (method)
   stretch(ratio: number, direction: Point2D, origin: Point2D): Drawing;
 
-  repr
+  readonly repr: string
 
   // Drawing.rotate (method)
   rotate(angle: number, center?: Point2D): Drawing;
@@ -752,7 +752,7 @@ Drawing: export declare class Drawing implements DrawingInterface
   // Drawing.approximate (method)
   approximate(target: "svg" | "arcs", options?: ApproximationOptions): Drawing;
 
-  blueprint
+  readonly blueprint: Blueprint
 
 // DrawingPen is a helper class to draw in 2D
 DrawingPen: export declare class DrawingPen extends BaseSketcher2d implements GenericSketcher<Drawing>
@@ -815,16 +815,16 @@ EdgeFinder: export declare class EdgeFinder extends Finder3d<Edge>
 
 Face: export declare class Face extends Shape<TopoDS_Face>
 
-  surface
+  readonly surface: Surface
 
-  orientation
+  readonly orientation: "forward" | "backward"
 
   // Face.flipOrientation (method)
   flipOrientation(): Face;
 
-  geomType
+  readonly geomType: SurfaceType
 
-  UVBounds
+  readonly UVBounds: FaceUVBounds
 
   // Face.pointOnSurface (method)
   pointOnSurface(u: number, v: number): Vector;
@@ -835,7 +835,7 @@ Face: export declare class Face extends Shape<TopoDS_Face>
   // Face.normalAt (method)
   normalAt(locationVector?: Point): Vector;
 
-  center
+  readonly center: Vector
 
   // Face.outerWire (method)
   outerWire(): Wire;
@@ -903,4 +903,4 @@ FaceSketcher: export declare class FaceSketcher extends BaseSketcher2d implement
 
 LinearPhysicalProperties: export declare class LinearPhysicalProperties extends PhysicalProperties
 
-  length
+  readonly length: number

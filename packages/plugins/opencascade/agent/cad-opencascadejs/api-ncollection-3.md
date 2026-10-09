@@ -1,6 +1,89 @@
 # libcascade — NCollection (3)
 
-12 top-level symbols. Signatures are verbatim typescript.
+13 top-level symbols. Signatures are verbatim typescript.
+
+NCollection_Array1_StepAP203_ClassifiedItem: declare class NCollection_Array1_StepAP203_ClassifiedItem
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.constructor (constructor)
+  constructor();
+  constructor(theSize: number);
+  constructor(theOther: NCollection_Array1_StepAP203_ClassifiedItem);
+  constructor(theLower: number, theUpper: number);
+  constructor(theBegin: StepAP203_ClassifiedItem, theSize: number, theUseBuffer: boolean);
+  constructor(theBegin: StepAP203_ClassifiedItem, theLower: number, theUpper: number, theUseBuffer?: boolean);
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Init (method)
+  Init(theValue: StepAP203_ClassifiedItem): void;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Size (method)
+  Size(): number;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Length (method)
+  Length(): number;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.IsEmpty (method)
+  IsEmpty(): boolean;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Lower (method)
+  Lower(): number;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Upper (method)
+  Upper(): number;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Assign (method)
+  Assign(theOther: NCollection_Array1_StepAP203_ClassifiedItem): NCollection_Array1_StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.CopyValues (method)
+  CopyValues(theOther: NCollection_Array1_StepAP203_ClassifiedItem): NCollection_Array1_StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Move (method)
+  Move(theOther: NCollection_Array1_StepAP203_ClassifiedItem): NCollection_Array1_StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.First (method)
+  First(): StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.ChangeFirst (method)
+  ChangeFirst(): StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Last (method)
+  Last(): StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.ChangeLast (method)
+  ChangeLast(): StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Value (method)
+  Value(theIndex: number): StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.ChangeValue (method)
+  ChangeValue(theIndex: number): StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.At (method)
+  At(theIndex: number): StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.ChangeAt (method)
+  ChangeAt(theIndex: number): StepAP203_ClassifiedItem;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.SetValue (method)
+  SetValue(theIndex: number, theItem: StepAP203_ClassifiedItem): void;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.UpdateLowerBound (method)
+  UpdateLowerBound(theLower: number): void;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.UpdateUpperBound (method)
+  UpdateUpperBound(theUpper: number): void;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.Resize (method)
+  Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+  Resize(theSize: number, theToCopyData: boolean): void;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.IsDeletable (method)
+  IsDeletable(): boolean;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.delete (method)
+  delete(): void;
+
+  // NCollection_Array1_StepAP203_ClassifiedItem.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 NCollection_Array1_StepAP203_ContractedItem: declare class NCollection_Array1_StepAP203_ContractedItem
 

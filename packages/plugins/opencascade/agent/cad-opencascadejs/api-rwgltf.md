@@ -228,11 +228,65 @@ RWGltf_GltfAccessor: declare class RWGltf_GltfAccessor
 
 RWGltf_GltfAccessorCompType: typeof RWGltf_GltfAccessorCompType[keyof typeof RWGltf_GltfAccessorCompType]
 
+  readonly RWGltf_GltfAccessorCompType_UNKNOWN: 'RWGltf_GltfAccessorCompType_UNKNOWN'
+
+  readonly RWGltf_GltfAccessorCompType_Int8: 'RWGltf_GltfAccessorCompType_Int8'
+
+  readonly RWGltf_GltfAccessorCompType_UInt8: 'RWGltf_GltfAccessorCompType_UInt8'
+
+  readonly RWGltf_GltfAccessorCompType_Int16: 'RWGltf_GltfAccessorCompType_Int16'
+
+  readonly RWGltf_GltfAccessorCompType_UInt16: 'RWGltf_GltfAccessorCompType_UInt16'
+
+  readonly RWGltf_GltfAccessorCompType_UInt32: 'RWGltf_GltfAccessorCompType_UInt32'
+
+  readonly RWGltf_GltfAccessorCompType_Float32: 'RWGltf_GltfAccessorCompType_Float32'
+
 RWGltf_GltfAccessorLayout: typeof RWGltf_GltfAccessorLayout[keyof typeof RWGltf_GltfAccessorLayout]
+
+  readonly RWGltf_GltfAccessorLayout_UNKNOWN: 'RWGltf_GltfAccessorLayout_UNKNOWN'
+
+  readonly RWGltf_GltfAccessorLayout_Scalar: 'RWGltf_GltfAccessorLayout_Scalar'
+
+  readonly RWGltf_GltfAccessorLayout_Vec2: 'RWGltf_GltfAccessorLayout_Vec2'
+
+  readonly RWGltf_GltfAccessorLayout_Vec3: 'RWGltf_GltfAccessorLayout_Vec3'
+
+  readonly RWGltf_GltfAccessorLayout_Vec4: 'RWGltf_GltfAccessorLayout_Vec4'
+
+  readonly RWGltf_GltfAccessorLayout_Mat2: 'RWGltf_GltfAccessorLayout_Mat2'
+
+  readonly RWGltf_GltfAccessorLayout_Mat3: 'RWGltf_GltfAccessorLayout_Mat3'
+
+  readonly RWGltf_GltfAccessorLayout_Mat4: 'RWGltf_GltfAccessorLayout_Mat4'
 
 RWGltf_GltfAlphaMode: typeof RWGltf_GltfAlphaMode[keyof typeof RWGltf_GltfAlphaMode]
 
+  readonly RWGltf_GltfAlphaMode_Opaque: 'RWGltf_GltfAlphaMode_Opaque'
+
+  readonly RWGltf_GltfAlphaMode_Mask: 'RWGltf_GltfAlphaMode_Mask'
+
+  readonly RWGltf_GltfAlphaMode_Blend: 'RWGltf_GltfAlphaMode_Blend'
+
 RWGltf_GltfArrayType: typeof RWGltf_GltfArrayType[keyof typeof RWGltf_GltfArrayType]
+
+  readonly RWGltf_GltfArrayType_UNKNOWN: 'RWGltf_GltfArrayType_UNKNOWN'
+
+  readonly RWGltf_GltfArrayType_Indices: 'RWGltf_GltfArrayType_Indices'
+
+  readonly RWGltf_GltfArrayType_Position: 'RWGltf_GltfArrayType_Position'
+
+  readonly RWGltf_GltfArrayType_Normal: 'RWGltf_GltfArrayType_Normal'
+
+  readonly RWGltf_GltfArrayType_Color: 'RWGltf_GltfArrayType_Color'
+
+  readonly RWGltf_GltfArrayType_TCoord0: 'RWGltf_GltfArrayType_TCoord0'
+
+  readonly RWGltf_GltfArrayType_TCoord1: 'RWGltf_GltfArrayType_TCoord1'
+
+  readonly RWGltf_GltfArrayType_Joint: 'RWGltf_GltfArrayType_Joint'
+
+  readonly RWGltf_GltfArrayType_Weight: 'RWGltf_GltfArrayType_Weight'
 
 RWGltf_GltfBufferView: declare class RWGltf_GltfBufferView
 
@@ -256,6 +310,12 @@ RWGltf_GltfBufferView: declare class RWGltf_GltfBufferView
   [Symbol.dispose](): void;
 
 RWGltf_GltfBufferViewTarget: typeof RWGltf_GltfBufferViewTarget[keyof typeof RWGltf_GltfBufferViewTarget]
+
+  readonly RWGltf_GltfBufferViewTarget_UNKNOWN: 'RWGltf_GltfBufferViewTarget_UNKNOWN'
+
+  readonly RWGltf_GltfBufferViewTarget_ARRAY_BUFFER: 'RWGltf_GltfBufferViewTarget_ARRAY_BUFFER'
+
+  readonly RWGltf_GltfBufferViewTarget_ELEMENT_ARRAY_BUFFER: 'RWGltf_GltfBufferViewTarget_ELEMENT_ARRAY_BUFFER'
 
 RWGltf_GltfFace: declare class RWGltf_GltfFace extends Standard_Transient
 
@@ -488,7 +548,65 @@ RWGltf_GltfPrimArrayData: declare class RWGltf_GltfPrimArrayData
 
 RWGltf_GltfPrimitiveMode: typeof RWGltf_GltfPrimitiveMode[keyof typeof RWGltf_GltfPrimitiveMode]
 
+  readonly RWGltf_GltfPrimitiveMode_UNKNOWN: 'RWGltf_GltfPrimitiveMode_UNKNOWN'
+
+  readonly RWGltf_GltfPrimitiveMode_Points: 'RWGltf_GltfPrimitiveMode_Points'
+
+  readonly RWGltf_GltfPrimitiveMode_Lines: 'RWGltf_GltfPrimitiveMode_Lines'
+
+  readonly RWGltf_GltfPrimitiveMode_LineLoop: 'RWGltf_GltfPrimitiveMode_LineLoop'
+
+  readonly RWGltf_GltfPrimitiveMode_LineStrip: 'RWGltf_GltfPrimitiveMode_LineStrip'
+
+  readonly RWGltf_GltfPrimitiveMode_Triangles: 'RWGltf_GltfPrimitiveMode_Triangles'
+
+  readonly RWGltf_GltfPrimitiveMode_TriangleStrip: 'RWGltf_GltfPrimitiveMode_TriangleStrip'
+
+  readonly RWGltf_GltfPrimitiveMode_TriangleFan: 'RWGltf_GltfPrimitiveMode_TriangleFan'
+
 RWGltf_GltfRootElement: typeof RWGltf_GltfRootElement[keyof typeof RWGltf_GltfRootElement]
+
+  readonly RWGltf_GltfRootElement_Asset: 'RWGltf_GltfRootElement_Asset'
+
+  readonly RWGltf_GltfRootElement_Scenes: 'RWGltf_GltfRootElement_Scenes'
+
+  readonly RWGltf_GltfRootElement_Scene: 'RWGltf_GltfRootElement_Scene'
+
+  readonly RWGltf_GltfRootElement_Nodes: 'RWGltf_GltfRootElement_Nodes'
+
+  readonly RWGltf_GltfRootElement_Meshes: 'RWGltf_GltfRootElement_Meshes'
+
+  readonly RWGltf_GltfRootElement_Accessors: 'RWGltf_GltfRootElement_Accessors'
+
+  readonly RWGltf_GltfRootElement_BufferViews: 'RWGltf_GltfRootElement_BufferViews'
+
+  readonly RWGltf_GltfRootElement_Buffers: 'RWGltf_GltfRootElement_Buffers'
+
+  readonly RWGltf_GltfRootElement_NB_MANDATORY: 'RWGltf_GltfRootElement_NB_MANDATORY'
+
+  readonly RWGltf_GltfRootElement_Animations: 'RWGltf_GltfRootElement_Animations'
+
+  readonly RWGltf_GltfRootElement_Materials: 'RWGltf_GltfRootElement_Materials'
+
+  readonly RWGltf_GltfRootElement_Programs: 'RWGltf_GltfRootElement_Programs'
+
+  readonly RWGltf_GltfRootElement_Samplers: 'RWGltf_GltfRootElement_Samplers'
+
+  readonly RWGltf_GltfRootElement_Shaders: 'RWGltf_GltfRootElement_Shaders'
+
+  readonly RWGltf_GltfRootElement_Skins: 'RWGltf_GltfRootElement_Skins'
+
+  readonly RWGltf_GltfRootElement_Techniques: 'RWGltf_GltfRootElement_Techniques'
+
+  readonly RWGltf_GltfRootElement_Textures: 'RWGltf_GltfRootElement_Textures'
+
+  readonly RWGltf_GltfRootElement_Images: 'RWGltf_GltfRootElement_Images'
+
+  readonly RWGltf_GltfRootElement_ExtensionsUsed: 'RWGltf_GltfRootElement_ExtensionsUsed'
+
+  readonly RWGltf_GltfRootElement_ExtensionsRequired: 'RWGltf_GltfRootElement_ExtensionsRequired'
+
+  readonly RWGltf_GltfRootElement_NB: 'RWGltf_GltfRootElement_NB'
 
 RWGltf_GltfSceneNodeMap: declare class RWGltf_GltfSceneNodeMap
 
@@ -600,6 +718,12 @@ RWGltf_TriangulationReader: declare class RWGltf_TriangulationReader extends RWM
   [Symbol.dispose](): void;
 
 RWGltf_WriterTrsfFormat: typeof RWGltf_WriterTrsfFormat[keyof typeof RWGltf_WriterTrsfFormat]
+
+  readonly RWGltf_WriterTrsfFormat_Compact: 'RWGltf_WriterTrsfFormat_Compact'
+
+  readonly RWGltf_WriterTrsfFormat_Mat4: 'RWGltf_WriterTrsfFormat_Mat4'
+
+  readonly RWGltf_WriterTrsfFormat_TRS: 'RWGltf_WriterTrsfFormat_TRS'
 
 RWGltf_CafWriter_Mesh: interface RWGltf_CafWriter_Mesh
 

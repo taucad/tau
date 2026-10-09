@@ -4,7 +4,7 @@
  * browser barrel (`backend/index.ts`), which the file-manager worker bundles.
  */
 
-export { NodeFsProvider } from '#backend/node/provider.js';
+export { drainNodeFsProviderWatchClosures, NodeFsProvider } from '#backend/node/provider.js';
 export { acquireNodeAuthorityWriter, NodeAuthorityWriterError } from '#backend/node/authority-writer-lock.js';
 export type { AcquireNodeAuthorityWriterInput, NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 export { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js';

@@ -217,6 +217,31 @@ const failedResponseError = (
 };
 
 /**
+ * The provider failure a parsed frame body reports, when it is one: an `error`
+ * event (OpenAI Responses, Anthropic), a Responses `response.failed`, or any body
+ * whose `error` member is an object (the OpenAI-compatible wires). Undefined for
+ * every healthy frame, so a caller can tell a stream the supplier failed from one
+ * that merely ended.
+ *
+ * @param data - One parsed frame body, as the SSE decoder or a bare JSON tail gives it.
+ * @returns What the frame says about the failure, or undefined when it reports none.
+ */
+export const providerFailureOf = (data: unknown): ProviderTerminalFailure | undefined => {
+  const body = unwrapProviderBody(data);
+  if (body === null || typeof body !== 'object') {
+    return undefined;
+  }
+  const failed = failedResponseError(body);
+  if (failed !== undefined) {
+    return terminalFailureOf(failed.payload);
+  }
+  const record = body as Record<string, unknown>;
+  return record['type'] === 'error' || providerErrorRecord(record) !== undefined
+    ? terminalFailureOf(record)
+    : undefined;
+};
+
+/**
  * Replaces a recognised provider-account refusal in a relayed SSE body with the
  * Tau-coded frame its clients switch on, and leaves every other frame byte-for-byte.
  *

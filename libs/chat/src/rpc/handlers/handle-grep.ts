@@ -40,7 +40,7 @@ async function collectFilePaths(
   return paths;
 }
 
-type GrepMatch = { file: string; line: number; content: string };
+type GrepMatch = { file: string; line: number; content: string; before?: string[]; after?: string[] };
 
 function truncateMatchLine(line: string): string {
   return line.slice(0, maxGrepLineChars);
@@ -62,6 +62,7 @@ async function resolveSearchPaths(fileSystem: RpcFileSystem, basePath: string): 
 export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem): Promise<GrepRpcResult> {
   const headLimit = input.headLimit ?? defaultGrepHeadLimit;
   const offset = input.offset ?? 0;
+  const context = input.context ?? 0;
 
   try {
     const regex = new RegExp(input.pattern, input.caseSensitive === false ? 'gi' : 'g');
@@ -84,13 +85,16 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
 
     if (input.glob) {
       const { minimatch } = await import('minimatch');
-      filesToSearch = filesToSearch.filter((path) => minimatch(path, input.glob!, { matchBase: true }));
+      filesToSearch = filesToSearch.filter((path) => minimatch(path, input.glob!, { matchBase: true, dot: true }));
     }
 
     const searchPromises = filesToSearch.map(async (filePath) => {
       try {
         const text = await fileSystem.readFile(filePath);
         const lines = text.split('\n');
+        if (lines.at(-1) === '') {
+          lines.pop();
+        }
         const fileMatches: GrepMatch[] = [];
 
         for (const [lineIndex, line] of lines.entries()) {
@@ -99,6 +103,17 @@ export async function handleGrep(input: GrepRpcInput, fileSystem: RpcFileSystem)
               file: filePath,
               line: lineIndex + 1,
               content: truncateMatchLine(line),
+              // ponytail: adjacent matches repeat shared context lines; merge ranges if that output size matters.
+              ...(context > 0
+                ? {
+                    before: lines
+                      .slice(Math.max(0, lineIndex - context), lineIndex)
+                      .map((contextLine) => truncateMatchLine(contextLine)),
+                    after: lines
+                      .slice(lineIndex + 1, lineIndex + 1 + context)
+                      .map((contextLine) => truncateMatchLine(contextLine)),
+                  }
+                : {}),
             });
           }
 

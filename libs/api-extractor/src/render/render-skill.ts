@@ -11,8 +11,19 @@
 
 import { estimateTokens } from '#render/shard-plan.js';
 
-/** Ceiling enforced by `apps/ui/app/lib/system-skills-budget.test.ts`. @public */
-export const maxSkillBodyTokens = 800;
+/**
+ * Ceiling enforced by `apps/ui/app/lib/system-skills-budget.test.ts`.
+ *
+ * Holds authored doctrine, the generated Core API section and the reference
+ * map, and keeps the decisive content inside the first ~5,000 tokens hosts
+ * retain for a skill after compaction (`kernel-skill-api-context.md` D1).
+ *
+ * @public
+ */
+export const maxSkillBodyTokens = 6000;
+
+/** Policy ceiling on any skill body, from `context-engineering-policy.md` Part 9. @public */
+export const maxSkillBodyLines = 500;
 
 /** Ceiling enforced by the same test on the frontmatter description. @public */
 export const maxSkillDescriptionChars = 160;
@@ -29,6 +40,8 @@ export type SkillRenderOptions = {
   readonly description: string;
   /** Authored body: workflow, canonical example, failure modes. Verbatim. */
   readonly doctrine: string;
+  /** Generated Core API section from `renderCoreApi`, when the owner has one. */
+  readonly coreApi?: string;
   /** Generated reference map from `renderReferenceMap`, or absent for a corpus-free skill. */
   readonly referenceMap?: string;
 };
@@ -77,6 +90,9 @@ export const renderSkill = (options: SkillRenderOptions): RenderedSkill => {
   }
 
   const sections = [`# ${options.title}`, '', options.doctrine.trim()];
+  if (options.coreApi !== undefined) {
+    sections.push('', options.coreApi.trim());
+  }
   if (options.referenceMap !== undefined) {
     sections.push('', options.referenceMap.trim());
   }
@@ -86,6 +102,12 @@ export const renderSkill = (options: SkillRenderOptions): RenderedSkill => {
   if (bodyTokens > maxBody) {
     throw new RangeError(
       `skill ${options.slug}: body is ~${bodyTokens} tokens, over the ${maxBody} ceiling. Move detail into a reference file.`,
+    );
+  }
+  const bodyLines = body.split('\n').length;
+  if (bodyLines > maxSkillBodyLines) {
+    throw new RangeError(
+      `skill ${options.slug}: body is ${bodyLines} lines, over the ${maxSkillBodyLines}-line ceiling.`,
     );
   }
 

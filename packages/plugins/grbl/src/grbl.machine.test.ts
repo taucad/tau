@@ -33,7 +33,12 @@ describe('grblMachine', () => {
       identity: 'claimed',
     });
     expect([...real.actions, ...real.holds].every((action) => action.qualification.status === 'designed')).toBe(true);
-    expect(real.jobs).toMatchObject({ type: 'supported', delivery: 'streamed', start: 'at-machine' });
+    expect(real.jobs).toMatchObject({
+      type: 'supported',
+      delivery: 'streamed',
+      start: 'at-machine',
+      accepts: [{ extensions: ['.gcode', '.gc', '.nc', '.tap', '.cnc'] }],
+    });
     expect(real.stop).toMatchObject({ position: 'kept', spindle: 'stops' });
     expect(real.holds[0]).toMatchObject({ id: 'motion.jog', lease: 100, bound: 150 });
     const simulated = parseMachineManifest(grblSimulatorMachine().manifest);
@@ -44,7 +49,7 @@ describe('grblMachine', () => {
     expect(simulated.actions.map((action) => action.id)).toContain('grbl-simulator.lid.press');
   });
 
-  it('offers likely Grbl serial ports, a configured port, or nothing on a host without serial access', async () => {
+  it('offers likely Grbl serial ports, an entered port, or nothing on a host without serial access', async () => {
     const definition = await resolveRuntimePluginDefinition('machine', grblMachine());
     const { signal } = new AbortController();
     const listed = await collect(
@@ -66,21 +71,25 @@ describe('grblMachine', () => {
         definition.discover({ configuration: { logicalId: 'garage', baudRate: 115_200 }, signal }, discovery()),
       ),
     ).toEqual([]);
-    const configured = await collect(
+    const entered = await collect(
       definition.discover(
-        { configuration: { logicalId: 'garage', port: 'COM3', baudRate: 115_200 }, signal },
+        {
+          configuration: { logicalId: 'garage', baudRate: 115_200 },
+          endpoint: { transport: 'serial', path: 'COM3' },
+          signal,
+        },
         discovery(),
       ),
     );
-    expect(configured).toHaveLength(1);
+    expect(entered).toMatchObject([{ type: 'found', candidate: { endpoint: { transport: 'serial', path: 'COM3' } } }]);
   });
 
-  it('opens the configured port through the host and refuses a host without serial access', async () => {
+  it('opens the candidate port through the host and refuses a host without serial access', async () => {
     const definition = await resolveRuntimePluginDefinition('machine', grblMachine());
     const candidate = {
       id: 'serial:/dev/tty.usbmodem1101',
       name: 'Grbl',
-      endpoint: { address: '/dev/tty.usbmodem1101', interface: 'serial' },
+      endpoint: { transport: 'serial', path: '/dev/tty.usbmodem1101' } as const,
       claimedIdentity: {},
       observedAt: clock.now(),
       expiresAt: clock.now(),

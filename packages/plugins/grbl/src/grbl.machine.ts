@@ -2,6 +2,7 @@ import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine, machineManifestOf } from '@taucad/runtime/machine';
 import type {
   MachineDiscoveryEvent,
+  MachineDiscoveryInput,
   MachineDiscoveryRuntime,
   MachineFailureCode,
   MachineSerialPort,
@@ -10,18 +11,12 @@ import { z } from 'zod';
 
 import { grblWorkOffsets, longMillManifest } from '#grbl.manifest.js';
 
-/** Where the controller is plugged in. @internal */
+/** How to talk to the controller; where it is plugged in is the discovery endpoint's serial path. @internal */
 export const grblBindingConfiguration = defineConfiguration({
   id: 'grbl.machine.binding',
-  version: '1.0.0',
+  version: '2.0.0',
   schema: z.object({
     logicalId: z.string().min(1).max(64),
-    port: z
-      .string()
-      .min(1)
-      .max(512)
-      .optional()
-      .meta({ title: 'Serial port', description: 'Such as /dev/tty.usbmodem1101 or COM3.' }),
     baudRate: z.number().int().positive().default(115_200).meta({ title: 'Baud rate' }),
   }),
   ui: { version: 1, rjsf: {} },
@@ -49,24 +44,28 @@ const bridges = new Set(['2341', '1a86', '0403', '10c4', '2a03']);
 const candidateLifetime = 30_000;
 
 /**
- * Serial ports that may have a Grbl controller behind them. A configured port is offered as it is; without one, the
- * host's port list is read. A host without serial access discovers nothing.
+ * Serial ports that may have a Grbl controller behind them. An addressed port (a person's entry) is offered as it is;
+ * without one, the host's port list is read. A host without serial access discovers nothing.
  * @internal
- * @param input - The binding configuration.
+ * @param input - The discovery input; `endpoint` is the serial path a person entered.
  * @param runtime - Discovery services.
  * @yields One candidate per port.
  */
 export async function* discoverGrblPorts(
-  input: Readonly<{ configuration: Readonly<{ logicalId: string; port?: string }>; signal: AbortSignal }>,
+  input: Pick<MachineDiscoveryInput<unknown>, 'endpoint' | 'signal'>,
   runtime: MachineDiscoveryRuntime,
 ): AsyncIterable<MachineDiscoveryEvent> {
-  // ponytail: no port list on this host and no configured port means nothing to offer; the binding form names one.
+  const { endpoint } = input;
+  // ponytail: no port list on this host and no entered port means nothing to offer; the person names one.
+  // A network endpoint finds nothing: the host refuses one before it reaches a serial provider.
   const ports: readonly MachineSerialPort[] =
-    input.configuration.port === undefined
+    endpoint === undefined
       ? ((await runtime.listSerialPorts?.({ signal: input.signal })) ?? []).filter(
           (port) => port.vendorId === undefined || bridges.has(port.vendorId),
         )
-      : [{ path: input.configuration.port }];
+      : endpoint.transport === 'serial'
+        ? [{ path: endpoint.path }]
+        : [];
   const observedAt = runtime.clock.now();
   const expiresAt = new Date(Date.parse(observedAt) + candidateLifetime).toISOString();
   for (const port of ports) {
@@ -75,7 +74,7 @@ export async function* discoverGrblPorts(
       candidate: {
         id: `serial:${port.path}`,
         name: `Grbl controller on ${port.path}`,
-        endpoint: { address: port.path, interface: 'serial' },
+        endpoint: { transport: 'serial', path: port.path },
         claimedIdentity: {
           ...(port.serialNumber === undefined ? {} : { serial: port.serialNumber }),
           model: 'longmill-mk2-30x30',
@@ -106,10 +105,15 @@ export const grblMachine = defineMachine({
         code: 'MACHINE_UNAVAILABLE' satisfies MachineFailureCode,
       });
     }
-    const path = input.configuration.port ?? input.candidate.endpoint.address;
+    const { endpoint } = input.candidate;
+    if (endpoint.transport !== 'serial') {
+      throw Object.assign(new Error('A Grbl controller is reached over a serial port, not the network.'), {
+        code: 'MACHINE_UNAVAILABLE' satisfies MachineFailureCode,
+      });
+    }
     // Opening the port toggles DTR, which restarts an Uno: Grbl comes back locked until it homes.
     const stream = await runtime.openSerial({
-      path,
+      path: endpoint.path,
       baudRate: input.configuration.baudRate,
       maximumReadBytes: 1024 * 1024,
       maximumWriteBytes: 1024 * 1024,

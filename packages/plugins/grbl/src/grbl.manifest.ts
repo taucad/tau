@@ -49,7 +49,8 @@ export const grblTravel = (settings: ReadonlyMap<number, number>): GrblTravel =>
 export const longMillMaximumRate = 4000;
 
 /**
- * The one container a Grbl machine accepts: one G-code file.
+ * The one container a Grbl machine accepts: one G-code file. Grbl streams any text, so the extensions are the ones
+ * Sienci's own sender opens for it (gSender 1.6.4 `FileControl/ButtonControlGroup.tsx:316`).
  * @internal
  */
 export const grblAcceptedContainers: Extract<MachineManifestDefinition['jobs'], { type: 'supported' }>['accepts'] = [
@@ -59,6 +60,7 @@ export const grblAcceptedContainers: Extract<MachineManifestDefinition['jobs'], 
     payloadSelection: 'single',
     requiredMembers: [],
     technology: 'subtractive.milling',
+    extensions: ['.gcode', '.gc', '.nc', '.tap', '.cnc'],
   },
 ];
 

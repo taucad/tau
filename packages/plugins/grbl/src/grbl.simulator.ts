@@ -1076,8 +1076,8 @@ export const grblSimulatorMachine = defineMachine({
       candidate: {
         id: 'grbl-simulator',
         name: 'Simulated LongMill MK2',
-        // RFC 6761 `.invalid`: names no network endpoint, so binding asks for no credential.
-        endpoint: { address: 'simulator.invalid', interface: 'memory' },
+        // RFC 6761 `.invalid`: names no real port; the controller is in memory.
+        endpoint: { transport: 'serial', path: 'simulator.invalid' },
         claimedIdentity: { serial: 'simulated-longmill', model: 'longmill-mk2-30x30' },
         observedAt,
         expiresAt: new Date(Date.parse(observedAt) + 30_000).toISOString(),

@@ -39,7 +39,7 @@ const runtime = defineRuntime({ plugins: [grbl()] });
 
 This creates an outer host definition with separate `cad`, `jobs`, and `machines` capabilities. Bind it to a
 trusted host implementation that provides `listSerialPorts` and `openSerial`; a host without serial access discovers
-nothing unless the binding names a port, and cannot connect.
+nothing unless a person enters the port (the discovery `endpoint`'s serial path), and cannot connect.
 
 ## API
 

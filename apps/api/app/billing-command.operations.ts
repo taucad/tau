@@ -2,6 +2,7 @@ import type postgres from 'postgres';
 import { cashBlockingFinancialCaseKinds } from '#api/billing/billing-cash-reconciliation.service.js';
 import type { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
 import type { BillingPurchaseReconciliationService } from '#api/billing/billing-purchase-reconciliation.service.js';
+import type { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 
@@ -85,6 +86,29 @@ export const recordOpenCases = async (input: {
       'tau.billing.unpriced.reason': row.reason,
     });
   }
+};
+
+/**
+ * Drains the recovery-notice outbox once. A notice that used its last attempt is a `billing.alert`:
+ * its customer was never told, and only an operator can re-queue it.
+ */
+export const deliverRecoveryNotices = async (input: {
+  readonly payments: Pick<BillingPaymentsService, 'deliverRecoveryNotices'>;
+  readonly environment: FinancialEnvironment;
+  readonly limit: number;
+}): Promise<Awaited<ReturnType<BillingPaymentsService['deliverRecoveryNotices']>>> => {
+  const report = await input.payments.deliverRecoveryNotices({ environment: input.environment, limit: input.limit });
+  if (report.abandoned.length > 0) {
+    console.error(
+      JSON.stringify({
+        event: 'billing.alert',
+        environment: input.environment,
+        kind: 'recovery_notice_abandoned',
+        notices: report.abandoned,
+      }),
+    );
+  }
+  return report;
 };
 
 /** Everything the hourly reconciliation needs from the operations worker. */

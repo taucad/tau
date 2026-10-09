@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
-import { recordOpenCases, runHourlyOperationsJobs } from '#billing-command.operations.js';
+import { deliverRecoveryNotices, recordOpenCases, runHourlyOperationsJobs } from '#billing-command.operations.js';
 import type {
   HourlyOperationsJobs,
   OperationsGaugeMetrics,
@@ -140,6 +140,48 @@ describe('billing operations worker', () => {
 
       expect(recordGauges).toHaveBeenCalledOnce();
       expect(failures).toEqual([new Error('Controlled Stripe outage')]);
+    });
+  });
+
+  describe('deliverRecoveryNotices', () => {
+    const report = (abandoned: string[]) => ({ processed: ['n-1'], pending: [], failed: ['n-2'], abandoned });
+
+    it('should raise a billing.alert naming each notice that used its last attempt', async () => {
+      const alerts = vi.spyOn(console, 'error').mockImplementation(() => {
+        // Test-local stderr sink.
+      });
+      const payments = { deliverRecoveryNotices: vi.fn(async () => report(['n-3'])) };
+
+      try {
+        await expect(deliverRecoveryNotices({ payments, environment: 'staging', limit: 100 })).resolves.toStrictEqual(
+          report(['n-3']),
+        );
+
+        expect(payments.deliverRecoveryNotices).toHaveBeenCalledExactlyOnceWith({ environment: 'staging', limit: 100 });
+        expect(alerts.mock.calls.map(([line]) => JSON.parse(String(line)) as unknown)).toStrictEqual([
+          { event: 'billing.alert', environment: 'staging', kind: 'recovery_notice_abandoned', notices: ['n-3'] },
+        ]);
+      } finally {
+        alerts.mockRestore();
+      }
+    });
+
+    it('should stay quiet while every notice still has attempts left', async () => {
+      const alerts = vi.spyOn(console, 'error').mockImplementation(() => {
+        // Test-local stderr sink.
+      });
+
+      try {
+        await deliverRecoveryNotices({
+          payments: { deliverRecoveryNotices: vi.fn(async () => report([])) },
+          environment: 'staging',
+          limit: 100,
+        });
+
+        expect(alerts).not.toHaveBeenCalled();
+      } finally {
+        alerts.mockRestore();
+      }
     });
   });
 });

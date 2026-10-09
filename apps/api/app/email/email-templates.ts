@@ -203,6 +203,64 @@ export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
         ],
       };
     }
+    case 'auto-reload-disabled': {
+      return {
+        subject: 'Automatic credit reload is off',
+        preheader: "Your saved card couldn't be charged. Your current credits are not affected.",
+        kicker: 'Billing',
+        heading: 'We turned off automatic reload',
+        reason: `You received this email because ${template.email} turned on automatic credit reload for Tau.`,
+        body: [
+          createElement(
+            paragraph,
+            null,
+            'Automatic credit reload for ',
+            createElement(strong, null, template.email),
+            " couldn't charge your saved card, so we turned it off. No more automatic reloads will run until you set it up again.",
+          ),
+          createElement(
+            paragraph,
+            null,
+            'Your current credits are not affected. You can set up automatic reload again from billing settings.',
+          ),
+          createElement(primaryAction, { href: template.billingUrl }, 'Open billing settings'),
+          createElement(
+            note,
+            null,
+            'Questions? Reply to this email or visit ',
+            createElement(inlineLink, { href: footerCopy.helpUrl }, 'the help docs'),
+            '.',
+          ),
+        ],
+      };
+    }
+    case 'auto-reload-action-required': {
+      return {
+        subject: 'Action needed: confirm your Tau credit reload',
+        preheader: 'Your bank asked to confirm this payment. No credits are added until you do.',
+        kicker: 'Billing',
+        heading: 'Your automatic reload needs confirmation',
+        reason: `You received this email because ${template.email} turned on automatic credit reload for Tau.`,
+        body: [
+          createElement(
+            paragraph,
+            null,
+            'Your bank asked for confirmation before it approves an automatic credit reload for ',
+            createElement(strong, null, template.email),
+            '. Your card was not charged, and no credits were added.',
+          ),
+          createElement(paragraph, null, 'Open billing settings to finish the payment.'),
+          createElement(primaryAction, { href: template.billingUrl }, 'Finish the payment'),
+          createElement(
+            note,
+            null,
+            'Questions? Reply to this email or visit ',
+            createElement(inlineLink, { href: footerCopy.helpUrl }, 'the help docs'),
+            '.',
+          ),
+        ],
+      };
+    }
   }
 };
 

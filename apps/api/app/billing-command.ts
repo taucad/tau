@@ -34,7 +34,12 @@ import * as schema from '#database/schema.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { EmailService } from '#email/email.service.js';
-import { createOperationsGaugeSource, recordOpenCases, runHourlyOperationsJobs } from '#billing-command.operations.js';
+import {
+  createOperationsGaugeSource,
+  deliverRecoveryNotices,
+  recordOpenCases,
+  runHourlyOperationsJobs,
+} from '#billing-command.operations.js';
 import type { DatabaseService } from '#database/database.service.js';
 
 /**
@@ -635,11 +640,11 @@ async function main(): Promise<void> {
             await runJob('billing.renewal_recovery', async () =>
               payments.recoverRenewalOffers({ environment: billingEnvironment, limit }),
             );
-            // Drains the dunning outbox `recordRenewalFailure` fills; a send failure leaves the row
-            // pending with its own backoff rather than failing the pass.
+            // Drains the notice outbox: renewal dunning and automatic-reload notices. A send failure leaves
+            // the row pending with its own backoff rather than failing the pass; its last failure alerts.
             // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
             await runJob('billing.recovery_notices', async () =>
-              payments.deliverRecoveryNotices({ environment: billingEnvironment, limit }),
+              deliverRecoveryNotices({ payments, environment: billingEnvironment, limit }),
             );
             if (Date.now() - lastScanAt >= scanIntervalMilliseconds) {
               lastScanAt = Date.now();

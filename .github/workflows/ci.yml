@@ -178,7 +178,7 @@ jobs:
 
       # Restore-only: a lockfile change would otherwise save the 1.1 GB macOS store after
       # the job (148-155 s on runs 37869646536 and 37878016418), delaying the jobs that wait
-      # on this one. The scheduled Darwin job in e2e-nightly.yml saves it from `main`.
+      # on this one. `pnpm-store-darwin` saves it from `main` once they are done.
       - &setup-nx-darwin
         name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -285,6 +285,21 @@ jobs:
           generation: ${{ steps.prepare.outputs.generation }}
           preparation-hit: ${{ steps.prepare.outputs.preparation-hit }}
           cargo-hit: ${{ steps.prepare.outputs.cargo-hit }}
+
+  # Saves the macOS pnpm store that the Darwin jobs above only restore, after them so
+  # the save delays nothing. actions/cache saves only from a successful job, and nothing
+  # needs this one. On a cache hit, the save is skipped.
+  pnpm-store-darwin:
+    name: Save the macOS pnpm store
+    needs: [geospec-producer, geospec-darwin]
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    runs-on: macos-15
+    steps:
+      - *checkout-darwin
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
 
   # The affected tasks run as parallel lanes on separate standard runners: lint,
   # typecheck, build and its checks, and three test shards. One runner running every

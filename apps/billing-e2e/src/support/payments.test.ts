@@ -1,5 +1,6 @@
+import { wireCreditBalanceSchema } from '@taucad/billing';
 import { describe, expect, it } from 'vitest';
-import { describeReads, returnPath, summaryTaxMinor } from '#support/payments.js';
+import { describeReads, heldAtoms, returnPath, summaryTaxMinor } from '#support/payments.js';
 
 const get = (state: string) => ({ method: 'GET', path: '/v1/billing/payment-actions/a1', status: 200, state });
 const recover = (status: number, state?: string) => ({
@@ -32,6 +33,36 @@ describe('describeReads', () => {
       'return page read GET action 200 fulfilled (req_1)',
     );
     expect(describeReads([])).toBe('the return page made no payment-action reads');
+  });
+});
+
+describe('heldAtoms', () => {
+  const balance = wireCreditBalanceSchema.parse({
+    schemaVersion: 1,
+    environment: 'staging',
+    subjectId: 'subject-1',
+    revision: '11',
+    asOf: '2026-10-09T17:08:59.000Z',
+    promoGrantCreditAtoms: '0',
+    planGrantCreditAtoms: '0',
+    purchasedCreditAtoms: '4949515',
+    debtCreditAtoms: '0',
+    promoHeldCreditAtoms: '0',
+    planHeldCreditAtoms: '0',
+    purchasedHeldCreditAtoms: '244100',
+    pendingIssuanceCreditAtoms: '0',
+    eligibleAvailableCreditAtoms: '4705415',
+    netBalanceCreditAtoms: '4949515',
+  });
+
+  it('should add the atoms every source holds for running operations', () => {
+    expect(heldAtoms({ balance })).toBe(244_100n);
+    expect(heldAtoms({ balance: { ...balance, promoHeldCreditAtoms: '5', planHeldCreditAtoms: '7' } })).toBe(244_112n);
+    expect(heldAtoms({ balance: { ...balance, purchasedHeldCreditAtoms: '0' } })).toBe(0n);
+  });
+
+  it('should hold nothing when the ledger could not answer', () => {
+    expect(heldAtoms({ balance: null })).toBe(0n);
   });
 });
 

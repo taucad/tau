@@ -216,7 +216,8 @@ describe('Pro subscription', () => {
       const settings = billingSettings(page);
       await settings.open();
       const banner = settings.cancellationBanner();
-      const bannerText = (await visibleText(banner)) || 'no banner';
+      // The plan card and its banner render once the entitlements query answers, after the credit balance shows.
+      const bannerText = (await isShown(banner, 30_000)) ? await visibleText(banner) : 'no banner';
       evidence.push(
         `returned by ${returned}`,
         `${describeEntitlements(entitlements)} ${seconds} s after the return`,
@@ -251,6 +252,7 @@ describe('Pro subscription', () => {
         ({ cancelAtPeriodEnd }) => !cancelAtPeriodEnd,
       );
       await settings.open();
+      await settings.waitForPlan();
       const isBannerShown = await settings.cancellationBanner().isVisible();
       evidence.push(
         `returned by ${returned}`,

@@ -115,7 +115,10 @@ const actionSubmission = async (
 
 /** Settings → Billing: plan, credit balance, automatic reload and account closure. */
 export type BillingSettings = {
-  readonly open: () => Promise<void>;
+  /** Opens Settings → Billing; the note names a first navigation the server never answered, retried once. */
+  readonly open: () => Promise<string | undefined>;
+  /** Resolves once the plan card has its entitlements: the cancellation banner renders with them. */
+  readonly waitForPlan: () => Promise<void>;
   /** The spendable balance the card prints (`data-testid="credit-balance"`). */
   readonly balance: () => Locator;
   readonly addCredits: () => Promise<void>;
@@ -133,15 +136,26 @@ export type BillingSettings = {
 
 /** Settings → Billing (`/?settings=billing`). */
 export const billingSettings = (page: Page): BillingSettings => ({
-  async open(): Promise<void> {
+  async open(): Promise<string | undefined> {
     const heading = page.getByText('Credit balance', { exact: true });
-    await page.goto(`${baseUrl}/?settings=billing`);
+    let note: string | undefined;
+    try {
+      await page.goto(`${baseUrl}/?settings=billing`);
+    } catch (error) {
+      // One retry for a navigation the server never answered (Run 3 AC-01 waited 30 s on a blank page, F-39); a
+      // second stall fails the row.
+      note = `first settings navigation stalled (${error instanceof Error ? error.message.split('\n')[0] : String(error)}); the retry loaded`;
+      await page.goto(`${baseUrl}/?settings=billing`);
+    }
     // One reload for a page that stalled while loading; a second stall fails the row.
     if (!(await isShown(heading, 45_000))) {
       await page.reload();
       await heading.waitFor({ timeout: 45_000 });
     }
+    return note;
   },
+  waitForPlan: async () =>
+    page.getByText('Loading plan…', { exact: true }).waitFor({ state: 'hidden', timeout: 30_000 }),
   balance: () => page.getByTestId('credit-balance'),
   addCredits: async () => page.getByRole('button', { name: 'Add credits' }).first().click(),
   manageSubscription: () => page.getByRole('button', { name: /Manage Subscription/u }),

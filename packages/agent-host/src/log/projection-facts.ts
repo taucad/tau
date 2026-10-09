@@ -42,7 +42,45 @@ for (const schema of projectionEffectSchemas) {
     effectInputsByType.set(type, variants.length === 1 ? schema : z.union(variants));
   }
 }
-const effectSchema: z.ZodType<ProjectionEffect> = z.union(projectionEffectSchemas.map((schema) => schema.strict()));
+const [
+  messageAppended,
+  messageEnvelopeReplaced,
+  historyCompacted,
+  historyRewound,
+  snapshotContextRefreshed,
+  safeguardNudge,
+  safeguardTerminate,
+  interruptRecorded,
+  turnChanged,
+  turnFinalized,
+  turnConflicted,
+  turnFailed,
+  modelInvocationPrepared,
+  modelInvocationBound,
+  modelInvocationCharged,
+  modelInvocationVoided,
+  runLifecycle,
+  historyProjectionCommitted,
+] = projectionEffectSchemas;
+// Compact transport accepts ordinary data; dispatch reuses every existing strict field validator.
+const effectSchema: z.ZodType<ProjectionEffect> = z.discriminatedUnion('type', [
+  messageAppended.strict(),
+  messageEnvelopeReplaced.strict(),
+  historyCompacted.strict(),
+  historyRewound.strict(),
+  snapshotContextRefreshed.strict(),
+  z.discriminatedUnion('action', [safeguardNudge.strict(), safeguardTerminate.strict()]),
+  interruptRecorded.strict(),
+  turnChanged.strict(),
+  turnFinalized.strict(),
+  turnConflicted.strict(),
+  turnFailed.strict(),
+  modelInvocationPrepared.strict(),
+  modelInvocationBound.strict(),
+  z.discriminatedUnion('outcome', [modelInvocationCharged.strict(), modelInvocationVoided.strict()]),
+  runLifecycle.strict(),
+  historyProjectionCommitted.strict(),
+]);
 
 /** A known compact event accepted by presentation and shared ledger transitions. @public */
 export type KnownProjectionEvent = LogEventBase & ProjectionEffect;

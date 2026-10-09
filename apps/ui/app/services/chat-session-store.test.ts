@@ -401,7 +401,16 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
     const connect = vi.fn(async () => ({
       hostCommand,
       catchUp: writerOwnedCatchUp,
-      read: vi.fn<AgentHostClient['read']>(),
+      read: vi.fn<AgentHostClient['read']>(async ({ cursor }) => ({
+        status: 'batch',
+        chatId,
+        sourceGeneration: 'writer-live-drop',
+        sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+        cursor,
+        nextCursor: cursor,
+        endCursor: 2,
+        events: [],
+      })),
       subscribe,
       subscribeLive: (
         _chatId: string,
@@ -578,7 +587,10 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
         yield {
           type: 'validated',
           health: { historyIntact: true, newerHistory: false, quarantined: false },
-          position: { cursor: 0, sourceGeneration: 'display-local-source' },
+          position: {
+            cursor: 0,
+            sourceGeneration: captures === 1 ? 'display-local-source' : 'display-replacement-source',
+          },
           observedEndCursor: 0,
         };
       };
@@ -587,7 +599,8 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       const unpublish = store.publishProjectHostConnector(projectId, async () => ({
         catchUp,
         hostCommand,
-        read: vi.fn<AgentHostClient['read']>(),
+        // Force the held-capture branch through a real source replacement observation.
+        read: vi.fn<AgentHostClient['read']>(async () => ({ status: 'refused', chatId, reason: 'identity-mismatch' })),
         subscribe,
         close: async () => undefined,
       }));
@@ -2107,8 +2120,12 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         observedEndCursor: rows.length,
       };
     };
-    const read = vi.fn<AgentHostClient['read']>();
-    // The ordinary read is parked: only actual validated catch-up can establish authority.
+    // The replaced source refuses the retained prefix; only its validated capture can establish authority.
+    const read = vi.fn<AgentHostClient['read']>(async () => ({
+      status: 'refused',
+      chatId,
+      reason: 'identity-mismatch',
+    }));
     const subscribe = vi.fn<AgentHostClient['subscribe']>(() => () => undefined);
     const unpublish = store.publishProjectHostConnector(projectId, async () => ({
       hostCommand: vi.fn<AgentHostClient['hostCommand']>(),
@@ -2142,7 +2159,12 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       });
       // Displaying retained validated history must not certify current command or usage authority.
       expect(store.historicalUsageReady(chatId, projectId)).toBe(false);
-      expect(read).not.toHaveBeenCalled();
+      expect(read).toHaveBeenCalledExactlyOnceWith({
+        chatId,
+        cursor: rows.length,
+        sourceGeneration: 'warm-source',
+        last: { leaderEpoch: 'g1', sequence: 3 },
+      });
       validation.resolve();
       await vi.waitFor(() => {
         expect(subscribe).toHaveBeenCalledTimes(2);
@@ -2151,7 +2173,12 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       });
       expect(replacement.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       expect(JSON.stringify(replacement.chat.messages)).toContain('Fresh validated warm reply');
-      expect(read).not.toHaveBeenCalled();
+      expect(read).toHaveBeenCalledExactlyOnceWith({
+        chatId,
+        cursor: rows.length,
+        sourceGeneration: 'warm-source',
+        last: { leaderEpoch: 'g1', sequence: 3 },
+      });
     } finally {
       validation.resolve();
       metadata.resolve(chatRow(chatId, projectId));

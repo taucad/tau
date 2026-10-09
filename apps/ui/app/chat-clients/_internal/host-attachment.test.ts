@@ -22,6 +22,338 @@ const writerOwnedCatchUp = async function* ({ chatId }: { chatId: string }): Asy
 };
 
 describe('hostAttachment', () => {
+  for (const cursor of [0, 1]) {
+    it(`freshly validates a retained cursor ${cursor} without full capture or a parked first read`, async () => {
+      const projection = createActor(chatProjectionLogic).start();
+      projection.send({
+        type: 'batch',
+        answer: {
+          status: 'batch',
+          sourceHealth: healthy,
+          sourceGeneration: 'retained',
+          cursor: 0,
+          nextCursor: cursor,
+          endCursor: cursor,
+          events: cursor === 0 ? [] : [lifecycleRow(0, 'admitted')],
+        },
+      });
+      const original = projection.getSnapshot().context;
+      const observation = Promise.withResolvers<ReadAnswer>();
+      const read = vi.fn(async () => observation.promise);
+      const catchUp = vi.fn(writerOwnedCatchUp);
+      const subscribe = vi.fn(() => vi.fn());
+      const onStatus = vi.fn();
+      const actor = createActor(hostAttachment, {
+        input: {
+          chatId: 'chat_1',
+          projection,
+          onStatus,
+          connect: async () => ({ read, catchUp, subscribe, close: async () => undefined }),
+        },
+      }).start();
+      try {
+        await vi.waitFor(() => {
+          expect(read).toHaveBeenCalledOnce();
+        });
+        expect(read).toHaveBeenCalledWith({ chatId: 'chat_1', ...original.ledger.position });
+        expect(onStatus).not.toHaveBeenCalledWith({ type: 'attachment.attached' });
+        expect(subscribe).not.toHaveBeenCalled();
+        const damaged = { historyIntact: false, newerHistory: false, quarantined: true };
+        observation.resolve({
+          status: 'batch',
+          chatId: 'chat_1',
+          sourceGeneration: 'retained',
+          sourceHealth: damaged,
+          cursor,
+          nextCursor: cursor,
+          endCursor: cursor,
+          events: [],
+        });
+        await vi.waitFor(() => {
+          expect(subscribe).toHaveBeenCalledOnce();
+        });
+        expect(catchUp).not.toHaveBeenCalled();
+        expect(projection.getSnapshot().context.sourceHealth).toEqual(damaged);
+        expect(projection.getSnapshot().context.ledger.historyIntact).toBe(false);
+        expect(subscribe).toHaveBeenCalledWith(
+          { chatId: 'chat_1', ...original.ledger.position, sourceHealth: damaged },
+          expect.any(Function),
+          expect.any(Function),
+          expect.any(Function),
+        );
+        expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.attached' });
+      } finally {
+        actor.stop();
+        projection.stop();
+      }
+    });
+  }
+
+  for (const mismatch of ['generation', 'cursor', 'chat', 'identity-mismatch', 'cursor-ahead'] as const) {
+    it(`recaptures a retained empty history after a fresh ${mismatch} mismatch without early attachment`, async () => {
+      const projection = createActor(chatProjectionLogic).start();
+      projection.send({
+        type: 'batch',
+        answer: {
+          status: 'batch',
+          sourceHealth: healthy,
+          sourceGeneration: 'retained',
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+        },
+      });
+      const original = projection.getSnapshot().context;
+      const read = vi.fn(
+        async (): Promise<ReadAnswer> =>
+          mismatch === 'identity-mismatch' || mismatch === 'cursor-ahead'
+            ? { status: 'refused', chatId: 'chat_1', reason: mismatch }
+            : {
+                status: 'batch',
+                chatId: mismatch === 'chat' ? 'other-chat' : 'chat_1',
+                sourceGeneration: mismatch === 'generation' ? 'replacement' : 'retained',
+                sourceHealth: healthy,
+                cursor: mismatch === 'cursor' ? 1 : 0,
+                nextCursor: mismatch === 'cursor' ? 1 : 0,
+                endCursor: mismatch === 'cursor' ? 1 : 0,
+                events: [],
+              },
+      );
+      const release = Promise.withResolvers<void>();
+      const catchUp = vi.fn(async function* (): AsyncIterable<CatchUpFrame> {
+        await release.promise;
+        yield {
+          type: 'validated',
+          position: { cursor: 0, sourceGeneration: 'replacement' },
+          observedEndCursor: 0,
+          health: healthy,
+        };
+      });
+      const subscribe = vi.fn(() => vi.fn());
+      const onStatus = vi.fn();
+      const actor = createActor(hostAttachment, {
+        input: {
+          chatId: 'chat_1',
+          projection,
+          onStatus,
+          connect: async () => ({ read, catchUp, subscribe, close: async () => undefined }),
+        },
+      }).start();
+      try {
+        await vi.waitFor(() => {
+          expect(catchUp).toHaveBeenCalledOnce();
+        });
+        expect(read).toHaveBeenCalledOnce();
+        expect(projection.getSnapshot().context).toBe(original);
+        expect(onStatus).not.toHaveBeenCalledWith({ type: 'attachment.attached' });
+        release.resolve();
+        await vi.waitFor(() => {
+          expect(subscribe).toHaveBeenCalledOnce();
+        });
+        expect(projection.getSnapshot().context.ledger.position.sourceGeneration).toBe('replacement');
+        expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.attached' });
+      } finally {
+        release.resolve();
+        actor.stop();
+        projection.stop();
+      }
+    });
+  }
+
+  for (const reason of ['owner-fenced', 'unreadable'] as const) {
+    it(`preserves retained probe ${reason} handling and retry ownership`, async () => {
+      const projection = createActor(chatProjectionLogic).start();
+      projection.send({
+        type: 'batch',
+        answer: {
+          status: 'batch',
+          sourceHealth: healthy,
+          sourceGeneration: 'retained',
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+        },
+      });
+      const read = vi
+        .fn<AgentHostClient['read']>()
+        .mockResolvedValueOnce({ status: 'refused', chatId: 'chat_1', reason })
+        .mockResolvedValue({
+          status: 'batch',
+          chatId: 'chat_1',
+          sourceGeneration: 'retained',
+          sourceHealth: healthy,
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+        });
+      const catchUp = vi.fn(writerOwnedCatchUp);
+      const subscribe = vi.fn(() => vi.fn());
+      const subscribeLive = vi.fn(() => vi.fn());
+      const onStatus = vi.fn();
+      const actor = createActor(hostAttachment, {
+        input: {
+          chatId: 'chat_1',
+          projection,
+          onStatus,
+          connect: async () => ({ read, catchUp, subscribe, subscribeLive, close: async () => undefined }),
+        },
+      }).start();
+      try {
+        await vi.waitFor(() => {
+          expect(onStatus).toHaveBeenCalledWith({
+            type: reason === 'owner-fenced' ? 'attachment.lost' : 'attachment.refused',
+            reason,
+          });
+        });
+        expect(subscribe).not.toHaveBeenCalled();
+        expect(catchUp).not.toHaveBeenCalled();
+        actor.send({ type: 'retry-read' });
+        if (reason === 'owner-fenced') {
+          await vi.waitFor(() => {
+            expect(subscribe).toHaveBeenCalledOnce();
+          });
+          expect(read).toHaveBeenCalledTimes(2);
+          expect(subscribeLive).toHaveBeenCalledOnce();
+          expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.attached' });
+        } else {
+          expect(read).toHaveBeenCalledOnce();
+          expect(projection.getSnapshot().context.fault).toBe('unreadable');
+          expect(onStatus).not.toHaveBeenCalledWith({ type: 'attachment.attached' });
+        }
+      } finally {
+        actor.stop();
+        projection.stop();
+      }
+    });
+  }
+
+  it('follows a retained suffix beyond the first page before reporting attached', async () => {
+    const projection = createActor(chatProjectionLogic).start();
+    projection.send({
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        sourceHealth: healthy,
+        sourceGeneration: 'retained',
+        cursor: 0,
+        nextCursor: 1,
+        endCursor: 1,
+        events: [lifecycleRow(0, 'admitted')],
+      },
+    });
+    const read = vi.fn(
+      async (): Promise<ReadAnswer> => ({
+        status: 'batch',
+        chatId: 'chat_1',
+        sourceGeneration: 'retained',
+        sourceHealth: healthy,
+        cursor: 1,
+        nextCursor: 17,
+        endCursor: 18,
+        events: Array.from({ length: 16 }, (_, index) => lifecycleRow(index + 1, 'running')),
+      }),
+    );
+    const catchUp = vi.fn(writerOwnedCatchUp);
+    const subscribe = vi.fn<AgentHostClient['subscribe']>(() => vi.fn());
+    const onStatus = vi.fn();
+    const actor = createActor(hostAttachment, {
+      input: {
+        chatId: 'chat_1',
+        projection,
+        onStatus,
+        connect: async () => ({ read, catchUp, subscribe, close: async () => undefined }),
+      },
+    }).start();
+    try {
+      await vi.waitFor(() => {
+        expect(subscribe).toHaveBeenCalledOnce();
+      });
+      expect(read).toHaveBeenCalledOnce();
+      expect(catchUp).not.toHaveBeenCalled();
+      expect(projection.getSnapshot().context.ledger.position.cursor).toBe(17);
+      expect(onStatus).not.toHaveBeenCalledWith({ type: 'attachment.attached' });
+      subscribe.mock.calls[0]?.[3]?.({
+        status: 'batch',
+        chatId: 'chat_1',
+        sourceGeneration: 'retained',
+        sourceHealth: healthy,
+        cursor: 17,
+        nextCursor: 18,
+        endCursor: 18,
+        events: [lifecycleRow(17, 'completed')],
+      });
+      expect(projection.getSnapshot().context.ledger.position.cursor).toBe(18);
+      expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.attached' });
+    } finally {
+      actor.stop();
+      projection.stop();
+    }
+  });
+
+  for (const retirement of ['reset', 'detach'] as const) {
+    it(`discards a retained probe after ${retirement}`, async () => {
+      const projection = createActor(chatProjectionLogic).start();
+      projection.send({
+        type: 'batch',
+        answer: {
+          status: 'batch',
+          sourceHealth: healthy,
+          sourceGeneration: 'retained',
+          cursor: 0,
+          nextCursor: 0,
+          endCursor: 0,
+          events: [],
+        },
+      });
+      const observation = Promise.withResolvers<ReadAnswer>();
+      const read = vi.fn(async () => observation.promise);
+      const subscribe = vi.fn(() => vi.fn());
+      const onStatus = vi.fn();
+      const actor = createActor(hostAttachment, {
+        input: {
+          chatId: 'chat_1',
+          projection,
+          onStatus,
+          connect: async () => ({ read, catchUp: writerOwnedCatchUp, subscribe, close: async () => undefined }),
+        },
+      }).start();
+      try {
+        await vi.waitFor(() => {
+          expect(read).toHaveBeenCalledOnce();
+        });
+        if (retirement === 'reset') {
+          projection.send({ type: 'reset' });
+        } else {
+          actor.stop();
+        }
+        const retired = projection.getSnapshot().context;
+        observation.resolve({
+          status: 'batch',
+          chatId: 'chat_1',
+          sourceGeneration: 'retained',
+          sourceHealth: healthy,
+          cursor: 0,
+          nextCursor: 1,
+          endCursor: 1,
+          events: [lifecycleRow(0, 'admitted')],
+        });
+        await observation.promise;
+        await new Promise<void>((resolve) => {
+          queueMicrotask(resolve);
+        });
+        expect(projection.getSnapshot().context).toBe(retired);
+        expect(subscribe).not.toHaveBeenCalled();
+        expect(onStatus).not.toHaveBeenCalledWith({ type: 'attachment.attached' });
+      } finally {
+        actor.stop();
+        projection.stop();
+      }
+    });
+  }
+
   it('accepts an authoritative empty marker without provisional pages and follows its source', async () => {
     const projection = createActor(chatProjectionLogic).start();
     const subscribe = vi.fn(() => vi.fn());
@@ -122,7 +454,14 @@ describe('hostAttachment', () => {
           chatId: 'chat_1',
           projection,
           onStatus,
-          connect: async () => ({ catchUp, read: vi.fn(), subscribe, close: async () => undefined }),
+          connect: async () => ({
+            catchUp,
+            read: vi.fn(
+              async (): Promise<ReadAnswer> => ({ status: 'refused', chatId: 'chat_1', reason: 'identity-mismatch' }),
+            ),
+            subscribe,
+            close: async () => undefined,
+          }),
         },
       }).start();
       try {
@@ -295,7 +634,14 @@ describe('hostAttachment', () => {
       input: {
         chatId: 'chat_1',
         projection,
-        connect: async () => ({ catchUp, read: vi.fn(), subscribe, close: async () => undefined }),
+        connect: async () => ({
+          catchUp,
+          read: vi.fn(
+            async (): Promise<ReadAnswer> => ({ status: 'refused', chatId: 'chat_1', reason: 'identity-mismatch' }),
+          ),
+          subscribe,
+          close: async () => undefined,
+        }),
       },
     }).start();
     try {
@@ -439,7 +785,9 @@ describe('hostAttachment', () => {
         onStatus,
         connect: async () => ({
           catchUp,
-          read: vi.fn(),
+          read: vi.fn(
+            async (): Promise<ReadAnswer> => ({ status: 'refused', chatId: 'chat_1', reason: 'identity-mismatch' }),
+          ),
           subscribe,
           subscribeLive: (_chatId: string, listener: Parameters<AgentHostClient['subscribeLive']>[1]) => {
             deliverLive = listener;
@@ -1243,7 +1591,12 @@ describe('hostAttachment', () => {
       expect.any(Function),
       expect.any(Function),
     );
-    expect(read).not.toHaveBeenCalled();
+    expect(read).toHaveBeenCalledExactlyOnceWith({
+      chatId: 'chat_1',
+      sourceGeneration: 'writer-1',
+      cursor: 1,
+      last: { leaderEpoch: 'g1', sequence: 0 },
+    });
     second.stop();
     expect(close).toHaveBeenCalledTimes(2);
     projection.stop();

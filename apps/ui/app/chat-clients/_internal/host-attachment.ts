@@ -207,7 +207,45 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       const base = input.projection.getSnapshot().context;
       let validated = false;
       let followCurrent = false;
-      for (let attempt = 0; attempt < 2; attempt += 1) {
+      const { position: basePosition } = base.ledger;
+      if (
+        basePosition.sourceGeneration !== undefined &&
+        base.sourceHealth &&
+        selectCaughtUp(base) &&
+        base.fault === undefined
+      ) {
+        // Omit the health echo once: even an unchanged empty suffix must prove its current source before attaching.
+        const answer = await client.read({ chatId: input.chatId, ...basePosition });
+        if (readerClosed()) {
+          return;
+        }
+        const current = input.projection.getSnapshot().context;
+        if (current.ledger !== base.ledger || current.resetVersion !== base.resetVersion) {
+          throw new Error('Read owner changed before validation.');
+        }
+        if (answer.chatId === input.chatId) {
+          if (answer.status === 'refused' && (answer.reason === 'owner-fenced' || answer.reason === 'unreadable')) {
+            readerFenced = answer.reason === 'owner-fenced';
+            onAnswer(answer);
+            return;
+          }
+          if (
+            answer.status === 'batch' &&
+            answer.sourceGeneration === basePosition.sourceGeneration &&
+            answer.cursor === basePosition.cursor &&
+            answer.nextCursor === basePosition.cursor + answer.events.length &&
+            answer.endCursor >= answer.nextCursor
+          ) {
+            onAnswer(answer);
+            const observed = input.projection.getSnapshot().context.ledger.position;
+            if (observed.sourceGeneration !== answer.sourceGeneration || observed.cursor !== answer.nextCursor) {
+              throw new Error('Read owner refused the observed suffix.');
+            }
+            validated = true;
+          }
+        }
+      }
+      for (let attempt = 0; !validated && attempt < 2; attempt += 1) {
         let staged = initialChatProjection;
         let sourceGeneration: string | undefined;
         let capturedEnd: number | undefined;

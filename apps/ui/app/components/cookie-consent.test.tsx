@@ -10,7 +10,7 @@ const privacy = vi.hoisted(() => ({ globalPrivacyControl: false }));
 vi.mock('#hooks/use-cookie-consent.js', () => ({
   useCookieConsent: () => [consent.status, consent.set],
 }));
-vi.mock('#lib/cookie-consent.lib.js', () => ({
+vi.mock('#lib/global-privacy-control.lib.js', () => ({
   isGlobalPrivacyControlEnabled: () => privacy.globalPrivacyControl,
 }));
 

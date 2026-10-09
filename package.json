@@ -244,6 +244,7 @@
     "@taucad/geospec-engine-native": "workspace:*",
     "@taucad/nx": "workspace:*",
     "@taucad/oxlint": "workspace:*",
+    "@taucad/project-core": "workspace:*",
     "@taucad/react": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",

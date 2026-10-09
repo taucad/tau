@@ -718,6 +718,158 @@ describe('MonacoModelService', () => {
       expect(contentService.saveEditor).toHaveBeenCalledTimes(2);
     });
 
+    it('should preserve unsaved text and its base after a failed save receives a fresh authoritative outcome', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('original base'));
+      await service.acquireModel('main.ts');
+      const model = models.get('file:///main.ts');
+      model?.setValue('unsaved local text');
+      const failure = new Error('disk full');
+      contentService.saveEditor.mockRejectedValueOnce(failure);
+      await expect(service.saveEditor('main.ts', new TextEncoder().encode('unsaved local text'))).rejects.toBe(failure);
+
+      contentService._outcomeHandler?.({ path: 'main.ts', result: textResult('external durable text') });
+      expect.soft(model?.getValue()).toBe('unsaved local text');
+      expect.soft(model?.pushEditOperations).not.toHaveBeenCalled();
+      expect(contentService.saveEditor).toHaveBeenCalledOnce();
+
+      model?.setValue('explicit retry text');
+      contentService.saveEditor.mockResolvedValueOnce(undefined);
+      contentService.peekOutcome.mockReturnValue(textResult('explicit retry text'));
+      await service.saveEditor('main.ts', new TextEncoder().encode('explicit retry text'));
+      expect(contentService.saveEditor).toHaveBeenLastCalledWith(
+        'main.ts',
+        new TextEncoder().encode('explicit retry text'),
+        new TextEncoder().encode('original base'),
+      );
+    });
+
+    it('should preserve a pending editor save against non-editor written ingress', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('original base'));
+      await service.acquireModel('main.ts');
+      const model = models.get('file:///main.ts');
+      model?.setValue('submitted local text');
+      const pending = Promise.withResolvers<void>();
+      contentService.saveEditor.mockReturnValueOnce(pending.promise);
+      const completion = service.saveEditor('main.ts', new TextEncoder().encode('submitted local text'));
+      const failure = new Error('write unavailable');
+      const rejected = expect(completion).rejects.toBe(failure);
+      model?.setValue('newer local text');
+      contentService._handler?.({
+        type: 'written',
+        path: 'main.ts',
+        data: new TextEncoder().encode('external durable text'),
+        source: 'machine',
+      });
+      expect.soft(model?.getValue()).toBe('newer local text');
+      expect.soft(model?.pushEditOperations).not.toHaveBeenCalled();
+      pending.reject(failure);
+      await rejected;
+      expect.soft(model?.getValue()).toBe('newer local text');
+      expect(contentService.saveEditor).toHaveBeenCalledOnce();
+
+      contentService.saveEditor.mockResolvedValueOnce(undefined);
+      contentService.peekOutcome.mockReturnValue(textResult('newer local text'));
+      await service.saveEditor('main.ts', new TextEncoder().encode('newer local text'));
+      expect(contentService.saveEditor).toHaveBeenLastCalledWith(
+        'main.ts',
+        new TextEncoder().encode('newer local text'),
+        new TextEncoder().encode('original base'),
+      );
+    });
+
+    it('should preserve a newer unsaved edit when a held file refresh completes after a failed save', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('original base'));
+      await service.acquireModel('main.ts');
+      const model = models.get('file:///main.ts');
+      const refresh = Promise.withResolvers<FileContentResult>();
+      contentService.resolve.mockReturnValueOnce(refresh.promise);
+      const refreshing = service.refreshContent(monaco.Uri.file('/main.ts'));
+      model?.setValue('unsaved during refresh');
+      const failure = new Error('disk full');
+      contentService.saveEditor.mockRejectedValueOnce(failure);
+      await expect(service.saveEditor('main.ts', new TextEncoder().encode('unsaved during refresh'))).rejects.toBe(
+        failure,
+      );
+      model?.setValue('newer unsaved during refresh');
+      refresh.resolve(textResult('external durable text'));
+      await refreshing;
+      expect.soft(model?.getValue()).toBe('newer unsaved during refresh');
+      expect.soft(model?.pushEditOperations).not.toHaveBeenCalled();
+      expect(contentService.saveEditor).toHaveBeenCalledOnce();
+
+      contentService.saveEditor.mockResolvedValueOnce(undefined);
+      contentService.peekOutcome.mockReturnValue(textResult('newer unsaved during refresh'));
+      await service.saveEditor('main.ts', new TextEncoder().encode('newer unsaved during refresh'));
+      expect(contentService.saveEditor).toHaveBeenLastCalledWith(
+        'main.ts',
+        new TextEncoder().encode('newer unsaved during refresh'),
+        new TextEncoder().encode('original base'),
+      );
+    });
+
+    it('should carry a failed edit through rename and accept external content after explicit recovery', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('original base'));
+      await service.acquireModel('main.ts');
+      models.get('file:///main.ts')?.setValue('unsaved local text');
+      const failure = new Error('disk full');
+      contentService.saveEditor.mockRejectedValueOnce(failure);
+      await expect(service.saveEditor('main.ts', new TextEncoder().encode('unsaved local text'))).rejects.toBe(failure);
+      service.applyContentChange({ type: 'renamed', oldPath: 'main.ts', newPath: 'renamed.ts' });
+      const renamed = models.get('file:///renamed.ts');
+      service.applyOutcomeChange({ path: 'renamed.ts', result: textResult('external before retry') });
+      expect(renamed?.getValue()).toBe('unsaved local text');
+      expect(contentService.saveEditor).toHaveBeenCalledOnce();
+
+      contentService.saveEditor.mockResolvedValueOnce(undefined);
+      contentService.peekOutcome.mockReturnValue(textResult('unsaved local text'));
+      await service.saveEditor('renamed.ts', new TextEncoder().encode('unsaved local text'));
+      expect(contentService.saveEditor).toHaveBeenLastCalledWith(
+        'renamed.ts',
+        new TextEncoder().encode('unsaved local text'),
+        new TextEncoder().encode('original base'),
+      );
+      service.applyOutcomeChange({ path: 'renamed.ts', result: textResult('external after retry') });
+      expect(renamed?.getValue()).toBe('external after retry');
+    });
+
+    it('should not let an obsolete save failure block newer success and current external adoption', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('original base'));
+      await service.acquireModel('main.ts');
+      const model = models.get('file:///main.ts');
+      const oldSave = Promise.withResolvers<void>();
+      contentService.saveEditor.mockReturnValueOnce(oldSave.promise).mockResolvedValueOnce(undefined);
+      model?.setValue('old edit');
+      const completion = service.saveEditor('main.ts', new TextEncoder().encode('old edit'));
+      const failure = new Error('obsolete write failed');
+      const rejected = expect(completion).rejects.toBe(failure);
+      model?.setValue('new edit');
+      contentService.peekOutcome.mockReturnValue(textResult('new edit'));
+      await service.saveEditor('main.ts', new TextEncoder().encode('new edit'));
+      oldSave.reject(failure);
+      await rejected;
+      expect(model?.getValue()).toBe('new edit');
+      service.applyOutcomeChange({ path: 'main.ts', result: textResult('current external text') });
+      expect(model?.getValue()).toBe('current external text');
+      expect(contentService.saveEditor).toHaveBeenCalledTimes(2);
+    });
+
+    it('should ignore a held file refresh after the project session changes', async () => {
+      contentService.resolve.mockResolvedValueOnce(textResult('original session'));
+      await service.acquireModel('main.ts');
+      const oldModel = models.get('file:///main.ts');
+      const refresh = Promise.withResolvers<FileContentResult>();
+      contentService.resolve.mockReturnValueOnce(refresh.promise);
+      const refreshing = service.refreshContent(monaco.Uri.file('/main.ts'));
+      service.setProjectSession();
+      const replacement = monaco.editor.createModel('replacement session', 'typescript', monaco.Uri.file('/main.ts'));
+      refresh.resolve(textResult('late original content'));
+      await refreshing;
+      expect(oldModel?.dispose).toHaveBeenCalledOnce();
+      expect(oldModel?.pushEditOperations).not.toHaveBeenCalled();
+      expect(oldModel?.getValue()).toBe('original session');
+      expect(replacement.getValue()).toBe('replacement session');
+    });
+
     it('should dispose an open model when an authoritative outcome becomes non-text', async () => {
       contentService.resolve.mockResolvedValueOnce(textResult('before'));
       await service.acquireModel('main.ts');

@@ -463,38 +463,42 @@ describe('fromNodeFS watch', { timeout: 3 * watchDeliveryBudget.timeout }, () =>
     const stopped = Promise.withResolvers<void>();
     const nativeStop = vi.fn(async () => stopped.promise);
     const nativeSubscribe = vi.spyOn(parcelWatcher, 'subscribe').mockReturnValue(admission.promise);
-    /** Whether `promise` has settled once the event loop has turned past every queued microtask. */
+    /** Whether `promise` settles before the event loop turns; its rejection propagates. */
     const settled = async (promise: Promise<void>): Promise<boolean> => {
-      const pending = Symbol('pending');
-      await new Promise<void>((resolve) => {
-        setImmediate(resolve);
+      const settles = async (): Promise<boolean> => {
+        await promise;
+        return true;
+      };
+      const turns = new Promise<boolean>((resolve) => {
+        setImmediate(() => {
+          resolve(false);
+        });
       });
-      return (await Promise.race([promise, Promise.resolve(pending)])) !== pending;
+      return Promise.race([settles(), turns]);
     };
+    const fileSystem = unwrap(root) as InlineRuntimeFileSystemBase & WorkerFileSystemProxy;
+    if (!fileSystem.disposeAsync || !fileSystem.watchReady) {
+      throw new Error('The Node filesystem adapter must expose disposeAsync() and watchReady().');
+    }
     try {
-      const fileSystem = unwrap(root);
-      const { disposeAsync, watchReady } = fileSystem as InlineRuntimeFileSystemBase & WorkerFileSystemProxy;
-      if (!disposeAsync || !watchReady) {
-        throw new Error('The Node filesystem adapter must expose disposeAsync() and watchReady().');
-      }
       const events: RuntimeWatchEvent[] = [];
-      const registration = watchReady({ paths: ['main.ts'], recursive: false }, (event) => events.push(event));
+      const registration = fileSystem.watchReady({ paths: ['main.ts'], recursive: false }, (event) =>
+        events.push(event),
+      );
       await vi.waitFor(() => {
         expect(nativeSubscribe).toHaveBeenCalledOnce();
       });
 
       // The worker that owns this adapter may exit as soon as disposal settles, so
-      // disposal must outlast the native subscribe that is still in flight.
-      const disposal = disposeAsync.call(fileSystem);
+      // disposal must outlast the native subscribe that is still in flight...
+      const disposal = fileSystem.disposeAsync();
       await expect(settled(disposal)).resolves.toBe(false);
       expect(nativeStop).not.toHaveBeenCalled();
 
+      // ...and the native stop that the late admission triggers before it is refused.
       admission.resolve({ unsubscribe: nativeStop });
       await expect(registration.ready).rejects.toThrow('cancelled during admission');
-      await vi.waitFor(() => {
-        expect(nativeStop).toHaveBeenCalledOnce();
-      });
-      // ... and the native stop that admission triggered.
+      expect(nativeStop).toHaveBeenCalledOnce();
       await expect(settled(disposal)).resolves.toBe(false);
 
       stopped.resolve();
@@ -503,6 +507,7 @@ describe('fromNodeFS watch', { timeout: 3 * watchDeliveryBudget.timeout }, () =>
     } finally {
       admission.resolve({ unsubscribe: nativeStop });
       stopped.resolve();
+      await fileSystem.disposeAsync();
       nativeSubscribe.mockRestore();
     }
   });

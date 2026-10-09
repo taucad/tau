@@ -242,10 +242,20 @@ export const launchDesktopApp = async (options: {
   const output: string[] = [];
   const startupStarted = performance.now();
   const startupPhases: Array<{ phase: string; elapsedMilliseconds: number }> = [];
-  const recordStartupPhase = (phase: string): void => {
+  const recordStartupPhase = (phase: string, url?: string): void => {
     const receipt = { phase, elapsedMilliseconds: Math.round(performance.now() - startupStarted) };
     startupPhases.push(receipt);
-    console.info('DESKTOP STARTUP', JSON.stringify({ ...receipt, userData }));
+    const location = url === undefined ? undefined : new URL(url);
+    console.info(
+      'DESKTOP STARTUP',
+      JSON.stringify({
+        ...receipt,
+        userData,
+        ...(location === undefined
+          ? {}
+          : { protocol: location.protocol, host: location.host, pathname: location.pathname }),
+      }),
+    );
   };
   const preserveStartupFailure = async (error: unknown): Promise<void> => {
     const directory = join(diagnosticsRoot, `launch-${basename(userData)}`);
@@ -365,10 +375,10 @@ export const launchDesktopApp = async (options: {
      * Configure the main-process test overrides only after that startup boundary. */
     recordStartupPhase('firstWindow.before');
     page = await application.firstWindow();
-    recordStartupPhase('firstWindow.after');
+    recordStartupPhase('firstWindow.after', page.url());
     recordStartupPhase('domcontentloaded.before');
     await page.waitForLoadState('domcontentloaded');
-    recordStartupPhase('domcontentloaded.after');
+    recordStartupPhase('domcontentloaded.after', page.url());
     if (options.windowTitle !== undefined) {
       const ownedWindow = await application.browserWindow(page);
       await ownedWindow.evaluate((window: BrowserWindow, title) => {
@@ -420,7 +430,7 @@ export const launchDesktopApp = async (options: {
     console.info('DESKTOP TRACE OPTIONS', JSON.stringify({ screenshots: true, snapshots, manual }));
     recordStartupPhase('tracing.before');
     await page.context().tracing.start({ screenshots: true, snapshots });
-    recordStartupPhase('tracing.after');
+    recordStartupPhase('tracing.after', page.url());
   } catch (error) {
     child.kill('SIGKILL');
     await preserveStartupFailure(error).catch(() => undefined);
@@ -449,6 +459,26 @@ export const launchDesktopApp = async (options: {
     captured = true;
     const directory = join(diagnosticsRoot, label);
     await mkdir(directory, { recursive: true });
+    const location = new URL(page.url());
+    const url = { protocol: location.protocol, host: location.host, pathname: location.pathname };
+    const desktopLog = await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '(no desktop.log)');
+    // Persist available evidence before any renderer or trace operation can stall.
+    await writeFile(
+      join(directory, 'diagnostics.log'),
+      [
+        `url: ${JSON.stringify(url)}`,
+        `userData: ${userData}`,
+        `pickedDirectory: ${pickedDirectory}`,
+        '--- console errors ---',
+        consoleErrors.join('\n'),
+        '--- process output ---',
+        output.join(''),
+        '--- desktop.log ---',
+        desktopLog,
+        '--- renderer/trace collection pending ---',
+      ].join('\n'),
+      'utf8',
+    );
     if (tracing) {
       tracing = false;
       /* A quit-path failure can close the renderer before diagnostics run;
@@ -461,7 +491,6 @@ export const launchDesktopApp = async (options: {
     await page
       .screenshot({ path: join(directory, 'screenshot.png'), fullPage: true, timeout: 10_000 })
       .catch(() => undefined);
-    const desktopLog = await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '(no desktop.log)');
     const bodyText = await page
       // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- `innerText` keeps the rendered line breaks that make this readable.
       .evaluate(() => document.body.innerText.slice(0, 2000))
@@ -472,7 +501,7 @@ export const launchDesktopApp = async (options: {
     await writeFile(
       join(directory, 'diagnostics.log'),
       [
-        `url: ${page.url()}`,
+        `url: ${JSON.stringify(url)}`,
         `body: ${bodyText}`,
         `userData: ${userData}`,
         `pickedDirectory: ${pickedDirectory}`,

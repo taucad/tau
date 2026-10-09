@@ -10,6 +10,33 @@ test('projects independent native manifest and chat metadata while the workspace
   const session = await launchDesktopApp({ token: 'offline-metadata' });
   try {
     const { page } = session;
+    let navigationReceipts = 0;
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame() && navigationReceipts < 12) {
+        navigationReceipts += 1;
+        const url = new URL(frame.url());
+        console.info(
+          'NATIVE METADATA NAVIGATION',
+          JSON.stringify({ event: 'navigated', protocol: url.protocol, host: url.host, pathname: url.pathname }),
+        );
+      }
+    });
+    page.on('requestfailed', (request) => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame() && navigationReceipts < 12) {
+        navigationReceipts += 1;
+        const url = new URL(request.url());
+        console.info(
+          'NATIVE METADATA NAVIGATION',
+          JSON.stringify({
+            event: 'failed',
+            protocol: url.protocol,
+            host: url.host,
+            pathname: url.pathname,
+            failure: request.failure()?.errorText,
+          }),
+        );
+      }
+    });
     await page.goto('app://tau/__e2e/project-file-tree?chat=1');
     await page.waitForURL(/\/w\//u, { timeout: 60_000 });
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]').last());
@@ -33,6 +60,20 @@ test('projects independent native manifest and chat metadata while the workspace
     expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({ name });
     expect(JSON.parse(await readFile(chatPath, 'utf8'))).toMatchObject({ name: chatName });
     await session.capture('projection-native-metadata');
+  } catch (error) {
+    console.error(
+      'NATIVE METADATA FAILURE',
+      error instanceof Error ? error.message.slice(0, 1000) : 'Unknown navigation failure',
+    );
+    try {
+      await session.capture('projection-native-metadata-startup-failure');
+    } catch (captureError) {
+      console.error(
+        'NATIVE METADATA CAPTURE FAILURE',
+        captureError instanceof Error ? captureError.name : 'Unknown capture failure',
+      );
+    }
+    throw error;
   } finally {
     await session.close();
   }

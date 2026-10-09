@@ -797,6 +797,57 @@ describe('getProjectRootConfigs', () => {
     expect(queryPermission).toHaveBeenCalledOnce();
   });
 
+  it('rechecks permission without a durable config mutation on the next root snapshot', async () => {
+    let permission: PermissionState = 'granted';
+    const queryPermission = vi.fn(async (): Promise<PermissionState> => permission);
+    const { createWorkspace, getProjectRootConfigs, setProjectFileSystemConfig } = await loadStore();
+    const workspace = await createWorkspace(makeHandle('Permission changes', { queryPermission }));
+    const projectId = 'proj_000000000000000000010';
+    await setProjectFileSystemConfig({
+      projectId,
+      backend: 'webaccess',
+      workspaceId: workspace.workspaceId,
+      providerBasePath: 'project',
+    });
+    const granted = await getProjectRootConfigs();
+    expect(granted.projects.some((project) => project.projectId === projectId)).toBe(true);
+    queryPermission.mockClear();
+    permission = 'denied';
+    const denied = await getProjectRootConfigs();
+    expect(denied.projects.some((project) => project.projectId === projectId)).toBe(false);
+    expect(queryPermission).toHaveBeenCalledOnce();
+    permission = 'granted';
+    const regranted = await getProjectRootConfigs();
+    expect(regranted.projects.some((project) => project.projectId === projectId)).toBe(true);
+  });
+
+  it('reads the newly committed replacement handle in the next root snapshot', async () => {
+    const {
+      createWorkspace,
+      getProjectRootConfigs,
+      disconnectWorkspace,
+      updateWorkspaceHandle,
+      setProjectFileSystemConfig,
+    } = await loadStore();
+    const original = makeHandle('Original snapshot');
+    const replacement = makeHandle('Replacement snapshot');
+    const workspace = await createWorkspace(original);
+    await setProjectFileSystemConfig({
+      projectId: 'proj_000000000000000000011',
+      backend: 'webaccess',
+      workspaceId: workspace.workspaceId,
+      providerBasePath: 'project',
+    });
+    const before = await getProjectRootConfigs();
+    await disconnectWorkspace(workspace.workspaceId);
+    await updateWorkspaceHandle(workspace.workspaceId, replacement);
+    const after = await getProjectRootConfigs();
+    const beforeRoot = before.roots.find((root) => root.backend === 'webaccess');
+    const afterRoot = after.roots.find((root) => root.backend === 'webaccess');
+    expect(beforeRoot).toMatchObject({ workspaceId: workspace.workspaceId, directoryHandle: original });
+    expect(afterRoot).toMatchObject({ workspaceId: workspace.workspaceId, directoryHandle: replacement });
+  });
+
   // R13 — a workspace dropped from the topology used to vanish in silence.
   it('classifies disconnected roots without an alarming console warning', async () => {
     stubLocks();

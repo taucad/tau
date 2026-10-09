@@ -2,9 +2,11 @@ import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import type { WatchRequest, WatchEvent, ProjectRootConfiguration } from '@taucad/filesystem';
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
+import type * as HandleStore from '#filesystem/handle-store.js';
 import type { ReactNode } from 'react';
 import { StrictMode, useEffect } from 'react';
-import { renderHook, render, screen, act } from '@testing-library/react';
+import { renderHook, render, screen, act, waitFor, configure, getConfig } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import { fileManagerMachine } from '#machines/file-manager.machine.js';
@@ -1019,6 +1021,324 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(handleStoreTestState.restoreWorkspaceHandle).toHaveBeenCalledExactlyOnceWith('wsp_x', handle);
     expect(mockInvalidateStandaloneProvider).toHaveBeenCalledExactlyOnceWith('webaccess:wsp_x');
     expect(mockConfigureProjectRoots).toHaveBeenCalledWith(await mockGetProjectRootConfigs());
+  });
+
+  it('keeps root sync usable from a passive effect after StrictMode layout replay', async () => {
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    const priorStrictMode = getConfig().reactStrictMode;
+    configure({ reactStrictMode: true });
+    const started = vi.fn();
+    const completed = vi.fn();
+    const failed = vi.fn();
+    const effects: Array<Promise<void>> = [];
+    const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <FileManagerProvider initialBackend='indexeddb' rootDirectory='/projects/root'>
+        {children}
+      </FileManagerProvider>
+    );
+    const { result, unmount } = renderHook(
+      () => {
+        const manager = useFileManager();
+        const { workspace } = manager;
+        useEffect(() => {
+          const controller = new AbortController();
+          started();
+          effects.push(
+            (async () => {
+              try {
+                await workspace.syncProjectRoots();
+                if (!controller.signal.aborted) {
+                  completed();
+                }
+              } catch (error) {
+                if (!controller.signal.aborted) {
+                  failed(error);
+                }
+              }
+            })(),
+          );
+          return () => {
+            controller.abort();
+          };
+        }, [workspace]);
+        return manager;
+      },
+      { wrapper },
+    );
+    try {
+      await waitFor(() => {
+        expect(completed).toHaveBeenCalledOnce();
+      });
+      expect(started).toHaveBeenCalledTimes(2);
+      expect(failed).not.toHaveBeenCalled();
+      const configured = mockConfigureProjectRoots.mock.calls.length;
+      await act(async () => {
+        await result.current.workspace.syncProjectRoots();
+      });
+      expect(mockConfigureProjectRoots).toHaveBeenCalledTimes(configured + 1);
+    } finally {
+      unmount();
+      await Promise.allSettled(effects);
+      configure({ reactStrictMode: priorStrictMode });
+    }
+  });
+
+  it('bounds overlapping root sync to a fresh trailing reconcile', async () => {
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    const { result, unmount } = renderProvider();
+    await waitFor(() => {
+      expect(result.current.treeService).toBeDefined();
+    });
+    mockGetProjectRootConfigs.mockClear();
+    mockConfigureProjectRoots.mockClear();
+    const held = Promise.withResolvers<void>();
+    mockConfigureProjectRoots.mockImplementationOnce(async () => held.promise);
+    const first = result.current.workspace.syncProjectRoots();
+    await waitFor(() => {
+      expect(mockConfigureProjectRoots).toHaveBeenCalledOnce();
+    });
+    const settled = vi.fn();
+    const second = (async () => {
+      await result.current.workspace.syncProjectRoots();
+      settled();
+    })();
+    const third = (async () => {
+      await result.current.workspace.syncProjectRoots();
+      settled();
+    })();
+    const fourth = (async () => {
+      await result.current.workspace.syncProjectRoots();
+      settled();
+    })();
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect.soft(settled).not.toHaveBeenCalled();
+      expect.soft(mockConfigureProjectRoots).toHaveBeenCalledOnce();
+      held.resolve();
+      await act(async () => {
+        await Promise.all([first, second, third, fourth]);
+      });
+      expect(mockGetProjectRootConfigs).toHaveBeenCalledTimes(2);
+      expect(mockConfigureProjectRoots).toHaveBeenCalledTimes(2);
+      expect(settled).toHaveBeenCalledTimes(3);
+    } finally {
+      held.resolve();
+      await Promise.allSettled([first, second, third, fourth]);
+      unmount();
+    }
+  });
+
+  it('runs another fresh root sync for calls arriving during the trailing pass', async () => {
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    const { result, unmount } = renderProvider();
+    await waitFor(() => {
+      expect(result.current.treeService).toBeDefined();
+    });
+    mockConfigureProjectRoots.mockClear();
+    const head = Promise.withResolvers<void>();
+    const trailing = Promise.withResolvers<void>();
+    mockConfigureProjectRoots
+      .mockImplementationOnce(async () => head.promise)
+      .mockImplementationOnce(async () => trailing.promise);
+    const first = result.current.workspace.syncProjectRoots();
+    await waitFor(() => {
+      expect(mockConfigureProjectRoots).toHaveBeenCalledOnce();
+    });
+    const second = result.current.workspace.syncProjectRoots();
+    await act(async () => {
+      head.resolve();
+      await first;
+    });
+    await waitFor(() => {
+      expect(mockConfigureProjectRoots).toHaveBeenCalledTimes(2);
+    });
+    const settled = vi.fn();
+    const third = (async () => {
+      await result.current.workspace.syncProjectRoots();
+      settled();
+    })();
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect.soft(settled).not.toHaveBeenCalled();
+      expect.soft(mockConfigureProjectRoots).toHaveBeenCalledTimes(2);
+      trailing.resolve();
+      await act(async () => {
+        await Promise.all([first, second, third]);
+      });
+      expect(mockConfigureProjectRoots).toHaveBeenCalledTimes(3);
+      expect(settled).toHaveBeenCalledOnce();
+    } finally {
+      head.resolve();
+      trailing.resolve();
+      await Promise.allSettled([first, second, third]);
+      unmount();
+    }
+  });
+
+  it('rejects only the failed root sync pass and still reconciles queued callers and retries', async () => {
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    const { result, unmount } = renderProvider();
+    await waitFor(() => {
+      expect(result.current.treeService).toBeDefined();
+    });
+    mockConfigureProjectRoots.mockClear();
+    const held = Promise.withResolvers<void>();
+    mockConfigureProjectRoots.mockImplementationOnce(async () => held.promise);
+    const first = result.current.workspace.syncProjectRoots();
+    const firstResult = (async () => {
+      try {
+        await first;
+        return 'unexpected-success';
+      } catch (error) {
+        return error;
+      }
+    })();
+    await waitFor(() => {
+      expect(mockConfigureProjectRoots).toHaveBeenCalledOnce();
+    });
+    const settled = vi.fn();
+    const second = (async () => {
+      await result.current.workspace.syncProjectRoots();
+      settled();
+    })();
+    try {
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect.soft(settled).not.toHaveBeenCalled();
+      const failure = new Error('first root configuration refused');
+      await act(async () => {
+        held.reject(failure);
+        await firstResult;
+      });
+      expect(await firstResult).toBe(failure);
+      await act(async () => {
+        await second;
+      });
+      await act(async () => {
+        await result.current.workspace.syncProjectRoots();
+      });
+      expect(mockConfigureProjectRoots).toHaveBeenCalledTimes(3);
+      expect(settled).toHaveBeenCalledOnce();
+    } finally {
+      held.resolve();
+      await Promise.allSettled([first, second]);
+      unmount();
+    }
+  });
+
+  it('keeps a recreated workspace root sync independent of a disposed provider pending pass', async () => {
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+    const old = renderProvider();
+    await waitFor(() => {
+      expect(old.result.current.treeService).toBeDefined();
+    });
+    mockConfigureProjectRoots.mockClear();
+    const held = Promise.withResolvers<void>();
+    mockConfigureProjectRoots.mockImplementationOnce(async () => held.promise);
+    const pending = old.result.current.workspace.syncProjectRoots();
+    const pendingResult = (async () => {
+      try {
+        await pending;
+        return 'unexpected-success';
+      } catch (error) {
+        return error;
+      }
+    })();
+    await waitFor(() => {
+      expect(mockConfigureProjectRoots).toHaveBeenCalledOnce();
+    });
+    const oldWorkspace = old.result.current.workspace;
+    const queued = [oldWorkspace.syncProjectRoots(), oldWorkspace.syncProjectRoots()];
+    const queuedResults = Promise.allSettled(queued);
+    old.unmount();
+    const current = renderProvider();
+    try {
+      await waitFor(() => {
+        expect(current.result.current.treeService).toBeDefined();
+      });
+      const polling = vi.spyOn(current.result.current.treeService!, 'stopPolling');
+      await act(async () => {
+        await current.result.current.workspace.syncProjectRoots();
+      });
+      const configured = mockConfigureProjectRoots.mock.calls.length;
+      const sourceReads = mockGetProjectRootConfigs.mock.calls.length;
+      const pollingCalls = polling.mock.calls.length;
+      await act(async () => {
+        held.resolve();
+        await pendingResult;
+      });
+      expect(await queuedResults).toEqual([
+        expect.objectContaining({ status: 'rejected' }),
+        expect.objectContaining({ status: 'rejected' }),
+      ]);
+      await expect(oldWorkspace.syncProjectRoots()).rejects.toThrow('disposed');
+      expect(mockGetProjectRootConfigs).toHaveBeenCalledTimes(sourceReads);
+      expect(mockConfigureProjectRoots).toHaveBeenCalledTimes(configured);
+      expect(polling).toHaveBeenCalledTimes(pollingCalls);
+      await act(async () => {
+        await current.result.current.workspace.syncProjectRoots();
+      });
+      expect(mockConfigureProjectRoots).toHaveBeenCalledTimes(configured + 1);
+    } finally {
+      held.resolve();
+      await Promise.all([pendingResult, queuedResults]);
+      current.unmount();
+    }
+  });
+
+  it('freshly reconciles an invocation after a completed durable config mutation while its predecessor is held', async () => {
+    const priorIndexedDb = globalThis.indexedDB;
+    const priorStorage = Object.getOwnPropertyDescriptor(navigator, 'storage');
+    globalThis.indexedDB = new IDBFactory();
+    Object.defineProperty(navigator, 'storage', { configurable: true, value: {} });
+    const store = await vi.importActual<typeof HandleStore>('#filesystem/handle-store.js');
+    const projectId = 'proj_000000000000000000009';
+    await store.setProjectFileSystemConfig({ projectId, backend: 'indexeddb', providerBasePath: 'before' });
+    mockGetProjectRootConfigs.mockImplementation(store.getProjectRootConfigs);
+    const { result, unmount } = renderProvider();
+    const held = Promise.withResolvers<void>();
+    let first: Promise<void> | undefined;
+    let second: Promise<void> | undefined;
+    try {
+      await waitFor(() => {
+        expect(result.current.treeService).toBeDefined();
+      });
+      mockConfigureProjectRoots.mockClear();
+      mockConfigureProjectRoots.mockImplementationOnce(async () => held.promise);
+      first = result.current.workspace.syncProjectRoots();
+      await waitFor(() => {
+        expect(mockConfigureProjectRoots).toHaveBeenCalledOnce();
+      });
+      expect(mockConfigureProjectRoots.mock.calls[0]?.[0].projects).toEqual(
+        expect.arrayContaining([expect.objectContaining({ projectId, providerBasePath: 'before' })]),
+      );
+      await store.setProjectFileSystemConfig({ projectId, backend: 'indexeddb', providerBasePath: 'after' });
+      await expect(store.getProjectFileSystemConfig(projectId)).resolves.toMatchObject({ providerBasePath: 'after' });
+      second = result.current.workspace.syncProjectRoots();
+      held.resolve();
+      await act(async () => {
+        await Promise.all([first, second]);
+      });
+      expect(mockConfigureProjectRoots.mock.calls.at(-1)?.[0].projects).toEqual(
+        expect.arrayContaining([expect.objectContaining({ projectId, providerBasePath: 'after' })]),
+      );
+    } finally {
+      held.resolve();
+      await Promise.allSettled([first, second]);
+      unmount();
+      mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+      globalThis.indexedDB = priorIndexedDb;
+      if (priorStorage === undefined) {
+        Reflect.deleteProperty(navigator, 'storage');
+      } else {
+        Object.defineProperty(navigator, 'storage', priorStorage);
+      }
+    }
   });
 
   it('starts external polling when a webaccess root is connected after provider boot', async () => {

@@ -206,7 +206,7 @@ describe('MachineDetails', () => {
     renderDetails(x1cProvider, '01.08.02.00');
 
     const binding = openPart('Binding settings');
-    expect(binding).toHaveTextContent('Declared by bambu.machine.binding 2.0.0');
+    expect(binding).toHaveTextContent('Declared by bambu.machine.binding 2.1.0');
     expect(binding).not.toHaveTextContent('Only the simulator reads these');
     const serial = await within(binding).findByRole('textbox', { name: 'Input for Serial' });
     expect(
@@ -228,7 +228,7 @@ describe('MachineDetails', () => {
     const binding = openPart('Binding settings');
     expect(binding).toHaveAccessibleName('Binding settings 1 field · Read-only');
     expect(binding).toHaveTextContent('Only the simulator reads these; they are not machine settings.');
-    expect(binding).toHaveTextContent('Declared by bambu.simulator.binding 1.1.0');
+    expect(binding).toHaveTextContent('Declared by bambu.simulator.binding 2.1.0');
     /* The declaration titles the field and starts it at real time. */
     const speed = await within(binding).findByRole('spinbutton', { name: 'Input for Demo Speed' });
     expect(within(binding).getByLabelText('Parameter: Demo Speed')).toHaveTextContent('Demo Speed');

@@ -366,6 +366,31 @@ describe('ChatApprovalBanner', () => {
     expect(fixture.resolveJob).not.toHaveBeenCalled();
   });
 
+  it('sends a job that needs only the person at the machine to the Print pane, by the contract rule', async () => {
+    const plain = chatApprovable();
+    const { jobs } = plain.descriptor.capabilities;
+    if (jobs.type !== 'supported') {
+      throw new Error('The fixture machine runs jobs.');
+    }
+    const attended = entry({
+      descriptor: {
+        ...plain.descriptor,
+        capabilities: {
+          ...plain.descriptor.capabilities,
+          jobs: { ...jobs, safety: { ...jobs.safety, attended: true } },
+        },
+      },
+    });
+    const fixture = createFixture({ entries: [attended], jobs: [agentJob()] });
+    machines = { available: true, ...fixture.client };
+    messages = [jobInterrupt()];
+
+    render(<ChatApprovalBanner />);
+
+    expect(await screen.findByRole('button', { name: 'Review in the Print pane' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+  });
+
   const actionInterrupt = () =>
     approvalMessage({
       ...pendingInput,

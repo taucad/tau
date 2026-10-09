@@ -22,7 +22,7 @@ import {
 /* Binding schemas carry provider fields only; the machine's name travels in `beginBinding` (U3-18). */
 const bindingConfiguration = defineConfiguration({
   id: 'bambu.machine.binding',
-  version: '2.0.0',
+  version: '2.1.0',
   schema: z.object({
     serial: z.string().min(1).max(64).optional(),
   }),
@@ -31,7 +31,7 @@ const bindingConfiguration = defineConfiguration({
 
 const simulatorBindingConfiguration = defineConfiguration({
   id: 'bambu.simulator.binding',
-  version: '1.1.0',
+  version: '2.1.0',
   schema: z.object({
     speed: z.number().min(1).max(3600).default(1).meta({
       title: 'Demo speed',
@@ -86,7 +86,7 @@ export const simulatorProvider: MachineProvider = parseMachineProvider({
 
 const grblBindingConfiguration = defineConfiguration({
   id: 'grbl.machine.binding',
-  version: '2.0.0',
+  version: '2.1.0',
   schema: z.object({
     baudRate: z.number().int().positive().default(115_200).meta({ title: 'Baud rate' }),
   }),

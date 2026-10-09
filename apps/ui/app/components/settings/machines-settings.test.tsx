@@ -599,7 +599,9 @@ describe('MachinesSettings', () => {
 
   it('should say another Tau app holds the printers when the machine store is owned elsewhere', async () => {
     const client = facetWith([]);
-    client.list.mockRejectedValue(new Error('MACHINE_STORE_OWNED_ELSEWHERE'));
+    client.list.mockRejectedValue(
+      Object.assign(new Error('MACHINE_STORE_OWNED_ELSEWHERE'), { code: 'MACHINE_STORE_OWNED_ELSEWHERE' }),
+    );
     state.facet = createMachinesFacet({
       dial: async () => new MessageChannel().port1,
       connect: async () => Object.assign(client, { ready: Promise.resolve(), close: () => undefined }),
@@ -714,11 +716,10 @@ describe('MachinesSettings', () => {
       expect(accessCode).toHaveValue('');
     });
 
-    it("should explain a changed certificate from the shell's refusal and ask for the code again", async () => {
+    it("should explain a changed certificate from the host's typed refusal and ask for the code again", async () => {
+      // As the desktop bridge rejects a failed ceremony: the host's message, with its code on the error.
       state.completeBinding.mockRejectedValueOnce(
-        new Error(
-          "Error invoking remote method 'tau:machines:complete-binding': Error: MACHINE_CREDENTIAL_TRUST_CHANGED",
-        ),
+        Object.assign(new Error('The certificate changed.'), { code: 'MACHINE_CREDENTIAL_TRUST_CHANGED' }),
       );
       await findSaved();
 
@@ -771,7 +772,9 @@ describe('MachinesSettings', () => {
 
     it('should keep a printer with open jobs and say what to resolve first', async () => {
       const { facet, remove } = await renderWith([workshopEntry]);
-      facet.removeBinding.mockRejectedValue(new Error('MACHINE_BINDING_BUSY'));
+      facet.removeBinding.mockRejectedValue(
+        Object.assign(new Error('MACHINE_BINDING_BUSY'), { code: 'MACHINE_BINDING_BUSY' }),
+      );
       facet.list.mockResolvedValue(snapshotOf([workshopEntry]));
       fireEvent.click(remove);
       const confirmation = screen.getByRole('alertdialog', { name: 'Remove Workshop X1C?' });
@@ -809,7 +812,9 @@ describe('MachinesSettings', () => {
 
     it('should quietly re-read the list when the printer is already gone', async () => {
       const { facet, remove } = await renderWith([workshopEntry]);
-      facet.removeBinding.mockRejectedValue(new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE'));
+      facet.removeBinding.mockRejectedValue(
+        Object.assign(new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE'), { code: 'MACHINE_DIRECTORY_UNKNOWN_MACHINE' }),
+      );
       fireEvent.click(remove);
 
       fireEvent.click(

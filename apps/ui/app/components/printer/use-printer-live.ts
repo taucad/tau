@@ -86,12 +86,19 @@ const positionOf = (run: MachineRun | undefined): LiveRunPosition => {
 };
 
 /**
- * The heater under the bed. The contract names no bed heater, so a 3D printer's only heater is its bed; with several,
- * which one heats the bed is unknown, and the scene shows no bed target rather than another heater's.
+ * The heater under the bed: the one the FFF process names (`bed.heater`). A process that names none falls back to a 3D
+ * printer's only heater; with several and none named, the scene shows no bed target rather than another heater's.
  */
 const bedHeaterOf = (entry: MachineDirectoryEntry): MachineComponent | undefined => {
+  const process = fffProcessOf(entry.descriptor.capabilities);
+  if (process === undefined) {
+    return undefined;
+  }
   const heaters = entry.descriptor.capabilities.components.filter((component) => component.kind === 'heater');
-  return fffProcessOf(entry.descriptor.capabilities) !== undefined && heaters.length === 1 ? heaters[0] : undefined;
+  if (process.bed.heater !== undefined) {
+    return heaters.find((component) => component.id === process.bed.heater);
+  }
+  return heaters.length === 1 ? heaters[0] : undefined;
 };
 
 /** The light and heater targets of a machine observed now. */

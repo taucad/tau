@@ -125,19 +125,16 @@ const asksForCode: ReadonlySet<string | undefined> = new Set([
   'MACHINE_CREDENTIAL_TRUST_CHANGED',
 ]);
 
-/** The desktop shell's invoke prefixes what the utility threw; the person reads only the latter. */
+/** The desktop shell's invoke prefixes what main threw (an invalid ceremony request); the person reads only the latter. */
 const shellPrefix = /^Error invoking remote method '[^']*': (?:\w*Error: )?/u;
 
 const errorMessage = (error: unknown): string =>
   (error instanceof Error ? error.message : String(error)).replace(shellPrefix, '');
 
+/* Read typed only: the machine channel and the desktop ceremony both carry `code`, so a message is never searched. */
 const refusalCode = (error: unknown): string | undefined => {
-  const typed = failureCodeOf(error);
-  if (typed !== undefined && refusals.has(typed)) {
-    return typed;
-  }
-  const message = errorMessage(error);
-  return [...refusals.keys()].find((code) => message.includes(code));
+  const code = failureCodeOf(error);
+  return code !== undefined && refusals.has(code) ? code : undefined;
 };
 
 /**
@@ -190,7 +187,7 @@ const bind = async (client: MachineClient, input: BindInput): Promise<MachineBin
     throw new Error('No machine answered there. Check it is switched on and reachable from this computer.');
   }
   if (input.accessCode === '' && candidate.credential !== 'saved') {
-    throw new Error('MACHINE_CREDENTIAL_REQUIRED');
+    throw Object.assign(new Error('MACHINE_CREDENTIAL_REQUIRED'), { code: 'MACHINE_CREDENTIAL_REQUIRED' });
   }
   const outcome = await client.beginBinding({ candidate, name: input.name });
   if (outcome.status === 'bound') {

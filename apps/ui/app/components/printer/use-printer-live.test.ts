@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
+import { fffProcessOf } from '@taucad/runtime/machine';
 import type { MachineClient, MachineDirectoryCursor, MachineJob, MachineRun } from '@taucad/runtime/machine';
 import { createQuantity, quantityKinds, quantityReferences } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
@@ -118,16 +119,21 @@ describe('selectPrinterLive', () => {
     });
   });
 
-  it("shows no bed target where several heaters leave the bed unnamed, never another heater's", () => {
+  /** The printing X1C with a heated chamber listed before the bed; its FFF process names `heater` as the bed's when given. */
+  const withChamber = (heater?: string) => {
     const base = printing();
-    const { components } = base.descriptor.capabilities;
-    const withChamber = {
+    const { components, processes } = base.descriptor.capabilities;
+    const fff = fffProcessOf(base.descriptor.capabilities);
+    return {
       ...base,
       descriptor: {
         ...base.descriptor,
         capabilities: {
           ...base.descriptor.capabilities,
           components: [{ id: 'chamber', kind: 'heater', label: 'Chamber' } as const, ...components],
+          processes: processes.map((process) =>
+            process === fff && heater !== undefined ? { ...fff, bed: { ...fff.bed, heater } } : process,
+          ),
         },
       },
       snapshot: {
@@ -141,8 +147,14 @@ describe('selectPrinterLive', () => {
         ],
       },
     };
+  };
 
-    expect(selectPrinterLive([withChamber])?.bedTarget).toBeUndefined();
+  it("shows no bed target where several heaters leave the bed unnamed, never another heater's", () => {
+    expect(selectPrinterLive([withChamber()])?.bedTarget).toBeUndefined();
+  });
+
+  it('reads the bed target from the heater the FFF process names, past a chamber heater listed first', () => {
+    expect(selectPrinterLive([withChamber('bed')])?.bedTarget).toBe(55);
   });
 
   it('reads the layer counter by its id, never by an English label', () => {

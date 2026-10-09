@@ -14,6 +14,7 @@ import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
 import { answerDeny, pendingMachineActionOf, recordMachineAction } from '#components/print/machine-action-approval.js';
 import { useMachinesFacet } from '#hooks/use-machines.js';
 import { operator } from '#hooks/use-machine-control.js';
+import { personOnlyJobApproval } from '@taucad/runtime/machine';
 import type { MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
@@ -172,16 +173,14 @@ const continuationNote = (execution: CadAgentExecution | undefined, name: string
 const unreachable = 'This computer cannot reach its machines, so Tau cannot record your answer.';
 
 /**
- * Whether approving a job needs what only the Print pane takes: the person's attestations or their presence. The chat
- * banner cannot collect either, so it sends the person there instead of offering Approve.
+ * Whether approving a job needs what only the Print pane takes (the person's attestations or their presence), by the
+ * contract's one rule. The chat banner cannot collect either, so it sends the person there instead of offering Approve.
  *
  * @param machine - The machine the job is for.
  * @returns True when only the Print pane can approve its jobs.
  */
-const needsPrintPane = (machine: MachineDirectoryEntry): boolean => {
-  const facts = machine.descriptor.capabilities.jobs;
-  return facts.type !== 'supported' || facts.attestations.length > 0 || facts.safety.attended;
-};
+const needsPrintPane = (machine: MachineDirectoryEntry): boolean =>
+  personOnlyJobApproval(machine.descriptor.capabilities) !== undefined;
 
 type AgentJob = Readonly<{ jobId: string; machineId: string }>;
 

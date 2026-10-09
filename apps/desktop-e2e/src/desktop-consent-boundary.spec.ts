@@ -1,6 +1,7 @@
 import { readFile, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { desktopE2EFrontendUrl } from '#support/config.js';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { expectDesktopSurfaceBoundary, expectNoDesktopAnalytics, expectVisible } from '#support/scenario.js';
@@ -54,7 +55,7 @@ test('keeps fresh and returning desktop profiles free of web consent and analyti
         () => (globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string }).__TAU_E2E_EXTERNAL_URL__,
       ),
     )
-    .toBe('https://tau.new/legal/privacy');
+    .toBe(`${new URL(desktopE2EFrontendUrl).origin}/legal/privacy`);
   await page.getByRole('button', { name: 'Help' }).click();
   await page.getByRole('menuitem', { name: 'Documentation' }).click();
   await expect

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   formatCreditAtoms,
@@ -13,6 +15,7 @@ import { baseUrl, failure, ok } from '#support/api.js';
 import type { ApiResponse } from '#support/api.js';
 import {
   checkoutSession,
+  evidenceStamp,
   openBrowser,
   payInCheckout,
   screenshot,
@@ -27,9 +30,11 @@ import {
   callGateway,
   describeCall,
   describeOperation,
+  finalUsage,
   gatewayRoutes,
   insufficientCreditDetailsSchema,
   lookupAttempt,
+  streamRefusal,
   waitForTerminal,
 } from '#support/gateway.js';
 import type { GatewayCall } from '#support/gateway.js';
@@ -58,7 +63,7 @@ import {
   uiRecheckSeconds,
   waitForSettlement,
 } from '#support/payments.js';
-import { matrixRow, runId } from '#support/results.js';
+import { matrixRow, runDirectory, runId } from '#support/results.js';
 import type { Verdict } from '#support/results.js';
 
 const billingReturnPath = '/?settings=billing';
@@ -148,9 +153,14 @@ const returnAnnouncement = async (page: Page, reads: readonly PaymentRead[]): Pr
   return toasts(page);
 };
 
+/** Whether billing was still waiting to hear how the payment ended, which the return page shows as processing. */
+const isAwaitingOutcome = (read: PaymentRead | undefined): boolean =>
+  read?.attention?.reason === 'provider_outcome_unknown' && read.attention.action === 'wait';
+
 /** A paid Checkout the return page reports as needing attention: what a customer reads after paying. */
 const attentionAfterPayment = (announced: readonly string[], reads: readonly PaymentRead[]): boolean =>
-  reads[0]?.state === 'attention_required' || announced.some((text) => text.startsWith('Your payment needs attention'));
+  (reads[0]?.state === 'attention_required' && !isAwaitingOutcome(reads[0])) ||
+  announced.some((text) => text.startsWith('Your payment needs attention'));
 
 describe('top-up in the browser', () => {
   let account: Account;
@@ -520,6 +530,74 @@ describe('funded journey', () => {
       return isUpstreamRefused ? { outcome: 'blocked', defect: 'F-24', evidence } : { outcome: 'pass', evidence };
     }),
     paymentRowTimeout,
+  );
+
+  it(
+    'should charge a funded GPT-6 Luna turn once OpenAI reports its usage [FD-12 P0]',
+    matrixRow('FD-12', 'P0', async (evidence): Promise<Verdict> => {
+      if (paid?.action.state !== 'fulfilled') {
+        return { outcome: 'blocked', defect: 'H-03', evidence: ['TU-01 left no funded account'] };
+      }
+      // The OpenAI pathway prices a cache-write dimension Anthropic's does not; Run 1 saw its hold outlive the row.
+      const call = await callGateway(account.api, 'luna', {
+        prompt: 'Reply with the single word OK.',
+        maximumTokens: 32,
+      });
+      // The whole stream is the evidence of what billing had to price; the usage event alone cannot say what is missing.
+      const streamFile = `${evidenceStamp()}-fd-12-luna-stream.txt`;
+      await writeFile(join(runDirectory, streamFile), call.stream ?? '');
+      evidence.push(
+        `GPT-6 Luna: ${describeCall(call)}`,
+        `final usage event: ${finalUsage(call.stream) ?? 'none in the stream'}`,
+        streamFile,
+      );
+      expect(call.status).toBe(200);
+      expect(call.operationId).toBeDefined();
+      const refusal = streamRefusal(call.stream);
+      /* A stream the gateway ended with its own refusal (Tau's supplier account exhausted, a rate limit) ran nothing,
+       * so billing must release the hold at once, as it does a refusal before the stream (F-30). A stream with an
+       * answer settles when its usage is priced; the invocation deadline is 300 s, and a turn billing cannot price
+       * settles only when that runs out. */
+      const operation = await waitForTerminal(
+        account.api,
+        call.operationId ?? '',
+        refusal === undefined ? 330_000 : 60_000,
+      );
+      const operationFile = `${evidenceStamp()}-fd-12-luna-operation.json`;
+      await writeFile(join(runDirectory, operationFile), JSON.stringify(operation, null, 2));
+      evidence.push(describeOperation(operation), operationFile);
+      if (refusal !== undefined) {
+        evidence.push(
+          `the gateway ended the stream with ${refusal.code}${refusal.providerCode === undefined ? '' : ` (${refusal.providerCode})`}`,
+        );
+        if (operation.state !== 'terminal') {
+          evidence.push('hold still open 60 s after the failed stream');
+          return { outcome: 'fail', defect: 'F-30', evidence };
+        }
+        if (operation.receipt.customerState !== 'released' || BigInt(operation.receipt.chargedCreditAtoms) !== 0n) {
+          evidence.push(
+            `a failed stream settled ${operation.receipt.customerState} at ${operation.receipt.chargedCreditAtoms} atoms instead of released at 0`,
+          );
+          return { outcome: 'fail', defect: 'F-30', evidence };
+        }
+        evidence.push(
+          "Tau's supplier account refuses the route, so a priced OpenAI turn cannot be observed until it is topped up",
+        );
+        return { outcome: 'blocked', defect: 'H-09', evidence };
+      }
+      if (operation.state !== 'terminal') {
+        evidence.push('still pending 330 s after the stream ended');
+        return { outcome: 'fail', defect: 'F-30', evidence };
+      }
+      const charged = BigInt(operation.receipt.chargedCreditAtoms);
+      if (operation.receipt.customerState !== 'settled' || charged <= 0n) {
+        evidence.push(`billing never priced the turn: ${operation.receipt.customerState} at ${charged} atoms`);
+        return { outcome: 'fail', defect: 'F-30', evidence };
+      }
+      return { outcome: 'pass', evidence };
+    }),
+    // Up to 330 s of settlement wait on top of the call itself.
+    400_000,
   );
 
   it(

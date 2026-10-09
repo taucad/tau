@@ -25,10 +25,15 @@ const workerDatabase = drizzle(workerClient, { schema });
 /** Every send the fake email service accepted or refused, by template and recipient. */
 const sends: Array<{ readonly template: string; readonly email: string; readonly billingUrl: string }> = [];
 const refusedRecipients = new Set<string>();
+/** Work a recipient's next send waits for before it answers, standing in for a slow email service. */
+const duringNextSend = new Map<string, () => Promise<void>>();
 const send =
   (template: string) =>
   async (args: { readonly email: string; readonly billingUrl: string }): Promise<void> => {
     sends.push({ template, email: args.email, billingUrl: args.billingUrl });
+    const during = duringNextSend.get(args.email);
+    duringNextSend.delete(args.email);
+    await during?.();
     if (refusedRecipients.has(args.email)) {
       throw new Error('Failed to send email');
     }
@@ -175,5 +180,30 @@ describe('billing recovery notices from the operations worker', { concurrent: fa
     await payments.deliverRecoveryNotices({ environment: 'development', limit: 100 });
 
     expect(sends.filter((sent) => sent.email === owner.email)).toHaveLength(attempts);
+  });
+
+  it('should record a send that outlasted its lease as delivered, so the next pass does not email again', async () => {
+    const owner = await seedOwner();
+    const [id] = await queueNotices(owner.accountId, ['consent_disabled']);
+    if (id === undefined) {
+      throw new Error('Notice fixture missing');
+    }
+    // The email service answers only after the claim's 30-second lease has run out; no other pass claimed it meanwhile.
+    duringNextSend.set(owner.email, async () => {
+      await database
+        .update(billingRecoveryNotice)
+        .set({ leaseUntil: sql`clock_timestamp() - interval '1 second'` })
+        .where(eq(billingRecoveryNotice.id, id));
+    });
+
+    const report = await payments.deliverRecoveryNotices({ environment: 'development', limit: 100 });
+
+    expect(report.processed).toContain(id);
+    const [row] = await noticeRows([id]);
+    expect(row).toMatchObject({ state: 'delivered', attemptCount: 1, leaseUntil: null, errorCode: null });
+
+    await payments.deliverRecoveryNotices({ environment: 'development', limit: 100 });
+
+    expect(sends.filter((sent) => sent.email === owner.email)).toHaveLength(1);
   });
 });

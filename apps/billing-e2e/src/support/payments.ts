@@ -137,10 +137,10 @@ export const describeReads = (reads: readonly PaymentRead[]): string =>
     ? 'the return page made no payment-action reads'
     : `return page read ${reads
         .map(
-          ({ method, path, status, state, requestId }) =>
+          ({ method, path, status, state, attention, requestId }) =>
             `${method} ${path.endsWith('/recover') ? 'recover' : 'action'} ${status} ${state ?? '?'}${
-              requestId === undefined ? '' : ` (${requestId})`
-            }`,
+              attention === undefined ? '' : ` ${attention.reason}/${attention.action}`
+            }${requestId === undefined ? '' : ` (${requestId})`}`,
         )
         .join(', ')}`;
 

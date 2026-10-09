@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ConflictException } from '@nestjs/common';
 import { betterAuth } from 'better-auth';
+import { APIError } from 'better-auth/api';
 import { getCookies } from 'better-auth/cookies';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { github as githubProvider } from 'better-auth/social-providers';
@@ -145,6 +147,75 @@ describe('getBetterAuthConfig abuse gates', () => {
     ).rejects.toThrow('account still owes');
     expect(writes).toStrictEqual([]);
     /* A refused deletion keeps its cloud hosts (W10 a4). */
+    expect(cloudHosts.retireCloudHosts).not.toHaveBeenCalled();
+  });
+
+  /** The pending top-up the billing closure names when it refuses (`BillingAccountClosureService.prepare`). */
+  const pendingAction = {
+    version: 'payment-action-v1',
+    actionId: 'action-pending',
+    environment: 'development',
+    ownerId: 'user_pending',
+    subjectId: 'account-pending',
+    purpose: 'manual_topup',
+    state: 'redirect_required',
+    frozen: {
+      offerId: 'top-up',
+      currency: 'usd',
+      principalMinor: '500',
+      taxMinor: null,
+      grossMinor: null,
+      maximumGrossMinor: null,
+      creditAtoms: '5000000',
+      paymentMethod: null,
+    },
+    redirectUrl: 'https://checkout.stripe.com/pending',
+    attention: null,
+    receipt: null,
+    updatedAt: '2026-10-09T00:00:00.000Z',
+  };
+
+  /*
+   * Staging, 2026-10-09: Better Auth answers any other error a hook throws with an empty 500, so a
+   * deletion refused while a payment was pending reached the customer as an internal error.
+   */
+  it.each([
+    [
+      'a pending payment',
+      new ConflictException({ code: 'payment_action_pending', action: pendingAction }),
+      { code: 'payment_action_pending', message: 'Conflict Exception', action: pendingAction },
+    ],
+    [
+      'an unfinished closure',
+      new ConflictException('account_closure_not_ready_for_auth_deletion'),
+      { code: 'CONFLICT', message: 'account_closure_not_ready_for_auth_deletion' },
+    ],
+  ])('should refuse a deletion blocked by %s as a Better Auth conflict', async (_blocker, refusal, body) => {
+    const { config, closure, cloudHosts, writes } = createConfig();
+    const beforeDelete = config.user?.deleteUser?.beforeDelete;
+    if (!beforeDelete) {
+      throw new Error('Deletion hook is missing');
+    }
+    closure.prepareForAuthDeletion.mockRejectedValueOnce(refusal);
+
+    const refused = beforeDelete(
+      {
+        id: 'user_pending',
+        email: 'pending@example.test',
+        name: 'Pending',
+        emailVerified: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      new Request('http://localhost:4000/v1/auth/delete-user'),
+    );
+
+    await expect(refused).rejects.toBeInstanceOf(APIError);
+    await expect(refused).rejects.toMatchObject({ status: 'CONFLICT', statusCode: 409 });
+    await expect(
+      refused.catch((error: unknown) => (error instanceof APIError ? error.body : error)),
+    ).resolves.toStrictEqual(body);
+    expect(writes).toStrictEqual([]);
     expect(cloudHosts.retireCloudHosts).not.toHaveBeenCalled();
   });
 
@@ -426,8 +497,8 @@ describe('getBetterAuthConfig runtime bearer composition', () => {
       apikey: [],
       subscription: [],
     };
-    const { config } = createConfig();
-    return { store, auth: betterAuth({ ...config, database: memoryAdapter(store) }) };
+    const { config, closure } = createConfig();
+    return { store, closure, auth: betterAuth({ ...config, database: memoryAdapter(store) }) };
   };
 
   // Structural, not `ReturnType<typeof betterAuth>`: Better Auth's concrete
@@ -445,10 +516,21 @@ describe('getBetterAuthConfig runtime bearer composition', () => {
       }),
     );
 
+  /*
+   * Better Auth's in-memory limiter is shared by every instance in the process and allows a client three
+   * sign-ups in ten seconds, so each sign-in below comes from its own documentation address.
+   */
+  let clients = 0;
+
   /** Signs up, marks the address verified in place, and signs in. */
   const signIn = async () => {
-    const { auth, store } = createRuntimeAuth();
-    const signUp = await request(auth, 'sign-up/email', { body: { email, name: 'Runtime Bearer', password } });
+    const { auth, store, closure } = createRuntimeAuth();
+    clients += 1;
+    const client = { 'x-forwarded-for': `203.0.113.${clients}` };
+    const signUp = await request(auth, 'sign-up/email', {
+      body: { email, name: 'Runtime Bearer', password },
+      headers: client,
+    });
     if (!signUp.ok) {
       throw new Error(`Runtime sign-up failed with ${signUp.status}: ${await signUp.text()}`);
     }
@@ -457,8 +539,8 @@ describe('getBetterAuthConfig runtime bearer composition', () => {
     for (const user of store['user'] ?? []) {
       user['emailVerified'] = true;
     }
-    const response = await request(auth, 'sign-in/email', { body: { email, password } });
-    return { auth, response, store };
+    const response = await request(auth, 'sign-in/email', { body: { email, password }, headers: client });
+    return { auth, response, store, closure };
   };
 
   it('emits set-auth-token on sign-in through the runtime composition (B6)', async () => {
@@ -485,6 +567,19 @@ describe('getBetterAuthConfig runtime bearer composition', () => {
     expect(config.advanced?.crossSubDomainCookies?.enabled).not.toBe(true);
     expect(cookies.sessionToken.attributes.domain).toBeUndefined();
     expect(cookies.sessionData.attributes.domain).toBeUndefined();
+  });
+
+  it('should answer a delete-user the financial closure refuses with its 409 and code', async () => {
+    const { auth, response, store, closure } = await signIn();
+    const token = response.headers.get('set-auth-token') ?? '';
+    closure.prepareForAuthDeletion.mockRejectedValueOnce(new ConflictException({ code: 'payment_action_pending' }));
+
+    const refused = await request(auth, 'delete-user', { body: {}, headers: { authorization: `Bearer ${token}` } });
+
+    expect(refused.status).toBe(409);
+    expect(refused.headers.get('content-type')).toContain('application/json');
+    expect(await refused.json()).toStrictEqual({ code: 'payment_action_pending', message: 'Conflict Exception' });
+    expect(store['user']).toHaveLength(1);
   });
 
   it('completes the desktop one-time-token handoff through the runtime composition', async () => {

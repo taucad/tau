@@ -22,6 +22,16 @@ export const gatewayErrorSchema = z
   .strict();
 export type GatewayError = z.infer<typeof gatewayErrorSchema>;
 
+/** The `error` event the gateway ends a relayed stream with: its own code and the supplier's details. */
+const gatewayErrorFrameSchema = z.object({
+  type: z.literal('error'),
+  error: z.object({
+    type: z.literal('tau_gateway'),
+    code: z.string().min(1),
+    details: z.record(z.string(), z.unknown()).optional(),
+  }),
+});
+
 /** The shortfall an `INSUFFICIENT_CREDIT` refusal carries for the credits card. */
 export const insufficientCreditDetailsSchema = z
   .object({
@@ -71,6 +81,10 @@ export type GatewayCall = ApiCall & {
   readonly refusal?: GatewayError;
   /** The streamed body, cut to its first 2,000 characters, when the gateway relayed. */
   readonly streamed?: string;
+  /** The last 2,000 characters of the streamed body, where a provider's final usage event lands. */
+  readonly streamTail?: string;
+  /** The whole stream as the gateway sent it, for the evidence file of a row that keeps it. */
+  readonly stream?: string;
   /** Whatever the `whileStreaming` probe returned, read after the headers and before the body. */
   readonly probe?: unknown;
 };
@@ -123,7 +137,15 @@ export const callGateway = async (api: Api, route: GatewayRoute, options: CallOp
     response.ok && options.whileStreaming !== undefined ? await options.whileStreaming(operationId) : undefined;
   const text = await response.text();
   if (response.ok) {
-    return { ...call, attemptId, operationId, streamed: text.slice(0, 2000), probe };
+    return {
+      ...call,
+      attemptId,
+      operationId,
+      streamed: text.slice(0, 2000),
+      streamTail: text.slice(-2000),
+      stream: text,
+      probe,
+    };
   }
   let parsed: unknown = text;
   try {
@@ -138,6 +160,54 @@ export const callGateway = async (api: Api, route: GatewayRoute, options: CallOp
     );
   }
   return { ...call, attemptId, operationId, refusal: refusal.data, probe };
+};
+
+/**
+ * The last `usage` object in a provider stream, as the provider sent it: OpenAI's lands in `response.completed`,
+ * Anthropic's output count in `message_delta`. It is the evidence of what billing had to price.
+ *
+ * @param stream - The stream's text, or its tail.
+ * @returns That object as compact JSON, or undefined when the text holds none.
+ */
+export const finalUsage = (stream: string | undefined): string | undefined => {
+  const last =
+    stream === undefined ? undefined : [...stream.matchAll(/"usage"\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})/gu)].at(-1)?.[1];
+  if (last === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(JSON.parse(last) as unknown);
+  } catch {
+    return last;
+  }
+};
+
+/**
+ * The Tau-coded refusal a relayed stream ended on, when it ended on one: the gateway replaces a supplier's in-stream
+ * failure (an exhausted account, a rate limit) with its own `error` event, so a 200 can still carry no answer.
+ *
+ * @param stream - The stream's text.
+ * @returns The gateway's code and the supplier's own code when the frame names one, or undefined for a stream that
+ * carried no such frame.
+ */
+export const streamRefusal = (
+  stream: string | undefined,
+): { readonly code: string; readonly providerCode?: string } | undefined => {
+  if (stream === undefined) {
+    return undefined;
+  }
+  for (const line of stream.split(/\r?\n/u)) {
+    if (!line.startsWith('data:') || !line.includes('"tau_gateway"')) {
+      continue;
+    }
+    // The relayed frame repeats the code and message beside its `error` member; only that member is read.
+    const parsed = gatewayErrorFrameSchema.safeParse(JSON.parse(line.slice(5).trim()) as unknown);
+    if (parsed.success) {
+      const providerCode = parsed.data.error.details?.['providerCode'];
+      return { code: parsed.data.error.code, ...(typeof providerCode === 'string' ? { providerCode } : {}) };
+    }
+  }
+  return undefined;
 };
 
 /** One evidence line for a gateway call. */

@@ -1,5 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { createBillableModelEvidenceCollector } from '#api/billing/billable-model-evidence.js';
+
+/* The real 200 stream OpenAI sent on 2026-09-19 with an exhausted organisation balance: no usage, then
+ * `error` and `response.failed`. Staging sent the same shape for GPT-6 Luna on 2026-10-09 (FD-12). */
+const exhaustedCapture = readFileSync(new URL('../llm/provider-account-stream.fixture.sse', import.meta.url), 'utf8');
 
 const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
 
@@ -444,6 +449,72 @@ describe('createBillableModelEvidenceCollector', () => {
       executionStatus: 'rejected',
       normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_rejected', fields: {} },
     });
+  });
+
+  /* A stream the supplier failed before any usage is the same proof of zero cost as a pre-stream refusal:
+   * it settles released now, instead of holding the customer's credits until the recovery deadline. */
+  it('should settle a stream the supplier failed before any usage as rejected', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-responses',
+      new Set(['uncached_input', 'cache_read', 'cache_write', 'output']),
+      'openai',
+    );
+    collector.accept(bytes(exhaustedCapture));
+
+    expect(collector.complete()).toEqual({
+      kind: 'provider_rejected',
+      executionStatus: 'rejected',
+      normalizationEvidence: {
+        version: 'provider-usage-v1',
+        terminalReason: 'provider_failed',
+        fields: { providerCode: 'credit_balance_exhausted' },
+      },
+    });
+  });
+
+  it.each([
+    {
+      name: 'an Anthropic error event',
+      wire: 'anthropic',
+      providerId: 'anthropic',
+      stream:
+        'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","usage":null}}\n\n' +
+        'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n',
+      fields: {},
+    },
+    {
+      name: 'an OpenAI-compatible error body',
+      wire: 'openai-completions',
+      providerId: 'vertexai',
+      stream: 'data: {"error":{"code":429,"message":"Resource exhausted.","status":"RESOURCE_EXHAUSTED"}}\n\n',
+      fields: { providerCode: '429' },
+    },
+  ] as const)('should settle $name that carried no usage as rejected', ({ wire, providerId, stream, fields }) => {
+    const collector = createBillableModelEvidenceCollector(wire, new Set(['uncached_input', 'output']), providerId);
+    collector.accept(bytes(stream));
+
+    expect(collector.complete()).toMatchObject({
+      kind: 'provider_rejected',
+      executionStatus: 'rejected',
+      normalizationEvidence: { terminalReason: 'provider_failed', fields },
+    });
+  });
+
+  /* Usage reported before the failure may already be a supplier charge, so it stays on the unknown path. */
+  it('should keep a stream that failed after reporting usage unknown', () => {
+    const collector = createBillableModelEvidenceCollector(
+      'openai-responses',
+      new Set(['uncached_input', 'cache_read', 'output']),
+      'openai',
+    );
+    collector.accept(
+      bytes(
+        'data: {"response":{"id":"resp_partial","usage":{"input_tokens":"20","output_tokens":"7","input_tokens_details":{"cached_tokens":"5"}}}}\n\n' +
+          'event: response.failed\ndata: {"type":"response.failed","response":{"id":"resp_partial","status":"failed","error":{"code":"server_error","message":"The server had an error."}}}\n\n',
+      ),
+    );
+
+    expect(collector.complete()).toMatchObject({ kind: 'absorbed_unknown', executionStatus: 'unknown' });
   });
 
   /* B7 I3 / R8 + W4: `executionStatus` alone cannot separate a ceiling cut from an abort. */

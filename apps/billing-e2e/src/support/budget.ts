@@ -2,10 +2,10 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import process from 'node:process';
 import { z } from 'zod';
-import { HarnessBlock, runDirectory, runId } from '#support/results.js';
+import { HarnessBlock, runDirectory } from '#support/results.js';
 
 /**
- * Successful payments each row may make under one run id: one per row that needs one, two for TU-04's two legs.
+ * Successful payments each row may make in one run: one per row that needs one, two for TU-04's two legs.
  * Every other row pays nothing. US$5 top-ups and the US$20 plan are the only amounts the rows charge.
  */
 export const paymentAllowance: Readonly<Record<string, number>> = {
@@ -21,7 +21,7 @@ export const paymentAllowance: Readonly<Record<string, number>> = {
 const paymentSchema = z.object({ row: z.string(), reference: z.string(), at: z.string() }).strict();
 export type PaymentEntry = z.infer<typeof paymentSchema>;
 
-/** The run's payment ledger beside results.json, so a re-run under the same run id sees what was already paid. */
+/** The run's payment ledger beside results.json, so a re-run into the same output directory sees what was paid. */
 const ledgerPath = join(runDirectory, 'payments.json');
 
 const readLedger = async (): Promise<PaymentEntry[]> => {
@@ -36,7 +36,7 @@ const readLedger = async (): Promise<PaymentEntry[]> => {
 };
 
 /**
- * How many payments the row may still make, given the payments already booked under this run id.
+ * How many payments the row may still make, given the payments already booked in this run's ledger.
  *
  * @param entries - The run's ledger.
  * @param row - The program row about to pay.
@@ -51,7 +51,7 @@ export const assertPaymentAllowed = async (row: string): Promise<void> => {
   if (paymentsLeft(entries, row) === 0) {
     throw new HarnessBlock(
       'H-06',
-      `${row} has spent its ${paymentAllowance[row] ?? 0} payment(s) under run id ${runId}; re-run it under a new run id`,
+      `${row} has spent its ${paymentAllowance[row] ?? 0} payment(s) in ${ledgerPath}; re-run it in a new output directory`,
     );
   }
 };

@@ -295,7 +295,7 @@ const refusedCards: ReadonlySet<string> = new Set([testCards.declined, testCards
 /**
  * Pays the open hosted Checkout with each card in turn (a refused card is replaced by the next) and an NZ address,
  * completing a 3D Secure challenge when the card asks for one. Test mode only: a live session never reaches the
- * card fields. A card that can succeed is tried only while `row` has payments left under this run id (H-06
+ * card fields. A card that can succeed is tried only while `row` has payments left in this run (H-06
  * otherwise), and a payment that leaves Checkout is booked against it. A Playwright trace is kept beside
  * results.json when the page never leaves Checkout.
  *
@@ -356,6 +356,8 @@ export type PaymentRead = {
   readonly path: string;
   readonly status: number;
   readonly state?: string;
+  /** The attention billing recorded on the action, when the read answered `attention_required`. */
+  readonly attention?: { readonly reason: string; readonly action: string };
   readonly requestId?: string;
 };
 
@@ -405,8 +407,14 @@ export const watchPaymentReads = (page: Page, actionId?: string): PaymentRead[] 
     } catch {
       body = undefined;
     }
-    const state = z.object({ state: z.string() }).safeParse(body);
-    reads[index] = { ...read, state: state.success ? state.data.state : undefined };
+    const state = z
+      .object({ state: z.string(), attention: z.object({ reason: z.string(), action: z.string() }).nullish() })
+      .safeParse(body);
+    reads[index] = {
+      ...read,
+      state: state.success ? state.data.state : undefined,
+      ...(state.success && state.data.attention ? { attention: state.data.attention } : {}),
+    };
   });
   return reads;
 };

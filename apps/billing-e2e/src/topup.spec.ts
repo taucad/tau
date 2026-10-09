@@ -27,6 +27,7 @@ import {
   callGateway,
   describeCall,
   describeOperation,
+  finalUsage,
   gatewayRoutes,
   insufficientCreditDetailsSchema,
   lookupAttempt,
@@ -520,6 +521,41 @@ describe('funded journey', () => {
       return isUpstreamRefused ? { outcome: 'blocked', defect: 'F-24', evidence } : { outcome: 'pass', evidence };
     }),
     paymentRowTimeout,
+  );
+
+  it(
+    'should charge a funded GPT-6 Luna turn once OpenAI reports its usage [FD-12 P0]',
+    matrixRow('FD-12', 'P0', async (evidence): Promise<Verdict> => {
+      if (paid?.action.state !== 'fulfilled') {
+        return { outcome: 'blocked', defect: 'H-03', evidence: ['TU-01 left no funded account'] };
+      }
+      // The OpenAI pathway prices a cache-write dimension Anthropic's does not; Run 1 saw its hold outlive the row.
+      const call = await callGateway(account.api, 'luna', {
+        prompt: 'Reply with the single word OK.',
+        maximumTokens: 32,
+      });
+      evidence.push(
+        `GPT-6 Luna: ${describeCall(call)}`,
+        `final usage event: ${finalUsage(call.streamTail) ?? 'none in the stream tail'}`,
+      );
+      expect(call.status).toBe(200);
+      expect(call.operationId).toBeDefined();
+      // The invocation deadline is 300 s: a turn whose usage billing cannot price settles only when that runs out.
+      const operation = await waitForTerminal(account.api, call.operationId ?? '', 330_000);
+      evidence.push(describeOperation(operation));
+      if (operation.state !== 'terminal') {
+        evidence.push('still pending 330 s after the stream ended');
+        return { outcome: 'fail', defect: 'F-30', evidence };
+      }
+      const charged = BigInt(operation.receipt.chargedCreditAtoms);
+      if (operation.receipt.customerState !== 'settled' || charged <= 0n) {
+        evidence.push(`billing never priced the turn: ${operation.receipt.customerState} at ${charged} atoms`);
+        return { outcome: 'fail', defect: 'F-30', evidence };
+      }
+      return { outcome: 'pass', evidence };
+    }),
+    // Up to 330 s of settlement wait on top of the call itself.
+    400_000,
   );
 
   it(

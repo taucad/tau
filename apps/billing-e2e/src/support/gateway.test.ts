@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   attemptLookupSchema,
   describeCall,
+  finalUsage,
   gatewayErrorSchema,
   insufficientCreditDetailsSchema,
 } from '#support/gateway.js';
@@ -59,5 +60,19 @@ describe('describeCall', () => {
     expect(line).toBe(
       '/v1/llm/anthropic/v1/messages 402 INSUFFICIENT_CREDIT "Insufficient credit" {"requiredCreditAtoms":"1200","availableCreditAtoms":"0","routeId":"anthropic-claude-haiku-4.5"} attempt att_1 (req_9)',
     );
+  });
+});
+
+describe('finalUsage', () => {
+  it('should return the last usage object in a stream, nested details included', () => {
+    const usage =
+      '{"input_tokens":12,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":15}';
+    const stream = `data: {"type":"response.created","response":{"usage":null}}\n\ndata: {"type":"response.completed","response":{"id":"resp_1","usage": ${usage}}}\n\n`;
+    expect(finalUsage(stream)).toBe(usage);
+  });
+
+  it('should return undefined without a usage object', () => {
+    expect(finalUsage(undefined)).toBeUndefined();
+    expect(finalUsage('data: {"type":"response.created"}')).toBeUndefined();
   });
 });

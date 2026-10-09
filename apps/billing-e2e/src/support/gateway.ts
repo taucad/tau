@@ -71,6 +71,8 @@ export type GatewayCall = ApiCall & {
   readonly refusal?: GatewayError;
   /** The streamed body, cut to its first 2,000 characters, when the gateway relayed. */
   readonly streamed?: string;
+  /** The last 2,000 characters of the streamed body, where a provider's final usage event lands. */
+  readonly streamTail?: string;
   /** Whatever the `whileStreaming` probe returned, read after the headers and before the body. */
   readonly probe?: unknown;
 };
@@ -123,7 +125,7 @@ export const callGateway = async (api: Api, route: GatewayRoute, options: CallOp
     response.ok && options.whileStreaming !== undefined ? await options.whileStreaming(operationId) : undefined;
   const text = await response.text();
   if (response.ok) {
-    return { ...call, attemptId, operationId, streamed: text.slice(0, 2000), probe };
+    return { ...call, attemptId, operationId, streamed: text.slice(0, 2000), streamTail: text.slice(-2000), probe };
   }
   let parsed: unknown = text;
   try {
@@ -138,6 +140,26 @@ export const callGateway = async (api: Api, route: GatewayRoute, options: CallOp
     );
   }
   return { ...call, attemptId, operationId, refusal: refusal.data, probe };
+};
+
+/**
+ * The last `usage` object in a provider stream, as the provider sent it: OpenAI's lands in `response.completed`,
+ * Anthropic's output count in `message_delta`. It is the evidence of what billing had to price.
+ *
+ * @param stream - The stream's text, or its tail.
+ * @returns That object as compact JSON, or undefined when the text holds none.
+ */
+export const finalUsage = (stream: string | undefined): string | undefined => {
+  const last =
+    stream === undefined ? undefined : [...stream.matchAll(/"usage"\s*:\s*(\{(?:[^{}]|\{[^{}]*\})*\})/gu)].at(-1)?.[1];
+  if (last === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(JSON.parse(last) as unknown);
+  } catch {
+    return last;
+  }
 };
 
 /** One evidence line for a gateway call. */

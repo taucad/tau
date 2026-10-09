@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyLogRow } from '#log/event-schema.js';
-import { parseEventLogBytes } from '#log/serialization.js';
+import { parseEventLogBytes, parseReplayEventLogBytes } from '#log/serialization.js';
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
 const event = {
@@ -83,4 +83,31 @@ describe('parser-owned JSON classification', () => {
     );
     expect(parsed.quarantined).toEqual(classified.class === 'quarantined' ? [0] : []);
   });
+});
+
+describe('private replay parsing preserves physical boundaries', () => {
+  it.each(['\n', '\r\n', '', '\n{"torn":', '\ninvalid\n'])(
+    'keeps the ordinary parser result for ending %j',
+    (ending) => {
+      const text = JSON.stringify(event) + ending;
+      const content = encode(text);
+      const backing = new Uint8Array(content.length + 6);
+      backing.set([255, 13, 10], 1);
+      backing.set(content, 4);
+      const bytes = backing.subarray(1, 4 + content.length);
+      const ordinary = parseEventLogBytes(bytes);
+      const replay = parseReplayEventLogBytes(bytes);
+      expect({ ...replay, rows: replay.rows.map(({ event: parsed, opaque }) => ({ event: parsed, opaque })) }).toEqual(
+        ordinary,
+      );
+      expect(replay.rows).toHaveLength(1);
+      expect(Object.keys(ordinary.rows[0]!)).toEqual(['event', 'opaque']);
+      expect(Object.keys(replay.events[0]!)).not.toContain('identity');
+      const { identity } = replay.rows[0]!;
+      bytes.fill(0);
+      Reflect.set(replay.events[0]!, 'text', 'exposed mutation');
+      expect(identity.canonical()).toContain('😀é');
+      expect(identity.canonical()).not.toContain('exposed mutation');
+    },
+  );
 });

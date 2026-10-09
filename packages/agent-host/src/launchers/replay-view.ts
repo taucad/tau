@@ -7,7 +7,7 @@ import type { AgentLogEvent } from '#log/event-types.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import { projectLogRow } from '#log/projection-facts.js';
 import type { ProjectionBatch, ProjectionFact, ProjectionSourceHealth } from '#log/projection-facts.js';
-import { parseEventLogBytes } from '#log/serialization.js';
+import { parseReplayEventLogBytes } from '#log/serialization.js';
 
 /** Immutable published view over a privately maintained tolerant replay. @internal */
 export type ReplayView = Readonly<{
@@ -76,12 +76,12 @@ export const createReplayView = (bytes: Uint8Array<ArrayBuffer>, generation: str
   let unterminated = false;
 
   const extend = (current: Uint8Array<ArrayBuffer>): ReplayView => {
-    const parsed = parseEventLogBytes(current.subarray(offset));
+    const parsed = parseReplayEventLogBytes(current.subarray(offset));
     for (const row of parsed.rows) {
       if (row.opaque) {
         opaque.add(row.event);
       }
-      reducer.replayClassified(row);
+      reducer.replayOwned(row);
     }
     events = [...events, ...parsed.events];
     ledger = foldClassifiedChatLedger(ledger, parsed.rows);

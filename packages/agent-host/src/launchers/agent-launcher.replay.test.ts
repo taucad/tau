@@ -13,7 +13,7 @@ import { createNodeChatStore } from '#node.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import type { ToolRegistry } from '#waist/ports.js';
 import { fakePlacement } from '#host/tau-agent-host.fixture.js';
-import { parseEventLogBytes } from '#log/serialization.js';
+import { parseReplayEventLogBytes } from '#log/serialization.js';
 import { foldClassifiedChatLedger } from '#log/chat-ledger.js';
 import { isBytePrefix } from '#launchers/replay-view.js';
 import type { CatchUpFrame } from '#wire/frames.schema.js';
@@ -23,7 +23,7 @@ import type * as LedgerModule from '#log/chat-ledger.js';
 
 vi.mock('#log/serialization.js', async (original) => {
   const actual = await original<typeof SerializationModule>();
-  return { ...actual, parseEventLogBytes: vi.fn(actual.parseEventLogBytes) };
+  return { ...actual, parseReplayEventLogBytes: vi.fn(actual.parseReplayEventLogBytes) };
 });
 vi.mock('#log/chat-ledger.js', async (original) => {
   const actual = await original<typeof LedgerModule>();
@@ -1759,16 +1759,16 @@ describe('launcher replay source ownership', () => {
       model,
       toolRegistry: emptyTools,
     });
-    vi.mocked(parseEventLogBytes).mockClear();
+    vi.mocked(parseReplayEventLogBytes).mockClear();
     vi.mocked(foldClassifiedChatLedger).mockClear();
     vi.mocked(isBytePrefix).mockClear();
     const readPage = async () => launcher!.read({ chatId: 'reuse', cursor: 0, limit: 16, maxBytes: 1_048_576 });
     const first = await readPage();
     const second = await readPage();
-    expect(parseEventLogBytes).toHaveBeenCalledOnce();
+    expect(parseReplayEventLogBytes).toHaveBeenCalledOnce();
     expect(foldClassifiedChatLedger).toHaveBeenCalledOnce();
     expect(isBytePrefix).toHaveBeenCalledOnce();
-    expect(vi.mocked(parseEventLogBytes).mock.calls[0]?.[0].byteLength).toBe(bytes.byteLength);
+    expect(vi.mocked(parseReplayEventLogBytes).mock.calls[0]?.[0].byteLength).toBe(bytes.byteLength);
     expect(vi.mocked(isBytePrefix).mock.calls[0]?.[0].byteLength).toBe(bytes.byteLength);
     for (let index = 0; index < 30; index++) {
       // oxlint-disable-next-line no-await-in-loop -- each independent page validates current bytes.
@@ -1776,7 +1776,7 @@ describe('launcher replay source ownership', () => {
     }
     expect(readBytes).toHaveBeenCalledTimes(32);
     expect(observeBytes).toHaveBeenCalledOnce();
-    expect(parseEventLogBytes).toHaveBeenCalledOnce();
+    expect(parseReplayEventLogBytes).toHaveBeenCalledOnce();
     expect(foldClassifiedChatLedger).toHaveBeenCalledOnce();
     expect(isBytePrefix).toHaveBeenCalledTimes(31);
     expect(first.status).toBe('batch');

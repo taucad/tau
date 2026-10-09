@@ -1,19 +1,25 @@
 import type * as SerializationModule from '#log/serialization.js';
 import type * as LedgerModule from '#log/chat-ledger.js';
+import type * as CanonicalModule from '#log/canonical-json.js';
+import { canonicalJson } from '#log/canonical-json.js';
 import { describe, expect, it, vi } from 'vitest';
 import { createReplayView, isBytePrefix } from '#launchers/replay-view.js';
-import { parseEventLogBytes } from '#log/serialization.js';
+import { parseReplayEventLogBytes } from '#log/serialization.js';
 import { foldClassifiedChatLedger } from '#log/chat-ledger.js';
 import { invalidHistoryFixtures } from '#log/invalid-history.fixture.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 
 vi.mock('#log/serialization.js', async (original) => {
   const actual = await original<typeof SerializationModule>();
-  return { ...actual, parseEventLogBytes: vi.fn(actual.parseEventLogBytes) };
+  return { ...actual, parseReplayEventLogBytes: vi.fn(actual.parseReplayEventLogBytes) };
 });
 vi.mock('#log/chat-ledger.js', async (original) => {
   const actual = await original<typeof LedgerModule>();
   return { ...actual, foldClassifiedChatLedger: vi.fn(actual.foldClassifiedChatLedger) };
+});
+vi.mock('#log/canonical-json.js', async (original) => {
+  const actual = await original<typeof CanonicalModule>();
+  return { ...actual, canonicalJson: vi.fn(actual.canonicalJson) };
 });
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
 const row = (sequence: number): string =>
@@ -27,6 +33,128 @@ const row = (sequence: number): string =>
   }) + '\n';
 
 describe('byte-validated replay view', () => {
+  it('defers canonical identity work for unique replay rows until an actual key collision', () => {
+    vi.mocked(canonicalJson).mockClear();
+    const unique = row(0) + row(1) + row(2);
+    const first = createReplayView(encode(unique), 'source');
+    expect(canonicalJson).not.toHaveBeenCalled();
+    const duplicate = first.extend(encode(unique + row(0)));
+    expect(canonicalJson).toHaveBeenCalledTimes(2);
+    vi.mocked(canonicalJson).mockClear();
+    duplicate.extend(encode(unique + row(0) + row(0)));
+    expect(canonicalJson).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      name: 'whitespace and key order',
+      first: row(0),
+      next: '  ' + row(0).replace('"version":1,', '').replace('}\n', ',"version":1}\n'),
+    },
+    { name: 'equivalent numeric spelling', first: row(0), next: row(0).replace('"sequence":0', '"sequence":0.0') },
+    {
+      name: 'duplicate JSON keys with equal final value',
+      first: row(0),
+      next: row(0).replace('"sequence":0', '"sequence":99,"sequence":0'),
+    },
+    {
+      name: 'opaque payload reordered',
+      first: row(0).replace('"type":"future.row"', '"type":"future.row","payload":{"a":1,"b":2}'),
+      next: row(0).replace('"type":"future.row"', '"type":"future.row","payload":{"b":2,"a":1}'),
+    },
+    {
+      name: 'opaque payload conflict',
+      first: row(0),
+      next: row(0).replace('"type":"future.row"', '"type":"future.row","payload":"different"'),
+    },
+    {
+      name: 'opaque nonfinite numeric spelling',
+      first: row(0).replace('"type":"future.row"', '"type":"future.row","payload":1e400'),
+      next: row(0).replace('"type":"future.row"', '"type":"future.row","payload":2e400'),
+    },
+  ])('preserves eager replay over $name across physical append boundaries', async ({ first, next }) => {
+    const bytes = encode(first + next + row(1));
+    const initial = createReplayView(encode(first), 'source');
+    const view = initial.extend(bytes);
+    const refuse = async (): Promise<never> => {
+      throw new Error('Read-only');
+    };
+    const canonical = await createEventLogAppender({
+      read: async () => bytes,
+      append: refuse,
+      truncate: refuse,
+      close: async () => undefined,
+      size: async () => bytes.byteLength,
+      exclusive: async (section) => section(),
+    });
+    try {
+      expect(await view.log.read()).toEqual(await canonical.read());
+      expect(await view.log.messages()).toEqual(await canonical.messages());
+      expect(view.sourceHealth.historyIntact).toBe(await canonical.historyIntact());
+      expect(view.ledger.position.cursor).toBe(3);
+      expect(view.projectionBatch({ chatId: 'chat', cursor: 0, limit: 16, maxBytes: 100_000 }).facts).toHaveLength(3);
+      const singleRows = [0, 1, 2].flatMap(
+        (cursor) => view.projectionBatch({ chatId: 'chat', cursor, limit: 1, maxBytes: 100_000 }).facts,
+      );
+      expect(singleRows).toEqual(
+        view.projectionBatch({ chatId: 'chat', cursor: 0, limit: 16, maxBytes: 100_000 }).facts,
+      );
+    } finally {
+      await canonical.close();
+    }
+  });
+
+  it.each([
+    { exposure: 'raw', conflict: false },
+    { exposure: 'raw', conflict: true },
+    { exposure: 'fact', conflict: false },
+    { exposure: 'fact', conflict: true },
+  ] as const)(
+    'keeps original identity after $exposure exposure mutation (conflict=$conflict)',
+    async ({ exposure, conflict }) => {
+      const original = {
+        version: 1,
+        leaderEpoch: 'e',
+        sequence: 0,
+        recordedAt: '2026-10-08T00:00:00.000Z',
+        runId: 'r',
+        type: 'message.appended',
+        message: { id: 'm', role: 'user', content: 'original' },
+      };
+      const firstLine = JSON.stringify(original) + '\n';
+      vi.mocked(canonicalJson).mockClear();
+      const first = createReplayView(encode(firstLine), 'source');
+      if (exposure === 'raw') {
+        const exposed = await first.log.read();
+        const event = exposed[0];
+        if (event?.type !== 'message.appended') {
+          throw new Error('Expected an appended provider message');
+        }
+        // Deliberately exercise runtime mutation available through a readonly public reference.
+        Reflect.set(event.message, 'content', 'exposed mutation');
+      } else {
+        const fact = first.projectionBatch({ chatId: 'chat', cursor: 0, limit: 16, maxBytes: 100_000 }).facts[0];
+        if (fact?.classification !== 'known' || fact.effect.type !== 'message.appended') {
+          throw new Error('Expected an appended message fact');
+        }
+        Reflect.set(fact.effect.message, 'content', 'exposed mutation');
+      }
+      const next = conflict ? { ...original, message: { ...original.message, content: 'exposed mutation' } } : original;
+      const appended = first.extend(encode(firstLine + JSON.stringify(next) + '\n'));
+      const fingerprints = vi
+        .mocked(canonicalJson)
+        .mock.results.filter((result) => result.type === 'return')
+        .map((result) => result.value);
+      expect(fingerprints.some((value) => value.includes('"content":"original"'))).toBe(true);
+      if (!conflict) {
+        expect(fingerprints.every((value) => !value.includes('exposed mutation'))).toBe(true);
+      }
+      expect(await appended.log.read()).toHaveLength(2);
+      expect(await appended.log.messages()).toHaveLength(1);
+      expect(appended.ledger.position.cursor).toBe(2);
+    },
+  );
+
   it('does not scan an exact retained byte object against itself', () => {
     const bytes = encode('retained exact bytes');
     const scan = vi.spyOn(bytes, 'every');
@@ -130,7 +258,7 @@ describe('byte-validated replay view', () => {
     const priorLedger = first.ledger;
     const appended = encode(firstLine + next);
     expect(isBytePrefix(bytes, appended)).toBe(true);
-    vi.mocked(parseEventLogBytes).mockClear();
+    vi.mocked(parseReplayEventLogBytes).mockClear();
     vi.mocked(foldClassifiedChatLedger).mockClear();
     const second = first.extend(appended);
     expect(second.generation).toBe('source');
@@ -140,8 +268,8 @@ describe('byte-validated replay view', () => {
     expect(first.ledger).toBe(priorLedger);
     expect(first.ledger.position.cursor).toBe(1);
     expect(await first.log.read()).toHaveLength(1);
-    expect(parseEventLogBytes).toHaveBeenCalledOnce();
-    expect(vi.mocked(parseEventLogBytes).mock.calls[0]?.[0]).toEqual(encode(next));
+    expect(parseReplayEventLogBytes).toHaveBeenCalledOnce();
+    expect(vi.mocked(parseReplayEventLogBytes).mock.calls[0]?.[0]).toEqual(encode(next));
     expect(vi.mocked(foldClassifiedChatLedger).mock.calls[0]?.[1]).toHaveLength(1);
     const refuse = async (): Promise<never> => {
       throw new Error('Read-only');

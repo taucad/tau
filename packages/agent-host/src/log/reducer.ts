@@ -1,6 +1,6 @@
 import { EventLogError } from '#log/event-log-error.js';
 import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
-import type { ReadRow } from '#log/serialization.js';
+import type { ReadRow, ReplayReadRow } from '#log/serialization.js';
 import { createEventSequence } from '#log/event-sequence.js';
 import type { SequenceAnomaly } from '#log/event-sequence.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
@@ -83,6 +83,8 @@ export const createEventLogReducer = (): {
   replay(candidate: AgentLogEvent): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly };
   /** Replay a parser-owned classification without revalidating the row. */
   replayClassified(row: ReadRow): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly };
+  /** Replay a privately parsed row using its immutable source identity. */
+  replayOwned(row: ReplayReadRow): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly };
   messages(): readonly ProviderMessage[];
   /** `false` once a history row was rejected at replay. */
   historyIntact(): boolean;
@@ -255,11 +257,10 @@ export const createEventLogReducer = (): {
     };
   };
 
-  const replayClassified = ({
-    event,
-    opaque,
-  }: ReadRow): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly } => {
-    const replayed = sequence.replay(event);
+  const applyReplay = (
+    { event, opaque }: ReadRow,
+    replayed: ReturnType<typeof sequence.replay>,
+  ): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly } => {
     if (!replayed.duplicate && opaque && historyRowTypes.has(event.type)) {
       intact = false;
     }
@@ -278,10 +279,14 @@ export const createEventLogReducer = (): {
     return replayed;
   };
 
+  const replayClassified = (row: ReadRow): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly } =>
+    applyReplay(row, sequence.replay(row.event));
+
   return {
     prepare,
     replay: (candidate) => replayClassified(reducerEvent(candidate)),
     replayClassified,
+    replayOwned: (row) => applyReplay(row, sequence.replayOwned(row)),
     messages: () => [...messages],
     historyIntact: () => intact,
   };

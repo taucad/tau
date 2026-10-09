@@ -9,6 +9,7 @@ import {
   assertMatchingRequestDigest,
   classifyFundedLlmCapacity,
   CreditLedgerService,
+  recordSettledGenAiUsage,
 } from '#api/billing/credit-ledger.service.js';
 import { and, eq, inArray } from 'drizzle-orm';
 import { billingAccountClosedError, isBillingAccountClosed, LlmGatewayError } from '#api/llm/llm-gateway.error.js';
@@ -138,19 +139,13 @@ const streamErrorType = (reason: string | undefined): string =>
       : reason === 'authorized_exhausted' || reason === 'malformed_response' || reason === 'service_restart'
         ? reason
         : 'incomplete';
-const genAiTokenTypes = new Map([
-  ['uncached_input', 'input'],
-  ['cache_read', 'cache_read'],
-  ['cache_write', 'cache_write'],
-  ['output', 'output'],
-]);
-const genAiAttributes = (qualification: QualifiedBillableInvocation): Record<string, string> => ({
+const genAiAttributes = (
+  qualification: QualifiedBillableInvocation,
+): Record<'gen_ai.request.model' | 'gen_ai.provider.name' | 'tau.surface', string> => ({
   'gen_ai.request.model': qualification.modelId,
   'gen_ai.provider.name': qualification.providerId,
   'tau.surface': qualification.surface,
 });
-/** One credit atom is one micro-USD. */
-const creditAtomsPerUsd = 1_000_000;
 
 /** Owns one funded model invocation from qualified admission through one terminal mutation. */
 @Injectable()
@@ -801,38 +796,12 @@ export class BillableModelInvocationService {
       // Recovery's own reason for expiring an absorbed hold: no supplier evidence is coming.
       ...(cutByStop ? { expireSpendHold: true } : {}),
     });
-    this.recordSettledUsage(qualification, row, evidence, receipt.chargedAtoms);
-  }
-
-  /**
-   * Records the tokens and charged USD of one operation this service settled, written together so
-   * the two series reconcile. An operation left pending for recovery records neither here, and
-   * recovery's own settlement is not recorded either (a known gap in both series).
-   */
-  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- one settled operation
-  private recordSettledUsage(
-    qualification: QualifiedBillableInvocation,
-    row: InvocationRow,
-    evidence: TerminalEvidence,
-    chargedAtoms: bigint,
-  ): void {
-    this.metrics?.genAiCost.add(Number(chargedAtoms) / creditAtomsPerUsd, {
-      ...genAiAttributes(qualification),
-      'tau.activity': row.activity,
-    });
-    // A stop-cut absorbed turn settles at zero; its partial meters are not usage it was charged for.
-    const meterItems =
-      evidence.kind === 'provider_rejected' || evidence.kind === 'absorbed_unknown' ? [] : (evidence.meterItems ?? []);
-    for (const item of meterItems) {
-      const tokenType = genAiTokenTypes.get(item.dimension);
-      if (tokenType !== undefined) {
-        this.metrics?.genAiTokenUsage.record(Number(item.quantity), {
-          ...genAiAttributes(qualification),
-          'gen_ai.token.type': tokenType,
-          'tau.activity': row.activity,
-        });
-      }
-    }
+    recordSettledGenAiUsage(
+      this.metrics,
+      { ...genAiAttributes(qualification), 'tau.activity': row.activity },
+      evidence,
+      receipt.chargedAtoms,
+    );
   }
 
   /**

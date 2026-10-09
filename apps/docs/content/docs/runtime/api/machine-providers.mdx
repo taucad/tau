@@ -3,7 +3,8 @@ title: Machine Provider API
 description: Declare a machine's manifest v3, its actions, holds, jobs and stop, and implement the provider session ABI v2 over host-owned I/O.
 docType: reference
 # 1150 -> 1300 (2026-10-09): services, remoteName, timed effects, a parsing example.
-wordBudgetOverride: 1300
+# 1300 -> 1360 (2026-10-10): credential, work-area-clear, job safety without authority, halt emission.
+wordBudgetOverride: 1360
 ---
 
 # Machine Provider API
@@ -21,7 +22,7 @@ Import from `@taucad/runtime/machine`. A provider describes one machine model in
 A `MachineManifest` has `version: 3` and these parts:
 
 - `identity`: type id, vendor, model and display name.
-- `connection`: `MachineConnectionFacts` for network or serial transport, exclusivity, whether opening resets the controller, whether identity is authenticated or only claimed, and optional `services` (`{ id, port, required }`, at most 8): TLS services binding pins on first use, kept in `serviceTrust` by id; a `required` one that does not answer refuses the binding.
+- `connection`: `MachineConnectionFacts` for network or serial transport, exclusivity, whether opening resets the controller, whether identity is authenticated or only claimed (a claimed one is pinned to its endpoint), an optional `credential` (`none` or `secret`: whether binding asks for a code or key; defaults to `secret` only for an authenticated identity), and optional `services` (`{ id, port, required }`, at most 8): TLS services binding pins on first use, kept in `serviceTrust` by id; a `required` one that does not answer refuses the binding.
 - `axes` and `components`: each `MachineAxis` the controller moves, and each `MachineComponent` with its kind (`motion`, `spindle`, `tools`, `probe`, `toolhead`, `material-system`, `interlock`, simple kinds by name, or `kind: 'vendor'` with a namespaced `type`, `<vendor>.<name>`).
 - `processes`: each `MachineProcess`, a `MachineFffProcess`, a `MachineMillingProcess` or a vendor process; `fffProcessOf` and `millingProcessOf` find them.
 - `actions`, `holds`, `jobs` and `stop`: what the machine can be asked to do, described below.
@@ -32,7 +33,7 @@ A `MachineManifest` has `version: 3` and these parts:
 
 Declare a standard family with `standardMachineAction` or a provider-owned `<vendor>.<area>.<verb>` action with `defineMachineAction`. Each returns a `MachineActionDefinition`: a `MachineActionDescriptor` plus the schema the host validates parameters with. A provider may narrow a family's schema, never widen it, and may only raise its authority. Every action stays `designed` until the provider names a qualification profile; a person can try it only in Testing mode. `machineJogHold` declares the standard held jog as a `MachineHoldDefinition` with this machine's lease and bound. `machineActionDescriptorOf` strips the schema from either definition. A timed effect (spindle run, heater hold, dwell) declares `safety.maximumDuration` and is queued on the controller as one bounded sequence that ends by itself if Tau goes silent; when only Stop ends it early, refuse an early off with a `stop` remedy.
 
-`jobs` is `unsupported` or `MachineJobFacts`: each accepted container (`MachineAcceptedContainer`: a semantic `contract`, `mediaType`, `technology`, `requiredMembers` and `payloadSelection`, `single` for a G-code or NC program; optional `extensions` such as `.gcode` name the files a consumer offers), `stored` or `streamed` delivery, a `remote` or `at-machine` start, attestations a person makes before a start, and the start's safety floor. `stop` is a `MachineHaltOutcome`: what motion, spindle and heaters do, whether position is kept, and the recovery remedies.
+`jobs` is `unsupported` or `MachineJobFacts`: each accepted container (`MachineAcceptedContainer`: a semantic `contract`, `mediaType`, `technology`, `requiredMembers` and `payloadSelection`, `single` for a G-code or NC program; optional `extensions` such as `.gcode` name the files a consumer offers), `stored` or `streamed` delivery, a `remote` or `at-machine` start, attestations a person makes before a start (always `work-area-clear`), and the start's attendance and interlocks; a person always approves a job, so it names no authority. `stop` is a `MachineHaltOutcome`: what motion, spindle, heaters and an optional beam `emission` do, whether position is kept, and the recovery remedies.
 
 ```ts
 import { defineConfiguration } from '@taucad/runtime/configuration';

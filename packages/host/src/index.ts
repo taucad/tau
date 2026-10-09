@@ -77,7 +77,9 @@ export type { KeyedIncarnation, KeyedResource } from '#keyed-resource.js';
 export {
   createMachineSecretStore,
   createNodeMachineRuntime,
+  defaultMachineProviders,
   localMachineFacet,
+  machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
   probeCertificateTrust,

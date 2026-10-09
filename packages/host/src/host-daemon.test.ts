@@ -794,6 +794,26 @@ describe('startHostDaemon', () => {
       client.close();
     }
     expect(registrySpy.mock.calls.at(-1)?.[0]).toMatchObject({ projectId, machines: { available: true } });
+    /* The tools' facet rides an agent session of its own: it reads machines, but a person's own acts are not its to
+     * call, whatever the payload claims. */
+    const agentFacet = registrySpy.mock.calls.at(-1)?.[0].machines;
+    if (agentFacet?.available !== true) {
+      throw new Error('The daemon offered its tools no machines facet.');
+    }
+    await expect(agentFacet.list({})).resolves.toMatchObject({ entries: [] });
+    const person = { kind: 'user', id: 'person', label: 'Person' } as const;
+    await expect(agentFacet.setTesting({ machineId: 'any', enabled: true, requestedBy: person })).rejects.toThrow(
+      'ROUTE_DENIED',
+    );
+    /* An agent never approves its own action: approving is a person's act on the person's session. */
+    await expect(
+      agentFacet.approveAction({
+        machineId: 'any',
+        operationId: 'op-1',
+        intent: { componentId: 'controller', action: 'controller.wake', version: 1, parameters: {} },
+        decision: 'approve',
+      }),
+    ).rejects.toThrow('ROUTE_DENIED');
 
     const readArtifact = machineRuntimeSpy.mock.calls.at(-1)?.[0].readArtifact;
     if (readArtifact === undefined) {

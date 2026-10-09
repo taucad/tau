@@ -43,6 +43,7 @@ import {
   createMachineSecretStore,
   createNodeMachineRuntime,
   localMachineFacet,
+  machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
   readProjectId,
@@ -821,8 +822,20 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       workspaceRoot: agent.workspaceRoot,
       checkoutsDirectory,
       ...(projectId === undefined ? {} : { projectId }),
+      /* The agent's facet rides an agent session of its own, so the host applies the agent rules whatever a call
+       * claims; the route's session stays the person's. */
       ...(machines
-        ? { machines: localMachineFacet((port) => machines.host.serve({ port, session: machines.session })) }
+        ? {
+            machines: localMachineFacet((port) =>
+              machines.host.serve({
+                port,
+                session: machines.host.issueSession({
+                  actor: { kind: 'agent', id: 'tau' },
+                  grants: machineAgentGrants,
+                }),
+              }),
+            ),
+          }
         : {}),
       fileSystem: {
         open: providerForAgentRoot,

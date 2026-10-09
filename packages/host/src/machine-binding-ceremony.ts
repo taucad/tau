@@ -1,23 +1,30 @@
 /**
- * The native half of a machine binding ceremony, keyed by the printer's
- * identity so an access code is typed once per printer, not once per binding.
+ * The native half of a machine binding ceremony, keyed by the machine's
+ * identity so an access code is typed once per machine, not once per binding.
  *
  * @public
  */
 
 import { randomUUID } from 'node:crypto';
 
-import { machineCredentialReference } from '@taucad/runtime/machine';
-import type { MachineBindingOutcome, MachineTransportTrust } from '@taucad/runtime/machine';
+import { isSimulatedMachine, machineCredentialReference } from '@taucad/runtime/machine';
+import type {
+  MachineBindingOutcome,
+  MachineManifest,
+  MachineProvider,
+  MachineTransportTrust,
+} from '@taucad/runtime/machine';
 import type { NodeMachineHost } from '@taucad/runtime/host/node';
 
 import { probeCertificateTrust } from '#machine-host.js';
 import type { MachineSecretStore } from '#machine-host.js';
 
-/** What one ceremony did with a credential, for a log: never a reference, serial or secret. @public */
+/** What one ceremony did with a credential or a pin, for a log: never a reference, serial or secret. @public */
 export type MachineBindingCeremonyEvent = Readonly<{
-  type: 'credential-saved' | 'credential-reused' | 'rollback-failed';
+  type: 'credential-saved' | 'credential-reused' | 'rollback-failed' | 'service-unpinned';
   providerId: string;
+  /** For `service-unpinned`: the optional service that did not answer, so what it enables stays unsupported. */
+  service?: string;
 }>;
 
 /** Input for {@link completeMachineBinding}. @public */
@@ -26,76 +33,114 @@ export type CompleteMachineBindingInput = Readonly<{
   host: Pick<NodeMachineHost, 'completeBinding' | 'describeBinding' | 'removeBinding'>;
   /** The custody the host's runtime resolves provider secrets through; a binding whose code it cannot save is removed again. */
   secrets: MachineSecretStore;
+  /** The providers the host serves; the candidate's provider declares whether its machine takes a code and what to pin. */
+  providers: ReadonlyArray<Pick<MachineProvider, 'id' | 'manifest'>>;
   ceremonyId: string;
-  /** The code the person typed. Absent, the saved code is reused only while the printer presents the certificate it was saved with. */
+  /** The code the person typed. Absent, the saved code is reused only while the machine presents the certificates it was saved with. */
   accessCode?: string;
   /** Reads one service's certificate pin; defaults to {@link probeCertificateTrust}. */
   probeCertificateTrust?: typeof probeCertificateTrust;
-  /** Told once a credential is saved or reused, or when a failed save could not be rolled back. */
+  /** Told once a credential is saved or reused, when an optional service is left unpinned, or when a failed save could not be rolled back. */
   onEvent?: (event: MachineBindingCeremonyEvent) => void;
 }>;
 
-/* RFC 6761 reserves `.invalid`, so such an address names no network endpoint:
- * the simulator's `simulator.invalid`. */
-const unreachableAddress = /(?:^|\.)invalid$/iu;
-
 type PinnedTrust = Extract<MachineTransportTrust, { type: 'pinned' }>;
 
+/** The TLS services a provider declares its binding pins (`connection.services`). */
+type PinnedServices = NonNullable<MachineManifest['connection']['services']>;
+
 /**
- * Pin MQTT, which the provider cannot connect without, and the camera, whose pin only enables stills.
+ * Pin every declared service at once; a required one that does not answer refuses the binding.
  *
- * @param probe - Reads one service's certificate pin.
- * @param address - The endpoint the provider will connect to.
- * @param cameraPort - The camera service for the candidate model.
- * @returns The pins a binding records; no camera pin when the camera does not answer.
+ * @param pinning - The probe, the endpoint the provider will connect to, the services by the `serviceTrust` name the
+ * provider reads, and who is told each optional service that did not answer.
+ * @returns The pins a binding records.
  */
 const pinServices = async (
-  probe: typeof probeCertificateTrust,
-  address: string,
-  cameraPort: number,
-): Promise<Readonly<{ mqtt: PinnedTrust; camera?: PinnedTrust }>> => {
-  const mqtt = await probe({ address, port: 8883 });
-  try {
-    return { mqtt, camera: await probe({ address, port: cameraPort }) };
-  } catch {
-    /* Stills stay unsupported on this binding. */
-    return { mqtt };
+  pinning: Readonly<{
+    probe: typeof probeCertificateTrust;
+    address: string;
+    services: PinnedServices;
+    unpinned: (service: string) => void;
+  }>,
+): Promise<Readonly<Record<string, PinnedTrust>>> => {
+  const probed = await Promise.allSettled(
+    pinning.services.map(async ({ port }) => pinning.probe({ address: pinning.address, port })),
+  );
+  const pinned: Record<string, PinnedTrust> = {};
+  for (const [index, { id: service, required }] of pinning.services.entries()) {
+    const outcome = probed[index];
+    if (outcome?.status === 'fulfilled') {
+      pinned[service] = outcome.value;
+    } else if (required) {
+      throw outcome?.reason instanceof Error ? outcome.reason : new Error('MACHINE_CERTIFICATE_PROBE_FAILED');
+    } else {
+      pinning.unpinned(service);
+    }
   }
+  return pinned;
+};
+
+/**
+ * What the candidate's provider declares its binding needs: a simulator or a claimed identity takes no code, and
+ * only a network machine has services to pin (`connection.services`).
+ *
+ * @param providers - The providers the host serves.
+ * @param providerId - The candidate's provider.
+ * @returns Whether a code is taken, and the services to pin.
+ * @throws `MACHINE_PROVIDER_UNAVAILABLE` when the host serves no such provider.
+ */
+const bindingNeeds = (
+  providers: CompleteMachineBindingInput['providers'],
+  providerId: string,
+): Readonly<{ code: boolean; services: PinnedServices }> => {
+  const provider = providers.find(({ id }) => id === providerId);
+  if (provider === undefined) {
+    throw new Error('MACHINE_PROVIDER_UNAVAILABLE');
+  }
+  const { connection } = provider.manifest;
+  const simulated = isSimulatedMachine(provider.manifest);
+  return {
+    code: !simulated && connection.identity === 'authenticated',
+    services: simulated || connection.transport !== 'network' ? [] : (connection.services ?? []),
+  };
 };
 
 /**
  * Complete a ceremony `beginBinding` answered with `operator-action-required`.
  *
- * Trust is pinned on first use from the address the provider will connect to:
- * MQTT on 8883 is required, the camera on the model-specific port is best effort. A typed code is
- * staged in memory for the connect and saved to the vault, beside its pins,
- * only once the binding commits, so a wrong code never reaches the vault.
- * Without a typed code the printer's saved code is reused only while its MQTT
- * certificate matches the saved pin, so a device claiming a printer's serial
- * never receives that printer's code. A candidate with no network endpoint
- * binds with no secret and no probe.
+ * What the ceremony asks is what the candidate's provider declares. A simulated provider, or a machine whose
+ * identity is only claimed (a Grbl on a serial port, a Carvera on the network), binds with no code. A machine that
+ * authenticates takes an access code. Over the network, the services the provider's binding pins are pinned on
+ * first use from the address the provider will connect to: a required one must answer, an optional one that does
+ * not is left unpinned and reported. A typed code is staged in memory for the connect and saved to the vault,
+ * beside its pins, only once the binding commits, so a wrong code never reaches the vault. Without a typed code the
+ * machine's saved code is reused only while every required service presents the certificate it was saved with, so
+ * a device claiming a machine's serial never receives that machine's code.
  *
  * ponytail: pins are taken silently; when an operator review of the digest is
  * wanted, return the probed trust to the form before committing.
  *
- * @param input - The host, its secret custody, the ceremony and the typed code, if any.
+ * @param input - The host, its providers, its secret custody, the ceremony and the typed code, if any.
  * @returns The host's own outcome.
- * @throws `MACHINE_BINDING_UNKNOWN_CEREMONY`, `MACHINE_CREDENTIAL_REQUIRED` when no code is typed or saved,
- * `MACHINE_CREDENTIAL_TRUST_CHANGED` when the saved code's pin no longer matches, or
- * `MACHINE_CREDENTIAL_SAVE_FAILED` (the binding is removed again; `cause.code` is the vault's code).
+ * @throws `MACHINE_BINDING_UNKNOWN_CEREMONY`, `MACHINE_PROVIDER_UNAVAILABLE` when the host serves no such provider,
+ * `MACHINE_CREDENTIAL_REQUIRED` when no code is typed or saved, `MACHINE_CREDENTIAL_TRUST_CHANGED` when the saved
+ * code's pins no longer match, a required service's probe failure, or `MACHINE_CREDENTIAL_SAVE_FAILED` (the binding
+ * is removed again; `cause.code` is the vault's code).
  * @public
  *
  * @example <caption>The desktop services utility completing the ceremony a renderer began</caption>
  * ```typescript
  * import { completeMachineBinding } from '@taucad/host';
  * import type { MachineSecretStore } from '@taucad/host';
- * import type { NodeMachineHost } from '@taucad/runtime/host/node';
+ * import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
  *
  * export const onBindingFrame = async (
  *   host: NodeMachineHost,
+ *   providers: CreateNodeMachineHostInput['providers'],
  *   secrets: MachineSecretStore,
  *   frame: Readonly<{ ceremonyId: string; accessCode?: string }>,
- * ) => completeMachineBinding({ host, secrets, ...frame });
+ * ) => completeMachineBinding({ host, providers, secrets, ...frame });
  * ```
  */
 export const completeMachineBinding = async (input: CompleteMachineBindingInput): Promise<MachineBindingOutcome> => {
@@ -105,28 +150,34 @@ export const completeMachineBinding = async (input: CompleteMachineBindingInput)
     throw new Error('MACHINE_BINDING_UNKNOWN_CEREMONY');
   }
   const { providerId, candidate } = pending;
-  const { address } = candidate.endpoint;
-  if (unreachableAddress.test(address)) {
-    return host.completeBinding({ ceremonyId, secretRef: 'none', serviceTrust: {} });
+  const { code, services } = bindingNeeds(input.providers, providerId);
+  const pin = async (): Promise<Readonly<Record<string, PinnedTrust>>> =>
+    pinServices({
+      probe: input.probeCertificateTrust ?? probeCertificateTrust,
+      address: candidate.endpoint.address,
+      services,
+      unpinned: (service) => {
+        input.onEvent?.({ type: 'service-unpinned', providerId, service });
+      },
+    });
+  if (!code) {
+    return host.completeBinding({ ceremonyId, secretRef: 'none', serviceTrust: await pin() });
   }
   const { serial } = candidate.claimedIdentity;
-  /* A printer that claims no serial gets a reference nothing can find again. */
+  /* A machine that claims no serial gets a reference nothing can find again. */
   const reference =
     serial === undefined
       ? `vault:machine/${providerId}/unidentified-${randomUUID()}`
       : machineCredentialReference(providerId, serial);
-  const saved = accessCode === undefined ? await secrets.facts(reference) : undefined;
+  /* A saved code is reused only against a required pin; with none declared, nothing could prove the machine. */
+  const required = services.filter((service) => service.required).map(({ id }) => id);
+  const saved = accessCode === undefined && required.length > 0 ? await secrets.facts(reference) : undefined;
   if (accessCode === undefined && saved === undefined) {
     throw new Error('MACHINE_CREDENTIAL_REQUIRED');
   }
-  const serviceTrust = await pinServices(
-    input.probeCertificateTrust ?? probeCertificateTrust,
-    address,
-    candidate.claimedIdentity.model === 'A1 mini' ? 6000 : 322,
-  );
-  const { mqtt, camera } = serviceTrust;
+  const serviceTrust = await pin();
   if (accessCode === undefined) {
-    if (saved?.['mqtt'] !== mqtt.digest) {
+    if (required.some((service) => saved?.[service] !== serviceTrust[service]?.digest)) {
       throw new Error('MACHINE_CREDENTIAL_TRUST_CHANGED');
     }
     const reused = await host.completeBinding({ ceremonyId, secretRef: reference, serviceTrust });
@@ -142,7 +193,7 @@ export const completeMachineBinding = async (input: CompleteMachineBindingInput)
     try {
       await secrets.save(reference, accessCode, {
         label: `Tau: ${candidate.name} access code`,
-        facts: { mqtt: mqtt.digest, ...(camera === undefined ? {} : { camera: camera.digest }) },
+        facts: Object.fromEntries(Object.entries(serviceTrust).map(([service, trust]) => [service, trust.digest])),
       });
     } catch (error) {
       /* A binding whose code is not saved could never reconnect. */

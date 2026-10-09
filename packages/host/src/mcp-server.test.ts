@@ -760,7 +760,40 @@ describe('the mounted /mcp route', () => {
             { id: 'controller', label: 'Printer', kind: 'controller' },
             { id: 'chamber-light', label: 'Chamber light', kind: 'light' },
           ],
-          processes: [],
+          /* A printer: slicing tools are offered only for an `fff` process. */
+          processes: [
+            {
+              type: 'fff',
+              version: 1,
+              geometry: {
+                unit: 'mm',
+                buildVolume: { x: 256, y: 256, z: 256 },
+                enclosure: { outer: { x: 389, y: 389, z: 457 }, enclosed: true, doors: [] },
+                kinematics: 'corexy',
+                bedMotion: 'z',
+                origin: 'front-left',
+                toolheadHome: { x: 1, y: 1, z: 256 },
+                materialSystemMount: 'none',
+              },
+              filamentDiameter: { value: 1.75, unit: 'mm' },
+              bed: {
+                maximumTemperature: { value: 110, unit: 'Cel' },
+                plates: [{ id: 'textured-pei', label: 'Textured PEI plate' }],
+              },
+              chamber: { enclosed: true, heated: false },
+              speedProfiles: [],
+              slicing: {
+                recommended: {
+                  layerHeight: { value: 0.2, unit: 'mm' },
+                  walls: 2,
+                  infillPercent: 15,
+                  nozzleTemperature: { value: 220, unit: 'Cel' },
+                  bedTemperature: { value: 55, unit: 'Cel' },
+                },
+                presets: [{ id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } }],
+              },
+            },
+          ],
           actions,
           holds: [],
           jobs: {
@@ -829,6 +862,13 @@ describe('the mounted /mcp route', () => {
         cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
         entries: [machine],
       }),
+      /* The machine reads the program and completes nothing: it is ready as planned. */
+      checkJob: vi.fn<MachineClient['checkJob']>(async (input) => ({
+        status: 'ready',
+        program: { name: 'main.gcode.3mf', facts: { process: 'fff', layers: 125 } },
+        checks: [],
+        configuration: input.configuration,
+      })),
       requestJob,
       applyAction,
       stop: stopMachine,
@@ -995,11 +1035,13 @@ describe('the mounted /mcp route', () => {
         openWorldHint: false,
       });
     }
-    expect(tools.find(({ name }) => name === 'request_job')?.inputSchema).toMatchObject({
+    /* A job names either a CAD source Tau slices or a finished program; neither is required alone. */
+    const requestJobSchema = tools.find(({ name }) => name === 'request_job')?.inputSchema;
+    expect(requestJobSchema).toMatchObject({
       type: 'object',
-      properties: { targetFile: { type: 'string' } },
-      required: ['targetFile'],
+      properties: { targetFile: { type: 'string' }, artifact: { type: 'string' } },
     });
+    expect(requestJobSchema?.['required'] ?? []).not.toEqual(expect.arrayContaining(['targetFile']));
 
     const call = async (name: string, args: Readonly<Record<string, unknown>>) => {
       const reply = await session.request('tools/call', { name, arguments: args });

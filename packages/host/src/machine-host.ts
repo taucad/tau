@@ -41,7 +41,11 @@ import type {
 } from '@taucad/runtime/machine';
 import type { HostRouteGrant } from '@taucad/runtime/host';
 import { createNodeMachineSerial } from '@taucad/runtime/host/node';
-import type { NodeMachineRuntime, NodeMachineSerialDriver } from '@taucad/runtime/host/node';
+import type {
+  CreateNodeMachineHostInput,
+  NodeMachineRuntime,
+  NodeMachineSerialDriver,
+} from '@taucad/runtime/host/node';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { projectManifestMaxBytes } from '@taucad/types';
 import { z } from 'zod';
@@ -80,7 +84,7 @@ export const localMachineFacet = (
 };
 
 /**
- * Every operation the machines route answers; a served session is granted all
+ * Every operation the machines route answers; a person's session is granted all
  * of them, because the route's operator is the same person who bound the
  * machine. Kept beside the runtime so the desktop utility and the daemon
  * issue identical sessions.
@@ -103,6 +107,7 @@ export const machineRouteGrants: readonly HostRouteGrant[] = (
     'machines.resolveJob',
     'machines.withdrawJob',
     'machines.applyAction',
+    'machines.approveAction',
     'machines.stop',
     'machines.beginHold',
     'machines.renewHold',
@@ -111,6 +116,53 @@ export const machineRouteGrants: readonly HostRouteGrant[] = (
     'machines.removeBinding',
   ] as const
 ).map((operation) => ({ route: 'machines', operation }));
+
+/* A person's own acts: finding and binding a machine, approving an action, Testing mode, and the held controls a
+ * person presses. */
+const personOperations: ReadonlySet<string> = new Set([
+  'machines.approveAction',
+  'machines.discover',
+  'machines.beginBinding',
+  'machines.removeBinding',
+  'machines.setTesting',
+  'machines.beginHold',
+]);
+
+/**
+ * What an agent's machines session is granted: {@link machineRouteGrants} without a person's own acts (discovery,
+ * binding, approving an action, Testing mode, holds). The session's actor is `{ kind: 'agent' }`, set by the host that issues it, so the
+ * host applies the agent rules whatever a call's payload says.
+ * @public
+ */
+export const machineAgentGrants: readonly HostRouteGrant[] = machineRouteGrants.filter(
+  ({ operation }) => !personOperations.has(operation),
+);
+
+/**
+ * The machine providers every Tau host serves: the Bambu Lab X1C and A1 mini, a Grbl router and a Makera Carvera,
+ * each beside its socket-free simulator. The vendor packages load on the first call, so a host that serves no
+ * machines never touches them.
+ *
+ * @returns One fresh registration per provider, for `createNodeMachineHost`.
+ * @public
+ */
+export const defaultMachineProviders = async (): Promise<CreateNodeMachineHostInput['providers']> => {
+  const [bambu, grbl, carvera] = await Promise.all([
+    import('@taucad/bambu'),
+    import('@taucad/grbl'),
+    import('@taucad/carvera'),
+  ]);
+  return [
+    bambu.bambuMachine(),
+    bambu.bambuA1MiniMachine(),
+    bambu.bambuSimulatorMachine(),
+    bambu.bambuA1MiniSimulatorMachine(),
+    grbl.grblMachine(),
+    grbl.grblSimulatorMachine(),
+    carvera.carveraMachine(),
+    carvera.carveraSimulatorMachine(),
+  ];
+};
 
 const digestOf = (bytes: Uint8Array<ArrayBuffer>): string =>
   `sha256:${createHash('sha256').update(bytes).digest('hex')}`;

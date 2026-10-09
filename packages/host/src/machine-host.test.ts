@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createMachineSecretStore,
   createNodeMachineRuntime,
+  machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
 } from '#machine-host.js';
@@ -35,6 +36,27 @@ afterEach(async () => {
 describe('machineRouteGrants', () => {
   it('should grant a served session the removal of a binding', () => {
     expect(machineRouteGrants).toContainEqual({ route: 'machines', operation: 'machines.removeBinding' });
+  });
+});
+
+describe('machineAgentGrants', () => {
+  it("should withhold a person's own acts from an agent and keep what the machine tools call", () => {
+    const operations = machineAgentGrants.map(({ operation }) => operation);
+    for (const personal of [
+      'machines.approveAction',
+      'machines.discover',
+      'machines.beginBinding',
+      'machines.removeBinding',
+      'machines.setTesting',
+      'machines.beginHold',
+    ]) {
+      expect(operations).not.toContain(personal);
+    }
+    expect(operations).toEqual(
+      expect.arrayContaining(['machines.list', 'machines.applyAction', 'machines.stop', 'machines.requestJob']),
+    );
+    /* Approving is the person's: their session is granted it. */
+    expect(machineRouteGrants).toContainEqual({ route: 'machines', operation: 'machines.approveAction' });
   });
 });
 

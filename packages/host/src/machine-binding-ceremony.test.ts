@@ -1,10 +1,10 @@
 import type { CompleteNodeMachineBindingInput, RemoveNodeMachineBindingInput } from '@taucad/runtime/host/node';
 import type { MachineBindingOutcome, MachineBindingRemoval, MachineCandidate } from '@taucad/runtime/machine';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { completeMachineBinding } from '#machine-binding-ceremony.js';
 import type { CompleteMachineBindingInput, MachineBindingCeremonyEvent } from '#machine-binding-ceremony.js';
-import { createMachineSecretStore } from '#machine-host.js';
+import { createMachineSecretStore, defaultMachineProviders } from '#machine-host.js';
 import type { probeCertificateTrust } from '#machine-host.js';
 import { createMemorySecretVault } from '#secret-vault.js';
 import type { SecretVault } from '#secret-vault.js';
@@ -26,16 +26,55 @@ const candidateAt = (address: string, claimedSerial?: string): MachineCandidate 
   expiresAt: '2026-09-26T00:00:30.000Z',
 });
 
+/* The TLS services a Bambu binding pins, as its manifests declare them: MQTT required, the camera best effort. */
+const bambuCameraPorts = new Map([
+  ['bambu', 322],
+  ['bambu-a1-mini', 6000],
+]);
+
+/* The registrations every Tau host serves: what each provider declares drives the ceremony. A Bambu manifest that
+ * does not declare its services yet is given the declaration above; one that does is used as it is. */
+let providers: CompleteMachineBindingInput['providers'] = [];
+beforeAll(async () => {
+  const served = await defaultMachineProviders();
+  providers = served.map((provider) => {
+    const camera = bambuCameraPorts.get(provider.id);
+    const { connection } = provider.manifest;
+    return camera === undefined || connection.services !== undefined
+      ? provider
+      : {
+          ...provider,
+          manifest: {
+            ...provider.manifest,
+            connection: {
+              ...connection,
+              services: [
+                { id: 'mqtt', port: 8883, required: true },
+                { id: 'camera', port: camera, required: false },
+              ],
+            },
+          },
+        };
+  });
+});
+
 /**
  * One pending ceremony on a host whose provider connects only with the
- * printer's own code, resolved through the store the way a provider resolves it.
+ * machine's own code, resolved through the store the way a provider resolves it.
  *
- * @param options - The candidate, the vault behind the store, the printer's MQTT certificate and whether its camera answers.
+ * @param options - The provider and candidate, the vault behind the store, the printer's MQTT certificate and whether its camera answers.
  * @returns The completion and every seam it touches.
  */
 const ceremony = (
-  options: Readonly<{ candidate?: MachineCandidate; vault?: SecretVault; certificate?: Pinned; camera?: boolean }> = {},
+  options: Readonly<{
+    providerId?: string;
+    candidate?: MachineCandidate;
+    vault?: SecretVault;
+    certificate?: Pinned;
+    camera?: boolean;
+  }> = {},
 ) => {
+  const providerId = options.providerId ?? 'bambu';
   const candidate = options.candidate ?? candidateAt('192.168.0.112', serial);
   const secrets = createMachineSecretStore({ vault: options.vault ?? createMemorySecretVault() });
   const resolvedDuringConnect: string[] = [];
@@ -56,12 +95,12 @@ const ceremony = (
     }),
   );
   const host: CompleteMachineBindingInput['host'] = {
-    describeBinding: (ceremonyId) => (ceremonyId === 'ceremony-1' ? { providerId: 'bambu', candidate } : undefined),
+    describeBinding: (ceremonyId) => (ceremonyId === 'ceremony-1' ? { providerId, candidate } : undefined),
     completeBinding,
     removeBinding,
   };
   const probe = vi.fn(async ({ port }: Readonly<{ address: string; port: number }>): Promise<Pinned> => {
-    if (port === 322 && options.camera === false) {
+    if (port !== 8883 && options.camera === false) {
       throw new Error('MACHINE_CERTIFICATE_PROBE_FAILED');
     }
     return port === 8883 ? (options.certificate ?? pin('a')) : pin('c');
@@ -71,6 +110,7 @@ const ceremony = (
     completeMachineBinding({
       host,
       secrets,
+      providers,
       ceremonyId: input.ceremonyId ?? 'ceremony-1',
       ...(input.accessCode === undefined ? {} : { accessCode: input.accessCode }),
       probeCertificateTrust: probe,
@@ -100,21 +140,36 @@ describe('completeMachineBinding', () => {
     expect(completeBinding).not.toHaveBeenCalled();
   });
 
-  it('should bind a candidate with no network endpoint without a secret or a probe', async () => {
-    const simulator = ceremony({ candidate: candidateAt('simulator.invalid', 'SIMULATED-X1C') });
+  it('should refuse a ceremony whose provider the host does not serve', async () => {
+    const { complete, completeBinding, probe } = ceremony({ providerId: 'klipper' });
 
-    await expect(simulator.complete({ accessCode: printerCode })).resolves.toEqual({
+    await expect(complete({ accessCode: printerCode })).rejects.toThrow('MACHINE_PROVIDER_UNAVAILABLE');
+    expect(probe).not.toHaveBeenCalled();
+    expect(completeBinding).not.toHaveBeenCalled();
+  });
+
+  /* What the provider declares decides, never the address: each of these sits at an ordinary LAN address or port. */
+  it.each([
+    ['a simulator', 'bambu-simulator', '192.168.0.112'],
+    ['a Grbl controller on a serial port', 'grbl', '/dev/tty.usbmodem1101'],
+    ['a Carvera, whose identity is only claimed', 'makera-carvera', '192.168.0.120'],
+  ])('should bind %s without a code, a secret or a probe', async (_name, providerId, address) => {
+    const bind = ceremony({ providerId, candidate: candidateAt(address, 'CLAIMED-1') });
+
+    await expect(bind.complete({ accessCode: printerCode })).resolves.toEqual({
       status: 'bound',
       machineId: 'workshop-x1c',
     });
-    expect(simulator.completeBinding).toHaveBeenCalledWith({
+    expect(bind.completeBinding).toHaveBeenCalledWith({
       ceremonyId: 'ceremony-1',
       secretRef: 'none',
       serviceTrust: {},
     });
-    expect(simulator.probe).not.toHaveBeenCalled();
-    /* A code typed for the simulator is never kept. */
-    await expect(simulator.secrets.has('vault:machine/bambu/SIMULATED-X1C')).resolves.toBe(false);
+    expect(bind.probe).not.toHaveBeenCalled();
+    /* A code typed for a machine that takes none is never kept. */
+    await expect(bind.secrets.has(`vault:machine/${providerId}/CLAIMED-1`)).resolves.toBe(false);
+    /* And none is asked for. */
+    await expect(ceremony({ providerId }).complete()).resolves.toEqual({ status: 'bound', machineId: 'workshop-x1c' });
   });
 
   describe('a typed code', () => {
@@ -142,17 +197,21 @@ describe('completeMachineBinding', () => {
       expect(bind.events).toEqual([{ type: 'credential-saved', providerId: 'bambu' }]);
     });
 
-    it('pins the Mini camera on 6000 while preserving MQTT credential custody', async () => {
+    it("should pin the camera on the port the A1 mini's provider declares, whatever model the candidate claims", async () => {
       const bind = ceremony({
+        providerId: 'bambu-a1-mini',
         candidate: {
           ...candidateAt('192.0.2.145', '0300EA652800550'),
-          claimedIdentity: { serial: '0300EA652800550', model: 'A1 mini' },
+          claimedIdentity: { serial: '0300EA652800550', model: 'X1C' },
         },
       });
       await bind.complete({ accessCode: printerCode });
       expect(bind.probe.mock.calls.map(([probed]) => probed.port)).toEqual([8883, 6000]);
       expect(bind.completeBinding).toHaveBeenCalledWith(
-        expect.objectContaining({ serviceTrust: { mqtt: pin('a'), camera: pin('c') } }),
+        expect.objectContaining({
+          secretRef: 'vault:machine/bambu-a1-mini/0300EA652800550',
+          serviceTrust: { mqtt: pin('a'), camera: pin('c') },
+        }),
       );
     });
 
@@ -178,6 +237,19 @@ describe('completeMachineBinding', () => {
         serviceTrust: { mqtt: pin('a') },
       });
       await expect(bind.secrets.facts(reference)).resolves.toEqual({ mqtt: pin('a').digest });
+      expect(bind.events).toEqual([
+        { type: 'service-unpinned', providerId: 'bambu', service: 'camera' },
+        { type: 'credential-saved', providerId: 'bambu' },
+      ]);
+    });
+
+    it('should refuse the binding when a required service does not answer', async () => {
+      const bind = ceremony();
+      bind.probe.mockRejectedValueOnce(new Error('MACHINE_CERTIFICATE_PROBE_FAILED'));
+
+      await expect(bind.complete({ accessCode: printerCode })).rejects.toThrow('MACHINE_CERTIFICATE_PROBE_FAILED');
+      expect(bind.completeBinding).not.toHaveBeenCalled();
+      await expect(bind.secrets.has(reference)).resolves.toBe(false);
     });
 
     it('should remove the binding again and name only the vault code when the code cannot be saved', async () => {

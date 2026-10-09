@@ -783,25 +783,39 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(mockProxyExists).toHaveBeenCalledTimes(2);
   });
 
-  it('should keep a delayed machine-settings read on its original worker after root rotation', async () => {
+  it('fences a delayed machine-settings read on its original worker after root rotation', async () => {
     const { result } = renderProvider();
     await vi.waitFor(() => {
       expect(result.current.contentService).toBeDefined();
     });
     const firstWorker = workerTestState.instances[0];
     const oldSettings = result.current.machineSettings;
-    let oldRead!: Promise<void>;
+    let releaseRead!: () => void;
+    const heldRead = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    mockReadMachineSettings.mockImplementationOnce(async () => {
+      await heldRead;
+      return { status: 'absent' };
+    });
+    const oldRead = oldSettings.refresh('bambu.x1c');
+    const oldReadClosed = expect(oldRead).rejects.toThrow('Settings observation closed');
+    await vi.waitFor(() => {
+      expect(mockReadMachineSettings).toHaveBeenCalledOnce();
+    });
     act(() => {
       result.current.fileManagerRef.send({ type: 'setRoot', path: '/checkouts/next', projectId: 'p' });
-      oldRead = oldSettings.refresh('bambu.x1c');
     });
     await vi.waitFor(() => {
       expect(result.current.machineSettings).not.toBe(oldSettings);
       expect(workerTestState.instances).toHaveLength(2);
     });
     const currentSettings = result.current.machineSettings;
-    await oldRead;
+    await oldReadClosed;
+    const retiredProjection = oldSettings.get('bambu.x1c');
+    releaseRead();
     await currentSettings.refresh('bambu.x1c');
+    expect(oldSettings.get('bambu.x1c')).toBe(retiredProjection);
 
     const settingsWorkers = mockReadMachineSettings.mock.calls.map(([bridge]) => bridge.worker);
     expect(settingsWorkers).toHaveLength(2);

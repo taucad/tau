@@ -7,6 +7,7 @@ import { BillingSessionProvider, useBillingSession } from '@taucad/billing/hooks
 import { formatCreditAtoms } from '@taucad/billing';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { authClient } from '#lib/auth-client.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { ENV } from '#environment.config.js';
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { stringParameter } from '#utils/search-parameter.codecs.js';
@@ -29,15 +30,18 @@ export function CloudRootBoundary({ children }: { readonly children: ReactNode }
 
 const BillingSessionBridge = ({ children }: { readonly children: ReactNode }): React.JSX.Element => {
   const { data: session } = useSession(authClient);
+  // Desktop SPA prerender runs before preload supplies the runtime API configuration.
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.window is absent during desktop SPA prerender.
+  const apiBaseUrl = isDesktopTarget() && globalThis.window === undefined ? undefined : ENV.TAU_API_URL;
   const identity =
-    ENV.TAU_BILLING_ENVIRONMENT === undefined || session?.user.id === undefined
+    apiBaseUrl === undefined || ENV.TAU_BILLING_ENVIRONMENT === undefined || session?.user.id === undefined
       ? undefined
-      : { apiBaseUrl: ENV.TAU_API_URL, environment: ENV.TAU_BILLING_ENVIRONMENT, ownerId: session.user.id };
+      : { apiBaseUrl, environment: ENV.TAU_BILLING_ENVIRONMENT, ownerId: session.user.id };
   return (
     <FinancialSessionScope identity={identity}>
       <BillingSessionProvider
         value={{
-          apiBaseUrl: ENV.TAU_API_URL,
+          apiBaseUrl,
           environment: ENV.TAU_BILLING_ENVIRONMENT,
           userId: session?.user.id,
         }}

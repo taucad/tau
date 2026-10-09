@@ -1563,11 +1563,7 @@ describe('BillableModelInvocationService', () => {
     const rejected = {
       kind: 'provider_rejected',
       executionStatus: 'rejected',
-      normalizationEvidence: {
-        version: 'provider-usage-v1',
-        terminalReason: 'provider_failed',
-        fields: { providerCode: 'credit_balance_exhausted' },
-      },
+      normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_failed', fields: {} },
     };
     const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
     expect(recorded?.evidence).toEqual(rejected);

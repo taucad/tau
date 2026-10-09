@@ -19,6 +19,7 @@ import {
   fetchStripeCheckoutSource,
   fetchStripeInvoiceEvidence,
   isLoopbackBillingStripeClient,
+  isStripeSubscriptionEnding,
   parseStripeCreateLeg,
   parseVerifiedStripeEvent,
   recoverStripeLegSource,
@@ -694,5 +695,17 @@ describe('billing Stripe transport', () => {
     };
     expect(parse({ pending_webhooks: 1 })).toBe(parse({ pending_webhooks: 3 }));
     expect(parse({ data: { object: { id: 'pi_1', object: 'payment_intent', amount: 1 } } })).not.toBe(parse({}));
+  });
+});
+
+describe('isStripeSubscriptionEnding', () => {
+  /* The Customer Portal schedules a cancellation on a flexible-mode subscription as `cancel_at` alone, with
+   * `cancel_at_period_end` left false (staging, 2026-10-09, PR-04); classic mode sets both. */
+  it.each([
+    ['a flexible-mode portal cancellation', { cancel_at_period_end: false, cancel_at: 1_794_238_881 }, true],
+    ['a classic period-end cancellation', { cancel_at_period_end: true, cancel_at: 1_794_238_881 }, true],
+    ['a renewing subscription', { cancel_at_period_end: false, cancel_at: null }, false],
+  ])('reads %s', (_name, subscription, ending) => {
+    expect(isStripeSubscriptionEnding(subscription)).toBe(ending);
   });
 });

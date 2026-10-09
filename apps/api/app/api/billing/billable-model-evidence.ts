@@ -291,16 +291,15 @@ export const createBillableModelEvidenceCollector = (
      * of holding the customer's credits until the recovery deadline: on staging (2026-10-09, FD-12)
      * a GPT-6 Luna `response.failed` on Tau's exhausted account kept a 717-atom hold and a
      * "Running" row open for 300 s. Usage reported before the failure keeps the unknown path, since
-     * the supplier may charge for what it generated. */
+     * the supplier may charge for what it generated. The evidence names only the reason: `fields`
+     * carries measured quantities, and the ledger's persisted-evidence schema rejects any other
+     * value, which is what kept the same hold open on the first fix (Run 2 FD-12): the supplier's
+     * own code is in the gateway's log line and in the frame the client received. */
     if (failure === undefined && latest === undefined && failureFrame !== undefined) {
       return {
         kind: 'provider_rejected',
         executionStatus: 'rejected',
-        normalizationEvidence: {
-          version: 'provider-usage-v1',
-          terminalReason: 'provider_failed',
-          fields: failureFrame.code === undefined ? {} : { providerCode: failureFrame.code },
-        },
+        normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_failed', fields: {} },
       };
     }
     /* A cut at the authorized ceiling is the designed outcome of an in-stream control (R8),

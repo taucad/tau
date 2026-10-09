@@ -4,7 +4,6 @@ import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { exportProjectionProjectClosure, writeProjectionProjectFile } from '#support/filesystem-projection.js';
 import { readProjectCheckoutTree, readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
-import { selectModel } from '#support/live-chat-turn.js';
 
 const manualMode = (import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> }).env[
   'VITE_TAU_E2E_ONE_SHOT_MANUAL'
@@ -12,13 +11,19 @@ const manualMode = (import.meta as ImportMeta & { readonly env: Readonly<Record<
 const manualEnabled = manualMode === 'fix' || manualMode === 'linked' || manualMode === 'thumbnail';
 
 const sourcePath = 'public/models/honeycomb.js';
-const previousSource = 'export default function main() { throw new Error("one-shot-previous-source"); }\n';
-const currentSource = 'export default function main() { throw new Error("one-shot-current-source"); }\n';
+// Match the installed replicad kernel's detectImport contract so the deliberate error executes.
+const previousSource = `import { makeBaseBox } from 'replicad';
+export default function main() { void makeBaseBox; throw new Error("one-shot-previous-source"); }
+`;
+const currentSource = `import { makeBaseBox } from 'replicad';
+export default function main() { void makeBaseBox; throw new Error("one-shot-current-source"); }
+`;
 
 test('Fix with AI reads the current rooted source after an independent persistent replacement', async () => {
   await target.installAgentHostGatewayFixture([
     { text: 'Current source received.', usage: { inputTokens: 10, outputTokens: 4 } },
   ]);
+  await target.setViewport({ width: 1440, height: 900 });
   await target.navigate('/__e2e/project-file-tree?chat=1');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
   const acquiredValue1 = await target.currentUrl();
@@ -30,7 +35,57 @@ test('Fix with AI reads the current rooted source after an independent persisten
   if (!config) {
     throw new Error('The real seed did not register its project storage.');
   }
-  await selectModel('anthropic-claude-haiku-4.5');
+  try {
+    const composer = selectors.getByCss('[aria-label="Ask Tau to build anything..."]:visible').first();
+    await target.expectVisible(composer);
+    await target.click(composer);
+    await target.keyboardPress('ControlOrMeta+Slash');
+    await target.click(selectors.getByRole('button', { name: /^Model: .*\. Change$/u }));
+    await target.click(selectors.getByCss('[role="option"][data-value="anthropic-claude-haiku-4.5"]'));
+    await target.expectVisible(selectors.getByRole('button', { name: /^Model: .*Haiku.*\. Change$/u }));
+    await target.keyboardPress('Escape');
+  } catch (error) {
+    try {
+      const document = await target.evaluate(() => ({
+        pathname: location.pathname,
+        viewport: { width: innerWidth, height: innerHeight },
+        composers: [
+          ...globalThis.document.querySelectorAll<HTMLElement>('[aria-label="Ask Tau to build anything..."]'),
+        ].map((node) => ({
+          rect: {
+            x: node.getBoundingClientRect().x,
+            y: node.getBoundingClientRect().y,
+            width: node.getBoundingClientRect().width,
+            height: node.getBoundingClientRect().height,
+            top: node.getBoundingClientRect().top,
+            right: node.getBoundingClientRect().right,
+            bottom: node.getBoundingClientRect().bottom,
+            left: node.getBoundingClientRect().left,
+          },
+          display: getComputedStyle(node).display,
+          visibility: getComputedStyle(node).visibility,
+          ancestor: node.closest<HTMLElement>('[data-slot]')?.dataset['slot'],
+        })),
+        buttons: [...globalThis.document.querySelectorAll('button[aria-label]')]
+          .slice(0, 64)
+          .map((node) => node.getAttribute('aria-label')),
+        text: globalThis.document.body.textContent.slice(-8000),
+      }));
+      await target.writeArtifact(
+        'projection-one-shot-composer-precondition.json',
+        JSON.stringify({ config, originalFailure: String(error), document }, null, 2),
+      );
+      await target.screenshot(undefined, 'projection-one-shot-composer-precondition.png');
+    } catch (captureError) {
+      await target
+        .writeArtifact(
+          'projection-one-shot-composer-capture-error.json',
+          JSON.stringify({ originalFailure: String(error), captureFailure: String(captureError) }),
+        )
+        .catch(() => undefined);
+    }
+    throw error;
+  }
   if (manualEnabled) {
     const identity = await target.evaluate(installOneShotManualControls);
     const digest = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> => {
@@ -123,24 +178,52 @@ test('Fix with AI reads the current rooted source after an independent persisten
     expect(ended).toBe(true);
     return;
   }
-  await writeProjectionProjectFile(config, sourcePath, previousSource);
-  const issues = selectors.getByRole('button', { name: /^Build failed\. Issues:/u }).first();
-  await target.expectVisible(issues, 180_000);
-  await target.click(issues);
-  await target.expectVisible(selectors.getByText('one-shot-previous-source', { exact: false }), 60_000);
-  await writeProjectionProjectFile(config, sourcePath, currentSource);
-  await target.expectVisible(selectors.getByText('one-shot-current-source', { exact: false }), 180_000);
-  const acquiredValue3 = await readProjectTree(config);
-  expect(acquiredValue3[`/${sourcePath}`]).toBe(currentSource);
-  const acquiredValue4 = await target.readAgentHostGatewayRequests();
-  expect(acquiredValue4).toHaveLength(0);
-  await target.click(selectors.getByRole('button', { name: 'Fix with AI', exact: true }).first());
-  await target.expectVisible(selectors.getByText('Current source received.', { exact: true }), 120_000);
-  const requests = await target.readAgentHostGatewayRequests();
-  expect(requests).toHaveLength(1);
-  const request = requests[0] as { readonly messages?: unknown };
-  expect(JSON.stringify(request.messages)).toContain(JSON.stringify(currentSource.trim()).slice(1, -1));
-  expect(JSON.stringify(request.messages)).not.toContain('one-shot-previous-source');
+  try {
+    await writeProjectionProjectFile(config, sourcePath, previousSource);
+    const issues = selectors.getByRole('button', { name: /^Build failed\. Issues:/u }).first();
+    await target.expectVisible(issues, 180_000);
+    await target.click(issues);
+    await target.expectVisible(selectors.getByText('one-shot-previous-source', { exact: false }), 60_000);
+    await writeProjectionProjectFile(config, sourcePath, currentSource);
+    await target.expectVisible(selectors.getByText('one-shot-current-source', { exact: false }), 180_000);
+    const acquiredValue3 = await readProjectTree(config);
+    expect(acquiredValue3[`/${sourcePath}`]).toBe(currentSource);
+    const acquiredValue4 = await target.readAgentHostGatewayRequests();
+    expect(acquiredValue4).toHaveLength(0);
+    await target.click(selectors.getByRole('button', { name: 'Fix with AI', exact: true }).first());
+    await target.expectVisible(selectors.getByText('Current source received.', { exact: true }), 120_000);
+    const requests = await target.readAgentHostGatewayRequests();
+    expect(requests).toHaveLength(1);
+    const request = requests[0] as { readonly messages?: unknown };
+    expect(JSON.stringify(request.messages)).toContain(JSON.stringify(currentSource.trim()).slice(1, -1));
+    expect(JSON.stringify(request.messages)).not.toContain('one-shot-previous-source');
+  } catch (error) {
+    await target.writeArtifact(
+      'projection-one-shot-current-source-failure.json',
+      JSON.stringify(
+        {
+          originalFailure: String(error),
+          config,
+          document: await target.evaluate(() => ({
+            href: location.href,
+            timeOrigin: performance.timeOrigin,
+            text: document.body.textContent.slice(-12_000),
+            issues: [...document.querySelectorAll('[aria-label^="Build failed. Issues:"]')].map((node) => ({
+              label: node.getAttribute('aria-label'),
+              expanded: node.getAttribute('aria-expanded'),
+              controls: node.getAttribute('aria-controls'),
+            })),
+          })),
+          physical: await readProjectTree(config),
+          requests: await target.readAgentHostGatewayRequests(),
+        },
+        null,
+        2,
+      ),
+    );
+    await target.screenshot(undefined, 'projection-one-shot-current-source-failure.png');
+    throw error;
+  }
 });
 
 type OneShotManualAction = 'previous' | 'current' | 'capture' | 'end';

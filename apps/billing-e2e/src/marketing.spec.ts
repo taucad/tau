@@ -128,6 +128,10 @@ describe('marketing copy in the app', () => {
         `${baseUrl}/legal/terms answers ${legal.status}`,
         await screenshot(page, 'mk-03-terms'),
       );
+      if (marketing.length === 0) {
+        evidence.push('/pricing/ shows no legal links in the browser');
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
       const foreign = [href, ...marketing].filter((link) => new URL(link, baseUrl).origin !== baseUrl);
       if (foreign.length > 0) {
         evidence.push(`${foreign.length} legal links leave ${baseUrl}: ${foreign.join(', ')}`);

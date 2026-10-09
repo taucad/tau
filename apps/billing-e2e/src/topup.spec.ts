@@ -153,9 +153,14 @@ const returnAnnouncement = async (page: Page, reads: readonly PaymentRead[]): Pr
   return toasts(page);
 };
 
+/** Whether billing was still waiting to hear how the payment ended, which the return page shows as processing. */
+const isAwaitingOutcome = (read: PaymentRead | undefined): boolean =>
+  read?.attention?.reason === 'provider_outcome_unknown' && read.attention.action === 'wait';
+
 /** A paid Checkout the return page reports as needing attention: what a customer reads after paying. */
 const attentionAfterPayment = (announced: readonly string[], reads: readonly PaymentRead[]): boolean =>
-  reads[0]?.state === 'attention_required' || announced.some((text) => text.startsWith('Your payment needs attention'));
+  (reads[0]?.state === 'attention_required' && !isAwaitingOutcome(reads[0])) ||
+  announced.some((text) => text.startsWith('Your payment needs attention'));
 
 describe('top-up in the browser', () => {
   let account: Account;

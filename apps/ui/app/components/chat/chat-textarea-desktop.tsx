@@ -594,7 +594,11 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
     if (!bar) {
       return undefined;
     }
+    let disposed = false;
     const fit = (): void => {
+      if (disposed) {
+        return;
+      }
       const name = bar.querySelector<HTMLElement>('[data-slot=trigger-model]');
       for (let hidden = 0; hidden <= collapseSteps.length; hidden += 1) {
         for (const [index, flag] of collapseSteps.entries()) {
@@ -619,6 +623,7 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
     };
     void refitWhenFontsLoad();
     return () => {
+      disposed = true;
       resize.disconnect();
       mutation.disconnect();
     };

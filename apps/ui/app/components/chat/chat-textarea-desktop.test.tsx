@@ -66,7 +66,7 @@ vi.mock('#components/chat/chat-agent-sheet.js', async (importOriginal) => ({
       data-slot='agent-trigger'
       data-reasoning={agentConfig.options.find((option) => option.category === 'thought_level')?.currentValue}
     >
-      Agent and model
+      <span data-slot='trigger-model'>Agent and model</span>
     </button>
   ),
 }));
@@ -470,5 +470,163 @@ describe('ChatTextareaDesktop draft rehydration', () => {
     await waitFor(() => {
       expect(submit).toHaveBeenCalledExactlyOnceWith('Existing draft. Build a bracket.');
     });
+  });
+});
+
+describe('composer bar measurement lifecycle', () => {
+  const observers = new Map<Element, { callback: ResizeObserverCallback; observer: ResizeObserver }>();
+  let width = 200;
+  let height = 40;
+  let requiredWidth = 260;
+  let reads: string[] = [];
+  let fonts: ReturnType<typeof Promise.withResolvers<FontFaceSet>>;
+  let originalFonts: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    width = 200;
+    height = 40;
+    requiredWidth = 260;
+    reads = [];
+    observers.clear();
+    originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+    fonts = Promise.withResolvers<FontFaceSet>();
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { ready: fonts.promise } });
+    vi.stubGlobal(
+      'ResizeObserver',
+      class implements ResizeObserver {
+        readonly #callback: ResizeObserverCallback;
+        public constructor(callback: ResizeObserverCallback) {
+          this.#callback = callback;
+        }
+        public observe(target: Element): void {
+          observers.set(target, { callback: this.#callback, observer: this });
+        }
+        public unobserve(target: Element): void {
+          observers.delete(target);
+        }
+        public disconnect(): void {
+          for (const [target, entry] of observers) {
+            if (entry.observer === this) {
+              observers.delete(target);
+            }
+          }
+        }
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset['slot'] !== 'trigger-model') {
+        return 0;
+      }
+      const bar = this.closest('[data-slot=composer-bar]')!;
+      reads.push(['kernel', 'mode', 'level'].filter((label) => bar.hasAttribute(`data-hide-${label}`)).join(','));
+      return requiredWidth;
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset['slot'] !== 'trigger-model') {
+        return 0;
+      }
+      const bar = this.closest('[data-slot=composer-bar]')!;
+      return width + ['kernel', 'mode', 'level'].filter((label) => bar.hasAttribute(`data-hide-${label}`)).length * 30;
+    });
+  });
+
+  afterEach(() => {
+    if (originalFonts) {
+      Object.defineProperty(document, 'fonts', originalFonts);
+    }
+    vi.unstubAllGlobals();
+  });
+
+  const notify = (bar: Element): void => {
+    const current = observers.get(bar);
+    if (!current) {
+      throw new Error('The actual composer observer is missing.');
+    }
+    current.callback(
+      [
+        {
+          target: bar,
+          contentRect: new DOMRectReadOnly(0, 0, width, height),
+          borderBoxSize: [],
+          contentBoxSize: [],
+          devicePixelContentBoxSize: [],
+        },
+      ],
+      current.observer,
+    );
+  };
+
+  it('should fit labels in order and restore them when widened', () => {
+    const { container } = renderBar();
+    const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]')!;
+    expect(reads.slice(0, 3)).toEqual(['', 'kernel', 'kernel,mode']);
+    act(() => {
+      notify(bar);
+    });
+    width = 400;
+    act(() => {
+      notify(bar);
+    });
+    expect(Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
+    expect(Object.hasOwn(bar.dataset, 'hideMode')).toBe(false);
+    expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(false);
+  });
+
+  it('should refit genuine height and live font changes even when width is unchanged', async () => {
+    const { container } = renderBar();
+    const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]')!;
+    act(() => {
+      notify(bar);
+    });
+    reads = [];
+    height = 60;
+    act(() => {
+      notify(bar);
+    });
+    expect(reads.length).toBeGreaterThan(0);
+    reads = [];
+    requiredWidth = 290;
+    await act(async () => {
+      fonts.resolve(document.fonts);
+      await fonts.promise;
+    });
+    expect(reads).toEqual(['', 'kernel', 'kernel,mode', 'kernel,mode,level']);
+    expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(true);
+  });
+
+  it.each(['model', 'kernel', 'mode'])('should refit a changed %s label without a resize', async (label) => {
+    execution.current = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
+    const { container } = renderBar({ acpSessionData: codexSession });
+    const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]')!;
+    act(() => {
+      notify(bar);
+    });
+    reads = [];
+    requiredWidth = 290;
+    const target =
+      label === 'model'
+        ? bar.querySelector('[data-slot=trigger-model]')
+        : label === 'kernel'
+          ? screen.getByRole('button', { name: 'Select kernel (Manifold)' })
+          : screen.getByRole('button', { name: 'Mode: Ask for approval' });
+    if (!target) {
+      throw new Error('The actual composer label is missing.');
+    }
+    await act(async () => {
+      target.append(document.createTextNode(' changed label'));
+    });
+    expect(reads.length).toBeGreaterThan(0);
+    expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(true);
+  });
+
+  it('should ignore late font completion after the actual bar unmounts', async () => {
+    const { unmount } = renderBar();
+    unmount();
+    reads = [];
+    await act(async () => {
+      fonts.resolve(document.fonts);
+      await fonts.promise;
+    });
+    expect(reads).toHaveLength(0);
   });
 });

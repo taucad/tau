@@ -23,6 +23,7 @@ vi.doMock('#hooks/use-keyboard.js', () => ({
 vi.doMock('#hooks/use-skills-catalog.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useSkillsCatalog: () => [],
+  useSkillsCatalogState: () => ({ commands: [], prompt: [], status: 'ready', retry: () => undefined }),
 }));
 vi.doMock('#hooks/use-cad-agent-config.js', () => ({
   useAgentHostPlacements: () => ({ targets: [], loading: false }),
@@ -191,3 +192,29 @@ for (const width of [320, 600]) {
     });
   }
 }
+
+describe('composer bar resize geometry', () => {
+  it('restores kernel text when widened and refits changed model text at the same width', async () => {
+    await page.viewport(320, 720);
+    const { container } = renderComposer({ enableKernelSelector: true });
+    const bar = container.querySelector<HTMLElement>('[data-slot=composer-bar]');
+    const model = container.querySelector<HTMLElement>('[data-slot=trigger-model]');
+    if (!bar || !model) {
+      throw new Error('The rendered composer bar is missing.');
+    }
+    // This suite substitutes the model control; these are real CSS/layout assertions,
+    // not acceptance of a product model/level selection gesture.
+    model.textContent = 'A sufficiently long current model name';
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(true);
+    await page.viewport(800, 720);
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
+    expect(Object.hasOwn(bar.dataset, 'hideMode')).toBe(false);
+    expect(Object.hasOwn(bar.dataset, 'hideLevel')).toBe(false);
+    expect(model.scrollWidth).toBeLessThanOrEqual(model.clientWidth);
+    await page.viewport(320, 720);
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(true);
+    model.textContent = 'Short';
+    await expect.poll(() => Object.hasOwn(bar.dataset, 'hideKernel')).toBe(false);
+    expect(model.scrollWidth).toBeLessThanOrEqual(model.clientWidth);
+  });
+});

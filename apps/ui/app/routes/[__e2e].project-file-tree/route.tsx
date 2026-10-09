@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
@@ -166,7 +167,7 @@ const createSeedProject = (mainFixture: string | undefined): Omit<ProjectManifes
 });
 
 /**
- * The worker that holds one OPFS file's exclusive access handle until the page goes.
+ * The worker that holds one OPFS file's exclusive access handle until release or page disposal.
  *
  * A held `FileSystemSyncAccessHandle` refuses every other writer with
  * `NoModificationAllowedError` while reads still succeed, which is what a second
@@ -175,6 +176,12 @@ const createSeedProject = (mainFixture: string | undefined): Omit<ProjectManifes
  */
 const holderSource = `onmessage = async ({ data }) => {
   try {
+    if (data.action === 'release') {
+      self.held.close();
+      self.held = undefined;
+      postMessage({ released: true });
+      return;
+    }
     const parts = data.split('/');
     const name = parts.pop();
     let directory = await navigator.storage.getDirectory();
@@ -186,8 +193,8 @@ const holderSource = `onmessage = async ({ data }) => {
   }
 };`;
 
-/** Holders stay referenced for the page's life, so a collected worker never lets its handle go. */
-const holders: Worker[] = [];
+/** Holders remain referenced until explicitly released or the page is disposed. */
+const holders = new Map<string, Worker>();
 
 /**
  * Hold one file of the open project (S19 in `revision-ux-visual-matrix.spec.ts`).
@@ -199,17 +206,181 @@ const holders: Worker[] = [];
  */
 const holdProjectFile = async (path: string): Promise<void> => {
   const projectSlug = location.pathname.split('/').pop() ?? '';
-  const holder = new Worker(URL.createObjectURL(new Blob([holderSource], { type: 'text/javascript' })));
-  holders.push(holder);
-  await new Promise<void>((resolve, reject) => {
-    holder.addEventListener('message', ({ data }: MessageEvent<{ held: boolean; error?: string }>) => {
-      if (data.held) {
-        resolve();
-      } else {
-        reject(new Error(`Could not hold ${projectSlug}/${path}: ${data.error ?? 'unknown'}`));
-      }
+  const key = `${projectSlug}/${path}`;
+  if (holders.has(key)) {
+    throw new Error(`The fixture already holds ${key}.`);
+  }
+  const url = URL.createObjectURL(new Blob([holderSource], { type: 'text/javascript' }));
+  const holder = new Worker(url);
+  URL.revokeObjectURL(url);
+  holders.set(key, holder);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      holder.addEventListener(
+        'message',
+        ({ data }: MessageEvent<{ held: boolean; error?: string }>) => {
+          if (data.held) {
+            resolve();
+          } else {
+            reject(new Error(`Could not hold ${key}: ${data.error ?? 'unknown'}`));
+          }
+        },
+        { once: true },
+      );
+      holder.postMessage(key);
     });
-    holder.postMessage(`${projectSlug}/${path}`);
+  } catch (error) {
+    holders.delete(key);
+    holder.terminate();
+    throw error;
+  }
+};
+
+/** Release the exact held project file after its worker acknowledges closing the actual OPFS handle. */
+const releaseProjectFile = async (path: string): Promise<void> => {
+  const projectSlug = location.pathname.split('/').pop() ?? '';
+  const key = `${projectSlug}/${path}`;
+  const holder = holders.get(key);
+  if (!holder) {
+    throw new Error(`The fixture does not hold ${key}.`);
+  }
+  await new Promise<void>((resolve, reject) => {
+    holder.addEventListener(
+      'message',
+      ({ data }: MessageEvent<{ released?: boolean; error?: string }>) => {
+        if (data.released) {
+          resolve();
+        } else {
+          reject(new Error(`Could not release ${key}: ${data.error ?? 'unknown'}`));
+        }
+      },
+      { once: true },
+    );
+    holder.postMessage({ action: 'release' });
+  });
+  holders.delete(key);
+  holder.terminate();
+};
+
+/** Opt-in fault controls keep actual provider watches and affect only listed exact paths. */
+const installObservationWatchControls = (paths: readonly string[]): void => {
+  if (
+    paths.length === 0 ||
+    paths.length > 8 ||
+    paths.some((path) => path.length > 256 || path.split('/').includes('..'))
+  ) {
+    throw new Error('Observation fixture requires one to eight bounded exact paths.');
+  }
+  const previous = globalThis as typeof globalThis & { __tauE2eObservationWatch?: { restore(): void } };
+  previous.__tauE2eObservationWatch?.restore();
+  const allowed = new Set(paths);
+  const original = WorkerChangeChannel.prototype.watchReady;
+  const modes = new Map<string, 'held' | 'rejected'>();
+  type CapturedWatch = { dispose(): void; release(): void };
+  const active = new Map<string, Set<CapturedWatch>>();
+  const registrations: Record<string, number> = {};
+  let disposed = 0;
+  const requirePath = (path: string): void => {
+    if (!allowed.has(path)) {
+      throw new Error(`Observation fixture does not own ${path}.`);
+    }
+  };
+  WorkerChangeChannel.prototype.watchReady = function (this: WorkerChangeChannel, request, handler) {
+    const watch = original.call(this, request, handler);
+    const path = request.paths.find((candidate) => allowed.has(candidate));
+    if (path === undefined) {
+      return watch;
+    }
+    const watches = active.get(path) ?? new Set<CapturedWatch>();
+    if (watches.size >= 32) {
+      watch.dispose();
+      throw new Error('Observation fixture watch bound exceeded.');
+    }
+    active.set(path, watches);
+    registrations[path] = (registrations[path] ?? 0) + 1;
+    const mode = modes.get(path);
+    const gate = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    if (mode !== 'held') {
+      gate.resolve();
+    }
+    let live = true;
+    const captured = {
+      release: () => {
+        gate.resolve();
+      },
+      dispose: () => {
+        if (live) {
+          live = false;
+          watches.delete(captured);
+          watch.dispose();
+          gate.resolve();
+          closed.resolve();
+          disposed++;
+        }
+      },
+    };
+    watches.add(captured);
+    const forwardClosure = async (): Promise<void> => {
+      try {
+        await watch.closed;
+      } catch {
+        // Rejected provider closure ends the captured watch as well.
+      }
+      captured.dispose();
+    };
+    void forwardClosure();
+    return {
+      ready: (async (): Promise<void> => {
+        await Promise.all([watch.ready, gate.promise]);
+        if (mode === 'rejected') {
+          throw new Error(`Observation fixture rejected ${path}.`);
+        }
+      })(),
+      closed: closed.promise,
+      dispose: captured.dispose,
+    };
+  };
+  Object.assign(globalThis, {
+    __tauE2eObservationWatch: {
+      close: (path: string): number => {
+        requirePath(path);
+        const watches = [...(active.get(path) ?? [])];
+        for (const watch of watches) {
+          watch.dispose();
+        }
+        return watches.length;
+      },
+      hold: (path: string): void => {
+        requirePath(path);
+        modes.set(path, 'held');
+      },
+      reject: (path: string): void => {
+        requirePath(path);
+        modes.set(path, 'rejected');
+      },
+      release: (path: string): void => {
+        requirePath(path);
+        modes.delete(path);
+        for (const watch of active.get(path) ?? []) {
+          watch.release();
+        }
+      },
+      evidence: () => ({
+        registrations: { ...registrations },
+        disposed,
+        active: [...active].map(([path, watches]) => ({ path, watches: watches.size })),
+      }),
+      restore: (): void => {
+        WorkerChangeChannel.prototype.watchReady = original;
+        for (const watches of active.values()) {
+          for (const watch of watches) {
+            watch.dispose();
+          }
+        }
+        modes.clear();
+      },
+    },
   });
 };
 
@@ -272,8 +443,15 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
       return { kind: 'workspace', workspaceId: connected.workspace.workspaceId };
     };
 
+    if (searchParameters.get('observation') === '1') {
+      installObservationWatchControls(searchParameters.getAll('watch'));
+    }
+
     /* S19's fault, reachable after the seed navigates into the project. */
-    Object.assign(globalThis, { __tauE2eHoldProjectFile: holdProjectFile });
+    Object.assign(globalThis, {
+      __tauE2eHoldProjectFile: holdProjectFile,
+      __tauE2eReleaseProjectFile: releaseProjectFile,
+    });
 
     const seed = async (): Promise<void> => {
       try {

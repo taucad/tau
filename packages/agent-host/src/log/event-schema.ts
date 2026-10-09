@@ -375,11 +375,16 @@ const sharedEventSchemas = [
 ] as const;
 const knownLogEventSchema = z.union([...sharedEventSchemas, lifecycleEventSchema, committedHistoryEventSchema]);
 
+// Canonical reading normalizes anchor extras; compact transport must never reshape accepted input.
+const projectionCompactionTraceSchema = compactionTraceSchema.extend({
+  anchor: compactionTraceSchema.shape.anchor.unwrap().strict().optional(),
+});
+
 /** The compact vocabulary shares the canonical field validators while omitting execution-only data. @internal */
 export const projectionEffectSchemas = [
   z.object(sharedEventShapes.messageAppended),
-  z.object(sharedEventShapes.messageEnvelopeReplaced),
-  z.object(sharedEventShapes.historyCompacted),
+  z.object({ ...sharedEventShapes.messageEnvelopeReplaced, details: projectionCompactionTraceSchema.optional() }),
+  z.object({ ...sharedEventShapes.historyCompacted, details: projectionCompactionTraceSchema.optional() }),
   z.object(sharedEventShapes.historyRewound),
   z.object(sharedEventShapes.snapshotContextRefreshed).pick({ type: true }),
   z.object(sharedEventShapes.safeguardRecordedNudge),

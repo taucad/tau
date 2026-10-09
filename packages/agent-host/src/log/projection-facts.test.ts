@@ -61,6 +61,38 @@ describe('owned compact fact mapping', () => {
     ).toBe(false);
   });
 
+  it.each([
+    { type: 'message.envelope-replaced', messageId: 'm', replacement: message },
+    { type: 'history.compacted', evictedMessageIds: ['old'], summary: message },
+  ])('keeps canonical anchor normalization and refuses reshaping a compact $type anchor', (body) => {
+    const details = {
+      lane: 'start_of_turn',
+      tier: 'summarization',
+      tokensBefore: 10,
+      tokensAfter: 5,
+      cleared: 0,
+      evicted: 1,
+      summarizerAttempts: 1,
+      summarizerUsage: null,
+      futureDetail: 'carried',
+      anchor: { messageId: 'm', tokens: 1, futureAnchor: 'stripped by canonical reader' },
+    };
+    const classified = classifyLogRow({ ...envelope, ...body, details });
+    expect(classified.class).toBe('known');
+    if (classified.class !== 'known') {
+      throw new Error('Expected a known compaction row');
+    }
+    const fact = projectLogRow({ event: classified.event, opaque: false });
+    expect(fact).toMatchObject({
+      effect: { details: { futureDetail: 'carried', anchor: { messageId: 'm', tokens: 1 } } },
+    });
+    expect(projectionFactSchema.parse(fact)).toEqual(fact);
+    if (fact.classification !== 'known') {
+      throw new Error('Expected a known compaction fact');
+    }
+    expect(projectionFactSchema.safeParse({ ...fact, effect: { ...fact.effect, details } }).success).toBe(false);
+  });
+
   it('covers every declared effect variant, including repeated type variants', () => {
     expect(bodies.map((body) => body.type)).toEqual(projectionEffectSchemas.map((schema) => schema.shape.type.value));
   });

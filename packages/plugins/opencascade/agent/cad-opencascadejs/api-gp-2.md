@@ -1,6 +1,60 @@
 # libcascade — gp (2)
 
-13 top-level symbols. Signatures are verbatim typescript.
+14 top-level symbols. Signatures are verbatim typescript.
+
+gp_EulerSequence: typeof gp_EulerSequence[keyof typeof gp_EulerSequence]
+
+  readonly gp_EulerAngles: 'gp_EulerAngles'
+
+  readonly gp_YawPitchRoll: 'gp_YawPitchRoll'
+
+  readonly gp_Extrinsic_XYZ: 'gp_Extrinsic_XYZ'
+
+  readonly gp_Extrinsic_XZY: 'gp_Extrinsic_XZY'
+
+  readonly gp_Extrinsic_YZX: 'gp_Extrinsic_YZX'
+
+  readonly gp_Extrinsic_YXZ: 'gp_Extrinsic_YXZ'
+
+  readonly gp_Extrinsic_ZXY: 'gp_Extrinsic_ZXY'
+
+  readonly gp_Extrinsic_ZYX: 'gp_Extrinsic_ZYX'
+
+  readonly gp_Intrinsic_XYZ: 'gp_Intrinsic_XYZ'
+
+  readonly gp_Intrinsic_XZY: 'gp_Intrinsic_XZY'
+
+  readonly gp_Intrinsic_YZX: 'gp_Intrinsic_YZX'
+
+  readonly gp_Intrinsic_YXZ: 'gp_Intrinsic_YXZ'
+
+  readonly gp_Intrinsic_ZXY: 'gp_Intrinsic_ZXY'
+
+  readonly gp_Intrinsic_ZYX: 'gp_Intrinsic_ZYX'
+
+  readonly gp_Extrinsic_XYX: 'gp_Extrinsic_XYX'
+
+  readonly gp_Extrinsic_XZX: 'gp_Extrinsic_XZX'
+
+  readonly gp_Extrinsic_YZY: 'gp_Extrinsic_YZY'
+
+  readonly gp_Extrinsic_YXY: 'gp_Extrinsic_YXY'
+
+  readonly gp_Extrinsic_ZYZ: 'gp_Extrinsic_ZYZ'
+
+  readonly gp_Extrinsic_ZXZ: 'gp_Extrinsic_ZXZ'
+
+  readonly gp_Intrinsic_XYX: 'gp_Intrinsic_XYX'
+
+  readonly gp_Intrinsic_XZX: 'gp_Intrinsic_XZX'
+
+  readonly gp_Intrinsic_YZY: 'gp_Intrinsic_YZY'
+
+  readonly gp_Intrinsic_YXY: 'gp_Intrinsic_YXY'
+
+  readonly gp_Intrinsic_ZXZ: 'gp_Intrinsic_ZXZ'
+
+  readonly gp_Intrinsic_ZYZ: 'gp_Intrinsic_ZYZ'
 
 gp_GTrsf: declare class gp_GTrsf
 

@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
 import { runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
-import { runBillingBudgetCommand } from '#api/billing/billing-budget.command.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
@@ -18,12 +17,15 @@ import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingRecoveryScheduler } from '#api/billing/billing-recovery.scheduler.js';
 import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
-import {
-  BillingCashReconciliationService,
-  cashBlockingFinancialCaseKinds,
-} from '#api/billing/billing-cash-reconciliation.service.js';
+import { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
 import { BillingPurchaseReconciliationService } from '#api/billing/billing-purchase-reconciliation.service.js';
-import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
+import { BillingRoutePauseService, parseRoutePauseArguments } from '#api/billing/billing-route-pause.service.js';
+import {
+  createSupplierLegacyStore,
+  deleteSupplierLegacy,
+  exportSupplierLegacy,
+  parseSupplierLegacyArguments,
+} from '#api/billing/billing-supplier-legacy-export.js';
 import { registerBillableModelMeterContracts } from '#api/billing/billable-model-qualification.js';
 import { runBillingPolicyCommand, runBillingPolicySyncCommand } from '#api/billing/billing-policy.command.js';
 import { installBillingProtections } from '#database/billing-protections.js';
@@ -32,6 +34,7 @@ import * as schema from '#database/schema.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { EmailService } from '#email/email.service.js';
+import { createOperationsGaugeSource, recordOpenCases, runHourlyOperationsJobs } from '#billing-command.operations.js';
 import type { DatabaseService } from '#database/database.service.js';
 
 /**
@@ -94,11 +97,17 @@ async function main(): Promise<void> {
     'recover-llm-worker': 'tau_billing_runtime',
     'reconcile-journal': 'tau_billing_runtime',
   };
+  // The login (owner) identity: DDL, the tariff bootstrap, and the operator's route and legacy-row commands.
+  const ownerCommands = new Set([
+    'protect',
+    'migrate',
+    'sync',
+    'pause-route',
+    'resume-route',
+    'export-supplier-legacy',
+  ]);
   const command = args[0] ?? '';
-  const role =
-    command === 'protect' || command === 'migrate' || command === 'provision-budgets' || command === 'sync'
-      ? undefined
-      : (runtimeRoles[command] ?? 'tau_billing_policy_publisher');
+  const role = ownerCommands.has(command) ? undefined : (runtimeRoles[command] ?? 'tau_billing_policy_publisher');
   const client = postgres(databaseUrl, {
     max: 1,
     prepare: false,
@@ -197,14 +206,50 @@ async function main(): Promise<void> {
         break;
       }
       case 'sync': {
-        // `sync` seeds development budgets and publishes, so it needs the owner identity and the protections.
+        // `sync` publishes the derived tariff, so it needs the owner identity and the protections.
         await installBillingProtections(client);
         console.log(await syncTariff());
         break;
       }
-      case 'provision-budgets': {
-        const result = await runBillingBudgetCommand(client, args, environment);
-        console.log(JSON.stringify(result));
+      case 'pause-route':
+      case 'resume-route': {
+        // Owner-only: the runtime role can read a pause but never write or lift one.
+        const { command: action, request } = parseRoutePauseArguments(args);
+        const pauses = new BillingRoutePauseService({ database: drizzle(client, { schema }) });
+        const pause = action === 'pause-route' ? await pauses.pauseRoute(request) : await pauses.resumeRoute(request);
+        console.log(
+          JSON.stringify({
+            event: action === 'pause-route' ? 'billing.route_paused' : 'billing.route_resumed',
+            ...pause,
+          }),
+        );
+        break;
+      }
+      case 'export-supplier-legacy': {
+        const options = parseSupplierLegacyArguments(args);
+        const store = createSupplierLegacyStore(client, options.environment);
+        const target = { store, environment: options.environment, outDirectory: options.outDirectory, now: new Date() };
+        if (options.delete) {
+          const deletion = await deleteSupplierLegacy(target);
+          console.log(
+            JSON.stringify({
+              event: 'billing.supplier_legacy_deleted',
+              environment,
+              outDirectory: options.outDirectory,
+              ...deletion,
+            }),
+          );
+          break;
+        }
+        const manifest = await exportSupplierLegacy(target);
+        console.log(
+          JSON.stringify({
+            event: 'billing.supplier_legacy_exported',
+            environment,
+            outDirectory: options.outDirectory,
+            files: manifest.files,
+          }),
+        );
         break;
       }
       case 'recover-payments': {
@@ -472,7 +517,7 @@ async function main(): Promise<void> {
         const journal = new BillingJournalReconciliationService(database, caseMetrics, sourceConfig);
         const cashScans = new BillingCashReconciliationService(database, sourceStripe, sourceConfig);
         const purchaseScans = new BillingPurchaseReconciliationService(database, sourceStripe, sourceConfig);
-        const supplier = new BillingSupplierReconciliationService(database, sourceConfig);
+        const gauges = createOperationsGaugeSource(client, billingEnvironment);
         // Each scheduled job owns its failure: one provider or data fault must not stop the others.
         let passFailed = false;
         const runJob = async (event: string, run: () => Promise<unknown>): Promise<void> => {
@@ -509,7 +554,6 @@ async function main(): Promise<void> {
         let lastSweepAt = Number.NEGATIVE_INFINITY;
         // Independent source reconciliation is hourly; its window is the previous complete UTC day.
         const scanIntervalMilliseconds = 60 * 60_000;
-        const dayMilliseconds = 24 * 60 * 60_000;
         // Due at boot: a worker restarted more often than hourly must still scan. A window whose cash scan
         // already completed costs one row read, so restarts do not repeat provider I/O.
         let lastScanAt = Number.NEGATIVE_INFINITY;
@@ -593,95 +637,15 @@ async function main(): Promise<void> {
             );
             if (Date.now() - lastScanAt >= scanIntervalMilliseconds) {
               lastScanAt = Date.now();
-              // Refused calls recorded as cost-unknown before the collector kept their kind: finalized
-              // at zero first, so the sweep closes their route-pausing cases instead of reopening them.
               // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
-              await runJob('billing.rejected_supplier_repair', async () =>
-                ledger.finalizeRejectedSupplierLiabilities({ environment: billingEnvironment, limit: 100 }),
-              );
-              // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
-              await runJob('billing.supplier_sweep', async () =>
-                supplier.sweepSupplierUsage({ pageSize: 100, unresolvedMaximumAge: dayMilliseconds }),
-              );
-              // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
-              await runJob('billing.source_reconciliation', async () => {
-                const windowEnd = new Date(Math.floor(Date.now() / dayMilliseconds) * dayMilliseconds);
-                const windowStart = new Date(windowEnd.getTime() - dayMilliseconds);
-                // The scan row is idempotent per window, so an hourly retry resumes the same durable cursors.
-                const scanId = await cashScans.createScan({
-                  environment: billingEnvironment,
-                  currency: 'usd',
-                  windowStart,
-                  windowEnd,
-                  lookbackStart: new Date(windowStart.getTime() - dayMilliseconds),
-                });
-                // The purchase comparison is stateless per pass, so it runs even when the cash scan is done or busy.
-                let cash: string;
-                try {
-                  if (await cashScans.isComplete(scanId)) {
-                    cash = 'complete';
-                  } else {
-                    const scanned = await cashScans.runScan({ scanId, maximumPagesPerStream: 20 });
-                    cash = scanned.status;
-                  }
-                } catch (error) {
-                  cash = error instanceof Error ? `failed:${error.message}` : 'failed';
-                }
-                // A paid obligation with no grant (for example a lost success webhook) holds the customer's
-                // money without credit; the per-kind gauge is what the alert watches. It reports the case
-                // table, so it is recorded even when a Stripe scan fails: that is when the alert matters most.
-                const recordOpenCases = async (): Promise<void> => {
-                  const openCases = await client<Array<{ kind: string; open: number }>>`
-                    SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
-                    WHERE environment = ${billingEnvironment} AND state IN ('open', 'attention')
-                    GROUP BY kind`;
-                  for (const kind of new Set([
-                    ...cashBlockingFinancialCaseKinds,
-                    ...openCases.map((row) => row.kind),
-                  ])) {
-                    caseMetrics.billingOpenFinancialCases.record(
-                      openCases.find((row) => row.kind === kind)?.open ?? 0,
-                      {
-                        kind,
-                      },
-                    );
-                  }
-                  const unfulfilled =
-                    openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
-                  if (unfulfilled > 0) {
-                    console.error(
-                      JSON.stringify({
-                        event: 'billing.alert',
-                        environment,
-                        kind: 'unfulfilled_purchase_obligation',
-                        open: unfulfilled,
-                      }),
-                    );
-                  }
-                };
-                let purchase: Awaited<ReturnType<typeof purchaseScans.runScan>>;
-                try {
-                  purchase = await purchaseScans.runScan({
-                    scanId,
-                    maximumObligations: 100,
-                    maximumGrants: 100,
-                    maximumSubscriptions: 100,
-                  });
-                } catch (error) {
-                  // The gauge still records when the scan fails, but its own failure must not replace the
-                  // scan's error, which is the diagnosis the operator needs.
-                  await recordOpenCases().catch((gaugeError: unknown) => {
-                    console.error(
-                      JSON.stringify({ event: 'billing.case_gauge_failed', environment, error: String(gaugeError) }),
-                    );
-                  });
-                  throw error;
-                }
-                await recordOpenCases();
-                if (cash !== 'complete' && cash !== 'incomplete') {
-                  throw new Error(`cash scan ${cash}; purchases ${purchase.status}`);
-                }
-                return { scanId, cash, purchases: purchase.status };
+              await runHourlyOperationsJobs({
+                runJob,
+                cashScans,
+                purchaseScans,
+                recordOpenCases: async () =>
+                  recordOpenCases({ source: gauges, metrics: caseMetrics, environment: billingEnvironment }),
+                environment: billingEnvironment,
+                now: lastScanAt,
               });
             }
             // F-10: one count per completed pass is the heartbeat a stalled or thrashing worker stops sending.

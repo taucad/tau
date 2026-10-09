@@ -1,6 +1,32 @@
 # libcascade — Extrema (2)
 
-23 top-level symbols. Signatures are verbatim typescript.
+24 top-level symbols. Signatures are verbatim typescript.
+
+Extrema_GenLocateExtPS: declare class Extrema_GenLocateExtPS
+
+  // Extrema_GenLocateExtPS.constructor (constructor)
+  constructor(theS: Adaptor3d_Surface, theTolU?: number, theTolV?: number);
+
+  // Extrema_GenLocateExtPS.Perform (method)
+  Perform(theP: gp_Pnt, theU0: number, theV0: number, isDistanceCriteria?: boolean): void;
+
+  // Extrema_GenLocateExtPS.IsDone (method)
+  IsDone(): boolean;
+
+  // Extrema_GenLocateExtPS.SquareDistance (method)
+  SquareDistance(): number;
+
+  // Extrema_GenLocateExtPS.Point (method)
+  Point(): Extrema_POnSurf;
+
+  // Extrema_GenLocateExtPS.IsMinDist (method)
+  static IsMinDist(theP: gp_Pnt, theS: Adaptor3d_Surface, theU0: number, theV0: number): boolean;
+
+  // Extrema_GenLocateExtPS.delete (method)
+  delete(): void;
+
+  // Extrema_GenLocateExtPS.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 Extrema_GenLocateExtSS: declare class Extrema_GenLocateExtSS
 

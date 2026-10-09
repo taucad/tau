@@ -24,7 +24,7 @@ import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
  * ```
  *
  * Required env: `BILLING_ENVIRONMENT=development` and `DATABASE_URL` (`BILLING_DATABASE_URL` wins when set, so
- * funding lands in the same database as the tariff). Bootstrap the tariff, the supplier budgets and the
+ * funding lands in the same database as the tariff). Bootstrap the tariff and the
  * billing protections this path depends on first with the `sync` billing command (`pnpm db:migrate`).
  *
  * `fund` grants by a paid cause through the same fixtures the billing foundation

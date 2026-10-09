@@ -1,6 +1,6 @@
 # libcascade — Interface
 
-30 top-level symbols. Signatures are verbatim typescript.
+29 top-level symbols. Signatures are verbatim typescript.
 
 Interface_BitMap: declare class Interface_BitMap
 
@@ -334,6 +334,18 @@ Interface_CheckIterator: declare class Interface_CheckIterator
 
 Interface_CheckStatus: typeof Interface_CheckStatus[keyof typeof Interface_CheckStatus]
 
+  readonly Interface_CheckOK: 'Interface_CheckOK'
+
+  readonly Interface_CheckWarning: 'Interface_CheckWarning'
+
+  readonly Interface_CheckFail: 'Interface_CheckFail'
+
+  readonly Interface_CheckAny: 'Interface_CheckAny'
+
+  readonly Interface_CheckMessage: 'Interface_CheckMessage'
+
+  readonly Interface_CheckNoFail: 'Interface_CheckNoFail'
+
 Interface_CheckTool: declare class Interface_CheckTool
 
   // Interface_CheckTool.constructor (constructor)
@@ -466,6 +478,20 @@ Interface_CopyTool: declare class Interface_CopyTool
   [Symbol.dispose](): void;
 
 Interface_DataState: typeof Interface_DataState[keyof typeof Interface_DataState]
+
+  readonly Interface_StateOK: 'Interface_StateOK'
+
+  readonly Interface_LoadWarning: 'Interface_LoadWarning'
+
+  readonly Interface_LoadFail: 'Interface_LoadFail'
+
+  readonly Interface_DataWarning: 'Interface_DataWarning'
+
+  readonly Interface_DataFail: 'Interface_DataFail'
+
+  readonly Interface_StateUnloaded: 'Interface_StateUnloaded'
+
+  readonly Interface_StateUnknown: 'Interface_StateUnknown'
 
 Interface_EntityCluster: declare class Interface_EntityCluster extends Standard_Transient
 
@@ -1277,33 +1303,4 @@ Interface_MSG: declare class Interface_MSG
   delete(): void;
 
   // Interface_MSG.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-Interface_NodeOfGeneralLib: declare class Interface_NodeOfGeneralLib extends Standard_Transient
-
-  // Interface_NodeOfGeneralLib.constructor (constructor)
-  constructor();
-
-  // Interface_NodeOfGeneralLib.AddNode (method)
-  AddNode(anode: Interface_GlobalNodeOfGeneralLib): void;
-
-  // Interface_NodeOfGeneralLib.Protocol (method)
-  Protocol(): Interface_Protocol;
-
-  // Interface_NodeOfGeneralLib.Next (method)
-  Next(): Interface_NodeOfGeneralLib;
-
-  // Interface_NodeOfGeneralLib.get_type_name (method)
-  static get_type_name(): string;
-
-  // Interface_NodeOfGeneralLib.get_type_descriptor (method)
-  static get_type_descriptor(): Standard_Type;
-
-  // Interface_NodeOfGeneralLib.DynamicType (method)
-  DynamicType(): Standard_Type;
-
-  // Interface_NodeOfGeneralLib.delete (method)
-  delete(): void;
-
-  // Interface_NodeOfGeneralLib.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

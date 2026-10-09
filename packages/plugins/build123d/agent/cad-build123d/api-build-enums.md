@@ -2,9 +2,10 @@
 
 29 top-level symbols. Signatures are verbatim python.
 
-// Category: build_enums
-// Align object about Axis
-Align
+# Category: build_enums
+# Align object about Axis
+# build123d.build_enums.Align (enum)
+class Align(Enum)
 
   MIN
 
@@ -14,17 +15,19 @@ Align
 
   NONE
 
-// Category: build_enums
-// Angular rotation direction
-AngularDirection
+# Category: build_enums
+# Angular rotation direction
+# build123d.build_enums.AngularDirection (enum)
+class AngularDirection(Enum)
 
   CLOCKWISE
 
   COUNTER_CLOCKWISE
 
-// Category: build_enums
-// DXF export spline approximation strategy
-ApproxOption
+# Category: build_enums
+# DXF export spline approximation strategy
+# build123d.build_enums.ApproxOption (enum)
+class ApproxOption(Enum)
 
   ARC
 
@@ -32,9 +35,10 @@ ApproxOption
 
   SPLINE
 
-// Category: build_enums
-// Center Options
-CenterOf
+# Category: build_enums
+# Center Options
+# build123d.build_enums.CenterOf (enum)
+class CenterOf(Enum)
 
   GEOMETRY
 
@@ -42,10 +46,11 @@ CenterOf
 
   BOUNDING_BOX
 
-// Category: build_enums
-// Continuity level for evaluating geometric connections
-// Remarks: Used to determine how smoothly adjacent geometry joins together, such as at shared vertices between edges or shared edges between faces. Levels: - C0 (G0): Positional continuity—elements meet at a point but may have sharp angles. - C1 (G1): Tangent continuity—elements have the same tangent direction at the junction. - C2 (G2): Curvature continuity—elements have matching curvature at the junction. These levels correspond to common CAD definitions and are compatible with OCCT's GeomAbs_Shape.
-ContinuityLevel
+# Category: build_enums
+# Continuity level for evaluating geometric connections
+# Remarks: Used to determine how smoothly adjacent geometry joins together, such as at shared vertices between edges or shared edges between faces. Levels: - C0 (G0): Positional continuity—elements meet at a point but may have sharp angles. - C1 (G1): Tangent continuity—elements have the same tangent direction at the junction. - C2 (G2): Curvature continuity—elements have matching curvature at the junction. These levels correspond to common CAD definitions and are compatible with OCCT's GeomAbs_Shape.
+# build123d.build_enums.ContinuityLevel (enum)
+class ContinuityLevel(IntEnum)
 
   C0
 
@@ -53,9 +58,10 @@ ContinuityLevel
 
   C2
 
-// Category: build_enums
-// Order to apply extrinsic rotations by axis
-Extrinsic
+# Category: build_enums
+# Order to apply extrinsic rotations by axis
+# build123d.build_enums.Extrinsic (enum)
+class Extrinsic(Enum)
 
   XYZ
 
@@ -81,9 +87,10 @@ Extrinsic
 
   ZYZ
 
-// Category: build_enums
-// Text Font Styles
-FontStyle
+# Category: build_enums
+# Text Font Styles
+# build123d.build_enums.FontStyle (enum)
+class FontStyle(Enum)
 
   REGULAR
 
@@ -93,17 +100,19 @@ FontStyle
 
   BOLDITALIC
 
-// Category: build_enums
-// Moving frame calculation method
-FrameMethod
+# Category: build_enums
+# Moving frame calculation method
+# build123d.build_enums.FrameMethod (enum)
+class FrameMethod(Enum)
 
   FRENET
 
   CORRECTED
 
-// Category: build_enums
-// CAD geometry object type
-GeomType
+# Category: build_enums
+# CAD geometry object type
+# build123d.build_enums.GeomType (enum)
+class GeomType(Enum)
 
   PLANE
 
@@ -137,9 +146,10 @@ GeomType
 
   OTHER
 
-// Category: build_enums
-// Arrow head types
-HeadType
+# Category: build_enums
+# Arrow head types
+# build123d.build_enums.HeadType (enum)
+class HeadType(Enum)
 
   STRAIGHT
 
@@ -147,9 +157,10 @@ HeadType
 
   FILLETED
 
-// Category: build_enums
-// Order to apply intrinsic rotations by axis
-Intrinsic
+# Category: build_enums
+# Order to apply intrinsic rotations by axis
+# build123d.build_enums.Intrinsic (enum)
+class Intrinsic(Enum)
 
   XYZ
 
@@ -175,9 +186,10 @@ Intrinsic
 
   ZYZ
 
-// Category: build_enums
-// Split options
-Keep
+# Category: build_enums
+# Split options
+# build123d.build_enums.Keep (enum)
+class Keep(Enum)
 
   ALL
 
@@ -191,9 +203,10 @@ Keep
 
   TOP
 
-// Category: build_enums
-// Offset corner transition
-Kind
+# Category: build_enums
+# Offset corner transition
+# build123d.build_enums.Kind (enum)
+class Kind(Enum)
 
   ARC
 
@@ -201,9 +214,10 @@ Kind
 
   TANGENT
 
-// Category: build_enums
-// Method of specifying length along PolarLine
-LengthMode
+# Category: build_enums
+# Method of specifying length along PolarLine
+# build123d.build_enums.LengthMode (enum)
+class LengthMode(Enum)
 
   DIAGONAL
 
@@ -211,9 +225,10 @@ LengthMode
 
   VERTICAL
 
-// Category: build_enums
-// 3MF mesh types typically for 3D printing
-MeshType
+# Category: build_enums
+# 3MF mesh types typically for 3D printing
+# build123d.build_enums.MeshType (enum)
+class MeshType(Enum)
 
   OTHER
 
@@ -223,9 +238,10 @@ MeshType
 
   SOLIDSUPPORT
 
-// Category: build_enums
-// Combination Mode
-Mode
+# Category: build_enums
+# Combination Mode
+# build123d.build_enums.Mode (enum)
+class Mode(Enum)
 
   ADD
 
@@ -237,17 +253,19 @@ Mode
 
   PRIVATE
 
-// Category: build_enums
-// Methods for displaying numbers
-NumberDisplay
+# Category: build_enums
+# Methods for displaying numbers
+# build123d.build_enums.NumberDisplay (enum)
+class NumberDisplay(Enum)
 
   DECIMAL
 
   FRACTION
 
-// Category: build_enums
-// Align object about Axis
-PageSize
+# Category: build_enums
+# Align object about Axis
+# build123d.build_enums.PageSize (enum)
+class PageSize(Enum)
 
   A0
 
@@ -277,18 +295,20 @@ PageSize
 
   LEDGER
 
-// Category: build_enums
-// Position along curve mode
-PositionMode
+# Category: build_enums
+# Position along curve mode
+# build123d.build_enums.PositionMode (enum)
+class PositionMode(Enum)
 
   LENGTH
 
   PARAMETER
 
-// Category: build_enums
-// When you export a model to a STEP file, the precision of the geometric data
-// Remarks: (such as the coordinates of points, the definitions of curves and surfaces, etc.) can significantly impact the file size and the fidelity of the model when it is imported into another CAD system. Higher precision means that the geometric data is described with more detail, which can improve the accuracy of the model in the target system but can also increase the file size.
-PrecisionMode
+# Category: build_enums
+# When you export a model to a STEP file, the precision of the geometric data
+# Remarks: (such as the coordinates of points, the definitions of curves and surfaces, etc.) can significantly impact the file size and the fidelity of the model when it is imported into another CAD system. Higher precision means that the geometric data is described with more detail, which can improve the accuracy of the model in the target system but can also increase the file size.
+# build123d.build_enums.PrecisionMode (enum)
+class PrecisionMode(Enum)
 
   SESSION
 
@@ -298,9 +318,10 @@ PrecisionMode
 
   LEAST
 
-// Category: build_enums
-// Sagitta selection
-Sagitta
+# Category: build_enums
+# Sagitta selection
+# build123d.build_enums.Sagitta (enum)
+class Sagitta(Enum)
 
   SHORT
 
@@ -308,9 +329,10 @@ Sagitta
 
   BOTH
 
-// Category: build_enums
-// Selector scope - all, last operation or new objects
-Select
+# Category: build_enums
+# Selector scope - all, last operation or new objects
+# build123d.build_enums.Select (enum)
+class Select(Enum)
 
   ALL
 
@@ -318,9 +340,10 @@ Select
 
   NEW
 
-// Category: build_enums
-// 2D Offset types
-Side
+# Category: build_enums
+# 2D Offset types
+# build123d.build_enums.Side (enum)
+class Side(Enum)
 
   LEFT
 
@@ -328,9 +351,10 @@ Side
 
   BOTH
 
-// Category: build_enums
-// Sorting criteria
-SortBy
+# Category: build_enums
+# Sorting criteria
+# build123d.build_enums.SortBy (enum)
+class SortBy(Enum)
 
   LENGTH
 
@@ -342,9 +366,10 @@ SortBy
 
   DISTANCE
 
-// Category: build_enums
-// Tangency constraint for solvers edge selection
-Tangency
+# Category: build_enums
+# Tangency constraint for solvers edge selection
+# build123d.build_enums.Tangency (enum)
+class Tangency(Enum)
 
   UNQUALIFIED
 
@@ -354,9 +379,10 @@ Tangency
 
   OUTSIDE
 
-// Category: build_enums
-// Text Alignment
-TextAlign
+# Category: build_enums
+# Text Alignment
+# build123d.build_enums.TextAlign (enum)
+class TextAlign(Enum)
 
   BOTTOM
 
@@ -370,9 +396,10 @@ TextAlign
 
   TOPFIRSTLINE
 
-// Category: build_enums
-// Sweep discontinuity handling option
-Transition
+# Category: build_enums
+# Sweep discontinuity handling option
+# build123d.build_enums.Transition (enum)
+class Transition(Enum)
 
   RIGHT
 
@@ -380,9 +407,10 @@ Transition
 
   TRANSFORMED
 
-// Category: build_enums
-// Standard Units
-Unit
+# Category: build_enums
+# Standard Units
+# build123d.build_enums.Unit (enum)
+class Unit(Enum)
 
   MC
 
@@ -396,9 +424,10 @@ Unit
 
   FT
 
-// Category: build_enums
-// Extrude limit
-Until
+# Category: build_enums
+# Extrude limit
+# build123d.build_enums.Until (enum)
+class Until(Enum)
 
   NEXT
 

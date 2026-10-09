@@ -2,6 +2,89 @@
 
 14 top-level symbols. Signatures are verbatim typescript.
 
+NCollection_Array1_BRepGraph_ShellRefId: declare class NCollection_Array1_BRepGraph_ShellRefId
+
+  // NCollection_Array1_BRepGraph_ShellRefId.constructor (constructor)
+  constructor();
+  constructor(theSize: number);
+  constructor(theOther: NCollection_Array1_BRepGraph_ShellRefId);
+  constructor(theLower: number, theUpper: number);
+  constructor(theBegin: BRepGraph_ShellRefId, theSize: number, theUseBuffer: boolean);
+  constructor(theBegin: BRepGraph_ShellRefId, theLower: number, theUpper: number, theUseBuffer?: boolean);
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Init (method)
+  Init(theValue: BRepGraph_ShellRefId): void;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Size (method)
+  Size(): number;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Length (method)
+  Length(): number;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.IsEmpty (method)
+  IsEmpty(): boolean;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Lower (method)
+  Lower(): number;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Upper (method)
+  Upper(): number;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Assign (method)
+  Assign(theOther: NCollection_Array1_BRepGraph_ShellRefId): NCollection_Array1_BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.CopyValues (method)
+  CopyValues(theOther: NCollection_Array1_BRepGraph_ShellRefId): NCollection_Array1_BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Move (method)
+  Move(theOther: NCollection_Array1_BRepGraph_ShellRefId): NCollection_Array1_BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.First (method)
+  First(): BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.ChangeFirst (method)
+  ChangeFirst(): BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Last (method)
+  Last(): BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.ChangeLast (method)
+  ChangeLast(): BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Value (method)
+  Value(theIndex: number): BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.ChangeValue (method)
+  ChangeValue(theIndex: number): BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.At (method)
+  At(theIndex: number): BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.ChangeAt (method)
+  ChangeAt(theIndex: number): BRepGraph_ShellRefId;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.SetValue (method)
+  SetValue(theIndex: number, theItem: BRepGraph_ShellRefId): void;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.UpdateLowerBound (method)
+  UpdateLowerBound(theLower: number): void;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.UpdateUpperBound (method)
+  UpdateUpperBound(theUpper: number): void;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.Resize (method)
+  Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
+  Resize(theSize: number, theToCopyData: boolean): void;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.IsDeletable (method)
+  IsDeletable(): boolean;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.delete (method)
+  delete(): void;
+
+  // NCollection_Array1_BRepGraph_ShellRefId.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
 NCollection_Array1_BRepGraph_SolidRefId: declare class NCollection_Array1_BRepGraph_SolidRefId
 
   // NCollection_Array1_BRepGraph_SolidRefId.constructor (constructor)
@@ -1079,87 +1162,4 @@ NCollection_Array1_StepAP203_ChangeRequestItem: declare class NCollection_Array1
   delete(): void;
 
   // NCollection_Array1_StepAP203_ChangeRequestItem.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-NCollection_Array1_StepAP203_ClassifiedItem: declare class NCollection_Array1_StepAP203_ClassifiedItem
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.constructor (constructor)
-  constructor();
-  constructor(theSize: number);
-  constructor(theOther: NCollection_Array1_StepAP203_ClassifiedItem);
-  constructor(theLower: number, theUpper: number);
-  constructor(theBegin: StepAP203_ClassifiedItem, theSize: number, theUseBuffer: boolean);
-  constructor(theBegin: StepAP203_ClassifiedItem, theLower: number, theUpper: number, theUseBuffer?: boolean);
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Init (method)
-  Init(theValue: StepAP203_ClassifiedItem): void;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Size (method)
-  Size(): number;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Length (method)
-  Length(): number;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.IsEmpty (method)
-  IsEmpty(): boolean;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Lower (method)
-  Lower(): number;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Upper (method)
-  Upper(): number;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Assign (method)
-  Assign(theOther: NCollection_Array1_StepAP203_ClassifiedItem): NCollection_Array1_StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.CopyValues (method)
-  CopyValues(theOther: NCollection_Array1_StepAP203_ClassifiedItem): NCollection_Array1_StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Move (method)
-  Move(theOther: NCollection_Array1_StepAP203_ClassifiedItem): NCollection_Array1_StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.First (method)
-  First(): StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.ChangeFirst (method)
-  ChangeFirst(): StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Last (method)
-  Last(): StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.ChangeLast (method)
-  ChangeLast(): StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Value (method)
-  Value(theIndex: number): StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.ChangeValue (method)
-  ChangeValue(theIndex: number): StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.At (method)
-  At(theIndex: number): StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.ChangeAt (method)
-  ChangeAt(theIndex: number): StepAP203_ClassifiedItem;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.SetValue (method)
-  SetValue(theIndex: number, theItem: StepAP203_ClassifiedItem): void;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.UpdateLowerBound (method)
-  UpdateLowerBound(theLower: number): void;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.UpdateUpperBound (method)
-  UpdateUpperBound(theUpper: number): void;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.Resize (method)
-  Resize(theLower: number, theUpper: number, theToCopyData: boolean): void;
-  Resize(theSize: number, theToCopyData: boolean): void;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.IsDeletable (method)
-  IsDeletable(): boolean;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.delete (method)
-  delete(): void;
-
-  // NCollection_Array1_StepAP203_ClassifiedItem.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

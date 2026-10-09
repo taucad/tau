@@ -120,6 +120,12 @@ BRepExtrema_ElementFilter: declare class BRepExtrema_ElementFilter
 
 BRepExtrema_ElementFilter_FilterResult: typeof BRepExtrema_ElementFilter_FilterResult[keyof typeof BRepExtrema_ElementFilter_FilterResult]
 
+  readonly NoCheck: 'NoCheck'
+
+  readonly Overlap: 'Overlap'
+
+  readonly DoCheck: 'DoCheck'
+
 BRepExtrema_ExtCC: declare class BRepExtrema_ExtCC
 
   // BRepExtrema_ExtCC.constructor (constructor)
@@ -577,6 +583,12 @@ BRepExtrema_SolutionElem: declare class BRepExtrema_SolutionElem
   [Symbol.dispose](): void;
 
 BRepExtrema_SupportType: typeof BRepExtrema_SupportType[keyof typeof BRepExtrema_SupportType]
+
+  readonly BRepExtrema_IsVertex: 'BRepExtrema_IsVertex'
+
+  readonly BRepExtrema_IsOnEdge: 'BRepExtrema_IsOnEdge'
+
+  readonly BRepExtrema_IsInFace: 'BRepExtrema_IsInFace'
 
 BRepExtrema_TriangleSet: declare class BRepExtrema_TriangleSet
 

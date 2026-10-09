@@ -67,6 +67,46 @@ describe('BillingRecoveryScheduler', () => {
     });
   });
 
+  it('should record every recovery series once per pool with the environment and pool attributes', async () => {
+    const metrics = fakeMetrics();
+    // A due absorbed, a due refused and a due undispatched operation resolve in each pool.
+    const recover = vi.fn(async () => ({ ...idle, claimed: 3, resolved: 3 }));
+
+    const pass = await scheduler(recover, metrics).runOnce();
+
+    expect(pass).toMatchObject({ failed: 0, fullBatch: false });
+    for (const pool of ['primary', 'helper']) {
+      const attributes = { 'deployment.environment': 'prod-eu', 'tau.billing.capacity_pool': pool };
+      expect(
+        metrics.billingFundedOperationRecoveries.add.mock.calls.filter(
+          ([, recorded]: unknown[]) => (recorded as Record<string, string>)['tau.billing.capacity_pool'] === pool,
+        ),
+      ).toEqual([
+        [1, { ...attributes, 'tau.billing.recovery.outcome': 'attempted' }],
+        [3, { ...attributes, 'tau.billing.recovery.outcome': 'claimed' }],
+        [3, { ...attributes, 'tau.billing.recovery.outcome': 'resolved' }],
+      ]);
+      for (const state of ['pending', 'due']) {
+        expect(metrics.billingFundedOperationCurrent.record).toHaveBeenCalledWith(0, {
+          ...attributes,
+          'tau.billing.pending.state': state,
+        });
+      }
+      expect(metrics.billingFundedOperationOldestDueAge.record).toHaveBeenCalledWith(0, attributes);
+      expect(metrics.billingFundedOperationRecoveryProviderExecutions.record).toHaveBeenCalledWith(0, attributes);
+      expect(metrics.billingFundedOperationRecoveryBatchDuration.record).toHaveBeenCalledWith(expect.any(Number), {
+        ...attributes,
+        'tau.billing.recovery.batch.outcome': 'succeeded',
+      });
+    }
+    expect(metrics.billingFundedOperationCurrent.record).toHaveBeenCalledTimes(4);
+    expect(metrics.billingWorkerPasses.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.worker': 'recovery',
+      outcome: 'ok',
+    });
+    expect(pass.batches.map(({ pool }) => pool)).toEqual(['primary', 'helper']);
+  });
+
   it('should still drain the other pool and record an error pass when one pool throws', async () => {
     const metrics = fakeMetrics();
     const recover = vi
@@ -88,6 +128,20 @@ describe('BillingRecoveryScheduler', () => {
       'tau.worker': 'recovery',
       outcome: 'error',
     });
+    expect(
+      metrics.billingFundedOperationRecoveries.add.mock.calls.filter(
+        ([, recorded]: unknown[]) => (recorded as Record<string, string>)['tau.billing.recovery.outcome'] === 'failed',
+      ),
+    ).toEqual([
+      [
+        1,
+        {
+          'deployment.environment': 'prod-eu',
+          'tau.billing.capacity_pool': 'primary',
+          'tau.billing.recovery.outcome': 'failed',
+        },
+      ],
+    ]);
   });
 
   it('should keep polling after a failed pass until it is destroyed', async () => {

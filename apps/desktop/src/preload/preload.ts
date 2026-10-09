@@ -35,7 +35,12 @@ import {
   slicersChannels,
 } from '#shared/desktop-bootstrap.js';
 import type { AppIconTheme } from '#shared/desktop-bootstrap.js';
-import { generatedImageIpcChannel, openFilesIpcChannel, quickLookIpcChannels } from '#shared/quick-look.js';
+import {
+  generatedImageIpcChannel,
+  isQuickLookEnabled,
+  openFilesIpcChannel,
+  quickLookIpcChannels,
+} from '#shared/quick-look.js';
 import type {
   DesktopOpenFile,
   QuickLookPathRequest,
@@ -166,14 +171,18 @@ contextBridge.exposeInMainWorld('tau', {
         readonly bytes: Uint8Array<ArrayBuffer>;
       },
   },
-  quickLook: {
-    directPreviewExtensions: quickLookManifest.directElectronPreviewExtensions,
-    previewPath: async (request: QuickLookPathRequest): Promise<QuickLookResult> =>
-      (await ipcRenderer.invoke(quickLookIpcChannels.previewPath, request)) as QuickLookResult,
-    previewUsdz: async (request: QuickLookUsdzRequest): Promise<QuickLookResult> =>
-      (await ipcRenderer.invoke(quickLookIpcChannels.previewUsdz, request)) as QuickLookResult,
-    close: (): void => {
-      ipcRenderer.send(quickLookIpcChannels.close);
-    },
-  },
+  ...(isQuickLookEnabled()
+    ? {
+        quickLook: {
+          directPreviewExtensions: quickLookManifest.directElectronPreviewExtensions,
+          previewPath: async (request: QuickLookPathRequest): Promise<QuickLookResult> =>
+            (await ipcRenderer.invoke(quickLookIpcChannels.previewPath, request)) as QuickLookResult,
+          previewUsdz: async (request: QuickLookUsdzRequest): Promise<QuickLookResult> =>
+            (await ipcRenderer.invoke(quickLookIpcChannels.previewUsdz, request)) as QuickLookResult,
+          close: (): void => {
+            ipcRenderer.send(quickLookIpcChannels.close);
+          },
+        },
+      }
+    : {}),
 });

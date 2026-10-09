@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { BrowserWindow, WebContents, WebContentsDidStartNavigationEventParams } from 'electron';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { _electron as electron } from 'playwright';
@@ -180,6 +180,67 @@ describe('explicit automated trace snapshot accommodation', () => {
 });
 
 describe('initial main navigation readiness', () => {
+  it.each([true, false])(
+    'should reach owned exit with pending optional diagnostics after capture=%s',
+    async (capture) => {
+      const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-diagnostics-test-'));
+      await mkdir(join(profileRoot, 'home'));
+      await writeFile(join(profileRoot, 'home', 'retained.txt'), 'retained');
+      const application = mockDeep<Awaited<ReturnType<typeof electron.launch>>>();
+      const child = mockDeep<ReturnType<typeof application.process>>({ exitCode: 0 });
+      application.evaluate.mockResolvedValue(undefined);
+      application.process.mockReturnValue(child);
+      application.context.mockReturnValue(mockDeep<ReturnType<typeof application.context>>());
+      application.browserWindow.mockResolvedValue(mockDeep<Awaited<ReturnType<typeof application.browserWindow>>>());
+      const page = mockDeep<Awaited<ReturnType<typeof application.firstWindow>>>();
+      page.url.mockReturnValue('app://tau/');
+      page.screenshot.mockResolvedValue(Buffer.alloc(0));
+      const context = mockDeep<ReturnType<typeof page.context>>();
+      context.tracing.stop.mockReturnValue(Promise.withResolvers<void>().promise);
+      page.evaluate.mockReturnValue(Promise.withResolvers<string>().promise);
+      page.context.mockReturnValue(context);
+      application.firstWindow.mockResolvedValue(page);
+      const launch = vi.spyOn(electron, 'launch').mockResolvedValueOnce(application);
+      let directory: string | undefined;
+      try {
+        const session = await launchDesktopApp({ token: 'fixture-token', profileRoot, preserveProfile: true });
+        application.evaluate.mockClear();
+        if (capture) {
+          const pending = session.capture(`bounded-${profileRoot.split('/').at(-1)}`);
+          await vi.waitFor(() => {
+            expect(context.tracing.stop).toHaveBeenCalledOnce();
+          });
+          const tracePath = context.tracing.stop.mock.calls[0]?.[0]?.path;
+          if (!tracePath) {
+            throw new Error('Expected the owned capture destination');
+          }
+          directory = dirname(tracePath);
+          expect(await readFile(join(directory, 'diagnostics.log'), 'utf8')).toContain('retained.txt');
+          expect(page.evaluate).not.toHaveBeenCalled();
+          expect(await pending).toBe(directory);
+          expect(await readFile(join(directory, 'diagnostics.log'), 'utf8')).toContain(
+            '(unavailable: renderer collection deadline)',
+          );
+        }
+        await session.close();
+        expect(application.evaluate).toHaveBeenCalledOnce();
+        expect(child.kill).not.toHaveBeenCalled();
+        expect(context.tracing.stop).toHaveBeenCalledOnce();
+      } finally {
+        const picked = launch.mock.calls[0]?.[0]?.env?.['TAU_E2E_PICK_DIRECTORY'];
+        launch.mockRestore();
+        await rm(profileRoot, { recursive: true, force: true });
+        if (picked) {
+          await rm(dirname(picked), { recursive: true, force: true });
+        }
+        if (directory) {
+          await rm(directory, { recursive: true, force: true });
+        }
+      }
+    },
+    20_000,
+  );
+
   it('should hold fixture setup until the initial document load finishes after DOM readiness', async () => {
     const profileRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-load-test-'));
     const loaded = Promise.withResolvers<void>();

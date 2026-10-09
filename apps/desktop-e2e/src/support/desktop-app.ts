@@ -632,6 +632,9 @@ export const launchDesktopApp = async (options: {
     const location = new URL(page.url());
     const url = { protocol: location.protocol, host: location.host, pathname: location.pathname };
     const desktopLog = await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '(no desktop.log)');
+    const pickedTree = await tree(pickedDirectory);
+    const homeTree = await tree(join(userData, 'home'));
+    const grants = await readFile(join(userData, 'granted-roots.json'), 'utf8').catch(() => '(none)');
     // Persist available evidence before any renderer or trace operation can stall.
     await writeFile(
       join(directory, 'diagnostics.log'),
@@ -645,6 +648,12 @@ export const launchDesktopApp = async (options: {
         output.join(''),
         '--- desktop.log ---',
         desktopLog,
+        '--- picked directory ---',
+        pickedTree.join('\n'),
+        '--- home root ---',
+        homeTree.join('\n'),
+        '--- granted roots ---',
+        grants,
         '--- renderer/trace collection pending ---',
       ].join('\n'),
       'utf8',
@@ -693,21 +702,24 @@ export const launchDesktopApp = async (options: {
       tracing = false;
       /* A quit-path failure can close the renderer before diagnostics run;
        * retain Home/process/event logs even when its trace can no longer stop. */
-      await page
-        .context()
-        .tracing.stop({ path: join(directory, 'trace.zip') })
-        .catch(() => undefined);
+      await Promise.race([
+        page
+          .context()
+          .tracing.stop({ path: join(directory, 'trace.zip') })
+          .catch(() => undefined),
+        wait(5000),
+      ]);
     }
     await page
       .screenshot({ path: join(directory, 'screenshot.png'), fullPage: true, timeout: 10_000 })
       .catch(() => undefined);
-    const bodyText = await page
-      // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- `innerText` keeps the rendered line breaks that make this readable.
-      .evaluate(() => document.body.innerText.slice(0, 2000))
-      .catch(() => '(unavailable)');
-    const pickedTree = await tree(pickedDirectory);
-    const homeTree = await tree(join(userData, 'home'));
-    const grants = await readFile(join(userData, 'granted-roots.json'), 'utf8').catch(() => '(none)');
+    const bodyText = await Promise.race([
+      page
+        // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- `innerText` preserves rendered line breaks in diagnostics.
+        .evaluate(() => document.body.innerText.slice(0, 2000))
+        .catch(() => '(unavailable)'),
+      wait(5000, '(unavailable: renderer collection deadline)'),
+    ]);
     await writeFile(
       join(directory, 'diagnostics.log'),
       [
@@ -737,10 +749,13 @@ export const launchDesktopApp = async (options: {
     void disposeNavigation();
     if (tracing) {
       tracing = false;
-      await page
-        .context()
-        .tracing.stop()
-        .catch(() => undefined);
+      await Promise.race([
+        page
+          .context()
+          .tracing.stop()
+          .catch(() => undefined),
+        wait(5000),
+      ]);
     }
     const exited =
       child.exitCode === null && child.signalCode === null

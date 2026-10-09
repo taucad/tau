@@ -1,13 +1,20 @@
 import { createHash } from 'node:crypto';
 import { base64ToUint8Array } from 'uint8array-extras';
 import { readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { expect, test } from 'vitest';
+import { z } from 'zod';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import { activeChatId, expectVisible } from '#support/scenario.js';
 
 test('projects independent native manifest and chat metadata while the workspace remains mounted', async () => {
-  const session = await launchDesktopApp({ token: 'offline-metadata' });
+  const session = await launchDesktopApp({
+    token: 'offline-metadata',
+    captureStartupNetwork: true,
+    preserveProfile: true,
+  });
+  let completed = false;
+  let captureDirectory: string | undefined;
   try {
     const { page } = session;
     let navigationReceipts = 0;
@@ -59,14 +66,15 @@ test('projects independent native manifest and chat metadata while the workspace
     expect(await page.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }))).toEqual(identity);
     expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({ name });
     expect(JSON.parse(await readFile(chatPath, 'utf8'))).toMatchObject({ name: chatName });
-    await session.capture('projection-native-metadata');
+    captureDirectory = await session.capture('projection-native-metadata');
+    completed = true;
   } catch (error) {
     console.error(
       'NATIVE METADATA FAILURE',
       error instanceof Error ? error.message.slice(0, 1000) : 'Unknown navigation failure',
     );
     try {
-      await session.capture('projection-native-metadata-startup-failure');
+      captureDirectory = await session.capture('projection-native-metadata-startup-failure');
     } catch (captureError) {
       console.error(
         'NATIVE METADATA CAPTURE FAILURE',
@@ -76,6 +84,68 @@ test('projects independent native manifest and chat metadata while the workspace
     throw error;
   } finally {
     await session.close();
+    try {
+      const networkLogPath = z.string().parse(session.startupNetworkLogPath);
+      const log = z
+        .object({
+          constants: z.object({ logEventTypes: z.record(z.string(), z.number()) }),
+          events: z.array(
+            z.object({
+              type: z.number(),
+              phase: z.number(),
+              time: z.string(),
+              source: z.object({ id: z.number(), type: z.number() }),
+              // eslint-disable-next-line @typescript-eslint/naming-convention -- Chromium NetLog owns this wire field.
+              params: z.object({ url: z.string().optional(), net_error: z.number().optional() }).optional(),
+            }),
+          ),
+        })
+        .parse(JSON.parse(await readFile(networkLogPath, 'utf8')));
+      const selected = new Set<number>();
+      const locations = new Map<number, { protocol: string; host: string; pathname: string }>();
+      for (const event of log.events) {
+        const url = event.params?.url === undefined ? undefined : URL.parse(event.params.url);
+        if (
+          url &&
+          ((url.protocol === 'app:' &&
+            url.host === 'tau' &&
+            (url.pathname === '/' || url.pathname === '/__e2e/project-file-tree')) ||
+            (url.protocol === 'file:' && url.pathname.endsWith('/index.html')))
+        ) {
+          selected.add(event.source.id);
+          locations.set(event.source.id, {
+            protocol: url.protocol,
+            host: url.host,
+            pathname: url.protocol === 'file:' ? '/index.html' : url.pathname,
+          });
+        }
+      }
+      const names = new Map(Object.entries(log.constants.logEventTypes).map(([name, id]) => [id, name]));
+      const relevant = log.events.filter((event) => selected.has(event.source.id));
+      const summary = JSON.stringify({
+        status: 'complete',
+        total: relevant.length,
+        dropped: Math.max(0, relevant.length - 256),
+        events: relevant.slice(0, 256).map((event) => ({
+          type: names.get(event.type) ?? event.type,
+          phase: event.phase,
+          time: event.time,
+          source: event.source,
+          location: locations.get(event.source.id),
+          errorCode: event.params?.net_error,
+        })),
+      });
+      await writeFile(join(captureDirectory ?? dirname(session.homeRoot), 'startup-network-summary.json'), summary);
+      if (completed && captureDirectory !== undefined) {
+        await rm(dirname(session.homeRoot), { recursive: true, force: true });
+      }
+    } catch (diagnosticError) {
+      console.error(
+        'NATIVE METADATA NETWORK CAPTURE',
+        diagnosticError instanceof Error ? diagnosticError.name : 'Unavailable',
+      );
+      // Keep the owned profile and original test outcome when optional network evidence is unavailable.
+    }
   }
 });
 

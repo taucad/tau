@@ -69,7 +69,7 @@ import type { HostAdmissionAuthority } from '@taucad/runtime/host';
 import { createNodeMachineHost, MachineHostStartInFlightError } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
 import { machineChannelProtocolVersion, withMachineCode } from '@taucad/runtime/machine';
-import type { MachineArtifactReference, MachineBindingOutcome, MachineRun } from '@taucad/runtime/machine';
+import type { MachineArtifactReference, MachineBindingOutcome } from '@taucad/runtime/machine';
 import type { HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { packageVersion } from '@taucad/runtime/metadata';
@@ -124,9 +124,6 @@ type MachineHostServices = Readonly<{
   secrets: MachineSecretStore;
   providers: CreateNodeMachineHostInput['providers'];
 }>;
-
-/* A streamed run this utility is still feeding. */
-const streamingRunStates: ReadonlySet<MachineRun['state']> = new Set(['starting', 'running', 'paused', 'finishing']);
 
 type RuntimeFileSystemDisposer = {
   drain(): Promise<void>;
@@ -698,10 +695,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   };
 
   /**
-   * The machines a streamed run is feeding now, by name. This utility feeds such a program line by line for its
-   * whole run, so quitting would cut it mid-run (Q-streamed-host); `finishing` still has lines in flight. A run the
-   * machine reports counts, and so does a streamed start the host recorded on its job from the start's receipt, so a
-   * provider that answers before its report shows the run is never read as idle.
+   * The machines a streamed run is feeding now, by name: the host's own answer (Q-streamed-host). Quitting would cut
+   * such a run mid-way, and main keeps the computer awake while one runs.
    *
    * @returns The machines' names; none while the store is not open here.
    */
@@ -710,38 +705,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (pending === undefined) {
       return [];
     }
-    const { host, admission } = await pending;
-    const session = host.issueSession({
-      actor: { kind: 'user', id: 'desktop' },
-      grants: [
-        { route: 'machines', operation: 'machines.list' },
-        { route: 'machines', operation: 'machines.listJobs' },
-      ],
-    });
-    const facet = localMachineFacet((port) => host.serve({ port, session }));
-    try {
-      if (!facet.available) {
-        return [];
-      }
-      const [{ entries }, jobs] = await Promise.all([facet.list({}), facet.listJobs({})]);
-      const running = new Set(
-        jobs
-          .filter(({ state, run }) => state === 'started' && run?.outcome === 'running')
-          .map(({ machineId }) => machineId),
-      );
-      return entries
-        .filter(({ machineId, descriptor, snapshot: { run } }) => {
-          if (run?.delivery === 'streamed' && streamingRunStates.has(run.state)) {
-            return true;
-          }
-          const facts = running.has(machineId) ? descriptor.capabilities.jobs : undefined;
-          return facts?.type === 'supported' && facts.delivery === 'streamed';
-        })
-        .map(({ name }) => name);
-    } finally {
-      facet.close();
-      admission.revoke(session);
-    }
+    const { host } = await pending;
+    const streaming = await host.streamingMachines();
+    return streaming.map(({ name }) => name);
   };
 
   /**

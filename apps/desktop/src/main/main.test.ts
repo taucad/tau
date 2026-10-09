@@ -223,11 +223,13 @@ vi.mock('@taucad/runtime/electron/main', () => ({
 }));
 vi.mock('@taucad/host', async (importOriginal) => {
   /* The host's real bounds, so the quit waits main derives from them are the shipped ones (rule 9). */
-  const { projectCloseMilliseconds, projectReleaseMilliseconds } = await importOriginal<typeof Host>();
+  const { keepAwakeWhileStreaming, projectCloseMilliseconds, projectReleaseMilliseconds } =
+    await importOriginal<typeof Host>();
   return {
     defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
     discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
     externalAgentDescriptors: vi.fn(() => []),
+    keepAwakeWhileStreaming,
     projectCloseMilliseconds,
     projectReleaseMilliseconds,
   };

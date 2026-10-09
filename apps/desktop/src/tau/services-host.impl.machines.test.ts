@@ -20,15 +20,14 @@ import type { ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/serv
  * directly: through a print, every read failure is the simulator's one
  * `MACHINE_JOB_ARTIFACT_INVALID`. */
 const runtimeOptions = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createNodeMachineRuntime>[0]>);
-/* A directory a case lists in place of the store's, for runs no simulator can be left in. */
-const listed = vi.hoisted(() => ({
-  entries: undefined as undefined | readonly unknown[],
-  /* The jobs a case lists in place of the store's. */
-  jobs: undefined as undefined | readonly unknown[],
-  /* A directory read that fails, as a busy store does. */
+/* What the machine host answers when asked which machines a streamed run feeds, in place of its own answer: the
+ * host owns that read and its tests; here only the utility's use of it is under test. */
+const streaming = vi.hoisted(() => ({
+  names: undefined as undefined | readonly string[],
+  /* A read that fails, as a busy store does. */
   error: undefined as undefined | Error,
 }));
-/* The order in which quiescing gates the machine host's starts, reads its runs and lets starts go again. */
+/* The order in which quiescing gates the machine host's starts, reads what streams and lets starts go again. */
 const gate = vi.hoisted(() => [] as string[]);
 /* How the machine host's quiesce behaves: held until `release` settles, or timed out with a start still in flight. */
 const quiescing = vi.hoisted(() => ({
@@ -59,6 +58,17 @@ vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
             resume();
           };
         },
+        streamingMachines: async () => {
+          const { error, names } = streaming;
+          if (error === undefined && names === undefined) {
+            return host.streamingMachines();
+          }
+          gate.push('read');
+          if (error !== undefined) {
+            throw error;
+          }
+          return (names ?? []).map((name) => ({ machineId: name.toLowerCase(), name }));
+        },
       };
     },
   };
@@ -71,29 +81,6 @@ vi.mock('@taucad/host', async (importOriginal) => {
     createNodeMachineRuntime: (options: Parameters<typeof TauHost.createNodeMachineRuntime>[0]) => {
       runtimeOptions.push(options);
       return actual.createNodeMachineRuntime(options);
-    },
-    localMachineFacet: (serve: Parameters<typeof TauHost.localMachineFacet>[0]) => {
-      const real = actual.localMachineFacet(serve);
-      const { entries, error, jobs } = listed;
-      const facet = jobs === undefined ? real : { ...real, listJobs: async () => jobs };
-      if (error !== undefined) {
-        return {
-          ...facet,
-          list: async () => {
-            gate.push('list');
-            throw error;
-          },
-        };
-      }
-      return entries === undefined
-        ? facet
-        : {
-            ...facet,
-            list: async () => {
-              gate.push('list');
-              return { cursor: undefined, entries };
-            },
-          };
     },
   };
 });
@@ -458,42 +445,12 @@ describe('createServicesHost — machines', () => {
       await expect(machines.streaming('before-open')).resolves.toEqual([]);
       const client = machines.connect();
       await machines.bindSimulator(client);
+      /* The host's own answer: the simulator streams nothing. */
       await expect(machines.streaming('idle')).resolves.toEqual([]);
-
-      const entry = (name: string, run: Readonly<Record<string, string>> | undefined) => ({
-        name,
-        snapshot: run === undefined ? {} : { run },
-      });
-      listed.entries = [
-        entry('Router', { delivery: 'streamed', state: 'running' }),
-        entry('Mill', { delivery: 'streamed', state: 'finishing' }),
-        entry('Lathe', { delivery: 'streamed', state: 'completed' }),
-        entry('Printer', { delivery: 'stored', state: 'running' }),
-        entry('Idle', undefined),
-      ];
+      streaming.names = ['Router', 'Mill'];
       await expect(machines.streaming('streaming')).resolves.toEqual(['Router', 'Mill']);
-
-      /* A streamed start the host recorded running from its receipt counts before the machine's report shows it. */
-      const recorded = (machineId: string, name: string, delivery: 'streamed' | 'stored') => ({
-        machineId,
-        name,
-        descriptor: { capabilities: { jobs: { type: 'supported', delivery } } },
-        snapshot: {},
-      });
-      listed.entries = [
-        recorded('router', 'Router', 'streamed'),
-        recorded('printer', 'Printer', 'stored'),
-        recorded('mill', 'Mill', 'streamed'),
-      ];
-      listed.jobs = [
-        { machineId: 'router', state: 'started', run: { runId: 'run-1', outcome: 'running' } },
-        { machineId: 'printer', state: 'started', run: { runId: 'run-2', outcome: 'running' } },
-        { machineId: 'mill', state: 'started', run: { runId: 'run-3', outcome: 'completed' } },
-      ];
-      await expect(machines.streaming('recorded')).resolves.toEqual(['Router']);
     } finally {
-      listed.entries = undefined;
-      listed.jobs = undefined;
+      streaming.names = undefined;
       await machines.cleanup();
     }
   }, 30_000);
@@ -504,13 +461,13 @@ describe('createServicesHost — machines', () => {
       await expect(machines.peek('before-open')).resolves.toEqual([]);
       const client = machines.connect();
       await machines.bindSimulator(client);
-      listed.entries = [{ name: 'Router', snapshot: { run: { delivery: 'streamed', state: 'running' } } }];
+      streaming.names = ['Router'];
       gate.length = 0;
       await expect(machines.peek('streaming')).resolves.toEqual(['Router']);
       /* Read only: unlike the quit question, starts were never stopped. */
-      expect(gate).toEqual(['list']);
+      expect(gate).toEqual(['read']);
     } finally {
-      listed.entries = undefined;
+      streaming.names = undefined;
       await machines.cleanup();
     }
   }, 30_000);
@@ -521,33 +478,33 @@ describe('createServicesHost — machines', () => {
       const client = machines.connect();
       await machines.bindSimulator(client);
 
-      listed.entries = [{ name: 'Router', snapshot: { run: { delivery: 'streamed', state: 'running' } } }];
+      streaming.names = ['Router'];
       gate.length = 0;
       await expect(machines.host.quiesce()).rejects.toMatchObject({
         refusal: { type: 'quiesce-refused', reason: 'streaming', machines: ['Router'] },
       });
       /* Starts stop before the runs are read, so none begins in between, and go again when nothing closes. */
-      expect(gate).toEqual(['quiesce', 'list', 'resume']);
+      expect(gate).toEqual(['quiesce', 'read', 'resume']);
       await expect(client.list({})).resolves.toMatchObject({ entries: [expect.anything()] });
 
-      listed.entries = undefined;
-      listed.error = new Error('The store is busy.');
+      streaming.names = undefined;
+      streaming.error = new Error('The store is busy.');
       gate.length = 0;
       await expect(machines.host.quiesce()).rejects.toMatchObject({
         refusal: { reason: 'streaming-unknown', message: 'The store is busy.' },
       });
       /* Unread is not "none": starts go again, as when a stream refuses the quit. */
-      expect(gate).toEqual(['quiesce', 'list', 'resume']);
+      expect(gate).toEqual(['quiesce', 'read', 'resume']);
       await expect(client.list({})).resolves.toMatchObject({ entries: [expect.anything()] });
 
       /* The person chose to quit anyway: the machine host closes with the rest, starting nothing first. */
       gate.length = 0;
       await machines.host.quiesce({ quitIfStreamingUnknown: true });
-      expect(gate).toEqual(['quiesce', 'list']);
+      expect(gate).toEqual(['quiesce', 'read']);
       await expect(client.list({})).rejects.toThrow();
     } finally {
-      listed.entries = undefined;
-      listed.error = undefined;
+      streaming.names = undefined;
+      streaming.error = undefined;
       await machines.cleanup();
     }
   }, 30_000);
@@ -558,24 +515,24 @@ describe('createServicesHost — machines', () => {
     try {
       const client = machines.connect();
       await machines.bindSimulator(client);
-      listed.entries = [];
+      streaming.names = [];
       gate.length = 0;
 
       await expect(machines.streaming('kept-open')).resolves.toEqual([]);
-      expect(gate).toEqual(['quiesce', 'list']);
+      expect(gate).toEqual(['quiesce', 'read']);
       /* The person kept Tau open: starts go again, so the window can still start a job. */
       machines.host.handleMessage(frame({ type: 'machines-resume' }));
-      expect(gate).toEqual(['quiesce', 'list', 'resume']);
+      expect(gate).toEqual(['quiesce', 'read', 'resume']);
 
       gate.length = 0;
       await expect(machines.streaming('quit')).resolves.toEqual([]);
       /* A stream the store now reported could not have begun under the hold: the answer main acted on stands. */
-      listed.entries = [{ name: 'Router', snapshot: { run: { delivery: 'streamed', state: 'running' } } }];
+      streaming.names = ['Router'];
       await machines.host.quiesce();
-      expect(gate).toEqual(['quiesce', 'list']);
+      expect(gate).toEqual(['quiesce', 'read']);
       await expect(client.list({})).rejects.toThrow();
     } finally {
-      listed.entries = undefined;
+      streaming.names = undefined;
       await machines.cleanup();
     }
   }, 30_000);
@@ -611,7 +568,7 @@ describe('createServicesHost — machines', () => {
     try {
       const client = machines.connect();
       await machines.bindSimulator(client);
-      listed.entries = [];
+      streaming.names = [];
 
       quiescing.isStartInFlight = true;
       gate.length = 0;
@@ -640,11 +597,11 @@ describe('createServicesHost — machines', () => {
       /* Nothing is held: a later quit asks afresh and gates once. */
       gate.length = 0;
       await expect(machines.streaming('again')).resolves.toEqual([]);
-      expect(gate).toEqual(['quiesce', 'list']);
+      expect(gate).toEqual(['quiesce', 'read']);
     } finally {
       quiescing.isStartInFlight = false;
       quiescing.release = undefined;
-      listed.entries = undefined;
+      streaming.names = undefined;
       await machines.cleanup();
     }
   }, 30_000);

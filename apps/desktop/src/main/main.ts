@@ -37,6 +37,7 @@ import {
   defaultConfigDirectory,
   discoverAcpAgents,
   externalAgentDescriptors,
+  keepAwakeWhileStreaming,
   projectCloseMilliseconds,
   projectReleaseMilliseconds,
 } from '@taucad/host';
@@ -76,7 +77,6 @@ import {
   sanitizeServicesContext,
 } from '#main/project-roots.js';
 import { createServicesBroker, rendererServicesConcerns, ServicesQuiescingError } from '#main/services-broker.js';
-import { keepAwakeWhileStreaming } from '#main/keep-awake.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { createGeometryBroker } from '#main/geometry-broker.js';
 import {
@@ -745,7 +745,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
   /* Q-streamed-host: a streamed program needs this computer awake for its whole run. */
   const stopKeepingAwake = keepAwakeWhileStreaming({
     streamingMachines: async () => services.peekStreamingMachines(keepAwakeIntervalMilliseconds / 2),
-    blocker: powerSaveBlocker,
+    blocker: {
+      hold: () => {
+        const id = powerSaveBlocker.start('prevent-app-suspension');
+        return () => {
+          powerSaveBlocker.stop(id);
+        };
+      },
+    },
     intervalMilliseconds: keepAwakeIntervalMilliseconds,
     log: (level, event, detail) => {
       log.log(level, event, detail);

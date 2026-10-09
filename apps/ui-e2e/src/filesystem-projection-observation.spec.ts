@@ -266,7 +266,8 @@ test('keeps the actual editor mounted through watch closure and acknowledged aut
 });
 
 test('retries the mounted project manifest through held acknowledgment and retains valid details through invalid bytes', async () => {
-  const config = await openFixture('tau.json');
+  const config = await openFixture('tau.json', { shouldOpenFiles: false });
+  const initialTimeOrigin = await target.evaluate(() => performance.timeOrigin);
   const originalTree = await readProjectTree(config);
   const original = originalTree['/tau.json'];
   if (original === undefined) {
@@ -278,11 +279,25 @@ test('retries the mounted project manifest through held acknowledgment and retai
   }
   const freshName = 'Acknowledged current manifest project';
   const freshBytes = JSON.stringify({ ...manifest, name: freshName });
+  await expect
+    .poll(
+      async () => {
+        const chatId = await target.evaluate(() => new URL(location.href).searchParams.get('chat'));
+        if (!chatId) {
+          return false;
+        }
+        const physical = await readProjectTree(config);
+        return physical[`/.tau/chats/${chatId}/chat.json`] !== undefined;
+      },
+      { timeout: 60_000 },
+    )
+    .toBe(true);
   const identity = await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }));
+  expect(identity.timeOrigin).toBe(initialTimeOrigin);
   try {
-    await target.click(
-      selectors.getByRole('group', { name: 'Project', exact: true }).getByRole('button', { name: /Details/u }),
-    );
+    await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
+    await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Open project details');
+    await target.click(selectors.getByRole('option', { name: /^Open project details(?:\s|$)/u }));
     const name = selectors.getByCss('[data-slot="details-panel-body"] #project-name');
     await target.expectValue(name, manifest['name']);
     const closed = await controlWorkbenchObservation('close', 'tau.json');
@@ -560,11 +575,27 @@ test('preserves actual unsaved Monaco bytes through closure and a held acknowled
     const acquiredValue8 = await visibleEditorText();
     expect(acquiredValue8).toContain('Unsaved observation editor bytes');
     await controlWorkbenchObservation('release', source);
-    await target.expectCount(selectors.getByText('File updates unavailable', { exact: true }), 0, 30_000);
-    const acquiredValue9 = await visibleEditorText();
-    expect(acquiredValue9).toContain('Unsaved observation editor bytes');
-    const acquiredValue10 = await readProjectTree(config);
-    expect(acquiredValue10[`/${source}`]).toBe(original);
+    try {
+      await target.expectCount(selectors.getByText('File updates unavailable', { exact: true }), 0, 30_000);
+      const acquiredValue9 = await visibleEditorText();
+      expect(acquiredValue9).toContain('Unsaved observation editor bytes');
+      const acquiredValue10 = await readProjectTree(config);
+      expect(acquiredValue10[`/${source}`]).toBe(original);
+    } finally {
+      try {
+        const events = await target.events();
+        await target.writeArtifact(
+          'observation-dirty-after-release-events',
+          JSON.stringify({
+            consoleMessages: events.consoleMessages.slice(-32),
+            pageErrors: events.pageErrors.slice(-16),
+          }),
+        );
+        await captureObservationPrecondition('dirty-after-release', config);
+      } catch {
+        // Preserve the original post-release assertion if diagnostic transport is unavailable.
+      }
+    }
   } finally {
     await restoreWorkbenchObservation();
     // The existing physical OPFS refusal holder has document lifetime.

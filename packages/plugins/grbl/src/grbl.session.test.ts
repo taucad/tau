@@ -34,7 +34,7 @@ const artifact = (path: string): MachineArtifactReference =>
     path,
     digest: 'sha256:0',
     length: 0,
-    mediaType: 'text/x-gcode',
+    mediaType: 'text/x.gcode',
     contract: { id: 'tau.toolpath.gcode', version: 1 },
     selectedMember: path,
   }) as unknown as MachineArtifactReference;
@@ -479,6 +479,9 @@ describe('grbl session stops, admission and observation', () => {
   it('checks moves and programs against the travel the controller reports in $130–$132', async () => {
     const connected = await connect('G90 G0 X450', {}, { settings: { 130: 400 } });
     await home(connected);
+    // The installed axes say the same travel the checks enforce.
+    const { capabilities } = await connected.session.getDescriptor({ signal: new AbortController().signal });
+    expect(capabilities.axes.find(({ id }) => id === 'x')).toMatchObject({ travel: { min: 0, max: 400 } });
     expect(await connected.act('motion:motion.move', { frame: 'machine', position: { x: 450 } })).toMatchObject({
       status: 'rejected',
       code: 'MACHINE_ACTION_PRECONDITION_FAILED',
@@ -494,6 +497,26 @@ describe('grbl session stops, admission and observation', () => {
       throw new Error(preparation.message);
     }
     expect(preparation.checks.find((check) => check.id === 'travel')).toMatchObject({ state: 'blocked' });
+  });
+
+  it('answers a repeated operation id with its first receipt, sending nothing again', async () => {
+    const connected = await connect();
+    await home(connected);
+    const apply = async () =>
+      connected.controller.apply({
+        operationId: 'once',
+        componentId: 'motion',
+        action: 'motion.move',
+        version: 1,
+        expectedRunId: null,
+        parameters: { frame: 'machine', position: { x: 10 } },
+        requestedBy: { kind: 'user' },
+        signal: new AbortController().signal,
+      });
+    const first = await apply();
+    const sent = connected.machine.lines.length;
+    await expect(apply()).resolves.toEqual(first);
+    expect(connected.machine.lines).toHaveLength(sent);
   });
 
   it('leaves an operation it never sent pending, and refuses an answer to a replaced question', async () => {

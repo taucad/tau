@@ -9,7 +9,7 @@
  * @module
  */
 
-import { checkMachineAction, standardMachineActions, standardMachineHolds } from '@taucad/runtime/machine';
+import { checkMachineActionAtSend, standardMachineActions, standardMachineHolds } from '@taucad/runtime/machine';
 import type {
   MachineActionConfirmation,
   MachineActivity,
@@ -453,7 +453,12 @@ export class GrblController {
       firmware: this.firmware,
       capabilities: {
         connection: manifest.connection,
-        axes: manifest.axes,
+        // The travel the controller enforces, from `$130`–`$132`, not the manifest's LongMill defaults.
+        axes: manifest.axes.map((axis) => {
+          const travel: Readonly<Record<string, GrblTravel['x'] | undefined>> = this.travel;
+          const range = travel[axis.id];
+          return range === undefined ? axis : { ...axis, travel: range };
+        }),
         components: manifest.components,
         processes: manifest.processes,
         actions: this.actions,
@@ -514,6 +519,11 @@ export class GrblController {
   // oxlint-disable-next-line eslint/complexity, max-lines-per-function -- One dispatch over the declared actions.
   public async apply(input: MachineProviderActionInput): Promise<MachineCommandReceipt> {
     const { operationId } = input;
+    // An operation already answered is answered again, never re-sent.
+    const known = this.receipts.get(operationId);
+    if (known !== undefined) {
+      return known;
+    }
     const refusal = this.admit(input.componentId, input.action, 'action', input.expectedRunId);
     if (refusal !== undefined) {
       return this.remember(operationId, this.rejected(refusal.code, refusal.message));
@@ -1064,17 +1074,17 @@ export class GrblController {
     // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run.
     expectedRunId: string | null,
   ): MachineFailure | undefined {
-    const check = checkMachineAction({
-      entry: { name: this.options.name, descriptor: this.descriptor(), snapshot: this.snapshot(), testing: true },
+    return checkMachineActionAtSend({
+      name: this.options.name,
+      capabilities: this.descriptor().capabilities,
+      report: this.snapshot(),
+      observations: this.options.manifest.observations,
       componentId,
       action,
       kind,
       expectedRunId,
-      caller: 'person',
-      attended: true,
       now: Date.parse(this.now()),
     });
-    return check.status === 'unavailable' ? { code: check.code, message: check.message } : undefined;
   }
 
   private unsettled(): MachineCommandReceipt {
@@ -1131,8 +1141,8 @@ export class GrblController {
   }
 
   private pump(): void {
-    while (this.queue[0] !== undefined && this.counter.fits(this.queue[0].line)) {
-      const next = this.queue.shift()!;
+    for (let next = this.queue[0]; next !== undefined && this.counter.fits(next.line); next = this.queue[0]) {
+      this.queue.shift();
       this.counter.sent(next.line);
       this.inFlight.push(next.resolve);
       this.write(new TextEncoder().encode(`${next.line}\n`));
@@ -1207,8 +1217,9 @@ export class GrblController {
       }
       case 'parser': {
         for (const word of message.words) {
-          if ((grblWorkOffsets as readonly string[]).includes(word)) {
-            this.selectOffset(word as GrblWorkOffset);
+          const offset = grblWorkOffsets.find((candidate) => candidate === word);
+          if (offset !== undefined) {
+            this.selectOffset(offset);
           }
           if (/^T\d+$/u.test(word) && Number(word.slice(1)) > 0) {
             this.tool ??= Number(word.slice(1));

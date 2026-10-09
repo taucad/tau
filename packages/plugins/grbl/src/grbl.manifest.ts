@@ -55,7 +55,7 @@ export const longMillMaximumRate = 4000;
 export const grblAcceptedContainers: Extract<MachineManifestDefinition['jobs'], { type: 'supported' }>['accepts'] = [
   {
     contract: { id: 'tau.toolpath.gcode', version: 1 },
-    mediaType: 'text/x-gcode',
+    mediaType: 'text/x.gcode',
     payloadSelection: 'single',
     requiredMembers: [],
     technology: 'subtractive.milling',

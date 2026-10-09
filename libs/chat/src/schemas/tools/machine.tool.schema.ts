@@ -123,8 +123,8 @@ const jobSourceShape = {
     ),
 };
 
-/** The slicing choices; they apply to a `targetFile` only. */
-const slicingFields = ['preset', 'options', 'bambuStudio'] as const;
+/** The slicing choices, the saved profile among them; they apply to a `targetFile` only. */
+const slicingFields = ['profileId', 'preset', 'options', 'bambuStudio'] as const;
 
 /** @public */
 export const requestJobInputSchema = z
@@ -145,7 +145,7 @@ export const requestJobInputSchema = z
       .max(64)
       .optional()
       .describe(
-        'Build plate installed, by its manifest plate id. Required when the machine does not report its plate; ask the person which plate is on it rather than guess.',
+        'For a 3D printer: the build plate installed, by its manifest plate id. Required when the machine does not report its plate; ask the person which plate is on it rather than guess.',
       ),
     options: slicerOptionsSchema.optional(),
     bambuStudio: z
@@ -286,6 +286,10 @@ export const stopMachineOutputSchema = machineActionOutputSchema;
 export const requestJobOutputSchema = z.looseObject({
   job: jobRecordSchema,
   machineName: z.string().optional().describe('Display name of the machine.'),
+  simulated: z
+    .boolean()
+    .optional()
+    .describe('True when the machine is a simulator: nothing physical happens; say so to the person.'),
   approval: z
     .enum(['approved', 'denied', 'cancelled'])
     .optional()
@@ -303,6 +307,10 @@ export const requestJobOutputSchema = z.looseObject({
 /** @public */
 export const checkJobOutputSchema = z.looseObject({
   status: z.enum(['ready', 'blocked', 'refused']),
+  simulated: z
+    .boolean()
+    .optional()
+    .describe('True when the machine is a simulator: nothing physical happens; say so to the person.'),
   program: programSchema.optional(),
   checks: z.array(jobCheckSchema).optional(),
   message: z.string().optional().describe('Why the machine refused the program.'),

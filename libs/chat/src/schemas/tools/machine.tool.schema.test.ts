@@ -21,6 +21,8 @@ describe('requestJobInputSchema', () => {
     [{ artifact: 'cam/part.nc', preset: 'fine' }, false],
     [{ artifact: 'cam/part.nc', options: { walls: 3 } }, false],
     [{ artifact: 'cam/part.nc', bambuStudio: { settings: { layer: 3 } } }, false],
+    /* A saved slicing profile applies to a slice only, never silently to a finished program. */
+    [{ artifact: 'cam/part.nc', profileId: 'fine-pla' }, false],
     [{ targetFile: 'main.ts', profiles: { printer: 'X1C' } }, false],
   ])('should take exactly one source, and slicing choices only for a CAD source: %o', (input, accepted) => {
     expect(requestJobInputSchema.safeParse(input).success).toBe(accepted);

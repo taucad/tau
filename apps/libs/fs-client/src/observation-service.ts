@@ -65,6 +65,7 @@ export class ObservationService<T> {
   private snapshot: ObservationSnapshot<T> = { status: 'registering' };
   private actor: ReturnType<typeof createObservationActor> | undefined;
   private leases = 0;
+  private disposed = false;
   private epoch = 0;
   private readonly dependencies = new Map<ObservationService<unknown>, ObservedDependency>();
   private refreshingDependencies = false;
@@ -92,21 +93,23 @@ export class ObservationService<T> {
    * @returns Idempotently releasable selecting lease.
    */
   public acquire(): ObservationLease<T> {
-    this.leases++;
-    if (!this.actor) {
-      this.start();
+    if (!this.disposed) {
+      this.leases++;
+      if (!this.actor) {
+        this.start();
+      }
     }
     let released = false;
     return {
       getSnapshot: () => this.snapshot,
-      subscribe: (handler) => this.changes.subscribe(handler),
+      subscribe: (handler) => this.subscribe(handler),
       refresh: () => {
-        if (!released) {
+        if (!released && !this.disposed) {
           this.refresh();
         }
       },
       release: () => {
-        if (released) {
+        if (released || this.disposed) {
           return;
         }
         released = true;
@@ -143,10 +146,14 @@ export class ObservationService<T> {
   public getSnapshot = (): ObservationSnapshot<T> => this.snapshot;
 
   /** Subscribe without acquiring I/O; bindings acquire in their effect. */
-  public subscribe = (handler: () => void): (() => void) => this.changes.subscribe(handler);
+  public subscribe = (handler: () => void): (() => void) =>
+    this.disposed ? () => undefined : this.changes.subscribe(handler);
 
   /** Explicit retry recreates a closed watch actor before reading again. */
   public refresh(): void {
+    if (this.disposed) {
+      return;
+    }
     this.options.refresh?.();
     if (this.actor?.getSnapshot().hasTag('closed') && this.leases > 0) {
       this.epoch++;
@@ -171,6 +178,9 @@ export class ObservationService<T> {
 
   /** Invalidate immediately, even while a single in-flight read is pending. */
   public invalidate(): void {
+    if (this.disposed) {
+      return;
+    }
     this.countInvalidation();
     this.discardStaged();
     this.options.invalidate?.();
@@ -179,6 +189,11 @@ export class ObservationService<T> {
 
   /** Close all active leases and fence every pending result. */
   public dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    this.leases = 0;
     this.stop();
     this.changes.dispose();
   }

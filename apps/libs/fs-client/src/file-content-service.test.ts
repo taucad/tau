@@ -123,6 +123,68 @@ function fileWritten(pathRelative: string): ChangeEvent {
   return { type: 'fileWritten', path: pathRelative, backend: 'indexeddb' };
 }
 
+describe('terminal selected observation ownership', () => {
+  it.each(['reset', 'dispose'] as const)(
+    'keeps a preselected service shell inert after domain %s',
+    async (operation) => {
+      const watchReady = vi.fn<NonNullable<WorkerChangeChannelTransport['watchReady']>>().mockImplementation(() => ({
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        unsubscribe: vi.fn(),
+      }));
+      const owned = createHarness({ watchReady });
+      const replacement = new TextEncoder().encode('replacement owner');
+      vi.mocked(owned.proxy.readFile).mockResolvedValue(replacement);
+      const selected = owned.service.observeContent('selected.txt');
+      if (operation === 'reset') {
+        owned.service.reset('/replacement');
+      } else {
+        owned.service.dispose();
+      }
+      const late = selected.acquire();
+      try {
+        expect.soft(watchReady).not.toHaveBeenCalled();
+        expect.soft(late.getSnapshot()).toEqual({ status: 'closed' });
+        expect.soft(selected.activeLeaseCount).toBe(0);
+        if (operation === 'reset') {
+          const current = owned.service.observeContent('selected.txt');
+          const lease = current.acquire();
+          try {
+            await vi.waitFor(() => {
+              expect(current.getSnapshot().status).toBe('ready');
+            });
+            expect.soft(current).not.toBe(selected);
+            expect.soft(watchReady).toHaveBeenCalledOnce();
+            expect.soft(owned.proxy.readFile).toHaveBeenCalledWith('/replacement/selected.txt');
+            expect
+              .soft(current.getSnapshot())
+              .toMatchObject({ status: 'ready', value: { kind: 'text', content: replacement } });
+            const readsBeforeStaleCallbacks = vi.mocked(owned.proxy.readFile).mock.calls.length;
+            const currentBeforeStaleCallbacks = current.getSnapshot();
+            const invalidationsBeforeStaleCallbacks = current.diagnostics.invalidations;
+            late.refresh();
+            late.release();
+            late.release();
+            await Promise.resolve();
+            expect.soft(owned.proxy.readFile).toHaveBeenCalledTimes(readsBeforeStaleCallbacks);
+            expect.soft(current.getSnapshot()).toBe(currentBeforeStaleCallbacks);
+            expect.soft(current.diagnostics.invalidations).toBe(invalidationsBeforeStaleCallbacks);
+            expect.soft(current.activeLeaseCount).toBe(1);
+            expect.soft(current.getSnapshot().status).toBe('ready');
+            expect.soft(selected.getSnapshot()).toEqual({ status: 'closed' });
+          } finally {
+            lease.release();
+          }
+        }
+      } finally {
+        late.release();
+        owned.service.dispose();
+        owned.disposeChannel();
+      }
+    },
+  );
+});
+
 describe('FileContentService', () => {
   let proxy: ComposedViewClient;
   let service: FileContentService;

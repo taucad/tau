@@ -202,6 +202,64 @@ function createTreeHarness(overrides?: {
   };
 }
 
+describe('terminal selected observation ownership', () => {
+  it.each(['reset', 'dispose'] as const)('keeps a preselected tree shell inert after domain %s', async (operation) => {
+    const watchReady = vi.fn<NonNullable<WorkerChangeChannelTransport['watchReady']>>().mockImplementation(() => ({
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      unsubscribe: vi.fn(),
+    }));
+    const owned = createTreeHarness({ watchReady });
+    vi.mocked(owned.proxy.readDirectory).mockResolvedValue([textNode('replacement.ts')]);
+    const selected = owned.tree.observeDirectory('');
+    if (operation === 'reset') {
+      owned.tree.reset('/projects/replacement');
+    } else {
+      owned.tree.dispose();
+    }
+    const late = selected.acquire();
+    try {
+      expect.soft(watchReady).not.toHaveBeenCalled();
+      expect.soft(late.getSnapshot()).toEqual({ status: 'closed' });
+      expect.soft(selected.activeLeaseCount).toBe(0);
+      if (operation === 'reset') {
+        const current = owned.tree.observeDirectory('');
+        const lease = current.acquire();
+        try {
+          await vi.waitFor(() => {
+            expect(current.getSnapshot().status).toBe('ready');
+          });
+          expect.soft(current).not.toBe(selected);
+          expect.soft(watchReady).toHaveBeenCalledOnce();
+          expect.soft(owned.proxy.readDirectory).toHaveBeenCalledWith('/projects/replacement');
+          expect
+            .soft(current.getSnapshot())
+            .toMatchObject({ status: 'ready', value: { kind: 'ready', entries: [{ name: 'replacement.ts' }] } });
+          const readsBeforeStaleCallbacks = vi.mocked(owned.proxy.readDirectory).mock.calls.length;
+          const currentBeforeStaleCallbacks = current.getSnapshot();
+          const invalidationsBeforeStaleCallbacks = current.diagnostics.invalidations;
+          late.refresh();
+          late.release();
+          late.release();
+          await Promise.resolve();
+          expect.soft(owned.proxy.readDirectory).toHaveBeenCalledTimes(readsBeforeStaleCallbacks);
+          expect.soft(current.getSnapshot()).toBe(currentBeforeStaleCallbacks);
+          expect.soft(current.diagnostics.invalidations).toBe(invalidationsBeforeStaleCallbacks);
+          expect.soft(current.activeLeaseCount).toBe(1);
+          expect.soft(current.getSnapshot().status).toBe('ready');
+          expect.soft(selected.getSnapshot()).toEqual({ status: 'closed' });
+        } finally {
+          lease.release();
+        }
+      }
+    } finally {
+      late.release();
+      owned.tree.dispose();
+      owned.disposeChannel();
+    }
+  });
+});
+
 describe('FileTreeService composed-view provenance (north star W2)', () => {
   /*
    * North-star W2 pin (execution-queue ruling P2). The Files pane and the

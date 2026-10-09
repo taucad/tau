@@ -26,6 +26,78 @@ const flush = async (): Promise<void> => {
 };
 
 describe('ObservationService', () => {
+  it('keeps a disposed shell inert after selection and closes stale active leases', async () => {
+    const held = Promise.withResolvers<string>();
+    const read = vi.fn().mockReturnValueOnce(held.promise).mockResolvedValue('revived');
+    const watch = vi.fn(() => ({
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      dispose: vi.fn(),
+    }));
+    const invalidate = vi.fn();
+    const publish = vi.fn();
+    const service = new ObservationService<string>({
+      resource: 'terminal',
+      actorOptions: guardedOptions(),
+      read,
+      watch,
+      invalidate,
+      publish,
+    });
+    const old = service.acquire();
+    await flush();
+    service.dispose();
+    const invalidationsAtDispose = invalidate.mock.calls.length;
+    const late = service.acquire();
+    try {
+      old.refresh();
+      old.release();
+      old.release();
+      late.refresh();
+      held.resolve('old');
+      await flush();
+      expect.soft(service.activeLeaseCount).toBe(0);
+      expect.soft(late.getSnapshot()).toEqual({ status: 'closed' });
+      expect.soft(watch).toHaveBeenCalledOnce();
+      expect.soft(read).toHaveBeenCalledOnce();
+      expect.soft(invalidate).toHaveBeenCalledTimes(invalidationsAtDispose);
+      expect.soft(publish).not.toHaveBeenCalled();
+    } finally {
+      late.release();
+      late.release();
+      service.dispose();
+    }
+    expect(service.activeLeaseCount).toBe(0);
+  });
+
+  it('keeps a shell disposed before its first lease closed without I/O', async () => {
+    const watch = vi.fn(() => ({
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      dispose: vi.fn(),
+    }));
+    const read = vi.fn().mockResolvedValue('unexpected');
+    const service = new ObservationService<string>({
+      resource: 'never-acquired',
+      actorOptions: guardedOptions(),
+      watch,
+      read,
+    });
+    service.dispose();
+    const late = service.acquire();
+    try {
+      late.refresh();
+      await flush();
+      expect.soft(late.getSnapshot()).toEqual({ status: 'closed' });
+      expect.soft(service.activeLeaseCount).toBe(0);
+      expect.soft(watch).not.toHaveBeenCalled();
+      expect.soft(read).not.toHaveBeenCalled();
+    } finally {
+      late.release();
+      service.dispose();
+    }
+  });
+
   it('should await registration, coalesce a burst, and catch up after a stale read rejects', async () => {
     const ready = Promise.withResolvers<void>();
     const closed = Promise.withResolvers<void>();

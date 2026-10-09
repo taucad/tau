@@ -622,7 +622,16 @@ const uploadFile = async (
       },
     });
     input.signal.throwIfAborted();
-    await client.uploadFrom(Readable.from(uploadChunks(input.bytes)), input.remoteName);
+    try {
+      await client.uploadFrom(Readable.from(uploadChunks(input.bytes)), input.remoteName);
+    } catch (error) {
+      // A permanent (5xx) reply to the store command means the printer declined the file, so sending it again
+      // cannot help until the printer's storage is fixed. The reply stays as the cause for diagnosis.
+      if (error instanceof ftp.FTPError && error.code >= 500) {
+        throw new Error('MACHINE_UPLOAD_REFUSED', { cause: error });
+      }
+      throw error;
+    }
     input.signal.throwIfAborted();
     if ((await client.size(input.remoteName)) !== input.bytes.byteLength) {
       throw new Error('MACHINE_UPLOAD_TRANSFER_MISMATCH');

@@ -203,7 +203,8 @@ export type MachineConnectionRuntime = Readonly<{
  * One file uploaded to a machine's own storage over implicit FTPS (TLS from the first byte, TLS 1.2 or later), a host
  * service any provider may use. The host checks the control and data connections against `trust`, logs in as
  * `username` with the secret `secretRef` names, stores `bytes` under `remoteName` in binary passive mode, and then asks
- * the server for the stored size: anything but `bytes.byteLength` rejects `MACHINE_UPLOAD_TRANSFER_MISMATCH`. The
+ * the server for the stored size: anything but `bytes.byteLength` rejects `MACHINE_UPLOAD_TRANSFER_MISMATCH`. A
+ * permanent (5xx) reply to the store rejects `MACHINE_UPLOAD_REFUSED`, with the server's reply as `cause`. The
  * bytes are written in 64 KiB pieces, so a transfer watchdog that measures queued bytes sees steady progress on a
  * slow server. At most 512 MiB. Every endpoint detail comes from the provider; the host assumes no port or account.
  * @public

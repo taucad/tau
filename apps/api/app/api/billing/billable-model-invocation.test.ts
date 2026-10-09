@@ -1537,7 +1537,8 @@ describe('BillableModelInvocationService', () => {
   });
 
   /* R1 in-stream + V4 (Cloud): the relayed frame carries Tau's code, and the turn that
-   * carried no usage settles absorbed — no meter item, no customer charge. */
+   * carried no usage settles rejected at once — no meter item, no customer charge, no hold
+   * left to the recovery deadline. */
   it('should rewrite the captured in-stream supplier refusal and settle the turn at zero charge', async () => {
     const qualified = { ...qualification(), maximumResponseBytes: 64 * 1024 };
     qualified.adapter.createEvidenceCollector = () =>
@@ -1558,14 +1559,20 @@ describe('BillableModelInvocationService', () => {
       `event: error\ndata: {"type":"error","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider's account is unavailable.","error":{"type":"tau_gateway","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider's account is unavailable.","details":{"providerId":"openai","providerCode":"credit_balance_exhausted","accountOwner":"tau"}}}\n\n`,
     );
     expect(relayed).not.toContain('You have no credits remaining');
-    // No usage was reported, so nothing is metered onto the customer and nothing terminalizes.
+    // No usage was reported before the supplier failed: the turn is released now, like a pre-stream refusal.
+    const rejected = {
+      kind: 'provider_rejected',
+      executionStatus: 'rejected',
+      normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_failed', fields: {} },
+    };
     const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
-    expect(recorded?.evidence).toMatchObject({ kind: 'absorbed_unknown', executionStatus: 'unknown' });
-    expect(Object.keys(recorded?.evidence ?? {})).not.toContain('meterItems');
-    expect(ledger.terminalizeOperation).not.toHaveBeenCalled();
+    expect(recorded?.evidence).toEqual(rejected);
+    expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ evidence: rejected }),
+    );
     expect(metrics.billingFundedOperationTerminals.add).toHaveBeenCalledWith(
       1,
-      expect.objectContaining({ 'tau.billing.terminal.kind': 'absorbed_unknown' }),
+      expect.objectContaining({ 'tau.billing.terminal.kind': 'provider_rejected' }),
     );
   });
 

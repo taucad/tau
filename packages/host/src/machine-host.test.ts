@@ -38,6 +38,94 @@ afterEach(async () => {
   await Promise.all(sandboxes.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })));
 });
 
+/**
+ * An implicit-FTPS printer answering only what basic-ftp sends for one upload, recording each command (the password
+ * redacted). Its data channel drains about 4 MiB/s; `stor` is the reply to the store command.
+ */
+const fakeFtpsPrinter = async (stor: string) => {
+  const directory = await sandbox();
+  /* The only way Node gets a self-signed certificate without a dependency. */
+  execFileSync(
+    'openssl',
+    [
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-subj',
+      '/CN=printer',
+      '-days',
+      '1',
+      '-keyout',
+      'key.pem',
+      '-out',
+      'cert.pem',
+    ],
+    { cwd: directory, stdio: 'ignore' },
+  );
+  const credentials = {
+    cert: await readFile(join(directory, 'cert.pem')),
+    key: await readFile(join(directory, 'key.pem')),
+  };
+  let received = 0;
+  let replyOnControl: ((line: string) => void) | undefined;
+  const commands: string[] = [];
+  const data = createTlsServer(credentials, (socket) => {
+    socket.on('error', () => undefined);
+    socket.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+      received += chunk.byteLength;
+      socket.pause();
+      setTimeout(() => socket.resume(), (chunk.byteLength / (4 * 1024 * 1024)) * 1000);
+    });
+    socket.on('end', () => replyOnControl?.('226 Transfer complete'));
+  });
+  data.listen(0, '127.0.0.1');
+  await once(data, 'listening');
+  const { port: dataPort } = data.address() as AddressInfo;
+  const control = createTlsServer(credentials, (socket) => {
+    socket.on('error', () => undefined);
+    const reply = (line: string): void => {
+      socket.write(`${line}\r\n`);
+    };
+    replyOnControl = reply;
+    reply('220 ready');
+    socket.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+      for (const line of Buffer.from(chunk).toString('latin1').split('\r\n').filter(Boolean)) {
+        const command = line.split(' ')[0]!.toUpperCase();
+        commands.push(command === 'PASS' ? 'PASS' : line);
+        const answers = new Map([
+          ['USER', '331 password'],
+          ['PASS', '230 logged in'],
+          ['FEAT', '211 end'],
+          ['EPSV', `229 passive (|||${dataPort}|)`],
+          ['STOR', stor],
+          ['SIZE', `213 ${received}`],
+          ['QUIT', '221 bye'],
+        ]);
+        reply(answers.get(command) ?? '200 ok');
+      }
+    });
+  });
+  control.listen(0, '127.0.0.1');
+  await once(control, 'listening');
+  const { port } = control.address() as AddressInfo;
+  const digest = `sha256:${createHash('sha256').update(new X509Certificate(credentials.cert).raw).digest('hex')}`;
+  return {
+    port,
+    trust: {
+      type: 'pinned',
+      digest: digest as Extract<MachineTransportTrust, { type: 'pinned' }>['digest'],
+    } satisfies MachineTransportTrust,
+    received: () => received,
+    commands: () => commands,
+    close: () => {
+      control.close();
+      data.close();
+    },
+  };
+};
+
 describe('machineRouteGrants', () => {
   it('should grant a served session the removal of a binding', () => {
     expect(machineRouteGrants).toContainEqual({ route: 'machines', operation: 'machines.removeBinding' });
@@ -329,105 +417,39 @@ describe('createNodeMachineRuntime', () => {
     }
   });
 
-  /*
-   * The wire an implicit-FTPS upload speaks, pinned: TLS from the first byte, a login with the caller's own account,
-   * binary passive STOR of the caller's name, then SIZE to prove every byte landed. The data channel drains slower than
-   * the 1 s timeout allows for the whole file, so a whole-file write would trip basic-ftp's watchdog (it counts queued
-   * bytes as progress); 64 KiB pieces keep it fed.
-   */
-  it('should finish an FTPS upload that outlasts its timeout while the server keeps reading', async () => {
-    const directory = await sandbox();
-    /* The only way Node gets a self-signed certificate without a dependency. */
-    execFileSync(
-      'openssl',
-      [
-        'req',
-        '-x509',
-        '-newkey',
-        'rsa:2048',
-        '-nodes',
-        '-subj',
-        '/CN=printer',
-        '-days',
-        '1',
-        '-keyout',
-        'key.pem',
-        '-out',
-        'cert.pem',
-      ],
-      { cwd: directory, stdio: 'ignore' },
-    );
-    const credentials = {
-      cert: await readFile(join(directory, 'cert.pem')),
-      key: await readFile(join(directory, 'key.pem')),
-    };
-    const upload = new Uint8Array(8 * 1024 * 1024).fill(7);
-    let received = 0;
-    let replyOnControl: ((line: string) => void) | undefined;
-    const commands: string[] = [];
-    /* The data channel drains about 4 MiB/s, so the 8 MiB upload lasts twice the 1 s timeout. */
-    const data = createTlsServer(credentials, (socket) => {
-      socket.on('error', () => undefined);
-      socket.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
-        received += chunk.byteLength;
-        socket.pause();
-        setTimeout(() => socket.resume(), (chunk.byteLength / (4 * 1024 * 1024)) * 1000);
-      });
-      socket.on('end', () => replyOnControl?.('226 Transfer complete'));
-    });
-    data.listen(0, '127.0.0.1');
-    await once(data, 'listening');
-    const { port: dataPort } = data.address() as AddressInfo;
-    /* Implicit FTPS on the control channel, answering only what basic-ftp sends for one upload. */
-    const control = createTlsServer(credentials, (socket) => {
-      socket.on('error', () => undefined);
-      const reply = (line: string): void => {
-        socket.write(`${line}\r\n`);
-      };
-      replyOnControl = reply;
-      reply('220 ready');
-      socket.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
-        for (const line of Buffer.from(chunk).toString('latin1').split('\r\n').filter(Boolean)) {
-          const command = line.split(' ')[0]!.toUpperCase();
-          commands.push(command === 'PASS' ? 'PASS' : line);
-          const answers = new Map([
-            ['USER', '331 password'],
-            ['PASS', '230 logged in'],
-            ['FEAT', '211 end'],
-            ['EPSV', `229 passive (|||${dataPort}|)`],
-            ['STOR', '150 ready'],
-            ['SIZE', `213 ${received}`],
-            ['QUIT', '221 bye'],
-          ]);
-          reply(answers.get(command) ?? '200 ok');
-        }
-      });
-    });
-    control.listen(0, '127.0.0.1');
-    await once(control, 'listening');
-    const { port } = control.address() as AddressInfo;
+  const uploadTo = async (printer: Awaited<ReturnType<typeof fakeFtpsPrinter>>, upload: Uint8Array<ArrayBuffer>) => {
     const secrets = createMachineSecretStore({ vault: createMemorySecretVault() });
     secrets.stage('vault:machine/fixture/printer-1', '11111111');
     const { uploadFile } = createNodeMachineRuntime({ secrets, readArtifact: async () => bytes }).connection();
     if (!uploadFile) {
       throw new Error('expected the node runtime to upload files');
     }
-    const digest = `sha256:${createHash('sha256').update(new X509Certificate(credentials.cert).raw).digest('hex')}`;
+    return uploadFile({
+      endpoint: { address: '127.0.0.1', port: printer.port },
+      trust: printer.trust,
+      secretRef: 'vault:machine/fixture/printer-1',
+      username: 'maker',
+      remoteName: 'tau-fixture.gcode.3mf',
+      bytes: upload,
+      connectTimeout: 1000,
+      signal: new AbortController().signal,
+    });
+  };
+
+  /*
+   * The wire an implicit-FTPS upload speaks, pinned: TLS from the first byte, a login with the caller's own account,
+   * binary passive STOR of the caller's name, then SIZE to prove every byte landed. The data channel drains slower than
+   * the 1 s timeout allows for the whole file, so a whole-file write would trip basic-ftp's watchdog (it counts queued
+   * bytes as progress); 64 KiB pieces keep it fed.
+   */
+  it('should finish an FTPS upload that outlasts its timeout while the printer keeps reading', async () => {
+    /* The 8 MiB upload lasts twice the 1 s timeout. */
+    const printer = await fakeFtpsPrinter('150 ready');
+    const upload = new Uint8Array(8 * 1024 * 1024).fill(7);
     try {
-      await expect(
-        uploadFile({
-          endpoint: { address: '127.0.0.1', port },
-          trust: { type: 'pinned', digest: digest as Extract<MachineTransportTrust, { type: 'pinned' }>['digest'] },
-          secretRef: 'vault:machine/fixture/printer-1',
-          username: 'maker',
-          remoteName: 'tau-fixture.gcode.3mf',
-          bytes: upload,
-          connectTimeout: 1000,
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toEqual({ bytesWritten: upload.byteLength });
-      expect(received).toBe(upload.byteLength);
-      expect(commands).toEqual([
+      await expect(uploadTo(printer, upload)).resolves.toEqual({ bytesWritten: upload.byteLength });
+      expect(printer.received()).toBe(upload.byteLength);
+      expect(printer.commands()).toEqual([
         'OPTS UTF8 ON',
         'USER maker',
         'PASS',
@@ -442,8 +464,20 @@ describe('createNodeMachineRuntime', () => {
         'SIZE tau-fixture.gcode.3mf',
       ]);
     } finally {
-      control.close();
-      data.close();
+      printer.close();
+    }
+  }, 20_000);
+
+  it('should name an upload the printer refuses to store, keeping its reply', async () => {
+    // An A1 mini whose microSD will not take the file answers the store command with a bare 550.
+    const printer = await fakeFtpsPrinter('550 ');
+    try {
+      const refusal = await uploadTo(printer, new Uint8Array(1024).fill(7)).catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(Error);
+      expect((refusal as Error).message).toBe('MACHINE_UPLOAD_REFUSED');
+      expect(((refusal as Error).cause as { code?: unknown }).code).toBe(550);
+    } finally {
+      printer.close();
     }
   }, 20_000);
 });

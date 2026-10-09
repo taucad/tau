@@ -199,6 +199,34 @@ const memberMd5Pattern = /^[0-9a-f]{32}$/u;
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
+/**
+ * A failed upload, as the log keeps it: the host's error (which never names the access code) and the printer's reply
+ * when it refused the file.
+ * @param error - What the upload threw.
+ * @returns At most 400 characters.
+ */
+const uploadFailure = (error: unknown): string => {
+  if (!(error instanceof Error)) {
+    return '';
+  }
+  const reply = error.cause instanceof Error ? ` (${error.cause.message.slice(0, 200)})` : '';
+  return `${error.message.slice(0, 200)}${reply}`;
+};
+
+/**
+ * The sentence for an upload the printer refused to store. It stores uploads on its microSD card, so a refused store
+ * is the card, not the network, and sending again cannot help until the card is fixed.
+ * @param cause - The printer's FTP reply, as the host keeps it.
+ * @returns The message a person reads.
+ */
+const uploadRefusal = (cause: unknown): string => {
+  const reply = isRecord(cause) && typeof cause['code'] === 'number' ? `FTP ${cause['code']}` : 'FTP refusal';
+  return (
+    `The printer refused to store the file (${reply}), so nothing was started. Its microSD card may be full, ` +
+    'damaged or locked: free space on it or format it on the printer, then send again.'
+  );
+};
+
 /** `print_error` 0500-400E: "Printing was cancelled." */
 const cancelledCode = '0500-400E';
 
@@ -2189,11 +2217,15 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         );
         return entry.receipt;
       }
-      // The host's transport errors name the failure, never the access code.
-      const code = error instanceof Error ? error.message : '';
+      // The host's transport errors name the failure, never the access code; a refusal keeps the printer's reply.
       await input
-        .log({ level: 'warning', message: `FTPS upload of ${jobInput.remoteName} failed: ${code.slice(0, 200)}` })
+        .log({ level: 'warning', message: `FTPS upload of ${jobInput.remoteName} failed: ${uploadFailure(error)}` })
         .catch(() => undefined);
+      if (error instanceof Error && error.message === 'MACHINE_UPLOAD_REFUSED') {
+        entry.receipt = rejected('TRANSFER_REFUSED', uploadRefusal(error.cause));
+        return entry.receipt;
+      }
+      // A transfer that broke off may have reached the printer, so its result is unknown.
       entry.receipt = { status: 'unknown', reason: 'transfer-result-unavailable', observedAt: now() };
       return entry.receipt;
     }

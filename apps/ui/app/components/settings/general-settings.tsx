@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
-import { legalUrl } from '#constants/meta.constants.js';
+import { legalUrl } from '#lib/legal-url.js';
 import { AlertCircle, Check, ChevronDown, Circle, Contrast, Laptop, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { Loader } from '#components/ui/loader.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';

@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Environment variables retain their wire names. */
 import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import process from 'node:process';
 import { setTimeout as wait } from 'node:timers/promises';
 import type { BrowserWindow, DownloadItem, Event } from 'electron';
@@ -229,6 +229,34 @@ export const launchDesktopApp = async (options: {
   const pickedDirectory = join(pickedParent, 'tau-desktop-workspace');
   await mkdir(pickedDirectory, { recursive: true });
   const output: string[] = [];
+  const startupStarted = performance.now();
+  const startupPhases: Array<{ phase: string; elapsedMilliseconds: number }> = [];
+  const recordStartupPhase = (phase: string): void => {
+    const receipt = { phase, elapsedMilliseconds: Math.round(performance.now() - startupStarted) };
+    startupPhases.push(receipt);
+    console.info('DESKTOP STARTUP', JSON.stringify({ ...receipt, userData }));
+  };
+  const preserveStartupFailure = async (error: unknown): Promise<void> => {
+    const directory = join(diagnosticsRoot, `launch-${basename(userData)}`);
+    const desktopLog = await readFile(join(userData, 'logs/desktop.log'), 'utf8').catch(() => '(no desktop.log)');
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, 'diagnostics.log'),
+      [
+        `userData: ${userData}`,
+        `pickedDirectory: ${pickedDirectory}`,
+        `failure: ${error instanceof Error ? error.stack : String(error)}`,
+        '--- startup phases ---',
+        JSON.stringify(startupPhases),
+        '--- process output ---',
+        output.join(''),
+        '--- desktop.log ---',
+        desktopLog,
+      ].join('\n'),
+      'utf8',
+    );
+    console.info('DESKTOP STARTUP FAILURE', directory);
+  };
   const inheritedEnvironment = { ...(process.env as Record<string, string>) };
   const packaged = desktopE2ECompletedArtifact || options.packaged === true;
   const packagedExecutable = desktopE2ECompletedArtifact ? desktopE2EPackagedExecutable() : defaultPackagedExecutable;
@@ -245,54 +273,62 @@ export const launchDesktopApp = async (options: {
     delete inheritedEnvironment['TAU_FRONTEND_URL'];
   }
 
-  const application = await electron.launch({
-    ...(packaged ? { executablePath: packagedExecutable } : {}),
-    args: [
-      ...(packaged ? [] : [desktopRoot]),
-      `--user-data-dir=${userData}`,
-      ...(startupNetworkLogPath ? [`--log-net-log=${startupNetworkLogPath}`] : []),
-      ...webGpuArguments(),
-      ...(options.fakeMicrophonePath
-        ? [
-            '--use-fake-device-for-media-stream',
-            '--use-fake-ui-for-media-stream',
-            // Chromium's sandboxed audio service cannot read the test-owned WAV on macOS.
-            '--no-sandbox',
-            `--use-file-for-fake-audio-capture=${options.fakeMicrophonePath}`,
-          ]
-        : []),
-    ],
-    cwd: packaged ? userData : desktopRoot,
-    env: {
-      ...inheritedEnvironment,
-      NODE_ENV: 'production',
-      /* Forwarded into `window.ENV` by the shell's client allowlist, where it
-       * turns on the `tauDebug` feature flag that mounts
-       * `SectionViewTestBridge` — the viewport-framing observable. `ui-e2e`
-       * sets the same variable on its UI server for the same reason. */
-      TAU_DEBUG: process.env['TAU_DEBUG'] ?? 'true',
-      TAU_S3_ENDPOINT: process.env['TAU_S3_ENDPOINT'] ?? 'http://localhost:9000',
-      ...(options.useProductionEndpointDefaults
-        ? {}
-        : {
-            TAU_API_URL: desktopE2EApiUrl,
-            TAU_WEBSOCKET_URL: desktopE2EApiUrl.replace(/^http/u, 'ws'),
-            TAU_FRONTEND_URL: desktopE2EFrontendUrl,
-          }),
-      ...(packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: clientRoot }),
-      TAU_DESKTOP_TOKEN: options.token,
-      TAU_E2E_PICK_DIRECTORY: pickedDirectory,
-      /* Printer access codes go to the throwaway profile's file vault, never the
-       * person's login keychain, whatever the shell running the suite sets. */
-      TAU_SECRET_VAULT: 'file',
-      /* The per-user machine store and every other Tau config live in the
-       * throwaway profile too, never the person's own. */
-      TAU_CONFIG_DIR: join(userData, 'config'),
-      ...options.env,
-      TAU_E2E_HIDE_WINDOW: options.visible === true ? '0' : '1',
-      ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
-    },
-  });
+  let application: ElectronApplication;
+  recordStartupPhase('launch.before');
+  try {
+    application = await electron.launch({
+      ...(packaged ? { executablePath: packagedExecutable } : {}),
+      args: [
+        ...(packaged ? [] : [desktopRoot]),
+        `--user-data-dir=${userData}`,
+        ...(startupNetworkLogPath ? [`--log-net-log=${startupNetworkLogPath}`] : []),
+        ...webGpuArguments(),
+        ...(options.fakeMicrophonePath
+          ? [
+              '--use-fake-device-for-media-stream',
+              '--use-fake-ui-for-media-stream',
+              // Chromium's sandboxed audio service cannot read the test-owned WAV on macOS.
+              '--no-sandbox',
+              `--use-file-for-fake-audio-capture=${options.fakeMicrophonePath}`,
+            ]
+          : []),
+      ],
+      cwd: packaged ? userData : desktopRoot,
+      env: {
+        ...inheritedEnvironment,
+        NODE_ENV: 'production',
+        /* Forwarded into `window.ENV` by the shell's client allowlist, where it
+         * turns on the `tauDebug` feature flag that mounts
+         * `SectionViewTestBridge` — the viewport-framing observable. `ui-e2e`
+         * sets the same variable on its UI server for the same reason. */
+        TAU_DEBUG: process.env['TAU_DEBUG'] ?? 'true',
+        TAU_S3_ENDPOINT: process.env['TAU_S3_ENDPOINT'] ?? 'http://localhost:9000',
+        ...(options.useProductionEndpointDefaults
+          ? {}
+          : {
+              TAU_API_URL: desktopE2EApiUrl,
+              TAU_WEBSOCKET_URL: desktopE2EApiUrl.replace(/^http/u, 'ws'),
+              TAU_FRONTEND_URL: desktopE2EFrontendUrl,
+            }),
+        ...(packaged ? {} : { TAU_DESKTOP_CLIENT_ROOT: clientRoot }),
+        TAU_DESKTOP_TOKEN: options.token,
+        TAU_E2E_PICK_DIRECTORY: pickedDirectory,
+        /* Printer access codes go to the throwaway profile's file vault, never the
+         * person's login keychain, whatever the shell running the suite sets. */
+        TAU_SECRET_VAULT: 'file',
+        /* The per-user machine store and every other Tau config live in the
+         * throwaway profile too, never the person's own. */
+        TAU_CONFIG_DIR: join(userData, 'config'),
+        ...options.env,
+        TAU_E2E_HIDE_WINDOW: options.visible === true ? '0' : '1',
+        ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
+      },
+    });
+  } catch (error) {
+    await preserveStartupFailure(error).catch(() => undefined);
+    throw error;
+  }
+  recordStartupPhase('launch.after');
   const child = application.process();
   /* Installed before the first window loads, and kept for the whole session, so
    * startup and late traffic are both observed. */
@@ -316,8 +352,12 @@ export const launchDesktopApp = async (options: {
   try {
     /* A packaged launch releases main bootstrap before its first window exists.
      * Configure the main-process test overrides only after that startup boundary. */
+    recordStartupPhase('firstWindow.before');
     page = await application.firstWindow();
+    recordStartupPhase('firstWindow.after');
+    recordStartupPhase('domcontentloaded.before');
     await page.waitForLoadState('domcontentloaded');
+    recordStartupPhase('domcontentloaded.after');
     if (options.windowTitle !== undefined) {
       const ownedWindow = await application.browserWindow(page);
       await ownedWindow.evaluate((window: BrowserWindow, title) => {
@@ -349,6 +389,7 @@ export const launchDesktopApp = async (options: {
         };
       });
     }
+    recordStartupPhase('main-overrides.before');
     await application.evaluate(({ dialog, shell }, selectedDirectory) => {
       const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
       shell.openExternal = async (url): Promise<void> => {
@@ -357,6 +398,7 @@ export const launchDesktopApp = async (options: {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
       dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
     }, pickedDirectory);
+    recordStartupPhase('main-overrides.after');
     page.setDefaultTimeout(60_000);
     page.on('console', (message) => {
       if (message.type() === 'error') {
@@ -364,9 +406,12 @@ export const launchDesktopApp = async (options: {
       }
     });
     page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
+    recordStartupPhase('tracing.before');
     await page.context().tracing.start({ screenshots: true, snapshots: true });
+    recordStartupPhase('tracing.after');
   } catch (error) {
     child.kill('SIGKILL');
+    await preserveStartupFailure(error).catch(() => undefined);
     /* The shell's own output is the only account of why it went away, and the
      * caller has no session to read it from. */
     throw new Error(`The desktop shell did not survive launch.\n${output.join('')}`, { cause: error });

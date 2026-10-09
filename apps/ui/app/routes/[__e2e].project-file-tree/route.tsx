@@ -12,6 +12,14 @@ import { projectUrl } from '#utils/project-url.utils.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 
+if (
+  'location' in globalThis &&
+  ENV.TAU_DEBUG &&
+  new URL(globalThis.location.href).searchParams.get('startupTrace') === '1'
+) {
+  console.info('PROJECT FIXTURE PHASE', 'module.loaded');
+}
+
 /** Same shape the project-creation-location fixture accepts: one OPFS directory name. */
 const validWorkspaceFixture = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
 

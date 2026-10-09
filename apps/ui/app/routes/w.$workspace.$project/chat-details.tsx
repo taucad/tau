@@ -18,6 +18,7 @@ import { Textarea } from '@taucad/ui/components/textarea';
 import { Tags, TagsTrigger } from '#components/ui/input-tags.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { ChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';
+import { PackagesPanel } from '#routes/w.$workspace.$project/packages-panel.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -158,6 +159,7 @@ export function DetailsPanelBody({
           </section>
 
           <FileSystemInfo backendType={backendType} activeWorkspaceName={activeWorkspaceName} />
+          {sharedReadOnly ? null : <PackagesPanel />}
           {sharedReadOnly ? null : <ChatDetailsUsage enabled={enableHistory} />}
         </div>
       </div>

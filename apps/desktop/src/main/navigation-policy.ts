@@ -129,6 +129,8 @@ export const isTrustedSender = (frame: SenderFrame | undefined, origins: readonl
  *
  * `'wasm-unsafe-eval'` is required by every WebAssembly kernel; `blob:` in
  * `worker-src`/`connect-src` by the runtime's worker delivery and Monaco.
+ * `https://registry.npmjs.org` is where the Packages panel's Install reads
+ * packuments and tarballs (every tarball is checked against the lock's integrity).
  * `default-src 'none'` makes every directive below an explicit grant, and
  * `base-uri`/`form-action`/`frame-ancestors 'none'` close the three
  * redirect-style escapes a CSP is usually forgotten on.
@@ -144,7 +146,7 @@ export const contentSecurityPolicy = (connectOrigins: readonly string[]): string
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "media-src 'self' blob:",
-    `connect-src 'self' data: blob:${connectOrigins.map((origin) => ` ${origin}`).join('')}`,
+    `connect-src 'self' data: blob: https://registry.npmjs.org${connectOrigins.map((origin) => ` ${origin}`).join('')}`,
     "worker-src 'self' blob:",
     "child-src 'self' blob:",
     "object-src 'none'",

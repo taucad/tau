@@ -62,6 +62,7 @@ const staticFamilies = new Map<string, ActivityFamily>([
   ['tool-delete_file', 'edit'],
   ['tool-apply_parameter_operation', 'edit'],
   ['tool-arrange_workbench', 'edit'],
+  ['tool-install_packages', 'edit'],
   ['tool-evaluate_model', 'render'],
   // Durable pre-migration turns remain readable; these names are display-only, never tool registrations.
   ['tool-get_kernel_result', 'render'],
@@ -84,6 +85,7 @@ const nativeFamilies = new Map<string, ActivityFamily>([
   ['create_file', 'edit'],
   ['delete_file', 'edit'],
   ['apply_parameter_operation', 'edit'],
+  ['install_packages', 'edit'],
   ['evaluate_model', 'render'],
   ['get_kernel_result', 'render'],
   ['screenshot', 'screenshot'],

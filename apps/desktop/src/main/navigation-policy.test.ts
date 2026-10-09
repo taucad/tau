@@ -85,8 +85,10 @@ describe('contentSecurityPolicy', () => {
     expect(policy.startsWith("default-src 'none'; ")).toBe(true);
   });
 
-  it('reaches the API and WebSocket origins and nothing else', () => {
-    expect(directive('connect-src')).toBe("connect-src 'self' data: blob: http://localhost:4000 ws://localhost:4001");
+  it('reaches the npm registry, the API and WebSocket origins, and nothing else', () => {
+    expect(directive('connect-src')).toBe(
+      "connect-src 'self' data: blob: https://registry.npmjs.org http://localhost:4000 ws://localhost:4001",
+    );
   });
 
   it('admits no remote script origin, while allowing what the SPA measurably needs', () => {

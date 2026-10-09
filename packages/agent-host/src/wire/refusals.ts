@@ -197,6 +197,16 @@ export const refusals = {
    * and nothing new can be charged to it. Signing in again does not change it; the card points to account support (W11).
    */
   BILLING_ACCOUNT_CLOSED: { owner: 'gateway', retry: 'never' },
+  /**
+   * Tau's operators paused this model route (HTTP 503, `details.routeId`). Resuming re-sends to the same paused route,
+   * so the card offers another model instead; its copy is the page's, never the gateway's sentence.
+   */
+  MODEL_ROUTE_PAUSED: { owner: 'gateway', retry: 'never' },
+  /**
+   * Admission refused spending on this account (HTTP 403): the account is restricted, or a billing case puts its own
+   * balance in question. Neither another model nor signing in changes it; the card points to support.
+   */
+  BILLING_ACCOUNT_RESTRICTED: { owner: 'gateway', retry: 'never' },
 
   // ── transport: the host's gateway client ────────────────────────────────────────────────────
   MODEL_PROVIDER_UNSUPPORTED: { owner: 'transport', retry: 'never' },

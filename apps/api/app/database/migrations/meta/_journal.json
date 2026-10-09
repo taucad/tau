@@ -337,6 +337,20 @@
       "when": 1790511831085,
       "tag": "0048_credit_operation_dispatch",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1791499107880,
+      "tag": "0049_supplier_simplification",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791526758725,
+      "tag": "0050_user_allows_usage_metrics",
+      "breakpoints": true
     }
   ]
 }

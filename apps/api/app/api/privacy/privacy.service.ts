@@ -18,11 +18,13 @@ export class PrivacyService {
       where: eq(user.id, userId),
       columns: {
         allowsAiTraining: true,
+        allowsUsageMetrics: true,
       },
     });
 
     return {
       allowsAiTraining: result?.allowsAiTraining ?? true,
+      allowsUsageMetrics: result?.allowsUsageMetrics ?? true,
     };
   }
 
@@ -38,14 +40,17 @@ export class PrivacyService {
       .update(user)
       .set({
         allowsAiTraining: preferences.allowsAiTraining,
+        allowsUsageMetrics: preferences.allowsUsageMetrics,
       })
       .where(eq(user.id, userId))
       .returning({
         allowsAiTraining: user.allowsAiTraining,
+        allowsUsageMetrics: user.allowsUsageMetrics,
       });
 
     return {
       allowsAiTraining: updated?.allowsAiTraining ?? true,
+      allowsUsageMetrics: updated?.allowsUsageMetrics ?? true,
     };
   }
 }

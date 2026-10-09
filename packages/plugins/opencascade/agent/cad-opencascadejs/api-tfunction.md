@@ -80,6 +80,16 @@ TFunction_DriverTable: declare class TFunction_DriverTable extends Standard_Tran
 
 TFunction_ExecutionStatus: typeof TFunction_ExecutionStatus[keyof typeof TFunction_ExecutionStatus]
 
+  readonly TFunction_ES_WrongDefinition: 'TFunction_ES_WrongDefinition'
+
+  readonly TFunction_ES_NotExecuted: 'TFunction_ES_NotExecuted'
+
+  readonly TFunction_ES_Executing: 'TFunction_ES_Executing'
+
+  readonly TFunction_ES_Succeeded: 'TFunction_ES_Succeeded'
+
+  readonly TFunction_ES_Failed: 'TFunction_ES_Failed'
+
 TFunction_Function: declare class TFunction_Function extends TDF_Attribute
 
   // TFunction_Function.constructor (constructor)

@@ -44,6 +44,7 @@ import {
   fetchStripeTaxCalculationEvidence,
   fetchStripeTaxTransactionEvidence,
   isLoopbackBillingStripeClient,
+  isStripeSubscriptionEnding,
   parseStripeCreateLeg,
   parseVerifiedStripeEvent,
   recoverStripeLegSource,
@@ -51,6 +52,7 @@ import {
   retrieveStripeBillingCustomer,
   retrieveStripeSetupEvidence,
   retrieveStripeSubscriptionSchedule,
+  stripeCustomerContact,
   updateStripeSubscriptionScheduleOnce,
 } from '#api/billing/billing-stripe.js';
 import type { StripeCreateLeg, StripeCreateResult } from '#api/billing/billing-stripe.js';
@@ -81,6 +83,7 @@ import {
   creditAccount,
   stripeEventInbox,
   subscription,
+  user,
 } from '#database/schema.js';
 
 type Database = DatabaseService['database'];
@@ -229,10 +232,18 @@ const describeRenewalFailure = (
 export type BillingRecoveryNoticeTransport = {
   deliver(input: {
     readonly kind: string;
+    /** The notice row's account, whose active owner receives it. */
+    readonly accountId: string;
     readonly payload: Record<string, unknown>;
     readonly dedupeKey: string;
   }): Promise<{ readonly receipt: string }>;
 };
+
+/**
+ * How many sends a recovery notice gets before it is parked for an operator. Retries wait one minute,
+ * doubling after each failure, so the last attempt comes about eight and a half hours after the first.
+ */
+export const recoveryNoticeAttemptLimit = 10;
 
 /** Wire states with nothing left to recover; a repeated recover answers them without reading Stripe. */
 const terminalActionStates = new Set<WirePaymentAction['state']>(['fulfilled', 'completed', 'canceled', 'failed']);
@@ -1756,8 +1767,20 @@ export class BillingPaymentsService {
             },
             { id: leg.id, leaseUntil },
           );
-        if (recovered.object.kind === 'checkout')
-          await this.linkRecoveredCheckout(leg, leaseUntil, recovered.object.object);
+        if (recovered.object.kind === 'checkout') {
+          const session = recovered.object.object;
+          // An expired Session whose `checkout.session.expired` event never arrived is closed the way that event
+          // closes it: otherwise its purchase or Pro slot stays pending, refusing a new one, and this sweep reads
+          // the Session again every lease. The leg now carries the Session even when this pass just linked it.
+          if (
+            session.status === 'expired' &&
+            (await this.closeExpiredCheckout({ ...leg, providerObjectId: session.id }, session, 'failed'))
+          ) {
+            result.processed.push(leg.id);
+            continue;
+          }
+          await this.linkRecoveredCheckout(leg, leaseUntil, session);
+        }
         result.processed.push(leg.id);
       } catch (error) {
         await this.releaseProviderLegClaim(leg.id, leaseUntil, paymentRecoveryErrorCode(error));
@@ -1935,8 +1958,13 @@ export class BillingPaymentsService {
   public async deliverRecoveryNotices(input: {
     readonly environment: FinancialEnvironment;
     readonly limit: number;
-  }): Promise<{ processed: string[]; pending: string[]; failed: string[] }> {
-    const result = { processed: [] as string[], pending: [] as string[], failed: [] as string[] };
+  }): Promise<{ processed: string[]; pending: string[]; failed: string[]; abandoned: string[] }> {
+    const result = {
+      processed: [] as string[],
+      pending: [] as string[],
+      failed: [] as string[],
+      abandoned: [] as string[],
+    };
     if (input.environment !== this.config.environment || input.limit < 1 || input.limit > 100) {
       throw new RangeError('Invalid notice recovery scope');
     }
@@ -1982,9 +2010,13 @@ export class BillingPaymentsService {
       try {
         const delivered = await this.noticeTransport.deliver({
           kind: claim.kind,
+          accountId: claim.accountId,
           payload: claim.payload,
           dedupeKey: claim.dedupeKey,
         });
+        /* This update and the failure update below find the claim by its generation alone, which every
+         * re-claim bumps. Requiring an unexpired lease as well would leave a send that outlasted it unrecorded
+         * and `processing`, and the next pass would email the owner again. */
         const changed = await this.databaseService.database
           .update(billingRecoveryNotice)
           .set({
@@ -2000,20 +2032,24 @@ export class BillingPaymentsService {
               eq(billingRecoveryNotice.id, claim.id),
               eq(billingRecoveryNotice.generation, claim.generation),
               eq(billingRecoveryNotice.state, 'processing'),
-              sql`${billingRecoveryNotice.leaseUntil} > clock_timestamp()`,
             ),
           )
           .returning({ id: billingRecoveryNotice.id });
         if (changed[0] === undefined) throw new Error('Stale recovery notice claim');
         result.processed.push(claim.id);
       } catch {
-        await this.databaseService.database
+        /* The claim already counted this attempt. A notice out of attempts stays pending but is parked, which
+         * the outbox's state check allows, so an operator can re-queue it by setting `next_attempt_at`. */
+        const abandoned = claim.attemptCount >= recoveryNoticeAttemptLimit;
+        const failed = await this.databaseService.database
           .update(billingRecoveryNotice)
           .set({
             state: 'pending',
             leaseUntil: null,
-            errorCode: 'delivery_failed',
-            nextAttemptAt: sql`clock_timestamp() + interval '30 seconds'`,
+            errorCode: abandoned ? 'delivery_abandoned' : 'delivery_failed',
+            nextAttemptAt: abandoned
+              ? new Date('9999-12-31T00:00:00Z')
+              : sql`clock_timestamp() + ${60 * 2 ** (claim.attemptCount - 1)} * interval '1 second'`,
             updatedAt: new Date(),
           })
           .where(
@@ -2021,10 +2057,14 @@ export class BillingPaymentsService {
               eq(billingRecoveryNotice.id, claim.id),
               eq(billingRecoveryNotice.generation, claim.generation),
               eq(billingRecoveryNotice.state, 'processing'),
-              sql`${billingRecoveryNotice.leaseUntil} > clock_timestamp()`,
             ),
-          );
-        result.failed.push(claim.id);
+          )
+          .returning({ id: billingRecoveryNotice.id });
+        if (abandoned && failed[0] !== undefined) {
+          result.abandoned.push(claim.id);
+        } else {
+          result.failed.push(claim.id);
+        }
       }
     }
     return result;
@@ -3424,7 +3464,7 @@ export class BillingPaymentsService {
           .set({
             status: remote.status,
             slotState: ended ? 'ended' : ownedSubscription.slotState,
-            cancelAtPeriodEnd: remote.cancel_at_period_end,
+            cancelAtPeriodEnd: isStripeSubscriptionEnding(remote),
             canceledAt: remote.canceled_at === null ? null : new Date(remote.canceled_at * 1000),
             endedAt: remote.ended_at === null ? null : new Date(remote.ended_at * 1000),
             updatedAt: new Date(),
@@ -4086,17 +4126,32 @@ export class BillingPaymentsService {
       if (binding === undefined) throw new Error('Customer binding disappeared');
       if (binding.stripeCustomerId !== null) return { binding, dispatch: false, leg: undefined };
       const existing = await tx
-        .select()
+        .select({
+          leg: billingProviderLeg,
+          dispatching: sql<boolean>`coalesce(${billingProviderLeg.state} = 'dispatched' and ${billingProviderLeg.leaseUntil} > clock_timestamp(), false)`,
+        })
         .from(billingProviderLeg)
         .where(and(eq(billingProviderLeg.customerBindingId, binding.id), eq(billingProviderLeg.kind, 'customer')))
         .limit(1)
         .for('update');
-      if (existing[0] !== undefined) return { binding, dispatch: false, leg: existing[0] };
+      /* Another request's create is still inside its dispatch lease, so Stripe may not have answered it. Searching for
+       * its Customer now would race that create: search lags a new Customer, and a burst of first purchases would
+       * become a burst of searches Stripe rate-limits. The request reports the creation as unresolved instead, as it
+       * does when a search misses, and a retry finds the Customer bound. */
+      if (existing[0]?.dispatching === true) throw new ConflictException({ code: 'customer_creation_outcome_unknown' });
+      if (existing[0] !== undefined) return { binding, dispatch: false, leg: existing[0].leg };
       const legId = randomUUID();
+      // Stripe addresses receipts, invoices and the portal to the Customer's email, and Checkout prefills it.
+      const [contact] = await tx
+        .select({ email: user.email, name: user.name })
+        .from(user)
+        .where(eq(user.id, owner.ownerId))
+        .limit(1);
       /* The environment stamp is what lets a test-mode cash scan tell another environment's
        * customer from unexplained cash: test mode shares one Stripe account between local
        * development, the acceptance suite and staging. */
       const request = {
+        ...stripeCustomerContact(contact),
         metadata: {
           tau_account_id: owner.accountId,
           tau_customer_binding_id: binding.id,
@@ -4117,6 +4172,8 @@ export class BillingPaymentsService {
           idempotencyKey: `tau:${legId}`,
           state: 'dispatched',
           dispatchStartedAt: new Date(),
+          // Outlasts this request's create, which Stripe answers or times out within seconds.
+          leaseUntil: sql`date_trunc('milliseconds', clock_timestamp()) + interval '30 seconds'`,
           nextAttemptAt: new Date(),
         })
         .returning();
@@ -4536,6 +4593,12 @@ export class BillingPaymentsService {
       }
       return true;
     }
+    if (purchase.state === 'failed' || purchase.state === 'canceled') {
+      // Closed only on Stripe's proof that no money moved, which the database keeps immutable: a later event for its
+      // PaymentIntent, such as the cancellation Stripe sends when a hosted Session expires, has nothing left to settle.
+      const source = await retrieveStripePaymentEvidence(this.sourceStripe, paymentIntentId);
+      return source.paymentIntent.amount_received === 0;
+    }
     const bindingRows = await this.databaseService.database
       .select()
       .from(billingStripeCustomer)
@@ -4569,6 +4632,25 @@ export class BillingPaymentsService {
       expected.customerBindingId !== binding.id
     ) {
       throw new ConflictException({ code: 'payment_proof_scope_mismatch' });
+    }
+    // A hosted payment is decided by its Checkout Session, not by one attempt on its PaymentIntent. An open Session
+    // survives a declined card or a 3-D Secure step: its customer can still pay in it, and Stripe completes it once a
+    // payment succeeds, so the purchase stays resumable at the same link. An expired one closes the purchase as its
+    // `checkout.session.expired` event would, whichever of that event and the PaymentIntent's arrives first.
+    if (checkout?.session.status === 'open') return false;
+    if (checkout?.session.status === 'expired') {
+      const [leg] = await this.databaseService.database
+        .select()
+        .from(billingProviderLeg)
+        .where(
+          and(
+            eq(billingProviderLeg.id, expected.providerLegId),
+            eq(billingProviderLeg.accountId, accountId),
+            eq(billingProviderLeg.purchaseId, purchaseId),
+          ),
+        )
+        .limit(1);
+      if (leg !== undefined && (await this.closeExpiredCheckout(leg, checkout.session, 'failed', claim))) return true;
     }
     const paymentSource = await retrieveStripePaymentEvidence(this.sourceStripe, paymentIntentId);
     // Without a delivered success event, a hosted Checkout is accepted at its settled charge's own time.

@@ -166,7 +166,7 @@ describe('HostsService route admission', () => {
       authorization: `Bearer ${revokedGrant}`,
       socket: revoked,
     });
-    expect(revoked.close).toHaveBeenCalledWith(1008, 'device revoked');
+    expect(revoked.close).toHaveBeenCalledWith(4003, 'device revoked');
   });
 
   /*

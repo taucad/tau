@@ -34,3 +34,13 @@ part();
 ```
 
 Check missing semicolons, undefined variables, unclosed modules, and non-positive dimensions first.
+
+## Wrong / Correct
+
+- Wrong: `cylinder(10, 5)`; positional order is easy to misread. Correct: name the arguments: `cylinder(h = 10, r = 5, center = true)`.
+- Wrong: `include <lib/widget.scad>` for a module library. Correct: `use <lib/widget.scad>`.
+- Wrong: relying on top-level `$fa`/`$fs` for measured accuracy. Correct: they shape the preview, but exports and GeoSpec evidence tessellate with `$fn = 32`; set `$fn` on a curved feature (`cylinder(h = 16, r = 4, $fn = 64)`) when its volume or fit is tested, and size volume tolerances to that facet count.
+
+## Verify
+
+Test with a TypeScript `main.geospec.ts` (activate `geospec-authoring`): `await loadModel({ file: 'main.scad' })`; OpenSCAD yields mesh evidence.

@@ -353,7 +353,51 @@ ShapeExtend_MsgRegistrator: declare class ShapeExtend_MsgRegistrator extends Sha
 
 ShapeExtend_Parametrisation: typeof ShapeExtend_Parametrisation[keyof typeof ShapeExtend_Parametrisation]
 
+  readonly ShapeExtend_Natural: 'ShapeExtend_Natural'
+
+  readonly ShapeExtend_Uniform: 'ShapeExtend_Uniform'
+
+  readonly ShapeExtend_Unitary: 'ShapeExtend_Unitary'
+
 ShapeExtend_Status: typeof ShapeExtend_Status[keyof typeof ShapeExtend_Status]
+
+  readonly ShapeExtend_OK: 'ShapeExtend_OK'
+
+  readonly ShapeExtend_DONE1: 'ShapeExtend_DONE1'
+
+  readonly ShapeExtend_DONE2: 'ShapeExtend_DONE2'
+
+  readonly ShapeExtend_DONE3: 'ShapeExtend_DONE3'
+
+  readonly ShapeExtend_DONE4: 'ShapeExtend_DONE4'
+
+  readonly ShapeExtend_DONE5: 'ShapeExtend_DONE5'
+
+  readonly ShapeExtend_DONE6: 'ShapeExtend_DONE6'
+
+  readonly ShapeExtend_DONE7: 'ShapeExtend_DONE7'
+
+  readonly ShapeExtend_DONE8: 'ShapeExtend_DONE8'
+
+  readonly ShapeExtend_DONE: 'ShapeExtend_DONE'
+
+  readonly ShapeExtend_FAIL1: 'ShapeExtend_FAIL1'
+
+  readonly ShapeExtend_FAIL2: 'ShapeExtend_FAIL2'
+
+  readonly ShapeExtend_FAIL3: 'ShapeExtend_FAIL3'
+
+  readonly ShapeExtend_FAIL4: 'ShapeExtend_FAIL4'
+
+  readonly ShapeExtend_FAIL5: 'ShapeExtend_FAIL5'
+
+  readonly ShapeExtend_FAIL6: 'ShapeExtend_FAIL6'
+
+  readonly ShapeExtend_FAIL7: 'ShapeExtend_FAIL7'
+
+  readonly ShapeExtend_FAIL8: 'ShapeExtend_FAIL8'
+
+  readonly ShapeExtend_FAIL: 'ShapeExtend_FAIL'
 
 ShapeExtend_WireData: declare class ShapeExtend_WireData extends Standard_Transient
 

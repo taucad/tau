@@ -4,7 +4,9 @@ export type EmailTemplateKind =
   | 'password-changed'
   | 'verify-email'
   | 'publication-invite'
-  | 'payment-failed';
+  | 'payment-failed'
+  | 'auto-reload-disabled'
+  | 'auto-reload-action-required';
 
 export type EmailMessage = {
   readonly to: string;
@@ -63,13 +65,31 @@ export type PaymentFailedEmailTemplate = {
   readonly paymentMethodSummary?: string;
 };
 
+/** Automatic credit reload could not charge the saved card and turned itself off. */
+export type AutoReloadDisabledEmailTemplate = {
+  readonly kind: 'auto-reload-disabled';
+  readonly email: string;
+  /** Billing-settings deep link where reload can be set up again. */
+  readonly billingUrl: string;
+};
+
+/** The card's bank asked the customer to confirm an automatic credit reload before it is charged. */
+export type AutoReloadActionRequiredEmailTemplate = {
+  readonly kind: 'auto-reload-action-required';
+  readonly email: string;
+  /** Billing-settings deep link where the payment is finished. */
+  readonly billingUrl: string;
+};
+
 export type EmailTemplate =
   | MagicLinkEmailTemplate
   | ResetPasswordEmailTemplate
   | PasswordChangedEmailTemplate
   | VerifyEmailTemplate
   | PublicationInviteEmailTemplate
-  | PaymentFailedEmailTemplate;
+  | PaymentFailedEmailTemplate
+  | AutoReloadDisabledEmailTemplate
+  | AutoReloadActionRequiredEmailTemplate;
 
 export type RenderedEmail = {
   readonly html: string;

@@ -567,6 +567,12 @@ StepData_GlobalNodeOfWriterLib: declare class StepData_GlobalNodeOfWriterLib ext
 
 StepData_Logical: typeof StepData_Logical[keyof typeof StepData_Logical]
 
+  readonly StepData_LFalse: 'StepData_LFalse'
+
+  readonly StepData_LTrue: 'StepData_LTrue'
+
+  readonly StepData_LUnknown: 'StepData_LUnknown'
+
 StepData_NodeOfWriterLib: declare class StepData_NodeOfWriterLib extends Standard_Transient
 
   // StepData_NodeOfWriterLib.constructor (constructor)

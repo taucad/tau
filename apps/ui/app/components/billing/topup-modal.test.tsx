@@ -3,10 +3,11 @@ import userEvent from '@testing-library/user-event';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { MemoryRouter } from 'react-router';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactQuery from '@tanstack/react-query';
 import { TopupModal } from '#components/billing/topup-modal.js';
 
+const clientEnvironment = globalThis.window.ENV;
 const client = vi.hoisted(() => ({
   prepareTopup: vi.fn(),
   confirmPaymentAction: vi.fn(),
@@ -136,6 +137,11 @@ describe('TopupModal', () => {
     };
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    globalThis.window.ENV = clientEnvironment;
+  });
+
   it.each(['success', 'conflict'])('ignores a delayed %s after A to B to A', async (outcome) => {
     let settle!: (value: unknown) => void;
     client.prepareTopup.mockImplementation(
@@ -250,12 +256,26 @@ describe('TopupModal', () => {
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
 
-  it('links Terms to the public website so desktop never opens a removed route', async () => {
+  it('should link Terms to the terms page of the deployment serving the app', async () => {
     renderModal();
 
     const terms = await screen.findByRole('link', { name: 'Terms' });
-    expect(terms).toHaveAttribute('href', 'https://tau.new/legal/terms');
+    expect(terms).toHaveAttribute('href', '/legal/terms');
     expect(terms).toHaveAttribute('target', '_blank');
+  });
+
+  it('should link Terms to the bound web deployment on desktop, which ships no legal pages', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    globalThis.window.ENV = {
+      ...clientEnvironment,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names.
+      TAU_FRONTEND_URL: 'https://taucad.dev',
+    };
+
+    renderModal();
+
+    const terms = await screen.findByRole('link', { name: 'Terms' });
+    expect(terms).toHaveAttribute('href', 'https://taucad.dev/legal/terms');
   });
 
   it('prepares a frozen quote before confirmation', async () => {

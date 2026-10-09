@@ -922,6 +922,10 @@ jobs:
       STRIPE_READ_SECRET_KEY: ${{ secrets.STRIPE_TEST_READ_RESTRICTED_KEY }}
       STRIPE_REFUND_SECRET_KEY: ${{ secrets.STRIPE_TEST_REFUND_RESTRICTED_KEY }}
       STRIPE_ACCOUNT_ID: ${{ secrets.STRIPE_TEST_ACCOUNT_ID }}
+      # The test account's own catalog. The lane copies `.env.example` into `.env`, whose placeholders
+      # name no real Stripe object; exported values win over `.env` for Nx and for dotenv in vitest.
+      STRIPE_PRICE_ID_PRO_MONTHLY: ${{ secrets.STRIPE_TEST_PRICE_ID_PRO_MONTHLY }}
+      STRIPE_PRODUCT_ID_CREDIT_PACK: ${{ secrets.STRIPE_TEST_PRODUCT_ID_CREDIT_PACK }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -930,16 +934,17 @@ jobs:
         id: gate
         run: |
           set=0
-          for value in "$STRIPE_SECRET_KEY" "$STRIPE_READ_SECRET_KEY" "$STRIPE_REFUND_SECRET_KEY" "$STRIPE_ACCOUNT_ID"; do
+          for value in "$STRIPE_SECRET_KEY" "$STRIPE_READ_SECRET_KEY" "$STRIPE_REFUND_SECRET_KEY" "$STRIPE_ACCOUNT_ID" \
+            "$STRIPE_PRICE_ID_PRO_MONTHLY" "$STRIPE_PRODUCT_ID_CREDIT_PACK"; do
             if [ -n "$value" ]; then set=$((set + 1)); fi
           done
           if [ "$set" -eq 0 ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "::notice title=Billing e2e skipped::No STRIPE_TEST_* secret is configured; the real Stripe lane runs once the payments work adds them."
-          elif [ "$set" -eq 4 ]; then
+          elif [ "$set" -eq 6 ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::Only $set of the four STRIPE_TEST_* secrets are set; set all four or none."
+            echo "::error::Only $set of the six STRIPE_TEST_* secrets are set; set all six or none."
             exit 1
           fi
 

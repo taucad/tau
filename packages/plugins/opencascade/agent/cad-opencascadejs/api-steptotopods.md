@@ -70,6 +70,10 @@ StepToTopoDS_Builder: declare class StepToTopoDS_Builder extends StepToTopoDS_Ro
 
 StepToTopoDS_BuilderError: typeof StepToTopoDS_BuilderError[keyof typeof StepToTopoDS_BuilderError]
 
+  readonly StepToTopoDS_BuilderDone: 'StepToTopoDS_BuilderDone'
+
+  readonly StepToTopoDS_BuilderOther: 'StepToTopoDS_BuilderOther'
+
 StepToTopoDS_GeometricTool: declare class StepToTopoDS_GeometricTool
 
   // StepToTopoDS_GeometricTool.constructor (constructor)
@@ -94,6 +98,18 @@ StepToTopoDS_GeometricTool: declare class StepToTopoDS_GeometricTool
   [Symbol.dispose](): void;
 
 StepToTopoDS_GeometricToolError: typeof StepToTopoDS_GeometricToolError[keyof typeof StepToTopoDS_GeometricToolError]
+
+  readonly StepToTopoDS_GeometricToolDone: 'StepToTopoDS_GeometricToolDone'
+
+  readonly StepToTopoDS_GeometricToolIsDegenerated: 'StepToTopoDS_GeometricToolIsDegenerated'
+
+  readonly StepToTopoDS_GeometricToolHasNoPCurve: 'StepToTopoDS_GeometricToolHasNoPCurve'
+
+  readonly StepToTopoDS_GeometricToolWrong3dParameters: 'StepToTopoDS_GeometricToolWrong3dParameters'
+
+  readonly StepToTopoDS_GeometricToolNoProjectiOnCurve: 'StepToTopoDS_GeometricToolNoProjectiOnCurve'
+
+  readonly StepToTopoDS_GeometricToolOther: 'StepToTopoDS_GeometricToolOther'
 
 StepToTopoDS_MakeTransformed: declare class StepToTopoDS_MakeTransformed extends StepToTopoDS_Root
 
@@ -367,6 +383,10 @@ StepToTopoDS_TranslateEdge: declare class StepToTopoDS_TranslateEdge extends Ste
 
 StepToTopoDS_TranslateEdgeError: typeof StepToTopoDS_TranslateEdgeError[keyof typeof StepToTopoDS_TranslateEdgeError]
 
+  readonly StepToTopoDS_TranslateEdgeDone: 'StepToTopoDS_TranslateEdgeDone'
+
+  readonly StepToTopoDS_TranslateEdgeOther: 'StepToTopoDS_TranslateEdgeOther'
+
 StepToTopoDS_TranslateEdgeLoop: declare class StepToTopoDS_TranslateEdgeLoop extends StepToTopoDS_Root
 
   // StepToTopoDS_TranslateEdgeLoop.constructor (constructor)
@@ -390,7 +410,15 @@ StepToTopoDS_TranslateEdgeLoop: declare class StepToTopoDS_TranslateEdgeLoop ext
 
 StepToTopoDS_TranslateEdgeLoopError: typeof StepToTopoDS_TranslateEdgeLoopError[keyof typeof StepToTopoDS_TranslateEdgeLoopError]
 
+  readonly StepToTopoDS_TranslateEdgeLoopDone: 'StepToTopoDS_TranslateEdgeLoopDone'
+
+  readonly StepToTopoDS_TranslateEdgeLoopOther: 'StepToTopoDS_TranslateEdgeLoopOther'
+
 StepToTopoDS_TranslateFaceError: typeof StepToTopoDS_TranslateFaceError[keyof typeof StepToTopoDS_TranslateFaceError]
+
+  readonly StepToTopoDS_TranslateFaceDone: 'StepToTopoDS_TranslateFaceDone'
+
+  readonly StepToTopoDS_TranslateFaceOther: 'StepToTopoDS_TranslateFaceOther'
 
 StepToTopoDS_TranslatePolyLoop: declare class StepToTopoDS_TranslatePolyLoop extends StepToTopoDS_Root
 
@@ -415,6 +443,10 @@ StepToTopoDS_TranslatePolyLoop: declare class StepToTopoDS_TranslatePolyLoop ext
 
 StepToTopoDS_TranslatePolyLoopError: typeof StepToTopoDS_TranslatePolyLoopError[keyof typeof StepToTopoDS_TranslatePolyLoopError]
 
+  readonly StepToTopoDS_TranslatePolyLoopDone: 'StepToTopoDS_TranslatePolyLoopDone'
+
+  readonly StepToTopoDS_TranslatePolyLoopOther: 'StepToTopoDS_TranslatePolyLoopOther'
+
 StepToTopoDS_TranslateShell: declare class StepToTopoDS_TranslateShell extends StepToTopoDS_Root
 
   // StepToTopoDS_TranslateShell.constructor (constructor)
@@ -438,6 +470,10 @@ StepToTopoDS_TranslateShell: declare class StepToTopoDS_TranslateShell extends S
 
 StepToTopoDS_TranslateShellError: typeof StepToTopoDS_TranslateShellError[keyof typeof StepToTopoDS_TranslateShellError]
 
+  readonly StepToTopoDS_TranslateShellDone: 'StepToTopoDS_TranslateShellDone'
+
+  readonly StepToTopoDS_TranslateShellOther: 'StepToTopoDS_TranslateShellOther'
+
 StepToTopoDS_TranslateSolid: declare class StepToTopoDS_TranslateSolid extends StepToTopoDS_Root
 
   // StepToTopoDS_TranslateSolid.constructor (constructor)
@@ -459,6 +495,10 @@ StepToTopoDS_TranslateSolid: declare class StepToTopoDS_TranslateSolid extends S
   [Symbol.dispose](): void;
 
 StepToTopoDS_TranslateSolidError: typeof StepToTopoDS_TranslateSolidError[keyof typeof StepToTopoDS_TranslateSolidError]
+
+  readonly StepToTopoDS_TranslateSolidDone: 'StepToTopoDS_TranslateSolidDone'
+
+  readonly StepToTopoDS_TranslateSolidOther: 'StepToTopoDS_TranslateSolidOther'
 
 StepToTopoDS_TranslateVertex: declare class StepToTopoDS_TranslateVertex extends StepToTopoDS_Root
 
@@ -483,6 +523,10 @@ StepToTopoDS_TranslateVertex: declare class StepToTopoDS_TranslateVertex extends
 
 StepToTopoDS_TranslateVertexError: typeof StepToTopoDS_TranslateVertexError[keyof typeof StepToTopoDS_TranslateVertexError]
 
+  readonly StepToTopoDS_TranslateVertexDone: 'StepToTopoDS_TranslateVertexDone'
+
+  readonly StepToTopoDS_TranslateVertexOther: 'StepToTopoDS_TranslateVertexOther'
+
 StepToTopoDS_TranslateVertexLoop: declare class StepToTopoDS_TranslateVertexLoop extends StepToTopoDS_Root
 
   // StepToTopoDS_TranslateVertexLoop.constructor (constructor)
@@ -505,3 +549,7 @@ StepToTopoDS_TranslateVertexLoop: declare class StepToTopoDS_TranslateVertexLoop
   [Symbol.dispose](): void;
 
 StepToTopoDS_TranslateVertexLoopError: typeof StepToTopoDS_TranslateVertexLoopError[keyof typeof StepToTopoDS_TranslateVertexLoopError]
+
+  readonly StepToTopoDS_TranslateVertexLoopDone: 'StepToTopoDS_TranslateVertexLoopDone'
+
+  readonly StepToTopoDS_TranslateVertexLoopOther: 'StepToTopoDS_TranslateVertexLoopOther'

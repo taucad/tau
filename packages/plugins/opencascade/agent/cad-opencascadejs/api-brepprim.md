@@ -113,6 +113,18 @@ BRepPrim_Cylinder: declare class BRepPrim_Cylinder extends BRepPrim_Revolution
 
 BRepPrim_Direction: typeof BRepPrim_Direction[keyof typeof BRepPrim_Direction]
 
+  readonly BRepPrim_XMin: 'BRepPrim_XMin'
+
+  readonly BRepPrim_XMax: 'BRepPrim_XMax'
+
+  readonly BRepPrim_YMin: 'BRepPrim_YMin'
+
+  readonly BRepPrim_YMax: 'BRepPrim_YMax'
+
+  readonly BRepPrim_ZMin: 'BRepPrim_ZMin'
+
+  readonly BRepPrim_ZMax: 'BRepPrim_ZMax'
+
 BRepPrim_FaceBuilder: declare class BRepPrim_FaceBuilder
 
   // BRepPrim_FaceBuilder.constructor (constructor)

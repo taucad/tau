@@ -1,6 +1,6 @@
 # libcascade — StepDimTol
 
-33 top-level symbols. Signatures are verbatim typescript.
+32 top-level symbols. Signatures are verbatim typescript.
 
 StepDimTol_AngularityTolerance: declare class StepDimTol_AngularityTolerance extends StepDimTol_GeometricToleranceWithDatumReference
 
@@ -23,6 +23,12 @@ StepDimTol_AngularityTolerance: declare class StepDimTol_AngularityTolerance ext
   [Symbol.dispose](): void;
 
 StepDimTol_AreaUnitType: typeof StepDimTol_AreaUnitType[keyof typeof StepDimTol_AreaUnitType]
+
+  readonly StepDimTol_Circular: 'StepDimTol_Circular'
+
+  readonly StepDimTol_Rectangular: 'StepDimTol_Rectangular'
+
+  readonly StepDimTol_Square: 'StepDimTol_Square'
 
 StepDimTol_CircularRunoutTolerance: declare class StepDimTol_CircularRunoutTolerance extends StepDimTol_GeometricToleranceWithDatumReference
 
@@ -300,6 +306,14 @@ StepDimTol_DatumReferenceModifier: declare class StepDimTol_DatumReferenceModifi
   [Symbol.dispose](): void;
 
 StepDimTol_DatumReferenceModifierType: typeof StepDimTol_DatumReferenceModifierType[keyof typeof StepDimTol_DatumReferenceModifierType]
+
+  readonly StepDimTol_CircularOrCylindrical: 'StepDimTol_CircularOrCylindrical'
+
+  readonly StepDimTol_Distance: 'StepDimTol_Distance'
+
+  readonly StepDimTol_Projected: 'StepDimTol_Projected'
+
+  readonly StepDimTol_Spherical: 'StepDimTol_Spherical'
 
 StepDimTol_DatumReferenceModifierWithValue: declare class StepDimTol_DatumReferenceModifierWithValue extends Standard_Transient
 
@@ -806,6 +820,36 @@ StepDimTol_GeometricTolerance: declare class StepDimTol_GeometricTolerance exten
 
 StepDimTol_GeometricToleranceModifier: typeof StepDimTol_GeometricToleranceModifier[keyof typeof StepDimTol_GeometricToleranceModifier]
 
+  readonly StepDimTol_GTMAnyCrossSection: 'StepDimTol_GTMAnyCrossSection'
+
+  readonly StepDimTol_GTMCommonZone: 'StepDimTol_GTMCommonZone'
+
+  readonly StepDimTol_GTMEachRadialElement: 'StepDimTol_GTMEachRadialElement'
+
+  readonly StepDimTol_GTMFreeState: 'StepDimTol_GTMFreeState'
+
+  readonly StepDimTol_GTMLeastMaterialRequirement: 'StepDimTol_GTMLeastMaterialRequirement'
+
+  readonly StepDimTol_GTMLineElement: 'StepDimTol_GTMLineElement'
+
+  readonly StepDimTol_GTMMajorDiameter: 'StepDimTol_GTMMajorDiameter'
+
+  readonly StepDimTol_GTMMaximumMaterialRequirement: 'StepDimTol_GTMMaximumMaterialRequirement'
+
+  readonly StepDimTol_GTMMinorDiameter: 'StepDimTol_GTMMinorDiameter'
+
+  readonly StepDimTol_GTMNotConvex: 'StepDimTol_GTMNotConvex'
+
+  readonly StepDimTol_GTMPitchDiameter: 'StepDimTol_GTMPitchDiameter'
+
+  readonly StepDimTol_GTMReciprocityRequirement: 'StepDimTol_GTMReciprocityRequirement'
+
+  readonly StepDimTol_GTMSeparateRequirement: 'StepDimTol_GTMSeparateRequirement'
+
+  readonly StepDimTol_GTMStatisticalTolerance: 'StepDimTol_GTMStatisticalTolerance'
+
+  readonly StepDimTol_GTMTangentPlane: 'StepDimTol_GTMTangentPlane'
+
 StepDimTol_GeometricToleranceRelationship: declare class StepDimTol_GeometricToleranceRelationship extends Standard_Transient
 
   // StepDimTol_GeometricToleranceRelationship.constructor (constructor)
@@ -878,5 +922,3 @@ StepDimTol_GeometricToleranceTarget: declare class StepDimTol_GeometricTolerance
 
   // StepDimTol_GeometricToleranceTarget.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
-
-StepDimTol_GeometricToleranceType: typeof StepDimTol_GeometricToleranceType[keyof typeof StepDimTol_GeometricToleranceType]

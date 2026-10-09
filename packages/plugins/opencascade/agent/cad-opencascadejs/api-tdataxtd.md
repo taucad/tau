@@ -147,6 +147,58 @@ TDataXtd_Constraint: declare class TDataXtd_Constraint extends TDF_Attribute
 
 TDataXtd_ConstraintEnum: typeof TDataXtd_ConstraintEnum[keyof typeof TDataXtd_ConstraintEnum]
 
+  readonly TDataXtd_RADIUS: 'TDataXtd_RADIUS'
+
+  readonly TDataXtd_DIAMETER: 'TDataXtd_DIAMETER'
+
+  readonly TDataXtd_MINOR_RADIUS: 'TDataXtd_MINOR_RADIUS'
+
+  readonly TDataXtd_MAJOR_RADIUS: 'TDataXtd_MAJOR_RADIUS'
+
+  readonly TDataXtd_TANGENT: 'TDataXtd_TANGENT'
+
+  readonly TDataXtd_PARALLEL: 'TDataXtd_PARALLEL'
+
+  readonly TDataXtd_PERPENDICULAR: 'TDataXtd_PERPENDICULAR'
+
+  readonly TDataXtd_CONCENTRIC: 'TDataXtd_CONCENTRIC'
+
+  readonly TDataXtd_COINCIDENT: 'TDataXtd_COINCIDENT'
+
+  readonly TDataXtd_DISTANCE: 'TDataXtd_DISTANCE'
+
+  readonly TDataXtd_ANGLE: 'TDataXtd_ANGLE'
+
+  readonly TDataXtd_EQUAL_RADIUS: 'TDataXtd_EQUAL_RADIUS'
+
+  readonly TDataXtd_SYMMETRY: 'TDataXtd_SYMMETRY'
+
+  readonly TDataXtd_MIDPOINT: 'TDataXtd_MIDPOINT'
+
+  readonly TDataXtd_EQUAL_DISTANCE: 'TDataXtd_EQUAL_DISTANCE'
+
+  readonly TDataXtd_FIX: 'TDataXtd_FIX'
+
+  readonly TDataXtd_RIGID: 'TDataXtd_RIGID'
+
+  readonly TDataXtd_FROM: 'TDataXtd_FROM'
+
+  readonly TDataXtd_AXIS: 'TDataXtd_AXIS'
+
+  readonly TDataXtd_MATE: 'TDataXtd_MATE'
+
+  readonly TDataXtd_ALIGN_FACES: 'TDataXtd_ALIGN_FACES'
+
+  readonly TDataXtd_ALIGN_AXES: 'TDataXtd_ALIGN_AXES'
+
+  readonly TDataXtd_AXES_ANGLE: 'TDataXtd_AXES_ANGLE'
+
+  readonly TDataXtd_FACES_ANGLE: 'TDataXtd_FACES_ANGLE'
+
+  readonly TDataXtd_ROUND: 'TDataXtd_ROUND'
+
+  readonly TDataXtd_OFFSET: 'TDataXtd_OFFSET'
+
 TDataXtd_Geometry: declare class TDataXtd_Geometry extends TDF_Attribute
 
   // TDataXtd_Geometry.constructor (constructor)
@@ -224,6 +276,22 @@ TDataXtd_Geometry: declare class TDataXtd_Geometry extends TDF_Attribute
   [Symbol.dispose](): void;
 
 TDataXtd_GeometryEnum: typeof TDataXtd_GeometryEnum[keyof typeof TDataXtd_GeometryEnum]
+
+  readonly TDataXtd_ANY_GEOM: 'TDataXtd_ANY_GEOM'
+
+  readonly TDataXtd_POINT: 'TDataXtd_POINT'
+
+  readonly TDataXtd_LINE: 'TDataXtd_LINE'
+
+  readonly TDataXtd_CIRCLE: 'TDataXtd_CIRCLE'
+
+  readonly TDataXtd_ELLIPSE: 'TDataXtd_ELLIPSE'
+
+  readonly TDataXtd_SPLINE: 'TDataXtd_SPLINE'
+
+  readonly TDataXtd_PLANE: 'TDataXtd_PLANE'
+
+  readonly TDataXtd_CYLINDER: 'TDataXtd_CYLINDER'
 
 TDataXtd_Pattern: declare class TDataXtd_Pattern extends TDF_Attribute
 

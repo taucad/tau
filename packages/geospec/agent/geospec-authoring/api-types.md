@@ -19,7 +19,7 @@ GeoSpecSubject: {
     readonly [subjectBrand]: true;
 }
 
-  [subjectBrand]: true
+  readonly [subjectBrand]: true
 
 // Geometry units accepted at GeoSpec evidence-loading boundaries
 // Remarks: Loaded subjects normalize coordinates into canonical millimetres; this type describes source and provenance units, not a project-wide configuration.
@@ -55,19 +55,19 @@ GeoSpecAssertion: {
   expected: unknown
 
   // True when the assertion evaluated successfully
-  passed: boolean
+  passed?: boolean
 
   // Structured diagnostics from matcher evaluation
-  diagnostics: GeometryDiagnostic[]
+  diagnostics?: GeometryDiagnostic[]
 
   // Exact compiled assertion report, including core-owned bytes and polarity
-  report: GeoSpecCanonicalClaimReport
+  report?: GeoSpecCanonicalClaimReport
 
   // The host load which admitted this assertion's subject
-  loadId: string
+  loadId?: string
 
   // Wall-clock cost of matcher evaluation in milliseconds (R1
-  durationMs: number
+  durationMs?: number
 
 // Assembly occurrence rule accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)`
 GeoSpecAssemblyOccurrenceExpectation: {
@@ -84,9 +84,9 @@ GeoSpecAssemblyOccurrenceExpectation: {
 
   name: GeoSpecComponentSelector
 
-  count: GeoSpecNumericExpectation
+  count?: GeoSpecNumericExpectation
 
-  bounds: {
+  bounds?: {
           within?: GeoSpecComponentSelector;
           min?: Vec3 | GeoSpecAxisExpectation;
           max?: Vec3 | GeoSpecAxisExpectation;
@@ -102,7 +102,7 @@ GeoSpecAssemblyOccurrencesExpectation: {
 
   occurrences: GeoSpecAssemblyOccurrenceExpectation[]
 
-  uniqueNames: boolean
+  uniqueNames?: boolean
 
 // Axis-keyed numeric expectation used by high-level geometry matchers
 GeoSpecAxisExpectation: {
@@ -111,11 +111,11 @@ GeoSpecAxisExpectation: {
     z?: number;
 }
 
-  x: number
+  x?: number
 
-  y: number
+  y?: number
 
-  z: number
+  z?: number
 
 // Bounding-box expectation accepted by `expectGeo(...).toHaveBoundingBox(...)`
 GeoSpecBoundingBoxExpectation: {
@@ -126,15 +126,15 @@ GeoSpecBoundingBoxExpectation: {
     tolerance?: number;
 }
 
-  min: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
+  min?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
 
-  max: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
+  max?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
 
-  size: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
+  size?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
 
-  center: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
+  center?: Vec3 | Partial<Record<keyof GeoSpecAxisExpectation, GeoSpecNumericExpectation>>
 
-  tolerance: number
+  tolerance?: number
 
 // Center-of-mass expectation accepted by `expectGeo(...).toHaveCenterOfMass(...)`
 GeoSpecCenterOfMassExpectation: {
@@ -144,7 +144,7 @@ GeoSpecCenterOfMassExpectation: {
 
   point: GeoSpecPointExpectation
 
-  tolerance: number
+  tolerance?: number
 
 // Chamfer-feature expectation accepted by `expectGeo(...).toHaveChamferFeature(...)`
 GeoSpecChamferFeatureExpectation: {
@@ -155,9 +155,9 @@ GeoSpecChamferFeatureExpectation: {
 
   distance: number
 
-  selection: string
+  selection?: string
 
-  tolerance: number
+  tolerance?: number
 
 // Circular-hole expectation accepted by `expectGeo(...).toHaveCircularHole(...)`
 GeoSpecCircularHoleExpectation: {
@@ -170,13 +170,13 @@ GeoSpecCircularHoleExpectation: {
 
   diameter: number
 
-  through: boolean
+  through?: boolean
 
-  axis: 'x' | 'y' | 'z'
+  axis?: 'x' | 'y' | 'z'
 
-  center: GeoSpecPointExpectation
+  center?: GeoSpecPointExpectation
 
-  tolerance: number
+  tolerance?: number
 
 // Cylindrical-face expectation accepted by `expectGeo(...).toHaveCylindricalFace(...)`
 GeoSpecCylindricalFaceExpectation: {
@@ -189,7 +189,7 @@ GeoSpecCylindricalFaceExpectation: {
 
   axis: 'x' | 'y' | 'z'
 
-  tolerance: number
+  tolerance?: number
 
 // Intentional component interference allowance accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
 GeoSpecComponentInterferenceAllowance: {
@@ -200,13 +200,13 @@ GeoSpecComponentInterferenceAllowance: {
     reason: string;
 }
 
-  kind: 'intentionalInterference'
+  kind?: 'intentionalInterference'
 
   left: GeoSpecComponentSelector
 
   right: GeoSpecComponentSelector
 
-  maxVolume: number
+  maxVolume?: number
 
   reason: string
 
@@ -218,11 +218,11 @@ GeoSpecComponentInterferenceExpectation: {
     allowances?: GeoSpecComponentInterferenceAllowance[];
 }
 
-  tolerance: number
+  tolerance?: number
 
-  pairs: GeoSpecComponentInterferencePairExpectation[]
+  pairs?: GeoSpecComponentInterferencePairExpectation[]
 
-  allowances: GeoSpecComponentInterferenceAllowance[]
+  allowances?: GeoSpecComponentInterferenceAllowance[]
 
 // A pair-specific component-interference check accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
 GeoSpecComponentInterferencePairExpectation: {
@@ -243,9 +243,9 @@ GeoSpecConnectedComponentsExpectation: {
 
   count: number
 
-  tolerance: number
+  tolerance?: number
 
-  toleranceMm: number
+  toleranceMm?: number
 
 // Geometry selector used by inspection and spatial relationship matchers
 GeoSpecGeometrySelector: GeoSpecComponentSelector | {
@@ -392,7 +392,7 @@ GeoSpecMatcher: {
 }
 
   // Core-owned negation
-  not: Omit<GeoSpecMatcher, 'not'>
+  readonly not: Omit<GeoSpecMatcher, 'not'>
 
   // Assert the fixed rational plate contract
   // GeoSpecMatcher.toSatisfyRationalPlate (method)
@@ -507,9 +507,9 @@ GeoSpecMassExpectation: {
 
   value: number | GeoSpecNumericExpectation
 
-  density: number
+  density?: number
 
-  tolerance: number
+  tolerance?: number
 
 // Mesh integrity expectation accepted by `expectGeo(...).toHaveMeshIntegrity(...)`
 GeoSpecMeshIntegrityExpectation: {
@@ -527,22 +527,22 @@ GeoSpecMeshIntegrityExpectation: {
     triangleCount?: GeoSpecNumericExpectation;
 }
 
-  finitePositions: boolean
+  finitePositions?: boolean
 
-  degenerateTriangles: {
+  degenerateTriangles?: {
           count?: number;
           maxCount?: number;
           areaTolerance?: number;
       }
 
-  duplicateFaces: {
+  duplicateFaces?: {
           count?: number;
           maxCount?: number;
       }
 
-  watertight: boolean
+  watertight?: boolean
 
-  triangleCount: GeoSpecNumericExpectation
+  triangleCount?: GeoSpecNumericExpectation
 
 // Diagnostic severities rejected by `expectGeo(...).toHaveNoDiagnostics(...)`
 // Remarks: Defaults to `error` and `warning` when omitted.
@@ -550,7 +550,7 @@ GeoSpecNoDiagnosticsExpectation: {
     severities?: Array<GeometryDiagnostic['severity']>;
 }
 
-  severities: Array<GeometryDiagnostic['severity']>
+  severities?: Array<GeometryDiagnostic['severity']>
 
 // Minimum-wall-thickness expectation accepted by `expectGeo(...).toHaveMinimumWallThickness(...)`
 GeoSpecMinimumWallThicknessExpectation: {
@@ -560,7 +560,7 @@ GeoSpecMinimumWallThicknessExpectation: {
 
   value: GeoSpecNumericExpectation
 
-  tolerance: number
+  tolerance?: number
 
 // Circular-hole-pattern expectation accepted by `expectGeo(...).toHaveCircularHolePattern(...)`
 GeoSpecCircularHolePatternExpectation: {
@@ -576,13 +576,13 @@ GeoSpecCircularHolePatternExpectation: {
 
   holeDiameter: number
 
-  boltCircleDiameter: number
+  boltCircleDiameter?: number
 
-  axis: 'x' | 'y' | 'z'
+  axis?: 'x' | 'y' | 'z'
 
-  center: GeoSpecPointExpectation
+  center?: GeoSpecPointExpectation
 
-  tolerance: number
+  tolerance?: number
 
 // Fillet-feature expectation accepted by `expectGeo(...).toHaveFilletFeature(...)`
 GeoSpecFilletFeatureExpectation: {
@@ -593,9 +593,9 @@ GeoSpecFilletFeatureExpectation: {
 
   radius: number
 
-  selection: string
+  selection?: string
 
-  tolerance: number
+  tolerance?: number
 
 // Shared scalar expectation used by geometry measurements
 GeoSpecNumericExpectation: number | {
@@ -618,9 +618,9 @@ GeoSpecPlanarFaceExpectation: {
 
   offset: number
 
-  area: GeoSpecNumericExpectation
+  area?: GeoSpecNumericExpectation
 
-  tolerance: number
+  tolerance?: number
 
 // Point expectation accepted by center and feature matchers
 GeoSpecPointExpectation: Vec3 | GeoSpecAxisExpectation
@@ -631,9 +631,9 @@ GeoSpecProductStructureExpectation: {
     count?: GeoSpecNumericExpectation;
 }
 
-  names: string[]
+  names?: string[]
 
-  count: GeoSpecNumericExpectation
+  count?: GeoSpecNumericExpectation
 
 // One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
 // Remarks: Verdicts are decided by exact BRep evidence only (D3): extrema for `contact`/`clearance`, analytic fact comparison for `coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`, exact solid classification for `containment`/`insertion`, and exact boolean common volume for `interference` (positive volume outside the `minVolume`/`maxVolume` allowance band fails).
@@ -655,7 +655,7 @@ GeoSpecSpatialRelationshipExpectation: {
     reason?: string;
 }
 
-  id: string
+  id?: string
 
   kind: 'contact' | 'clearance' | 'coaxial' | 'concentric' | 'coplanar' | 'parallel' | 'perpendicular' | 'angle' | 'containment' | 'insertion' | 'interference'
 
@@ -663,25 +663,25 @@ GeoSpecSpatialRelationshipExpectation: {
 
   target: GeoSpecGeometrySelector
 
-  tolerance: number
+  tolerance?: number
 
-  angularToleranceDegrees: number
+  angularToleranceDegrees?: number
 
   // Expected angle in degrees for `kind
-  angleDegrees: number
+  angleDegrees?: number
 
   // Declared insertion axis (subject-frame direction) for `kind
-  axis: Vec3
+  axis?: Vec3
 
-  min: number
+  min?: number
 
-  max: number
+  max?: number
 
-  minVolume: number
+  minVolume?: number
 
-  maxVolume: number
+  maxVolume?: number
 
-  reason: string
+  reason?: string
 
 // Spatial relationship expectation accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
 GeoSpecSpatialRelationshipsExpectation: {
@@ -705,7 +705,7 @@ GeoSpecSurfaceAreaExpectation: {
 
   value: number | GeoSpecNumericExpectation
 
-  tolerance: number
+  tolerance?: number
 
 // Topology-count expectation accepted by `expectGeo(...).toHaveTopologyCounts(...)`
 GeoSpecTopologyCountsExpectation: {
@@ -719,21 +719,21 @@ GeoSpecTopologyCountsExpectation: {
     tolerance?: number;
 }
 
-  vertices: GeoSpecNumericExpectation
+  vertices?: GeoSpecNumericExpectation
 
-  edges: GeoSpecNumericExpectation
+  edges?: GeoSpecNumericExpectation
 
-  wires: GeoSpecNumericExpectation
+  wires?: GeoSpecNumericExpectation
 
-  faces: GeoSpecNumericExpectation
+  faces?: GeoSpecNumericExpectation
 
-  shells: GeoSpecNumericExpectation
+  shells?: GeoSpecNumericExpectation
 
-  solids: GeoSpecNumericExpectation
+  solids?: GeoSpecNumericExpectation
 
-  compounds: GeoSpecNumericExpectation
+  compounds?: GeoSpecNumericExpectation
 
-  tolerance: number
+  tolerance?: number
 
 // Exact BRep validity expectation accepted by `expectGeo(...).toBeValidBrep(...)`
 GeoSpecValidBrepExpectation: {
@@ -747,19 +747,19 @@ GeoSpecValidBrepExpectation: {
     closedWires?: boolean;
 }
 
-  maxTolerance: number
+  maxTolerance?: number
 
-  freeBounds: {
+  freeBounds?: {
           count?: GeoSpecNumericExpectation;
       }
 
-  minEdgeLength: number
+  minEdgeLength?: number
 
-  sameParameter: boolean
+  sameParameter?: boolean
 
-  closedShells: boolean
+  closedShells?: boolean
 
-  closedWires: boolean
+  closedWires?: boolean
 
 // Void-continuity expectation accepted by `expectGeo(...).toHaveVoidContinuity(...)`
 // Remarks: A whole-assembly negative-space claim: the ordered `path` waypoints must all lie in ONE connected open-void component (void = outside every `material` solid), that component must not reach any `isolatedFrom` point, and its tightest sampled cross-section must meet `minCrossSection`. Connectivity and isolation are proven from Boolean shell topology, generalized winding-number body identity, and deterministic cross-sections.
@@ -789,16 +789,16 @@ GeoSpecVoidContinuityExpectation: {
   path: GeoSpecVoidWaypoint[]
 
   // Occurrence names whose solids bound the void
-  material: string[]
+  material?: string[]
 
   // Minimum required bottleneck cross-section (mm²), sampled
-  minCrossSection: number
+  minCrossSection?: number
 
   // Points that must NOT be reachable from the path void (isolation claim)
-  isolatedFrom: Vec3[]
+  isolatedFrom?: Vec3[]
 
   // Region bounded for the proof (subject frame)
-  bounds: {
+  bounds?: {
           min: Vec3;
           max: Vec3;
       }
@@ -816,7 +816,7 @@ GeoSpecVolumeExpectation: {
 
   value: number | GeoSpecNumericExpectation
 
-  tolerance: number
+  tolerance?: number
 
 // Basic exact or topology-derived BRep evidence consumed by early feature matchers
 BrepEvidence: {
@@ -928,7 +928,7 @@ BrepEvidence: {
     };
 }
 
-  validity: {
+  validity?: {
           valid: boolean;
           checks?: Array<{
               shape: string;
@@ -953,7 +953,7 @@ BrepEvidence: {
           closedWires?: boolean;
       }
 
-  topologyCounts: {
+  topologyCounts?: {
           vertices?: number;
           edges?: number;
           wires?: number;
@@ -963,28 +963,28 @@ BrepEvidence: {
           compounds?: number;
       }
 
-  boundingBox: {
+  boundingBox?: {
           min: Vec3;
           max: Vec3;
           size: Vec3;
           center: Vec3;
       }
 
-  massProperties: {
+  massProperties?: {
           surfaceArea?: number;
           volume?: number;
           centerOfMass?: Vec3;
           mass?: number;
       }
 
-  planarFaces: Array<{
+  planarFaces?: Array<{
           normal: Vec3;
           offset: number;
           area?: number;
           center?: Vec3;
       }>
 
-  cylindricalFaces: Array<{
+  cylindricalFaces?: Array<{
           radius: number;
           axis: 'x' | 'y' | 'z';
           center?: Vec3;
@@ -994,7 +994,7 @@ BrepEvidence: {
           };
       }>
 
-  circularHoles: Array<{
+  circularHoles?: Array<{
           diameter: number;
           through: boolean;
           axis: 'x' | 'y' | 'z';
@@ -1005,7 +1005,7 @@ BrepEvidence: {
           };
       }>
 
-  circularHolePatterns: Array<{
+  circularHolePatterns?: Array<{
           count: number;
           holeDiameter: number;
           boltCircleDiameter: number;
@@ -1013,17 +1013,17 @@ BrepEvidence: {
           center?: Vec3;
       }>
 
-  chamferFeatures: Array<{
+  chamferFeatures?: Array<{
           distance: number;
           selection?: string;
       }>
 
-  filletFeatures: Array<{
+  filletFeatures?: Array<{
           radius: number;
           selection?: string;
       }>
 
-  minimumWallThickness: {
+  minimumWallThickness?: {
           value: number;
           location?: Vec3;
           pointA?: Vec3;
@@ -1088,15 +1088,15 @@ GeometryDiagnostic: {
 
   message: string
 
-  suggestion: string
+  suggestion?: string
 
-  spatial: {
+  spatial?: {
           min?: Vec3;
           max?: Vec3;
           center?: Vec3;
       }
 
-  details: unknown
+  details?: unknown
 
 // Provenance recorded by GeoSpec loaders
 GeometryProvenance: {
@@ -1114,11 +1114,11 @@ GeometryProvenance: {
 
   loader: 'gltf-transform' | 'in-memory' | 'opencascade-step'
 
-  contentHash: string
+  contentHash?: string
 
-  parameters: Record<string, JSONValue>
+  parameters?: Record<string, JSONValue>
 
-  exportIntent: GeometryExportIntent
+  exportIntent?: GeometryExportIntent
 
 // Source metadata for a loaded geometry subject
 GeometrySource: {
@@ -1133,11 +1133,11 @@ GeometrySource: {
 
   format: GeometryFileFormat
 
-  path: string
+  path?: string
 
-  name: string
+  name?: string
 
-  byteLength: number
+  byteLength?: number
 
 // Canonical P0 object under test for GeoSpec
 // Remarks: This is intentionally a GeoSpec-loaded subject rather than a Tau runtime contract. Runtime integrations pass GLB/glTF bytes or files into loaders.
@@ -1160,9 +1160,9 @@ GeometrySubject: {
 
   mesh: GeometrySubjectMeshEvidence
 
-  brep: BrepEvidence
+  brep?: BrepEvidence
 
-  step: StepEvidence
+  step?: StepEvidence
 
   provenance: GeometryProvenance
 
@@ -1246,7 +1246,7 @@ MeshQualityStats: {
 
   signedVolume: number
 
-  centerOfMass: Vec3
+  centerOfMass?: Vec3
 
 // One triangle from mesh evidence, in geometry document coordinates
 MeshTriangle: {
@@ -1298,11 +1298,11 @@ StepEvidence: {
     xde?: XdeReadResult;
 }
 
-  schema: string
+  schema?: string
 
-  unit: GeoSpecUnit
+  unit?: GeoSpecUnit
 
-  productStructure: Array<{
+  productStructure?: Array<{
           name: string;
           path: string;
           transform?: number[];
@@ -1323,7 +1323,7 @@ StepEvidence: {
       }>
 
   // Structured AP242 XDE read result (occurrences, subshape names, datum placements)
-  xde: XdeReadResult
+  xde?: XdeReadResult
 
 // Numeric 3D vector
 Vec3: readonly [number, number, number]
@@ -1339,21 +1339,21 @@ AnalyzeMeshOptions: (LoadMeshOptions & {
 
   source: MeshSource
 
-  format: MeshFileFormat
+  format?: MeshFileFormat
 
-  path: string
+  path?: string
 
-  name: string
+  name?: string
 
   // Unit exposed by the returned GeoSpec subject
-  unit: GeoSpecUnit
+  unit?: GeoSpecUnit
 
   // Coordinate unit of the supplied mesh data before normalization
-  sourceUnit: GeoSpecUnit
+  sourceUnit?: GeoSpecUnit
 
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
-  subject: never
+  subject?: never
 
 // Mesh analysis result
 AnalyzeMeshResult: {
@@ -1386,19 +1386,19 @@ LoadMeshOptions: {
 
   source: MeshSource
 
-  format: MeshFileFormat
+  format?: MeshFileFormat
 
-  path: string
+  path?: string
 
-  name: string
+  name?: string
 
   // Unit exposed by the returned GeoSpec subject
-  unit: GeoSpecUnit
+  unit?: GeoSpecUnit
 
   // Coordinate unit of the supplied mesh data before normalization
-  sourceUnit: GeoSpecUnit
+  sourceUnit?: GeoSpecUnit
 
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
 // Result of loading mesh evidence into a GeoSpec geometry subject
 LoadMeshResult: LoadMeshSuccess | LoadMeshFailure
@@ -1497,34 +1497,34 @@ CreateModelLoaderOptions: {
 }
 
   // Initialized compiled engine supplied by the host, never selected by an authored spec
-  engine: GeoSpecNativeModelEngine
+  engine?: GeoSpecNativeModelEngine
 
   // Rooted host reader for direct filesystem or URL sources
-  readSource: GeoSpecNativeSourceReader
+  readSource?: GeoSpecNativeSourceReader
 
   // Geometry format to export when an individual call does not specify one
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Runtime client or lazy runtime factory
-  runtime: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
+  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
 
   // Source-specific runtime adapters, e.g
-  sourceAdapters: readonly GeoSpecRuntimeSourceAdapter[]
+  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // Project root used by runtime integrations
-  projectPath: string
+  projectPath?: string
 
   // STEP reader strategy used for STEP sources or exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Geometry formats accepted by {@link import ('./load-model.js').loadModel}
 GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
@@ -1541,8 +1541,8 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
   dispose(): Promise<void>;
 
 // Runtime client surface consumed by `geospec/model`
-// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL.
-GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & {
+// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL. A client with `shutdown` is awaited through it when GeoSpec releases an owned runtime, so its host resources are closed before the caller (for example a worker thread) exits.
+GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & Partial<Pick<RuntimeClient, 'shutdown'>> & {
     open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
     on?(event: 'telemetry', handler: (batch: {
         readonly entries: ReadonlyArray<{
@@ -1622,31 +1622,31 @@ LoadModelCodeOptions: {
   file: keyof Code & string
 
   // Geometry format to export
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // Runtime client or lazy runtime factory
-  runtime: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
+  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
 
   // Source-specific runtime adapters, e.g
-  sourceAdapters: readonly GeoSpecRuntimeSourceAdapter[]
+  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // Project root used by runtime integrations
-  projectPath: string
+  projectPath?: string
 
   // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Filesystem-backed model load options
 LoadModelFileOptions: {
@@ -1676,52 +1676,52 @@ LoadModelFileOptions: {
   file: string
 
   // Project root used by runtime integrations
-  projectPath: string
+  projectPath?: string
 
   // Geometry format to export
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // Runtime client or lazy runtime factory
-  runtime: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
+  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
 
   // Source-specific runtime adapters, e.g
-  sourceAdapters: readonly GeoSpecRuntimeSourceAdapter[]
+  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Options accepted by {@link import ('./load-model.js').loadModel}
 LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadModelFileOptions
 
   // Geometry format to export
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Explicit parameters passed to the runtime
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number
 
 // Direct geometry-source model load options
 LoadModelSourceOptions: {
@@ -1756,34 +1756,34 @@ LoadModelSourceOptions: {
   source: MeshSource | StepSource
 
   // Named external resources consumed alongside the direct geometry bytes
-  resources: ReadonlyArray<{
+  resources?: ReadonlyArray<{
           readonly name: string;
           readonly source: MeshSource | StepSource;
       }>
 
   // Source geometry format
-  format: GeoSpecModelFormat
+  format?: GeoSpecModelFormat
 
   // Source path recorded in provenance
-  path: string
+  path?: string
 
   // Human-readable source name recorded in provenance
-  name: string
+  name?: string
 
   // Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization
-  sourceUnit: GeoSpecUnit
+  sourceUnit?: GeoSpecUnit
 
   // Explicit parameters recorded in provenance
-  parameters: Record<string, unknown>
+  parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP sources
-  stepStreaming: StepStreamingMode
+  stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence
-  mesh: boolean
+  mesh?: boolean
 
   // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance: number
+  meshLinearTolerance?: number
 
   // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees: number
+  meshAngularToleranceDegrees?: number

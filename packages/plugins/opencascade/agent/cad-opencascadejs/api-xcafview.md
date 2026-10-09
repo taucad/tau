@@ -123,3 +123,9 @@ XCAFView_Object: declare class XCAFView_Object extends Standard_Transient
   [Symbol.dispose](): void;
 
 XCAFView_ProjectionType: typeof XCAFView_ProjectionType[keyof typeof XCAFView_ProjectionType]
+
+  readonly XCAFView_ProjectionType_NoCamera: 'XCAFView_ProjectionType_NoCamera'
+
+  readonly XCAFView_ProjectionType_Parallel: 'XCAFView_ProjectionType_Parallel'
+
+  readonly XCAFView_ProjectionType_Central: 'XCAFView_ProjectionType_Central'

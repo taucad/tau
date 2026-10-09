@@ -12,7 +12,6 @@ import {
   validatePolicyActivationNotice,
 } from '#api/billing/billing-policy.js';
 import type { CommercialPolicy, FinancialEnvironment, ValidatedCommercialPolicy } from '#api/billing/billing-policy.js';
-import { seedDevelopmentBudgets } from '#api/billing/development-budgets.js';
 import type { BillingPolicyService, PolicyReplica } from '#api/billing/billing-policy.service.js';
 import type { DatabaseType } from '#database/database.service.js';
 
@@ -27,7 +26,11 @@ export const commercialOverlaySchema = z
     /** `policyVersion` is `${series}-${hash12}`, so the series names the tariff line, not the revision. */
     series: financialIdentitySchema,
     markupBps: policyShape.markupBps,
-    budgets: z.object({ spendBudgetId: financialIdentitySchema, riskBudgetId: financialIdentitySchema }).strict(),
+    /** Retired supplier budget pins: an overlay may still carry them until its owner drops them; nothing reads them. */
+    budgets: z
+      .object({ spendBudgetId: financialIdentitySchema, riskBudgetId: financialIdentitySchema })
+      .strict()
+      .optional(),
     offers: policyShape.offers,
     promotionalIssuance: policyShape.promotionalIssuance,
     // A checked-in overlay states "no automatic reload" as an explicit null; the document omits the key.
@@ -104,8 +107,6 @@ export const composeTariff = (input: {
       meterContractId: route.meterContractId,
       rateIds: route.rates.map((rate) => rateId(route.routeId, rate.dimension, rate.tier)),
       enabled: true,
-      spendBudgetId: overlay.budgets.spendBudgetId,
-      riskBudgetId: overlay.budgets.riskBudgetId,
     })),
     offers: overlay.offers,
     promotionalIssuance: overlay.promotionalIssuance,
@@ -116,7 +117,7 @@ export const composeTariff = (input: {
   return validateCommercialPolicy({ ...document, policyVersion });
 };
 
-type SyncDatabase = Pick<DatabaseType, 'execute' | 'insert'>;
+type SyncDatabase = Pick<DatabaseType, 'execute'>;
 
 export type PolicySyncResult =
   | { status: 'unchanged'; activationId: string; contentHash: string }
@@ -225,9 +226,6 @@ export const syncPolicy = async (
     overlay: input.overlay,
     ...(input.routes === undefined ? {} : { routes: input.routes }),
   });
-  if (input.environment === 'development') {
-    await seedDevelopmentBudgets(database);
-  }
 
   /* `retry` means the head moved under us: this pass cancelled a stale pending activation, or another
    * publisher won the publication. Both are resolved by reading the head again. */

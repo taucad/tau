@@ -124,14 +124,27 @@ export type BambuStatus = Readonly<{
 /** Identity-qualified printer firmware facts returned by `info.get_version`. @internal */
 export type BambuVersion = Readonly<{ serial: string; firmware: string; model?: string }>;
 
-/** Correlated command result that never treats transport delivery as acceptance. @internal */
-export type BambuCommandResult =
-  | Readonly<{ status: 'accepted'; providerRunId?: string }>
-  | Readonly<{ status: 'rejected'; reason: string }>
-  | Readonly<{ status: 'unrelated' }>;
+/**
+ * A refusal this package raises with a stable code, so a caller branches on `code` rather than reading the message.
+ * The message is the code unless a sentence for a person is given; nothing from the printer or the host is carried.
+ * @internal
+ */
+export class BambuProtocolError extends TypeError {
+  public readonly code: string;
+
+  /**
+   * @param code - Stable failure code callers branch on.
+   * @param message - Sentence a person reads; defaults to the code.
+   */
+  public constructor(code: string, message: string = code) {
+    super(message);
+    this.name = 'BambuProtocolError';
+    this.code = code;
+  }
+}
 
 const protocolError = (code: string): never => {
-  throw new TypeError(code);
+  throw new BambuProtocolError(code);
 };
 
 const decode = (bytes: Uint8Array<ArrayBuffer>, maximumBytes: number, code: string): string => {
@@ -495,7 +508,7 @@ export const bambuQuantity = (
     semanticMode: 'declared-only',
   });
   if (result.status !== 'success' || typeof result.value.value !== 'number') {
-    throw new TypeError('BAMBU_INVALID_PHYSICAL_QUANTITY');
+    throw new BambuProtocolError('BAMBU_INVALID_PHYSICAL_QUANTITY');
   }
   const { assumptions, kind, numericProvenance, reference, representation, space, unit, value: _value } = result.value;
   return Object.freeze({
@@ -578,7 +591,7 @@ const parseJson = (bytes: Uint8Array<ArrayBuffer>): Readonly<Record<string, unkn
       'BAMBU_STATUS_INVALID',
     );
   } catch (error) {
-    if (error instanceof TypeError && error.message === 'BAMBU_STATUS_INVALID') {
+    if (error instanceof BambuProtocolError) {
       throw error;
     }
     return protocolError('BAMBU_STATUS_INVALID');
@@ -850,7 +863,8 @@ export const parseBambuVersionPayload = (bytes: Uint8Array<ArrayBuffer>): BambuV
   const info = record(parseJson(bytes)['info'], 'BAMBU_VERSION_INVALID');
   if (
     info['command'] !== 'get_version' ||
-    info['sequence_id'] !== '0' ||
+    // Firmware may echo the sequence id as a number.
+    (typeof info['sequence_id'] === 'number' ? String(info['sequence_id']) : info['sequence_id']) !== '0' ||
     (typeof info['result'] === 'string' && info['result'].toLowerCase() !== 'success')
   ) {
     return protocolError('BAMBU_VERSION_INVALID');
@@ -871,40 +885,6 @@ export const parseBambuVersionPayload = (bytes: Uint8Array<ArrayBuffer>): BambuV
     }
   }
   return protocolError('BAMBU_VERSION_INVALID');
-};
-
-/** Interpret only an exactly correlated semantic command result.
- * @param input - Payload and exact requested command/sequence identity.
- * @returns Correlated semantic outcome or unrelated.
- */
-export const parseBambuCommandPayload = (
-  input: Readonly<{
-    bytes: Uint8Array<ArrayBuffer>;
-    command: string;
-    sequence: string;
-  }>,
-): BambuCommandResult => {
-  const print = record(parseJson(input.bytes)['print'], 'BAMBU_COMMAND_INVALID');
-  // Firmware may echo the sequence id as a number.
-  const sequence = print['sequence_id'];
-  if (
-    print['command'] !== input.command ||
-    (typeof sequence === 'number' ? String(sequence) : sequence) !== input.sequence
-  ) {
-    return Object.freeze({ status: 'unrelated' });
-  }
-  const result = boundedString(print['result'], 64)?.toLowerCase();
-  if (result === 'success') {
-    const providerRunId = boundedString(print['subtask_id'], 128);
-    return Object.freeze({
-      status: 'accepted',
-      ...(providerRunId ? { providerRunId } : {}),
-    });
-  }
-  return Object.freeze({
-    status: 'rejected',
-    reason: boundedString(print['reason'], 128) ?? 'provider-rejected',
-  });
 };
 
 /** One reply to a command, from any client: replies arrive on the shared report topic. @internal */

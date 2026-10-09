@@ -13,9 +13,13 @@ import { describe, expect, it, vi } from 'vitest';
 const report =
   '{"print":{"sequence_id":"8","printer_type":"BL-P001","nozzle_diameter":"0.4","nozzle_temper":215,"nozzle_target_temper":220,"bed_temper":60,"bed_target_temper":65,"gcode_state":"RUNNING","mc_percent":42,"mc_remaining_time":3,"subtask_id":"run-1","subtask_name":"Cube","layer_num":12,"total_layer_num":120,"spd_lvl":2,"spd_mag":100,"stg_cur":1,"hms":[{"attr":201327360,"code":196619}],"cooling_fan_speed":"15","wifi_signal":"-47dBm","sdcard":true,"lights_report":[{"node":"chamber_light","mode":"on"}],"ams":{"tray_exist_bits":"1","tray_now":"0","tray_tar":"0","ams":[{"humidity":"3","temp":"22","tray":[{"tray_type":"PLA","tray_info_idx":"GFA00"},{},{},{}]}]}}}';
 const published = vi.hoisted((): string[] => []);
-const versionReply = vi.hoisted(() => ({ serial: '00M00A391800004' }));
-// The model the mocked printer's status reports; `BL-P001` is the X1C.
-const statusReply = vi.hoisted(() => ({ printerType: 'BL-P001', externalSpool: false }));
+const versionReply = vi.hoisted(() => ({ serial: '00M00A000000001' }));
+// The model and state the mocked printer's status reports; `BL-P001` is the X1C.
+const statusReply = vi.hoisted(() => ({ printerType: 'BL-P001', externalSpool: false, gcodeState: 'RUNNING' }));
+// Push the mocked printer's whole status now, as a printer does on its own.
+const mockPrinter = vi.hoisted((): { push?: () => void } => ({}));
+// A CONNACK return code other than 0 refuses the connection, as MQTT.js reports it.
+const connack = vi.hoisted(() => ({ code: 0 }));
 const externalSpoolReport =
   '"vt_tray":{"id":"254","tray_type":"PETG","tray_color":"FFFFFFFF","tray_info_idx":"GFG99","remain":0},"ams":{';
 // How the mocked printer answers a start: an exact echo, or only its status naming the run by the id or name Tau sent.
@@ -36,6 +40,10 @@ vi.mock('mqtt', async () => {
       stream.write(Buffer.from([0x00, 0x00]));
       stream.uncork();
       queueMicrotask(() => {
+        if (connack.code !== 0) {
+          this.#emit('error', Object.assign(new Error('Connection refused: Not authorized'), { code: connack.code }));
+          return;
+        }
         this.connected = true;
         this.#emit('connect');
       });
@@ -61,7 +69,10 @@ vi.mock('mqtt', async () => {
       return this;
     }
 
-    public async subscribeAsync(): Promise<void> {
+    public async subscribeAsync(topic: string): Promise<void> {
+      mockPrinter.push = () => {
+        this.#emit('message', topic, Buffer.from(this.#status()));
+      };
       await Promise.resolve();
     }
 
@@ -116,15 +127,7 @@ vi.mock('mqtt', async () => {
           ),
         );
       } else {
-        this.#emit(
-          'message',
-          topic.replace('/request', '/report'),
-          Buffer.from(
-            report
-              .replace('BL-P001', statusReply.printerType)
-              .replace('"ams":{', statusReply.externalSpool ? externalSpoolReport : '"ams":{'),
-          ),
-        );
+        this.#emit('message', topic.replace('/request', '/report'), Buffer.from(this.#status()));
       }
       await Promise.resolve();
     }
@@ -133,6 +136,13 @@ vi.mock('mqtt', async () => {
       this.connected = false;
       this.#emit('close');
       await Promise.resolve();
+    }
+
+    #status(): string {
+      return report
+        .replace('BL-P001', statusReply.printerType)
+        .replace('"gcode_state":"RUNNING"', `"gcode_state":"${statusReply.gcodeState}"`)
+        .replace('"ams":{', statusReply.externalSpool ? externalSpoolReport : '"ams":{');
     }
 
     #emit(name: string, ...values: unknown[]): void {
@@ -179,10 +189,10 @@ const artifactOf = (bytes: Uint8Array<ArrayBuffer>): MachineArtifactReference =>
   selectedMember: 'Metadata/plate_1.gcode',
 });
 const candidate = {
-  id: 'bambu:00M00A391800004',
+  id: 'bambu:00M00A000000001',
   name: 'Workshop X1C',
   endpoint: { address: '192.0.2.10', interface: 'test0' },
-  claimedIdentity: { serial: '00M00A391800004', model: 'X1C' },
+  claimedIdentity: { serial: '00M00A000000001', model: 'X1C' },
   observedAt: '2026-09-14T00:00:00.000Z',
   expiresAt: '2026-09-14T00:00:30.000Z',
 };
@@ -190,7 +200,7 @@ const candidate = {
 describe('Bambu read-only controller', () => {
   it('should keep secret and trust host-local while reporting X1C status, then prepare, upload and start', async () => {
     published.length = 0;
-    versionReply.serial = '00M00A391800004';
+    versionReply.serial = '00M00A000000001';
     const bytes = studioArchive;
     const artifact = artifactOf(bytes);
     const archives = [studioArchive, referenceArchive, unnamedArchive];
@@ -268,7 +278,7 @@ describe('Bambu read-only controller', () => {
         trust: { type: 'pinned', digest: pinnedDigest },
       }),
     );
-    expect(descriptor).toMatchObject({ id: '00M00A391800004', model: 'X1C', firmware: '01.08.02.00' });
+    expect(descriptor).toMatchObject({ id: '00M00A000000001', model: 'X1C', firmware: '01.08.02.00' });
     expect(snapshot).toMatchObject({
       connection: 'connected',
       state: { status: 'active' },
@@ -319,11 +329,12 @@ describe('Bambu read-only controller', () => {
     if (jobs.type !== 'supported' || jobs.delivery !== 'stored') {
       throw new Error('Expected stored jobs');
     }
-    const base = { operationId: 'prepared-1', expectedMachineId: '00M00A391800004', artifact, configuration, signal };
+    const base = { operationId: 'prepared-1', expectedMachineId: '00M00A000000001', artifact, configuration, signal };
     const prepared = await jobs.prepare(base);
-    if (prepared.status === 'refused') {
+    if (prepared.status === 'refused' || prepared.remoteName === undefined) {
       throw new Error('Expected a preparation');
     }
+    const { remoteName } = prepared;
     // The mocked printer is mid-run: only the idle check blocks.
     expect(prepared.checks.filter(({ state }) => state === 'blocked').map(({ id }) => id)).toEqual(['idle']);
     expect(prepared).toMatchObject({ remoteName: 'tau-prepared-1.gcode.3mf', parser: { id: 'tau.bambu.gcode-3mf' } });
@@ -368,10 +379,15 @@ describe('Bambu read-only controller', () => {
       jobs.start({
         ...base,
         operationId,
-        remoteName: prepared.remoteName,
+        remoteName,
         transferId: 'tau-prepared-1.gcode.3mf',
         providerData: prepared.providerData,
       });
+    // Prepared while the printer printed; it is still printing, so nothing is sent.
+    await expect(start('start-0')).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_RUN_ACTIVE' });
+    expect(published).not.toEqual(expect.arrayContaining([expect.stringContaining('project_file')]));
+    statusReply.gcodeState = 'IDLE';
+    mockPrinter.push?.();
     await expect(start('start-1')).resolves.toMatchObject({ status: 'accepted', runId: 'run-2' });
     const lastStart = (): Record<string, unknown> | undefined =>
       published
@@ -409,17 +425,19 @@ describe('Bambu read-only controller', () => {
         reason: 'no-correlated-provider-reply',
       });
       const logged = vi.mocked(runtime.log).mock.calls.map(([entry]) => entry.message);
-      expect(logged.join('\n')).not.toMatch(/00M00A391800004|192\.0\.2\.10/u);
+      expect(logged.join('\n')).not.toMatch(/00M00A000000001|192\.0\.2\.10/u);
     } finally {
       startReply.mode = 'echo';
+      statusReply.gcodeState = 'RUNNING';
     }
     await session.close();
   });
 
   it('should offer the external spool as slot 254 and start from it with the AMS off', async () => {
     published.length = 0;
-    versionReply.serial = '00M00A391800004';
+    versionReply.serial = '00M00A000000001';
     statusReply.externalSpool = true;
+    statusReply.gcodeState = 'IDLE';
     const artifact = artifactOf(studioArchive);
     const configuration = {
       amsMapping: [254],
@@ -481,7 +499,7 @@ describe('Bambu read-only controller', () => {
       ) =>
         jobs.prepare({
           operationId: 'prepared-external',
-          expectedMachineId: '00M00A391800004',
+          expectedMachineId: '00M00A000000001',
           artifact,
           configuration: { ...configuration, ...overrides },
           signal,
@@ -506,13 +524,13 @@ describe('Bambu read-only controller', () => {
         state: 'blocked',
       });
       const prepared = await prepare({});
-      if (prepared.status === 'refused') {
+      if (prepared.status === 'refused' || prepared.remoteName === undefined) {
         throw new Error('Expected a preparation');
       }
       await expect(
         jobs.start({
           operationId: 'start-external',
-          expectedMachineId: '00M00A391800004',
+          expectedMachineId: '00M00A000000001',
           artifact,
           remoteName: prepared.remoteName,
           transferId: prepared.remoteName,
@@ -533,6 +551,7 @@ describe('Bambu read-only controller', () => {
       /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
     } finally {
       statusReply.externalSpool = false;
+      statusReply.gcodeState = 'RUNNING';
       await session.close();
     }
   });
@@ -546,7 +565,7 @@ describe('Bambu read-only controller', () => {
         configuration: {
           logicalId: 'Workshop',
           address: 'x1c.local',
-          serial: '00M00A391800004',
+          serial: '00M00A000000001',
         },
         signal: new AbortController().signal,
       },
@@ -564,6 +583,29 @@ describe('Bambu read-only controller', () => {
       },
     ]);
     expect(listenDatagrams).not.toHaveBeenCalled();
+  });
+
+  it('should refuse a manual address or serial with a sentence a person can act on', async () => {
+    const listenDatagrams = vi.fn(async function* () {
+      yield* [];
+    });
+    const discover = async (configuration: Readonly<{ address: string; serial?: string }>): Promise<void> => {
+      for await (const _event of discoverBambuMachines(
+        { configuration: { logicalId: 'Workshop', ...configuration }, signal: new AbortController().signal },
+        { clock: { now: () => '2026-09-14T00:00:00.000Z' }, listenDatagrams },
+      )) {
+        // Refused before anything is yielded.
+      }
+    };
+    await expect(discover({ address: 'http://x1c' })).rejects.toMatchObject({
+      code: 'BAMBU_MANUAL_ADDRESS_INVALID',
+      message: 'Enter a valid IP address or printer hostname.',
+    });
+    // An A1 mini serial is not an X1C serial.
+    await expect(discover({ address: 'x1c.local', serial: '0300AA000000001' })).rejects.toMatchObject({
+      code: 'BAMBU_SERIAL_INVALID',
+      message: 'The serial does not match the selected printer model.',
+    });
   });
 
   it('should listen on UDP 2021 for two advertisement periods so a pass cannot fall between them', async () => {
@@ -648,8 +690,78 @@ describe('Bambu read-only controller', () => {
         },
         runtime,
       ),
-    ).rejects.toThrow('BAMBU_MQTT_CONNECT_FAILED');
-    versionReply.serial = '00M00A391800004';
+    ).rejects.toMatchObject({
+      code: 'BAMBU_INITIAL_FACTS_INVALID',
+      message: 'The device at this address is not the bound printer, or did not report its serial, model and firmware.',
+    });
+    versionReply.serial = '00M00A000000001';
+  });
+
+  it('should name a refused access code apart from a dropped link', async () => {
+    const runtime: MachineConnectionRuntime = {
+      clock: { now: () => '2026-09-14T00:00:00.000Z' },
+      log: vi.fn(async () => undefined),
+      connectStream: vi.fn(async () => ({
+        readable: (async function* () {
+          yield* [];
+        })(),
+        write: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+      })),
+      async *readArtifact() {
+        yield* [];
+      },
+      resolveSecret: vi.fn(async () => 'access-code-must-not-escape'),
+    };
+    const connect = async (configuration: Readonly<{ logicalId: string; serial?: string }>) =>
+      connectBambuMachine(
+        {
+          candidate,
+          configuration,
+          connection: {
+            secretRef: 'vault:bambu-x1c',
+            serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } },
+          },
+          signal: new AbortController().signal,
+        },
+        runtime,
+      );
+    try {
+      connack.code = 5;
+      // Settings shows the message to the person, so it is a sentence; callers branch on the stable code.
+      await expect(connect({ logicalId: 'workshop' })).rejects.toMatchObject({
+        code: 'BAMBU_ACCESS_CODE_REJECTED',
+        message: "The printer refused the access code. Check the code on the printer's screen and bind it again.",
+      });
+      connack.code = 3;
+      await expect(connect({ logicalId: 'workshop' })).rejects.toMatchObject({
+        code: 'BAMBU_MQTT_CONNECT_FAILED',
+        message: 'Could not connect to the printer. Check that it is on and on this network, then try again.',
+      });
+    } finally {
+      connack.code = 0;
+    }
+    // The bound serial fences the printer: an advertisement naming another one is not it.
+    await expect(connect({ logicalId: 'workshop', serial: '00M00A000000002' })).rejects.toMatchObject({
+      code: 'BAMBU_SERIAL_MISMATCH',
+      message: 'The printer at this address reports a different serial.',
+    });
+    // Neither bound nor advertised: the person is told where to enter it.
+    await expect(
+      connectBambuMachine(
+        {
+          candidate: { ...candidate, claimedIdentity: { model: 'X1C' } },
+          configuration: { logicalId: 'workshop' },
+          connection: { secretRef: 'vault:bambu-x1c', serviceTrust: {} },
+          signal: new AbortController().signal,
+        },
+        runtime,
+      ),
+    ).rejects.toMatchObject({
+      code: 'BAMBU_SERIAL_REQUIRED',
+      message: "Enter the printer's serial under Printer details, or find the printer on the network to fill it.",
+    });
+    expect(runtime.connectStream).toHaveBeenCalledTimes(2);
   });
 
   it('should keep Mini model facts and capture a fragmented bounded TLS JPEG, closing failed captures', async () => {
@@ -679,7 +791,7 @@ describe('Bambu read-only controller', () => {
       }),
     );
     try {
-      versionReply.serial = '0300EA652800550';
+      versionReply.serial = '0300AA000000001';
       statusReply.printerType = 'N1';
       const session = await connectBambuMachine(
         {
@@ -737,7 +849,7 @@ describe('Bambu read-only controller', () => {
       expect(cameraClose).toHaveBeenCalledTimes(2);
       await session.close();
     } finally {
-      versionReply.serial = '00M00A391800004';
+      versionReply.serial = '00M00A000000001';
       statusReply.printerType = 'BL-P001';
     }
   });
@@ -778,7 +890,7 @@ describe('Bambu read-only controller', () => {
     try {
       // Another model's camera needs its own manifest and pin; the X1C's pinned camera service never reaches it.
       statusReply.printerType = 'C12';
-      await expect(connect(true)).rejects.toThrow('BAMBU_MQTT_CONNECT_FAILED');
+      await expect(connect(true)).rejects.toMatchObject({ code: 'BAMBU_INITIAL_FACTS_INVALID' });
       statusReply.printerType = 'BL-P001';
       const withoutHostCapture = await connect(false);
       expect(withoutHostCapture.stillCapture).toEqual({ type: 'unsupported' });

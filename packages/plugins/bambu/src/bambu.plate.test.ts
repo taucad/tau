@@ -106,6 +106,12 @@ describe('bambuX1cPlates', () => {
     expect(bambuPlateForBedType('Supertack Plate')).toBeUndefined();
   });
 
+  it('should resolve a name both printers share within the family asked for', () => {
+    expect(bambuPlateForBedType('hot_plate', 'a1-mini')).toMatchObject({ id: 'high-temperature', printer: 'a1-mini' });
+    expect(bambuPlateForBedType('hot_plate', 'x1c')).toMatchObject({ id: 'high-temperature', printer: 'x1c' });
+    expect(bambuPlateForBedType('cool_plate', 'a1-mini')).toBeUndefined();
+  });
+
   it('should give every bed-type name to one plate only', () => {
     const names = bambuX1cPlates.flatMap((plate) => plate.bedTypeNames);
     expect(new Set(names).size).toBe(names.length);

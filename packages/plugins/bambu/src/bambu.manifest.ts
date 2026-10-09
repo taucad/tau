@@ -36,11 +36,15 @@ const seconds = (value: number): number => value * 1000;
 const traySlots = (last: number, ...extra: number[]) =>
   z.literal([...Array.from({ length: last + 1 }, (_, slot) => slot), bambuExternalSpoolSlot, ...extra]);
 
-/** Submission schema shared by the LAN provider and the simulator. @internal */
+/**
+ * Submission schema shared by the LAN provider and the simulator. Trays 0–15 are the four AMS units an X1C takes;
+ * the installed capabilities name the ones the printer reports.
+ * @internal
+ */
 export const bambuSubmissionConfiguration = defineConfiguration({
   id: 'bambu.machine.submission',
   version: '1.2.0',
-  schema: z.object({
+  schema: z.strictObject({
     amsMapping: z.array(traySlots(15, -1)).max(16).default([]),
     bedLeveling: z.boolean().default(true),
     expectedBedType: z.string().min(1).max(64),
@@ -104,8 +108,17 @@ const anyState: readonly MachineStatus[] = ['ready', 'active', 'held'];
 const idle: readonly MachineStatus[] = ['ready'];
 const material = [{ componentId: 'filament', group: 'material' }] as const;
 
-/** What stopping or cancelling does on a Bambu printer: motion halts, the heaters go off, the position is kept. */
-const halts: MachineHaltOutcome = { motion: 'halts', spindle: 'none', heaters: 'off', position: 'kept', recovery: [] };
+/**
+ * What stopping or cancelling does on a Bambu printer: motion halts, the heaters go off, the position is kept. The
+ * printer is ready at once; only the part left on the plate stands in the way of the next print.
+ */
+const halts: MachineHaltOutcome = {
+  motion: 'halts',
+  spindle: 'none',
+  heaters: 'off',
+  position: 'kept',
+  recovery: [{ type: 'person', instruction: 'Remove the unfinished print from the build plate.' }],
+};
 
 /**
  * A control on the host's low-risk list (a light, a printer's speed profile). The standard families start above the
@@ -115,7 +128,8 @@ const fanLevel = standardMachineActions['level.set'].schema.extend({
   ratio: quantity({ unit: '1' }).min(0).max(1).meta({ title: 'Speed', description: '0 is off, 1 is full speed.' }),
 });
 
-const jog = z.strictObject({
+/** `motion.jog` parameters. @internal */
+export const bambuJogSchema = z.strictObject({
   axis: z.enum(['x', 'y', 'z']).meta({ title: 'Axis' }),
   distance: z
     .number()
@@ -125,9 +139,15 @@ const jog = z.strictObject({
   feed: quantity({ unit: 'mm/min' }).positive().max(3000).meta({ title: 'Feed' }),
 });
 
-const slot = z.strictObject({
+/** A slot address parameter. @internal */
+export const bambuSlotSchema = z.strictObject({
   unitId: z.string().min(1).max(64).meta({ title: 'Material unit' }),
   slotId: z.string().min(1).max(64).meta({ title: 'Slot' }),
+});
+
+/** `speed:option.set` parameters, in `print_speed` order. @internal */
+export const bambuSpeedSchema = z.strictObject({
+  option: z.enum(['silent', 'standard', 'sport', 'ludicrous']).meta({ title: 'Speed' }),
 });
 
 /** The printer routines `bambu.printer.calibrate` runs, per model (BL-P001.json, N1.json). */
@@ -136,6 +156,21 @@ const routines = {
   X1C: ['lidar', 'bed-levelling', 'vibration'],
   'A1 mini': ['bed-levelling', 'vibration', 'motor-noise'],
 } as const;
+
+/** `bambu.printer.calibrate` parameters, per model. @internal */
+export const bambuCalibrateSchemas = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+  X1C: z.strictObject({ routines: z.array(z.enum(routines.X1C)).min(1).max(3).meta({ title: 'Routines' }) }),
+  'A1 mini': z.strictObject({
+    routines: z.array(z.enum(routines['A1 mini'])).min(1).max(3).meta({ title: 'Routines' }),
+  }),
+} as const;
+
+/**
+ * Bambu calibration belongs to a person who need not stand at the printer (2026-10-05 amendment): the plate must be
+ * empty and a run prints or purges, so an agent may not start or change one.
+ */
+const calibrationSafety = { authority: 'person', attended: false, interlocks: [] } as const;
 
 const fanLabels = { 'part-fan': 'Part fan', 'aux-fan': 'Auxiliary fan', 'chamber-fan': 'Chamber fan' } as const;
 
@@ -164,9 +199,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       label: 'Print speed',
       when: ['active', 'held'],
       effects: ['motion'],
-      schema: z.strictObject({
-        option: z.enum(['silent', 'standard', 'sport', 'ludicrous']).meta({ title: 'Speed' }),
-      }),
+      schema: bambuSpeedSchema,
     }),
     standardMachineAction({
       id: 'run.pause',
@@ -247,6 +280,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       description: 'Choose `default` for the printer’s own pressure advance.',
       when: idle,
       requires: material,
+      safety: calibrationSafety,
     }),
     standardMachineAction({
       id: 'material.calibration.save',
@@ -254,6 +288,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       label: 'Save a pressure-advance profile',
       when: idle,
       requires: material,
+      safety: calibrationSafety,
     }),
     standardMachineAction({
       id: 'material.calibration.delete',
@@ -261,6 +296,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       label: 'Delete a pressure-advance profile',
       when: idle,
       requires: material,
+      safety: calibrationSafety,
     }),
     standardMachineAction({
       id: 'material.calibration.run',
@@ -268,6 +304,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       label: 'Calibrate',
       when: idle,
       requires: material,
+      safety: calibrationSafety,
       consequence: x1c
         ? 'The printer heats, prints test lines on the plate and scans them.'
         : 'The printer heats and purges filament at the wiper to measure it.',
@@ -301,7 +338,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
         consequence: 'The AMS turns the spool past its tag reader.',
         confirms: 'observation',
       },
-      slot,
+      bambuSlotSchema,
     ),
     defineMachineAction(
       {
@@ -335,7 +372,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       when: idle,
       consequence: 'One relative move inside the printer’s soft limits.',
       confirms: 'acknowledgement',
-      schema: jog,
+      schema: bambuJogSchema,
       qualification: x1c ? provenInTesting : provenOnMini,
     }),
     defineMachineAction(
@@ -347,14 +384,12 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
         effects: ['motion', 'thermal'],
         scope: 'idle',
         when: idle,
-        safety: { authority: 'person', attended: false, interlocks: [] },
+        safety: calibrationSafety,
         requires: [],
         consequence: 'The printer homes, probes the bed and sweeps its motors; the plate must be empty.',
         confirms: 'observation',
       },
-      z.strictObject({
-        routines: z.array(z.enum(routines[model])).min(1).max(3).meta({ title: 'Routines' }),
-      }),
+      bambuCalibrateSchemas[model],
     ),
   ];
 };
@@ -446,9 +481,18 @@ const presets = [
 
 type MaterialUnit = Extract<MachineComponent, { kind: 'material-system' }>['units'][number];
 
-/** The material-system unit of one AMS, by its index. @internal */
+/**
+ * The material-system unit of one AMS, by its index.
+ * @param index - The AMS index the printer reports, 0–3.
+ * @returns The unit.
+ * @throws RangeError for an index no single-nozzle Bambu printer has; the protocol never reports one.
+ * @internal
+ */
 export const bambuAmsUnit = (index: number): MaterialUnit => {
-  const letter = 'abcd'[index] ?? 'a';
+  const letter = Number.isInteger(index) ? 'abcd'[index] : undefined;
+  if (letter === undefined) {
+    throw new RangeError(`AMS ${String(index)} does not exist.`);
+  }
   return {
     id: `ams-${letter}`,
     label: `AMS ${letter.toUpperCase()}`,
@@ -485,7 +529,18 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
     identity: x1c
       ? { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'x1c', displayName: 'X1 Carbon', family: 'X1' }
       : { typeId: 'bambu.a1-mini', vendor: 'Bambu Lab', model: 'a1-mini', displayName: 'A1 mini', family: 'A1' },
-    connection: { transport: 'network', exclusive: false, opening: 'nothing', identity: 'authenticated' },
+    connection: {
+      transport: 'network',
+      exclusive: false,
+      opening: 'nothing',
+      identity: 'authenticated',
+      // The binding pins these under the ids the host reads (`serviceTrust['mqtt' | 'camera']`). Uploads (FTPS 990)
+      // reuse the MQTT pin, so no ftp service: declaring one would add a probe. Simulated bindings pin nothing.
+      services: [
+        { id: 'mqtt', port: 8883, required: true },
+        { id: 'camera', port: x1c ? 322 : 6000, required: false },
+      ],
+    },
     axes: (['x', 'y', 'z'] as const).map((id) => ({
       id,
       label: id.toUpperCase(),
@@ -516,11 +571,12 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
         id: 'filament',
         kind: 'material-system',
         label: x1c ? 'AMS and external spool' : 'AMS lite and external spool',
-        units: [bambuAmsUnit(0), bambuExternalUnit],
-        routes: [
-          { unitId: 'ams-a', toolheadIds: ['tool-0'] },
-          { unitId: 'external', toolheadIds: ['tool-0'] },
-        ],
+        // The X1C takes up to four AMS units, the A1 mini one AMS lite; a connected printer reports the ones it has.
+        units: [...(x1c ? [0, 1, 2, 3] : [0]).map((index) => bambuAmsUnit(index)), bambuExternalUnit],
+        routes: [...(x1c ? ['ams-a', 'ams-b', 'ams-c', 'ams-d'] : ['ams-a']), 'external'].map((unitId) => ({
+          unitId,
+          toolheadIds: ['tool-0'],
+        })),
       },
     ],
     processes: [fffProcess(model)],
@@ -548,10 +604,10 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
             id: bambuX1cHardwareProfile,
             environment: 'hardware',
             model: 'X1C',
-            firmware: ['01.08.02.00'],
+            firmware: ['01.12.00.00'],
             attachments: ['filament', 'camera'],
             evidence:
-              'qualify-x1c print-cube runs on the workshop X1C (machines production readiness program): start, pause, resume, cancel, stop and camera still.',
+              'qualify-x1c print-cube runs on the workshop X1C at firmware 01.12.00.00 with Developer Mode on (2026-09-15, agentic-manufacturing runway br10-print-attempt; machines production readiness program): start, pause, resume, cancel, stop and camera still.',
           },
           {
             id: bambuX1cTestingProfile,
@@ -560,7 +616,7 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
             firmware: ['01.12.00.00'],
             attachments: ['filament', 'camera'],
             evidence:
-              'The operator switched the chamber light, homed and jogged X, Y and Z, and set the part, auxiliary and chamber fans on the workshop X1C from the Print pane in Testing mode (2026-10-05).',
+              'The operator switched the chamber light, homed and jogged X, Y and Z, and set the part, auxiliary and chamber fans on the workshop X1C at firmware 01.12.00.00 from the Print pane in Testing mode (2026-10-05).',
           },
         ]
       : [
@@ -569,9 +625,9 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
             environment: 'hardware',
             model: 'A1 mini',
             firmware: ['01.03.30.01'],
-            attachments: ['filament', 'camera'],
+            attachments: ['camera'],
             evidence:
-              'The operator set the part fan and jogged X, Y and Z on the workshop A1 mini (no AMS lite) from the Print pane in Testing mode (2026-10-05).',
+              'The operator set the part fan and jogged X, Y and Z on the workshop A1 mini (no AMS lite) at firmware 01.03.30.01 from the Print pane in Testing mode (2026-10-05).',
           },
         ],
   };
@@ -611,9 +667,11 @@ export const bambuSimulatedDefinition = (
 const simulated: MachineActionQualification = { status: 'qualified', profileId: 'simulation' };
 
 /**
- * Bambu Lab X1 Carbon manifest (version 3): hardware, the FFF process, declared actions and jobs. Pause, resume,
- * cancel, stop, start and the camera still are qualified on the workshop X1C; everything else is `designed` until
- * the testing program proves it.
+ * Bambu Lab X1 Carbon manifest (version 3): hardware, the FFF process, declared actions and jobs. Pause, resume and
+ * cancel are qualified by the print-cube runs (`x1c-hardware-2026-10`); the chamber light, the three fans, homing and
+ * jogging by the operator's Testing-mode session (`x1c-testing-2026-10-05`); everything else is `designed` until the
+ * testing program proves it. A connected printer whose firmware is outside a profile's list reports those actions
+ * `designed`.
  * @public
  */
 export const bambuX1cManifest: MachineManifest = machineManifestOf(
@@ -621,7 +679,11 @@ export const bambuX1cManifest: MachineManifest = machineManifestOf(
   bambuSubmissionConfiguration.manifest,
 );
 
-/** Bambu Lab A1 mini manifest (version 3). Nothing is hardware-qualified yet. @public */
+/**
+ * Bambu Lab A1 mini manifest (version 3). The part fan and jogging are qualified by the operator's Testing-mode
+ * session (`a1-mini-testing-2026-10-05`, no AMS lite attached); everything else is `designed`.
+ * @public
+ */
 export const bambuA1MiniManifest: MachineManifest = machineManifestOf(
   bambuA1MiniDefinition,
   bambuA1MiniSubmissionConfiguration.manifest,

@@ -37,13 +37,17 @@ certificate trust, sockets, and device lifetime; importing this package does not
 
 ## API
 
-| Export                | Kind            | Use                                                                           |
-| --------------------- | --------------- | ----------------------------------------------------------------------------- |
-| `bambu`               | toolkit factory | package-named authoring factory; presets select capabilities                  |
-| `plugin`              | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
-| `bambuMachine`        | machine factory | X1C registration                                                              |
-| `bambuA1MiniMachine`  | machine factory | A1 mini registration                                                          |
-| `bambuA1MiniManifest` | manifest        | A1 mini hardware, setup and qualification facts                               |
+| Export                        | Kind            | Use                                                                           |
+| ----------------------------- | --------------- | ----------------------------------------------------------------------------- |
+| `bambu`                       | toolkit factory | package-named authoring factory; presets select capabilities                  |
+| `plugin`                      | toolkit factory | the same factory under its mechanical name, for loaders that read a fixed key |
+| `bambuMachine`                | machine factory | X1C over Developer LAN                                                        |
+| `bambuA1MiniMachine`          | machine factory | A1 mini over Developer LAN                                                    |
+| `bambuSimulatorMachine`       | machine factory | a simulated X1C: no sockets, no hardware                                      |
+| `bambuA1MiniSimulatorMachine` | machine factory | a simulated A1 mini                                                           |
+| `bambuX1cManifest`            | manifest        | X1C hardware, FFF process, actions, jobs and qualification profiles           |
+| `bambuA1MiniManifest`         | manifest        | A1 mini hardware, FFF process, actions, jobs and qualification profiles       |
+| `bambuSettingsConfiguration`  | configuration   | sparse project preferences (plate, levelling, slots); also at `./settings`    |
 
 The `default` preset retains the X1C registration (`machines.default`). Select the `a1Mini` preset to register `machines.a1Mini`, or compose both directly:
 
@@ -55,7 +59,47 @@ const runtime = defineRuntime({ machines: [bambuMachine(), bambuA1MiniMachine()]
 
 Each discovered printer has its own binding, certificate pins, credential and session.
 Mini advertises a 180 mm build volume and captures a bounded JPEG still through pinned TLS port 6000.
-Its physical write actions remain designed until qualified on the actual printer.
+
+### Qualification
+
+An action is `qualified` only under a profile naming the hardware, firmware and attachments it was proven on; the rest
+are `designed` and run only for a person in Testing mode. A connected printer whose firmware is outside a profile's
+list reports that profile's actions `designed`.
+
+| Profile                      | Printer and firmware | Actions                                                |
+| ---------------------------- | -------------------- | ------------------------------------------------------ |
+| `x1c-hardware-2026-10`       | X1C, 01.12.00.00     | pause, resume, cancel (with start, stop, camera still) |
+| `x1c-testing-2026-10-05`     | X1C, 01.12.00.00     | chamber light, part/auxiliary/chamber fans, home, jog  |
+| `a1-mini-testing-2026-10-05` | A1 mini, 01.03.30.01 | part fan, jog (no AMS lite attached)                   |
+
+Calibration (pressure-advance profiles, automatic calibration and the printer's own routines) is a person's, who need
+not stand at the printer: an agent may not start or change one.
+
+### Developer Mode
+
+From firmware 01.08.03.00 a printer silently drops `project_file`, `gcode_line` and filament commands unless Developer
+Mode is on. The session reads it from the X1C's `fun` field and from the "MQTT command verification failed" HMS row,
+shows a blocked `developer-mode` check, and refuses every write before sending while it is off. An A1 mini reports no
+`fun`, so once it refuses a command the session keeps writes unavailable until it accepts one again or reconnects.
+
+### Slots and command forms
+
+Tau names a slot `{ unitId, slotId }` (`ams-a`/`a1` … `ams-d`/`d4`, `external`/`spool`). Bambu's tray numbers
+(`ams * 4 + tray`, 254 for the external spool) belong to this package: `bambuSlotOf` and `bambuAddressOf` from
+`@taucad/bambu/settings` map between the two, so a consumer never repeats them.
+
+The clients disagree on how to address the external spool. The binding's **Command forms (testing)** setting picks the
+testing program's variant (a), (b) or (c); (a) is Bambu Studio's everywhere and the default. Which forms each printer
+applies is still being measured on hardware (testing program rows T6, T7, T10, T17).
+
+### Simulators
+
+The simulated printers drive the real session over an in-memory link: runs print the uploaded plate's layers,
+filament changes walk Bambu Studio's steps, calibrations report results, and a stop ends in FAILED with
+"Printing was cancelled" as an X1C does. A simulated printer applies only form (a) for the external spool and ignores
+the others, and it can lag its reports, acknowledge and ignore, lose replies or turn Developer Mode off, so tests prove
+the session decides from reports, never from replies. Simulation never qualifies hardware: its actions are qualified by
+the `simulation` profile only.
 
 ### Build plate models (`@taucad/bambu/plate`)
 
@@ -97,9 +141,11 @@ This executes the same eight exports and source-hash update; it does not bypass 
 
 ## Supervised X1C qualification
 
-The repository-only `bambu:qualify-x1c` target supports the BR10 read-only hardware stage. It cannot upload or start,
-pause, resume, cancel, or stop a print. It refuses hardware access unless `TAU_X1C_STAGE_CONSENT=read-only` is set for
-that invocation.
+The repository-only `bambu:qualify-x1c` target runs the supervised hardware stages. Each stage needs consent for that
+invocation: `TAU_X1C_STAGE_CONSENT=read-only` for the discovery, certificate, observation, camera and live-view stages,
+which never upload, start or control a print; `TAU_X1C_STAGE_CONSENT=upload-and-start` for `print-cube`, which uploads
+the pinned 25 mm PETG cube (`out/hardware/bambu-x1c`), starts it once from AMS slot A1 on firmware 01.12.00.00 and follows
+it to completion. It refuses to start a cube the previous journal already started.
 
 When the protected config is absent, `discover-read-only` performs one continuous bounded passive listen and
 `probe-discovered-read-only` inspects the advertised printer's MQTTS (8883) and X1C RTSPS camera (322) certificates
@@ -157,6 +203,13 @@ TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=serve-r
 
 TAU_X1C_QUALIFICATION_CONFIG=/absolute/path/x1c-qualification.json \
 TAU_X1C_STAGE_CONSENT=read-only pnpm nx run bambu:qualify-x1c -- --stage=read-only
+```
+
+With the printer idle, the plate clear, Developer Mode on and PETG in AMS slot A1, the operator may then print the cube:
+
+```bash
+TAU_X1C_QUALIFICATION_CONFIG=/absolute/path/x1c-qualification.json \
+TAU_X1C_STAGE_CONSENT=upload-and-start pnpm nx run bambu:qualify-x1c -- --stage=print-cube
 ```
 
 ## Versioning and stability

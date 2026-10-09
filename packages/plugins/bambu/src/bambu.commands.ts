@@ -2,7 +2,7 @@
  * Bambu LAN request payloads: one builder per command Tau sends, each returning the exact JSON object published on
  * `device/<serial>/request`. Field forms follow Bambu Studio (repos/BambuStudio @ 66e40547, DeviceManager.cpp,
  * DeviceCore/*Ctrl.cpp); where the clients disagree (the external spool, the clear form) the binding's wire form
- * selects the testing program's row variant (a), (b) or (c).
+ * selects the testing program's row variant (a), (b) or (c) through one table, {@link bambuExternalSpoolFields}.
  *
  * @module
  */
@@ -12,47 +12,57 @@
 import { bambuExternalSpoolSlot } from '#bambu.protocol.js';
 import type { BambuMaterial } from '#bambu.protocol.js';
 
+const unitLetters = 'abcd';
+
 /**
  * Which variant of a command the clients disagree on to send, as the testing program numbers them: (a) is Bambu
- * Studio's form everywhere; (b) and (c) are the alternatives rows T6, T7, T10 and T17 try in turn.
+ * Studio's form everywhere; (b) and (c) are the alternatives rows T6, T7, T10 and T17 try in turn. A letter names a
+ * row variant, not a client: {@link bambuExternalSpoolFields} says which client each one is, per command.
  * @internal
  */
 export type BambuWireForm = 'a' | 'b' | 'c';
 
-/** A slot address in Tau's words. @internal */
-export type BambuSlotAddress = Readonly<{ unitId: string; slotId: string }>;
-
-const unitLetters = 'abcd';
+/** The commands whose external-spool address the clients disagree on. @internal */
+export type BambuExternalSpoolCommand = 'load' | 'unload' | 'setting' | 'calibration';
 
 /**
- * The flat tray id Bambu uses for an address: `ams-a`…`ams-d` slots `a1`…`d4` are `ams * 4 + tray`, the external
- * spool is 254.
- * @param address - The slot address.
- * @returns The flat tray id, or undefined for an address no Bambu printer has.
+ * The external spool's address fields, per command and wire form (lane bambu-material-calibration F3; testing
+ * program rows T6, T10, T16, T17):
+ *
+ * | Command | (a) | (b) | (c) |
+ * |---|---|---|---|
+ * | `load` (`ams_change_filament`) | Studio 254/254/0 | OrcaSlicer 255/255/0 | bambuddy 255, slot 254, target 254 |
+ * | `unload` (`ams_change_filament`) | 255, target 255, slot 255 | the same (no client differs) | the same |
+ * | `setting` (`ams_filament_setting`, clear) | Studio 255/254/0 | probe 255/0/0 (a P1S refused it) | 254/254/0 |
+ * | `calibration` (`extrusion_cali_sel`, `_set`, `extrusion_cali`, `flowrate_cali`) | Studio 255/255/0 | bambuddy 254/254/0 | Studio (a) |
+ *
+ * Studio's external id in every calibration command is its internal 255 (DevFilaSystem.cpp:354-397, CalibUtils.cpp:259).
  * @internal
  */
-export const bambuSlotOf = (address: BambuSlotAddress): number | undefined => {
-  if (address.unitId === 'external') {
-    return address.slotId === 'spool' ? bambuExternalSpoolSlot : undefined;
-  }
-  const unit = /^ams-([a-d])$/u.exec(address.unitId)?.[1];
-  const slot = /^([a-d])([1-4])$/u.exec(address.slotId);
-  return unit === undefined || slot?.[1] !== unit ? undefined : unitLetters.indexOf(unit) * 4 + Number(slot[2]) - 1;
+export const bambuExternalSpoolFields: Readonly<
+  Record<BambuExternalSpoolCommand, Readonly<Record<BambuWireForm, Readonly<Record<string, number>>>>>
+> = {
+  load: {
+    a: { ams_id: 254, target: 254, slot_id: 0 },
+    b: { ams_id: 255, target: 255, slot_id: 0 },
+    c: { ams_id: 255, slot_id: 254, target: 254 },
+  },
+  unload: {
+    a: { ams_id: 255, target: 255, slot_id: 255 },
+    b: { ams_id: 255, target: 255, slot_id: 255 },
+    c: { ams_id: 255, target: 255, slot_id: 255 },
+  },
+  setting: {
+    a: { ams_id: 255, tray_id: 254, slot_id: 0 },
+    b: { ams_id: 255, tray_id: 0, slot_id: 0 },
+    c: { ams_id: 254, tray_id: 254, slot_id: 0 },
+  },
+  calibration: {
+    a: { tray_id: 255, ams_id: 255, slot_id: 0 },
+    b: { tray_id: 254, ams_id: 254, slot_id: 0 },
+    c: { tray_id: 255, ams_id: 255, slot_id: 0 },
+  },
 };
-
-/**
- * The address of a flat tray id.
- * @param slot - The flat tray id: 0–15 or 254.
- * @returns The address.
- * @internal
- */
-export const bambuAddressOf = (slot: number): BambuSlotAddress =>
-  slot === bambuExternalSpoolSlot
-    ? { unitId: 'external', slotId: 'spool' }
-    : {
-        unitId: `ams-${unitLetters[Math.floor(slot / 4)] ?? 'a'}`,
-        slotId: `${unitLetters[Math.floor(slot / 4)] ?? 'a'}${String((slot % 4) + 1)}`,
-      };
 
 /** The label a person reads for a slot: `AMS A2`, `External spool`. @internal */
 export const bambuSlotLabel = (slot: number): string =>
@@ -171,8 +181,7 @@ export const bambuChangeTemperature = (material: BambuMaterial | undefined): num
 
 /**
  * `print.ams_change_filament` loading one tray (DeviceManager.cpp:1639). The external spool's form is the row T17
- * variant: (a) Bambu Studio 254/254/0, (b) OrcaSlicer 255/255/0, (c) bambuddy 255 with slot 254, target 254 and
- * temperatures −1.
+ * variant ({@link bambuExternalSpoolFields}); bambuddy's (c) also sends temperatures −1.
  * @internal
  */
 export const bambuLoad = (
@@ -183,48 +192,35 @@ export const bambuLoad = (
   if (input.slot !== bambuExternalSpoolSlot) {
     return print('ams_change_filament', sequence, { ...temperatures, ...amsFields(input.slot), target: input.slot });
   }
-  switch (input.form) {
-    case 'a': {
-      return print('ams_change_filament', sequence, { ...temperatures, ams_id: 254, target: 254, slot_id: 0 });
-    }
-    case 'b': {
-      return print('ams_change_filament', sequence, { ...temperatures, ams_id: 255, target: 255, slot_id: 0 });
-    }
-    case 'c': {
-      return print('ams_change_filament', sequence, {
-        curr_temp: -1,
-        tar_temp: -1,
-        ams_id: 255,
-        slot_id: 254,
-        target: 254,
-      });
-    }
-  }
+  return print('ams_change_filament', sequence, {
+    ...(input.form === 'c' ? { curr_temp: -1, tar_temp: -1 } : temperatures),
+    ...bambuExternalSpoolFields.load[input.form],
+  });
 };
 
 /** `print.ams_change_filament` unloading: target and slot 255 (DeviceManager.cpp:1639; StatusPanel.cpp:5038). @internal */
-export const bambuUnload = (sequence: string, input: Readonly<{ slot: number; temperature: number }>): BambuRequest =>
+export const bambuUnload = (
+  sequence: string,
+  input: Readonly<{ slot: number; form: BambuWireForm; temperature: number }>,
+): BambuRequest =>
   print('ams_change_filament', sequence, {
     curr_temp: input.temperature,
     tar_temp: input.temperature,
-    ams_id: input.slot === bambuExternalSpoolSlot ? 255 : Math.floor(input.slot / 4),
-    target: 255,
-    slot_id: 255,
+    ...(input.slot === bambuExternalSpoolSlot
+      ? bambuExternalSpoolFields.unload[input.form]
+      : { ams_id: Math.floor(input.slot / 4), target: 255, slot_id: 255 }),
   });
 
 /** `print.ams_control`: `done` and `resume` answer a filament-change question, `abort` abandons the change. @internal */
 export const bambuAmsControl = (sequence: string, parameter: 'done' | 'resume' | 'abort'): BambuRequest =>
   print('ams_control', sequence, { param: parameter });
 
-/** External-spool `ams_id`/`tray_id`/`slot_id` for `ams_filament_setting`, row T6 (a) 255/254/0, (b) 255/0/0, (c) 254/254/0. */
-const externalSettingFields: Readonly<Record<BambuWireForm, Readonly<Record<string, number>>>> = {
-  a: { ams_id: 255, tray_id: 254, slot_id: 0 },
-  b: { ams_id: 255, tray_id: 0, slot_id: 0 },
-  c: { ams_id: 254, tray_id: 254, slot_id: 0 },
-};
-
 const settingAddress = (slot: number, form: BambuWireForm) =>
-  slot === bambuExternalSpoolSlot ? externalSettingFields[form] : { ...amsFields(slot), tray_id: slot % 4 };
+  slot === bambuExternalSpoolSlot ? bambuExternalSpoolFields.setting[form] : { ...amsFields(slot), tray_id: slot % 4 };
+
+/** `tray_id`/`ams_id`/`slot_id` of a tray in the calibration commands. */
+const calibrationAddress = (slot: number, form: BambuWireForm) =>
+  slot === bambuExternalSpoolSlot ? bambuExternalSpoolFields.calibration[form] : { tray_id: slot, ...amsFields(slot) };
 
 /** A tray's identity as `material.set` writes it. @internal */
 export type BambuMaterialSetting = Readonly<{
@@ -294,23 +290,19 @@ export const bambuMaterialClear = (
 
 /**
  * `print.extrusion_cali_sel` binding a profile, −1 for the default (DeviceManager.cpp:2061). The external spool is
- * row T10 (a) Bambu Studio 255/255/0 or (b) bambuddy 254/254/0; (c) sends (a).
+ * row T10 ({@link bambuExternalSpoolFields} `calibration`).
  * @internal
  */
 export const bambuCalibrationSelect = (
   sequence: string,
   input: Readonly<{ slot: number; form: BambuWireForm; index: number; filamentId: string; nozzleDiameter: number }>,
-): BambuRequest => {
-  const external = input.form === 'b' ? 254 : 255;
-  return print('extrusion_cali_sel', sequence, {
-    ...(input.slot === bambuExternalSpoolSlot
-      ? { tray_id: external, ams_id: external, slot_id: 0 }
-      : { tray_id: input.slot, ...amsFields(input.slot) }),
+): BambuRequest =>
+  print('extrusion_cali_sel', sequence, {
+    ...calibrationAddress(input.slot, input.form),
     cali_idx: input.index,
     filament_id: input.filamentId,
     nozzle_diameter: bambuNozzleDiameter(input.nozzleDiameter),
   });
-};
 
 /** One row `extrusion_cali_set` writes. @internal */
 export type BambuCalibrationWrite = Readonly<{
@@ -325,21 +317,27 @@ export type BambuCalibrationWrite = Readonly<{
   nozzleDiameter: number;
 }>;
 
-/** `print.extrusion_cali_set` creating one row (no `cali_idx`) (DeviceManager.cpp:1971; row T9). @internal */
-export const bambuCalibrationSave = (sequence: string, row: BambuCalibrationWrite): BambuRequest =>
+/**
+ * `print.extrusion_cali_set` creating one row (no `cali_idx`) (DeviceManager.cpp:1971; row T9). `k_value` is spelt as
+ * Studio's `std::to_string` spells it, six decimals.
+ * @internal
+ */
+export const bambuCalibrationSave = (
+  sequence: string,
+  row: BambuCalibrationWrite & Readonly<{ form: BambuWireForm }>,
+): BambuRequest =>
   print('extrusion_cali_set', sequence, {
     nozzle_diameter: bambuNozzleDiameter(row.nozzleDiameter),
     filaments: [
       {
-        tray_id: row.slot === bambuExternalSpoolSlot ? 254 : row.slot,
+        ...calibrationAddress(row.slot, row.form),
         extruder_id: 0,
         nozzle_id: bambuNozzleId(row.nozzleDiameter),
         nozzle_diameter: bambuNozzleDiameter(row.nozzleDiameter),
-        ...(row.slot === bambuExternalSpoolSlot ? { ams_id: 255, slot_id: 0 } : amsFields(row.slot)),
         filament_id: row.filamentId,
         setting_id: row.settingId,
         name: row.name,
-        k_value: row.pressureAdvance.toFixed(3),
+        k_value: row.pressureAdvance.toFixed(6),
         n_coef: row.coefficient,
       },
     ],
@@ -383,10 +381,9 @@ export type BambuCalibrationFilament = Readonly<{
   bedTemperature: number;
   /** Cubic millimetres per second. */
   maximumVolumetricSpeed: number;
+  /** The filament preset's flow ratio, the starting point a flow-ratio run measures from. */
+  flowRatio: number;
 }>;
-
-const trayFields = (slot: number) =>
-  slot === bambuExternalSpoolSlot ? { tray_id: 254, ams_id: 255, slot_id: 0 } : { tray_id: slot, ...amsFields(slot) };
 
 /**
  * `print.extrusion_cali` with `mode` 0 (automatic pressure advance; DeviceManager.cpp:1930, row T19) or
@@ -397,6 +394,7 @@ export const bambuCalibrationRun = (
   sequence: string,
   input: Readonly<{
     method: 'pressure-advance' | 'flow-ratio';
+    form: BambuWireForm;
     nozzleDiameter: number;
     filaments: readonly BambuCalibrationFilament[];
   }>,
@@ -404,15 +402,16 @@ export const bambuCalibrationRun = (
   const diameter = bambuNozzleDiameter(input.nozzleDiameter);
   if (input.method === 'flow-ratio') {
     return print('flowrate_cali', sequence, {
-      tray_id: trayFields(input.filaments[0]?.slot ?? 0).tray_id,
+      tray_id: calibrationAddress(input.filaments[0]?.slot ?? 0, input.form)['tray_id'],
       nozzle_diameter: diameter,
       filaments: input.filaments.map((filament) => ({
-        ...trayFields(filament.slot),
+        ...calibrationAddress(filament.slot, input.form),
         bed_temp: filament.bedTemperature,
         filament_id: filament.filamentId,
         setting_id: filament.settingId,
         nozzle_temp: filament.nozzleTemperature,
-        def_flow_ratio: '0.98',
+        // Studio sends the preset's ratio through `std::to_string` (DeviceManager.cpp:2099).
+        def_flow_ratio: filament.flowRatio.toFixed(6),
         max_volumetric_speed: String(filament.maximumVolumetricSpeed),
         extruder_id: 0,
       })),
@@ -422,7 +421,7 @@ export const bambuCalibrationRun = (
     nozzle_diameter: diameter,
     mode: 0,
     filaments: input.filaments.map((filament) => ({
-      ...trayFields(filament.slot),
+      ...calibrationAddress(filament.slot, input.form),
       extruder_id: 0,
       bed_temp: filament.bedTemperature,
       filament_id: filament.filamentId,
@@ -461,18 +460,19 @@ export const bambuPrinterCalibration = (
 
 /**
  * Generic filament preset values a calibration run needs, from Bambu Studio's `Generic <type>` profiles
- * (resources/profiles/BBL/filament): nozzle °C, textured-plate bed °C, maximum volumetric speed mm³/s.
+ * (resources/profiles/BBL/filament): nozzle °C, textured-plate bed °C, maximum volumetric speed mm³/s and flow ratio
+ * (`filament_flow_ratio`; TPU and PA inherit the common 1).
  *
  * ponytail: Tau keeps no slicer preset per tray, so a run uses the generic values for the tray's type, clamped to the
  * tray's own nozzle range. Pass the preset's values when the slicer's presets reach the provider.
  * @internal
  */
-export const bambuGenericPresets: Readonly<Record<string, readonly [number, number, number]>> = {
-  pla: [220, 55, 12],
-  petg: [255, 70, 12],
-  abs: [270, 90, 16],
-  asa: [260, 100, 12],
-  tpu: [240, 35, 3.2],
-  pa: [260, 100, 12],
-  pc: [280, 110, 16],
+export const bambuGenericPresets: Readonly<Record<string, readonly [number, number, number, number]>> = {
+  pla: [220, 55, 12, 0.98],
+  petg: [255, 70, 12, 0.95],
+  abs: [270, 90, 16, 0.95],
+  asa: [260, 100, 12, 0.95],
+  tpu: [240, 35, 3.2, 1],
+  pa: [260, 100, 12, 1],
+  pc: [280, 110, 16, 0.94],
 };

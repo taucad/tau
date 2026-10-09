@@ -20,7 +20,13 @@ import { prepareBambuArtifact } from '#bambu.archive.js';
 import type { BambuWireForm } from '#bambu.commands.js';
 import { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
 import type { BambuModel } from '#bambu.protocol.js';
-import { bambuTopic, isBambuSerial, parseBambuDiscoveryDatagram, parseBambuStill } from '#bambu.protocol.js';
+import {
+  BambuProtocolError,
+  bambuTopic,
+  isBambuSerial,
+  parseBambuDiscoveryDatagram,
+  parseBambuStill,
+} from '#bambu.protocol.js';
 import { openBambuSession } from '#bambu.session.js';
 import type { BambuSubmission } from '#bambu.session.js';
 
@@ -56,13 +62,13 @@ export async function* discoverBambuMachines(
   if (input.configuration.address) {
     const { address } = input.configuration;
     if (input.configuration.serial && !isBambuSerial(input.configuration.serial, model)) {
-      throw new TypeError('BAMBU_SERIAL_INVALID');
+      throw new BambuProtocolError('BAMBU_SERIAL_INVALID', 'The serial does not match the selected printer model.');
     }
     if (
       (/^[0-9.]+$/u.test(address) && isIP(address) !== 4) ||
       !/^(?=.{1,253}$)(?!.*[\s/\\?#@])(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]+$/u.test(address)
     ) {
-      throw new TypeError('BAMBU_MANUAL_ADDRESS_INVALID');
+      throw new BambuProtocolError('BAMBU_MANUAL_ADDRESS_INVALID', 'Enter a valid IP address or printer hostname.');
     }
     const observedAt = runtime.clock.now();
     yield Object.freeze({
@@ -199,6 +205,23 @@ const toDuplex = (stream: MachineNetworkStream): Duplex => {
 };
 
 const maximumCameraBytes = 4 * 1024 * 1024;
+
+/**
+ * Name an MQTT connect failure by its remedy: CONNACK 4 (bad user name or password) and 5 (not authorized) mean the
+ * access code is wrong and the printer must be bound again; anything else is the link, which a retry may fix.
+ * @param error - The MQTT.js error; a refused CONNACK is an `ErrorWithReasonCode` whose `code` is the return code.
+ * @returns The coded failure, worded for a person.
+ */
+const connectFailure = (error?: Error): BambuProtocolError =>
+  error !== undefined && 'code' in error && (error.code === 4 || error.code === 5)
+    ? new BambuProtocolError(
+        'BAMBU_ACCESS_CODE_REJECTED',
+        "The printer refused the access code. Check the code on the printer's screen and bind it again.",
+      )
+    : new BambuProtocolError(
+        'BAMBU_MQTT_CONNECT_FAILED',
+        'Could not connect to the printer. Check that it is on and on this network, then try again.',
+      );
 
 /**
  * Resolve the printer's access code from the host vault. It stays in the session and never reaches a log or error.
@@ -390,9 +413,18 @@ export const connectBambuMachine = async (
   model: BambuModel = 'X1C',
 ): Promise<MachineSession<BambuSubmission>> => {
   const manifest: MachineManifest = model === 'X1C' ? bambuX1cManifest : bambuA1MiniManifest;
-  const serial = input.candidate.claimedIdentity.serial ?? input.configuration.serial;
+  // The bound serial fences the printer; an advertisement that names another one is a different printer.
+  const bound = input.configuration.serial;
+  const claimed = input.candidate.claimedIdentity.serial;
+  if (bound !== undefined && claimed !== undefined && bound !== claimed) {
+    throw new BambuProtocolError('BAMBU_SERIAL_MISMATCH', 'The printer at this address reports a different serial.');
+  }
+  const serial = bound ?? claimed;
   if (!serial || !isBambuSerial(serial, model)) {
-    throw new TypeError('BAMBU_SERIAL_REQUIRED');
+    throw new BambuProtocolError(
+      'BAMBU_SERIAL_REQUIRED',
+      "Enter the printer's serial under Printer details, or find the printer on the network to fill it.",
+    );
   }
   const trust = input.connection.serviceTrust['mqtt'];
   if (trust?.type !== 'pinned') {
@@ -423,8 +455,12 @@ export const connectBambuMachine = async (
     await network.close().catch(() => undefined);
     throw new Error('BAMBU_MQTT_CLIENT_FAILED');
   }
-  client.on('error', () => {
-    runtime.clock.now();
+  client.on('error', (error) => {
+    // MQTT.js errors carry no credential; a bounded message is enough to tell a dropped link from a refusal.
+    // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- an event handler cannot await; a failed host log has nowhere else to go.
+    void runtime
+      .log({ level: 'warning', message: `Bambu MQTT error: ${error.message.slice(0, 200)}` })
+      .catch(() => undefined);
   });
   try {
     await new Promise<void>((resolve, reject) => {
@@ -432,9 +468,9 @@ export const connectBambuMachine = async (
         cleanup();
         resolve();
       };
-      const failed = (): void => {
+      const failed = (error: Error): void => {
         cleanup();
-        reject(new Error('BAMBU_MQTT_CONNECT_FAILED'));
+        reject(connectFailure(error));
       };
       const aborted = (): void => {
         cleanup();
@@ -450,9 +486,11 @@ export const connectBambuMachine = async (
       input.signal.addEventListener('abort', aborted, { once: true });
     });
     await client.subscribeAsync(bambuTopic(serial, 'report'), { qos: 0 });
-  } catch {
+  } catch (error) {
     await client.endAsync(true).catch(() => undefined);
-    throw new Error('BAMBU_MQTT_CONNECT_FAILED');
+    throw error instanceof BambuProtocolError || (error instanceof Error && error.message.startsWith('BAMBU_'))
+      ? error
+      : connectFailure();
   }
   const request = bambuTopic(serial, 'request');
   const report = bambuTopic(serial, 'report');
@@ -489,7 +527,7 @@ export const connectBambuMachine = async (
     readArtifact: async (artifact, signal) => prepareBambuArtifact({ artifact, runtime, signal }),
     async upload({ remoteName, artifact, signal }) {
       if (!runtime.uploadFile) {
-        throw new Error('TRANSFER_UNAVAILABLE');
+        throw new BambuProtocolError('MACHINE_TRANSFER_UNAVAILABLE');
       }
       const { bytesWritten } = await runtime.uploadFile({
         endpoint: { address: input.candidate.endpoint.address, port: 990 },

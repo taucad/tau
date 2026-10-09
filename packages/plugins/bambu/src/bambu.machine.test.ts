@@ -68,7 +68,12 @@ describe('bambuMachine', () => {
     expect(loaded.count).toBe(0);
     const registration = bambuMachine();
     expect(() => structuredClone(registration)).not.toThrow();
-    expect(JSON.stringify(registration)).not.toMatch(/mqtt|ftp|secret|certificate/iu);
+    // The manifest names the services a binding pins (ids only); nothing else about the transport or a secret.
+    const { services, ...connection } = registration.manifest.connection;
+    expect(services?.map(({ id }) => id)).toEqual(['mqtt', 'camera']);
+    expect(JSON.stringify({ ...registration, manifest: { ...registration.manifest, connection } })).not.toMatch(
+      /mqtt|ftp|secret|certificate/iu,
+    );
     const definition = await resolveRuntimePluginDefinition('machine', registration);
     const iterator = definition
       .discover(

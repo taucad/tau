@@ -10,8 +10,10 @@ import type {
 import { zipSync } from 'fflate';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { bambuSubmissionConfiguration } from '#bambu.manifest.js';
 import type { BambuModel } from '#bambu.protocol.js';
 import { developerModeRemedy } from '#bambu.protocol.js';
+import { bambuWireSequenceId } from '#bambu.session.js';
 import type { BambuSubmission } from '#bambu.session.js';
 import { createBambuSimulator, readBambuSimulatedPlate } from '#bambu.simulator.js';
 import type { BambuSimulator, BambuSimulatorFault } from '#bambu.simulator.js';
@@ -96,6 +98,9 @@ const open = async (
     faults?: readonly BambuSimulatorFault[];
     developerMode?: boolean;
     form?: 'a' | 'b' | 'c';
+    externalForms?: ReadonlyArray<'a' | 'b' | 'c'>;
+    firmware?: string;
+    calibrationTable?: boolean;
     readArtifact?: Parameters<typeof createBambuSimulator>[0] extends infer I
       ? I extends { readArtifact?: infer R }
         ? R
@@ -134,12 +139,19 @@ const act = async (
 ): Promise<Readonly<{ receipt: MachineCommandReceipt; confirm: () => string; operationId: string }>> =>
   applyAction(simulator, target, { parameters });
 /** Apply a run control to the run the caller saw. */
-const actOnRun = async (simulator: BambuSimulator, target: `${string}:${string}`, runId: string) =>
-  applyAction(simulator, target, { parameters: {}, expectedRunId: runId });
+const actOnRun = async (
+  simulator: BambuSimulator,
+  target: `${string}:${string}`,
+  { runId, requester = 'user' }: Readonly<{ runId: string; requester?: 'agent' | 'user' }>,
+) => applyAction(simulator, target, { parameters: {}, expectedRunId: runId, requester });
 const applyAction = async (
   simulator: BambuSimulator,
   target: `${string}:${string}`,
-  { parameters, expectedRunId }: Readonly<{ parameters: unknown; expectedRunId?: string }>,
+  {
+    parameters,
+    expectedRunId,
+    requester = 'user',
+  }: Readonly<{ parameters: unknown; expectedRunId?: string; requester?: 'agent' | 'user' }>,
 ): Promise<Readonly<{ receipt: MachineCommandReceipt; confirm: () => string; operationId: string }>> => {
   const [componentId = '', action = ''] = target.split(':');
   operations += 1;
@@ -152,7 +164,7 @@ const applyAction = async (
     parameters,
   };
   const actions = actionsOf(simulator);
-  const receipt = await actions.apply({ ...input, signal });
+  const receipt = await actions.apply({ ...input, requestedBy: { kind: requester }, signal });
   await settle();
   return { receipt, confirm: () => actions.confirm(input).status, operationId: input.operationId };
 };
@@ -198,7 +210,7 @@ const startJob = async (simulator: BambuSimulator, runArtifact: MachineArtifactR
     signal,
   };
   const prepared = await jobs.prepare(base);
-  if (prepared.status !== 'ready') {
+  if (prepared.status !== 'ready' || prepared.remoteName === undefined) {
     throw new Error(`expected a ready preparation, got ${JSON.stringify(prepared)}`);
   }
   const transfer = await jobs.transfer({
@@ -365,8 +377,9 @@ describe('Simulated X1C accessory actions', () => {
       version: 1,
       expectedRunId: null,
       parameters: { on: true },
+      requestedBy: { kind: 'user' },
       signal,
-    };
+    } as const;
     await actions.apply(input);
     await actions.apply(input);
     expect(simulator.writes().filter((write) => write === 'ledctrl')).toHaveLength(1);
@@ -376,11 +389,15 @@ describe('Simulated X1C accessory actions', () => {
     });
   });
 
-  it('should report unknown when the reply is lost, and still confirm from the report', async () => {
+  it('should accept from the report when the reply is lost, and report unknown when nothing shows it', async () => {
     const { simulator } = await open({ faults: ['reply-lost-after-accept'] });
     const { receipt, confirm } = await act(simulator, 'chamber-light:switch.set', { on: false });
-    expect(receipt).toMatchObject({ status: 'unknown', reason: 'no-reply' });
+    expect(receipt).toMatchObject({ status: 'accepted' });
     expect(confirm()).toBe('confirmed');
+    // Homing confirms by acknowledgement only, so without the reply nothing proves it.
+    await expect(act(simulator, 'motion:motion.home', {})).resolves.toMatchObject({
+      receipt: { status: 'unknown', reason: 'no-reply' },
+    });
   });
 });
 
@@ -421,21 +438,33 @@ describe('Simulated X1C jobs and run control', () => {
   it('should pause, resume, change speed and cancel the run, each confirmed from the report', async () => {
     const { simulator } = await open();
     const { runId } = await startJob(simulator);
-    const pause = await actOnRun(simulator, 'controller:run.pause', runId);
+    const pause = await actOnRun(simulator, 'controller:run.pause', { runId });
     expect(lastRequest(simulator, 'pause')).toEqual({ command: 'pause', sequence_id: anyString, param: '' });
     expect(pause.confirm()).toBe('confirmed');
     await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({ state: { status: 'held' } });
-    const resume = await actOnRun(simulator, 'controller:run.resume', runId);
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { paused: { by: 'person' } },
+    });
+    const resume = await actOnRun(simulator, 'controller:run.resume', { runId });
     expect(resume.confirm()).toBe('confirmed');
+    // An agent's pause reads as the agent's, though the printer reports every remote pause alike.
+    await actOnRun(simulator, 'controller:run.pause', { runId, requester: 'agent' });
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { paused: { by: 'agent' } },
+    });
+    await actOnRun(simulator, 'controller:run.resume', { runId });
     const speed = await act(simulator, 'speed:option.set', { option: 'sport' });
     expect(lastRequest(simulator, 'print_speed')).toMatchObject({ param: '3' });
     expect(speed.confirm()).toBe('confirmed');
-    await expect(actOnRun(simulator, 'controller:run.pause', 'another-run')).resolves.toMatchObject({
+    await expect(actOnRun(simulator, 'controller:run.pause', { runId: 'another-run' })).resolves.toMatchObject({
       receipt: { status: 'rejected', code: 'MACHINE_ACTION_STALE_RUN' },
     });
-    const cancel = await actOnRun(simulator, 'controller:run.cancel', runId);
+    const cancel = await actOnRun(simulator, 'controller:run.cancel', { runId });
     expect(lastRequest(simulator, 'stop')).toMatchObject({ command: 'stop', param: '' });
     expect(cancel.confirm()).toBe('confirmed');
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { runId, state: 'cancelled' },
+    });
   });
 
   it('should stop urgently and reconcile the stop and the start from proof', async () => {
@@ -453,13 +482,16 @@ describe('Simulated X1C jobs and run control', () => {
     await expect(simulator.session.reconcile({ operationId: 'stop-1', kind: 'stop', signal })).resolves.toMatchObject({
       status: 'accepted',
     });
+    // An X1C ends a stopped print in FAILED with 0500-400E, which reads as a cancelled run.
     const stopped = await simulator.session.getSnapshot({ signal });
-    expect(stopped.run).toBeUndefined();
+    expect(stopped.run).toMatchObject({ state: 'cancelled' });
+    expect(stopped.state.status).toBe('ready');
+    expect(stopped.alerts).toContainEqual(expect.objectContaining({ code: '0500-400E' }));
   });
 
   it.each([
-    ['storage-full', 'STORAGE_FULL'],
-    ['partial-transfer', 'TRANSFER_PARTIAL'],
+    ['storage-full', 'MACHINE_TRANSFER_STORAGE_FULL'],
+    ['partial-transfer', 'MACHINE_TRANSFER_PARTIAL'],
   ] as const)('should reject a transfer under %s without starting', async (fault, code) => {
     const { simulator } = await open({ faults: [fault] });
     const { jobs } = simulator.session;
@@ -468,7 +500,7 @@ describe('Simulated X1C jobs and run control', () => {
     }
     const base = { operationId: 'job-1', expectedMachineId: 'simulated-x1c', artifact, configuration, signal };
     const prepared = await jobs.prepare(base);
-    if (prepared.status === 'refused') {
+    if (prepared.status === 'refused' || prepared.remoteName === undefined) {
       throw new Error('expected a preparation');
     }
     await expect(
@@ -699,7 +731,7 @@ describe('Simulated X1C calibration', () => {
     expect(save.receipt).toMatchObject({ status: 'accepted' });
     expect(lastRequest(simulator, 'extrusion_cali_set')).toMatchObject({
       nozzle_diameter: '0.4',
-      filaments: [{ name: 'PLA measured', filament_id: 'GFA00', k_value: '0.024', tray_id: 0 }],
+      filaments: [{ name: 'PLA measured', filament_id: 'GFA00', k_value: '0.024000', tray_id: 0 }],
     });
     await settle();
     expect(save.confirm()).toBe('confirmed');
@@ -761,6 +793,226 @@ describe('Simulated X1C calibration', () => {
     expect(lastRequest(simulator, 'calibration')).toMatchObject({ option: 0b110 });
     await after(1);
     expect(calibrate.confirm()).toBe('confirmed');
+  });
+});
+
+describe('Simulated X1C admission at the moment of sending', () => {
+  it.each([
+    ['motion:motion.home', {}],
+    ['filament:material.calibration.run', { method: 'pressure-advance', nozzleId: 'nozzle-0.4', slots: [a(1)] }],
+    ['controller:bambu.printer.calibrate', { routines: ['bed-levelling'] }],
+  ] as const)('should refuse %s during a print and send nothing', async (target, parameters) => {
+    const { simulator } = await open();
+    await startJob(simulator);
+    const before = simulator.writes();
+    await expect(act(simulator, target, parameters)).resolves.toMatchObject({
+      receipt: { status: 'rejected', code: 'MACHINE_ACTION_RUN_ACTIVE' },
+    });
+    expect(simulator.writes()).toEqual(before);
+  });
+
+  it('should refuse a control the printer does not declare, and anything once the session is closed', async () => {
+    const { simulator } = await open({ model: 'A1 mini' });
+    await expect(act(simulator, 'chamber-light:switch.set', { on: true })).resolves.toMatchObject({
+      receipt: { status: 'rejected', code: 'MACHINE_ACTION_UNDECLARED' },
+    });
+    await simulator.session.close();
+    await expect(act(simulator, 'part-fan:level.set', { ratio: 1 })).resolves.toMatchObject({
+      receipt: { status: 'rejected', code: 'MACHINE_UNAVAILABLE' },
+    });
+    expect(simulator.writes()).toEqual([]);
+  });
+
+  it('should hide the profiles and refuse to use them on firmware without a pressure-advance table', async () => {
+    const { simulator } = await open({ calibrationTable: false });
+    const report = await simulator.session.getSnapshot({ signal });
+    expect(valueOf(report, 'filament')).not.toHaveProperty('calibrations');
+    for (const id of ['material.calibration.select', 'material.calibration.save', 'material.calibration.delete']) {
+      expect(report.availability).toContainEqual(
+        expect.objectContaining({ componentId: 'filament', id, code: 'MACHINE_ACTION_UNSUPPORTED' }),
+      );
+    }
+    await expect(
+      act(simulator, 'filament:material.calibration.select', { slot: a(2), profileId: 'default' }),
+    ).resolves.toMatchObject({ receipt: { status: 'rejected', code: 'MACHINE_ACTION_UNSUPPORTED' } });
+    expect(simulator.writes()).toEqual([]);
+  });
+
+  it('should keep Developer Mode off on an A1 mini until it accepts a command, not until a push lacks the alert', async () => {
+    const { simulator } = await open({ model: 'A1 mini', developerMode: false });
+    await act(simulator, 'part-fan:level.set', { ratio: 1 });
+    // The printer stops raising the alert; it sends no `fun` to say Developer Mode is on.
+    simulator.setDeveloperMode(true);
+    await settle();
+    const report = await simulator.session.getSnapshot({ signal });
+    expect(report.alerts).toEqual([]);
+    expect(report.availability).toContainEqual(
+      expect.objectContaining({ componentId: 'part-fan', id: 'level.set', code: 'MACHINE_ACTION_UNSUPPORTED' }),
+    );
+    // A new session starts without the refusal.
+    const fresh = await simulator.connect();
+    await expect(fresh.getSnapshot({ signal })).resolves.toMatchObject({
+      checks: expect.arrayContaining([expect.objectContaining({ id: 'developer-mode', state: 'unknown' })]) as unknown,
+    });
+    await fresh.close();
+  });
+
+  it('should move a later operation off a sequence id an earlier one still waits on', async () => {
+    const ids = new Map<string, string>();
+    let pair: readonly [string, string] | undefined;
+    for (let index = 0; pair === undefined; index += 1) {
+      const operationId = `collide-${String(index)}`;
+      const sequence = bambuWireSequenceId(operationId);
+      const other = ids.get(sequence);
+      pair = other === undefined ? undefined : [other, operationId];
+      ids.set(sequence, operationId);
+    }
+    const { simulator } = await open({ faults: ['reply-lost-after-accept'] });
+    const actions = actionsOf(simulator);
+    const send = async (operationId: string, on: boolean) =>
+      actions.apply({
+        operationId,
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        version: 1,
+        expectedRunId: null,
+        parameters: { on },
+        requestedBy: { kind: 'user' },
+        signal,
+      });
+    await Promise.all([send(pair[0], false), send(pair[1], true)]);
+    const sequences = simulator
+      .requests()
+      .map((request) => (request as Readonly<Record<string, Readonly<Record<string, unknown>> | undefined>>)['system'])
+      .filter((body) => body?.['command'] === 'ledctrl')
+      .map((body) => body?.['sequence_id']);
+    expect(sequences).toHaveLength(2);
+    expect(new Set(sequences).size).toBe(2);
+  });
+});
+
+describe('Simulated printer reports', () => {
+  it('should give a late subscriber a snapshot first, then deltas, and end on abort without throwing', async () => {
+    const { simulator, after } = await open();
+    await after(1);
+    const controller = new AbortController();
+    const seen: string[] = [];
+    const reading = (async () => {
+      for await (const observation of simulator.session.observe({ signal: controller.signal })) {
+        seen.push(observation.type);
+        if (seen.length === 2) {
+          controller.abort();
+        }
+      }
+    })();
+    await settle();
+    await after(1);
+    await expect(reading).resolves.toBeUndefined();
+    expect(seen).toEqual(['snapshot', expect.stringMatching(/^(snapshot|changed)$/u)]);
+  });
+
+  it('should read proof without sending anything', async () => {
+    const { simulator } = await open();
+    await startJob(simulator);
+    const before = simulator.writes();
+    await simulator.session.reconcile({ operationId: 'start-1', kind: 'start', signal });
+    await simulator.session.reconcile({ operationId: 'never-sent', kind: 'stop', signal });
+    expect(simulator.writes()).toEqual(before);
+  });
+
+  it('should mark every qualified action designed on firmware its profile was not proven on', async () => {
+    const proven = await open();
+    const other = await open({ firmware: 'simulator-1' });
+    const qualification = async (simulator: BambuSimulator) => {
+      const descriptor = await simulator.session.getDescriptor({ signal });
+      return descriptor.capabilities.actions.map((action) => action.qualification);
+    };
+    const provenQualifications = await qualification(proven.simulator);
+    expect(new Set(provenQualifications.map(({ status }) => status))).toEqual(new Set(['qualified']));
+    for (const entry of await qualification(other.simulator)) {
+      expect(entry).toEqual({
+        status: 'designed',
+        reason: 'Proven on firmware simulator-2; this printer runs simulator-1.',
+      });
+    }
+  });
+});
+
+describe('Simulated printer faults the session must survive', () => {
+  it('should keep a confirmation pending while the report lags the reply', async () => {
+    const { simulator } = await open({ faults: ['push-lag'] });
+    const { receipt, confirm } = await act(simulator, 'chamber-light:switch.set', { on: false });
+    expect(receipt).toMatchObject({ status: 'accepted' });
+    expect(confirm()).toBe('pending');
+    simulator.push();
+    await settle();
+    expect(confirm()).toBe('confirmed');
+  });
+
+  it('should never confirm from a reply alone when the printer acknowledges and ignores', async () => {
+    const { simulator } = await open({ faults: ['ack-but-ignore'] });
+    const { receipt, confirm } = await act(simulator, 'chamber-light:switch.set', { on: false });
+    expect(receipt).toMatchObject({ status: 'accepted' });
+    simulator.push();
+    await settle();
+    expect(confirm()).toBe('pending');
+  });
+
+  it('should leave the external spool unchanged when the printer ignores the form sent, and load it when it applies', async () => {
+    const ignored = await open({ form: 'b' });
+    const load = await act(ignored.simulator, 'filament:material.load', { slot: spool, toolheadId: 'tool-0' });
+    const report = await ignored.after(30);
+    expect(report.activities).toEqual([]);
+    expect(load.confirm()).toBe('pending');
+
+    const applied = await open({ form: 'b', externalForms: ['a', 'b'] });
+    await act(applied.simulator, 'filament:material.load', { slot: spool, toolheadId: 'tool-0' });
+    const loading = await applied.after(1);
+    expect(loading.activities).toContainEqual(expect.objectContaining({ kind: 'material-load' }));
+  });
+
+  it('should end a stopped calibration as failed', async () => {
+    const { simulator, after } = await open();
+    await act(simulator, 'filament:material.calibration.run', {
+      method: 'pressure-advance',
+      nozzleId: 'nozzle-0.4',
+      slots: [a(1)],
+    });
+    await after(1);
+    await simulator.session.stop({ operationId: 'stop-calibration', signal });
+    const report = await after(1);
+    expect(report.activities).toContainEqual(expect.objectContaining({ kind: 'calibration', state: 'failed' }));
+    expect(report.state.status).toBe('ready');
+  });
+});
+
+describe('Simulated X1C start form', () => {
+  it('should complete a partial form from the printer, keeping what the caller chose', async () => {
+    const { simulator } = await open();
+    const { jobs } = simulator.session;
+    if (jobs.type !== 'supported' || jobs.completeConfiguration === undefined) {
+      throw new Error('expected a form completion');
+    }
+    const complete = async (configuration: Readonly<Record<string, number[] | boolean>>) =>
+      jobs.completeConfiguration?.({ expectedMachineId: 'simulated-x1c', artifact, configuration, signal });
+    const completed = await complete({});
+    expect(completed).toEqual({
+      expectedModel: 'X1C',
+      expectedFilamentDiameter: 1.75,
+      expectedNozzleDiameter: 0.4,
+      expectedBedType: 'textured-pei',
+      amsMapping: [0],
+      expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
+      bedLeveling: true,
+      flowCalibration: true,
+      timelapse: false,
+    });
+    expect(bambuSubmissionConfiguration.schema.safeParse(completed).success).toBe(true);
+    await expect(complete({ amsMapping: [1], timelapse: true })).resolves.toMatchObject({
+      amsMapping: [1],
+      expectedMaterials: [{ slot: 1, materialId: 'PETG' }],
+      timelapse: true,
+    });
   });
 });
 

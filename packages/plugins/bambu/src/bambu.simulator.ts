@@ -21,6 +21,8 @@ import { defineMachine, machineManifestOf } from '@taucad/runtime/machine';
 import { z } from 'zod';
 
 import type { BambuPreparedArtifact } from '#bambu.archive.js';
+import { bambuExternalSpoolFields } from '#bambu.commands.js';
+import type { BambuExternalSpoolCommand, BambuWireForm } from '#bambu.commands.js';
 import {
   bambuA1MiniDefinition,
   bambuA1MiniSubmissionConfiguration,
@@ -29,18 +31,22 @@ import {
   bambuX1cDefinition,
 } from '#bambu.manifest.js';
 import type { BambuModel } from '#bambu.protocol.js';
-import { bambuExternalSpoolSlot, parseBambuStill } from '#bambu.protocol.js';
+import { BambuProtocolError, bambuExternalSpoolSlot, parseBambuStill } from '#bambu.protocol.js';
 import { openBambuSession } from '#bambu.session.js';
 import type { BambuLink, BambuSubmission } from '#bambu.session.js';
 import { bambuSettingsConfiguration } from '#bambu.settings.js';
 
 /** Deterministic fault switches accepted by the simulator. @internal */
 export type BambuSimulatorFault =
+  /** Answer every write with success and apply none of them: only the reports can tell. */
+  | 'ack-but-ignore'
   | 'approval-required-not-honored'
   | 'camera-unavailable'
   | 'certificate-changed'
   | 'partial-transfer'
   | 'protected-mode'
+  /** Send no report after a write, as a P1 or a busy X1C lags its acknowledgements; the next push shows it. */
+  | 'push-lag'
   | 'reply-lost-after-accept'
   /** Answer "fail" to a profile write and apply it anyway, as an X1C does (bambuddy notes). */
   | 'replies-lie'
@@ -252,7 +258,7 @@ type SimulatedRun = {
   readonly preheat: number;
   /** Simulated seconds spent paused so far. */
   pausedFor: number;
-  /** Simulated seconds at which the current pause began. */
+  /** Simulated seconds at which the current pause began, or the stop that ended the run. */
   pausedAt?: number;
 };
 
@@ -289,6 +295,8 @@ type SimulatedCalibration = {
   startTime: number;
   filaments: ReadonlyArray<Readonly<Record<string, unknown>>>;
   ended: boolean;
+  /** Ended by `print.stop`: the printer reports FAILED with "Printing was cancelled". */
+  cancelled?: boolean;
 };
 type ProfileRow = {
   cali_idx: number;
@@ -306,6 +314,8 @@ const text = (value: unknown, fallback: string): string =>
   typeof value === 'string' ? value : typeof value === 'number' ? String(value) : fallback;
 
 const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+/** `print_error` 0500-400E, "Printing was cancelled", which an X1C reports with FAILED after a stop. */
+const cancelledError = 0x05_00_40_0e;
 /** Degrees Celsius the enclosure settles to with its heaters off. */
 const ambient = 25;
 /** Degrees Celsius per simulated second while each heater heats and while it cools passively. */
@@ -397,10 +407,19 @@ export const createBambuSimulator = async (
     /** Host artifact reader: with it an upload runs the plate it carries, without it the reference plate runs. */
     readArtifact?: MachineConnectionRuntime['readArtifact'];
     developerMode?: boolean;
-    form?: 'a' | 'b' | 'c';
+    form?: BambuWireForm;
+    /**
+     * The external-spool forms the simulated printer applies; any other is acknowledged and ignored, the risk the
+     * testing program names. Defaults to Bambu Studio's (a), the only form verified in source.
+     */
+    externalForms?: readonly BambuWireForm[];
+    /** The firmware `get_version` reports; the simulation profile is proven on `simulator-2`. */
+    firmware?: string;
+    /** False plays firmware without the pressure-advance table: no `cali_version`. */
+    calibrationTable?: boolean;
     /** Report on a timer, as a printer does; tests push by hand. */
     cadence?: boolean;
-    /** Milliseconds the session waits for a reply. */
+    /** Milliseconds the session waits for a reply; the session's own default, as on hardware, when omitted. */
     replyWindow?: number;
   }> = {},
 ): Promise<BambuSimulator> => {
@@ -409,6 +428,16 @@ export const createBambuSimulator = async (
   const x1c = model === 'X1C';
   const serial = x1c ? 'simulated-x1c' : 'simulated-a1-mini';
   const faults = new Set(input.faults ?? []);
+  const externalForms: ReadonlySet<BambuWireForm> = new Set(input.externalForms ?? ['a']);
+  /** Whether a request addresses the external spool in a form this printer applies. */
+  const appliesExternal = (command: BambuExternalSpoolCommand, body: Readonly<Record<string, unknown>>): boolean =>
+    (['a', 'b', 'c'] as const).some(
+      (form) =>
+        externalForms.has(form) &&
+        Object.entries(bambuExternalSpoolFields[command][form]).every(
+          ([field, value]) => Number(body[field]) === value,
+        ),
+    );
   const uploaded = new Map<string, BambuSimulatedPlate>();
   const writeLog: string[] = [];
   const requestLog: unknown[] = [];
@@ -490,6 +519,8 @@ export const createBambuSimulator = async (
   let calibration: SimulatedCalibration | undefined;
   let run: SimulatedRun | undefined;
   let finished: SimulatedRun | undefined;
+  /** The finished run was stopped, not completed. */
+  let cancelled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const reading = (heater: keyof typeof heaters, at: number): number => {
@@ -636,10 +667,14 @@ export const createBambuSimulator = async (
           : 'PAUSE'
         : calibration
           ? calibration.ended
-            ? 'FINISH'
+            ? calibration.cancelled === true
+              ? 'FAILED'
+              : 'FINISH'
             : 'RUNNING'
           : finished
-            ? 'FINISH'
+            ? cancelled
+              ? 'FAILED'
+              : 'FINISH'
             : 'IDLE',
       print_type: (run ?? finished) === undefined ? (calibration ? 'system' : 'idle') : 'local',
       gcode_file: calibration
@@ -657,7 +692,9 @@ export const createBambuSimulator = async (
         : calibration
           ? Math.floor((calibrationTime / calibration.duration) * 100)
           : finished
-            ? 100
+            ? cancelled
+              ? Math.floor((printed(finished, at) / Math.max(finished.plate.duration, 1)) * 100)
+              : 100
             : 0,
       mc_remaining_time: run
         ? Math.ceil((Math.max(run.preheat - runClock(run, at), 0) + run.plate.duration - programTime) / 60)
@@ -689,10 +726,10 @@ export const createBambuSimulator = async (
         : trayNow < 254
           ? 0x03_00
           : 0,
-      cali_version: caliVersion,
+      ...(input.calibrationTable === false ? {} : { cali_version: caliVersion }),
       flag3: 0b1000,
       ...(x1c ? { fun: developerMode ? '0' : '20000000' } : {}),
-      print_error: 0,
+      print_error: cancelled || calibration?.cancelled === true ? cancelledError : 0,
       hms: refused && !developerMode ? [{ attr: 0x05_00_05_00, code: 0x00_01_00_07 }] : [],
       ams: {
         tray_exist_bits: exist.toString(16),
@@ -796,11 +833,19 @@ export const createBambuSimulator = async (
         return {};
       }
       case 'stop': {
+        // An X1C ends a stopped print or calibration in FAILED with print_error 0500-400E, not IDLE.
         setHeater('nozzle', 0, at);
         setHeater('bed', 0, at);
-        run = undefined;
-        finished = undefined;
-        calibration = undefined;
+        if (run) {
+          run.pausedAt ??= at;
+          finished = run;
+          run = undefined;
+          cancelled = true;
+        }
+        if (calibration && !calibration.ended) {
+          calibration.ended = true;
+          calibration.cancelled = true;
+        }
         return {};
       }
       case 'gcode_line': {
@@ -830,8 +875,8 @@ export const createBambuSimulator = async (
         if (busy !== undefined) {
           return { fail: busy };
         }
-        const target = Number(body['target']);
-        if (target === 255) {
+        // An unload targets 255 from slot 255; OrcaSlicer's external-spool load also targets 255, from slot 0.
+        if (Number(body['target']) === 255 && Number(body['slot_id']) === 255) {
           if (trayNow === 255) {
             return { fail: 'no filament loaded' };
           }
@@ -852,6 +897,9 @@ export const createBambuSimulator = async (
           return {};
         }
         const slot = slotFrom(body);
+        if (slot === bambuExternalSpoolSlot && !appliesExternal('load', body)) {
+          return {};
+        }
         if (!trayOf(slot).present) {
           return { fail: 'slot empty' };
         }
@@ -894,6 +942,9 @@ export const createBambuSimulator = async (
       case 'ams_filament_setting': {
         const slot =
           Number(body['ams_id']) >= 254 ? bambuExternalSpoolSlot : Number(body['ams_id']) * 4 + Number(body['slot_id']);
+        if (slot === bambuExternalSpoolSlot && !appliesExternal('setting', body)) {
+          return {};
+        }
         const tray = trayOf(slot);
         const color = text(body['tray_color'], '');
         trays.set(slot, {
@@ -914,6 +965,9 @@ export const createBambuSimulator = async (
           Number(body['ams_id']) >= 254 || Number(body['tray_id']) >= 254
             ? bambuExternalSpoolSlot
             : Number(body['tray_id']);
+        if (slot === bambuExternalSpoolSlot && !appliesExternal('calibration', body)) {
+          return {};
+        }
         const index = Number(body['cali_idx']);
         const row = profiles.find(({ cali_idx }) => cali_idx === index);
         trays.set(slot, { ...trayOf(slot), caliIdx: row ? index : -1, k: row ? Number(row.k_value) : 0.02 });
@@ -988,10 +1042,16 @@ export const createBambuSimulator = async (
           return { fail: busy };
         }
         const filaments = Array.isArray(body['filaments']) ? (body['filaments'] as Array<Record<string, unknown>>) : [];
+        if (
+          filaments.some((filament) => Number(filament['ams_id']) >= 254 && !appliesExternal('calibration', filament))
+        ) {
+          return {};
+        }
         const first = filaments[0];
         setHeater('nozzle', Number(first?.['nozzle_temp'] ?? 220), at);
         setHeater('bed', Number(first?.['bed_temp'] ?? 55), at);
         finished = undefined;
+        cancelled = false;
         calibration = {
           kind:
             command === 'extrusion_cali' ? 'pressure-advance' : command === 'flowrate_cali' ? 'flow-ratio' : 'printer',
@@ -1029,6 +1089,7 @@ export const createBambuSimulator = async (
         fanOverrides.clear();
         calibration = undefined;
         finished = undefined;
+        cancelled = false;
         run = {
           id: String(body['subtask_id']),
           name: text(body['subtask_name'], file),
@@ -1064,7 +1125,13 @@ export const createBambuSimulator = async (
           command: 'get_version',
           sequence_id: '0',
           module: [
-            { name: 'ota', sw_ver: 'simulator-2', hw_ver: 'OTA', sn: serial, project_name: x1c ? 'BL-P001' : 'N1' },
+            {
+              name: 'ota',
+              sw_ver: input.firmware ?? 'simulator-2',
+              hw_ver: 'OTA',
+              sn: serial,
+              project_name: x1c ? 'BL-P001' : 'N1',
+            },
           ],
           result: 'success',
         },
@@ -1086,6 +1153,8 @@ export const createBambuSimulator = async (
       }
       if (!developerMode) {
         // Firmware from 01.08.03.00 drops a write without Developer Mode, answers so, and raises HMS 0500-0500-0001-0007.
+        // ponytail: recorded for X1-class firmware only (bambuddy notes); the A1 mini drops the same way here, unverified
+        // on hardware (testing program T1). Gate on the model once the A1 mini is measured.
         refused = true;
         reply({ result: 'failed', reason: 'mqtt message verify failed' });
         push();
@@ -1095,15 +1164,18 @@ export const createBambuSimulator = async (
     }
     const at = simulated(clock.now());
     advance(at);
-    const outcome = apply(command, body, at);
-    if (reads.has(command) || !faults.has('reply-lost-after-accept')) {
+    const write = !reads.has(command);
+    const outcome = write && faults.has('ack-but-ignore') ? {} : apply(command, body, at);
+    if (!write || !faults.has('reply-lost-after-accept')) {
       reply(
         outcome.fail === undefined
           ? { result: 'success', reason: 'success', ...outcome.extra }
           : { result: 'fail', reason: outcome.fail },
       );
     }
-    push();
+    if (!write || !faults.has('push-lag')) {
+      push();
+    }
     schedule();
   };
 
@@ -1172,6 +1244,7 @@ export const createBambuSimulator = async (
       signal: new AbortController().signal,
       manifest,
       form: input.form ?? 'a',
+      // Deliberately unlike the LAN provider: the simulator runs any producer's slice, Tau's reference engine too.
       requireBambuStudio: false,
       readArtifact: readPrepared,
       async upload({ remoteName, artifact }) {
@@ -1180,10 +1253,10 @@ export const createBambuSimulator = async (
           throw new Error('BAMBU_SIMULATOR_UNAPPROVED_WRITE');
         }
         if (faults.has('storage-full')) {
-          throw new Error('STORAGE_FULL');
+          throw new BambuProtocolError('MACHINE_TRANSFER_STORAGE_FULL');
         }
         if (faults.has('partial-transfer')) {
-          throw new Error('TRANSFER_PARTIAL');
+          throw new BambuProtocolError('MACHINE_TRANSFER_PARTIAL');
         }
         uploaded.set(
           remoteName,
@@ -1202,7 +1275,7 @@ export const createBambuSimulator = async (
           return parseBambuStill(jpeg, clock.now());
         },
       },
-      replyWindow: input.replyWindow ?? 2000,
+      ...(input.replyWindow === undefined ? {} : { replyWindow: input.replyWindow }),
       openWindow: 2000,
     });
     const failure = (['certificate-changed', 'wrong-credential', 'protected-mode', 'timeout'] as const).find((fault) =>

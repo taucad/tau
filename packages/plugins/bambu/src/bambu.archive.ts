@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import type { MachineArtifactReference, MachineConnectionRuntime } from '@taucad/runtime/machine';
 import { unzipSync } from 'fflate';
 
+import { BambuProtocolError } from '#bambu.protocol.js';
+
 const maximumArchiveBytes = 256 * 1024 * 1024;
 const maximumEntries = 512;
 const maximumExpandedBytes = 512 * 1024 * 1024;
@@ -62,7 +64,7 @@ export type BambuPreparedArtifact = Readonly<{
 }>;
 
 const fail = (code: string): never => {
-  throw new TypeError(code);
+  throw new BambuProtocolError(code);
 };
 
 const safeMemberName = (name: string): string => {

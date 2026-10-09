@@ -17,7 +17,9 @@ import type {
   MachineCheck,
   MachineClock,
   MachineCommandReceipt,
+  MachineCompleteConfigurationInput,
   MachineComponentValue,
+  MachineJobFailureCode,
   MachineLogEntry,
   MachineManifest,
   MachineObservation,
@@ -31,12 +33,12 @@ import type {
   MachineStillCaptureCapability,
   MaterialSlotSnapshot,
 } from '@taucad/runtime/machine';
+import { checkMachineActionAtSend } from '@taucad/runtime/machine';
 import { checkOperation, createQuantity, quantityKinds } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
 
 import type { BambuPreparedArtifact } from '#bambu.archive.js';
 import {
-  bambuAddressOf,
   bambuAmsControl,
   bambuCalibrationDelete,
   bambuCalibrationResultRequest,
@@ -60,19 +62,18 @@ import {
   bambuReadTag,
   bambuRunCommand,
   bambuSlotLabel,
-  bambuSlotOf,
   bambuUnload,
 } from '#bambu.commands.js';
-import type {
-  BambuCalibrationFilament,
-  BambuRequest,
-  BambuSlotAddress,
-  BambuWireForm,
-  bambuFanIndexes,
-  bambuPrinterRoutines,
-  bambuSpeedProfiles,
-} from '#bambu.commands.js';
-import { bambuAmsUnit, bambuExternalUnit, bambuNozzle } from '#bambu.manifest.js';
+import type { BambuCalibrationFilament, BambuRequest, BambuWireForm, bambuFanIndexes } from '#bambu.commands.js';
+import {
+  bambuAmsUnit,
+  bambuCalibrateSchemas,
+  bambuExternalUnit,
+  bambuJogSchema,
+  bambuNozzle,
+  bambuSlotSchema,
+  bambuSpeedSchema,
+} from '#bambu.manifest.js';
 import { bambuPlateForBedType } from '#bambu.plate.js';
 import type {
   BambuCalibrationResult,
@@ -87,6 +88,7 @@ import {
   bambuCalibrationResults,
   bambuCalibrationTable,
   bambuCommandVerificationAlert,
+  BambuProtocolError,
   bambuExternalSpoolSlot,
   bambuQuantity,
   bambuRemoteName,
@@ -98,6 +100,7 @@ import {
   parseBambuStatusPayload,
   parseBambuVersionPayload,
 } from '#bambu.protocol.js';
+import { bambuAddressOf, bambuSlotOf } from '#bambu.settings.js';
 
 /** One MQTT-shaped conversation with one printer: requests out, reports in. @internal */
 export type BambuLink = Readonly<{
@@ -155,6 +158,10 @@ export type BambuSessionInput = Readonly<{
 }>;
 
 type MachineJobs = Extract<MachineSession<BambuSubmission>['jobs'], { type: 'supported' }>;
+type Configuration = MachineCompleteConfigurationInput['configuration'];
+const isFields = (value: Configuration): value is Readonly<Record<string, Configuration>> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+type StoredJobs = Extract<MachineJobs, { delivery: 'stored' }>;
 
 const actionKey = (componentId: string, action: string): string => `${componentId}:${action}`;
 
@@ -165,10 +172,21 @@ const bambuWireId = (operationId: string): string =>
   );
 /**
  * The `sequence_id` an operation's command carries: 30000–89999, outside Bambu Studio's own 20000–29999 (whose
- * failures it shows as dialogs) and outside the session's reads.
+ * failures it shows as dialogs) and outside the session's reads. Two operations can share one; the session moves the
+ * later one on while the earlier is in flight.
+ * @param operationId - The operation.
+ * @returns The sequence id.
+ * @internal
  */
-const bambuWireSequenceId = (operationId: string): string =>
+export const bambuWireSequenceId = (operationId: string): string =>
   String(30_000 + (Number(bambuWireId(operationId)) % 60_000));
+
+/** Transfer failures the upload names itself: nothing was left half-sent. */
+const bambuTransferRefusals: ReadonlySet<string> = new Set([
+  'MACHINE_TRANSFER_STORAGE_FULL',
+  'MACHINE_TRANSFER_PARTIAL',
+  'MACHINE_TRANSFER_UNAVAILABLE',
+]);
 
 const remoteNamePattern = /^tau-[A-Za-z0-9_-]{1,64}\.gcode\.3mf$/u;
 const memberMd5Pattern = /^[0-9a-f]{32}$/u;
@@ -341,6 +359,7 @@ const ledgerCapacity = 512;
 // oxlint-disable-next-line eslint/complexity, eslint/max-statements -- one session closure owns the whole printer conversation.
 export const openBambuSession = async (input: BambuSessionInput): Promise<MachineSession<BambuSubmission>> => {
   const { model, serial, link, clock, manifest } = input;
+  const printer = model === 'X1C' ? 'x1c' : 'a1-mini';
   const replyWindow = input.replyWindow ?? 5000;
   const updates = new EventTarget();
   const replies = new Map<string, BambuReply>();
@@ -353,7 +372,10 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
   let firmware: string | undefined;
   let versionSerial: string | undefined;
   let versionModel: string | undefined;
-  /** Developer Mode off, learnt from a refusal; cleared when the printer reports it on. */
+  /**
+   * Developer Mode off, learnt from a refusal or the HMS row; cleared only when the printer reports it on (`fun`) or
+   * accepts one of the session's own commands. A printer that sends no `fun` (A1 mini) keeps it until then.
+   */
   let refusedForDeveloperMode = false;
   let table: { version?: number; rows: readonly BambuCalibrationRow[] } | undefined;
   let tableRequestedFor: number | undefined;
@@ -362,6 +384,8 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
   let calibration: Calibration | undefined;
   /** The calibration this session last asked for, so a system print without a known file name is still named. */
   let requestedCalibration: { method: Calibration['method']; operationId: string } | undefined;
+  /** A pause an agent asked for, until the run has shown it and left it: the printer reports every remote pause alike. */
+  let agentPause: { runId: string; shown: boolean } | undefined;
   let readSequence = 90_000;
   let lastEmitted: MachineReport | undefined;
   let closed = false;
@@ -488,6 +512,12 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
   const handleReply = (reply: BambuReply): void => {
     if (reply.unauthorized) {
       refusedForDeveloperMode = true;
+    } else if (
+      reply.result === 'success' &&
+      [...ledger.values()].some((entry) => entry.sequence !== '' && entry.sequence === reply.sequence)
+    ) {
+      // The printer took a command of ours, so it is not dropping them.
+      refusedForDeveloperMode = false;
     }
     if (reply.sequence !== undefined) {
       replies.set(reply.sequence, reply);
@@ -534,7 +564,14 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     }
     statusAt = now();
     lastReportAt = Date.now();
-    if (status.developerMode === 'on' || (status.developerMode === undefined && !hasVerificationAlert())) {
+    if (agentPause !== undefined) {
+      if (status.gcodeState === 'PAUSE') {
+        agentPause.shown = true;
+      } else if (agentPause.shown) {
+        agentPause = undefined;
+      }
+    }
+    if (status.developerMode === 'on') {
       refusedForDeveloperMode = false;
     }
     if (hasVerificationAlert()) {
@@ -611,14 +648,17 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     })();
     const stage = isLive(status) ? bambuStage(status.stageId) : undefined;
     const { stageId } = status;
+    const runId = runIdOf(status);
     const pausedBy =
       stageId === 5 || stageId === 30
         ? 'program'
         : stageId === 16 || stageId === undefined || stageId <= 0
-          ? 'person'
+          ? agentPause?.runId === runId
+            ? 'agent'
+            : 'person'
           : 'machine';
     return {
-      runId: runIdOf(status),
+      runId,
       origin: status.runName?.startsWith('tau-') === true ? 'tau' : 'external',
       delivery: 'stored',
       state,
@@ -763,7 +803,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       label: string,
       [value, target]: readonly [Quantity | undefined, Quantity | undefined],
     ) => (value === undefined ? [] : [{ id, label, value, ...(target === undefined ? {} : { target }) }]);
-    const plateId = status.bedType === undefined ? undefined : bambuPlateForBedType(status.bedType)?.id;
+    const plateId = status.bedType === undefined ? undefined : bambuPlateForBedType(status.bedType, printer)?.id;
     const fans = [
       ['part-fan', status.partFanPercent],
       ...(model === 'X1C'
@@ -1081,11 +1121,21 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       (versionModel !== undefined && versionModel !== model) ||
       (status.model !== undefined && status.model !== model)
     ) {
-      throw new Error('BAMBU_INITIAL_FACTS_INVALID');
+      throw new BambuProtocolError(
+        'BAMBU_INITIAL_FACTS_INVALID',
+        'The device at this address is not the bound printer, or did not report its serial, model and firmware.',
+      );
     }
-  } catch {
+  } catch (error) {
     await link.close().catch(() => undefined);
-    throw new Error('BAMBU_MQTT_CONNECT_FAILED');
+    // A wrong printer at the address and a cancelled open keep their own codes; anything else is the link failing.
+    if (input.signal.aborted || (error instanceof BambuProtocolError && error.code === 'BAMBU_INITIAL_FACTS_INVALID')) {
+      throw error;
+    }
+    throw new BambuProtocolError(
+      'BAMBU_MQTT_CONNECT_FAILED',
+      'Could not connect to the printer. Check that it is on and on this network, then try again.',
+    );
   }
   // A printer that pushes only what changes goes quiet while idle; ask for the whole state before it reads as stale.
   const keepFresh = setInterval(() => {
@@ -1149,17 +1199,20 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
   // oxlint-disable-next-line eslint/complexity -- one dispatch over the declared actions.
   const plan = (action: MachineProviderActionInput, sequence: string): Planned => {
     const parameters: Readonly<Record<string, unknown>> = isRecord(action.parameters) ? action.parameters : {};
-    const slotParameter = (value: unknown): number | undefined =>
-      isRecord(value) && typeof value['unitId'] === 'string' && typeof value['slotId'] === 'string'
-        ? bambuSlotOf(value as BambuSlotAddress)
-        : undefined;
+    const slotParameter = (value: unknown): number | undefined => {
+      const address = bambuSlotSchema.safeParse(value);
+      return address.success ? bambuSlotOf(address.data) : undefined;
+    };
     const invalid = refusal('MACHINE_ACTION_PARAMETERS_INVALID', 'This printer has no such slot.');
+    // The host validated the parameters; the wire-bound ones are parsed again here, so nothing unchecked is sent.
+    const malformed = refusal('MACHINE_ACTION_PARAMETERS_INVALID', 'The parameters do not fit this control.');
     switch (actionKey(action.componentId, action.action)) {
       case 'chamber-light:switch.set': {
         return { request: bambuChamberLight(sequence, parameters['on'] === true) };
       }
       case 'speed:option.set': {
-        return { request: bambuPrintSpeed(sequence, parameters['option'] as (typeof bambuSpeedProfiles)[number]) };
+        const speed = bambuSpeedSchema.safeParse(action.parameters);
+        return speed.success ? { request: bambuPrintSpeed(sequence, speed.data.option) } : malformed;
       }
       case 'controller:run.pause':
       case 'controller:run.resume':
@@ -1168,7 +1221,15 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
           return refusal('MACHINE_ACTION_STALE_RUN', 'The run you saw has ended or changed.');
         }
         const command = action.action === 'run.pause' ? 'pause' : action.action === 'run.resume' ? 'resume' : 'stop';
-        return { request: bambuRunCommand(sequence, command) };
+        const runId = runIdOf(status);
+        return {
+          request: bambuRunCommand(sequence, command),
+          after: () => {
+            if (command === 'pause') {
+              agentPause = action.requestedBy.kind === 'agent' ? { runId, shown: false } : undefined;
+            }
+          },
+        };
       }
       case 'part-fan:level.set':
       case 'aux-fan:level.set':
@@ -1220,6 +1281,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         return {
           request: bambuUnload(sequence, {
             slot,
+            form: input.form,
             temperature: temperature >= 180 ? Math.round(temperature) : bambuChangeTemperature(trayOf(slot)),
           }),
         };
@@ -1317,6 +1379,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
           }
           return {
             request: bambuCalibrationSave(sequence, {
+              form: input.form,
               slot: 0,
               filamentId: String(preset['profileId']),
               settingId: typeof preset['settingId'] === 'string' ? preset['settingId'] : '',
@@ -1356,6 +1419,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         }
         return {
           request: bambuCalibrationSave(sequence, {
+            form: input.form,
             slot: result.slot,
             filamentId: result.filamentId,
             settingId: result.settingId,
@@ -1406,9 +1470,9 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
               'TPU 90A and TPU 85A are too soft to calibrate automatically.',
             );
           }
-          const [nozzle, bed, speed] = bambuGenericPresets[tray.materialId.toLowerCase().split('-')[0] ?? ''] ?? [
-            220, 60, 12,
-          ];
+          const [nozzle, bed, speed, flowRatio] = bambuGenericPresets[
+            tray.materialId.toLowerCase().split('-')[0] ?? ''
+          ] ?? [220, 60, 12, 1];
           filaments.push({
             slot,
             filamentId: tray.profileId,
@@ -1416,10 +1480,16 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
             nozzleTemperature: Math.min(Math.max(nozzle, tray.nozzleMinimum ?? nozzle), tray.nozzleMaximum ?? nozzle),
             bedTemperature: bed,
             maximumVolumetricSpeed: speed,
+            flowRatio,
           });
         }
         return {
-          request: bambuCalibrationRun(sequence, { method, nozzleDiameter: nozzleDiameter(), filaments }),
+          request: bambuCalibrationRun(sequence, {
+            method,
+            form: input.form,
+            nozzleDiameter: nozzleDiameter(),
+            filaments,
+          }),
           after: () => {
             requestedCalibration = { method, operationId: action.operationId };
           },
@@ -1475,18 +1545,16 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         return { request: bambuHome(sequence) };
       }
       case 'motion:motion.jog': {
-        return {
-          request: bambuJog(sequence, {
-            axis: parameters['axis'] as 'x' | 'y' | 'z',
-            distance: Number(parameters['distance']),
-            feed: Number(parameters['feed']),
-          }),
-        };
+        const jog = bambuJogSchema.safeParse(action.parameters);
+        return jog.success ? { request: bambuJog(sequence, jog.data) } : malformed;
       }
       case 'controller:bambu.printer.calibrate': {
-        const routines = Array.isArray(parameters['routines']) ? parameters['routines'] : [];
+        const calibrate = bambuCalibrateSchemas[model].safeParse(action.parameters);
+        if (!calibrate.success) {
+          return malformed;
+        }
         return {
-          request: bambuPrinterCalibration(sequence, routines as Array<keyof typeof bambuPrinterRoutines>),
+          request: bambuPrinterCalibration(sequence, calibrate.data.routines),
           after: () => {
             requestedCalibration = { method: 'printer', operationId: action.operationId };
           },
@@ -1502,6 +1570,44 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     manifest.actions.find((descriptor) => descriptor.componentId === componentId && descriptor.id === action)
       ?.confirms ?? 'observation';
 
+  /**
+   * Admission repeated at the moment of sending, over this session's own latest report: connection, declaration,
+   * the session's own availability (Developer Mode, filament busy, `cali_version`), state, the run fence, freshness
+   * and interlocks. Who may send was the host's to settle.
+   * @param action - The admitted intent.
+   * @returns The rejected receipt, or undefined when it may be sent.
+   */
+  const admit = (action: MachineProviderActionInput): MachineCommandReceipt | undefined => {
+    const refused = checkMachineActionAtSend({
+      name: input.name,
+      capabilities: capabilities(),
+      report: report(),
+      componentId: action.componentId,
+      action: action.action,
+      expectedRunId: action.expectedRunId,
+      now: Date.parse(now()),
+    });
+    return refused === undefined ? undefined : rejected(refused.code, refused.message);
+  };
+
+  /**
+   * The `sequence_id` for one command: the operation's own, moved on past any still in flight, so two operations never
+   * read each other's reply. A remembered reply under it is dropped first.
+   * @param operationId - The operation sending it.
+   * @returns The sequence id.
+   */
+  const sequenceFor = (operationId: string): string => {
+    const inFlight = new Set(
+      [...ledger.values()].filter((entry) => entry.receipt === undefined).map((entry) => entry.sequence),
+    );
+    let sequence = Number(bambuWireSequenceId(operationId));
+    while (inFlight.has(String(sequence))) {
+      sequence = 30_000 + ((sequence - 30_000 + 1) % 60_000);
+    }
+    replies.delete(String(sequence));
+    return String(sequence);
+  };
+
   const apply = async (action: MachineProviderActionInput): Promise<MachineCommandReceipt> => {
     const key = actionKey(action.componentId, action.action);
     const existing = ledger.get(action.operationId);
@@ -1510,14 +1616,12 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         ? (existing.receipt ?? { status: 'unknown', reason: 'sending', observedAt: now() })
         : rejected('MACHINE_OPERATION_ID_CONFLICT', 'This operation id was used for another command.');
     }
-    if (developerMode() === 'off') {
-      return rejected(
-        'MACHINE_ACTION_UNSUPPORTED',
-        'This printer ignores commands from Tau until Developer Mode is on.',
-      );
+    const refused = admit(action);
+    if (refused !== undefined) {
+      return refused;
     }
     action.signal.throwIfAborted();
-    const sequence = bambuWireSequenceId(action.operationId);
+    const sequence = sequenceFor(action.operationId);
     const planned = plan(action, sequence);
     if ('refused' in planned) {
       return rejected(planned.refused.code, planned.refused.message);
@@ -1539,11 +1643,24 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     }
     planned.after?.();
     emit();
-    const reply = await waitForReply(sequence, () => false, action.signal);
     const acknowledged = confirms(action.componentId, action.action) === 'acknowledgement';
+    // An observation-confirmed action stops waiting as soon as a report shows its effect: many commands get no reply.
+    const shown = (): boolean => !acknowledged && confirm(action).status === 'confirmed';
+    const reply = await waitForReply(sequence, shown, action.signal);
+    if (!acknowledged && reply?.result === 'fail' && !reply.unauthorized) {
+      // A reply is a hint for these: the report decides. Keep what the printer said.
+      await input
+        .log({
+          level: 'warning',
+          message: `${planned.request.command} ${sequence} replied fail: ${(reply.reason ?? 'no reason').slice(0, 200)}`,
+        })
+        .catch(() => undefined);
+    }
     entry.receipt =
       reply === undefined
-        ? { status: 'unknown', reason: 'no-reply', observedAt: now() }
+        ? shown()
+          ? { status: 'accepted', observedAt: now() }
+          : { status: 'unknown', reason: 'no-reply', observedAt: now() }
         : reply.unauthorized
           ? unauthorizedReceipt()
           : acknowledged && reply.result === 'fail'
@@ -1559,7 +1676,8 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       return { status: 'refuted', code: entry.receipt.code, message: entry.receipt.message };
     }
     const parameters: Readonly<Record<string, unknown>> = isRecord(action.parameters) ? action.parameters : {};
-    const slot = isRecord(parameters['slot']) ? bambuSlotOf(parameters['slot'] as BambuSlotAddress) : undefined;
+    const address = bambuSlotSchema.safeParse(parameters['slot']);
+    const slot = address.success ? bambuSlotOf(address.data) : undefined;
     const tray = slot === undefined ? undefined : trayOf(slot);
     const confirmed = { status: 'confirmed' } as const;
     const pending = { status: 'pending' } as const;
@@ -1690,7 +1808,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     if (existing?.kind === 'stop' && existing.receipt !== undefined) {
       return existing.receipt;
     }
-    const sequence = bambuWireSequenceId(stopInput.operationId);
+    const sequence = sequenceFor(stopInput.operationId);
     const entry: LedgerEntry = { kind: 'stop', key: 'stop', sequence, command: 'stop', sawActivity: false };
     remember(stopInput.operationId, entry);
     try {
@@ -1713,23 +1831,66 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
 
   /** A plate name from a file or the printer as its manifest id, so `hot_plate` and `high-temperature` agree. */
   const plateIdOf = (name: string | undefined): string | undefined =>
-    name === undefined ? undefined : (bambuPlateForBedType(name)?.id ?? name);
+    name === undefined ? undefined : (bambuPlateForBedType(name, printer)?.id ?? name);
+
+  /**
+   * Complete a partial start form from what the printer reports, in this provider's own keys: the model, the
+   * installed nozzle, the 1.75 mm filament, the plate on the bed, the loaded tray as the one filament and its
+   * material, and Bambu Studio's defaults (bed levelling and flow calibration on, timelapse off). What the caller
+   * gave wins. Read-only.
+   *
+   * ponytail: a plate's filament count is not read here, so an unmapped job maps its one filament to the loaded
+   * tray; a multi-filament plate names its `amsMapping`.
+   * @param input - The partial form.
+   * @returns The completed form.
+   */
+  const completeConfiguration: NonNullable<MachineJobs['completeConfiguration']> = async ({
+    configuration,
+    signal,
+  }) => {
+    signal.throwIfAborted();
+    const given = isFields(configuration) ? configuration : {};
+    const plate = status?.bedType === undefined ? undefined : bambuPlateForBedType(status.bedType, printer)?.id;
+    const loaded =
+      status?.currentMaterialSlot ??
+      trays().find((tray) => tray.state === 'loaded' && tray.materialId !== undefined)?.slot;
+    const mapping = given['amsMapping'];
+    const amsMapping = Array.isArray(mapping)
+      ? mapping.filter((slot): slot is number => typeof slot === 'number')
+      : loaded === undefined
+        ? []
+        : [loaded];
+    return {
+      expectedModel: model,
+      expectedFilamentDiameter: 1.75,
+      ...definedFields({ expectedNozzleDiameter: millimetres(status?.nozzleDiameter), expectedBedType: plate }),
+      amsMapping,
+      expectedMaterials: amsMapping.flatMap((slot) => {
+        const materialId = trayOf(slot)?.materialId;
+        return materialId === undefined ? [] : [{ slot, materialId }];
+      }),
+      bedLeveling: true,
+      flowCalibration: true,
+      timelapse: false,
+      ...given,
+    };
+  };
 
   const prepare: MachineJobs['prepare'] = async (jobInput): Promise<MachinePreparation> => {
-    const refused = (code: string, message: string): MachinePreparation => ({
+    const refused = (code: MachineJobFailureCode, message: string): MachinePreparation => ({
       status: 'refused',
       code,
       message,
       observedAt: now(),
     });
     if (jobInput.expectedMachineId !== serial) {
-      return refused('IDENTITY_MISMATCH', 'The prepared machine identity changed.');
+      return refused('MACHINE_JOB_IDENTITY_MISMATCH', 'The prepared machine identity changed.');
     }
     let artifact: BambuPreparedArtifact;
     try {
       artifact = await input.readArtifact(jobInput.artifact, jobInput.signal);
     } catch {
-      return refused('ARTIFACT_INVALID', 'The artifact failed bounded verification.');
+      return refused('MACHINE_JOB_ARTIFACT_INVALID', 'The artifact failed bounded verification.');
     }
     const { configuration } = jobInput;
     const external = configuration.amsMapping.includes(bambuExternalSpoolSlot);
@@ -1826,23 +1987,23 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     };
   };
 
-  const transfer: Extract<MachineJobs, { delivery: 'stored' }>['transfer'] = async (jobInput) => {
+  const transfer: StoredJobs['transfer'] = async (jobInput) => {
     const existing = ledger.get(jobInput.operationId);
     if (existing?.kind === 'transfer' && existing.receipt !== undefined) {
       return existing.receipt;
     }
     const providerRecord = isRecord(jobInput.providerData) ? jobInput.providerData : undefined;
     if (jobInput.expectedMachineId !== serial || !remoteNamePattern.test(jobInput.remoteName)) {
-      return rejected('PREPARATION_INVALID', 'The prepared artifact identity is invalid.');
+      return rejected('MACHINE_JOB_PREPARATION_INVALID', 'The prepared artifact identity is invalid.');
     }
     let artifact: BambuPreparedArtifact;
     try {
       artifact = await input.readArtifact(jobInput.artifact, jobInput.signal);
     } catch {
-      return rejected('ARTIFACT_INVALID', 'The artifact failed bounded verification.');
+      return rejected('MACHINE_JOB_ARTIFACT_INVALID', 'The artifact failed bounded verification.');
     }
     if (providerRecord?.['memberMd5'] !== artifact.memberMd5) {
-      return rejected('PREPARATION_INVALID', 'The artifact changed since it was prepared.');
+      return rejected('MACHINE_JOB_PREPARATION_INVALID', 'The artifact changed since it was prepared.');
     }
     const entry: LedgerEntry = {
       kind: 'transfer',
@@ -1856,15 +2017,18 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     try {
       written = await input.upload({ remoteName: jobInput.remoteName, artifact, signal: jobInput.signal });
     } catch (error) {
-      // The host's transport errors name the failure, never the access code.
-      const code = error instanceof Error ? error.message : '';
-      if (code === 'STORAGE_FULL' || code === 'TRANSFER_PARTIAL' || code === 'TRANSFER_UNAVAILABLE') {
+      // A refusal the transfer itself names ends it; anything else may have written, so the result is unknown.
+      if (error instanceof BambuProtocolError && bambuTransferRefusals.has(error.code)) {
         entry.receipt = rejected(
-          code,
-          code === 'STORAGE_FULL' ? 'Printer storage is full.' : 'The transfer did not complete.',
+          error.code,
+          error.code === 'MACHINE_TRANSFER_STORAGE_FULL'
+            ? 'Printer storage is full.'
+            : 'The transfer did not complete.',
         );
         return entry.receipt;
       }
+      // The host's transport errors name the failure, never the access code.
+      const code = error instanceof Error ? error.message : '';
       await input
         .log({ level: 'warning', message: `FTPS upload of ${jobInput.remoteName} failed: ${code.slice(0, 200)}` })
         .catch(() => undefined);
@@ -1875,11 +2039,11 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       written === artifact.length
         ? // The printer holds exactly one object per remote name, so the name is the transfer evidence.
           { status: 'accepted', transferId: jobInput.remoteName, observedAt: now() }
-        : rejected('TRANSFER_PARTIAL', 'The transfer ended before the whole artifact was written.');
+        : rejected('MACHINE_TRANSFER_PARTIAL', 'The transfer ended before the whole artifact was written.');
     return entry.receipt;
   };
 
-  const start: MachineJobs['start'] = async (jobInput) => {
+  const start: StoredJobs['start'] = async (jobInput) => {
     const existing = ledger.get(jobInput.operationId);
     if (existing?.kind === 'start' && existing.receipt !== undefined) {
       return existing.receipt;
@@ -1893,7 +2057,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       typeof memberMd5 !== 'string' ||
       !memberMd5Pattern.test(memberMd5)
     ) {
-      return rejected('PREPARATION_INVALID', 'The prepared artifact identity or provider data is invalid.');
+      return rejected('MACHINE_JOB_PREPARATION_INVALID', 'The prepared artifact identity or provider data is invalid.');
     }
     if (developerMode() === 'off') {
       return rejected(
@@ -1901,9 +2065,18 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         'This printer ignores commands from Tau until Developer Mode is on.',
       );
     }
+    // The setup was checked at preparation; a print started at the screen or from Studio since then is not.
+    if (machineStatus().status !== 'ready') {
+      return isLive(status)
+        ? rejected('MACHINE_ACTION_RUN_ACTIVE', 'The printer is already printing.')
+        : rejected('MACHINE_ACTION_BUSY', 'Wait until the printer is idle.');
+    }
+    if (status?.removableStorage === 'absent') {
+      return rejected('MACHINE_JOB_STORAGE_ABSENT', 'Insert the printer’s storage card.');
+    }
     const { configuration } = jobInput;
     const wireId = bambuWireId(jobInput.operationId);
-    const sequence = bambuWireSequenceId(jobInput.operationId);
+    const sequence = sequenceFor(jobInput.operationId);
     const runName = jobInput.remoteName.replace('.gcode.3mf', '');
     startRunNames.set(jobInput.operationId, runName);
     // The external spool prints with the AMS off: firmware takes -1 in `ams_mapping` and holder 255 in
@@ -1957,7 +2130,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       reply?.unauthorized === true
         ? unauthorizedReceipt()
         : reply?.result === 'fail' && runId === undefined
-          ? rejected('PROVIDER_REJECTED', reply.reason ?? 'provider-rejected')
+          ? rejected('MACHINE_JOB_PROVIDER_REJECTED', reply.reason ?? 'The printer refused the start.')
           : reply?.result === 'success' || runId !== undefined
             ? {
                 status: 'accepted',
@@ -1983,8 +2156,9 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         return { status: 'accepted', runId, observedAt: statusAt ?? now() };
       }
     }
-    if (reconcileInput.kind === 'stop' && entry?.kind === 'stop' && !isLive(status)) {
-      return { status: 'accepted', observedAt: statusAt ?? now() };
+    // Not printing is proof enough of a stop, even one sent before a restart left the ledger empty.
+    if (reconcileInput.kind === 'stop' && statusAt !== undefined && !isLive(status)) {
+      return { status: 'accepted', observedAt: statusAt };
     }
     const kinds: Readonly<Record<string, LedgerEntry['kind']>> = {
       action: 'action',
@@ -2029,7 +2203,20 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         return component;
       }),
       processes: manifest.processes,
-      actions: manifest.actions,
+      actions: manifest.actions.map((action) => {
+        const profileId = action.qualification.status === 'qualified' ? action.qualification.profileId : undefined;
+        const profile = manifest.qualifications.find(({ id }) => id === profileId);
+        // A qualification holds for the firmware it was proven on; on any other this printer is untested.
+        return profile === undefined || firmware === undefined || profile.firmware.includes(firmware)
+          ? action
+          : {
+              ...action,
+              qualification: {
+                status: 'designed',
+                reason: `Proven on firmware ${profile.firmware.join(', ')}; this printer runs ${firmware}.`,
+              } as const,
+            };
+      }),
       holds: manifest.holds,
       jobs: manifest.jobs,
       stop: manifest.stop,
@@ -2052,15 +2239,32 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       snapshotInput.signal.throwIfAborted();
       return report();
     },
+    // The first observation is a snapshot; deltas follow it. Abort ends the stream without throwing.
     async *observe(observeInput) {
-      for await (const [event] of on(updates, 'observation', { signal: observeInput.signal })) {
-        yield (event as CustomEvent<MachineObservation>).detail;
+      if (observeInput.signal.aborted) {
+        return;
+      }
+      // Subscribe before the snapshot so nothing emitted in between is lost.
+      const events = on(updates, 'observation', { signal: observeInput.signal });
+      try {
+        yield { type: 'snapshot', snapshot: report() } satisfies MachineObservation;
+        for await (const [event] of events) {
+          yield (event as CustomEvent<MachineObservation>).detail;
+        }
+      } catch (error) {
+        // Abort ends the stream by returning; anything else is a real failure.
+        if (!(error instanceof Error && error.name === 'AbortError')) {
+          throw error;
+        }
+      } finally {
+        // A subscriber that stops at the snapshot never entered the loop that would close the listener.
+        await events.return?.();
       }
     },
     stop,
     actions: { type: 'supported', apply, confirm },
     holds: { type: 'unsupported' },
-    jobs: { type: 'supported', delivery: 'stored', prepare, transfer, start },
+    jobs: { type: 'supported', delivery: 'stored', completeConfiguration, prepare, transfer, start },
     stillCapture: input.stillCapture,
     reconcile,
     close,

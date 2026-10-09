@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  bambuCalibrationResults,
   bambuCalibrationTable,
   bambuRemoteName,
   bambuStage,
   bambuTopic,
   mergeBambuStatus,
-  parseBambuCommandPayload,
   parseBambuReply,
   parseBambuDiscoveryDatagram,
   parseBambuStatusPayload,
@@ -38,7 +38,7 @@ describe('Bambu protocol admission', () => {
       parseBambuDiscoveryDatagram({
         datagram: {
           bytes: bytes(
-            'NOTIFY * HTTP/1.1\r\nDevName.bambu.com: Workshop\r\nDevModel.bambu.com: BL-P001\r\nUSN: 00M00A391800004\r\n',
+            'NOTIFY * HTTP/1.1\r\nDevName.bambu.com: Workshop\r\nDevModel.bambu.com: BL-P001\r\nUSN: 00M00A000000001\r\n',
           ),
           peer: { address: '192.0.2.10', interface: 'test0', port: 2021 },
         },
@@ -46,7 +46,7 @@ describe('Bambu protocol admission', () => {
         expiresAt: '2026-09-14T00:00:30.000Z',
       }),
     ).toMatchObject({
-      claimedIdentity: { model: 'X1C', serial: '00M00A391800004' },
+      claimedIdentity: { model: 'X1C', serial: '00M00A000000001' },
     });
     expect(() =>
       parseBambuDiscoveryDatagram({
@@ -61,7 +61,7 @@ describe('Bambu protocol admission', () => {
     expect(() =>
       parseBambuDiscoveryDatagram({
         datagram: {
-          bytes: bytes('NOTIFY * HTTP/1.1\r\nDevModel.bambu.com: C12\r\nUSN: 01P00A391800001\r\n'),
+          bytes: bytes('NOTIFY * HTTP/1.1\r\nDevModel.bambu.com: C12\r\nUSN: 01P00A000000002\r\n'),
           peer: { address: '192.0.2.10', interface: 'test0', port: 2021 },
         },
         observedAt: '2026-09-14T00:00:00.000Z',
@@ -92,12 +92,12 @@ describe('Bambu protocol admission', () => {
         observedAt: '2026-09-30T00:00:00.000Z',
         expiresAt: '2026-09-30T00:00:30.000Z',
       });
-    expect(discover('N1', '0300EA652800550')).toMatchObject({
+    expect(discover('N1', '0300AA000000001')).toMatchObject({
       name: 'Mini',
-      claimedIdentity: { model: 'A1 mini', serial: '0300EA652800550' },
+      claimedIdentity: { model: 'A1 mini', serial: '0300AA000000001' },
     });
-    expect(() => discover('N1', '00M00A391800004')).toThrow('BAMBU_DISCOVERY_INVALID');
-    expect(() => discover('C12', '01P00A391800001')).toThrow('BAMBU_DISCOVERY_INVALID');
+    expect(() => discover('N1', '00M00A000000001')).toThrow('BAMBU_DISCOVERY_INVALID');
+    expect(() => discover('C12', '01P00A000000002')).toThrow('BAMBU_DISCOVERY_INVALID');
   });
 
   it('should preserve native physical units and map unknown states without retaining raw payload', () => {
@@ -320,46 +320,40 @@ describe('Bambu protocol admission', () => {
   it('should correlate exact OTA firmware with the physical serial', () => {
     const version = parseBambuVersionPayload(
       bytes(
-        '{"info":{"command":"get_version","sequence_id":"0","module":[{"name":"ota","project_name":"BL-P001","sw_ver":"01.08.02.00","hw_ver":"OTA","sn":"00M00A391800004"}],"result":"success"}}',
+        '{"info":{"command":"get_version","sequence_id":"0","module":[{"name":"ota","project_name":"BL-P001","sw_ver":"01.08.02.00","hw_ver":"OTA","sn":"00M00A000000001"}],"result":"success"}}',
       ),
     );
     expect(version).toEqual({
-      serial: '00M00A391800004',
+      serial: '00M00A000000001',
       firmware: '01.08.02.00',
       model: 'X1C',
     });
     expect(() =>
       parseBambuVersionPayload(
         bytes(
-          '{"info":{"command":"get_version","sequence_id":"other","module":[{"name":"ota","sw_ver":"01.08.02.00","sn":"00M00A391800004"}],"result":"success"}}',
+          '{"info":{"command":"get_version","sequence_id":"other","module":[{"name":"ota","sw_ver":"01.08.02.00","sn":"00M00A000000001"}],"result":"success"}}',
         ),
       ),
     ).toThrow('BAMBU_VERSION_INVALID');
   });
 
-  it('should require exact semantic correlation and reject topic, path, and still injection', () => {
+  it('should read a reply with its sequence, numeric or not, and reject topic, path, and still injection', () => {
     expect(
-      parseBambuCommandPayload({
-        bytes: bytes('{"print":{"command":"project_file","sequence_id":"9","result":"success","subtask_id":"run-1"}}'),
-        command: 'project_file',
-        sequence: '9',
-      }),
-    ).toEqual({ status: 'accepted', providerRunId: 'run-1' });
-    expect(
-      parseBambuCommandPayload({
-        bytes: bytes('{"print":{"command":"project_file","sequence_id":"other","result":"success"}}'),
-        command: 'project_file',
-        sequence: '9',
-      }),
-    ).toEqual({ status: 'unrelated' });
+      parseBambuReply(
+        bytes('{"print":{"command":"project_file","sequence_id":"9","result":"success","subtask_id":"run-1"}}'),
+      ),
+    ).toMatchObject({ command: 'project_file', sequence: '9', result: 'success', unauthorized: false });
     // Firmware may echo the sequence id as a number.
     expect(
-      parseBambuCommandPayload({
-        bytes: bytes('{"print":{"command":"project_file","sequence_id":9,"result":"SUCCESS"}}'),
-        command: 'project_file',
-        sequence: '9',
-      }),
-    ).toEqual({ status: 'accepted' });
+      parseBambuReply(bytes('{"print":{"command":"project_file","sequence_id":9,"result":"SUCCESS"}}')),
+    ).toMatchObject({ sequence: '9', result: 'success' });
+    expect(
+      parseBambuVersionPayload(
+        bytes(
+          '{"info":{"command":"get_version","sequence_id":0,"module":[{"name":"ota","sw_ver":"01.12.00.00","sn":"00M00A000000001"}]}}',
+        ),
+      ),
+    ).toMatchObject({ firmware: '01.12.00.00' });
     expect(() => bambuTopic('serial/#', 'request')).toThrow('BAMBU_IDENTIFIER_INVALID');
     expect(() => bambuRemoteName('bad\r\nDELE all')).toThrow('BAMBU_REMOTE_NAME_INVALID');
     expect(() => parseBambuStill(Uint8Array.from([0xff, 0xd8, 0, 0]), 'now')).toThrow('BAMBU_STILL_INVALID');
@@ -513,5 +507,53 @@ describe('Bambu printer stage', () => {
     expect(report({ mc_print_stage: '2', gcode_state: 'RUNNING' })).not.toHaveProperty('stageId');
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field names.
     expect(report({ stg_cur: 'heating', gcode_state: 'RUNNING' })).not.toHaveProperty('stageId');
+  });
+});
+
+describe('Bambu Developer Mode and calibration results', () => {
+  it('should raise the command-verification HMS row as a blocking Developer-Mode alert', () => {
+    expect(report({ hms: [{ attr: 0x05_00_05_00, code: 0x00_01_00_07 }] }).alerts).toContainEqual(
+      expect.objectContaining({ code: '0500-0500-0001-0007', blocks: 'everything' }),
+    );
+  });
+
+  it.each([
+    ['20000000', 'off'],
+    ['0', 'on'],
+    [0x20_00_00_00, 'off'],
+    [0, 'on'],
+  ] as const)('should read fun %s as Developer Mode %s', (fun, developerMode) => {
+    expect(report({ fun }).developerMode).toBe(developerMode);
+  });
+
+  it('should still parse a report whose state and stage this package does not know', () => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field names are fixed.
+    const status = report({ gcode_state: 'SOMETHING_NEW', stg_cur: 99, nozzle_temper: 30 });
+    expect(status.gcodeState).toBe('SOMETHING_NEW');
+    expect(status.nozzleTemperature).toBeDefined();
+    expect(bambuStage(status.stageId)).toBeUndefined();
+  });
+
+  it('should read each result confidence, and the external spool by ams 255 and tray 254', () => {
+    /* eslint-disable @typescript-eslint/naming-convention -- Bambu wire field names are fixed. */
+    const row = { ams_id: 255, tray_id: 254, slot_id: 0, filament_id: 'GFG99', setting_id: '', k_value: '0.040' };
+    const reply = parseBambuReply(
+      bytes(
+        JSON.stringify({
+          print: {
+            command: 'extrusion_cali_get_result',
+            sequence_id: '90001',
+            result: 'success',
+            filaments: [0, 1, 2].map((confidence) => ({ ...row, confidence })),
+          },
+        }),
+      ),
+    );
+    /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
+    expect(reply === undefined ? undefined : bambuCalibrationResults(reply)).toEqual([
+      expect.objectContaining({ slot: 254, confidence: 'good', pressureAdvance: 0.04 }),
+      expect.objectContaining({ slot: 254, confidence: 'uncertain' }),
+      expect.objectContaining({ slot: 254, confidence: 'failed' }),
+    ]);
   });
 });

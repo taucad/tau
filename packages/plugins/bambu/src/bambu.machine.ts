@@ -13,14 +13,14 @@ import { bambuSettingsConfiguration } from '#bambu.settings.js';
 const bindingConfiguration = defineConfiguration({
   id: 'bambu.machine.binding',
   version: '1.1.0',
-  schema: z.object({
+  schema: z.strictObject({
     logicalId: z.string().min(1).max(64),
     address: z.string().min(1).max(253).optional(),
     serial: z.string().min(1).max(64).optional(),
     wireForm: z.enum(['a', 'b', 'c']).optional().meta({
       title: 'Command forms (testing)',
       description:
-        'Which form to send where Bambu Studio, OrcaSlicer and bambuddy disagree: the external spool and clearing a slot (testing program rows T6, T7, T10, T17). (a) is Bambu Studio’s.',
+        'Which form to send where Bambu Studio, OrcaSlicer and bambuddy disagree: the external spool and clearing a slot (testing program rows T6, T7, T10, T17). (a) is Bambu Studio’s everywhere; for a load (b) is OrcaSlicer’s and (c) bambuddy’s, for a slot setting (b) is a probe and (c) 254/254, for a clear (b) and (c) are bambuddy’s, for a profile (b) is bambuddy’s.',
     }),
   }),
   ui: { version: 1, rjsf: {} },

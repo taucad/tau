@@ -1,14 +1,22 @@
-import { fffProcessOf, isUnattendedAction, parseMachineManifest } from '@taucad/runtime/machine';
+import {
+  fffProcessOf,
+  isUnattendedAction,
+  parseMachineManifest,
+  standardMachineActions,
+} from '@taucad/runtime/machine';
 import { describe, expect, it } from 'vitest';
 
 import { bambuA1MiniMachine, bambuMachine } from '#bambu.machine.js';
 import {
   bambuA1MiniManifest,
+  bambuA1MiniSubmissionConfiguration,
   bambuA1MiniTestingProfile,
+  bambuSubmissionConfiguration,
   bambuX1cHardwareProfile,
   bambuX1cManifest,
   bambuX1cTestingProfile,
 } from '#bambu.manifest.js';
+import { bambuAddressOf } from '#bambu.settings.js';
 import { bambuA1MiniSimulatorMachine, bambuSimulatorMachine } from '#bambu.simulator.js';
 
 const actionIds = (manifest: typeof bambuX1cManifest): string[] =>
@@ -93,7 +101,7 @@ describe('bambuX1cManifest', () => {
     const kindOf = (componentId: string): string =>
       bambuX1cManifest.components.find(({ id }) => id === componentId)?.kind ?? 'unknown';
     const unattended = bambuX1cManifest.actions
-      .filter((action) => isUnattendedAction(kindOf(action.componentId), action))
+      .filter((action) => isUnattendedAction(kindOf(action.componentId), action, bambuX1cManifest.processes))
       .map(({ id }) => id);
     expect(unattended).toContain('switch.set');
     expect(unattended).toContain('option.set');
@@ -167,5 +175,111 @@ describe('provider registrations', () => {
       expect(simulated.manifest.qualifications).toMatchObject([{ id: 'simulation', environment: 'simulation' }]);
       expect(() => structuredClone(simulated)).not.toThrow();
     }
+  });
+
+  it('should declare the services a binding pins under the ids the host reads, and no ftp probe', () => {
+    // The ceremony probes and pins these; saved access codes are keyed by the ids. Uploads reuse the MQTT pin.
+    expect(bambuMachine().manifest.connection.services).toEqual([
+      { id: 'mqtt', port: 8883, required: true },
+      { id: 'camera', port: 322, required: false },
+    ]);
+    expect(bambuA1MiniMachine().manifest.connection.services).toEqual([
+      { id: 'mqtt', port: 8883, required: true },
+      { id: 'camera', port: 6000, required: false },
+    ]);
+  });
+});
+
+const manifests = [
+  ['X1C', bambuX1cManifest, bambuSubmissionConfiguration],
+  ['A1 mini', bambuA1MiniManifest, bambuA1MiniSubmissionConfiguration],
+] as const;
+const rank = { agent: 0, 'approved-agent': 1, person: 2 } as const;
+const families: Readonly<Record<string, Readonly<{ authority: keyof typeof rank; attended: boolean }>>> =
+  standardMachineActions;
+/** A vendor action has no family; it may never sit at the unattended `agent` floor. */
+const vendorFloor = { authority: 'approved-agent', attended: false } as const;
+
+describe.each(manifests)('the %s manifest', (name, manifest, submission) => {
+  it('should hold every action at or above its family floor, and a vendor action above an agent', () => {
+    const kindOf = (componentId: string): string =>
+      manifest.components.find(({ id }) => id === componentId)?.kind ?? '';
+    for (const action of manifest.actions) {
+      const family = families[action.id] ?? vendorFloor;
+      const floor = isUnattendedAction(kindOf(action.componentId), action, manifest.processes)
+        ? 0
+        : rank[family.authority];
+      expect(rank[action.safety.authority], `${action.componentId}:${action.id}`).toBeGreaterThanOrEqual(floor);
+      expect(action.safety.attended || !family.attended, `${action.componentId}:${action.id}`).toBe(true);
+    }
+  });
+
+  it('should keep every calibration for a person who need not stand at the printer', () => {
+    const calibrations = manifest.actions.filter(
+      ({ id }) => id.startsWith('material.calibration.') || id === 'bambu.printer.calibrate',
+    );
+    expect(calibrations.map(({ id }) => id)).toEqual([
+      'material.calibration.select',
+      'material.calibration.save',
+      'material.calibration.delete',
+      'material.calibration.run',
+      'bambu.printer.calibrate',
+    ]);
+    for (const { safety } of calibrations) {
+      expect(safety).toEqual({ authority: 'person', attended: false, interlocks: [] });
+    }
+  });
+
+  it('should halt on stop with the heaters off and ask for the plate to be cleared', () => {
+    expect(manifest.stop).toEqual({
+      motion: 'halts',
+      spindle: 'none',
+      heaters: 'off',
+      position: 'kept',
+      recovery: [{ type: 'person', instruction: 'Remove the unfinished print from the build plate.' }],
+    });
+  });
+
+  it('should name only declared components as a profile’s attachments, and only firmware its evidence ran on', () => {
+    const components = new Set(manifest.components.map(({ id }) => id));
+    for (const profile of manifest.qualifications) {
+      expect(profile.attachments.every((attachment) => components.has(attachment))).toBe(true);
+      for (const firmware of profile.firmware) {
+        expect(profile.evidence, profile.id).toContain(firmware);
+      }
+    }
+  });
+
+  it('should accept only tray numbers its material system declares', () => {
+    const filament = manifest.components.find(({ kind }) => kind === 'material-system');
+    const declared = new Set(
+      filament?.kind === 'material-system'
+        ? filament.units.flatMap(({ id, slots }) => slots.map((slot) => `${id}/${slot.id}`))
+        : [],
+    );
+    const base = {
+      expectedBedType: 'textured-pei',
+      expectedFilamentDiameter: 1.75,
+      expectedModel: name,
+      expectedNozzleDiameter: 0.4,
+    };
+    const accepted = Array.from({ length: 300 }, (_, slot) => slot).filter(
+      (slot) =>
+        submission.schema.safeParse({ ...base, amsMapping: [slot], expectedMaterials: [{ slot, materialId: 'PLA' }] })
+          .success,
+    );
+    expect(accepted.length).toBeGreaterThan(1);
+    for (const slot of accepted) {
+      const { unitId, slotId } = bambuAddressOf(slot);
+      expect(declared.has(`${unitId}/${slotId}`), String(slot)).toBe(true);
+    }
+  });
+});
+
+describe('the A1 mini Testing profile', () => {
+  it('should not claim the AMS lite it was proven without', () => {
+    expect(bambuA1MiniManifest.qualifications.find(({ id }) => id === bambuA1MiniTestingProfile)?.attachments).toEqual([
+      'camera',
+    ]);
   });
 });

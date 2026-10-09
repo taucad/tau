@@ -1457,7 +1457,7 @@ export function FileManagerProvider({
     };
   }, [getReadiedProxy, fileManagerRef, whenServicesReady, workspaceTelemetry]);
 
-  useLayoutEffect(activateRootSync, [activateRootSync]);
+  useLayoutEffect(() => activateRootSync(), [activateRootSync]);
 
   const value = useMemo<FileManagerContextType>(
     () => ({

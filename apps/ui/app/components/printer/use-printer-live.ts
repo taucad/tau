@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { componentValue } from '@taucad/runtime/machine';
+import { componentValue, fffProcessOf } from '@taucad/runtime/machine';
 import type {
   ComponentObservation,
   MachineClient,
@@ -27,7 +27,7 @@ import type { Quantity } from '@taucad/units/quantity';
 import { projectMachineDirectoryFrame, useMachinesFacet } from '#hooks/use-machines.js';
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
-import { startedRunIdOf, useMachinesJobs } from '#hooks/use-machines-jobs.js';
+import { firstResync, longestResync, pause, startedRunIdOf, useMachinesJobs } from '#hooks/use-machines-jobs.js';
 import { materialSystemValue, toolheadOf } from '#components/print/machine-facts.js';
 import type { LiveRunPosition } from '#components/printer/printer-playback.js';
 
@@ -76,13 +76,22 @@ const targetOf = (
 
 /** Where the run stands: the layer counter when the machine counts layers, and the fraction done as a percentage. */
 const positionOf = (run: MachineRun | undefined): LiveRunPosition => {
-  const layer = run?.progress.counters.find(({ id, label }) => id === 'layer' || label.includes('Layer'));
+  const layer = run?.progress.counters.find(({ id }) => id === 'layer');
   const fraction = run?.progress.fraction;
   return {
     currentLayer: layer?.current,
     totalLayers: layer?.total,
     progress: fraction === undefined ? undefined : fraction * 100,
   };
+};
+
+/**
+ * The heater under the bed. The contract names no bed heater, so a 3D printer's only heater is its bed; with several,
+ * which one heats the bed is unknown, and the scene shows no bed target rather than another heater's.
+ */
+const bedHeaterOf = (entry: MachineDirectoryEntry): MachineComponent | undefined => {
+  const heaters = entry.descriptor.capabilities.components.filter((component) => component.kind === 'heater');
+  return fffProcessOf(entry.descriptor.capabilities) !== undefined && heaters.length === 1 ? heaters[0] : undefined;
 };
 
 /** The light and heater targets of a machine observed now. */
@@ -96,10 +105,7 @@ const currentFacts = (
   return {
     chamberLight: lightValue === undefined ? 'unknown' : lightValue.on ? 'on' : 'off',
     nozzleTarget: targetOf(components, toolheadOf({ components: installed })),
-    bedTarget: targetOf(
-      components,
-      installed.find((component) => component.kind === 'heater'),
-    ),
+    bedTarget: targetOf(components, bedHeaterOf(entry)),
   };
 };
 
@@ -166,21 +172,34 @@ export const useMachineDirectoryEntries = (
       return undefined;
     }
     const abort = new AbortController();
+    const { signal } = abort;
+    /* Read through a call: the abort lands while awaiting, which narrowing on the property cannot see. */
+    const isAborted = (): boolean => signal.aborted;
+    /* A watch that ends or fails means resync (R10): list again, then watch again, backing off as the jobs do. */
     const observe = async (): Promise<void> => {
-      try {
-        const initial = await client.list({ signal: abort.signal });
-        if (abort.signal.aborted) {
-          return;
+      let wait = firstResync;
+      while (!isAborted()) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- each resync lists, then watches, in order; never in parallel.
+          const initial = await client.list({ signal });
+          if (isAborted()) {
+            return;
+          }
+          setState({ client, snapshot: initial });
+          // oxlint-disable-next-line no-await-in-loop -- the watch runs until it ends; the next resync follows it.
+          for await (const frame of client.watch({ cursor: initial.cursor, signal })) {
+            wait = firstResync;
+            setState((current) => ({
+              client,
+              snapshot: projectMachineDirectoryFrame(current?.client === client ? current.snapshot : initial, frame),
+            }));
+          }
+        } catch {
+          // The viewer only decorates the simulation: until the resync lands, it keeps what it last saw or file mode.
         }
-        setState({ client, snapshot: initial });
-        for await (const frame of client.watch({ cursor: initial.cursor, signal: abort.signal })) {
-          setState((current) => ({
-            client,
-            snapshot: projectMachineDirectoryFrame(current?.client === client ? current.snapshot : initial, frame),
-          }));
-        }
-      } catch {
-        // The viewer only decorates the simulation; a lost directory leaves it in file mode.
+        // oxlint-disable-next-line no-await-in-loop -- the backoff between resyncs is the point of the loop.
+        await pause(wait, signal);
+        wait = Math.min(wait * 2, longestResync);
       }
     };
     // async-iife: bootstrap -- a React effect cannot await; cleanup aborts the observation loop.

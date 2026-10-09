@@ -38,7 +38,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { isRecord } from '@taucad/utils/schema';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
-import { describeOutcome } from '#components/print/machine-facts.js';
+import { describeOutcome, failureCodeOf } from '#components/print/machine-facts.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import {
@@ -561,8 +561,9 @@ function JogPad({
           aria-label='Jog step'
           value={step}
           onValueChange={(value) => {
-            if (value !== '') {
-              setStep(value as JogStep);
+            const chosen = jogSteps.find((candidate) => candidate === value);
+            if (chosen !== undefined) {
+              setStep(chosen);
             }
           }}
         >
@@ -773,10 +774,10 @@ function ToolsGroup({ control }: { readonly control: MachineControl }): React.JS
     ]),
     tools === undefined ? undefined : declaredAction(entry, tools.id, 'tool.change'),
   ].filter((descriptor) => descriptor !== undefined);
-  if (descriptors.length === 0) {
+  const [first] = descriptors;
+  if (first === undefined) {
     return undefined;
   }
-  const first = descriptors[0]!;
   return group(
     'Tools and probing',
     <>
@@ -1398,7 +1399,7 @@ const unknownStillFailure = 'The camera could not capture a still; capture again
 export const describeStillFailure = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
   const codes = [
-    ...(isRecord(error) && typeof error['code'] === 'string' ? [error['code']] : []),
+    ...[failureCodeOf(error)].filter((code) => code !== undefined),
     ...(message.match(/\b[A-Z][\dA-Z]*(?:_[\dA-Z]+)+\b/gu) ?? []),
   ];
   const sentence = codes.map((code) => stillFailures.get(code)).find((candidate) => candidate !== undefined);

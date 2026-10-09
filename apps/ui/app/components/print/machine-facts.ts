@@ -1,6 +1,6 @@
 /**
  * Plain readings of the machine contract that every machine surface shares: the material system and its slots,
- * the toolhead's nozzles, and halt outcomes in words. Pure; no I/O.
+ * the toolhead's nozzles, halt outcomes and request failures in words. Pure; no I/O.
  *
  * @module
  */
@@ -139,6 +139,29 @@ export const describeOutcome = (outcome: MachineHaltOutcome): string => {
   const position = outcome.position === 'kept' ? 'the position is kept' : 'the position may be lost';
   return `${[motion, spindle, heaters, position].filter((part) => part !== undefined).join(', ')}.`;
 };
+
+/**
+ * A thrown request failure as the pane shows it: the host's or the provider's own words. What clears a refusal
+ * arrives as a check's remedy, never from parsing this text.
+ *
+ * @param error - What a machine client call rejected with.
+ * @returns Plain copy.
+ * @public
+ */
+export const describePrintError = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/**
+ * The typed failure code a machine call rejected with (R11). The machine channel carries `code` beside the message,
+ * which is a sentence for a person, so a code is read from here and never looked for in the message.
+ *
+ * @param error - What a machine client call rejected with.
+ * @returns The `MachineFailure` code, or `undefined` when the error carries none.
+ * @public
+ */
+export const failureCodeOf = (error: unknown): string | undefined =>
+  typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined;
 
 /** One declared material slot, by its contract address, with what the machine reports for it. @public */
 export type ObservedSlot = Readonly<{

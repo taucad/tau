@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { FileCode, LoaderCircle, Send } from 'lucide-react';
 import type {
   MachineAcceptedContainer,
@@ -12,18 +12,14 @@ import { Button } from '@taucad/ui/components/button';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { randomUuid } from '@taucad/utils/id';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
+import { describePrintError } from '#components/print/machine-facts.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { operator } from '#hooks/use-machine-control.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import { useProject } from '#hooks/use-project.js';
 import { PrintNotice, PrintRow, PrintStage } from '#routes/w.$workspace.$project/chat-print-section.js';
-import {
-  JobChecks,
-  describePrintError,
-  describeProgram,
-  startBlocker,
-} from '#routes/w.$workspace.$project/chat-print-send.js';
+import { JobChecks, describeProgram, startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
 
 /**
  * The extensions a machine's accepted containers are saved under: each container's own `extensions`, or, for one that
@@ -274,6 +270,8 @@ export function ProgramStage({
   const program = programs?.find(({ path }) => path === chosen) ?? programs?.[0];
   const current = useProgramCheck({ client, entry, accepts, program });
   const [isSending, setIsSending] = useState(false);
+  /* Unique per pane, so two mounted panes never describe one button with the other's blocker. */
+  const blockerId = useId();
   const [sendError, setSendError] = useState<string>();
   const requestIdRef = useRef<Readonly<{ key: string; requestId: string }>>(undefined);
   const { machineId } = entry;
@@ -345,7 +343,7 @@ export function ProgramStage({
         <Button
           type='button'
           size='sm'
-          aria-describedby={blocker === undefined ? undefined : 'print-program-blocker'}
+          aria-describedby={blocker === undefined ? undefined : blockerId}
           disabled={blocker !== undefined || isSending}
           onClick={() => {
             void send();
@@ -360,7 +358,7 @@ export function ProgramStage({
         </Button>
       </div>
       {blocker === undefined ? null : (
-        <p id='print-program-blocker' className='text-xs text-muted-foreground'>
+        <p id={blockerId} className='text-xs text-muted-foreground'>
           {blocker}
         </p>
       )}

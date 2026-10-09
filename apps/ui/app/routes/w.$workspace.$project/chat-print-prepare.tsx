@@ -38,6 +38,7 @@ import { FilamentSlots } from '#components/print/filament-slots.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { SearchInput } from '#components/search-input.js';
 import {
+  bambuOwnedSubmissionFields,
   bambuPreferencesOf,
   bambuSubmissionSlots,
   chosenBambuFilament,
@@ -64,6 +65,7 @@ import {
 } from '#routes/w.$workspace.$project/chat-print-section.js';
 import { operator } from '#hooks/use-machine-control.js';
 import {
+  describePrintError,
   formatQuantity,
   materialSystemValue,
   observedPlate,
@@ -72,7 +74,7 @@ import {
   slotKey,
 } from '#components/print/machine-facts.js';
 import type { ObservedSlot } from '#components/print/machine-facts.js';
-import { JobChecks, describePrintError, startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
+import { JobChecks, startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import {
   fitsPlate,
@@ -248,17 +250,12 @@ export type SlicedArtifact = Readonly<{
 }>;
 
 const noColors: readonly string[] = [];
-/** Values owned by the machine or the visible Prepare controls, not separate Advanced choices. */
-const prepareSubmissionFields = new Set([
-  'amsMapping',
-  'expectedMaterials',
-  'expectedBedType',
-  'expectedModel',
-  'operatorConfirmedBedType',
-  'bedLeveling',
-  'flowCalibration',
-  'timelapse',
-]);
+/**
+ * Values owned by the machine or the visible Prepare controls, not separate Advanced choices: Bambu's own keys, and the
+ * start options any provider declares, which Start options shows.
+ */
+const preparedFields = (provider: MachineProvider | undefined): ReadonlySet<string> =>
+  new Set([...bambuOwnedSubmissionFields(provider), ...startOptions.map(({ key }) => key)]);
 const observedDiameterFields = new Set(['expectedFilamentDiameter', 'expectedNozzleDiameter']);
 
 /** The submission schema's own defaults, by key. */
@@ -294,8 +291,13 @@ const chosenSubmission = (
   );
 };
 
-const advancedSubmissionValues = (values: Record<string, unknown>): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(values).filter(([key]) => !prepareSubmissionFields.has(key)));
+const advancedSubmissionValues = (
+  provider: MachineProvider | undefined,
+  values: Record<string, unknown>,
+): Record<string, unknown> => {
+  const prepared = preparedFields(provider);
+  return Object.fromEntries(Object.entries(values).filter(([key]) => !prepared.has(key)));
+};
 
 /**
  * The slot each filament prints from unless someone chooses: the first loaded slot for one, as the agent's planner
@@ -621,21 +623,11 @@ export const usePrintPrepare = ({
   }, [machineSettings.machine, filamentColors, entry, provider, manifest, transientSubmission, preferenceKey]);
   const setSubmission = useCallback(
     (next: Record<string, unknown>): void => {
+      /* Bambu's own keys are remembered in its preferences or completed by the provider; every other choice passes. */
+      const owned = bambuOwnedSubmissionFields(provider);
       setTransientSubmission({
         key: preferenceKey,
-        values: Object.fromEntries(
-          Object.entries(next).filter(
-            ([key]) =>
-              ![
-                'bedLeveling',
-                'flowCalibration',
-                'timelapse',
-                'amsMapping',
-                'expectedMaterials',
-                'expectedBedType',
-              ].includes(key),
-          ),
-        ),
+        values: Object.fromEntries(Object.entries(next).filter(([key]) => !owned.has(key))),
       });
       /* Only Bambu's settings remember the choices; another provider's form keeps what it declares. */
       machineSettings.updateMachine((prior) => {
@@ -1954,19 +1946,20 @@ function AdvancedSettingsStage({
       return undefined;
     }
     const { schema } = submissionSchema;
+    const prepared = preparedFields(provider);
     const properties = Object.entries(schema.properties ?? {})
-      .filter(([key]) => !prepareSubmissionFields.has(key))
+      .filter(([key]) => !prepared.has(key))
       .map(([key, field]): [string, JSONSchema7Definition] => [
         key,
         observedDiameterFields.has(key) && typeof field === 'object' ? { ...field, readOnly: true } : field,
       ]);
-    const required = schema.required?.filter((key) => !prepareSubmissionFields.has(key));
+    const required = schema.required?.filter((key) => !prepared.has(key));
     return {
       ...schema,
       properties: Object.fromEntries(properties),
       ...(required === undefined ? {} : { required }),
     };
-  }, [submissionSchema]);
+  }, [submissionSchema, provider]);
 
   return (
     <PrintStage icon={Settings2} title='Advanced settings'>
@@ -2020,8 +2013,8 @@ function AdvancedSettingsStage({
           <div className='min-w-0' role='group' aria-label='Machine mapping'>
             {submissionManifest ? (
               <Parameters
-                parameters={advancedSubmissionValues(submission)}
-                defaultParameters={advancedSubmissionValues({
+                parameters={advancedSubmissionValues(provider, submission)}
+                defaultParameters={advancedSubmissionValues(provider, {
                   ...submissionDefaults(provider, entry, { filamentColors }),
                   /* What the machine completed when it checked the slice: its model, nozzle, materials. */
                   ...(jobCheck !== undefined && jobCheck.status !== 'refused' && isRecordObject(jobCheck.configuration)
@@ -2032,7 +2025,7 @@ function AdvancedSettingsStage({
                 onParametersChange={(changed) => {
                   setSubmission({
                     ...Object.fromEntries(
-                      Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
+                      Object.entries(submission).filter(([key]) => preparedFields(provider).has(key)),
                     ),
                     ...changed,
                   });

@@ -56,10 +56,10 @@ export type JobsView = Readonly<{
   isStalled: boolean;
 }>;
 
-/** The first wait before following the ledger again after its watch ended. Milliseconds. */
-const firstResync = 500;
-/** The longest wait between resyncs. Milliseconds. */
-const longestResync = 30_000;
+/** The first wait before following the ledger again after its watch ended. Milliseconds. @public */
+export const firstResync = 500;
+/** The longest wait between resyncs. Milliseconds. @public */
+export const longestResync = 30_000;
 /** This many watches ending without news within {@link stallWindow} say the updates stopped. */
 const stallEndings = 3;
 /** Milliseconds. */
@@ -71,8 +71,9 @@ const stallWindow = 60_000;
  * @param milliseconds - How long.
  * @param signal - Ends the wait early.
  * @returns When the time is up or the signal aborted.
+ * @public
  */
-const pause = async (milliseconds: number, signal: AbortSignal): Promise<void> =>
+export const pause = async (milliseconds: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     const timer = globalThis.setTimeout(resolve, milliseconds);
     signal.addEventListener(

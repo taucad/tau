@@ -354,6 +354,23 @@ describe('serializeMessage', () => {
     });
   });
 
+  describe('machine tool parts', () => {
+    it("keeps an old chat's object answer from get_machine readable", () => {
+      const message = baseMessage([
+        {
+          type: 'tool-get_machine',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { machineId: 'workshop-x1c' },
+          // An answer recorded before get_machine answered in text.
+          output: { name: 'Workshop X1C' } as unknown as string,
+        },
+      ]);
+      expect(serializeMessage(message)).toContain('"name": "Workshop X1C"');
+      expect(serializeMessage(message)).not.toContain('[object Object]');
+    });
+  });
+
   describe('dynamic-tool parts', () => {
     it('serializes input-streaming state', () => {
       const message = baseMessage([

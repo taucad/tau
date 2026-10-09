@@ -8,6 +8,7 @@ import type {
   MachineProvider,
 } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
+import { describePrintError, failureCodeOf } from '#components/print/machine-facts.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 
 /**
@@ -133,10 +134,14 @@ export const printersInUseElsewhere =
 /* The host's name for a machine store another process holds, and the lock's own code it wraps. */
 const inUseElsewhereCodes = ['MACHINE_STORE_OWNED_ELSEWHERE', 'AUTHORITY_ALREADY_OWNED'];
 
-/** The channel carries a refusal's code in its message; this one becomes words, every other failure passes. */
+/**
+ * This refusal becomes words, every other failure passes. The code is read typed first; a desktop shell's invoke
+ * drops `code` and keeps it only inside its own message, so that message is the fallback.
+ */
 const explain = (error: unknown): unknown => {
-  const message = error instanceof Error ? error.message : String(error);
-  return inUseElsewhereCodes.some((code) => message.includes(code))
+  const code = failureCodeOf(error);
+  const message = describePrintError(error);
+  return inUseElsewhereCodes.some((known) => code === known || message.includes(known))
     ? new Error(printersInUseElsewhere, { cause: error })
     : error;
 };

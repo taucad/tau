@@ -25,10 +25,10 @@ import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { randomUuid } from '@taucad/utils/id';
-import { describeOutcome } from '#components/print/machine-facts.js';
+import { describeOutcome, describePrintError } from '#components/print/machine-facts.js';
 import { operator } from '#hooks/use-machine-control.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
-import { answerMachineAction } from '#components/print/machine-action-approval.js';
+import { answerDeny, answerMachineAction } from '#components/print/machine-action-approval.js';
 import type { PendingMachineAction } from '#components/print/machine-action-approval.js';
 import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { isOpenJob } from '#hooks/use-machines-jobs.js';
@@ -48,16 +48,6 @@ import {
   formatProducer,
   shortDigest,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
-
-/**
- * A thrown request failure as the pane shows it: the host's or the provider's own words. What clears a refusal
- * arrives as a check's remedy, never from parsing this text.
- *
- * @param error - What a machine client call rejected with.
- * @returns Plain copy.
- * @public
- */
-export const describePrintError = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
  * Why the machine cannot take a job right now, or nothing when it can: a current connected observation, no run in
@@ -239,15 +229,16 @@ function JobReview({
       }
     });
   /* An agent's job is denied on the person's own session first, so the host records `denied` with the person as its
-   * resolver; then the paused chat is answered (R16). A person's own request is withdrawn. */
+   * resolver; then the paused chat is answered (R16), even when the record fails (`answerDeny`). A person's own
+   * request is withdrawn. */
   const decline = async (): Promise<void> =>
     run(async () => {
-      await (isAgent
-        ? client.resolveJob({ jobId: job.jobId, decision: 'deny', resolvedBy: operator })
-        : client.withdrawJob({ jobId: job.jobId, resolvedBy: operator }));
-      if (pending) {
-        await bridge.respond(pending.approvalId, false);
-      }
+      const record = async (): Promise<void> => {
+        await (isAgent
+          ? client.resolveJob({ jobId: job.jobId, decision: 'deny', resolvedBy: operator })
+          : client.withdrawJob({ jobId: job.jobId, resolvedBy: operator }));
+      };
+      await (pending ? answerDeny(record, async () => bridge.respond(pending.approvalId, false)) : record());
     });
 
   return (
@@ -516,8 +507,14 @@ function UnknownCard({ client, job }: { readonly client: MachineClient; readonly
     }
   };
   return (
-    <div role='alert' className='flex min-w-0 flex-col gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3'>
-      <p className='text-sm font-medium'>The machine hasn&apos;t confirmed the start of {job.program.name}.</p>
+    /* One live region per message: the headline alerts; the check result and any error announce on their own. */
+    <section
+      aria-label='Start not confirmed'
+      className='flex min-w-0 flex-col gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3'
+    >
+      <p role='alert' className='text-sm font-medium'>
+        The machine hasn&apos;t confirmed the start of {job.program.name}.
+      </p>
       <p className='text-xs text-muted-foreground'>
         Check the machine. Tau keeps watching and moves this to the run as soon as the machine reports it. Nothing is
         resent.
@@ -551,7 +548,7 @@ function UnknownCard({ client, job }: { readonly client: MachineClient; readonly
           </Button>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -691,6 +688,7 @@ function ActionApproval({
     action: pending.action,
     caller: 'agent',
     attended: false,
+    expectedRunId: pending.expectedRunId,
     now,
   });
   const answer = async (approved: boolean): Promise<void> => {

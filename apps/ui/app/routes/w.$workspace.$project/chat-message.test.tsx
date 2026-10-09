@@ -1106,14 +1106,14 @@ describe('ChatMessage machine tools', () => {
   });
 });
 
-it('shows generic diagnostics for an unsupported historical static tool', () => {
+it('shows a retired tool from an old chat on the generic card under its own name, never as an unknown part', () => {
   const message: MyUIMessage = {
     id: 'msg-unknown',
     role: 'assistant',
     parts: [
       {
-        type: 'tool-unregistered_operation',
-        toolCallId: 'unknown',
+        type: 'tool-request_print',
+        toolCallId: 'old-print',
         state: 'output-available',
         input: {},
         output: 'Old result',
@@ -1122,6 +1122,18 @@ it('shows generic diagnostics for an unsupported historical static tool', () => 
   };
   setMessages([message]);
   render(<ChatMessage messageId='msg-unknown' />);
+  expect(screen.getByText('request_print')).toBeInTheDocument();
+  expect(screen.queryByTestId('tool-unknown')).toBeNull();
+});
+
+it('shows generic diagnostics for a part that is not a tool part at all', () => {
+  const message: MyUIMessage = {
+    id: 'msg-unknown-data',
+    role: 'assistant',
+    parts: [{ type: 'data-retired', data: {} } as unknown as MyUIMessage['parts'][number]],
+  };
+  setMessages([message]);
+  render(<ChatMessage messageId='msg-unknown-data' />);
   expect(screen.getByTestId('tool-unknown')).toBeInTheDocument();
 });
 

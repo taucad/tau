@@ -268,6 +268,13 @@ function SlotDetail({
     backRef.current?.focus();
   }, []);
   const [moment, setMoment] = useState<'offered' | 'confirming' | 'editing'>('offered');
+  const confirmRef = useRef<HTMLDivElement>(null);
+  /* The button that opened the confirmation is gone, so the confirmation takes focus on its first choice. */
+  useEffect(() => {
+    if (moment === 'confirming') {
+      confirmRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    }
+  }, [moment]);
   const value = materialSystemValue(entry);
   const label = slotLabel(system, slot.slot);
   const isExternal = isExternalSlot(system, slot.slot);
@@ -379,6 +386,7 @@ function SlotDetail({
         />
       ) : moment === 'confirming' ? (
         <div
+          ref={confirmRef}
           role='alertdialog'
           aria-label={`Confirm ${isCurrent ? 'unload' : 'load'}`}
           className='rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs'

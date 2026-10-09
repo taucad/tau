@@ -48,7 +48,7 @@ describe('MachineDetails', () => {
       'Stop Motion halts at once, heaters turn off, the position is kept.',
       'Controls 3 qualified · 14 designed',
       'Observation freshness 4 groups · 15 s to 30 s',
-      'Binding settings 2 fields · Read-only',
+      'Binding settings 1 field · Read-only',
       'Job options 10 fields · Set per job',
     ]);
     for (const part of parts) {
@@ -208,25 +208,25 @@ describe('MachineDetails', () => {
     const binding = openPart('Binding settings');
     expect(binding).toHaveTextContent('Declared by bambu.machine.binding 2.0.0');
     expect(binding).not.toHaveTextContent('Only the simulator reads these');
-    const logicalId = await within(binding).findByRole('textbox', { name: 'Input for Logical Id' });
+    const serial = await within(binding).findByRole('textbox', { name: 'Input for Serial' });
     expect(
       within(binding)
         .getAllByRole('textbox')
         .map((input) => input.getAttribute('aria-label')),
-    ).toEqual(['Input for Logical Id', 'Input for Serial']);
+    ).toEqual(['Input for Serial']);
     for (const input of within(binding).getAllByRole('textbox')) {
       expect(input).toHaveAttribute('readonly');
     }
     expect(within(binding).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
-    fireEvent.change(logicalId, { target: { value: 'renamed' } });
-    expect(logicalId).toHaveValue('');
+    fireEvent.change(serial, { target: { value: 'renamed' } });
+    expect(serial).toHaveValue('');
   });
 
   it("should show the simulator's binding fields as demo settings, read-only", async () => {
     renderDetails(simulatorProvider, 'simulator-1');
 
     const binding = openPart('Binding settings');
-    expect(binding).toHaveAccessibleName('Binding settings 2 fields · Read-only');
+    expect(binding).toHaveAccessibleName('Binding settings 1 field · Read-only');
     expect(binding).toHaveTextContent('Only the simulator reads these; they are not machine settings.');
     expect(binding).toHaveTextContent('Declared by bambu.simulator.binding 1.1.0');
     /* The declaration titles the field and starts it at real time. */
@@ -237,7 +237,6 @@ describe('MachineDetails', () => {
     expect(
       within(binding).getByText('Simulated seconds per real second, so a long print can be watched in minutes'),
     ).toBeInTheDocument();
-    expect(within(binding).getByRole('textbox', { name: 'Input for Logical Id' })).toHaveAttribute('readonly');
   });
 
   it('should render the job options from the manifest with their declared defaults, locked and without growth', async () => {

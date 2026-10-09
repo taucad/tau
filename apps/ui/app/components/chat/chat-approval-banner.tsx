@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { ShieldQuestion } from 'lucide-react';
 import { getToolPartName, isAnyToolPart } from '@taucad/chat';
 import { isRecord } from '@taucad/utils/schema';
@@ -10,10 +11,11 @@ import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-h
 import type { AgentHostApproval, AgentHostApprovalOption } from '#services/agent-host-event-projection.js';
 import { toast } from '#components/ui/sonner.js';
 import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
-import { answerMachineAction, pendingMachineActionOf } from '#components/print/machine-action-approval.js';
+import { answerDeny, pendingMachineActionOf, recordMachineAction } from '#components/print/machine-action-approval.js';
 import { useMachinesFacet } from '#hooks/use-machines.js';
 import { operator } from '#hooks/use-machine-control.js';
-import type { MachineClient } from '@taucad/runtime/machine';
+import type { MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
+import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 
 /** One unresolved interrupt, located in the transcript that projected it. @public */
@@ -167,50 +169,63 @@ const continuationNote = (execution: CadAgentExecution | undefined, name: string
     ? `Approving lets ${name} keep working in this chat's tree; Tau does not gate each action it takes there.`
     : `Approving lets ${name} continue this turn; Tau does not ask again for each action it takes.`;
 
+const unreachable = 'This computer cannot reach its machines, so Tau cannot record your answer.';
+
 /**
- * Resolve an agent's job on the person's own machines session (R16): the agent's session can never approve one. A job
- * already settled elsewhere is left alone, and an approval that needs what only the Print pane takes (attestations,
- * presence) leaves the job waiting there.
+ * Whether approving a job needs what only the Print pane takes: the person's attestations or their presence. The chat
+ * banner cannot collect either, so it sends the person there instead of offering Approve.
  *
- * @param input - The person's machines client, the job and the decision.
+ * @param machine - The machine the job is for.
+ * @returns True when only the Print pane can approve its jobs.
  */
-const resolveAgentJob = async ({
-  client,
-  jobId,
-  machineId,
-  approved,
-}: Readonly<{ client: MachineClient; jobId: string; machineId: string; approved: boolean }>): Promise<void> => {
-  const jobs = await client.listJobs({ machineId });
-  const job = jobs.find((listed) => listed.jobId === jobId);
-  if (job?.state !== 'awaiting-approval') {
-    return;
-  }
-  if (!approved) {
-    await client.resolveJob({ jobId, decision: 'deny', resolvedBy: operator });
-    return;
-  }
-  const machine = await client.get({ machineId });
+const needsPrintPane = (machine: MachineDirectoryEntry): boolean => {
   const facts = machine.descriptor.capabilities.jobs;
-  if (facts.type !== 'supported' || facts.attestations.length > 0 || facts.safety.attended) {
-    return;
+  return facts.type !== 'supported' || facts.attestations.length > 0 || facts.safety.attended;
+};
+
+type AgentJob = Readonly<{ jobId: string; machineId: string }>;
+
+/** The job, when it still waits on the person; one already settled elsewhere is left alone. */
+const isAwaiting = async (client: MachineClient, { jobId, machineId }: AgentJob): Promise<boolean> => {
+  const jobs = await client.listJobs({ machineId });
+  return jobs.some((listed) => listed.jobId === jobId && listed.state === 'awaiting-approval');
+};
+
+/**
+ * Approve an agent's job on the person's own machines session (R16): the agent's session can never approve one.
+ *
+ * @param client - The person's machines client.
+ * @param job - The job and its machine.
+ * @returns `print-pane` when only the Print pane can approve it (nothing is recorded), else `recorded`.
+ */
+const approveAgentJob = async (client: MachineClient, job: AgentJob): Promise<'recorded' | 'print-pane'> => {
+  if (!(await isAwaiting(client, job))) {
+    return 'recorded';
+  }
+  if (needsPrintPane(await client.get({ machineId: job.machineId }))) {
+    return 'print-pane';
   }
   await client.resolveJob({
-    jobId,
+    jobId: job.jobId,
     decision: 'approve',
     resolvedBy: operator,
     attestations: [],
     // Named by the job, so a second click finds the same operations rather than sending twice.
-    transferOperationId: `${jobId}:transfer`,
-    startOperationId: `${jobId}:start`,
+    transferOperationId: `${job.jobId}:transfer`,
+    startOperationId: `${job.jobId}:start`,
   });
+  return 'recorded';
 };
 
 /**
  * Answer one interrupt. An agent's machine action or job is recorded on the host through the person's own machines
  * session first (R15, R16), so the paused tool finds the person's decision; any other interrupt is answered directly.
+ * A deny is always answered, recorded or not ({@link answerDeny}). A job only the Print pane can approve is left
+ * unanswered.
  *
  * @param input - The interrupt, the decision, this computer's machines and how the chat is answered.
- * @throws When the machines cannot be reached or the host refuses the record; the interrupt stays open.
+ * @returns `print-pane` when the approval must be given there; the interrupt is then still open.
+ * @throws When an approval cannot be recorded (the interrupt stays open), or after answering a deny whose record failed.
  */
 const answerInterrupt = async ({
   approval,
@@ -222,25 +237,85 @@ const answerInterrupt = async ({
   approved: boolean;
   machines: RuntimeTransportFacet<MachineClient>;
   answer: (approvalId: string, approved: boolean) => Promise<void>;
-}>): Promise<void> => {
-  const pending = pendingMachineActionOf(approval);
-  const jobId = approval.context?.jobId;
-  const machineId = approval.context?.machineId;
-  if (pending === undefined && (jobId === undefined || machineId === undefined)) {
-    await answer(approval.approvalId, approved);
-    return;
+}>): Promise<'answered' | 'print-pane'> => {
+  const action = pendingMachineActionOf(approval);
+  const { jobId, machineId } = approval.context ?? {};
+  const job = jobId === undefined || machineId === undefined ? undefined : { jobId, machineId };
+  const respond = async (): Promise<void> => answer(approval.approvalId, approved);
+  if (action === undefined && job === undefined) {
+    await respond();
+    return 'answered';
   }
-  if (!machines.available) {
-    throw new Error('This computer cannot reach its machines, so Tau cannot record your answer.');
+  const reachable = (): MachineClient => {
+    if (!machines.available) {
+      throw new Error(unreachable);
+    }
+    return machines;
+  };
+  const record = async (): Promise<'recorded' | 'print-pane'> => {
+    const client = reachable();
+    if (action !== undefined) {
+      await recordMachineAction(client, action, approved);
+      return 'recorded';
+    }
+    if (job !== undefined && !approved) {
+      if (await isAwaiting(client, job)) {
+        await client.resolveJob({ jobId: job.jobId, decision: 'deny', resolvedBy: operator });
+      }
+      return 'recorded';
+    }
+    return job === undefined ? 'recorded' : approveAgentJob(client, job);
+  };
+  if (!approved) {
+    await answerDeny(async () => {
+      await record();
+    }, respond);
+    return 'answered';
   }
-  if (pending !== undefined) {
-    await answerMachineAction({ client: machines, pending, approved, respond: answer });
-    return;
+  if ((await record()) === 'print-pane') {
+    return 'print-pane';
   }
-  if (jobId !== undefined && machineId !== undefined) {
-    await resolveAgentJob({ client: machines, jobId, machineId, approved });
-  }
-  await answer(approval.approvalId, approved);
+  await respond();
+  return 'answered';
+};
+
+/**
+ * Whether the pending job interrupt can only be approved in the Print pane, read once per machine. Until it is known
+ * the banner offers Approve, whose click reads the machine again, so a slow or failed read never approves a job here
+ * that needs the pane.
+ *
+ * @param machines - This computer's machines.
+ * @param approval - The pending interrupt, if any.
+ * @returns True once the machine is known to need the Print pane.
+ */
+const usePrintPaneOnly = (
+  machines: RuntimeTransportFacet<MachineClient>,
+  approval: PendingAgentHostApproval | undefined,
+): boolean => {
+  const machineId = approval?.context?.jobId === undefined ? undefined : approval.context.machineId;
+  const [paneOnly, setPaneOnly] = useState<Readonly<{ machineId: string; value: boolean }>>();
+  useEffect(() => {
+    if (machineId === undefined || !machines.available) {
+      return undefined;
+    }
+    let isCurrent = true;
+    const read = async (): Promise<void> => {
+      try {
+        const machine = await machines.get({ machineId });
+        if (isCurrent) {
+          setPaneOnly({ machineId, value: needsPrintPane(machine) });
+        }
+      } catch {
+        // A failed read leaves Approve, whose click reads the machine again and says the failure.
+      }
+    };
+    // async-iife: bootstrap -- a React effect cannot await; cleanup drops a late answer.
+    void read();
+    return () => {
+      isCurrent = false;
+    };
+  }, [machines, machineId]);
+  return paneOnly !== undefined && paneOnly.machineId === machineId && paneOnly.value;
 };
 
 /**
@@ -258,36 +333,51 @@ const answerInterrupt = async ({
 export function ChatApprovalBanner(): React.JSX.Element | undefined {
   const { respondToToolApproval } = useCadChatClient();
   const machines = useMachinesFacet();
+  const workspace = useProjectWorkspace({ enableNoContext: true });
   const activeExecution = useChatSelector((state) => state.activeExecution);
   const messages = useChatSelector((state) => state.messages);
+  const [busyId, setBusyId] = useState<string>();
+  // A paused run has exactly one unresolved interrupt: it stopped on it.
+  const approval = pendingAgentHostApprovals(messages)[0];
+  const isPrintPaneOnly = usePrintPaneOnly(machines, approval);
   const login = currentRunLogin(messages);
   if (login) {
     /* Not a decision: nothing here is approved or denied, so the banner hands
      * over to the affordance that says what the *user* has to do (V11). */
     return <ChatLoginAffordance login={login} />;
   }
-  // A paused run has exactly one unresolved interrupt: it stopped on it.
-  const approval = pendingAgentHostApprovals(messages)[0];
   if (!approval) {
     return undefined;
   }
 
   const name = approval.tauTool ? 'Tau' : requesterName(approval.agentId, activeExecution);
   const focused = defaultOption(approval.options);
+  const isBusy = busyId === approval.approvalId;
+  const openPrintPane = (): void => {
+    workspace?.openPanel('print');
+  };
   const respond = (approved: boolean, optionId?: string): void => {
     const answer = async (approvalId: string, isApproved: boolean): Promise<void> => {
       await respondToToolApproval(approvalId, isApproved, { optionId });
     };
     const resolve = async (): Promise<void> => {
+      setBusyId(approval.approvalId);
       try {
-        await answerInterrupt({ approval, approved, machines, answer });
+        if ((await answerInterrupt({ approval, approved, machines, answer })) === 'print-pane') {
+          openPrintPane();
+        }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'The host did not accept that decision.');
+      } finally {
+        setBusyId(undefined);
       }
     };
     // async-iife: the banner clears when the durable resolution arrives, not here.
     void resolve();
   };
+  /* Approving a job sends it, which can take as long as its upload: the person sees that, and a second click cannot
+   * answer the interrupt early. */
+  const busyText = approval.context?.jobId === undefined ? 'Sending your answer…' : 'Sending the job to the machine…';
 
   return (
     <section
@@ -302,6 +392,11 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
       <p className='text-xs text-muted-foreground'>
         {continuationNote(approval.tauTool ? undefined : activeExecution, name)}
       </p>
+      {isBusy ? (
+        <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
+          {busyText}
+        </p>
+      ) : undefined}
       {approval.options.some((option) => option.kind === 'allow_always') ? (
         <p className='text-xs text-muted-foreground'>
           Standing-grant persistence is controlled by the connected agent or MCP server; Tau only forwards this exact
@@ -319,6 +414,7 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
               size='sm'
               variant={option.kind?.startsWith('allow') === true ? 'default' : 'outline'}
               autoFocus={option.optionId === focused?.optionId}
+              disabled={isBusy}
               onClick={() => {
                 respond(option.kind?.startsWith('allow') ?? true, option.optionId);
               }}
@@ -328,18 +424,27 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
           ))
         ) : (
           <>
-            <Button
-              size='sm'
-              autoFocus
-              onClick={() => {
-                respond(true);
-              }}
-            >
-              Approve
-            </Button>
+            {isPrintPaneOnly ? (
+              /* Attestations and presence are taken only in the Print pane; the interrupt stays open until it answers. */
+              <Button size='sm' autoFocus onClick={openPrintPane}>
+                Review in the Print pane
+              </Button>
+            ) : (
+              <Button
+                size='sm'
+                autoFocus
+                disabled={isBusy}
+                onClick={() => {
+                  respond(true);
+                }}
+              >
+                Approve
+              </Button>
+            )}
             <Button
               size='sm'
               variant='outline'
+              disabled={isBusy}
               onClick={() => {
                 respond(false);
               }}

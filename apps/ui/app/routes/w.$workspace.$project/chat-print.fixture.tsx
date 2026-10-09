@@ -448,10 +448,18 @@ const idleComponents = (): readonly ComponentObservation[] =>
  */
 export const entry = (overrides: Partial<MachineDirectoryEntry> = {}): MachineDirectoryEntry => {
   const base = machineEntry({ manifest: x1cManifest, snapshot: machineSnapshot(idleComponents()) });
+  /* The host stamps the provider manifest's qualifications on the descriptor, so the simulator's entry reads simulated. */
+  const providerId = overrides.providerId ?? base.providerId;
+  const { qualifications } = [provider, simulatorProvider].find(({ id }) => id === providerId)?.manifest ?? x1cManifest;
   return {
     ...base,
     /* The device reports its own name and model; every surface shows the name the person gave it (blueprint D3). */
-    descriptor: { ...base.descriptor, name: 'X1C-00M09A350100123', model: 'X1C' },
+    descriptor: {
+      ...base.descriptor,
+      name: 'X1C-00M09A350100123',
+      model: 'X1C',
+      capabilities: { ...base.descriptor.capabilities, qualifications },
+    },
     ...overrides,
   };
 };

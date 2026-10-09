@@ -267,7 +267,7 @@ function NoMachines(): React.JSX.Element {
     <PanelEmptyState
       icon={Printer}
       title='No machines yet'
-      description='Find a printer on your network or add a simulated machine in Settings. Machines set up there are available in every project on this computer.'
+      description='Find a machine on your network or add a simulated machine in Settings. Machines set up there are available in every project on this computer.'
     >
       <Button
         type='button'
@@ -354,6 +354,12 @@ function StopButton({ control }: { readonly control: MachineControl }): React.JS
         )}
         Stop
       </Button>
+      {/* Neither done nor failed: the machine has not said yet. Stop stays pressable meanwhile. */}
+      {control.isStopping ? (
+        <span role='status' className='shrink-0'>
+          Stopping…
+        </span>
+      ) : null}
       <span id={descriptionId} className='sr-only'>
         {outcome}
       </span>
@@ -369,7 +375,6 @@ function PrintHeader({
   select,
   refresh,
   stop,
-  isSimulated,
 }: {
   readonly entries: readonly MachineDirectoryEntry[];
   readonly selected: MachineDirectoryEntry | undefined;
@@ -377,10 +382,10 @@ function PrintHeader({
   readonly select: ReturnType<typeof useMachinesSelection>['select'];
   readonly refresh: () => void;
   readonly stop: React.ReactNode;
-  /** Whether the selected machine's provider runs only on a simulated transport. */
-  readonly isSimulated: boolean;
 }): React.JSX.Element {
   const presentation = selected ? presentMachine(selected, openJob) : undefined;
+  /* Read from the host-stamped qualifications on the entry itself, so no machine reads as real while providers load. */
+  const isSimulated = selected !== undefined && isSimulatedMachine(selected.descriptor.capabilities);
   const Icon = presentation?.icon ?? Printer;
   return (
     <div className='flex min-h-10 shrink-0 items-center gap-2 border-b border-border/70 px-3 text-xs text-muted-foreground'>
@@ -396,7 +401,10 @@ function PrintHeader({
                 options: entries.map((entry) => ({
                   value: entry.machineId,
                   label: entry.name,
-                  secondary: presentMachine(entry, entry.machineId === selected?.machineId ? openJob : undefined).label,
+                  secondary: [
+                    presentMachine(entry, entry.machineId === selected?.machineId ? openJob : undefined).label,
+                    ...(isSimulatedMachine(entry.descriptor.capabilities) ? ['Simulated'] : []),
+                  ].join(' · '),
                 })),
               },
             ]}
@@ -453,7 +461,6 @@ function ConnectedPrintPanel({
       select={select}
       refresh={directory.refresh}
       stop={stop}
-      isSimulated={provider !== undefined && isSimulatedMachine(provider.manifest)}
     />
   );
   return (

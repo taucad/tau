@@ -105,8 +105,8 @@ const renderSettings = (): ReturnType<typeof render> =>
     </KeyboardProvider>,
   );
 
-const bindingField = (name: string): HTMLElement =>
-  screen.getByRole('textbox', { name: new RegExp(`^Input for ${name.split(' ')[0]}`, 'u') });
+/** The name the person gives the machine: the card's own field, which travels in `beginBinding`. */
+const nameField = (): HTMLElement => screen.getByRole('textbox', { name: 'Name' });
 
 /** Where the machine is: the card's own field, not one of the provider's binding fields. */
 const addressField = (): HTMLElement => screen.getByRole('textbox', { name: 'Address' });
@@ -142,7 +142,7 @@ describe('MachinesSettings', () => {
       expect(screen.getByRole('status')).toHaveTextContent('Simulated X1C is bound as bambu:sim.');
     });
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ providerId: 'bambu-simulator', configuration: { logicalId: 'Simulated X1C' } }),
+      expect.objectContaining({ providerId: 'bambu-simulator', configuration: {} }),
     );
     /* The display name; the host slugs it to the id `simulated-x1c`. */
     expect(facet.beginBinding).toHaveBeenCalledExactlyOnceWith({ candidate, name: 'Simulated X1C' });
@@ -185,7 +185,7 @@ describe('MachinesSettings', () => {
     expect(
       within(simulator).getByText('Simulated seconds per real second, so a long print can be watched in minutes'),
     ).toBeInTheDocument();
-    /* The host names the machine itself, so the declared logical id is not offered. */
+    /* The machine's name travels in `beginBinding`; no binding field carries it (U3-18). */
     expect(within(simulator).queryByRole('textbox', { name: 'Input for Logical Id' })).not.toBeInTheDocument();
     expect(within(simulator).queryByRole('button', { name: /^Reset/u })).not.toBeInTheDocument();
 
@@ -205,7 +205,7 @@ describe('MachinesSettings', () => {
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         providerId: 'bambu-simulator',
-        configuration: { speed: 60, logicalId: 'Simulated X1C' },
+        configuration: { speed: 60 },
       }),
     );
   });
@@ -222,8 +222,8 @@ describe('MachinesSettings', () => {
     await waitFor(() => {
       expect(bind).toBeEnabled();
     });
-    await screen.findByRole('textbox', { name: 'Input for Name' });
-    fireEvent.change(bindingField('Name'), { target: { value: 'shop-x1c' } });
+    await screen.findByRole('textbox', { name: 'Name' });
+    fireEvent.change(nameField(), { target: { value: 'shop-x1c' } });
     fireEvent.change(addressField(), { target: { value: '10.0.0.5' } });
     const accessCode = screen.getByLabelText('Access code');
     fireEvent.change(accessCode, { target: { value: '12345678' } });
@@ -243,7 +243,7 @@ describe('MachinesSettings', () => {
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         providerId: 'bambu',
-        configuration: { logicalId: 'shop-x1c' },
+        configuration: {},
         endpoint: { transport: 'network', address: '10.0.0.5' },
       }),
     );
@@ -279,15 +279,15 @@ describe('MachinesSettings', () => {
     expect(screen.getAllByRole('button', { name: /X1 Carbon · 192\.168/u })).toHaveLength(2);
     /* Broadcast discovery: no address, nothing sent to a printer. */
     expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ providerId: 'bambu', configuration: { logicalId: 'discovery' } }),
+      expect.objectContaining({ providerId: 'bambu', configuration: {} }),
     );
     expect(facet.discover.mock.calls[0]?.[0]).not.toHaveProperty('endpoint');
 
     fireEvent.click(office);
 
-    await screen.findByRole('textbox', { name: 'Input for Name' });
+    await screen.findByRole('textbox', { name: 'Name' });
 
-    expect(bindingField('Name')).toHaveValue('Office X1C');
+    expect(nameField()).toHaveValue('Office X1C');
     expect(addressField()).toHaveValue('192.168.0.113');
     fireEvent.click(screen.getByRole('button', { name: 'Printer details' }));
     expect(await screen.findByRole('textbox', { name: /^Input for Serial/u })).toHaveValue('00M2');
@@ -323,7 +323,7 @@ describe('MachinesSettings', () => {
     await waitFor(() => {
       expect(addressField()).toHaveValue('192.168.0.112');
     });
-    expect(bindingField('Name')).toHaveValue('Workshop X1C');
+    expect(nameField()).toHaveValue('Workshop X1C');
     expect(screen.getByRole('status')).toHaveTextContent('Listening for more machines…');
     expect(find).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Bind' })).toBeEnabled();
@@ -357,16 +357,16 @@ describe('MachinesSettings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Find machines' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Mini A1 mini · 192.0.2.145' }));
     expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('bambu-a1-mini');
-    await screen.findByRole('textbox', { name: 'Input for Name' });
+    await screen.findByRole('textbox', { name: 'Name' });
     expect(document.querySelector('form form')).toBeNull();
-    fireEvent.change(bindingField('Name'), { target: { value: 'My Mini' } });
+    fireEvent.change(nameField(), { target: { value: 'My Mini' } });
     const accessCode = screen.getByLabelText('Access code');
     fireEvent.change(accessCode, { target: { value: '12345678' } });
     fireEvent.click(screen.getByRole('button', { name: 'Find machines' }));
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Find machines' })).toBeEnabled();
     });
-    expect(bindingField('Name')).toHaveValue('My Mini');
+    expect(nameField()).toHaveValue('My Mini');
     expect(accessCode).toHaveValue('12345678');
     fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
     await waitFor(() => {
@@ -375,7 +375,7 @@ describe('MachinesSettings', () => {
     expect(facet.discover).toHaveBeenLastCalledWith(
       expect.objectContaining({
         providerId: 'bambu-a1-mini',
-        configuration: { logicalId: 'My Mini', serial: '0300EA652800550' },
+        configuration: { serial: '0300EA652800550' },
         endpoint: { transport: 'network', address: '192.0.2.145' },
       }),
     );
@@ -427,8 +427,8 @@ describe('MachinesSettings', () => {
       expect(screen.getByRole('button', { name: 'Enter details' })).toBeEnabled();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Enter details' }));
-    await screen.findByRole('textbox', { name: 'Input for Name' });
-    fireEvent.change(bindingField('Name'), { target: { value: 'shop-x1c' } });
+    await screen.findByRole('textbox', { name: 'Name' });
+    fireEvent.change(nameField(), { target: { value: 'shop-x1c' } });
     fireEvent.change(addressField(), { target: { value: '10.0.0.5' } });
     fireEvent.change(screen.getByLabelText('Access code'), { target: { value: '12345678' } });
 
@@ -446,8 +446,8 @@ describe('MachinesSettings', () => {
       expect(screen.getByRole('button', { name: 'Enter details' })).toBeEnabled();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Enter details' }));
-    await screen.findByRole('textbox', { name: 'Input for Name' });
-    fireEvent.change(bindingField('Name'), { target: { value: 'shop-x1c' } });
+    await screen.findByRole('textbox', { name: 'Name' });
+    fireEvent.change(nameField(), { target: { value: 'shop-x1c' } });
 
     fireEvent.submit(screen.getByRole('form', { name: 'Connect a Bambu Lab printer' }));
 
@@ -467,8 +467,8 @@ describe('MachinesSettings', () => {
       expect(screen.getByRole('button', { name: 'Enter details' })).toBeEnabled();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Enter details' }));
-    await screen.findByRole('textbox', { name: 'Input for Name' });
-    fireEvent.change(bindingField('Name'), { target: { value: 'LongMill' } });
+    await screen.findByRole('textbox', { name: 'Name' });
+    fireEvent.change(nameField(), { target: { value: 'LongMill' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Serial port' }), { target: { value: '/dev/ttyUSB0' } });
 
     fireEvent.submit(screen.getByRole('form', { name: 'Connect a Sienci Labs machine' }));
@@ -477,7 +477,7 @@ describe('MachinesSettings', () => {
       expect(facet.discover).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
           providerId: 'grbl',
-          configuration: { logicalId: 'LongMill' },
+          configuration: {},
           endpoint: { transport: 'serial', path: '/dev/ttyUSB0' },
         }),
       );
@@ -635,7 +635,7 @@ describe('MachinesSettings', () => {
           name: `${heard.name} X1 Carbon · 192.168.0.112`,
         }),
       );
-      await screen.findByRole('textbox', { name: 'Input for Name' });
+      await screen.findByRole('textbox', { name: 'Name' });
       return facet;
     };
     const submit = (): void => {
@@ -676,8 +676,8 @@ describe('MachinesSettings', () => {
         expect(bind).toBeEnabled();
       });
       expect(screen.getByLabelText('Access code')).not.toBeRequired();
-      await screen.findByRole('textbox', { name: 'Input for Name' });
-      fireEvent.change(bindingField('Name'), { target: { value: 'shop-x1c' } });
+      await screen.findByRole('textbox', { name: 'Name' });
+      fireEvent.change(nameField(), { target: { value: 'shop-x1c' } });
       fireEvent.change(addressField(), { target: { value: '10.0.0.5' } });
 
       submit();
@@ -688,7 +688,7 @@ describe('MachinesSettings', () => {
       expect(facet.beginBinding).not.toHaveBeenCalled();
       expect(state.completeBinding).not.toHaveBeenCalled();
       /* Only the code is cleared, so the retry needs nothing but the code. */
-      expect(bindingField('Name')).toHaveValue('shop-x1c');
+      expect(nameField()).toHaveValue('shop-x1c');
       expect(addressField()).toHaveValue('10.0.0.5');
     });
 
@@ -729,7 +729,7 @@ describe('MachinesSettings', () => {
       );
       expect(screen.getByLabelText('Access code')).toHaveAttribute('type', 'password');
       expect(screen.queryByText('Saved in your Keychain')).not.toBeInTheDocument();
-      expect(bindingField('Name')).toHaveValue('Workshop X1C');
+      expect(nameField()).toHaveValue('Workshop X1C');
     });
   });
 

@@ -62,6 +62,22 @@ describe('ChatMessageToolRequestJob', () => {
     expect(phraseOf('Running')).toBe('Running sign.nc on Garage LongMill');
   });
 
+  it('should say a simulated job ran on a simulator, and a real one nothing of the kind', () => {
+    const { rerender } = render(
+      <ChatMessageToolRequestJob
+        part={settled({ state: 'started' }, { machineName: 'Workshop X1C', simulated: true })}
+      />,
+    );
+    expect(phraseOf('Printing')).toBe('Printing pyramid.gcode.3mf on Workshop X1C (simulated)');
+
+    rerender(
+      <ChatMessageToolRequestJob
+        part={settled({ state: 'started' }, { machineName: 'Workshop X1C', simulated: false })}
+      />,
+    );
+    expect(phraseOf('Printing')).toBe('Printing pyramid.gcode.3mf on Workshop X1C');
+  });
+
   it('should record a declined job as a decision, naming the machine by id when no name came back', () => {
     render(<ChatMessageToolRequestJob part={settled({ state: 'denied' }, { approval: 'denied' })} />);
 

@@ -426,7 +426,10 @@ describe('press and hold', () => {
 
   it('stays quiet when the release finds the hold already ended, and says any other failure', async () => {
     const fixture = createFixture({ entries: [router()] });
-    fixture.endHold.mockRejectedValueOnce(new Error('MACHINE_HOLD_ENDED'));
+    /* The host's typed refusal: the code travels beside a sentence, never inside it (R11). */
+    fixture.endHold.mockRejectedValueOnce(
+      Object.assign(new Error('This hold has already ended.'), { code: 'MACHINE_HOLD_ENDED' }),
+    );
     const { jog } = holdJog(fixture);
     await press(fixture, jog);
     fireEvent.pointerUp(jog);
@@ -642,6 +645,8 @@ describe('Monitor and materials on a printer', () => {
     await user.click(within(slot).getByRole('button', { name: 'Unload' }));
     expect(fixture.applyAction).not.toHaveBeenCalled();
     const confirm = screen.getByRole('alertdialog', { name: 'Confirm unload' });
+    // The button that opened it is gone; keyboard focus lands on the confirmation's first choice, not the page.
+    expect(within(confirm).getByRole('button', { name: /^Unload A1/u })).toHaveFocus();
     await user.click(within(confirm).getByRole('button', { name: /^Unload A1/u }));
     await waitFor(() => {
       expect(fixture.applyAction).toHaveBeenCalledWith(

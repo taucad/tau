@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import type { MachineJob, MachineRun } from '@taucad/runtime/machine';
+import { describe, expect, it, vi } from 'vitest';
+import { renderHook, waitFor } from '@testing-library/react';
+import type { MachineClient, MachineDirectoryCursor, MachineJob, MachineRun } from '@taucad/runtime/machine';
 import { createQuantity, quantityKinds, quantityReferences } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
-import { selectPrinterLive } from '#components/printer/use-printer-live.js';
+import { selectPrinterLive, useMachineDirectoryEntries } from '#components/printer/use-printer-live.js';
 import {
   a1MiniManifest,
   fffComponents,
@@ -117,6 +118,46 @@ describe('selectPrinterLive', () => {
     });
   });
 
+  it("shows no bed target where several heaters leave the bed unnamed, never another heater's", () => {
+    const base = printing();
+    const { components } = base.descriptor.capabilities;
+    const withChamber = {
+      ...base,
+      descriptor: {
+        ...base.descriptor,
+        capabilities: {
+          ...base.descriptor.capabilities,
+          components: [{ id: 'chamber', kind: 'heater', label: 'Chamber' } as const, ...components],
+        },
+      },
+      snapshot: {
+        ...base.snapshot,
+        components: [
+          known('chamber', 'temperature', {
+            kind: 'readings',
+            values: [{ id: 'chamber', label: 'Chamber', value: celsius(40), target: celsius(60) }],
+          }),
+          ...base.snapshot.components,
+        ],
+      },
+    };
+
+    expect(selectPrinterLive([withChamber])?.bedTarget).toBeUndefined();
+  });
+
+  it('reads the layer counter by its id, never by an English label', () => {
+    const base = printing();
+    const counted = {
+      ...base,
+      snapshot: {
+        ...base.snapshot,
+        run: { ...run, progress: { ...run.progress, counters: [{ id: 'lines', label: 'Layers', current: 3 }] } },
+      },
+    };
+
+    expect(selectPrinterLive([counted])?.position.currentLayer).toBeUndefined();
+  });
+
   it('reads an undeclared light as unknown, as on the A1 mini', () => {
     expect(selectPrinterLive([machineEntry({ manifest: a1MiniManifest })])?.chamberLight).toBe('unknown');
   });
@@ -172,5 +213,36 @@ it('keeps the selected Mini even while another printer runs or changes order', (
     printsThisFile: false,
     chamberLight: 'unknown',
     nozzleTarget: undefined,
+  });
+});
+
+describe('useMachineDirectoryEntries', () => {
+  it('lists again once the directory watch ends, so the viewer resyncs (R10)', async () => {
+    const cursor = (position: number): MachineDirectoryCursor => ({
+      hostId: 'host-1',
+      authorityId: 'authority-1',
+      generation: 'generation-1',
+      position,
+      revision: position,
+    });
+    const list = vi
+      .fn<MachineClient['list']>()
+      .mockResolvedValueOnce({ cursor: cursor(1), entries: [] })
+      .mockResolvedValue({ cursor: cursor(2), entries: [printing()] });
+    // SAFETY: the hook calls only list and watch.
+    const client = {
+      list,
+      // A watch that ends at once, as after a host restart.
+      async *watch() {
+        yield* [];
+      },
+    } as unknown as MachineClient;
+
+    const { result } = renderHook(() => useMachineDirectoryEntries(client));
+
+    await waitFor(() => {
+      expect(result.current?.map(({ machineId }) => machineId)).toEqual(['machine-1']);
+    });
+    expect(list).toHaveBeenCalledTimes(2);
   });
 });

@@ -85,6 +85,10 @@ type ToolSerializer<T extends keyof MyTools> = {
 
 type ToolPartFor<Name extends keyof MyTools> = ToolUIPart<Pick<MyTools, Name>>;
 
+/** The machine tools answer in text; an old chat's object answer is kept readable rather than `[object Object]`. */
+const machineTextOf = (output: unknown): string =>
+  typeof output === 'string' ? output : JSON.stringify(output, undefined, 2);
+
 const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
   [toolName.getParameters]: {
     input: (input) =>
@@ -279,11 +283,11 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
   },
   [toolName.listMachines]: {
     input: () => '',
-    output: (output) => output,
+    output: (output: unknown) => machineTextOf(output),
   },
   [toolName.getMachine]: {
     input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
-    output: (output) => output,
+    output: (output: unknown) => machineTextOf(output),
   },
   [toolName.machineAction]: {
     input: (input) =>

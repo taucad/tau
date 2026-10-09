@@ -262,6 +262,25 @@ const genericToolPart = (
   toolName: name,
 });
 
+/**
+ * A tool part from a tool Tau no longer offers (an old chat's `request_print`, `cancel_print`, …): the generic card
+ * shows it under its own name rather than as an unknown part.
+ *
+ * @param part - A part no case of the dispatch names.
+ * @returns The part as a dynamic tool part, or `undefined` when it is not a tool part.
+ */
+const retiredToolPart = (part: unknown): DynamicToolUIPart | undefined => {
+  if (!isRecord(part) || typeof part['type'] !== 'string' || typeof part['toolCallId'] !== 'string') {
+    return undefined;
+  }
+  const { type } = part;
+  // SAFETY: a static tool part carries every field a dynamic one does; only the name moves from `type` to `toolName`.
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- a persisted part of a retired tool has no static type.
+  return type.startsWith('tool-')
+    ? ({ ...part, type: 'dynamic-tool', toolName: type.slice(5) } as DynamicToolUIPart)
+    : undefined;
+};
+
 // oxlint-disable-next-line complexity -- Part type dispatch requires many branches
 function renderAssistantPart(
   part: MyMessagePart,
@@ -550,7 +569,12 @@ function renderAssistantPart(
 
     default: {
       const unknownPart: never = part;
-      return <ChatMessagePartUnknown key={String(unknownPart)} part={unknownPart} />;
+      const retired = retiredToolPart(unknownPart);
+      return retired === undefined ? (
+        <ChatMessagePartUnknown key={String(unknownPart)} part={unknownPart} />
+      ) : (
+        <ChatMessageToolExternal key={retired.toolCallId} part={retired} />
+      );
     }
   }
 }

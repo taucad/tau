@@ -73,6 +73,7 @@ import {
   renderGeometry,
   setRestoredPrintEntryPath,
   settledCadSnapshot,
+  simulatorProvider,
   sliceFixture,
   summarizeGcodeContainerMock,
   timestamp,
@@ -495,15 +496,15 @@ describe('Print pane orientation', () => {
     );
   });
 
-  it('lists machines by the names people gave them, not the names the devices report', async () => {
-    const attic = entry({ machineId: 'attic-p1s', name: 'Attic P1S' });
+  it('lists machines by the names people gave them, not the names the devices report, marking simulators', async () => {
+    const attic = entry({ machineId: 'attic-p1s', name: 'Attic P1S', providerId: provider.id });
     renderPane(createFixture({ entries: [entry(), attic] }).client);
 
     const picker = await screen.findByRole('combobox', { name: 'Machine' });
     fireEvent.click(picker);
     expect(screen.getAllByRole('option').map((option) => option.textContent.trim())).toEqual([
       'Attic P1SReady',
-      'Workshop X1CReady',
+      'Workshop X1CReady · Simulated',
     ]);
     expect(screen.queryByText(entry().descriptor.name)).not.toBeInTheDocument();
   });
@@ -649,9 +650,10 @@ describe('Print pane orientation', () => {
     expect(screen.getByText('Machines unavailable')).toBeInTheDocument();
   });
 
-  it('marks the simulator as simulated', async () => {
+  it("marks the simulator as simulated from its own entry, not from a provider's manifest", async () => {
     const fixture = createFixture({ entries: [entry({ providerId: 'bambu-simulator' })] });
-    renderPane(fixture.client);
+    // No provider manifest to read: the host-stamped qualifications on the entry alone say it is simulated.
+    renderPane({ ...fixture.client, listProviders: async () => [] });
     // The header names the printer once, with its status and the Simulated mark beside the picker.
     const picker = await findMachine('Ready');
     expect(picker.parentElement?.parentElement).toContainElement(screen.getByText('Simulated'));
@@ -1074,6 +1076,23 @@ describe('Print pane prepare and send', () => {
     ]) {
       expect(within(mapping).queryByLabelText(`Parameter: ${label}`)).not.toBeInTheDocument();
     }
+  });
+
+  it("keeps a start option on a provider whose settings form is not Bambu's", async () => {
+    // The same submission form with no Bambu settings: nothing remembers its flags but the choice itself.
+    const fixture = createFixture();
+    const user = userEvent.setup();
+    renderPane({
+      ...fixture.client,
+      listProviders: async () => [{ ...simulatorProvider, settingsConfiguration: undefined }],
+    });
+    await findMachine('Ready');
+    openDisclosure(/^Start options/u);
+    const timelapse = screen.getByRole('switch', { name: 'Toggle for Timelapse' });
+    await user.click(timelapse);
+
+    expect(timelapse).toBeChecked();
+    expect(screen.getByRole('button', { name: /^Start options/u })).toHaveTextContent(/timelapse/u);
   });
 
   it('invalidates a slice when a prestart choice changes and submits the new value', async () => {
@@ -1531,8 +1550,11 @@ describe('Print pane jobs', () => {
     const user = userEvent.setup();
     renderPane(fixture.client);
 
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent("The machine hasn't confirmed the start of pyramid.gcode.3mf.");
+    const alert = await screen.findByRole('region', { name: 'Start not confirmed' });
+    // One live region announces the headline; the card around it is not a second one.
+    expect(within(alert).getByRole('alert')).toHaveTextContent(
+      "The machine hasn't confirmed the start of pyramid.gcode.3mf.",
+    );
     expect(alert).toHaveTextContent('Nothing is resent.');
     expect(screen.queryByRole('button', { name: /retry/iu })).not.toBeInTheDocument();
     await user.click(within(alert).getByRole('button', { name: 'Check again' }));
@@ -1667,7 +1689,8 @@ describe('Print pane monitor and controls', () => {
     expect(fixture.resolveJob).not.toHaveBeenCalled();
   });
 
-  it('says plainly when the machine does not confirm a Stop', async () => {
+  /* During a filament change, a tag read or a busy AMS the stop receipt can be `unknown` until a report settles it. */
+  const unconfirmedStop = async () => {
     const fixture = createFixture({ entries: [printing()] });
     fixture.stop.mockResolvedValueOnce({
       operationId: 'stop-1',
@@ -1681,11 +1704,50 @@ describe('Print pane monitor and controls', () => {
     renderPane(fixture.client);
     await findMachine('Printing');
     await user.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(await screen.findByText('Stopping…')).toHaveAttribute('role', 'status');
+    expect(screen.queryByText(/did not confirm the stop/u)).not.toBeInTheDocument();
+    const settle = (state: 'confirming' | 'accepted' | 'attention'): void => {
+      const current = printing();
+      fixture.observe({
+        ...current,
+        snapshot: {
+          ...current.snapshot,
+          operations: [
+            {
+              operationId: 'stop-1',
+              machineId: 'machine-1',
+              kind: 'stop',
+              inputDigest: artifact.digest,
+              state,
+              updatedAt: later,
+            },
+          ],
+        },
+      });
+    };
+    return settle;
+  };
+
+  it('reads Stopping… for an unconfirmed Stop until a report settles it, then nothing', async () => {
+    const settle = await unconfirmedStop();
+    settle('confirming');
+    expect(await screen.findByText('Stopping…')).toBeInTheDocument();
+    settle('accepted');
+    await waitFor(() => {
+      expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText(/did not confirm the stop/u)).not.toBeInTheDocument();
+  });
+
+  it('says plainly when the host gives up confirming a Stop', async () => {
+    const settle = await unconfirmedStop();
+    settle('attention');
     expect(
       await screen.findByText(
         'Workshop X1C did not confirm the stop. Use the machine’s own stop if it is still moving.',
       ),
     ).toBeInTheDocument();
+    expect(screen.queryByText('Stopping…')).not.toBeInTheDocument();
   });
 
   it.each([
@@ -3413,7 +3475,7 @@ describe('Print pane without printers', () => {
     /* Printers belong to the computer, so the pane never speaks of this project's printers. */
     expect(
       screen.getByText(
-        'Find a printer on your network or add a simulated machine in Settings. Machines set up there are available in every project on this computer.',
+        'Find a machine on your network or add a simulated machine in Settings. Machines set up there are available in every project on this computer.',
       ),
     ).toBeInTheDocument();
     /* Discovery and the access-code ceremony live in settings; the pane offers no binding form of its own. */

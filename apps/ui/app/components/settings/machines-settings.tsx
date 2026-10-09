@@ -40,6 +40,7 @@ import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { PasswordInput } from '@taucad/ui/components/password-input';
 import { Switch } from '@taucad/ui/components/switch';
+import { failureCodeOf } from '#components/print/machine-facts.js';
 import { ConfigurationFields, MachineDetails, fieldNames } from '#components/settings/machine-details.js';
 import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
@@ -97,14 +98,10 @@ const takesCode = (manifest: MachineManifest): boolean =>
 const nounOf = (manifest: MachineManifest): 'printer' | 'machine' =>
   fffProcessOf(manifest) === undefined ? 'machine' : 'printer';
 
-/** The bind flow names the machine itself, so its binding form does not offer the logical id. */
-const flowFilledFields: readonly string[] = ['logicalId'];
-const bindTitles = { logicalId: 'Name' } as const;
-
 /**
  * What a person reads for the host's binding and removal refusals, by code; `undefined` means say nothing.
- * The machine channel carries the code as the message and the desktop shell's invoke wraps it in its own,
- * so the code is looked for anywhere in the message. A provider's own refusal is shown in its own words.
+ * The machine channel carries the typed code, read first; the desktop shell's invoke drops it and keeps it only
+ * inside its own message, so the message is the fallback. A provider's own refusal is shown in its own words.
  */
 const refusals: ReadonlyMap<string, string | undefined> = new Map([
   ['MACHINE_CREDENTIAL_REQUIRED', 'Enter the access code shown on the machine.'],
@@ -135,6 +132,10 @@ const errorMessage = (error: unknown): string =>
   (error instanceof Error ? error.message : String(error)).replace(shellPrefix, '');
 
 const refusalCode = (error: unknown): string | undefined => {
+  const typed = failureCodeOf(error);
+  if (typed !== undefined && refusals.has(typed)) {
+    return typed;
+  }
   const message = errorMessage(error);
   return [...refusals.keys()].find((code) => message.includes(code));
 };
@@ -166,8 +167,8 @@ const describeRefusal = (error: unknown): string | undefined => {
 const bind = async (client: MachineClient, input: BindInput): Promise<MachineBindingOutcome> => {
   // SAFETY: the Parameters form writes JSON values only, and the host validates the whole configuration
   // against the provider's binding schema before discovery.
-  const fields = input.fields as Readonly<Record<string, MachineDiscoverInput['configuration']>>;
-  const configuration = { ...fields, logicalId: input.name };
+  // The name travels in `beginBinding`, never in the provider's binding configuration (U3-18).
+  const configuration = input.fields as Readonly<Record<string, MachineDiscoverInput['configuration']>>;
   const abort = new AbortController();
   let candidate;
   try {
@@ -226,7 +227,7 @@ const findMachines = async (
     providerIds.map(async (providerId) => {
       for await (const frame of client.discover({
         providerId,
-        configuration: { logicalId: 'discovery' },
+        configuration: {},
         signal: AbortSignal.timeout(20_000),
       })) {
         if (frame.type === 'found' || frame.type === 'updated') {
@@ -479,25 +480,22 @@ const chosenFields = (values: Readonly<Record<string, unknown>>): Record<string,
     }),
   );
 
-/** How the bind form lays out one provider's fields: the name up front, the rest under details. */
+/** How the bind form lays out one provider's fields: the card's own name up front, the provider's under details. */
 const formLayout = (
   provider: MachineProvider | undefined,
 ): Readonly<{
   noun: 'printer' | 'machine';
   details: string;
-  primary: readonly string[];
   others: readonly string[];
 }> => {
   if (provider === undefined) {
-    return { noun: 'machine', details: 'Machine details', primary: [], others: [] };
+    return { noun: 'machine', details: 'Machine details', others: [] };
   }
-  const primary = ['logicalId'];
   const noun = nounOf(provider.manifest);
   return {
     noun,
     details: noun === 'printer' ? 'Printer details' : 'Machine details',
-    primary,
-    others: fieldNames(provider.bindingConfiguration).filter((field) => !primary.includes(field)),
+    others: fieldNames(provider.bindingConfiguration),
   };
 };
 
@@ -580,6 +578,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
   const [simulatorFields, setSimulatorFields] = useState<Readonly<Record<string, Record<string, unknown>>>>({});
   const [selectedProviderId, setSelectedProviderId] = useState<string>();
   const [isBinding, setIsBinding] = useState(false);
+  const [bindName, setBindName] = useState('');
   const [bindFields, setBindFields] = useState<Record<string, unknown>>({});
   const [place, setPlace] = useState(noPlace);
   const [candidates, setCandidates] = useState<readonly HeardCandidate[]>();
@@ -663,10 +662,8 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     });
     clearCode();
     const declared = new Set(fieldNames(provider.bindingConfiguration));
-    const heard: Record<string, string | undefined> = {
-      logicalId: candidate.name.slice(0, 64),
-      serial: candidate.claimedIdentity.serial,
-    };
+    const heard: Record<string, string | undefined> = { serial: candidate.claimedIdentity.serial };
+    setBindName(candidate.name.slice(0, 64));
     setBindFields(chosenFields(Object.fromEntries(Object.entries(heard).filter(([key]) => declared.has(key)))));
     setPlace(placeOf(candidate.endpoint));
     (isSaved || !takesCode(provider.manifest) ? bindButton.current : formInput('accessCode'))?.focus();
@@ -707,8 +704,9 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
       return;
     }
     const form = event.currentTarget;
-    const { logicalId: name, ...fields } = chosenFields(bindFields);
-    if (typeof name !== 'string') {
+    const name = bindName.trim();
+    const fields = chosenFields(bindFields);
+    if (name === '') {
       say(undefined, `Enter a name for the ${nounOf(selected.manifest)}.`);
       return;
     }
@@ -730,6 +728,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
       })
     ) {
       form.reset();
+      setBindName('');
       setBindFields({});
       setPlace(noPlace);
       setIsCodeSaved(false);
@@ -737,7 +736,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     }
   };
 
-  const { noun: selectedNoun, details, primary: primaryFields, others: otherFields } = formLayout(selected);
+  const { noun: selectedNoun, details, others: otherFields } = formLayout(selected);
 
   return (
     <>
@@ -792,6 +791,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
             disabled={busy || physicalProviders.length === 0}
             onClick={() => {
               setIsBinding(true);
+              setBindName('');
               setBindFields({});
               setPlace(noPlace);
               setIsCodeSaved(false);
@@ -850,7 +850,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
                 if (next?.manifest.connection.transport !== selected.manifest.connection.transport) {
                   setPlace(noPlace);
                 }
-                setBindFields(({ logicalId }) => chosenFields({ logicalId }));
+                setBindFields({});
                 setIsCodeSaved(false);
                 clearCode();
               }}
@@ -862,16 +862,16 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
               ))}
             </select>
           </div>
-          <div className='min-w-0 lg:col-span-2' role='group' aria-label='Binding fields'>
-            <ConfigurationFields
-              providerId={selected.id}
-              name='binding'
-              configuration={selected.bindingConfiguration}
-              values={bindFields}
-              omit={otherFields}
-              titles={bindTitles}
-              presentation='embedded'
-              onChange={setBindFields}
+          <div className='grid min-w-0 gap-1.5 lg:col-span-2'>
+            <Label htmlFor='machines-bind-name'>Name</Label>
+            <Input
+              id='machines-bind-name'
+              maxLength={64}
+              autoComplete='off'
+              value={bindName}
+              onChange={(event) => {
+                setBindName(event.target.value);
+              }}
             />
           </div>
           <PlaceField transport={selected.manifest.connection.transport} place={place} onChange={setPlace} />
@@ -887,8 +887,6 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
                   name='binding'
                   configuration={selected.bindingConfiguration}
                   values={bindFields}
-                  omit={primaryFields}
-                  titles={bindTitles}
                   presentation='embedded'
                   onChange={setBindFields}
                 />
@@ -926,6 +924,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
               disabled={busy}
               onClick={() => {
                 setIsBinding(false);
+                setBindName('');
                 setBindFields({});
                 setPlace(noPlace);
                 setIsCodeSaved(false);
@@ -960,7 +959,6 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
                   name='binding'
                   configuration={simulator.bindingConfiguration}
                   values={fields}
-                  omit={flowFilledFields}
                   onChange={(values) => {
                     setSimulatorFields((current) => ({ ...current, [simulator.id]: values }));
                   }}

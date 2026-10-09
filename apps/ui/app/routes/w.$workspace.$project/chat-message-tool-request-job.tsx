@@ -1,4 +1,4 @@
-import { Printer } from 'lucide-react';
+import { Drill, Printer } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import {
@@ -60,6 +60,12 @@ const presentation = (job: JobRecord): Presentation => {
   }
 };
 
+/** A printer for a 3D print, a mill for any other process the program names; a printer until the host has read it. */
+const iconOf = (job: JobRecord): typeof Printer => {
+  const process = job.program.facts?.process;
+  return process === undefined || process === 'fff' ? Printer : Drill;
+};
+
 /** Said when the printer has not confirmed a start for minutes: whether it prints is unknown, so nothing invites a retry. */
 const unconfirmedStart =
   "The machine hasn't confirmed the start. Check the machine; Tau updates this when the machine reports the run.";
@@ -119,9 +125,10 @@ export function ChatMessageToolRequestJob({ part }: { readonly part: RequestJobI
     }
 
     case 'output-available': {
-      const { job, machineName } = part.output;
+      const { job, machineName, simulated } = part.output;
       const { verb, tone, separated, pending } = presentation(job);
-      const where = `${job.program.name} on ${machineName ?? job.machineId}`;
+      /* A simulator runs nothing physical, and the transcript must not read as if a machine did. */
+      const where = `${job.program.name} on ${machineName ?? job.machineId}${simulated === true ? ' (simulated)' : ''}`;
       const detail = `${separated ? '· ' : ''}${where}${pending ? ' · waiting for approval in the Print pane' : ''}`;
       const reason = reasonOf(job);
       return (
@@ -132,7 +139,7 @@ export function ChatMessageToolRequestJob({ part }: { readonly part: RequestJobI
           isDefaultOpen={reason !== undefined}
         >
           <ChatToolCardHeader>
-            <ChatToolCardIcon icon={Printer} {...(tone === undefined ? {} : { tone })} />
+            <ChatToolCardIcon icon={iconOf(job)} {...(tone === undefined ? {} : { tone })} />
             <ChatToolCardTitle>
               <ChatToolLabel verb={verb}>
                 <ChatToolDescription>{detail}</ChatToolDescription>

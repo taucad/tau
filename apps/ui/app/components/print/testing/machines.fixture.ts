@@ -747,7 +747,7 @@ export const carveraManifest: MachineManifest = parseMachineManifest({
 const bindingConfiguration = defineConfiguration({
   id: 'fixture.binding',
   version: '1',
-  schema: z.object({ logicalId: z.string().min(1).max(64) }),
+  schema: z.object({}),
   ui: { version: 1, rjsf: {} },
 });
 
@@ -961,6 +961,7 @@ export const machineEntry = ({
       stop: manifest.stop,
       revision: 'capabilities-1',
       incarnation: 'session-1',
+      qualifications: manifest.qualifications,
     },
   },
   snapshot:

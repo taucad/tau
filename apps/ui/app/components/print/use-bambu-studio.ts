@@ -65,6 +65,31 @@ export type BambuPreferences = ReturnType<typeof bambuSettingsConfiguration.sche
 const isBambuSettings = (provider: MachineProvider | undefined): boolean =>
   provider?.settingsConfiguration?.source.id === bambuSettingsConfiguration.manifest.source.id;
 
+const bambuSubmissionFields: ReadonlySet<string> = new Set([
+  'amsMapping',
+  'expectedMaterials',
+  'expectedBedType',
+  'expectedModel',
+  'operatorConfirmedBedType',
+  'bedLeveling',
+  'flowCalibration',
+  'timelapse',
+]);
+const noFields: ReadonlySet<string> = new Set();
+
+/**
+ * The submission keys Bambu's settings own: the slot mapping (`amsMapping`), what the program expects (the provider
+ * completes those) and the start flags its saved preferences remember. Prepare sets or remembers them itself, so it
+ * neither keeps them as passing choices nor offers them under Advanced. Another provider owns nothing here: its
+ * fields are its own form's.
+ *
+ * @param provider - The selected machine's provider.
+ * @returns The Bambu-owned keys, empty unless the provider's settings form is Bambu's.
+ * @public
+ */
+export const bambuOwnedSubmissionFields = (provider: MachineProvider | undefined): ReadonlySet<string> =>
+  isBambuSettings(provider) ? bambuSubmissionFields : noFields;
+
 /**
  * A provider's saved preferences read as Bambu's, when its settings form is Bambu's (by source id, never by provider
  * id): the slots remembered per colour and the start flags live there.

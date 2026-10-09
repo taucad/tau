@@ -23,6 +23,10 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
   useCadChatClient: () => ({ respondToToolApproval }),
 }));
 vi.mock('#hooks/use-machines.js', () => ({ useMachinesFacet: () => machines }));
+const openPanel = vi.fn();
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useProjectWorkspace: () => ({ openPanel }),
+}));
 
 const { ChatApprovalBanner, pendingAgentHostApprovals } = await import('#components/chat/chat-approval-banner.js');
 
@@ -347,8 +351,70 @@ describe('ChatApprovalBanner', () => {
     },
   );
 
-  it('leaves a job that needs a confirmation only the Print pane takes to the pane, and answers', async () => {
+  it('offers no Approve for a job that needs what only the Print pane takes, and leaves the interrupt open', async () => {
     const fixture = createFixture({ jobs: [agentJob()] });
+    machines = { available: true, ...fixture.client };
+    messages = [jobInterrupt()];
+    const user = userEvent.setup();
+
+    render(<ChatApprovalBanner />);
+    await user.click(await screen.findByRole('button', { name: 'Review in the Print pane' }));
+
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(openPanel).toHaveBeenCalledExactlyOnceWith('print');
+    expect(respondToToolApproval).not.toHaveBeenCalled();
+    expect(fixture.resolveJob).not.toHaveBeenCalled();
+  });
+
+  const actionInterrupt = () =>
+    approvalMessage({
+      ...pendingInput,
+      options: [],
+      context: {
+        machineId: 'machine-1',
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        operationId: 'op-1',
+        parameters: { on: true },
+        version: 1,
+        expectedRunId: null,
+      },
+    });
+
+  it('answers a Deny where no machines are reachable: a deny needs no host record to be safe', async () => {
+    messages = [actionInterrupt()];
+    const user = userEvent.setup();
+
+    render(<ChatApprovalBanner />);
+    await user.click(screen.getByRole('button', { name: 'Deny' }));
+
+    await vi.waitFor(() => {
+      expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', false, { optionId: undefined });
+    });
+  });
+
+  it('answers a Deny the host refuses to record', async () => {
+    const fixture = createFixture();
+    fixture.approveAction.mockResolvedValueOnce({ status: 'refused', code: 'MACHINE_UNAVAILABLE', message: 'Gone.' });
+    machines = { available: true, ...fixture.client };
+    messages = [actionInterrupt()];
+    const user = userEvent.setup();
+
+    render(<ChatApprovalBanner />);
+    await user.click(screen.getByRole('button', { name: 'Deny' }));
+
+    await vi.waitFor(() => {
+      expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', false, { optionId: undefined });
+    });
+  });
+
+  it('disables the decision and says the job is being sent while the approval runs', async () => {
+    const fixture = createFixture({ entries: [chatApprovable()], jobs: [agentJob()] });
+    const { promise: sent, resolve: finishSending } = Promise.withResolvers<void>();
+    fixture.resolveJob.mockImplementationOnce(async () => {
+      await sent;
+      return agentJob({ state: 'started' });
+    });
     machines = { available: true, ...fixture.client };
     messages = [jobInterrupt()];
     const user = userEvent.setup();
@@ -356,10 +422,14 @@ describe('ChatApprovalBanner', () => {
     render(<ChatApprovalBanner />);
     await user.click(screen.getByRole('button', { name: 'Approve' }));
 
+    expect(await screen.findByRole('status')).toHaveTextContent('Sending the job to the machine…');
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeDisabled();
+    expect(respondToToolApproval).not.toHaveBeenCalled();
+    finishSending();
     await vi.waitFor(() => {
-      expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', true, { optionId: undefined });
+      expect(respondToToolApproval).toHaveBeenCalledOnce();
     });
-    expect(fixture.resolveJob).not.toHaveBeenCalled();
   });
 
   /* A Tau tool gated by the API offers no option list of its own. */

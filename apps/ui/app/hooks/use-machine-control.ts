@@ -8,6 +8,7 @@ import type {
   MachineRequester,
 } from '@taucad/runtime/machine';
 import { randomUuid } from '@taucad/utils/id';
+import { describePrintError, failureCodeOf } from '#components/print/machine-facts.js';
 
 /** Who the pane acts as: the person at this computer. @public */
 export const operator: MachineRequester = { kind: 'user', id: 'operator', label: 'You' };
@@ -112,6 +113,7 @@ export type MachineControl = Readonly<{
   /** The last refusal, in the person's words. */
   error: string | undefined;
   stop: () => Promise<void>;
+  /** A stop is in flight, or its receipt was `unknown` and the host has not settled it from a report yet. */
   isStopping: boolean;
   beginHold: (componentId: string, parameters: MachineJogHoldParameters) => void;
   endHold: () => void;
@@ -146,6 +148,9 @@ export const useMachineControl = ({
   const [error, setError] = useState<string>();
   /* Stops in flight: each press is its own operation, so a second press never waits for the first. */
   const [stopping, setStopping] = useState(0);
+  /* The last stop whose receipt was `unknown`: the machine may still be stopping (a filament change, a tag read, a
+   * busy AMS), so it reads "Stopping…" until the host settles its operation from a report. */
+  const [unconfirmedStop, setUnconfirmedStop] = useState<string>();
   const [hold, setHold] = useState<ActiveHold>();
   /** The hold in force: its id once granted, its renewal timer, and whether the press already ended. */
   const holdRef = useRef<HoldLease>(undefined);
@@ -215,6 +220,7 @@ export const useMachineControl = ({
   const stop = async (): Promise<void> => {
     setStopping((count) => count + 1);
     setError(undefined);
+    setUnconfirmedStop(undefined);
     try {
       const receipt = await client.stop({
         machineId: entry.machineId,
@@ -224,7 +230,7 @@ export const useMachineControl = ({
       if (receipt.status === 'rejected') {
         setError(receipt.message);
       } else if (receipt.status === 'unknown') {
-        setError(`${entry.name} did not confirm the stop. Use the machine’s own stop if it is still moving.`);
+        setUnconfirmedStop(receipt.operationId);
       }
     } catch (error_) {
       setError(
@@ -242,10 +248,9 @@ export const useMachineControl = ({
       try {
         await client.endHold({ holdId });
       } catch (error_) {
-        const message = error_ instanceof Error ? error_.message : String(error_);
-        if (!message.includes('MACHINE_HOLD_ENDED')) {
+        if (failureCodeOf(error_) !== 'MACHINE_HOLD_ENDED') {
           setError(
-            `${entry.name} did not confirm the end of the jog (${message}); it stops by itself when the hold lapses.`,
+            `${entry.name} did not confirm the end of the jog (${describePrintError(error_)}); it stops by itself when the hold lapses.`,
           );
         }
       }
@@ -374,6 +379,20 @@ export const useMachineControl = ({
 
   useEffect(() => endHold, [endHold]);
 
+  /* An unconfirmed stop is still stopping until its operation settles: not yet listed, sending or confirming. It
+   * succeeds silently once accepted; a refusal, or a stop the host gave up confirming, is said. */
+  const stopOperation =
+    unconfirmedStop === undefined
+      ? undefined
+      : entry.snapshot.operations.find((operation) => operation.operationId === unconfirmedStop);
+  const isStopUnsettled =
+    unconfirmedStop !== undefined &&
+    (stopOperation === undefined || ['planned', 'sending', 'confirming'].includes(stopOperation.state));
+  const stopNotice =
+    stopOperation?.state === 'attention' || stopOperation?.state === 'rejected'
+      ? `${entry.name} did not confirm the stop. Use the machine’s own stop if it is still moving.`
+      : undefined;
+
   return {
     entry,
     attended,
@@ -381,9 +400,9 @@ export const useMachineControl = ({
     check,
     apply,
     pending,
-    error,
+    error: error ?? stopNotice,
     stop,
-    isStopping: stopping > 0,
+    isStopping: stopping > 0 || isStopUnsettled,
     beginHold,
     endHold,
     hold,

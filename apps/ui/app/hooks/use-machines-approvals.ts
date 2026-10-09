@@ -49,8 +49,8 @@ export type MachineApprovalBridge = Readonly<{
 /**
  * Bridge the Print pane to the chat's pending interrupts.
  *
- * Approving through the interrupt lets the paused tool call resolve the job or apply the action itself, naming the
- * person's approval; the pane resolves a job directly only when no run is waiting.
+ * The person's session records the decision first (R15/R16); answering the interrupt then lets the paused tool read
+ * it: the job as the host now holds it, or the action the host now holds an approval for.
  *
  * @returns The bridge for the focused chat.
  * @public

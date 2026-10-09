@@ -1,4 +1,5 @@
 import type { MachineClient } from '@taucad/runtime/machine';
+import { describePrintError } from '#components/print/machine-facts.js';
 import { operator } from '#hooks/use-machine-control.js';
 import type { AgentHostApproval } from '#services/agent-host-event-projection.js';
 
@@ -57,6 +58,59 @@ export const pendingMachineActionOf = (approval: ActionInterrupt): PendingMachin
 };
 
 /**
+ * Answer a deny whatever the host says. A deny needs no host record to be safe: the paused tool reports a denied
+ * action without sending it and withdraws a job whose deny went unrecorded. So the record is best effort, the
+ * interrupt is always answered, and what kept the record from landing is thrown only after that.
+ *
+ * @param record - Records the deny on the person's machines session.
+ * @param respond - Answers the interrupt denied.
+ * @throws After answering, when the record failed; the message says the answer was still sent.
+ * @public
+ */
+export const answerDeny = async (record: () => Promise<void>, respond: () => Promise<void>): Promise<void> => {
+  let failure: unknown;
+  try {
+    await record();
+  } catch (error) {
+    failure = error;
+  }
+  await respond();
+  if (failure !== undefined) {
+    throw new Error(`Your answer was sent, but the host did not record it: ${describePrintError(failure)}`, {
+      cause: failure,
+    });
+  }
+};
+
+/**
+ * Record the person's decision on an agent's machine action on the host, through their own machines session (R15),
+ * for the exact intent and run the agent asked with (R16). Nothing answers the interrupt here.
+ *
+ * @param client - The person's machines client.
+ * @param pending - The action the agent waits on.
+ * @param approved - The person's decision.
+ * @throws When the host refuses to record it.
+ * @public
+ */
+export const recordMachineAction = async (
+  client: MachineClient,
+  pending: PendingMachineAction,
+  approved: boolean,
+): Promise<void> => {
+  const { machineId, operationId, componentId, action, version, expectedRunId, parameters } = pending;
+  const recorded = await client.approveAction({
+    machineId,
+    operationId,
+    intent: { componentId, action, version, expectedRunId, parameters },
+    decision: approved ? 'approve' : 'deny',
+    approvedBy: operator,
+  });
+  if (recorded.status === 'refused') {
+    throw new Error(recorded.message);
+  }
+};
+
+/**
  * Answer an agent's machine action: record the person's decision on the host through their own machines session
  * first (the agent's session cannot record one, R15), for the exact intent and run the agent asked with (R16), then
  * answer the interrupt so the paused tool applies the intent
@@ -64,7 +118,8 @@ export const pendingMachineActionOf = (approval: ActionInterrupt): PendingMachin
  *
  * @param answer - The person's machines client, the action the agent waits on, the person's decision and how the
  *   chat interrupt is answered.
- * @throws When the host refuses to record the decision; the interrupt is then left unanswered.
+ * @throws When the host refuses to record an approval; the interrupt is then left unanswered. A deny is always
+ *   answered ({@link answerDeny}).
  * @public
  */
 export const answerMachineAction = async ({
@@ -78,16 +133,12 @@ export const answerMachineAction = async ({
   approved: boolean;
   respond: (approvalId: string, approved: boolean) => Promise<void>;
 }>): Promise<void> => {
-  const { machineId, operationId, componentId, action, version, expectedRunId, parameters } = pending;
-  const recorded = await client.approveAction({
-    machineId,
-    operationId,
-    intent: { componentId, action, version, expectedRunId, parameters },
-    decision: approved ? 'approve' : 'deny',
-    approvedBy: operator,
-  });
-  if (recorded.status === 'refused') {
-    throw new Error(recorded.message);
+  const record = async (): Promise<void> => recordMachineAction(client, pending, approved);
+  const answer = async (): Promise<void> => respond(pending.approval.approvalId, approved);
+  if (!approved) {
+    await answerDeny(record, answer);
+    return;
   }
-  await respond(pending.approval.approvalId, approved);
+  await record();
+  await answer();
 };

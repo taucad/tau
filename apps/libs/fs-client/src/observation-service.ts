@@ -222,6 +222,13 @@ export class ObservationService<T> {
           sendBack({ type: 'reset' });
         };
         const watch = this.options.watch?.(invalidate, reset);
+        const disposeWatch = (): void => {
+          if (disposed) {
+            return;
+          }
+          disposed = true;
+          watch?.dispose();
+        };
         const register = async (): Promise<void> => {
           try {
             await watch?.ready;
@@ -230,6 +237,7 @@ export class ObservationService<T> {
             }
           } catch (error) {
             if (!disposed) {
+              disposeWatch();
               sendBack({ type: 'closed', error: String(error) });
             }
           }
@@ -241,6 +249,7 @@ export class ObservationService<T> {
             /* Either settlement closes this captured connection. */
           }
           if (!disposed) {
+            disposeWatch();
             this.discardStaged();
             this.options.invalidate?.();
             sendBack({ type: 'closed', error: 'Observation connection closed.' });
@@ -250,10 +259,7 @@ export class ObservationService<T> {
         if (watch) {
           void close();
         }
-        return () => {
-          disposed = true;
-          watch?.dispose();
-        };
+        return disposeWatch;
       }),
       observationRead: createAsyncLogic<ObservationReadOutput, { generation: number }>({
         run: async ({ input, signal }) => {
@@ -354,6 +360,7 @@ export class ObservationService<T> {
       }
       const { value } = this.snapshot;
       if (state.hasTag('closed')) {
+        this.releaseDependencies();
         this.setSnapshot({
           status: 'closed',
           value,

@@ -816,3 +816,186 @@ describe('observed dependencies', () => {
     lease.release();
   });
 });
+
+describe('observation watch terminal delivery', () => {
+  it.each(['rejected readiness', 'provider closure'] as const)(
+    'should dispose %s immediately and fence callbacks while a sibling remains live',
+    async (failure) => {
+      const ready = Promise.withResolvers<void>();
+      const closed = Promise.withResolvers<void>();
+      const callbacks: Array<{ invalidate(): void; reset(): void }> = [];
+      const dispose = vi.fn();
+      const invalidateDomain = vi.fn();
+      const read = vi.fn().mockResolvedValue('current');
+      const watch = vi.fn((invalidate: () => void, reset: () => void) => {
+        callbacks.push({ invalidate, reset });
+        return callbacks.length === 1
+          ? { ready: ready.promise, closed: closed.promise, dispose }
+          : { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: vi.fn() };
+      });
+      const service = new ObservationService<string>({
+        actorOptions: guardedOptions(),
+        resource: 'target',
+        watch,
+        read,
+        invalidate: invalidateDomain,
+      });
+      const siblingDispose = vi.fn();
+      const siblingRead = vi.fn().mockResolvedValue('sibling');
+      const sibling = new ObservationService<string>({
+        actorOptions: guardedOptions(),
+        resource: 'sibling',
+        read: siblingRead,
+        watch: () => ({
+          ready: Promise.resolve(),
+          closed: Promise.withResolvers<void>().promise,
+          dispose: siblingDispose,
+        }),
+      });
+      const lease = service.acquire();
+      const peer = sibling.acquire();
+      try {
+        if (failure === 'rejected readiness') {
+          ready.reject(new Error('registration rejected'));
+        } else {
+          ready.resolve();
+          await flush();
+          expect(lease.getSnapshot()).toEqual({ status: 'ready', value: 'current' });
+          closed.resolve();
+        }
+        await flush();
+        expect.soft(lease.getSnapshot().status).toBe('closed');
+        expect.soft(dispose).toHaveBeenCalledOnce();
+        if (failure === 'provider closure') {
+          expect.soft(lease.getSnapshot()).toEqual({
+            status: 'closed',
+            value: 'current',
+            error: 'Observation connection closed.',
+          });
+        }
+        const reads = read.mock.calls.length;
+        const invalidations = invalidateDomain.mock.calls.length;
+        const diagnosticInvalidations = service.diagnostics.invalidations;
+        callbacks[0]!.invalidate();
+        callbacks[0]!.reset();
+        await flush();
+        expect.soft(invalidateDomain).toHaveBeenCalledTimes(invalidations);
+        expect.soft(service.diagnostics.invalidations).toBe(diagnosticInvalidations);
+        if (failure === 'provider closure') {
+          expect.soft(lease.getSnapshot().value).toBe('current');
+        }
+        expect.soft(read).toHaveBeenCalledTimes(reads);
+        expect.soft(peer.getSnapshot()).toEqual({ status: 'ready', value: 'sibling' });
+        expect.soft(siblingDispose).not.toHaveBeenCalled();
+        lease.refresh();
+        await flush();
+        expect.soft(watch).toHaveBeenCalledTimes(2);
+        expect.soft(lease.getSnapshot()).toEqual({ status: 'ready', value: 'current' });
+        expect.soft(dispose).toHaveBeenCalledOnce();
+        expect.soft(siblingRead).toHaveBeenCalledOnce();
+      } finally {
+        lease.release();
+        peer.release();
+        service.dispose();
+        sibling.dispose();
+      }
+    },
+  );
+});
+
+describe('closed observation dependency lifetime', () => {
+  it('should retain the outer value while releasing dependency leases and reacquiring them on Retry', async () => {
+    const ownedDispose = vi.fn();
+    const sharedDispose = vi.fn();
+    const ownedWatch = vi.fn(() => ({
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      dispose: ownedDispose,
+    }));
+    const sharedWatch = vi.fn(() => ({
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      dispose: sharedDispose,
+    }));
+    const owned = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'owned-dependency',
+      watch: ownedWatch,
+      read: async () => 'owned',
+    });
+    let sharedValue = 'shared';
+    const shared = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'shared-dependency',
+      watch: sharedWatch,
+      read: async () => sharedValue,
+    });
+    const firstClosed = Promise.withResolvers<void>();
+    const outerDispose = vi.fn();
+    const outerWatch = vi
+      .fn()
+      .mockReturnValueOnce({ ready: Promise.resolve(), closed: firstClosed.promise, dispose: outerDispose })
+      .mockImplementation(() => ({
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        dispose: vi.fn(),
+      }));
+    const value = { text: 'last-good' };
+    const invalidate = vi.fn();
+    const disposeValue = vi.fn();
+    const outer = new ObservationService({
+      actorOptions: guardedOptions(),
+      resource: 'outer',
+      watch: outerWatch,
+      invalidate,
+      disposeValue,
+      read: async (fence) => {
+        await fence.observe(owned);
+        await fence.observe(shared);
+        return value;
+      },
+    });
+    const sibling = shared.acquire();
+    const lease = outer.acquire();
+    try {
+      await flush();
+      await flush();
+      expect(lease.getSnapshot()).toEqual({ status: 'ready', value });
+      expect(owned.activeLeaseCount).toBe(1);
+      expect(shared.activeLeaseCount).toBe(2);
+      firstClosed.resolve();
+      await flush();
+      expect.soft(lease.getSnapshot()).toEqual({ status: 'closed', value, error: 'Observation connection closed.' });
+      expect.soft(lease.getSnapshot().value).toBe(value);
+      expect.soft(disposeValue).not.toHaveBeenCalled();
+      expect.soft(owned.activeLeaseCount).toBe(0);
+      expect.soft(ownedDispose).toHaveBeenCalledOnce();
+      expect.soft(shared.activeLeaseCount).toBe(1);
+      expect.soft(sharedDispose).not.toHaveBeenCalled();
+      const invalidations = invalidate.mock.calls.length;
+      const counted = outer.diagnostics.invalidations;
+      sharedValue = 'peer-update';
+      sibling.refresh();
+      await flush();
+      expect.soft(sibling.getSnapshot()).toEqual({ status: 'ready', value: 'peer-update' });
+      expect.soft(invalidate).toHaveBeenCalledTimes(invalidations);
+      expect.soft(outer.diagnostics.invalidations).toBe(counted);
+      expect.soft(lease.getSnapshot().value).toBe(value);
+      lease.refresh();
+      await flush();
+      await flush();
+      expect.soft(outerWatch).toHaveBeenCalledTimes(2);
+      expect.soft(ownedWatch).toHaveBeenCalledTimes(2);
+      expect.soft(sharedWatch).toHaveBeenCalledOnce();
+      expect.soft(owned.activeLeaseCount).toBe(1);
+      expect.soft(shared.activeLeaseCount).toBe(2);
+      expect.soft(lease.getSnapshot()).toEqual({ status: 'ready', value });
+    } finally {
+      lease.release();
+      sibling.release();
+      outer.dispose();
+      owned.dispose();
+      shared.dispose();
+    }
+  });
+});

@@ -4,7 +4,7 @@ import { getSchemaType } from '@rjsf/utils';
 import { projectParameterField, resolveParameterBinding } from '@taucad/parameters';
 import { admitUnit } from '@taucad/units/unit';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
-import { ParametersNumber, toNativeValue } from '#components/geometry/parameters/parameters-number.js';
+import { ParametersNumber, toDisplayValue, toNativeValue } from '#components/geometry/parameters/parameters-number.js';
 import { ParametersNumberOrString, ParametersString } from '#components/geometry/parameters/parameters-string.js';
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import { toUcumLengthCode } from '#constants/length-units.js';
@@ -188,7 +188,11 @@ export function ParametersWidget(
               disabled={disabled}
               readOnly={readonly}
               autoFocus={autofocus}
-              placeholder={Number.isFinite(defaultNumericValue) ? String(defaultNumericValue) : undefined}
+              placeholder={
+                Number.isFinite(defaultNumericValue)
+                  ? String(toDisplayValue(fieldProjection, defaultNumericValue))
+                  : undefined
+              }
               aria-label={`Input for ${prettyLabel}`}
               onFocus={handleFocus}
               onBlur={handleBlur}
@@ -198,7 +202,9 @@ export function ParametersWidget(
                   handleChange(undefined);
                   return;
                 }
-                const native = toNativeValue(fieldProjection, next);
+                // An integer field is checked as typed, so a fraction is refused rather than rounded.
+                const native =
+                  fieldProjection.representation === 'safe-integer' ? next : toNativeValue(fieldProjection, next);
                 // The raw fallback input admits values through the same rules as the numeric editor.
                 const diagnostic = validateParameterInputValue(
                   {

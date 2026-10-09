@@ -114,6 +114,18 @@ export const toNativeValue = (fieldProjection: ParameterFieldProjection, value: 
   return displayValue(value, { ...binding, nativeUnit: displayUnit }, binding.nativeUnit);
 };
 
+/**
+ * A native value in a field's display unit.
+ *
+ * @param fieldProjection - The field that shows the value.
+ * @param value - The value in the field's native unit.
+ * @returns The value in the field's display unit.
+ */
+export const toDisplayValue = (fieldProjection: ParameterFieldProjection, value: number): number => {
+  const binding = fieldBinding(fieldProjection);
+  return binding.representation === 'safe-integer' ? value : displayValue(value, binding, fieldProjection.displayUnit);
+};
+
 /** The authority value this row last showed, which a commit proves it was still editing. */
 type EditBase = Readonly<{ value: number; binding: ParameterFieldBinding; authorityValue: number }>;
 

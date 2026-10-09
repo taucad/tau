@@ -44,6 +44,7 @@ import {
   fetchStripeTaxCalculationEvidence,
   fetchStripeTaxTransactionEvidence,
   isLoopbackBillingStripeClient,
+  isStripeSubscriptionEnding,
   parseStripeCreateLeg,
   parseVerifiedStripeEvent,
   recoverStripeLegSource,
@@ -3463,7 +3464,7 @@ export class BillingPaymentsService {
           .set({
             status: remote.status,
             slotState: ended ? 'ended' : ownedSubscription.slotState,
-            cancelAtPeriodEnd: remote.cancel_at_period_end,
+            cancelAtPeriodEnd: isStripeSubscriptionEnding(remote),
             canceledAt: remote.canceled_at === null ? null : new Date(remote.canceled_at * 1000),
             endedAt: remote.ended_at === null ? null : new Date(remote.ended_at * 1000),
             updatedAt: new Date(),

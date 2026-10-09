@@ -72,7 +72,7 @@ describe('createNodeClient', () => {
     client.terminate();
   });
 
-  it('releases the admitted native subscription on termination for a path-backed client', async () => {
+  it('closes the admitted native subscription before shutdown resolves for a path-backed client', async () => {
     const projectDirectory = await mkdtemp(join(tmpdir(), 'taucad-node-client-'));
     await writeFile(join(projectDirectory, 'main.mock'), 'fixture');
     const nativeSubscribe = parcelWatcher.subscribe.bind(parcelWatcher);
@@ -98,10 +98,10 @@ describe('createNodeClient', () => {
       expect(active.size).toBeGreaterThan(0);
 
       document.close();
-      client.terminate();
-      await vi.waitFor(() => {
-        expect(active.size).toBe(0);
-      });
+      // A worker thread may exit right after shutdown; native unsubscribe work
+      // still settling then aborts the process inside the addon.
+      await client.shutdown();
+      expect(active.size).toBe(0);
     } finally {
       document?.close();
       client?.terminate();

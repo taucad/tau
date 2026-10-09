@@ -78,6 +78,18 @@ FilletSurf_Builder: declare class FilletSurf_Builder
 
 FilletSurf_ErrorTypeStatus: typeof FilletSurf_ErrorTypeStatus[keyof typeof FilletSurf_ErrorTypeStatus]
 
+  readonly FilletSurf_EmptyList: 'FilletSurf_EmptyList'
+
+  readonly FilletSurf_EdgeNotG1: 'FilletSurf_EdgeNotG1'
+
+  readonly FilletSurf_FacesNotG1: 'FilletSurf_FacesNotG1'
+
+  readonly FilletSurf_EdgeNotOnShape: 'FilletSurf_EdgeNotOnShape'
+
+  readonly FilletSurf_NotSharpEdge: 'FilletSurf_NotSharpEdge'
+
+  readonly FilletSurf_PbFilletCompute: 'FilletSurf_PbFilletCompute'
+
 FilletSurf_InternalBuilder: declare class FilletSurf_InternalBuilder extends ChFi3d_FilBuilder
 
   // FilletSurf_InternalBuilder.constructor (constructor)
@@ -157,4 +169,16 @@ FilletSurf_InternalBuilder: declare class FilletSurf_InternalBuilder extends ChF
 
 FilletSurf_StatusDone: typeof FilletSurf_StatusDone[keyof typeof FilletSurf_StatusDone]
 
+  readonly FilletSurf_IsOk: 'FilletSurf_IsOk'
+
+  readonly FilletSurf_IsNotOk: 'FilletSurf_IsNotOk'
+
+  readonly FilletSurf_IsPartial: 'FilletSurf_IsPartial'
+
 FilletSurf_StatusType: typeof FilletSurf_StatusType[keyof typeof FilletSurf_StatusType]
+
+  readonly FilletSurf_TwoExtremityOnEdge: 'FilletSurf_TwoExtremityOnEdge'
+
+  readonly FilletSurf_OneExtremityOnEdge: 'FilletSurf_OneExtremityOnEdge'
+
+  readonly FilletSurf_NoExtremityOnEdge: 'FilletSurf_NoExtremityOnEdge'

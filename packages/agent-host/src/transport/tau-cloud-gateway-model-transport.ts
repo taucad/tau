@@ -137,8 +137,9 @@ const lookUpAttempt = async (
     });
   }
   if (response.status === 403) {
-    // A closed account or a refused origin is its own code (`BILLING_ACCOUNT_CLOSED`, `ORIGIN_NOT_ALLOWED`), read as
-    // `stream()` reads a 403: never a sign-in failure, which signing in again would not fix.
+    // A closed or restricted account or a refused origin is its own code (`BILLING_ACCOUNT_CLOSED`,
+    // `BILLING_ACCOUNT_RESTRICTED`, `ORIGIN_NOT_ALLOWED`), read as `stream()` reads a 403 and passed through with its
+    // details: never a sign-in failure, which signing in again would not fix.
     throw await gatewayResponseError(response);
   }
   if (!response.ok) {

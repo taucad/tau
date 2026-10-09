@@ -1,0 +1,2098 @@
+{
+  "slug": "geospec-authoring",
+  "sources": {
+    "workspaceFiles": 337,
+    "exampleFiles": 80,
+    "transcriptRuns": 104
+  },
+  "symbols": [
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveBoundingBox",
+      "name": "toHaveBoundingBox",
+      "score": 239,
+      "workspace": 137,
+      "examples": 69,
+      "lookups": 33
+    },
+    {
+      "id": "typescript:loadModel",
+      "name": "loadModel",
+      "score": 224,
+      "workspace": 131,
+      "examples": 79,
+      "lookups": 14
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toBeWatertight",
+      "name": "toBeWatertight",
+      "score": 219,
+      "workspace": 128,
+      "examples": 66,
+      "lookups": 25
+    },
+    {
+      "id": "typescript:it",
+      "name": "it",
+      "score": 219,
+      "workspace": 139,
+      "examples": 80,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:describe",
+      "name": "describe",
+      "score": 218,
+      "workspace": 138,
+      "examples": 80,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:expectGeo",
+      "name": "expectGeo",
+      "score": 215,
+      "workspace": 134,
+      "examples": 79,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveConnectedComponents",
+      "name": "toHaveConnectedComponents",
+      "score": 176,
+      "workspace": 101,
+      "examples": 49,
+      "lookups": 26
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveVolume",
+      "name": "toHaveVolume",
+      "score": 116,
+      "workspace": 66,
+      "examples": 19,
+      "lookups": 31
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveNoComponentInterference",
+      "name": "toHaveNoComponentInterference",
+      "score": 91,
+      "workspace": 49,
+      "examples": 19,
+      "lookups": 23
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toBeValidBrep",
+      "name": "toBeValidBrep",
+      "score": 68,
+      "workspace": 48,
+      "examples": 17,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveCircularHole",
+      "name": "toHaveCircularHole",
+      "score": 56,
+      "workspace": 37,
+      "examples": 15,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveAssemblyOccurrences",
+      "name": "toHaveAssemblyOccurrences",
+      "score": 50,
+      "workspace": 26,
+      "examples": 18,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveCylindricalFace",
+      "name": "toHaveCylindricalFace",
+      "score": 50,
+      "workspace": 37,
+      "examples": 11,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveTopologyCounts",
+      "name": "toHaveTopologyCounts",
+      "score": 43,
+      "workspace": 30,
+      "examples": 13,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveStepUnits",
+      "name": "toHaveStepUnits",
+      "score": 34,
+      "workspace": 24,
+      "examples": 10,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveCircularHolePattern",
+      "name": "toHaveCircularHolePattern",
+      "score": 32,
+      "workspace": 19,
+      "examples": 13,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveCenterOfMass",
+      "name": "toHaveCenterOfMass",
+      "score": 28,
+      "workspace": 18,
+      "examples": 4,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHavePlanarFace",
+      "name": "toHavePlanarFace",
+      "score": 25,
+      "workspace": 20,
+      "examples": 5,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveSpatialRelationships",
+      "name": "toHaveSpatialRelationships",
+      "score": 25,
+      "workspace": 12,
+      "examples": 11,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveMeshIntegrity",
+      "name": "toHaveMeshIntegrity",
+      "score": 24,
+      "workspace": 16,
+      "examples": 5,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveProductStructure",
+      "name": "toHaveProductStructure",
+      "score": 24,
+      "workspace": 19,
+      "examples": 3,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveVoidContinuity",
+      "name": "toHaveVoidContinuity",
+      "score": 20,
+      "workspace": 11,
+      "examples": 7,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecNumericExpectation",
+      "name": "GeoSpecNumericExpectation",
+      "score": 18,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 18
+    },
+    {
+      "id": "typescript:GeoSpecVolumeExpectation",
+      "name": "GeoSpecVolumeExpectation",
+      "score": 18,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 18
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveSurfaceArea",
+      "name": "toHaveSurfaceArea",
+      "score": 16,
+      "workspace": 13,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecConnectedComponentsExpectation",
+      "name": "GeoSpecConnectedComponentsExpectation",
+      "score": 15,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 15
+    },
+    {
+      "id": "typescript:GeoSpecBoundingBoxExpectation",
+      "name": "GeoSpecBoundingBoxExpectation",
+      "score": 14,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 14
+    },
+    {
+      "id": "typescript:GeoSpecEngineHostBindings.loadModel",
+      "name": "loadModel",
+      "score": 14,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 14
+    },
+    {
+      "id": "typescript:GeoSpecBoundingBoxExpectation.max",
+      "name": "max",
+      "score": 13,
+      "workspace": 9,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveChamferFeature",
+      "name": "toHaveChamferFeature",
+      "score": 13,
+      "workspace": 11,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipExpectation.max",
+      "name": "max",
+      "score": 13,
+      "workspace": 9,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpec",
+      "name": "GeoSpec",
+      "score": 12,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 12
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveNoDiagnostics",
+      "name": "toHaveNoDiagnostics",
+      "score": 12,
+      "workspace": 7,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadModelOptions",
+      "name": "LoadModelOptions",
+      "score": 12,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 12
+    },
+    {
+      "id": "typescript:GeoSpecBoundingBoxExpectation.min",
+      "name": "min",
+      "score": 11,
+      "workspace": 7,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecComponentInterferenceAllowance",
+      "name": "GeoSpecComponentInterferenceAllowance",
+      "score": 11,
+      "workspace": 3,
+      "examples": 7,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipExpectation.min",
+      "name": "min",
+      "score": 11,
+      "workspace": 7,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:LoadModelCodeOptions.parameters",
+      "name": "parameters",
+      "score": 11,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:LoadModelFileOptions.parameters",
+      "name": "parameters",
+      "score": 11,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:LoadModelOptions.parameters",
+      "name": "parameters",
+      "score": 11,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:LoadModelSourceOptions.parameters",
+      "name": "parameters",
+      "score": 11,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecBoundingBoxExpectation.size",
+      "name": "size",
+      "score": 10,
+      "workspace": 6,
+      "examples": 4,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AnalyzeMeshOptions.parameters",
+      "name": "parameters",
+      "score": 9,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CreateStepLoaderOptions.parameters",
+      "name": "parameters",
+      "score": 9,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveMinimumWallThickness",
+      "name": "toHaveMinimumWallThickness",
+      "score": 9,
+      "workspace": 7,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecNativeLoadModelOptions.parameters",
+      "name": "parameters",
+      "score": 9,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecTauProjectDescriptor.parameters",
+      "name": "parameters",
+      "score": 9,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeometryProvenance.parameters",
+      "name": "parameters",
+      "score": 9,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadMeshOptions.parameters",
+      "name": "parameters",
+      "score": 9,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadStepOptions.parameters",
+      "name": "parameters",
+      "score": 9,
+      "workspace": 4,
+      "examples": 4,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:describe.skip",
+      "name": "skip",
+      "score": 8,
+      "workspace": 0,
+      "examples": 8,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:it.skip",
+      "name": "skip",
+      "score": 8,
+      "workspace": 0,
+      "examples": 8,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecGeometrySelector",
+      "name": "GeoSpecGeometrySelector",
+      "score": 7,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 7
+    },
+    {
+      "id": "typescript:GeoSpecAssemblyOccurrenceExpectation.name",
+      "name": "name",
+      "score": 6,
+      "workspace": 4,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecAssertion.kind",
+      "name": "kind",
+      "score": 6,
+      "workspace": 3,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecAxisExpectation.x",
+      "name": "x",
+      "score": 6,
+      "workspace": 3,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecComponentInterferenceAllowance.kind",
+      "name": "kind",
+      "score": 6,
+      "workspace": 3,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecComponentInterferenceExpectation",
+      "name": "GeoSpecComponentInterferenceExpectation",
+      "score": 6,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveFilletFeature",
+      "name": "toHaveFilletFeature",
+      "score": 6,
+      "workspace": 5,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecMeshIntegrityExpectation",
+      "name": "GeoSpecMeshIntegrityExpectation",
+      "score": 6,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 6
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipExpectation.id",
+      "name": "id",
+      "score": 6,
+      "workspace": 3,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipExpectation.kind",
+      "name": "kind",
+      "score": 6,
+      "workspace": 3,
+      "examples": 3,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecAssemblyOccurrenceExpectation.count",
+      "name": "count",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecBoundingBoxExpectation.center",
+      "name": "center",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecCircularHoleExpectation.center",
+      "name": "center",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecCircularHolePatternExpectation.center",
+      "name": "center",
+      "score": 5,
+      "workspace": 4,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecCircularHolePatternExpectation.count",
+      "name": "count",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecConnectedComponentsExpectation.count",
+      "name": "count",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecProductStructureExpectation.count",
+      "name": "count",
+      "score": 5,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecAssemblyOccurrencesExpectation",
+      "name": "GeoSpecAssemblyOccurrencesExpectation",
+      "score": 4,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:GeoSpecCircularHoleExpectation",
+      "name": "GeoSpecCircularHoleExpectation",
+      "score": 4,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:GeoSpecCircularHolePatternExpectation",
+      "name": "GeoSpecCircularHolePatternExpectation",
+      "score": 4,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:GeoSpecForensicEvent.type",
+      "name": "type",
+      "score": 4,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecMatcher.toHaveMass",
+      "name": "toHaveMass",
+      "score": 4,
+      "workspace": 4,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecPointExpectation",
+      "name": "GeoSpecPointExpectation",
+      "score": 4,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:GeoSpecPoolHostMessage.type",
+      "name": "type",
+      "score": 4,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecPoolWorkerMessage.type",
+      "name": "type",
+      "score": 4,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecProductStructureExpectation",
+      "name": "GeoSpecProductStructureExpectation",
+      "score": 4,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:GeoSpecRunnerEvent.type",
+      "name": "type",
+      "score": 4,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipExpectation",
+      "name": "GeoSpecSpatialRelationshipExpectation",
+      "score": 4,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipExpectation.minVolume",
+      "name": "minVolume",
+      "score": 4,
+      "workspace": 2,
+      "examples": 2,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecTopologyCountsExpectation",
+      "name": "GeoSpecTopologyCountsExpectation",
+      "score": 4,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:GeoSpecValidBrepExpectation",
+      "name": "GeoSpecValidBrepExpectation",
+      "score": 4,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 4
+    },
+    {
+      "id": "typescript:AnalyzeMeshOptions.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:CreateGeoSpecNativeModelLoaderOptions.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:CreateModelLoaderOptions.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecCylindricalFaceExpectation.radius",
+      "name": "radius",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecFilletFeatureExpectation.radius",
+      "name": "radius",
+      "score": 3,
+      "workspace": 2,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecIngestSubjectRequest.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecMinimumWallThicknessExpectation",
+      "name": "GeoSpecMinimumWallThicknessExpectation",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecNativeLoadModelOptions",
+      "name": "GeoSpecNativeLoadModelOptions",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecNativeLoadModelOptions.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecTauProjectArtifact.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeoSpecTauProjectDescriptor.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeometrySelector",
+      "name": "GeometrySelector",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeometrySource.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:GeometrySubject.brep",
+      "name": "brep",
+      "score": 3,
+      "workspace": 3,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeometrySubjectMeshEvidence.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:LoadMeshOptions.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:LoadModelCodeOptions.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:LoadModelFileOptions.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:LoadModelOptions.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:LoadModelSourceOptions.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:MeshBufferSource.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:MeshEvidence.format",
+      "name": "format",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:SerializedRegExp.pattern",
+      "name": "pattern",
+      "score": 3,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 3
+    },
+    {
+      "id": "typescript:Vec3",
+      "name": "Vec3",
+      "score": 3,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:AabbMeters.max",
+      "name": "max",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AabbMeters.min",
+      "name": "min",
+      "score": 2,
+      "workspace": 2,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:AnalyzeMeshResult",
+      "name": "AnalyzeMeshResult",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:BoundingBoxStats.primitives",
+      "name": "primitives",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:CreateGeoSpecNativeModelLoaderOptions.engine",
+      "name": "engine",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CreateModelLoaderOptions.engine",
+      "name": "engine",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecAssemblyOccurrenceExpectation",
+      "name": "GeoSpecAssemblyOccurrenceExpectation",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecAssertionClient.expectGeo",
+      "name": "expectGeo",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecAssertionClientOptions.engine",
+      "name": "engine",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecAxisExpectation.y",
+      "name": "y",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecAxisExpectation.z",
+      "name": "z",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecCenterOfMassExpectation",
+      "name": "GeoSpecCenterOfMassExpectation",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecChamferFeatureExpectation.selection",
+      "name": "selection",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecCollector.expectGeo",
+      "name": "expectGeo",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecEngineDescriptor.engine",
+      "name": "engine",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecEngineImplementation.engine",
+      "name": "engine",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecFilletFeatureExpectation.selection",
+      "name": "selection",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecInitializeResult.engine",
+      "name": "engine",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecMatcher",
+      "name": "GeoSpecMatcher",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecModelFormat",
+      "name": "GeoSpecModelFormat",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecNativeCollector.expectGeo",
+      "name": "expectGeo",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecNativeQueryOptions.engine",
+      "name": "engine",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecNativeRunnerAssertions.engine",
+      "name": "engine",
+      "score": 2,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecNoDiagnosticsExpectation",
+      "name": "GeoSpecNoDiagnosticsExpectation",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecPmiRecord.limits",
+      "name": "limits",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecPmiRecord.raw",
+      "name": "raw",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecSubject",
+      "name": "GeoSpecSubject",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecSurfaceAreaExpectation",
+      "name": "GeoSpecSurfaceAreaExpectation",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeoSpecVoidContinuityExpectation",
+      "name": "GeoSpecVoidContinuityExpectation",
+      "score": 2,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeometryDiagnostic.spatial",
+      "name": "spatial",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeometryEvidenceDiagnostic.spatial",
+      "name": "spatial",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeometryInspectionSelection.selector",
+      "name": "selector",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:GeometrySelection.selector",
+      "name": "selector",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:LoadModelCodeOptions.code",
+      "name": "code",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:PrimitiveRecord.color",
+      "name": "color",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:RelationshipEndpointReport.selection",
+      "name": "selection",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:SelectorDiagnosticOptions.selector",
+      "name": "selector",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:StepLoadProgressEvent.phase",
+      "name": "phase",
+      "score": 2,
+      "workspace": 1,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:WatertightIrregularEdgeSample.color",
+      "name": "color",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:test",
+      "name": "test",
+      "score": 2,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 2
+    },
+    {
+      "id": "typescript:AabbMeters",
+      "name": "AabbMeters",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:AnalyzeBrepOptions.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:AnalyzeBrepResult.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:AnalyzeMeshOptions.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:AnalyzeMeshOverlapOptions.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:AnalyzeMeshOverlapResult.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:AxisSelector.expect",
+      "name": "expect",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:AxisSelector.kind",
+      "name": "kind",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BodySelector.expect",
+      "name": "expect",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BodySelector.kind",
+      "name": "kind",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BoundingBoxAxisExtremum.aabb",
+      "name": "aabb",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:BoundingBoxStats.center",
+      "name": "center",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:BrepEvidence.boundingBox",
+      "name": "boundingBox",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CandidateEntity.distance",
+      "name": "distance",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ClusterReport.aabb",
+      "name": "aabb",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ClusterReport.primitives",
+      "name": "primitives",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ConnectedComponentsFailure.clusters",
+      "name": "clusters",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ConnectedComponentsResult.clusters",
+      "name": "clusters",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:ConnectedComponentsResult.count",
+      "name": "count",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CreateModelLoaderOptions.mesh",
+      "name": "mesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:CreateStepLoaderOptions.mesh",
+      "name": "mesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:DatumSelector.expect",
+      "name": "expect",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:DatumSelector.kind",
+      "name": "kind",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:FaceQuery.offset",
+      "name": "offset",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:FaceSelector.expect",
+      "name": "expect",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:FaceSelector.kind",
+      "name": "kind",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpec.analyzeMesh",
+      "name": "analyzeMesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecAssertion.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecAssertion.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecAssertionError.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecAuthoringInvocation.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecCanonicalClaimReport.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecChamferFeatureExpectation.distance",
+      "name": "distance",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecCircularHoleExpectation.axis",
+      "name": "axis",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecCircularHoleExpectation.through",
+      "name": "through",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecCircularHolePatternExpectation.axis",
+      "name": "axis",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecClaimResult.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecComponentInterferenceAllowance.reason",
+      "name": "reason",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecComponentInterferenceExpectation.allowances",
+      "name": "allowances",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecComponentInterferencePairExpectation",
+      "name": "GeoSpecComponentInterferencePairExpectation",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecConfig.cache",
+      "name": "cache",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecCylindricalFaceExpectation",
+      "name": "GeoSpecCylindricalFaceExpectation",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecCylindricalFaceExpectation.axis",
+      "name": "axis",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecEngineHostBindings.analyzeMesh",
+      "name": "analyzeMesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecIngestSubjectRequest.frame",
+      "name": "frame",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecIngestSubjectResult.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecModelLoadError.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecNativeLoadModelOptions.mesh",
+      "name": "mesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecNativeQueryOptions.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecNodePoolRunnerOptions.cache",
+      "name": "cache",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecNodeRunnerOptions.cache",
+      "name": "cache",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecPmiFaceAssociation.occurrence",
+      "name": "occurrence",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecProductStructureExpectation.names",
+      "name": "names",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecProtocolProvenance.build",
+      "name": "build",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecQueryOptions.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipExpectation.axis",
+      "name": "axis",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipExpectation.reason",
+      "name": "reason",
+      "score": 1,
+      "workspace": 0,
+      "examples": 1,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipExpectation.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecSpatialRelationshipsExpectation",
+      "name": "GeoSpecSpatialRelationshipsExpectation",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecTauProjectArtifact.export",
+      "name": "export",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecTauProjectArtifact.frame",
+      "name": "frame",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:GeoSpecTestCase.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeoSpecVoidContinuityExpectation.material",
+      "name": "material",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeometryDiagnostic.details",
+      "name": "details",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeometryEvidenceDiagnostic.details",
+      "name": "details",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeometrySelection.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeometryStats.boundingBox",
+      "name": "boundingBox",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeometrySubject.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GeometrySubject.mesh",
+      "name": "mesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GroupSelector.expect",
+      "name": "expect",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:GroupSelector.kind",
+      "name": "kind",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:InspectGeometryOptions.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:InspectGeometryResult.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:InterfaceSelector.expect",
+      "name": "expect",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:InterfaceSelector.kind",
+      "name": "kind",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadMeshFailure.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadMeshSuccess.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadModelCodeOptions.mesh",
+      "name": "mesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadModelFileOptions",
+      "name": "LoadModelFileOptions",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadModelFileOptions.mesh",
+      "name": "mesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadModelOptions.mesh",
+      "name": "mesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadModelSourceOptions.mesh",
+      "name": "mesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:LoadStepOptions.mesh",
+      "name": "mesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:MeshComponentOverlap.intersectionVolume",
+      "name": "intersectionVolume",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:MeshQualityStats",
+      "name": "MeshQualityStats",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:MeshQualityStats.centerOfMass",
+      "name": "centerOfMass",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MeshTriangle.a",
+      "name": "a",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MeshTriangle.b",
+      "name": "b",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MeshTriangle.center",
+      "name": "center",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:MinimumDistanceFact.distance",
+      "name": "distance",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:MinimumDistanceQuery.subject",
+      "name": "subject",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:OccurrenceSelector.expect",
+      "name": "expect",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:OccurrenceSelector.kind",
+      "name": "kind",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:PlaneQuery.offset",
+      "name": "offset",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:PlaneSelector.expect",
+      "name": "expect",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:PlaneSelector.kind",
+      "name": "kind",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:PrimitiveRecord.aabb",
+      "name": "aabb",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:RelationshipEvidence.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:RuntimeBackedModelFormat",
+      "name": "RuntimeBackedModelFormat",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:RuntimeExportIntentFailure.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:SelectorDiagnosticOptions.details",
+      "name": "details",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:SelectorIndex.diagnostics",
+      "name": "diagnostics",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:WatertightFailure.irregularEdgeClusters",
+      "name": "irregularEdgeClusters",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:WatertightIrregularEdgeCluster.aabb",
+      "name": "aabb",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:WatertightIrregularEdgeCluster.edgeCount",
+      "name": "edgeCount",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:WatertightIrregularEdgeCluster.samples",
+      "name": "samples",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:WatertightIrregularEdgeSample.center",
+      "name": "center",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:WatertightIrregularEdgeSample.primitives",
+      "name": "primitives",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:WatertightResult.irregularEdgeClusters",
+      "name": "irregularEdgeClusters",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:analyzeMesh",
+      "name": "analyzeMesh",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:defaultGeoSpecInclude",
+      "name": "defaultGeoSpecInclude",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:inspectGeometry",
+      "name": "inspectGeometry",
+      "score": 1,
+      "workspace": 0,
+      "examples": 0,
+      "lookups": 1
+    },
+    {
+      "id": "typescript:loadMesh",
+      "name": "loadMesh",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    },
+    {
+      "id": "typescript:loadStep",
+      "name": "loadStep",
+      "score": 1,
+      "workspace": 1,
+      "examples": 0,
+      "lookups": 0
+    }
+  ]
+}

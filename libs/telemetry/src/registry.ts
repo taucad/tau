@@ -8,33 +8,12 @@ import { agentPlacements, agentToolKinds } from '#ingest.js';
  *
  * Canonical metrics with OTEL-compliant names. Renames from legacy:
  * - `ws.connections.total` -> `ws.disconnections` (counters must not use `.total`)
- * - `sse.events.total` -> `sse.events` (counters must not use `.total`)
  * - `kernel.execution.total` -> `kernel.executions` (counters must be pluralized, no `.total`)
  *
  * @public
  */
 export const TauMetrics = {
-  // --- WebSocket / RPC ---
-
-  rpcCallDuration: defineHistogram({
-    name: 'rpc.server.call.duration',
-    unit: 's',
-    description: 'RPC round-trip latency',
-    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60],
-    attributes: z.object({
-      'rpc.method': z.string().optional(),
-      'rpc.status': z.string().optional(),
-    }),
-  }),
-
-  rpcActiveCalls: defineUpDownCounter({
-    name: 'rpc.server.active_calls',
-    unit: '{call}',
-    description: 'Currently in-flight RPC calls',
-    attributes: z.object({
-      'rpc.method': z.string().optional(),
-    }),
-  }),
+  // --- WebSocket ---
 
   wsActiveConnections: defineUpDownCounter({
     name: 'ws.connections.active',
@@ -88,34 +67,6 @@ export const TauMetrics = {
       'ws.gateway': z.enum(['hosts', 'kernels', 'none']),
       reason: z.enum(['unauthenticated', 'forbidden', 'auth_error', 'unknown_route', 'server_shutdown']),
     }),
-  }),
-
-  rpcDeliveryEvents: defineCounter({
-    name: 'rpc.delivery.events',
-    unit: '{event}',
-    description: 'Durable chat RPC delivery transitions by plane and outcome',
-    attributes: z.object({
-      'rpc.delivery.stage': z.string(),
-      'rpc.delivery.outcome': z.string().optional(),
-      'rpc.delivery.transport': z.string().optional(),
-    }),
-  }),
-
-  rpcDeliveryWakeDuration: defineHistogram({
-    name: 'rpc.delivery.wake.duration',
-    unit: 's',
-    description: 'Time spent waiting for a durable RPC response wake-up',
-    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
-    attributes: z.object({
-      'rpc.delivery.transport': z.string(),
-    }),
-  }),
-
-  rpcActiveRunRooms: defineUpDownCounter({
-    name: 'rpc.delivery.rooms.active',
-    unit: '{room}',
-    description: 'Run rooms currently retained by authenticated RPC sockets',
-    attributes: z.object({}),
   }),
 
   // --- AI / LLM (GenAI semantic conventions) ---
@@ -403,22 +354,6 @@ export const TauMetrics = {
     }),
   }),
 
-  sseActiveConnections: defineUpDownCounter({
-    name: 'sse.connections.active',
-    unit: '{connection}',
-    description: 'Active SSE streams',
-    attributes: z.object({}),
-  }),
-
-  sseEvents: defineCounter({
-    name: 'sse.events',
-    unit: '{event}',
-    description: 'SSE events emitted',
-    attributes: z.object({
-      'sse.event.type': z.string().optional(),
-    }),
-  }),
-
   publicationViewsTotal: defineCounter({
     name: 'publication.views',
     unit: '{view}',
@@ -623,6 +558,31 @@ export const TauMetrics = {
     }),
   }),
 
+  billingSupplierCostPicoUsd: defineCounter({
+    name: 'tau.billing.supplier_cost_picousd',
+    unit: '{picousd}',
+    description:
+      "Estimated supplier cost of each live-settled funded LLM call in pico-USD, priced from its reported usage at the pinned supplier rates (Tau's cost, never customer-visible)",
+    attributes: z.object({
+      'gen_ai.request.model': z.string(),
+      'gen_ai.provider.name': z.string(),
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+    }),
+  }),
+
+  billingSupplierUnpricedOperations: defineGauge({
+    name: 'tau.billing.supplier_unpriced_operations',
+    unit: '{operation}',
+    description:
+      'Terminal funded operations with no supplier cost estimate, by provider, sku and reason, after each hourly reconciliation',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'gen_ai.provider.name': z.string(),
+      'tau.billing.sku': z.string(),
+      'tau.billing.unpriced.reason': z.enum(['missing_rate', 'dimension_mismatch', 'absorbed']),
+    }),
+  }),
+
   billingProviderAccountRefusals: defineCounter({
     name: 'tau.billing.provider_account.refusals',
     unit: '{refusal}',
@@ -647,7 +607,7 @@ export const TauMetrics = {
         'genuine_saturation',
         'recovery_in_progress',
         'recovery_failed',
-        'supplier_route_paused',
+        'operator_route_paused',
       ]),
     }),
   }),

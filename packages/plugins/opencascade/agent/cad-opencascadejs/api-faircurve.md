@@ -4,6 +4,14 @@
 
 FairCurve_AnalysisCode: typeof FairCurve_AnalysisCode[keyof typeof FairCurve_AnalysisCode]
 
+  readonly FairCurve_OK: 'FairCurve_OK'
+
+  readonly FairCurve_NotConverged: 'FairCurve_NotConverged'
+
+  readonly FairCurve_InfiniteSliding: 'FairCurve_InfiniteSliding'
+
+  readonly FairCurve_NullHeight: 'FairCurve_NullHeight'
+
 FairCurve_Batten: declare class FairCurve_Batten
 
   // FairCurve_Batten.constructor (constructor)

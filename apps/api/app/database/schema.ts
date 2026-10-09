@@ -957,11 +957,13 @@ export const creditOperation = billing.table(
     promoHeldAtoms: bigint('promo_held_atoms', { mode: 'bigint' }).notNull(),
     planHeldAtoms: bigint('plan_held_atoms', { mode: 'bigint' }).notNull(),
     purchasedHeldAtoms: bigint('purchased_held_atoms', { mode: 'bigint' }).notNull(),
-    spendBudgetHoldId: text('spend_budget_hold_id').notNull(),
-    riskBudgetHoldId: text('risk_budget_hold_id').notNull(),
+    /** Retired supplier holds: no longer written; legacy rows keep theirs until the columns are dropped. */
+    spendBudgetHoldId: text('spend_budget_hold_id'),
+    riskBudgetHoldId: text('risk_budget_hold_id'),
     dispatchState: text('dispatch_state').notNull().default('admitted'),
     customerState: text('customer_state').notNull().default('pending'),
-    supplierState: text('supplier_state').notNull().default('reserved'),
+    /** Retired supplier finality state: no longer written or read; legacy rows keep theirs until it is dropped. */
+    supplierState: text('supplier_state'),
     generation: bigint('generation', { mode: 'bigint' })
       .notNull()
       .default(sql`1`),
@@ -994,6 +996,14 @@ export const creditOperation = billing.table(
     >(),
     inputTokens: bigint('input_tokens', { mode: 'bigint' }),
     outputTokens: bigint('output_tokens', { mode: 'bigint' }),
+    /**
+     * Estimated supplier cost in pico-USD, written once with the terminal receipt: usage priced at
+     * the pinned supplier valuation, zero for a refusal or an undispatched call, null when unpriced.
+     * Internal reporting only.
+     */
+    supplierCostPicoUsd: bigint('supplier_cost_pico_usd', { mode: 'bigint' }),
+    /** Why a terminal operation carries no supplier cost: `missing_rate`, `dimension_mismatch` or `absorbed`. */
+    supplierCostUnpricedReason: text('supplier_cost_unpriced_reason'),
   },
   (table): PgTableExtraConfigValue[] => [
     foreignKey({
@@ -1041,6 +1051,10 @@ export const creditOperation = billing.table(
     check(
       'credit_operation_dispatch',
       sql`${table.historyVersion} IS NULL OR ${table.customerState} <> 'settled' OR ${table.dispatchIntentAt} IS NOT NULL`,
+    ),
+    check(
+      'credit_operation_supplier_cost',
+      sql`(${table.supplierCostPicoUsd} IS NULL OR (${table.supplierCostPicoUsd} >= 0 AND ${table.supplierCostUnpricedReason} IS NULL)) AND (${table.supplierCostUnpricedReason} IS NULL OR ${table.supplierCostUnpricedReason} IN ('missing_rate','dimension_mismatch','absorbed')) AND (${table.customerState} <> 'pending' OR (${table.supplierCostPicoUsd} IS NULL AND ${table.supplierCostUnpricedReason} IS NULL))`,
     ),
     check(
       'credit_operation_terminal',
@@ -1104,7 +1118,7 @@ export const billingInvocationEvidence = billing.table(
   ],
 );
 
-/** Retains the full observed overrun separately from the bounded customer charge and supplier holds. */
+/** Retains the full observed overrun separately from the bounded customer charge. */
 export const billingOperationException = billing.table(
   'billing_operation_exception',
   {
@@ -1133,20 +1147,31 @@ export const billingOperationException = billing.table(
   ],
 );
 
-/** An observed pricing or supplier-bound overrun closes the SKU until protected review. */
+/**
+ * Operator pauses of one route (a base sku and its long-context sibling), appended and resumed
+ * under the owner identity only. At most one pause per route is unresumed; admission reads it and
+ * never writes it. Rows with an `operation_id` are legacy automatic pauses.
+ */
 export const billingRoutePause = billing.table(
   'billing_route_pause',
   {
+    id: text('id')
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
     environment: text('environment').notNull(),
     sku: text('sku').notNull(),
-    operationId: text('operation_id')
-      .notNull()
-      .references(() => creditOperation.id, { onDelete: 'restrict' }),
+    operationId: text('operation_id').references(() => creditOperation.id, { onDelete: 'restrict' }),
+    actor: text('actor').notNull(),
     reason: text('reason').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    resumedAt: timestamp('resumed_at', { withTimezone: true }),
+    resumedBy: text('resumed_by'),
+    resumeReason: text('resume_reason'),
   },
   (table) => [
-    primaryKey({ columns: [table.environment, table.sku] }),
+    uniqueIndex('billing_route_pause_active')
+      .on(table.environment, table.sku)
+      .where(sql`${table.resumedAt} IS NULL`),
     foreignKey({
       columns: [table.environment, table.operationId],
       foreignColumns: [creditOperation.environment, creditOperation.id],

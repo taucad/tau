@@ -119,3 +119,9 @@ UnitsAPI: declare class UnitsAPI
   [Symbol.dispose](): void;
 
 UnitsAPI_SystemUnits: typeof UnitsAPI_SystemUnits[keyof typeof UnitsAPI_SystemUnits]
+
+  readonly UnitsAPI_DEFAULT: 'UnitsAPI_DEFAULT'
+
+  readonly UnitsAPI_SI: 'UnitsAPI_SI'
+
+  readonly UnitsAPI_MDTV: 'UnitsAPI_MDTV'

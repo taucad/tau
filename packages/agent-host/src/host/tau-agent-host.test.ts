@@ -294,6 +294,8 @@ describe('createTauAgentHost', () => {
     ['FUNDED_OPERATION_LIMIT', 429],
     ['FUNDED_HELPER_LIMIT', 429],
     ['BILLING_RECOVERY_UNAVAILABLE', 503],
+    ['MODEL_ROUTE_PAUSED', 503],
+    ['BILLING_ACCOUNT_RESTRICTED', 403],
   ] as const)('retains %s as a typed failed-run snapshot', async (code, status) => {
     const file = createMemoryLogFile();
     const host = createTauAgentHost(
@@ -801,6 +803,10 @@ describe('createTauAgentHost', () => {
       ATTEMPT_VOIDED: false,
       // A closed account's attempt cannot be resolved or charged; signing in again does not change it (W11).
       BILLING_ACCOUNT_CLOSED: false,
+      // Resuming re-sends to the paused route; the person switches model instead (W6).
+      MODEL_ROUTE_PAUSED: false,
+      // Spending on the account is held; neither a resume nor another model changes it (W11a).
+      BILLING_ACCOUNT_RESTRICTED: false,
       // Compaction failures resume through start-of-turn reprojection and the degradation ladder.
       SUMMARY_REQUIRED: true,
       NO_EVICTABLE_HISTORY: true,

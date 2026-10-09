@@ -1,6 +1,252 @@
 # libcascade — XCAFDoc (3)
 
-7 top-level symbols. Signatures are verbatim typescript.
+9 top-level symbols. Signatures are verbatim typescript.
+
+XCAFDoc_ShapeTool: declare class XCAFDoc_ShapeTool extends TDataStd_GenericEmpty
+
+  // XCAFDoc_ShapeTool.constructor (constructor)
+  constructor();
+
+  // XCAFDoc_ShapeTool.GetID (method)
+  static GetID(): Standard_GUID;
+
+  // XCAFDoc_ShapeTool.Set (method)
+  static Set(L: TDF_Label): XCAFDoc_ShapeTool;
+
+  // XCAFDoc_ShapeTool.IsTopLevel (method)
+  IsTopLevel(L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.IsFree (method)
+  static IsFree(L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.IsShape (method)
+  static IsShape(L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.IsSimpleShape (method)
+  static IsSimpleShape(L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.IsReference (method)
+  static IsReference(L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.IsAssembly (method)
+  static IsAssembly(L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.IsComponent (method)
+  static IsComponent(L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.IsCompound (method)
+  static IsCompound(L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.IsSubShape (method)
+  static IsSubShape(L: TDF_Label): boolean;
+  IsSubShape(shapeL: TDF_Label, sub: TopoDS_Shape): boolean;
+
+  // XCAFDoc_ShapeTool.SearchUsingMap (method)
+  SearchUsingMap(S: TopoDS_Shape, L: TDF_Label, findWithoutLoc: boolean, findSubshape: boolean): boolean;
+
+  // XCAFDoc_ShapeTool.Search (method)
+  Search(S: TopoDS_Shape, L: TDF_Label, findInstance: boolean, findComponent: boolean, findSubshape: boolean): boolean;
+
+  // XCAFDoc_ShapeTool.FindShape (method)
+  FindShape(S: TopoDS_Shape, L: TDF_Label, findInstance: boolean): boolean;
+  FindShape(S: TopoDS_Shape, findInstance: boolean): TDF_Label;
+
+  // XCAFDoc_ShapeTool.GetShape (method)
+  static GetShape(L: TDF_Label, S: TopoDS_Shape): boolean;
+  static GetShape(L: TDF_Label): TopoDS_Shape;
+
+  // XCAFDoc_ShapeTool.GetOneShape (method)
+  static GetOneShape(theLabels: NCollection_Sequence_TDF_Label): TopoDS_Shape;
+  GetOneShape(): TopoDS_Shape;
+
+  // XCAFDoc_ShapeTool.NewShape (method)
+  NewShape(): TDF_Label;
+
+  // XCAFDoc_ShapeTool.SetShape (method)
+  SetShape(L: TDF_Label, S: TopoDS_Shape): void;
+
+  // XCAFDoc_ShapeTool.AddShape (method)
+  AddShape(S: TopoDS_Shape, makeAssembly?: boolean, makePrepare?: boolean): TDF_Label;
+
+  // XCAFDoc_ShapeTool.RemoveShape (method)
+  RemoveShape(L: TDF_Label, removeCompletely?: boolean): boolean;
+
+  // XCAFDoc_ShapeTool.Init (method)
+  Init(): void;
+
+  // XCAFDoc_ShapeTool.SetAutoNaming (method)
+  static SetAutoNaming(V: boolean): void;
+
+  // XCAFDoc_ShapeTool.AutoNaming (method)
+  static AutoNaming(): boolean;
+
+  // XCAFDoc_ShapeTool.ComputeShapes (method)
+  ComputeShapes(L: TDF_Label): void;
+
+  // XCAFDoc_ShapeTool.ComputeSimpleShapes (method)
+  ComputeSimpleShapes(): void;
+
+  // XCAFDoc_ShapeTool.GetShapes (method)
+  GetShapes(Labels: NCollection_Sequence_TDF_Label): void;
+
+  // XCAFDoc_ShapeTool.GetFreeShapes (method)
+  GetFreeShapes(FreeLabels: NCollection_Sequence_TDF_Label): void;
+
+  // XCAFDoc_ShapeTool.GetUsers (method)
+  static GetUsers(L: TDF_Label, Labels: NCollection_Sequence_TDF_Label, getsubchilds: boolean): number;
+
+  // XCAFDoc_ShapeTool.GetLocation (method)
+  static GetLocation(L: TDF_Label): TopLoc_Location;
+
+  // XCAFDoc_ShapeTool.GetReferredShape (method)
+  static GetReferredShape(L: TDF_Label, Label: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.NbComponents (method)
+  static NbComponents(L: TDF_Label, getsubchilds?: boolean): number;
+
+  // XCAFDoc_ShapeTool.GetComponents (method)
+  static GetComponents(L: TDF_Label, Labels: NCollection_Sequence_TDF_Label, getsubchilds: boolean): boolean;
+
+  // XCAFDoc_ShapeTool.AddComponent (method)
+  AddComponent(assembly: TDF_Label, comp: TDF_Label, Loc: TopLoc_Location): TDF_Label;
+  AddComponent(assembly: TDF_Label, comp: TopoDS_Shape, expand: boolean): TDF_Label;
+
+  // XCAFDoc_ShapeTool.RemoveComponent (method)
+  RemoveComponent(comp: TDF_Label): void;
+
+  // XCAFDoc_ShapeTool.UpdateAssemblies (method)
+  UpdateAssemblies(): void;
+
+  // XCAFDoc_ShapeTool.FindSubShape (method)
+  FindSubShape(shapeL: TDF_Label, sub: TopoDS_Shape, L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.AddSubShape (method)
+  AddSubShape(shapeL: TDF_Label, sub: TopoDS_Shape): TDF_Label;
+  AddSubShape(shapeL: TDF_Label, sub: TopoDS_Shape, addedSubShapeL: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.FindMainShapeUsingMap (method)
+  FindMainShapeUsingMap(sub: TopoDS_Shape): TDF_Label;
+
+  // XCAFDoc_ShapeTool.FindMainShape (method)
+  FindMainShape(sub: TopoDS_Shape): TDF_Label;
+
+  // XCAFDoc_ShapeTool.GetSubShapes (method)
+  static GetSubShapes(L: TDF_Label, Labels: NCollection_Sequence_TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.BaseLabel (method)
+  BaseLabel(): TDF_Label;
+
+  // XCAFDoc_ShapeTool.ID (method)
+  ID(): Standard_GUID;
+
+  // XCAFDoc_ShapeTool.IsExternRef (method)
+  static IsExternRef(L: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.SetExternRefs (method)
+  SetExternRefs(SHAS: NCollection_Sequence_handle_TCollection_HAsciiString): TDF_Label;
+  SetExternRefs(L: TDF_Label, SHAS: NCollection_Sequence_handle_TCollection_HAsciiString): void;
+
+  // XCAFDoc_ShapeTool.GetExternRefs (method)
+  static GetExternRefs(L: TDF_Label, SHAS: NCollection_Sequence_handle_TCollection_HAsciiString): void;
+
+  // XCAFDoc_ShapeTool.SetSHUO (method)
+  SetSHUO(Labels: NCollection_Sequence_TDF_Label): { returnValue: boolean; MainSHUOAttr: XCAFDoc_GraphNode; [Symbol.dispose](): void };
+
+  // XCAFDoc_ShapeTool.GetSHUO (method)
+  static GetSHUO(SHUOLabel: TDF_Label): { returnValue: boolean; aSHUOAttr: XCAFDoc_GraphNode; [Symbol.dispose](): void };
+
+  // XCAFDoc_ShapeTool.GetAllComponentSHUO (method)
+  static GetAllComponentSHUO(CompLabel: TDF_Label, SHUOAttrs: NCollection_Sequence_handle_TDF_Attribute): boolean;
+
+  // XCAFDoc_ShapeTool.GetSHUOUpperUsage (method)
+  static GetSHUOUpperUsage(NextUsageL: TDF_Label, Labels: NCollection_Sequence_TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.GetSHUONextUsage (method)
+  static GetSHUONextUsage(UpperUsageL: TDF_Label, Labels: NCollection_Sequence_TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.RemoveSHUO (method)
+  RemoveSHUO(SHUOLabel: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.FindComponent (method)
+  FindComponent(theShape: TopoDS_Shape, Labels: NCollection_Sequence_TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.GetSHUOInstance (method)
+  GetSHUOInstance(theSHUO: XCAFDoc_GraphNode): TopoDS_Shape;
+
+  // XCAFDoc_ShapeTool.SetInstanceSHUO (method)
+  SetInstanceSHUO(theShape: TopoDS_Shape): XCAFDoc_GraphNode;
+
+  // XCAFDoc_ShapeTool.GetAllSHUOInstances (method)
+  GetAllSHUOInstances(theSHUO: XCAFDoc_GraphNode, theSHUOShapeSeq: NCollection_Sequence_TopoDS_Shape): boolean;
+
+  // XCAFDoc_ShapeTool.FindSHUO (method)
+  static FindSHUO(Labels: NCollection_Sequence_TDF_Label): { returnValue: boolean; theSHUOAttr: XCAFDoc_GraphNode; [Symbol.dispose](): void };
+
+  // XCAFDoc_ShapeTool.SetLocation (method)
+  SetLocation(theShapeLabel: TDF_Label, theLoc: TopLoc_Location, theRefLabel: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.Expand (method)
+  Expand(Shape: TDF_Label): boolean;
+
+  // XCAFDoc_ShapeTool.GetNamedProperties (method)
+  GetNamedProperties(theLabel: TDF_Label, theToCreate: boolean): TDataStd_NamedData;
+  GetNamedProperties(theShape: TopoDS_Shape, theToCreate: boolean): TDataStd_NamedData;
+
+  // XCAFDoc_ShapeTool.get_type_name (method)
+  static get_type_name(): string;
+
+  // XCAFDoc_ShapeTool.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // XCAFDoc_ShapeTool.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // XCAFDoc_ShapeTool.NewEmpty (method)
+  NewEmpty(): TDF_Attribute;
+
+  // XCAFDoc_ShapeTool.delete (method)
+  delete(): void;
+
+  // XCAFDoc_ShapeTool.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+XCAFDoc_View: declare class XCAFDoc_View extends TDataStd_GenericEmpty
+
+  // XCAFDoc_View.constructor (constructor)
+  constructor();
+
+  // XCAFDoc_View.GetID (method)
+  static GetID(): Standard_GUID;
+
+  // XCAFDoc_View.Set (method)
+  static Set(theLabel: TDF_Label): XCAFDoc_View;
+
+  // XCAFDoc_View.ID (method)
+  ID(): Standard_GUID;
+
+  // XCAFDoc_View.SetObject (method)
+  SetObject(theViewObject: XCAFView_Object): void;
+
+  // XCAFDoc_View.GetObject (method)
+  GetObject(): XCAFView_Object;
+
+  // XCAFDoc_View.get_type_name (method)
+  static get_type_name(): string;
+
+  // XCAFDoc_View.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // XCAFDoc_View.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // XCAFDoc_View.NewEmpty (method)
+  NewEmpty(): TDF_Attribute;
+
+  // XCAFDoc_View.delete (method)
+  delete(): void;
+
+  // XCAFDoc_View.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 XCAFDoc_ViewTool: declare class XCAFDoc_ViewTool extends TDataStd_GenericEmpty
 

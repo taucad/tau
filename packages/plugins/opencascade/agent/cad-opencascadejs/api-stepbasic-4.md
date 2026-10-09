@@ -1,6 +1,6 @@
 # libcascade — StepBasic (4)
 
-50 top-level symbols. Signatures are verbatim typescript.
+41 top-level symbols. Signatures are verbatim typescript.
 
 StepBasic_ProductDefinitionFormationRelationship: declare class StepBasic_ProductDefinitionFormationRelationship extends Standard_Transient
 
@@ -601,6 +601,38 @@ StepBasic_SecurityClassificationLevel: declare class StepBasic_SecurityClassific
 
 StepBasic_SiPrefix: typeof StepBasic_SiPrefix[keyof typeof StepBasic_SiPrefix]
 
+  readonly StepBasic_spExa: 'StepBasic_spExa'
+
+  readonly StepBasic_spPeta: 'StepBasic_spPeta'
+
+  readonly StepBasic_spTera: 'StepBasic_spTera'
+
+  readonly StepBasic_spGiga: 'StepBasic_spGiga'
+
+  readonly StepBasic_spMega: 'StepBasic_spMega'
+
+  readonly StepBasic_spKilo: 'StepBasic_spKilo'
+
+  readonly StepBasic_spHecto: 'StepBasic_spHecto'
+
+  readonly StepBasic_spDeca: 'StepBasic_spDeca'
+
+  readonly StepBasic_spDeci: 'StepBasic_spDeci'
+
+  readonly StepBasic_spCenti: 'StepBasic_spCenti'
+
+  readonly StepBasic_spMilli: 'StepBasic_spMilli'
+
+  readonly StepBasic_spMicro: 'StepBasic_spMicro'
+
+  readonly StepBasic_spNano: 'StepBasic_spNano'
+
+  readonly StepBasic_spPico: 'StepBasic_spPico'
+
+  readonly StepBasic_spFemto: 'StepBasic_spFemto'
+
+  readonly StepBasic_spAtto: 'StepBasic_spAtto'
+
 StepBasic_SiUnit: declare class StepBasic_SiUnit extends StepBasic_NamedUnit
 
   // StepBasic_SiUnit.constructor (constructor)
@@ -913,6 +945,62 @@ StepBasic_SiUnitAndVolumeUnit: declare class StepBasic_SiUnitAndVolumeUnit exten
 
 StepBasic_SiUnitName: typeof StepBasic_SiUnitName[keyof typeof StepBasic_SiUnitName]
 
+  readonly StepBasic_sunMetre: 'StepBasic_sunMetre'
+
+  readonly StepBasic_sunGram: 'StepBasic_sunGram'
+
+  readonly StepBasic_sunSecond: 'StepBasic_sunSecond'
+
+  readonly StepBasic_sunAmpere: 'StepBasic_sunAmpere'
+
+  readonly StepBasic_sunKelvin: 'StepBasic_sunKelvin'
+
+  readonly StepBasic_sunMole: 'StepBasic_sunMole'
+
+  readonly StepBasic_sunCandela: 'StepBasic_sunCandela'
+
+  readonly StepBasic_sunRadian: 'StepBasic_sunRadian'
+
+  readonly StepBasic_sunSteradian: 'StepBasic_sunSteradian'
+
+  readonly StepBasic_sunHertz: 'StepBasic_sunHertz'
+
+  readonly StepBasic_sunNewton: 'StepBasic_sunNewton'
+
+  readonly StepBasic_sunPascal: 'StepBasic_sunPascal'
+
+  readonly StepBasic_sunJoule: 'StepBasic_sunJoule'
+
+  readonly StepBasic_sunWatt: 'StepBasic_sunWatt'
+
+  readonly StepBasic_sunCoulomb: 'StepBasic_sunCoulomb'
+
+  readonly StepBasic_sunVolt: 'StepBasic_sunVolt'
+
+  readonly StepBasic_sunFarad: 'StepBasic_sunFarad'
+
+  readonly StepBasic_sunOhm: 'StepBasic_sunOhm'
+
+  readonly StepBasic_sunSiemens: 'StepBasic_sunSiemens'
+
+  readonly StepBasic_sunWeber: 'StepBasic_sunWeber'
+
+  readonly StepBasic_sunTesla: 'StepBasic_sunTesla'
+
+  readonly StepBasic_sunHenry: 'StepBasic_sunHenry'
+
+  readonly StepBasic_sunDegreeCelsius: 'StepBasic_sunDegreeCelsius'
+
+  readonly StepBasic_sunLumen: 'StepBasic_sunLumen'
+
+  readonly StepBasic_sunLux: 'StepBasic_sunLux'
+
+  readonly StepBasic_sunBecquerel: 'StepBasic_sunBecquerel'
+
+  readonly StepBasic_sunGray: 'StepBasic_sunGray'
+
+  readonly StepBasic_sunSievert: 'StepBasic_sunSievert'
+
 StepBasic_SizeMember: declare class StepBasic_SizeMember extends StepData_SelectReal
 
   // StepBasic_SizeMember.constructor (constructor)
@@ -1009,6 +1097,12 @@ StepBasic_SolidAngleUnit: declare class StepBasic_SolidAngleUnit extends StepBas
   [Symbol.dispose](): void;
 
 StepBasic_Source: typeof StepBasic_Source[keyof typeof StepBasic_Source]
+
+  readonly StepBasic_sMade: 'StepBasic_sMade'
+
+  readonly StepBasic_sBought: 'StepBasic_sBought'
+
+  readonly StepBasic_sNotKnown: 'StepBasic_sNotKnown'
 
 StepBasic_SourceItem: declare class StepBasic_SourceItem extends StepData_SelectType
 
@@ -1195,79 +1289,3 @@ StepBasic_VersionedActionRequest: declare class StepBasic_VersionedActionRequest
 
   // StepBasic_VersionedActionRequest.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
-
-StepBasic_VolumeUnit: declare class StepBasic_VolumeUnit extends StepBasic_NamedUnit
-
-  // StepBasic_VolumeUnit.constructor (constructor)
-  constructor();
-
-  // StepBasic_VolumeUnit.get_type_name (method)
-  static get_type_name(): string;
-
-  // StepBasic_VolumeUnit.get_type_descriptor (method)
-  static get_type_descriptor(): Standard_Type;
-
-  // StepBasic_VolumeUnit.DynamicType (method)
-  DynamicType(): Standard_Type;
-
-  // StepBasic_VolumeUnit.delete (method)
-  delete(): void;
-
-  // StepBasic_VolumeUnit.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-StepBasic_WeekOfYearAndDayDate: declare class StepBasic_WeekOfYearAndDayDate extends StepBasic_Date
-
-  // StepBasic_WeekOfYearAndDayDate.constructor (constructor)
-  constructor();
-
-  // StepBasic_WeekOfYearAndDayDate.Init (method)
-  Init(aYearComponent: number, aWeekComponent: number, hasAdayComponent: boolean, aDayComponent: number): void;
-  Init(aYearComponent: number): void;
-
-  // StepBasic_WeekOfYearAndDayDate.SetWeekComponent (method)
-  SetWeekComponent(aWeekComponent: number): void;
-
-  // StepBasic_WeekOfYearAndDayDate.WeekComponent (method)
-  WeekComponent(): number;
-
-  // StepBasic_WeekOfYearAndDayDate.SetDayComponent (method)
-  SetDayComponent(aDayComponent: number): void;
-
-  // StepBasic_WeekOfYearAndDayDate.UnSetDayComponent (method)
-  UnSetDayComponent(): void;
-
-  // StepBasic_WeekOfYearAndDayDate.DayComponent (method)
-  DayComponent(): number;
-
-  // StepBasic_WeekOfYearAndDayDate.HasDayComponent (method)
-  HasDayComponent(): boolean;
-
-  // StepBasic_WeekOfYearAndDayDate.get_type_name (method)
-  static get_type_name(): string;
-
-  // StepBasic_WeekOfYearAndDayDate.get_type_descriptor (method)
-  static get_type_descriptor(): Standard_Type;
-
-  // StepBasic_WeekOfYearAndDayDate.DynamicType (method)
-  DynamicType(): Standard_Type;
-
-  // StepBasic_WeekOfYearAndDayDate.delete (method)
-  delete(): void;
-
-  // StepBasic_WeekOfYearAndDayDate.[Symbol.dispose] (method)
-  [Symbol.dispose](): void;
-
-StepBasic_Array1OfApproval: NCollection_Array1_handle_StepBasic_Approval
-
-StepBasic_Array1OfDerivedUnitElement: NCollection_Array1_handle_StepBasic_DerivedUnitElement
-
-StepBasic_Array1OfDocument: NCollection_Array1_handle_StepBasic_Document
-
-StepBasic_Array1OfNamedUnit: NCollection_Array1_handle_StepBasic_NamedUnit
-
-StepBasic_Array1OfOrganization: NCollection_Array1_handle_StepBasic_Organization
-
-StepBasic_Array1OfPerson: NCollection_Array1_handle_StepBasic_Person
-
-StepBasic_Array1OfProduct: NCollection_Array1_handle_StepBasic_Product

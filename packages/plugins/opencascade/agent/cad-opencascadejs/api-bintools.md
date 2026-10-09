@@ -74,6 +74,16 @@ BinTools_CurveSet: declare class BinTools_CurveSet
 
 BinTools_FormatVersion: typeof BinTools_FormatVersion[keyof typeof BinTools_FormatVersion]
 
+  readonly BinTools_FormatVersion_VERSION_1: 'BinTools_FormatVersion_VERSION_1'
+
+  readonly BinTools_FormatVersion_VERSION_2: 'BinTools_FormatVersion_VERSION_2'
+
+  readonly BinTools_FormatVersion_VERSION_3: 'BinTools_FormatVersion_VERSION_3'
+
+  readonly BinTools_FormatVersion_VERSION_4: 'BinTools_FormatVersion_VERSION_4'
+
+  readonly BinTools_FormatVersion_CURRENT: 'BinTools_FormatVersion_CURRENT'
+
 BinTools_IStream: declare class BinTools_IStream
 
   // BinTools_IStream.ReadType (method)
@@ -179,6 +189,52 @@ BinTools_OStream: declare class BinTools_OStream
   [Symbol.dispose](): void;
 
 BinTools_ObjectType: typeof BinTools_ObjectType[keyof typeof BinTools_ObjectType]
+
+  readonly BinTools_ObjectType_Unknown: 'BinTools_ObjectType_Unknown'
+
+  readonly BinTools_ObjectType_Reference8: 'BinTools_ObjectType_Reference8'
+
+  readonly BinTools_ObjectType_Reference16: 'BinTools_ObjectType_Reference16'
+
+  readonly BinTools_ObjectType_Reference32: 'BinTools_ObjectType_Reference32'
+
+  readonly BinTools_ObjectType_Reference64: 'BinTools_ObjectType_Reference64'
+
+  readonly BinTools_ObjectType_Location: 'BinTools_ObjectType_Location'
+
+  readonly BinTools_ObjectType_SimpleLocation: 'BinTools_ObjectType_SimpleLocation'
+
+  readonly BinTools_ObjectType_EmptyLocation: 'BinTools_ObjectType_EmptyLocation'
+
+  readonly BinTools_ObjectType_LocationEnd: 'BinTools_ObjectType_LocationEnd'
+
+  readonly BinTools_ObjectType_Curve: 'BinTools_ObjectType_Curve'
+
+  readonly BinTools_ObjectType_EmptyCurve: 'BinTools_ObjectType_EmptyCurve'
+
+  readonly BinTools_ObjectType_Curve2d: 'BinTools_ObjectType_Curve2d'
+
+  readonly BinTools_ObjectType_EmptyCurve2d: 'BinTools_ObjectType_EmptyCurve2d'
+
+  readonly BinTools_ObjectType_Surface: 'BinTools_ObjectType_Surface'
+
+  readonly BinTools_ObjectType_EmptySurface: 'BinTools_ObjectType_EmptySurface'
+
+  readonly BinTools_ObjectType_Polygon3d: 'BinTools_ObjectType_Polygon3d'
+
+  readonly BinTools_ObjectType_EmptyPolygon3d: 'BinTools_ObjectType_EmptyPolygon3d'
+
+  readonly BinTools_ObjectType_PolygonOnTriangulation: 'BinTools_ObjectType_PolygonOnTriangulation'
+
+  readonly BinTools_ObjectType_EmptyPolygonOnTriangulation: 'BinTools_ObjectType_EmptyPolygonOnTriangulation'
+
+  readonly BinTools_ObjectType_Triangulation: 'BinTools_ObjectType_Triangulation'
+
+  readonly BinTools_ObjectType_EmptyTriangulation: 'BinTools_ObjectType_EmptyTriangulation'
+
+  readonly BinTools_ObjectType_EmptyShape: 'BinTools_ObjectType_EmptyShape'
+
+  readonly BinTools_ObjectType_EndShape: 'BinTools_ObjectType_EndShape'
 
 BinTools_ShapeReader: declare class BinTools_ShapeReader extends BinTools_ShapeSetBase
 

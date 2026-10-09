@@ -311,6 +311,20 @@ export type BrowserChatStoreOptions = Readonly<{
         durability?: StorageDurabilityClass | undefined;
       }>;
   /**
+   * Rooted observation of a project-relative log path. Resolve only once delivery is acknowledged; report lost
+   * delivery through onError, and release registration on abort. Notifications never substitute for fresh bytes.
+   */
+  observeLog?:
+    | ((
+        input: Readonly<{
+          path: string;
+          signal: AbortSignal;
+          onChange: () => void;
+          onError: (error: unknown) => void;
+        }>,
+      ) => Promise<() => void>)
+    | undefined;
+  /**
    * The page's visibility, relayed to the worker: a hidden page never queues for a chat's lock (RH-R16), and a page
    * shown again re-arms the heartbeat bounds it may have been frozen through.
    */
@@ -396,6 +410,10 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
     };
     return createChatStore({
       platform: 'browser',
+      observeBytes:
+        options.observeLog === undefined
+          ? undefined
+          : async (chatId, input) => options.observeLog!({ ...input, path: logPath(chatId) }),
       durability: 'exclusive-append',
       attachments: { read: async (chatId, path) => bytesOf(chatAttachmentPath(chatId, path)) },
       readBytes: async (chatId) => (await bytesOf(logPath(chatId))) ?? new Uint8Array(),
@@ -409,6 +427,10 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
   const { fileSystem } = log;
   return createChatStore({
     platform: 'browser',
+    observeBytes:
+      options.observeLog === undefined
+        ? undefined
+        : async (chatId, input) => options.observeLog!({ ...input, path: logPath(chatId) }),
     durability: log.durability ?? 'stream-append',
     attachments: createProviderAttachmentReader(fileSystem),
     readBytes: async (chatId) => {

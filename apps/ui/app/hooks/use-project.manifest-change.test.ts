@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { projectToManifest, serializeProjectManifest } from '@taucad/types';
+import { projectToManifest, readProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
 import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
@@ -35,22 +35,77 @@ const observe = ({
   const report = vi.fn();
   const observer = createProjectManifestChangeObserver({
     projectId: current.id,
-    readManifest,
     getCurrent: () => ({ project: current, issue }),
     reload,
     report,
   });
-  return { observer, reload, report };
+  return { observer, readManifest, reload, report };
 };
 
 describe('createProjectManifestChangeObserver', () => {
+  it('should retain the mounted manifest through malformed JSON and clear its issue when identical valid bytes return', async () => {
+    const retained = projectToManifest({
+      ...project('Retained details'),
+      assets: { main: { entryPath: 'assembly.scad' } },
+    });
+    const validBytes = serializeProjectManifest(retained);
+    let bytes = validBytes;
+    const current: { project: ProjectManifest; issue: ProjectManifestParseIssue | undefined } = {
+      project: retained,
+      issue: undefined,
+    };
+    const reload = vi.fn(() => {
+      const read = readProjectManifestBytes(bytes, { id: retained.id });
+      if (!read.success) {
+        throw new Error('Expected a scoped manifest reading');
+      }
+      current.project = read.data;
+      current.issue = read.issue;
+    });
+    const report = vi.fn((issue: ProjectManifestParseIssue) => {
+      current.issue = issue;
+    });
+    const observer = createProjectManifestChangeObserver({
+      projectId: retained.id,
+      getCurrent: () => current,
+      reload,
+      report,
+    });
+    const readManifest = async (): Promise<Uint8Array<ArrayBuffer>> => bytes;
+    try {
+      await observer.check({ readManifest });
+      expect(reload).not.toHaveBeenCalled();
+      bytes = new TextEncoder().encode('{');
+      await observer.check({ readManifest });
+      expect.soft(current.project).toBe(retained);
+      expect.soft(current.issue?.code).toBe('manifest-invalid-json');
+      expect.soft(report).toHaveBeenCalledOnce();
+      expect.soft(reload).not.toHaveBeenCalled();
+
+      bytes = validBytes;
+      await observer.check({ readManifest });
+      expect(current.project).toEqual(retained);
+      expect(current.issue).toBeUndefined();
+      expect(reload).toHaveBeenCalledOnce();
+      await observer.check({ readManifest });
+      expect(reload).toHaveBeenCalledOnce();
+    } finally {
+      observer.dispose();
+    }
+  });
+
   it('does not report or reload a read invalidated before it resolves', async () => {
     const gate = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
-    const { observer, reload, report } = observe({
+    const {
+      observer,
+      reload,
+      report,
+      readManifest: readObservedManifest,
+    } = observe({
       current: project('Current'),
       readManifest: async () => gate.promise,
     });
-    const pending = observer.check();
+    const pending = observer.check({ readManifest: readObservedManifest });
     observer.invalidate();
     gate.resolve(serializeProjectManifest(project('Obsolete')));
     await pending;
@@ -60,12 +115,17 @@ describe('createProjectManifestChangeObserver', () => {
 
   it('does not reload when a local write matches the current project', async () => {
     const current = project('Current');
-    const { observer, reload, report } = observe({
+    const {
+      observer,
+      reload,
+      report,
+      readManifest: readObservedManifest,
+    } = observe({
       current,
       readManifest: async () => serializeProjectManifest(current),
     });
 
-    await observer.check();
+    await observer.check({ readManifest: readObservedManifest });
 
     expect(reload).not.toHaveBeenCalled();
     expect(report).not.toHaveBeenCalled();
@@ -74,10 +134,14 @@ describe('createProjectManifestChangeObserver', () => {
   it('reloads an externally changed manifest once', async () => {
     const current = project('Current');
     const changed = project('External change');
-    const { observer, reload } = observe({ current, readManifest: async () => serializeProjectManifest(changed) });
+    const {
+      observer,
+      reload,
+      readManifest: readObservedManifest,
+    } = observe({ current, readManifest: async () => serializeProjectManifest(changed) });
 
-    await observer.check();
-    await observer.check();
+    await observer.check({ readManifest: readObservedManifest });
+    await observer.check({ readManifest: readObservedManifest });
 
     expect(reload).toHaveBeenCalledOnce();
   });
@@ -87,9 +151,14 @@ describe('createProjectManifestChangeObserver', () => {
   it('reloads a degraded write so its issue shows while the project is open', async () => {
     const current = project('Current');
     const degraded = encode({ ...current, assets: { ...current.assets, second: { entryPath: 'second.cs' } } });
-    const { observer, reload, report } = observe({ current, readManifest: async () => degraded });
+    const {
+      observer,
+      reload,
+      report,
+      readManifest: readObservedManifest,
+    } = observe({ current, readManifest: async () => degraded });
 
-    await observer.check();
+    await observer.check({ readManifest: readObservedManifest });
 
     expect(reload).toHaveBeenCalledOnce();
     expect(report).not.toHaveBeenCalled();
@@ -121,9 +190,14 @@ describe('createProjectManifestChangeObserver', () => {
       'manifest-unknown-schema',
     ],
   ] as const)('reports a manifest %s instead of reloading into an error', async (_case, readManifest, code) => {
-    const { observer, reload, report } = observe({ current: project('Current'), readManifest });
+    const {
+      observer,
+      reload,
+      report,
+      readManifest: readObservedManifest,
+    } = observe({ current: project('Current'), readManifest });
 
-    await observer.check();
+    await observer.check({ readManifest: readObservedManifest });
 
     expect(reload).not.toHaveBeenCalled();
     expect(report).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code }));
@@ -131,20 +205,29 @@ describe('createProjectManifestChangeObserver', () => {
 
   it('reloads to clear a report when the last good bytes return', async () => {
     const current = project('Current');
-    const { observer, reload } = observe({
+    const {
+      observer,
+      reload,
+      readManifest: readObservedManifest,
+    } = observe({
       current,
       issue: { code: 'manifest-missing' },
       readManifest: async () => serializeProjectManifest(current),
     });
 
-    await observer.check();
+    await observer.check({ readManifest: readObservedManifest });
 
     expect(reload).toHaveBeenCalledOnce();
   });
 
   it('ignores results that arrive after disposal', async () => {
     let resolveRead: ((bytes: Uint8Array<ArrayBuffer>) => void) | undefined;
-    const { observer, reload, report } = observe({
+    const {
+      observer,
+      reload,
+      report,
+      readManifest: readObservedManifest,
+    } = observe({
       current: project('Current'),
       readManifest: async () =>
         new Promise((resolve) => {
@@ -152,7 +235,7 @@ describe('createProjectManifestChangeObserver', () => {
         }),
     });
 
-    const pending = observer.check();
+    const pending = observer.check({ readManifest: readObservedManifest });
     observer.dispose();
     resolveRead?.(serializeProjectManifest(project('External change')));
     await pending;

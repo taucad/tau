@@ -1443,6 +1443,9 @@ importers:
       '@taucad/formal':
         specifier: workspace:*
         version: link:tools/formal
+      '@taucad/fs-bridge':
+        specifier: workspace:*
+        version: link:libs/fs-bridge
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:packages/core/geometry
@@ -1455,6 +1458,9 @@ importers:
       '@taucad/oxlint':
         specifier: workspace:*
         version: link:libs/oxlint
+      '@taucad/project-core':
+        specifier: workspace:*
+        version: link:packages/core/project
       '@taucad/react':
         specifier: workspace:*
         version: link:packages/react
@@ -20889,8 +20895,8 @@ packages:
   leac@0.6.0:
     resolution: {integrity: sha512-y+SqErxb8h7nE/fiEX07jsbuhrpO9lL8eca7/Y1nuWV2moNlXhyd59iDGcRf6moVyDMbmTNzL40SUyrFU/yDpg==}
 
-  legacy-javascript@0.0.1:
-    resolution: {integrity: sha512-lPyntS4/aS7jpuvOlitZDFifBCb4W8L/3QU0PLbUTUj+zYah8rfVjYic88yG7ZKTxhS5h9iz7duT8oUXKszLhg==}
+  legacy-javascript@0.0.3:
+    resolution: {integrity: sha512-1r6MT4dVaJyXt4G07Cm2cQ0AUaLJdefiEp4SmIAylA++gnEQ82YvmzE58RkM5EP0fk5hROLCslUPGnwIYdZQVA==}
 
   less-loader@12.3.3:
     resolution: {integrity: sha512-F0+ErFFDj3Pt+nVrCN6VlEGEzocv9s7x/aR9v2riI+WM83UAfTYBDBjGPJnT55lBLR6JSI4fmWblt+aA2JN6/w==}
@@ -34298,7 +34304,7 @@ snapshots:
 
   '@paulirish/trace_engine@0.0.65':
     dependencies:
-      legacy-javascript: 0.0.1
+      legacy-javascript: 0.0.3
       third-party-web: 0.30.0
 
   '@peculiar/asn1-android@2.9.4':
@@ -44916,7 +44922,7 @@ snapshots:
 
   leac@0.6.0: {}
 
-  legacy-javascript@0.0.1: {}
+  legacy-javascript@0.0.3: {}
 
   less-loader@12.3.3(@rspack/core@1.6.8(@swc/helpers@0.5.23))(less@4.5.1)(webpack@5.107.2(@swc/core@1.15.8(@swc/helpers@0.5.23))(esbuild@0.27.7)(lightningcss@1.32.0)(postcss@8.5.25)):
     dependencies:

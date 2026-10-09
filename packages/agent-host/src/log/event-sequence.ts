@@ -1,5 +1,6 @@
 import { EventLogError } from '#log/event-log-error.js';
 import { canonicalJson } from '#log/canonical-json.js';
+import type { ReplayIdentity, ReplayReadRow } from '#log/serialization.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const fingerprint = (event: AgentLogEvent): string => canonicalJson(event);
@@ -12,12 +13,17 @@ type SequenceCheck = { readonly duplicate: true } | { readonly duplicate: false;
 /** A term rule a row in history broke; the row is still kept, because it is durable (CL-R6). @internal */
 export type SequenceAnomaly = { readonly kind: 'order' | 'conflict'; readonly message: string };
 
+type StoredIdentity = string | ReplayIdentity;
+const canonicalOf = (identity: StoredIdentity): string =>
+  typeof identity === 'string' ? identity : identity.canonical();
+
 type EventSequence = {
   /** The term rules at append (CL-R5): throws `EVENT_MUTATED` or `EVENT_OUT_OF_ORDER`, never writes. */
   check(event: AgentLogEvent): SequenceCheck;
   commit(event: AgentLogEvent, fingerprint: string): void;
   /** The same rules over history (CL-R6): never throws; a broken rule is reported and the row is kept. */
   replay(event: AgentLogEvent): { readonly duplicate: boolean; readonly anomaly?: SequenceAnomaly };
+  replayOwned(row: ReplayReadRow): { readonly duplicate: boolean; readonly anomaly?: SequenceAnomaly };
 };
 
 /**
@@ -31,16 +37,19 @@ type EventSequence = {
  * @internal
  */
 export const createEventSequence = (): EventSequence => {
-  const cursorFingerprints = new Map<string, string>();
+  const cursorFingerprints = new Map<string, StoredIdentity>();
   const termEpochs = new Map<string, number>();
   let activeTerm: string | undefined;
   let lastSequence = -1;
   let maxEpoch = 0;
 
-  const violation = (event: AgentLogEvent, nextFingerprint: string): EventLogError | 'duplicate' | undefined => {
+  const violation = (
+    event: AgentLogEvent,
+    nextFingerprint: StoredIdentity,
+  ): EventLogError | 'duplicate' | undefined => {
     const prior = cursorFingerprints.get(cursorKey(event));
     if (prior !== undefined) {
-      return prior === nextFingerprint
+      return canonicalOf(prior) === canonicalOf(nextFingerprint)
         ? 'duplicate'
         : new EventLogError(
             'EVENT_MUTATED',
@@ -72,7 +81,7 @@ export const createEventSequence = (): EventSequence => {
     return undefined;
   };
 
-  const commit = (event: AgentLogEvent, nextFingerprint: string): void => {
+  const commit = (event: AgentLogEvent, nextFingerprint: StoredIdentity): void => {
     if (!termEpochs.has(event.leaderEpoch)) {
       termEpochs.set(event.leaderEpoch, epochOf(event));
     }
@@ -80,6 +89,22 @@ export const createEventSequence = (): EventSequence => {
     lastSequence = event.sequence;
     maxEpoch = Math.max(maxEpoch, epochOf(event));
     cursorFingerprints.set(cursorKey(event), nextFingerprint);
+  };
+
+  const replayIdentity = (
+    event: AgentLogEvent,
+    nextFingerprint: StoredIdentity,
+  ): ReturnType<EventSequence['replay']> => {
+    const found = violation(event, nextFingerprint);
+    if (found === 'duplicate') {
+      return { duplicate: true };
+    }
+    if (found?.code === 'EVENT_MUTATED') {
+      // The first copy of a key stays its identity; the differing copy is reported and kept in file order.
+      return { duplicate: false, anomaly: { kind: 'conflict', message: found.message } };
+    }
+    commit(event, nextFingerprint);
+    return { duplicate: false, ...(found ? { anomaly: { kind: 'order', message: found.message } } : {}) };
   };
 
   return {
@@ -95,18 +120,7 @@ export const createEventSequence = (): EventSequence => {
       return { duplicate: false, fingerprint: nextFingerprint };
     },
     commit,
-    replay: (event) => {
-      const nextFingerprint = fingerprint(event);
-      const found = violation(event, nextFingerprint);
-      if (found === 'duplicate') {
-        return { duplicate: true };
-      }
-      if (found?.code === 'EVENT_MUTATED') {
-        // The first copy of a key stays its identity; the differing copy is reported and kept in file order.
-        return { duplicate: false, anomaly: { kind: 'conflict', message: found.message } };
-      }
-      commit(event, nextFingerprint);
-      return { duplicate: false, ...(found ? { anomaly: { kind: 'order', message: found.message } } : {}) };
-    },
+    replay: (event) => replayIdentity(event, fingerprint(event)),
+    replayOwned: (row) => replayIdentity(row.event, row.identity),
   };
 };

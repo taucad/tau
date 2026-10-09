@@ -7,7 +7,7 @@ import type {
   ParameterSetRequest,
   ParameterSetTarget,
 } from '@taucad/parameters';
-import type { ParameterDraft } from '#services/parameter-set-service.js';
+import type { ParameterDraft, ParameterValueEdit } from '#services/parameter-set-service.js';
 
 export type Units = {
   length: {
@@ -30,21 +30,14 @@ export type ParameterCommit = Readonly<{
   /** The draft a row left behind when it last unmounted, if it has one. */
   draft(pointer: string): ParameterDraft | undefined;
   /** Retain or clear one row's draft; `undefined` clears it. */
-  setDraft(pointer: string, draft: ParameterDraft | undefined): void;
-  /** Observe drafts discarded elsewhere, such as by the unsaved-drafts dialog. */
+  setDraft(pointer: string, draft: Pick<ParameterDraft, 'text' | 'valid'> | undefined): void;
+  /** Observe final settlement and drafts discarded elsewhere, such as by the unsaved-drafts dialog. */
   subscribeDrafts(listener: () => void): () => void;
   /**
    * Commit one field of the active group. `base` scopes the conflict to this field, and `transient`
    * pressure lets a newer value from the same drag displace an older queued one.
    */
-  commit(
-    field: Readonly<{
-      pointer: string;
-      value: JSONValue;
-      base?: ParameterSetRequest['base'];
-      pressure?: ParameterSetRequest['pressure'];
-    }>,
-  ): Promise<ParameterSetOutcome | undefined>;
+  commit(field: ParameterValueEdit): Promise<ParameterSetOutcome | undefined>;
   /** Commit one field of the active group; non-numeric widgets never rewrite the whole group. */
   setValue(
     field: Readonly<{ pointer: string; value: JSONValue; base: NonNullable<ParameterSetRequest['base']> }>,

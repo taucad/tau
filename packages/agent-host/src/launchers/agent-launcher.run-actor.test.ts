@@ -6,6 +6,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -295,19 +296,37 @@ describe('the run actor on the daemon (W7)', () => {
     });
     /* A native pause ends its attempt, which settles before the run rests (W8 TS-R10); a command in between waits. */
     await until(root, 'chat-held', (rows) => rows.some((row) => row.type === 'turn.finalized'));
-    const resume = async (): Promise<Awaited<ReturnType<typeof execute>>> => {
-      const answer = await execute(launcher, { type: 'resume', payload: { chatId: 'chat-held', runId: 'run-held' } });
-      return answer.status === 'refused' && answer.code === 'CHAT_RUN_LIVE' ? resume() : answer;
+    let ended = false;
+    const deadline = Date.now() + 500;
+    const resume = async (): Promise<Awaited<ReturnType<typeof execute>> | 'held'> => {
+      while (Date.now() < deadline) {
+        if (ended) {
+          return 'held';
+        }
+        // oxlint-disable-next-line no-await-in-loop -- Commands retry sequentially while the real attempt settles.
+        const answer = await execute(launcher, { type: 'resume', payload: { chatId: 'chat-held', runId: 'run-held' } });
+        if (answer.status !== 'refused' || answer.code !== 'CHAT_RUN_LIVE') {
+          return answer;
+        }
+        // Let the actual FileHandle close/settlement acknowledgement and the refusal deadline run.
+        // oxlint-disable-next-line no-await-in-loop -- A macrotask yield prevents command microtasks starving settlement I/O.
+        await yieldToEventLoop();
+      }
+      return 'held';
     };
-
-    const resumed = await Promise.race([
-      resume(),
-      new Promise<'held'>((resolve) => {
-        setTimeout(() => {
-          resolve('held');
-        }, 500);
-      }),
-    ]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refusalDeadline = new Promise<'held'>((resolve) => {
+      timer = setTimeout(() => {
+        resolve('held');
+      }, 500);
+    });
+    let resumed: Awaited<ReturnType<typeof resume>>;
+    try {
+      resumed = await Promise.race([resume(), refusalDeadline]);
+    } finally {
+      ended = true;
+      clearTimeout(timer);
+    }
 
     expect(resumed).toMatchObject({ status: 'refused', code: 'INTERRUPT_PENDING' });
   });

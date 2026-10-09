@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -21,20 +23,29 @@ const exampleRoot = resolve(import.meta.dirname, '../../../libs/tau-examples/src
 const source = readFileSync(join(exampleRoot, 'main.cs'), 'utf8');
 const assembly = readFileSync(join(exampleRoot, 'assembly.json'), 'utf8');
 const unitId = 'file:main.cs';
+const manualKinematics = process.env['TAU_E2E_KINEMATICS_MANUAL'] === 'true';
+const manualWindowTitle = manualKinematics ? 'Tau native PicoGK turbofan manual' : undefined;
 
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
 let seededEmail: string | undefined;
 
 afterEach(async () => {
-  await session?.close();
-  session = undefined;
-  await fixture?.close();
-  fixture = undefined;
-  if (seededEmail) {
-    await deleteTauTestUser(seededEmail);
+  try {
+    await session?.close();
+  } finally {
+    session = undefined;
+    try {
+      await fixture?.close();
+    } finally {
+      fixture = undefined;
+      const email = seededEmail;
+      seededEmail = undefined;
+      if (email) {
+        await deleteTauTestUser(email);
+      }
+    }
   }
-  seededEmail = undefined;
 });
 
 test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
@@ -49,7 +60,7 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
         { name: 'create_file', input: { targetFile: 'main.cs', content: source } },
       ],
     });
-    session = await launchDesktopApp({ token });
+    session = await launchDesktopApp({ token, visible: manualKinematics, windowTitle: manualWindowTitle });
     await fixture.routeThrough(session.page);
     const { page } = session;
     try {
@@ -64,6 +75,114 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
       await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 180_000);
       await expectCount(page.getByRole('alert', { name: 'CAD runtime error' }), 0, 180_000);
+
+      if (manualKinematics) {
+        const projectRoot = dirname(sourcePath);
+        await expect
+          .poll(() => readFileSync(join(projectRoot, 'assembly.json'), 'utf8'), { timeout: 60_000 })
+          .toBe(assembly);
+        const specBytes = await readFile(new URL('desktop-picogk-kinematics.spec.ts', import.meta.url));
+        const sourceSha256 = createHash('sha256').update(source).digest('hex');
+        const assemblySha256 = createHash('sha256').update(assembly).digest('hex');
+        const specSha256 = createHash('sha256').update(specBytes).digest('hex');
+        const identity = await page.evaluate(() => {
+          const state = { requests: [] as Array<{ action: 'screenshot' | 'end'; gesture: string }> };
+          Object.assign(globalThis, { __tauKinematicsManual: state });
+          document.title = 'Tau native PicoGK turbofan manual';
+          const controls = document.createElement('aside');
+          controls.setAttribute('aria-label', 'Kinematics fixture controls');
+          controls.style.cssText =
+            'position:fixed;top:8px;right:8px;z-index:2147483647;background:white;color:black;padding:8px;border:1px solid black';
+          const gesture = document.createElement('input');
+          gesture.setAttribute('aria-label', 'Gesture checkpoint name');
+          gesture.placeholder = 'Gesture checkpoint name';
+          controls.append(gesture);
+          for (const action of ['screenshot', 'end'] as const) {
+            const button = document.createElement('button');
+            button.textContent = `Fixture ${action}`;
+            button.addEventListener('click', () => {
+              if (action === 'screenshot' && !gesture.value.trim()) {
+                gesture.focus();
+                return;
+              }
+              if (state.requests.length < 16) {
+                state.requests.push({ action, gesture: gesture.value.trim().slice(0, 160) });
+              }
+            });
+            controls.append(button);
+          }
+          document.body.append(controls);
+          return { href: location.href, title: document.title, timeOrigin: performance.timeOrigin };
+        });
+        const deadline = Date.now() + 240_000;
+        const receipt = {
+          identity,
+          windowTitle: manualWindowTitle,
+          deadline,
+          projectRoot,
+          sourcePath,
+          homeRoot: session.homeRoot,
+          pickedDirectory: session.pickedDirectory,
+          electronPid: session.application.process().pid,
+          logPath: session.logPath,
+          sourceSha256,
+          assemblySha256,
+          specSha256,
+          unitId,
+          instructions:
+            'Principal opens kinematics (Control+m), selects Two spool rotation, plays/pauses, adjusts coordinates and hovers rotor. Driver performs only explicit named screenshots/end; no physical print.',
+        };
+        await writeFile(join(session.homeRoot, 'kinematics-manual-ready.json'), JSON.stringify(receipt, null, 2));
+        console.info('KINEMATICS MANUAL READY', JSON.stringify(receipt));
+        let ended = false;
+        let checkpoint = 0;
+        while (!ended && Date.now() < deadline) {
+          // oxlint-disable-next-line no-await-in-loop -- Poll only explicit bounded fixture requests after READY.
+          const requests = await page.evaluate(() => {
+            const state = (
+              globalThis as typeof globalThis & {
+                __tauKinematicsManual: { requests: Array<{ action: 'screenshot' | 'end'; gesture: string }> };
+              }
+            ).__tauKinematicsManual;
+            return state.requests.splice(0);
+          });
+          for (const request of requests) {
+            if (request.action === 'end') {
+              ended = true;
+              break;
+            }
+            const capturedAt = Date.now();
+            // oxlint-disable-next-line no-await-in-loop -- Principal explicitly requested this named screenshot.
+            const directory = await session.capture(`kinematics-manual-${++checkpoint}`);
+            const screenshotFile = join(directory, 'screenshot.png');
+            // oxlint-disable-next-line no-await-in-loop -- Hash actual saved PNG bytes; a missing screenshot fails.
+            const bytes = await readFile(screenshotFile);
+            const screenshotSha256 = createHash('sha256').update(bytes).digest('hex');
+            // oxlint-disable-next-line no-await-in-loop -- Paired screenshot/source/root/operator gesture receipt.
+            await writeFile(
+              join(directory, 'screenshot-receipt.json'),
+              JSON.stringify(
+                {
+                  ...receipt,
+                  screenshotFile,
+                  screenshotSha256,
+                  bytes: bytes.byteLength,
+                  gesture: request.gesture,
+                  capturedAt,
+                },
+                null,
+                2,
+              ),
+            );
+          }
+          // oxlint-disable-next-line no-await-in-loop -- Bounded fixture-only cadence, never product state polling.
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 100);
+          });
+        }
+        expect(ended).toBe(true);
+        return;
+      }
 
       await page.keyboard.press('Control+m');
       await expectVisible(page.getByTestId('kinematics-pane'), 60_000);
@@ -136,7 +255,9 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       }
       await session.capture('picogk-turbofan-kinematics-playback');
     } catch (error) {
-      await session.capture('picogk-turbofan-kinematics-failure');
+      if (!manualKinematics) {
+        await session.capture('picogk-turbofan-kinematics-failure');
+      }
       throw error;
     }
   },

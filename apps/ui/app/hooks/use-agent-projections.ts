@@ -139,7 +139,7 @@ const usageOperationIds = (messages: readonly MyUIMessage[]): string[] => {
 export const buildAgentProjection = (input: AgentProjectionInput): AgentProjection => {
   const { chat, history, session, unread, focusedChatId, defaultModel, resolveModel, defaultWorkspace, metadata } =
     input;
-  const messages = session?.chat.messages ?? ('messages' in chat ? chat.messages : []);
+  const messages = session?.messages ?? ('messages' in chat ? chat.messages : []);
   const status = chatStatusOf(session, unread);
   const persistedSnapshot = session?.persistenceActorRef.getSnapshot();
   const activeExecution = persistedSnapshot?.context.activeExecution ?? chat.activeExecution;
@@ -204,7 +204,7 @@ const liveProjectionSnapshot = (store: ChatSessionStore, chatIds: readonly strin
         return [chatId, 'parked'];
       }
       const persistenceSnapshot = session.persistenceActorRef.getSnapshot();
-      const tail = session.chat.messages.at(-1);
+      const tail = session.messages.at(-1);
       return [
         chatId,
         chatStatusOf(session, store.isUnread(chatId)),

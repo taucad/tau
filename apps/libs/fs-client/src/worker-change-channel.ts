@@ -426,6 +426,7 @@ export class WorkerChangeChannel {
           path === '' ||
           path === root ||
           root.startsWith(`${path}/`) ||
+          (request.recursive !== true && (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '') === root) ||
           (request.recursive === true && (root === '' || path.startsWith(`${root}/`))),
       );
     const unsubscriptions = [

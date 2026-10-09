@@ -154,6 +154,8 @@ export type SectionViewTestRenderedModelComponentState = Readonly<{
   meshCount: number;
   visibleMeshCount: number;
   materialOpacities: readonly number[];
+  surfaceMaterialOpacities: readonly number[];
+  edgeMaterialOpacities: readonly number[];
 }>;
 
 export type SectionViewTestCapCompleteness =
@@ -283,13 +285,16 @@ function isActuallyVisible(object: THREE.Object3D): boolean {
   return true;
 }
 
-function getRenderedModelComponentState(
+/** Report visible component surfaces and fat edges separately without changing aggregate visibility. */
+export function getSectionViewTestRenderedModelComponentState(
   scene: THREE.Object3D,
   componentId: string,
 ): SectionViewTestRenderedModelComponentState {
   let meshCount = 0;
   let visibleMeshCount = 0;
   const materialOpacities: number[] = [];
+  const surfaceMaterialOpacities: number[] = [];
+  const edgeMaterialOpacities: number[] = [];
   scene.traverse((object) => {
     if (!(object instanceof THREE.Mesh) || getModelComponentIdInHierarchy(object) !== componentId) {
       return;
@@ -297,10 +302,22 @@ function getRenderedModelComponentState(
     meshCount++;
     if (isActuallyVisible(object)) {
       visibleMeshCount++;
-      materialOpacities.push(...getObjectMaterials(object).map((material) => material.opacity));
+      const opacities = getObjectMaterials(object).map((material) => material.opacity);
+      materialOpacities.push(...opacities);
+      if (object.type === 'LineSegments2') {
+        edgeMaterialOpacities.push(...opacities);
+      } else if (!hasSceneTag(object, sceneTag.gltfSurfacePresentation)) {
+        surfaceMaterialOpacities.push(...opacities);
+      }
     }
   });
-  return { meshCount, visibleMeshCount, materialOpacities };
+  return {
+    meshCount,
+    visibleMeshCount,
+    materialOpacities,
+    surfaceMaterialOpacities,
+    edgeMaterialOpacities,
+  };
 }
 
 export const getSectionViewTestControlState = ({
@@ -799,7 +816,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
         };
       },
       getRenderedModelComponentState(componentId) {
-        return getRenderedModelComponentState(scene, componentId);
+        return getSectionViewTestRenderedModelComponentState(scene, componentId);
       },
       projectModelComponent(componentId) {
         const { camera, gl } = get();

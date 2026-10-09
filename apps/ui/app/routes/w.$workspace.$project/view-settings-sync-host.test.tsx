@@ -113,10 +113,10 @@ function realViewFiles(branchScenario = false) {
     getSnapshot: () => ({ context: { rootDirectory: selectedRoot } }),
     subscribe: () => ({ unsubscribe: () => undefined }),
   };
-  const setService = (contentService: unknown): void => {
+  const setService = (contentService: unknown, parameterFiles: typeof files = files): void => {
     fileManagerStore.set({
       fileManagerRef,
-      parameterFiles: files,
+      parameterFiles,
       contentService,
       watchRecordFile: (path: string, listener: (event: WatchEvent) => void) => {
         const closed = Promise.withResolvers<void>();
@@ -159,6 +159,51 @@ function realViewFiles(branchScenario = false) {
 }
 
 describe('ViewSettingsSyncHost', () => {
+  it('reads and persists through an ordinary store replacement held at actual watch acknowledgement', async () => {
+    const memory = realViewFiles();
+    const actor = graphics();
+    const viewId = 'v-c1e20003';
+    setViews({ [viewId]: actor });
+    const view = render(<ViewSettingsSyncHost />);
+    try {
+      await waitFor(() => {
+        expect(sync).toHaveBeenCalledWith(expect.objectContaining({ viewId, recordReady: true }));
+      });
+      const ready = memory.holdNextWatch();
+      const readFile = vi.fn(memory.files.readFile);
+      sync.mockClear();
+      await act(async () => {
+        memory.setService(undefined, { ...memory.files, readFile });
+        await Promise.resolve();
+      });
+      expect(readFile).not.toHaveBeenCalled();
+      expect(sync).toHaveBeenLastCalledWith(expect.objectContaining({ viewId, recordReady: false }));
+      await act(async () => {
+        ready.resolve();
+      });
+      await waitFor(() => {
+        expect(sync).toHaveBeenLastCalledWith(expect.objectContaining({ viewId, recordReady: true }));
+      });
+      const latest = sync.mock.calls.at(-1)?.[0] as { writeRecord: (record: unknown) => Promise<boolean> };
+      const edited = workbenchRecords.view.schema.parse({
+        version: 1,
+        entryPath: 'a.ts',
+        name: 'Replacement after acknowledgement',
+      });
+      await act(async () => {
+        expect(await latest.writeRecord(edited)).toBe(true);
+      });
+      expect(workbenchRecords.view.read(memory.get())).toMatchObject({
+        status: 'current',
+        record: { name: edited.name },
+      });
+      expect(memory.files.writeFileChecked).toHaveBeenCalledOnce();
+    } finally {
+      view.unmount();
+      actor.stop();
+    }
+  });
+
   it('re-registers a closed view watch on retry and applies later external edits', async () => {
     const memory = realViewFiles();
     const actor = graphics();

@@ -155,6 +155,35 @@ const byteBounded = (
 
 const keyOf = (event: AgentLogEvent): RowKey => ({ leaderEpoch: event.leaderEpoch, sequence: event.sequence });
 
+/** Read a bounded page from the canonical tolerant row sequence. @internal */
+export const readEventLogBatch = (
+  events: readonly AgentLogEvent[],
+  opaqueRows: ReadonlySet<AgentLogEvent>,
+  { cursor, limit, maxBytes, last }: Parameters<EventLogAppender['readBatch']>[0],
+): EventLogReadAnswer => {
+  if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(limit) || limit < 1) {
+    throw new EventLogError('EVENT_INVALID', 'Event-log cursor and limit must be positive safe integers.');
+  }
+  if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) {
+    throw new EventLogError('EVENT_INVALID', 'An event-log byte budget must be a positive safe integer.');
+  }
+  const endCursor = events.length;
+  if (cursor > endCursor) {
+    return { status: 'refused', reason: 'cursor-ahead', expected: { endCursor } };
+  }
+  const prior = cursor === 0 ? undefined : events[cursor - 1];
+  if (last !== undefined && (prior?.leaderEpoch !== last.leaderEpoch || prior.sequence !== last.sequence)) {
+    return {
+      status: 'refused',
+      reason: 'identity-mismatch',
+      expected: { endCursor, ...(prior ? { last: keyOf(prior) } : {}) },
+    };
+  }
+  const window = events.slice(cursor, cursor + limit);
+  const batch = maxBytes === undefined ? window : byteBounded(window, maxBytes, opaqueRows);
+  return { status: 'batch', cursor, nextCursor: cursor + batch.length, endCursor, events: batch };
+};
+
 /**
  * Build the shared appender over one environment-specific file.
  *
@@ -304,27 +333,7 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
     readBatch: async ({ cursor, limit, maxBytes, last }) =>
       enqueue(async () => {
         assertOpen();
-        if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(limit) || limit < 1) {
-          throw new EventLogError('EVENT_INVALID', 'Event-log cursor and limit must be positive safe integers.');
-        }
-        if (maxBytes !== undefined && (!Number.isSafeInteger(maxBytes) || maxBytes < 1)) {
-          throw new EventLogError('EVENT_INVALID', 'An event-log byte budget must be a positive safe integer.');
-        }
-        const endCursor = events.length;
-        if (cursor > endCursor) {
-          return { status: 'refused', reason: 'cursor-ahead', expected: { endCursor } };
-        }
-        const prior = cursor === 0 ? undefined : events[cursor - 1];
-        if (last !== undefined && (prior?.leaderEpoch !== last.leaderEpoch || prior.sequence !== last.sequence)) {
-          return {
-            status: 'refused',
-            reason: 'identity-mismatch',
-            expected: { endCursor, ...(prior ? { last: keyOf(prior) } : {}) },
-          };
-        }
-        const window = events.slice(cursor, cursor + limit);
-        const batch = maxBytes === undefined ? window : byteBounded(window, maxBytes, opaqueRows);
-        return { status: 'batch', cursor, nextCursor: cursor + batch.length, endCursor, events: batch };
+        return readEventLogBatch(events, opaqueRows, { cursor, limit, maxBytes, last });
       }),
     messages: async () => enqueue(async () => reducer.messages()),
     historyIntact: async () => enqueue(async () => reducer.historyIntact() && parsed.quarantined.length === 0),

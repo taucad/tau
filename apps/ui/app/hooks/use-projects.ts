@@ -17,6 +17,8 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
   const includeDeleted = options?.includeDeleted ?? false;
   const {
     getProjectListing,
+    discoveryObservationError,
+    refreshFilesystemObservations,
     updateProject,
     getProject,
     getChatsForResource,
@@ -198,8 +200,15 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
      * "no projects" — which is how the sidebar came to say `No projects yet`
      * over a project it was counting as live. */
     isLoading: isLoading || isWorkerLoading,
-    error: error instanceof Error ? error : undefined,
-    retry: refetch,
+    error: discoveryObservationError
+      ? new Error(discoveryObservationError)
+      : error instanceof Error
+        ? error
+        : undefined,
+    retry: async (): ReturnType<typeof refetch> => {
+      refreshFilesystemObservations();
+      return refetch();
+    },
     verifyProjectQuiescent: requireQuiescentProject,
     deleteProject: handleDeleteProject,
     restoreProject: handleRestoreProject,

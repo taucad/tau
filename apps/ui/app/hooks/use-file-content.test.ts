@@ -1,167 +1,175 @@
-import { renderHook, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { FileContentResult } from '@taucad/fs-client/file-content-service';
+import { renderHook, act, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import { FileContentService } from '@taucad/fs-client/file-content-service';
+import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
+import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
+import { useFileContent } from '#hooks/use-file-content.js';
 
-const mockContentService = {
-  peekOutcome: vi.fn<(path: string) => FileContentResult>(),
-  resolve: vi.fn<(path: string) => Promise<FileContentResult>>(),
-  subscribe: vi.fn<(path: string | undefined, callback: () => void) => () => void>(),
-};
+const manager = vi.hoisted(() => {
+  let service: FileContentService | undefined;
+  return {
+    use: () => ({ contentService: service }),
+    set: (value: FileContentService | undefined) => {
+      service = value;
+    },
+  };
+});
+vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: manager.use }));
+const disposals: Array<() => void> = [];
+afterEach(() => {
+  for (const dispose of disposals.splice(0)) {
+    dispose();
+  }
+  manager.set(undefined);
+});
 
-vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ contentService: mockContentService }),
-}));
-
-const { useFileContent } = await import('#hooks/use-file-content.js');
-
-describe('useFileContent', () => {
-  const loadingOutcome: FileContentResult = { kind: 'loading' };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockContentService.peekOutcome.mockReturnValue(loadingOutcome);
-    mockContentService.resolve.mockResolvedValue({ kind: 'text', content: new Uint8Array([1, 2, 3]) });
-    mockContentService.subscribe.mockImplementation((_path, _callback) => () => {
-      /* No-op unsubscribe */
-    });
+function fixture() {
+  const ready = Promise.withResolvers<void>();
+  const closed = Promise.withResolvers<void>();
+  const watchReady = vi
+    .fn()
+    .mockReturnValueOnce({ ready: ready.promise, closed: closed.promise, unsubscribe: vi.fn() })
+    .mockReturnValue({ ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, unsubscribe: vi.fn() });
+  const proxy = mock<ComposedViewClient>();
+  const readFile = proxy.readFile.mockResolvedValue(new TextEncoder().encode('safe base'));
+  const channel = new WorkerChangeChannel({ transport: { listen: () => () => undefined, watchReady } });
+  const service = new FileContentService({
+    proxy,
+    channel,
+    paths: new WorkspacePathResolver('/project'),
+    refreshGuard: new RefreshGenerationGuard(),
   });
-
-  it('should return loading kind when contentService reports loading', () => {
-    mockContentService.peekOutcome.mockReturnValue({ kind: 'loading' });
-
-    const { result } = renderHook(() => useFileContent('main.ts'));
-
-    expect(result.current).toEqual({ kind: 'loading' });
+  manager.set(service);
+  disposals.push(() => {
+    service.dispose();
+    channel.dispose();
   });
+  return { service, ready, closed, watchReady, readFile };
+}
 
-  it('should trigger resolve once on cache miss even across re-renders', () => {
-    mockContentService.peekOutcome.mockReturnValue({ kind: 'loading' });
-
-    const { rerender } = renderHook(() => useFileContent('main.ts'));
-    rerender();
-    rerender();
-
-    expect(mockContentService.resolve).toHaveBeenCalledTimes(1);
-    expect(mockContentService.resolve).toHaveBeenCalledWith('main.ts');
-  });
-
-  it('should not loop when peekOutcome returns the same loading sentinel', () => {
-    // Regression: returning a fresh `{ kind: 'loading' }` from peekOutcome
-    // breaks useSyncExternalStore's referential-equality contract and
-    // triggers an infinite re-render that the parent error boundary turns
-    // into a project-tree remount crash-loop. The sentinel must be stable.
-    mockContentService.peekOutcome.mockReturnValue(loadingOutcome);
-
-    const { result, rerender } = renderHook(() => useFileContent('main.ts'));
-    rerender();
-    rerender();
-
-    expect(result.current).toBe(loadingOutcome);
-  });
-
-  it('should not trigger resolve when outcome is already text', () => {
-    mockContentService.peekOutcome.mockReturnValue({ kind: 'text', content: new Uint8Array([1]) });
-
-    renderHook(() => useFileContent('main.ts'));
-
-    expect(mockContentService.resolve).not.toHaveBeenCalled();
-  });
-
-  it('should return text kind with content when contentService reports text', () => {
-    const data = new Uint8Array([10, 20, 30]);
-    mockContentService.peekOutcome.mockReturnValue({ kind: 'text', content: data });
-
-    const { result } = renderHook(() => useFileContent('main.ts'));
-
-    expect(result.current.kind).toBe('text');
-    if (result.current.kind === 'text') {
-      expect(result.current.content).toEqual(data);
-    }
-  });
-
-  it('should return binary kind when contentService reports binary', () => {
-    const head = new Uint8Array([0x00, 0x01, 0x02]);
-    mockContentService.peekOutcome.mockReturnValue({ kind: 'binary', size: 4096, head, revision: 1 });
-
-    const { result } = renderHook(() => useFileContent('mystery.dat'));
-
-    expect(result.current.kind).toBe('binary');
-    if (result.current.kind === 'binary') {
-      expect(result.current.size).toBe(4096);
-      expect(result.current.head).toEqual(head);
-    }
-  });
-
-  it('should return too-large kind when contentService reports too-large', () => {
-    mockContentService.peekOutcome.mockReturnValue({ kind: 'too-large', size: 9000, limit: 1024 });
-
-    const { result } = renderHook(() => useFileContent('mystery.dat'));
-
-    expect(result.current.kind).toBe('too-large');
-    if (result.current.kind === 'too-large') {
-      expect(result.current.size).toBe(9000);
-      expect(result.current.limit).toBe(1024);
-    }
-  });
-
-  it('should return orphaned kind when contentService reports orphaned', () => {
-    mockContentService.peekOutcome.mockReturnValue({ kind: 'orphaned' });
-
-    const { result } = renderHook(() => useFileContent('missing.ts'));
-
-    expect(result.current).toEqual({ kind: 'orphaned' });
-  });
-
-  it('should return error kind with cause when contentService reports error', () => {
-    const cause = new Error('disk on fire');
-    mockContentService.peekOutcome.mockReturnValue({ kind: 'error', cause });
-
-    const { result } = renderHook(() => useFileContent('main.ts'));
-
-    expect(result.current.kind).toBe('error');
-    if (result.current.kind === 'error') {
-      expect(result.current.cause).toBe(cause);
-    }
-  });
-
-  it('should re-render with the new path outcome when path changes', () => {
-    const textResult: FileContentResult = { kind: 'text', content: new Uint8Array([1]) };
-    const orphanedResult: FileContentResult = { kind: 'orphaned' };
-    mockContentService.peekOutcome.mockImplementation((path: string) =>
-      path === 'a.ts' ? textResult : orphanedResult,
+describe('useFileContent shared observation', () => {
+  it('should dispatch one content outcome only to its selecting path among forty mounted files', async () => {
+    const f = fixture();
+    f.readFile.mockResolvedValue(new Uint8Array([0, 1, 2, 3]));
+    let dispatched = 0;
+    const global = f.service.onDidChangeOutcome.bind(f.service);
+    vi.spyOn(f.service, 'onDidChangeOutcome').mockImplementation((callback) =>
+      global((event) => {
+        dispatched++;
+        callback(event);
+      }),
     );
-
-    const { result, rerender } = renderHook(({ path }) => useFileContent(path), {
-      initialProps: { path: 'a.ts' },
+    const scoped = f.service.subscribe.bind(f.service);
+    vi.spyOn(f.service, 'subscribe').mockImplementation((path, callback) =>
+      scoped(path, () => {
+        dispatched++;
+        callback();
+      }),
+    );
+    const hooks = Array.from({ length: 40 }, (_, index) => renderHook(() => useFileContent(`file-${index}.bin`)));
+    await act(async () => {
+      f.ready.resolve();
     });
-
-    expect(result.current.kind).toBe('text');
-
-    rerender({ path: 'b.ts' });
-
-    expect(result.current.kind).toBe('orphaned');
+    await waitFor(() => {
+      expect(hooks.every((hook) => hook.result.current.kind === 'binary')).toBe(true);
+    });
+    dispatched = 0;
+    await act(async () => {
+      await f.service.resolve('file-0.bin', { forceText: true });
+    });
+    expect(hooks[0]!.result.current.kind).toBe('text');
+    expect(hooks.slice(1).every((hook) => hook.result.current.kind === 'binary')).toBe(true);
+    expect(dispatched).toBe(1);
+    expect(f.watchReady).toHaveBeenCalledTimes(40);
+    for (const hook of hooks) {
+      hook.unmount();
+    }
   });
 
-  it('should re-render after subscriber notification (snapshot recomputed)', () => {
-    const loading: FileContentResult = { kind: 'loading' };
-    const text: FileContentResult = { kind: 'text', content: new Uint8Array([1, 2, 3]) };
-    let registered: (() => void) | undefined;
-    mockContentService.subscribe.mockImplementation((_path, callback) => {
-      registered = callback;
-      return () => {
-        /* No-op unsubscribe */
-      };
+  it('should acknowledge its watch before acquisition and preserve a stable loading snapshot', async () => {
+    const f = fixture();
+    const hook = renderHook(() => useFileContent('main.ts'));
+    const loading = hook.result.current;
+    hook.rerender();
+    expect(hook.result.current).toBe(loading);
+    expect(f.readFile).not.toHaveBeenCalled();
+    await act(async () => {
+      f.ready.resolve();
     });
-    mockContentService.peekOutcome.mockReturnValue(loading);
+    await waitFor(() => {
+      expect(hook.result.current.kind).toBe('text');
+    });
+    expect(f.readFile).toHaveBeenCalledOnce();
+    hook.unmount();
+  });
 
-    const { result } = renderHook(() => useFileContent('main.ts'));
-    expect(result.current.kind).toBe('loading');
-
-    mockContentService.peekOutcome.mockReturnValue(text);
+  it('should retain mounted text through isolated closure and retry fresh bytes without changing resource', async () => {
+    const f = fixture();
+    const hook = renderHook(() => useFileContent('main.ts'));
+    await act(async () => {
+      f.ready.resolve();
+    });
+    await waitFor(() => {
+      expect(hook.result.current.kind).toBe('text');
+    });
+    await act(async () => {
+      f.closed.resolve();
+    });
+    expect(hook.result.current).toMatchObject({
+      kind: 'text',
+      content: new TextEncoder().encode('safe base'),
+      observation: { status: 'closed' },
+    });
+    f.readFile.mockResolvedValue(new TextEncoder().encode('fresh bytes'));
     act(() => {
-      registered?.();
+      hook.result.current.retry();
     });
+    await waitFor(() => {
+      expect(hook.result.current).toMatchObject({
+        kind: 'text',
+        content: new TextEncoder().encode('fresh bytes'),
+        observation: { status: 'ready' },
+      });
+    });
+    expect(f.watchReady).toHaveBeenCalledTimes(2);
+    expect(f.readFile).toHaveBeenCalledTimes(2);
+    hook.unmount();
+  });
 
-    expect(result.current.kind).toBe('text');
+  it('should expose failed registration rather than loading forever', async () => {
+    const f = fixture();
+    const hook = renderHook(() => useFileContent('main.ts'));
+    await act(async () => {
+      f.ready.reject(new Error('watch refused'));
+    });
+    await waitFor(() => {
+      expect(hook.result.current).toMatchObject({ kind: 'error', observation: { status: 'closed' } });
+    });
+    expect(f.readFile).not.toHaveBeenCalled();
+    hook.unmount();
+  });
+
+  it('should honor explicit force-text outcomes on the same mounted resource', async () => {
+    const f = fixture();
+    f.readFile.mockResolvedValue(new Uint8Array([0, 1, 2]));
+    const hook = renderHook(() => useFileContent('data.bin'));
+    await act(async () => {
+      f.ready.resolve();
+    });
+    await waitFor(() => {
+      expect(hook.result.current.kind).toBe('binary');
+    });
+    await act(async () => {
+      await f.service.resolve('data.bin', { forceText: true });
+    });
+    expect(hook.result.current.kind).toBe('text');
+    await act(async () => {
+      f.closed.resolve();
+    });
+    expect(hook.result.current).toMatchObject({ kind: 'text', observation: { status: 'closed' } });
+    hook.unmount();
   });
 });

@@ -78,6 +78,50 @@ export type RawReadOptions = {
   readonly sizeLimit?: number;
 };
 
+/** Existing classified content and its error-reporting path. @public */
+export type FileContentBytesInput = {
+  readonly path: string;
+  readonly result: FileContentResult;
+};
+
+/**
+ * Interpret classified text content without acquiring I/O or changing ownership.
+ * @param input - The existing content outcome and its workspace-relative path.
+ * @returns The same owned text byte array held by the outcome.
+ * @throws {BinaryFileError} When the content is binary.
+ * @throws {FileTooLargeError} When it exceeds the existing open-time limit.
+ * @throws {FileNotFoundError} When it is orphaned.
+ * @public
+ */
+export function fileContentBytes({ path, result }: FileContentBytesInput): Uint8Array<ArrayBuffer> {
+  switch (result.kind) {
+    case 'text': {
+      return result.content;
+    }
+    case 'binary': {
+      throw new BinaryFileError(`File '${path}' is binary and cannot be read as text`, {
+        path,
+        size: result.size,
+      });
+    }
+    case 'too-large': {
+      throw new FileTooLargeError(
+        `File '${path}' (${result.size} bytes) exceeds open-time size limit (${result.limit} bytes)`,
+        { path, size: result.size, limit: result.limit },
+      );
+    }
+    case 'orphaned': {
+      throw new FileNotFoundError(`File '${path}' was not found`, { path });
+    }
+    case 'error': {
+      throw result.cause instanceof Error ? result.cause : new Error(String(result.cause));
+    }
+    case 'loading': {
+      throw new Error(`Unexpected 'loading' outcome for '${path}'`);
+    }
+  }
+}
+
 /**
  * Outcome publication event for `useSyncExternalStore` consumers.
  *
@@ -218,7 +262,17 @@ export class FileContentService {
   private readonly openSizeBytes: number;
   private readonly paths: WorkspacePathResolver;
   private readonly refreshGuard: RefreshGenerationGuard;
-  private readonly observations = new Map<string, ObservationService<FileContentResult>>();
+  private readonly observationErrors = new Map<string, FileContentResult>();
+  // Selection can precede acquisition. Leases and active work retain the owner; the registry retains identity weakly.
+  private readonly observations = new Map<string, WeakRef<ObservationService<FileContentResult>>>();
+  private readonly retiredObservations = new FinalizationRegistry<{
+    path: string;
+    reference: WeakRef<ObservationService<FileContentResult>>;
+  }>(({ path, reference }) => {
+    if (this.observations.get(path) === reference) {
+      this.observations.delete(path);
+    }
+  });
   private readonly pendingResolves = new Map<string, Promise<FileContentResult>>();
   private readonly outcomes = new Map<string, FileContentResult>();
   private readonly binaryDigests = new WeakMap<FileContentResult, string>();
@@ -375,32 +429,7 @@ export class FileContentService {
    */
   public async resolveBytes(path: string, options?: ResolveOptions): Promise<Uint8Array<ArrayBuffer>> {
     const result = await this.resolve(path, options);
-    switch (result.kind) {
-      case 'text': {
-        return result.content;
-      }
-      case 'binary': {
-        throw new BinaryFileError(`File '${path}' is binary and cannot be read as text`, {
-          path,
-          size: result.size,
-        });
-      }
-      case 'too-large': {
-        throw new FileTooLargeError(
-          `File '${path}' (${result.size} bytes) exceeds open-time size limit (${result.limit} bytes)`,
-          { path, size: result.size, limit: result.limit },
-        );
-      }
-      case 'orphaned': {
-        throw new FileNotFoundError(`File '${path}' was not found`, { path });
-      }
-      case 'error': {
-        throw result.cause instanceof Error ? result.cause : new Error(String(result.cause));
-      }
-      case 'loading': {
-        throw new Error(`Unexpected 'loading' outcome for '${path}'`);
-      }
-    }
+    return fileContentBytes({ path, result });
   }
 
   /**
@@ -445,14 +474,100 @@ export class FileContentService {
   }
 
   /**
+   * Select the existing content owner, including observation health and safe last value.
+   * @param path - Workspace-relative resource.
+   * @returns Shared lifecycle owner; acquire a lease to start observation.
+   */
+  public observeContent(path: string): ObservationService<FileContentResult> {
+    const existing = this.observations.get(path)?.deref();
+    if (existing) {
+      return existing;
+    }
+    let authoritative = false;
+    const service = new ObservationService<FileContentResult>({
+      resource: path,
+      watch: (invalidate, reset) =>
+        this.channel.watchReady({ paths: [path] }, (event) => {
+          if (event.type === 'reset') {
+            reset();
+          } else {
+            invalidate();
+          }
+        }),
+      invalidate: () => {
+        authoritative = true;
+        this.refreshGuard.begin(path);
+      },
+      read: async ({ signal, isCurrent }) => {
+        const generation = this.refreshGuard.begin(path);
+        const result = await this.computeOutcome(path, generation, { authoritative });
+        signal.throwIfAborted();
+        if (result.kind === 'error') {
+          throw result.cause instanceof Error ? result.cause : new Error(String(result.cause));
+        }
+        return isCurrent()
+          ? this.refreshGuard.isCurrent(path, generation)
+            ? result
+            : this.peekOutcome(path)
+          : loadingOutcome;
+      },
+      equal: (previous, next) => outcomesEqual(previous, next, this.binaryDigests),
+    });
+    service.subscribe(() => {
+      if (this.observations.get(path)?.deref() !== service) {
+        return;
+      }
+      const snapshot = service.getSnapshot();
+      const previous = this.observationErrors.get(path);
+      if ((snapshot.status === 'closed' || snapshot.status === 'error') && service.activeLeaseCount > 0) {
+        if (previous === undefined) {
+          this.observationErrors.set(path, {
+            kind: 'error',
+            cause: new Error(snapshot.error ?? 'Content observation closed.'),
+          });
+        }
+      } else if (snapshot.status === 'ready' || service.activeLeaseCount === 0) {
+        this.observationErrors.delete(path);
+      }
+      if (previous !== this.observationErrors.get(path)) {
+        if (
+          this.outcomes.get(path)?.kind !== 'error' &&
+          (service.activeLeaseCount > 0 || snapshot.status === 'ready')
+        ) {
+          this.#outcomeTopic.emit({ path, result: this.peekOutcome(path) });
+        }
+        this.pathNotifyRegistry.notifyPath(path, undefined);
+      }
+    });
+    const reference = new WeakRef(service);
+    this.observations.set(path, reference);
+    this.retiredObservations.register(service, { path, reference }, reference);
+    return service;
+  }
+
+  /**
    * Sync snapshot of the most recent outcome for a path.
    * Returns `{ kind: 'loading' }` when no outcome has been computed yet.
    * Compatible with `useSyncExternalStore`.
    * @param path - Workspace-relative path.
+   * @param options - Retain safe display bytes when observation health is selected separately.
    * @returns Referentially stable {@link FileContentResult} snapshot (may be the shared loading sentinel).
    */
-  public peekOutcome(path: string): FileContentResult {
-    return this.outcomes.get(path) ?? loadingOutcome;
+  public peekOutcome(path: string, options?: { retainValue?: boolean }): FileContentResult {
+    const outcome = this.outcomes.get(path) ?? loadingOutcome;
+    if (options?.retainValue) {
+      if (outcome.kind === 'text' || outcome.kind === 'binary') {
+        return outcome;
+      }
+      const value = this.observations.get(path)?.deref()?.getSnapshot().value;
+      if (
+        (outcome.kind === 'error' || outcome.kind === 'loading') &&
+        (value?.kind === 'text' || value?.kind === 'binary')
+      ) {
+        return value;
+      }
+    }
+    return this.observationErrors.get(path) ?? outcome;
   }
 
   /**
@@ -497,7 +612,7 @@ export class FileContentService {
    * @returns Promise settled after the latest accepted value is durable;
    *   rejected with {@link EditorSaveConflictError} when the file had moved on.
    */
-  // oxlint-disable-next-line @typescript-eslint/promise-function-async -- Concurrent callers must receive the shared queue promise by identity.
+  // oxlint-disable-next-line typescript/promise-function-async -- Concurrent callers must receive the shared queue promise by identity.
   public saveEditor(path: string, data: Uint8Array<ArrayBuffer>, base?: Uint8Array<ArrayBuffer>): Promise<void> {
     const key = this.paths.toWorkspaceRelativeKey('saveEditor', path);
     const copy = new Uint8Array(data);
@@ -989,7 +1104,7 @@ export class FileContentService {
       });
     }
     const unsubscribe = this.pathNotifyRegistry.subscribePath(path, callback);
-    const lease = this.observationFor(path).acquire();
+    const lease = this.observeContent(path).acquire();
     return () => {
       unsubscribe();
       lease.release();
@@ -1085,7 +1200,7 @@ export class FileContentService {
         }
       }
       if (finalError !== undefined) {
-        // oxlint-disable-next-line @typescript-eslint/only-throw-error -- Preserve the exact rejection from the filesystem client.
+        // oxlint-disable-next-line typescript/only-throw-error -- Preserve the exact rejection from the filesystem client.
         throw finalError;
       }
     } finally {
@@ -1334,7 +1449,7 @@ export class FileContentService {
   }
 
   private hasAuthorityObservation(path: string): boolean {
-    return this.channel.hasAuthorityWatch && (this.observations.get(path)?.diagnostics.activeWatches ?? 0) > 0;
+    return this.channel.hasAuthorityWatch && (this.observations.get(path)?.deref()?.diagnostics.activeWatches ?? 0) > 0;
   }
 
   private onWorkerFileWritten(relativePath: string): void {
@@ -1532,44 +1647,8 @@ export class FileContentService {
     await this.observeOutcome(path, true);
   }
 
-  private observationFor(path: string): ObservationService<FileContentResult> {
-    const existing = this.observations.get(path);
-    if (existing) {
-      return existing;
-    }
-    let authoritative = false;
-    const service = new ObservationService<FileContentResult>({
-      resource: path,
-      watch: (invalidate, reset) =>
-        this.channel.watchReady({ paths: [path] }, (event) => {
-          if (event.type === 'reset') {
-            reset();
-          } else {
-            invalidate();
-          }
-        }),
-      invalidate: () => {
-        authoritative = true;
-        this.refreshGuard.begin(path);
-      },
-      read: async ({ signal, isCurrent }) => {
-        const generation = this.refreshGuard.begin(path);
-        const result = await this.computeOutcome(path, generation, { authoritative });
-        signal.throwIfAborted();
-        return isCurrent()
-          ? this.refreshGuard.isCurrent(path, generation)
-            ? result
-            : this.peekOutcome(path)
-          : loadingOutcome;
-      },
-      equal: (previous, next) => outcomesEqual(previous, next, this.binaryDigests),
-    });
-    this.observations.set(path, service);
-    return service;
-  }
-
   private async observeOutcome(path: string, refresh = false): Promise<FileContentResult> {
-    const service = this.observationFor(path);
+    const service = this.observeContent(path);
     const lease = service.acquire();
     try {
       if (refresh) {
@@ -1583,7 +1662,12 @@ export class FileContentService {
             resolve(snapshot.value);
           } else if (snapshot.status === 'error' || snapshot.status === 'closed') {
             unsubscribe();
-            resolve({ kind: 'error', cause: new Error(snapshot.error ?? 'Content observation closed.') });
+            const outcome = this.outcomes.get(path);
+            resolve(
+              outcome?.kind === 'error'
+                ? outcome
+                : { kind: 'error', cause: new Error(snapshot.error ?? 'Content observation closed.') },
+            );
           }
         };
         const unsubscribe = lease.subscribe(check);
@@ -1596,10 +1680,15 @@ export class FileContentService {
   }
 
   private clearObservations(): void {
-    for (const service of this.observations.values()) {
-      service.dispose();
+    const services = [...this.observations.values()];
+    for (const reference of services) {
+      this.retiredObservations.unregister(reference);
     }
     this.observations.clear();
+    this.observationErrors.clear();
+    for (const reference of services) {
+      reference.deref()?.dispose();
+    }
   }
 
   private async computeOutcome(
@@ -1720,6 +1809,7 @@ export class FileContentService {
       }
       if (
         this.pathNotifyRegistry.hasPathSubscribers(path) ||
+        (this.observations.get(path)?.deref()?.activeLeaseCount ?? 0) > 0 ||
         this.editorSaves.has(path) ||
         this.pendingResolves.has(path)
       ) {
@@ -1728,12 +1818,6 @@ export class FileContentService {
       this.outcomes.delete(path);
       this.orphanedPaths.delete(path);
       bytes -= bytesOf(result);
-    }
-    for (const [path, observation] of this.observations) {
-      if (observation.activeLeaseCount === 0 && !this.outcomes.has(path) && !this.pendingResolves.has(path)) {
-        observation.dispose();
-        this.observations.delete(path);
-      }
     }
   }
 

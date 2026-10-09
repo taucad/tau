@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MachineSettingsRecord, MachineSettingsService, MachineSettingsSave } from '@taucad/types';
+import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import type { WatchEvent } from '@taucad/filesystem';
 import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 
 const typeId = 'bambu.x1c';
@@ -34,12 +36,286 @@ const fixture = () => {
       record,
     })),
   };
-  const observe = vi.fn(() => () => undefined);
+  const observe = vi.fn(() => ({
+    ready: Promise.resolve(),
+    closed: Promise.withResolvers<void>().promise,
+    dispose: () => undefined,
+  }));
   const store = new MachineSettingsStore(Promise.resolve(service), observe, () => undefined);
   return { store, service, observe };
 };
 
 describe('machine preference projections', () => {
+  it('should restore the admitted settings file after retry returns the same stable snapshot identity', async () => {
+    const { store, service } = fixture();
+    const stable = { status: 'current', record } as const;
+    vi.mocked(service.readMachineSettings)
+      .mockResolvedValueOnce(stable)
+      .mockRejectedValueOnce(new Error('Native settings read refused.'))
+      .mockResolvedValue(stable);
+    const off = store.subscribe(typeId, () => undefined);
+    await vi.waitFor(() => {
+      expect(store.get(typeId).file.status).toBe('current');
+    });
+    await expect(store.refresh(typeId)).rejects.toThrow('Native settings read refused.');
+    expect(store.get(typeId).file.status).toBe('unavailable');
+    await store.refresh(typeId);
+    expect(store.get(typeId).observation?.status).toBe('ready');
+    expect(store.get(typeId).file.status).toBe('current');
+    expect(store.record(typeId)).toEqual(record);
+    expect(service.readMachineSettings).toHaveBeenCalledTimes(3);
+    off();
+    store.dispose();
+  });
+
+  it('should refuse held pre-reset settings and converge through one trailing driver acquisition', async () => {
+    const { service } = fixture();
+    const stale = Promise.withResolvers<Awaited<ReturnType<MachineSettingsService['readMachineSettings']>>>();
+    vi.mocked(service.readMachineSettings)
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValue({
+        status: 'current',
+        record: { ...record, activeProfile: 'fine' },
+      });
+    let onEvent: ((event: WatchEvent) => void) | undefined;
+    const channel = new WorkerChangeChannel({
+      transport: {
+        listen: () => () => undefined,
+        watchReady: (_request, handler) => {
+          onEvent = handler;
+          return { ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, unsubscribe: vi.fn() };
+        },
+      },
+    });
+    const store = new MachineSettingsStore(
+      Promise.resolve(service),
+      (_typeId, handler) => channel.watchReady({ paths: ['.tau/machines/settings/bambu.x1c.json'] }, handler),
+      () => undefined,
+    );
+    const observed: Array<string | undefined> = [];
+    const off = store.subscribe(typeId, () => {
+      observed.push(store.record(typeId)?.activeProfile);
+    });
+    await vi.waitFor(() => {
+      expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    });
+    onEvent?.({ type: 'reset' });
+    await Promise.resolve();
+    expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    stale.resolve({ status: 'current', record });
+    await vi.waitFor(() => {
+      expect(store.record(typeId)?.activeProfile).toBe('fine');
+    });
+    expect(observed).not.toContain('default');
+    expect(service.readMachineSettings).toHaveBeenCalledTimes(2);
+    off();
+    store.dispose();
+    channel.dispose();
+  });
+
+  it('should wait for actual settings watch acknowledgement before a mounted read', async () => {
+    const { service } = fixture();
+    const ready = Promise.withResolvers<void>();
+    const dispose = vi.fn();
+    const watch = vi.fn(() => ({ ready: ready.promise, closed: Promise.withResolvers<void>().promise, dispose }));
+    const store = new MachineSettingsStore(Promise.resolve(service), watch, () => undefined);
+    const off = store.subscribe(typeId, () => undefined);
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(service.readMachineSettings).not.toHaveBeenCalled();
+    ready.resolve();
+    await vi.waitFor(() => {
+      expect(store.get(typeId).file.status).toBe('current');
+    });
+    expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    off();
+    expect(dispose).toHaveBeenCalledOnce();
+    store.dispose();
+  });
+
+  it('should surface rejected settings registration and retry with a new acknowledged watch', async () => {
+    const { service } = fixture();
+    const first = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    const watch = vi
+      .fn()
+      .mockReturnValueOnce({ ready: first.promise, closed: Promise.withResolvers<void>().promise, dispose: vi.fn() })
+      .mockReturnValue({ ready: second.promise, closed: Promise.withResolvers<void>().promise, dispose: vi.fn() });
+    const store = new MachineSettingsStore(Promise.resolve(service), watch, () => undefined);
+    const off = store.subscribe(typeId, () => undefined);
+    first.reject(new Error('settings watch refused'));
+    await vi.waitFor(() => {
+      expect(store.get(typeId).file.status).toBe('unavailable');
+    });
+    expect(service.readMachineSettings).not.toHaveBeenCalled();
+    const retry = store.refresh(typeId);
+    expect(watch).toHaveBeenCalledTimes(2);
+    expect(store.get(typeId).file.status).toBe('unavailable');
+    expect(service.readMachineSettings).not.toHaveBeenCalled();
+    second.resolve();
+    await retry;
+    expect(store.get(typeId).file.status).toBe('current');
+    expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    off();
+    store.dispose();
+  });
+
+  it('should mark retained settings as registering until a reacquired watch acknowledges', async () => {
+    const { service } = fixture();
+    const ready = Promise.withResolvers<void>();
+    const watch = vi
+      .fn()
+      .mockReturnValueOnce({
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        dispose: vi.fn(),
+      })
+      .mockReturnValue({ ready: ready.promise, closed: Promise.withResolvers<void>().promise, dispose: vi.fn() });
+    const store = new MachineSettingsStore(Promise.resolve(service), watch, () => undefined);
+    const off = store.subscribe(typeId, () => undefined);
+    await vi.waitFor(() => {
+      expect(store.get(typeId).file.status).toBe('current');
+    });
+    off();
+    const fresh = store.subscribe(typeId, () => undefined);
+    expect(store.record(typeId)?.activeProfile).toBe('default');
+    expect(store.get(typeId).observation?.status).toBe('registering');
+    expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    ready.resolve();
+    await vi.waitFor(() => {
+      expect(store.get(typeId).observation?.status).toBe('ready');
+    });
+    expect(service.readMachineSettings).toHaveBeenCalledTimes(2);
+    fresh();
+    store.dispose();
+  });
+
+  it('should reacquire a fresh acknowledged watch while a released settings read is held', async () => {
+    const { service } = fixture();
+    const stale = Promise.withResolvers<Awaited<ReturnType<MachineSettingsService['readMachineSettings']>>>();
+    const nextReady = Promise.withResolvers<void>();
+    const disposed = vi.fn();
+    const watch = vi
+      .fn()
+      .mockReturnValueOnce({
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        dispose: disposed,
+      })
+      .mockReturnValue({ ready: nextReady.promise, closed: Promise.withResolvers<void>().promise, dispose: vi.fn() });
+    vi.mocked(service.readMachineSettings)
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValue({
+        status: 'current',
+        record: { ...record, activeProfile: 'fine' },
+      });
+    const store = new MachineSettingsStore(Promise.resolve(service), watch, () => undefined);
+    const first = store.subscribe(typeId, () => undefined);
+    const second = store.subscribe(typeId, () => undefined);
+    await vi.waitFor(() => {
+      expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    });
+    first();
+    expect(disposed).not.toHaveBeenCalled();
+    second();
+    expect(disposed).toHaveBeenCalledOnce();
+    const observed: Array<string | undefined> = [];
+    const fresh = store.subscribe(typeId, () => {
+      observed.push(store.record(typeId)?.activeProfile);
+    });
+    expect(watch).toHaveBeenCalledTimes(2);
+    expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    nextReady.resolve();
+    await vi.waitFor(() => {
+      expect(store.record(typeId)?.activeProfile).toBe('fine');
+    });
+    expect(service.readMachineSettings).toHaveBeenCalledTimes(2);
+    expect(store.get(typeId).observation?.status).toBe('ready');
+    store.update(typeId, (current) => ({
+      ...current,
+      profiles: { ...current.profiles, fine: { ...current.profiles['fine']!, name: 'Edited while old read is held' } },
+    }));
+    await store.flush(typeId);
+    expect(service.editMachineSettings).toHaveBeenCalledOnce();
+    const trailing = Promise.withResolvers<Awaited<ReturnType<MachineSettingsService['readMachineSettings']>>>();
+    vi.mocked(service.readMachineSettings).mockReturnValueOnce(trailing.promise);
+    const refresh = store.refresh(typeId);
+    await vi.waitFor(() => {
+      expect(service.readMachineSettings).toHaveBeenCalledTimes(3);
+    });
+    stale.resolve({ status: 'current', record });
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(store.record(typeId)?.activeProfile).toBe('fine');
+    expect(store.get(typeId).observation?.status).toBe('pending');
+    expect(observed).not.toContain('default');
+    const coalesced = store.refresh(typeId);
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(service.readMachineSettings).toHaveBeenCalledTimes(3);
+    trailing.resolve({ status: 'current', record: { ...record, activeProfile: 'fine' } });
+    await Promise.all([refresh, coalesced]);
+    expect(service.readMachineSettings).toHaveBeenCalledTimes(4);
+    expect(store.get(typeId).observation?.status).toBe('ready');
+    fresh();
+    store.dispose();
+  });
+
+  it('should release an observer-owned pending refresh before independently reacquiring a held old read', async () => {
+    const { service } = fixture();
+    const stale = Promise.withResolvers<Awaited<ReturnType<MachineSettingsService['readMachineSettings']>>>();
+    const nextReady = Promise.withResolvers<void>();
+    const disposed = vi.fn();
+    const watch = vi
+      .fn()
+      .mockReturnValueOnce({
+        ready: Promise.resolve(),
+        closed: Promise.withResolvers<void>().promise,
+        dispose: disposed,
+      })
+      .mockReturnValue({ ready: nextReady.promise, closed: Promise.withResolvers<void>().promise, dispose: vi.fn() });
+    vi.mocked(service.readMachineSettings)
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValue({
+        status: 'current',
+        record: { ...record, activeProfile: 'fine' },
+      });
+    const store = new MachineSettingsStore(Promise.resolve(service), watch, () => undefined);
+    const off = store.subscribe(typeId, () => undefined);
+    await vi.waitFor(() => {
+      expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    });
+    const refresh = (async () => {
+      try {
+        await store.refresh(typeId);
+        return 'resolved';
+      } catch {
+        return 'closed';
+      }
+    })();
+    off();
+    expect(disposed).toHaveBeenCalledOnce();
+    expect(await refresh).toBe('closed');
+    const fresh = store.subscribe(typeId, () => undefined);
+    expect(watch).toHaveBeenCalledTimes(2);
+    nextReady.resolve();
+    await vi.waitFor(() => {
+      expect(store.record(typeId)?.activeProfile).toBe('fine');
+    });
+    expect(service.readMachineSettings).toHaveBeenCalledTimes(2);
+    stale.resolve({ status: 'current', record });
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(store.record(typeId)?.activeProfile).toBe('fine');
+    expect(service.readMachineSettings).toHaveBeenCalledTimes(2);
+    fresh();
+    store.dispose();
+  });
+
   it('should share warm reads and retain stable active blocks after inactive and formatting changes', async () => {
     const { store, service, observe } = fixture();
     const off = store.subscribe(typeId, () => undefined);
@@ -125,6 +401,9 @@ describe('machine preference projections', () => {
     const first = deferred<Awaited<ReturnType<MachineSettingsService['readMachineSettings']>>>();
     vi.mocked(service.readMachineSettings).mockImplementationOnce(async () => first.promise);
     const pending = store.refresh(typeId);
+    await vi.waitFor(() => {
+      expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    });
     const trailing = store.refresh(typeId);
     vi.mocked(service.readMachineSettings).mockResolvedValue({
       status: 'current',
@@ -190,7 +469,11 @@ describe('machine preference projections', () => {
     async (action) => {
       const { service } = fixture();
       const dispose = vi.fn();
-      const store = new MachineSettingsStore(Promise.resolve(service), () => () => undefined, dispose);
+      const store = new MachineSettingsStore(
+        Promise.resolve(service),
+        () => ({ ready: Promise.resolve(), closed: Promise.withResolvers<void>().promise, dispose: () => undefined }),
+        dispose,
+      );
       await store.refresh(typeId);
       vi.mocked(service.editMachineSettings).mockRejectedValueOnce(new Error('Reply lost'));
       store.update(typeId, (base) => ({ ...base, activeProfile: 'fine' }));

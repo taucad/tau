@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useObservation } from '#react/use-observation.js';
+import { DirectoryListingErrorCode } from '#directory-listing.js';
 import type { DirectoryListing } from '#directory-listing.js';
 import type { FileTreeService } from '#file-tree-service.js';
 
@@ -32,5 +33,24 @@ export function useDirectoryListing(
     const entries = treeService?.listDirectorySync(path);
     return entries === undefined ? undefined : { kind: 'ready', path, entries };
   }, [treeService, path, incarnation]);
-  return snapshot.value ?? warm ?? (treeService ? { kind: 'loading', path } : { kind: 'unready' });
+  const value = snapshot.value ?? warm;
+  return useMemo<DirectoryListing>(() => {
+    if (snapshot.status === 'error' || snapshot.status === 'closed') {
+      return treeService
+        ? {
+            kind: 'error',
+            path,
+            cause: {
+              code: DirectoryListingErrorCode.Unavailable,
+              message: snapshot.error ?? 'Directory observation closed.',
+              path,
+            },
+          }
+        : { kind: 'unready' };
+    }
+    if (value?.kind === 'ready' && (snapshot.status === 'pending' || snapshot.status === 'registering')) {
+      return { ...value, pending: true };
+    }
+    return value ?? (treeService ? { kind: 'loading', path } : { kind: 'unready' });
+  }, [value, snapshot.status, snapshot.error, treeService, path]);
 }

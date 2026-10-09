@@ -21,12 +21,13 @@ vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => fileManager
 function ImageFromFileContentService(): React.JSX.Element {
   const result = useFileContent('preview.png');
   const service = fileManager.contentService;
+  const binarySize = result.kind === 'binary' ? result.size : undefined;
   const readAll = useCallback(async (): Promise<Uint8Array<ArrayBuffer>> => {
-    if (result.kind !== 'binary' || !service) {
+    if (binarySize === undefined || !service) {
       throw new Error('Image bytes are unavailable');
     }
-    return service.readRawBytes('preview.png', { sizeLimit: result.size });
-  }, [result, service]);
+    return service.readRawBytes('preview.png', { sizeLimit: binarySize });
+  }, [binarySize, service]);
   if (result.kind !== 'binary') {
     return <span>Loading file…</span>;
   }
@@ -212,8 +213,8 @@ describe('NativeImageViewer', () => {
     fileManager.contentService = service;
     const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
     vi.mocked(URL.createObjectURL).mockReturnValueOnce('blob:first').mockReturnValueOnce('blob:second');
+    const mounted = render(<ImageFromFileContentService />);
     try {
-      render(<ImageFromFileContentService />);
       const image = await screen.findByRole('img', { name: 'preview.png' });
       expect(image).toHaveAttribute('src', 'blob:first');
       Object.defineProperties(image, {
@@ -228,7 +229,7 @@ describe('NativeImageViewer', () => {
       // The viewer's raw bytes come from the classified content the service already cached.
       expect(proxy.readFile).toHaveBeenCalledOnce();
 
-      writeFile();
+      act(writeFile);
       await waitFor(() => {
         expect(proxy.readFile).toHaveBeenCalledTimes(2);
         expect(digest).toHaveBeenCalledTimes(2);
@@ -247,7 +248,7 @@ describe('NativeImageViewer', () => {
 
       bytes = new Uint8Array(bytes);
       bytes[bytes.length - 1] = 1;
-      writeFile();
+      act(writeFile);
       await waitFor(() => {
         expect(screen.getByRole('img', { name: 'preview.png' })).toHaveAttribute('src', 'blob:second');
       });
@@ -256,6 +257,7 @@ describe('NativeImageViewer', () => {
       expect(service.peekOutcome('preview.png')).not.toBe(firstOutcome);
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first');
     } finally {
+      mounted.unmount();
       service.dispose();
       channel.dispose();
     }

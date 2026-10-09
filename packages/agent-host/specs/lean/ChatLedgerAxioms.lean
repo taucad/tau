@@ -241,3 +241,4 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t7_d5_duplicate_segment
 #print axioms ChatLedger.t7_d5_conflict_kept_and_reported
 #print axioms ChatLedger.t7_merge_not_prefix_stable
+#print axioms ChatLedger.d26_duplicate_boundary_keeps_semantic_term

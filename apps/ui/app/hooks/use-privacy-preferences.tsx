@@ -74,6 +74,8 @@ export function usePrivacyPreferences(): UsePrivacyPreferencesReturn {
     queryFn: getPrivacyPreferences,
     retry: 1,
     retryDelay: 1000,
+    /* Read under every chat; the preference only changes through the mutation below, which writes the cache. */
+    staleTime: Infinity,
   });
 
   const mutation = useMutation({

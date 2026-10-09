@@ -10,7 +10,7 @@ const createService = () => {
   const returning = vi.fn().mockResolvedValue([{ allowsAiTraining: true, allowsUsageMetrics: false }]);
   const where = vi.fn().mockReturnValue({ returning });
   const set = vi.fn().mockReturnValue({ where });
-  database.database.update.mockReturnValue({ set } as unknown as ReturnType<DatabaseService['database']['update']>);
+  database.database.update.mockReturnValue(mock<ReturnType<DatabaseService['database']['update']>>({ set }));
   return { service: new PrivacyService(database), database, set };
 };
 

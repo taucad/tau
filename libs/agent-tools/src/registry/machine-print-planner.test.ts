@@ -326,6 +326,10 @@ describe('machine print planner', () => {
     ).rejects.toThrow(
       'Workshop X1C accepts additive.fff (application/vnd.bambulab.gcode-3mf); cam/part.nc is not one of them.',
     );
+    /* A project file that is no program is never named G-code for the machine to refuse later. */
+    await expect(planner({ toolCallId: 'call-3', artifact: 'main.scad', machine: router, signal })).rejects.toThrow(
+      'main.scad is not one of them.',
+    );
   });
 
   it('refuses a plate container that names no plate to run, rather than guess one', async () => {

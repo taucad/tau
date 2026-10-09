@@ -331,16 +331,23 @@ const summarize = (
 };
 
 /**
+ * Program formats by file name, each with the media types that name it: a container's declared media type matches the
+ * file's. ponytail: G-code is spelled two ways by providers today; add a row when a provider declares a new format.
+ */
+const programFormats: ReadonlyArray<Readonly<{ name: RegExp; mediaTypes: readonly string[] }>> = [
+  { name: /\.gcode\.3mf$/iu, mediaTypes: ['application/vnd.bambulab.gcode-3mf'] },
+  { name: /\.(?:gcode|nc|ngc|tap|cnc)$/iu, mediaTypes: ['text/x-gcode', 'text/x.gcode'] },
+];
+
+/**
  * The artifact reference a job names: the program's project path and digest, in the container the machine accepts.
- *
- * ponytail: a zip is a plate container and anything else a single program, then the media type picks among those;
- * a machine accepting two single-program formats with no media type to tell them apart takes its first.
+ * The program's media type, stated by the slicer or read from its name, picks the container.
  *
  * @param deps - The project the program is in.
  * @param machine - The machine as observed; its `accepts` are what preflight checks.
  * @param file - The program's path, bytes and media type when known.
  * @returns The reference.
- * @throws When the machine takes no jobs, accepts no container of this shape, or names no plate to run.
+ * @throws When the machine takes no jobs, accepts no container of this format, or names no plate to run.
  */
 const artifactReference = async (
   deps: Pick<MachinePrintPlannerDependencies, 'projectId'>,
@@ -352,12 +359,15 @@ const artifactReference = async (
   if (accepts.length === 0) {
     throw new Error(`${machine.name} takes no jobs.`);
   }
-  const isZip = file.bytes[0] === 0x50 && file.bytes[1] === 0x4b;
-  const fitting = accepts.filter((container) => (container.payloadSelection === 'plate') === isZip);
-  const accepted = fitting.find((container) => container.mediaType === file.mediaType) ?? fitting[0];
+  const { mediaType } = file;
+  const mediaTypes =
+    programFormats.find((format) =>
+      mediaType === undefined ? format.name.test(file.path) : format.mediaTypes.includes(mediaType),
+    )?.mediaTypes ?? (mediaType === undefined ? [] : [mediaType]);
+  const accepted = accepts.find((container) => mediaTypes.includes(container.mediaType));
   if (accepted === undefined) {
     throw new Error(
-      `${machine.name} accepts ${accepts.map(({ technology, mediaType }) => `${technology} (${mediaType})`).join(', ')}; ${file.path} is not one of them.`,
+      `${machine.name} accepts ${accepts.map(({ technology, mediaType: accepting }) => `${technology} (${accepting})`).join(', ')}; ${file.path} is not one of them.`,
     );
   }
   const selectedMember = accepted.payloadSelection === 'single' ? file.path : accepted.requiredMembers[0];

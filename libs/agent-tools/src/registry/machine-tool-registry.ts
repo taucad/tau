@@ -334,6 +334,20 @@ const parameterProblems = (descriptor: MachineActionDescriptor, parameters: Json
 type ActionIntent = Omit<MachineApplyActionInput, 'attended' | 'signal'> &
   Readonly<{ label: string; confirms: MachineActionDescriptor['confirms'] }>;
 
+/** An intent this registry wrote to the session log, read back: a payload of any other shape is never sent. */
+const recalledIntentSchema = z.object({
+  machineId: z.string(),
+  componentId: z.string(),
+  capabilityRevision: z.string(),
+  operationId: z.string(),
+  action: z.string(),
+  version: z.number().int(),
+  expectedRunId: z.string().nullable(),
+  parameters: z.unknown(),
+  label: z.string(),
+  confirms: z.enum(['observation', 'acknowledgement', 'none']),
+}) satisfies z.ZodType<Omit<ActionIntent, 'requestedBy'>>;
+
 /**
  * Send one action and say what became of it: the receipt, and for an action the machine reports, whether it
  * showed the change within a few seconds. An approval is never claimed here: the person's Approve recorded it on the
@@ -353,7 +367,6 @@ const applyIntent = async (
   const { label, confirms, ...request } = intent;
   const receipt = await client.applyAction({
     ...request,
-    /* The caller asking now; a payload an older registry wrote carries none. */
     requestedBy: requesterOf(invocation),
     signal,
   });
@@ -475,8 +488,16 @@ const machineAction = async (
         message: `The person declined ${action} on ${entry.name}. Do not retry it unless they ask.`,
       };
     }
-    // SAFETY: this registry wrote the payload under this key from an `ActionIntent`.
-    const intent = prior.payload['intent'] as unknown as ActionIntent;
+    const recalled = recalledIntentSchema.safeParse(prior.payload['intent']);
+    if (!recalled.success) {
+      return {
+        status: 'refused',
+        code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
+        message: `The approved request for ${action} on ${entry.name} could not be read back, so nothing was sent. Ask the person to approve it again.`,
+      };
+    }
+    /* Who asks is the caller now, not what the log says. */
+    const intent = { ...recalled.data, requestedBy: requesterOf(invocation) };
     return applyIntent(client, invocation, { entry, intent, confirmation: options.confirmation });
   }
   const check = checkMachineAction({
@@ -514,7 +535,12 @@ const machineAction = async (
     confirms: descriptor.confirms,
   };
   if (check.status === 'available') {
-    return applyIntent(client, invocation, { entry, intent, confirmation: options.confirmation });
+    const sent = await applyIntent(client, invocation, { entry, intent, confirmation: options.confirmation });
+    /* The host admits under a standard family's floor, which a provider's descriptor may sit below: then ask the
+     * person for this same request. A refusal at admission journals nothing, so the operation id is still unused. */
+    if (sent.status !== 'needs-approval' || invocation.approve === undefined) {
+      return sent;
+    }
   }
   if (invocation.approve === undefined) {
     return {
@@ -708,45 +734,26 @@ const findJob = async (
 };
 
 /**
- * Settle a job by the person's answer in chat. An approval resolves the job only when the machine needs nothing the
- * Print pane alone takes (attestations, presence); otherwise the job keeps waiting for the pane.
+ * Settle a job by the person's answer in chat. The person's own session resolves the job before answering (R16): the
+ * agent's session can never approve one, so an answer here only reads what the person's surface recorded. A run
+ * stopped with the chat, or a denial no surface recorded, withdraws the request; an approval the chat could not take
+ * (attestations, presence) leaves the job waiting for the Print pane.
  *
  * @param client - The negotiated machines facet.
- * @param answered - The job, its machine, the answer, and the call's cancellation (only an approval takes it).
+ * @param answered - The job's ids, the answer, and the call's cancellation.
  * @returns The job as it stands.
  */
 const settleApproval = async (
   client: MachineClient,
-  answered: Readonly<{
-    job: MachineJob;
-    entry: MachineDirectoryEntry | undefined;
-    resolution: InterruptResolution;
-    signal: AbortSignal;
-  }>,
+  answered: Readonly<{ jobId: string; machineId?: string; resolution: InterruptResolution; signal: AbortSignal }>,
 ): Promise<MachineJob> => {
-  const { job, entry, resolution, signal } = answered;
-  const { jobId } = job;
-  const resolvedBy = chatPerson(resolution.outcome);
-  /* A denial is the person's decision and ends the job `denied`; only a run that was aborted or closed withdraws it.
-   * Both are safety answers that must land even while the run is being cancelled, so neither takes the signal. */
-  if (resolution.outcome === 'denied') {
-    return client.resolveJob({ jobId, decision: 'deny', resolvedBy });
-  }
-  if (resolution.outcome === 'cancelled') {
-    return client.withdrawJob({ jobId, resolvedBy });
-  }
-  if (entry === undefined || personOnlyApproval(entry) !== undefined) {
+  const { jobId, machineId, resolution, signal } = answered;
+  const job = await findJob(client, { jobId, ...(machineId === undefined ? {} : { machineId }) }, signal);
+  if (job.state !== 'awaiting-approval' || resolution.outcome === 'approved') {
     return job;
   }
-  return client.resolveJob({
-    jobId,
-    decision: 'approve',
-    resolvedBy,
-    attestations: [],
-    transferOperationId: `${jobId}:transfer`,
-    startOperationId: `${jobId}:start`,
-    signal,
-  });
+  /* A safety answer that must land even while the run is being cancelled, so it does not take the signal. */
+  return client.withdrawJob({ jobId, resolvedBy: chatPerson(resolution.outcome) });
 };
 
 /** What starting a program does, by process: a printer prints, a mill cuts, anything else runs it. */
@@ -894,7 +901,12 @@ const requestJob = async (
         job.state === 'denied' ? 'denied' : job.state === 'withdrawn' ? 'cancelled' : prior.resolution.outcome;
       return jobReport(job, entry, { approval });
     }
-    const settled = await settleApproval(client, { job, entry, resolution: prior.resolution, signal });
+    const settled = await settleApproval(client, {
+      jobId: priorJobId,
+      machineId: entry.machineId,
+      resolution: prior.resolution,
+      signal,
+    });
     return jobReport(settled, entry, { approval: prior.resolution.outcome });
   }
   const { plan, check, reported } = await planJob(client, options, { invocation, parsed, entry });
@@ -928,7 +940,7 @@ const requestJob = async (
       artifactDigest: plan.artifact.digest,
     },
   });
-  const settled = await settleApproval(client, { job, entry, resolution, signal });
+  const settled = await settleApproval(client, { jobId, machineId: entry.machineId, resolution, signal });
   return jobReport(settled, entry, { approval: resolution.outcome, ...reported });
 };
 
@@ -1136,16 +1148,11 @@ const answerJobApproval = async (client: MachineClient, answer: HostToolApproval
   if (name !== toolName.requestJob || payload['kind'] !== 'job' || typeof jobId !== 'string') {
     return;
   }
-  /* Nobody waits on the hand-over, and an approval's transfer answers to the host rather than to a caller. */
+  /* Nobody waits on the hand-over. */
   const { signal } = new AbortController();
-  const job = await findJob(client, { jobId, ...(typeof machineId === 'string' ? { machineId } : {}) }, signal);
-  if (job.state !== 'awaiting-approval') {
-    return;
-  }
-  const { entries } = await client.list({ signal });
   await settleApproval(client, {
-    job,
-    entry: entries.find((entry) => entry.machineId === job.machineId),
+    jobId,
+    ...(typeof machineId === 'string' ? { machineId } : {}),
     resolution,
     signal,
   });

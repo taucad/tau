@@ -69,6 +69,8 @@ type FixtureMachines = Readonly<{
   withdrawJob: Mock<MachineClient['withdrawJob']>;
   checkJob: Mock<MachineClient['checkJob']>;
   captureStill: Mock<MachineClient['captureStill']>;
+  /** What the person's own session records for a job, before the interrupt is answered. */
+  person: (jobId: string, decision: 'approve' | 'deny') => MachineJob;
 }>;
 
 /**
@@ -135,12 +137,16 @@ const fixtureClient = (
     jobs.set(created.jobId, created);
     return created;
   });
-  const resolveJob = vi.fn<MachineClient['resolveJob']>(async (request) =>
-    update(request.jobId, {
-      state: request.decision === 'approve' ? 'transferring' : 'denied',
-      resolvedBy: request.resolvedBy,
-    }),
-  );
+  /* The agent's session, as the host grants it: deciding a job is a person's alone (R16). */
+  const resolveJob = vi.fn<MachineClient['resolveJob']>(async () => {
+    throw new Error('ROUTE_DENIED');
+  });
+  /* What the person's own session records from the chat banner or the Print pane, before the interrupt is answered. */
+  const person = (jobId: string, decision: 'approve' | 'deny'): MachineJob =>
+    update(jobId, {
+      state: decision === 'approve' ? 'transferring' : 'denied',
+      resolvedBy: { kind: 'user', id: 'operator', label: 'You' },
+    });
   const withdrawJob = vi.fn<MachineClient['withdrawJob']>(async (request) =>
     update(request.jobId, { state: 'withdrawn', resolvedBy: request.resolvedBy }),
   );
@@ -216,6 +222,7 @@ const fixtureClient = (
     withdrawJob,
     checkJob,
     captureStill,
+    person,
   };
 };
 
@@ -317,8 +324,11 @@ const run = async (
     now: () => Date.parse('2026-10-05T00:00:01.000Z'),
   }).invoke({ toolCallId: 'call-1', signal: new AbortController().signal, ...call });
 
-const approveWith = (outcome: InterruptResolution['outcome']) =>
-  vi.fn<NonNullable<HostToolInvocation['approve']>>(async () => ({ interruptId: 'interrupt-1', outcome }));
+const approveWith = (outcome: InterruptResolution['outcome'], before?: () => void) =>
+  vi.fn<NonNullable<HostToolInvocation['approve']>>(async () => {
+    before?.();
+    return { interruptId: 'interrupt-1', outcome };
+  });
 
 describe('machine tool registry', () => {
   it('registers explicit tools only for the negotiated and granted facet, and no bare start', () => {
@@ -400,7 +410,7 @@ describe('machine tool registry', () => {
         "list_machines": "List every machine bound on this computer, one line each: id, name, model, connection, state and any run. Read-only.",
         "machine_action": "Apply one declared action that get_machine lists, by componentId, action and parameters.
 
-      An action you may use now runs at once; one that needs approval pauses for the person to approve exactly this request in Tau; one only a person at the machine may use is refused with what the person must do. Report the message as it states it. Never resend an action that is confirming or unknown, and never work around a refusal with other tools. To halt the machine, use stop_machine.",
+      An action you may use now runs at once; one that needs approval pauses for the person to approve exactly this request in a Tau chat, and elsewhere returns needs-approval for the person to do it in Tau; one only a person at the machine may use is refused with what the person must do. Report the message as it states it. Never resend an action that is confirming or unknown, and never work around a refusal with other tools. To halt the machine, use stop_machine.",
         "request_job": "The only way to start a program on a machine. Name targetFile, a CAD source Tau slices (machines with an fff process: 3D printers), or artifact, a finished program in the project run as is (get_machine's Jobs line lists what the machine accepts). Nothing is transferred or started until a person accepts. A Tau-hosted turn waits for the answer; otherwise, or when only the person can confirm something, the job awaits approval in Tau's Print pane. Report the outcome as nextStep states it; an unconfirmed start is unknown, never "started". Never retry.
 
       Call check_job first; for targetFile also test_model, the build-volume fit and get_print_profiles. When get_machine reports no plate, ask which is installed and pass plate. Under engine "bambu-studio" use bambuStudio.profiles and .settings as get_print_profiles names them; under the reference engine options accept only layerHeight, walls, infillPercent, infillPattern, supports, nozzleTemperature, bedTemperature, printSpeed, travelSpeed.",
@@ -709,6 +719,48 @@ describe('machine tool registry', () => {
       expect(fixture.applyAction.mock.calls[0]?.[0]).not.toHaveProperty('approval');
     });
 
+    it('sends nothing for a recalled approval whose intent cannot be read back, and asks again', async () => {
+      const fixture = fixtureClient();
+      const approve = Object.assign(approveWith('approved'), {
+        recall: vi.fn<NonNullable<NonNullable<HostToolInvocation['approve']>['recall']>>(async () => ({
+          /* Written by an older registry: no capability revision or run. */
+          payload: { kind: 'machine-action', intent: { machineId: 'machine-1', operationId: 'call-asked' } },
+          resolution: { interruptId: 'interrupt-1', outcome: 'approved' },
+        })),
+      });
+
+      const result = await run(fixture.client, { ...action('controller', 'run.cancel'), approve });
+
+      expect(result.content).toMatchObject({ status: 'refused', code: 'MACHINE_ACTION_APPROVAL_REQUIRED' });
+      expect(fixture.applyAction).not.toHaveBeenCalled();
+    });
+
+    /* A provider's descriptor below its standard family's floor: the host admits at the floor, so the person is asked. */
+    it('asks the person when the host needs an approval the directory did not show, then sends the same request', async () => {
+      const fixture = fixtureClient();
+      fixture.applyAction.mockResolvedValueOnce({
+        operationId: 'call-1',
+        machineId: 'machine-1',
+        kind: 'action',
+        observedAt: fixtureTimestamp,
+        status: 'rejected',
+        code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
+        message: 'A person must approve “Chamber light” in Tau first.',
+      });
+      const approve = approveWith('approved');
+
+      const result = await run(fixture.client, { ...action('chamber-light', 'switch.set', { on: true }), approve });
+
+      expect(approve).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          key: 'action:machine-1:chamber-light:switch.set:{"on":true}',
+          payload: expect.objectContaining({ operationId: 'call-1' }) as Record<string, unknown>,
+        }),
+      );
+      expect(fixture.applyAction.mock.calls.map(([request]) => request.operationId)).toEqual(['call-1', 'call-1']);
+      expect(result.content).toMatchObject({ status: 'done', operationId: 'call-1' });
+    });
+
     it('asks the person to approve it in Tau when the host holds no approval for the request', async () => {
       const fixture = fixtureClient();
       fixture.applyAction.mockResolvedValueOnce({
@@ -918,9 +970,9 @@ describe('machine tool registry', () => {
   });
 
   describe('request_job', () => {
-    it('requests one job, pauses on the approval, and approves it when the person accepts in chat', async () => {
+    it("requests one job, pauses on the approval, and reports the job the person's session approved", async () => {
       const fixture = fixtureClient();
-      const approve = approveWith('approved');
+      const approve = approveWith('approved', () => fixture.person('call-1', 'approve'));
 
       const result = await run(fixture.client, { toolName: 'request_job', input: { targetFile: 'main.ts' }, approve });
 
@@ -954,15 +1006,8 @@ describe('machine tool registry', () => {
           artifactDigest: fixtureArtifact.digest,
         },
       });
-      expect(fixture.resolveJob).toHaveBeenCalledExactlyOnceWith({
-        jobId: 'call-1',
-        decision: 'approve',
-        resolvedBy: { kind: 'user', id: 'chat', label: 'Accepted in chat' },
-        attestations: [],
-        transferOperationId: 'call-1:transfer',
-        startOperationId: 'call-1:start',
-        signal: expect.any(AbortSignal) as AbortSignal,
-      });
+      /* The agent's session never resolves a job: the person's did, before answering. */
+      expect(fixture.resolveJob).not.toHaveBeenCalled();
       expect(requestJobOutputSchema.parse(result.content)).toMatchObject({
         job: { jobId: 'call-1', state: 'transferring' },
         machineName: 'Workshop X1C',
@@ -990,22 +1035,36 @@ describe('machine tool registry', () => {
       });
     });
 
-    it.each([
-      ['denied', 'denied'],
-      ['cancelled', 'withdrawn'],
-    ] as const)('settles the job %s by the answer, without the call signal', async (outcome, state) => {
+    it("reports the person's recorded denial without resolving the job itself", async () => {
       const fixture = fixtureClient();
 
       const result = await run(fixture.client, {
         toolName: 'request_job',
         input: { targetFile: 'main.ts' },
-        approve: approveWith(outcome),
+        approve: approveWith('denied', () => fixture.person('call-1', 'deny')),
       });
 
-      expect(result.content).toMatchObject({ job: { state }, approval: outcome });
-      const [call] = (outcome === 'denied' ? fixture.resolveJob : fixture.withdrawJob).mock.calls[0]!;
-      expect(call).not.toHaveProperty('signal');
+      expect(result.content).toMatchObject({ job: { state: 'denied' }, approval: 'denied' });
+      expect(fixture.resolveJob).not.toHaveBeenCalled();
+      expect(fixture.withdrawJob).not.toHaveBeenCalled();
     });
+
+    it.each(['denied', 'cancelled'] as const)(
+      'withdraws a job still awaiting approval after a %s answer, without the call signal',
+      async (outcome) => {
+        const fixture = fixtureClient();
+
+        const result = await run(fixture.client, {
+          toolName: 'request_job',
+          input: { targetFile: 'main.ts' },
+          approve: approveWith(outcome),
+        });
+
+        expect(result.content).toMatchObject({ job: { state: 'withdrawn' }, approval: outcome });
+        expect(fixture.resolveJob).not.toHaveBeenCalled();
+        expect(fixture.withdrawJob.mock.calls[0]![0]).not.toHaveProperty('signal');
+      },
+    );
 
     it('returns the job awaiting approval with a next step to an external agent', async () => {
       const fixture = fixtureClient();
@@ -1046,14 +1105,15 @@ describe('machine tool registry', () => {
       const answer: HostToolApprovalAnswer = {
         toolName: 'request_job',
         payload: { kind: 'job', jobId: 'call-1', machineId: 'machine-1' },
-        resolution: { interruptId: 'interrupt-1', outcome: 'denied' },
+        resolution: { interruptId: 'interrupt-1', outcome: 'cancelled' },
       };
 
       await registry.answerApproval?.(answer);
       await registry.answerApproval?.(answer);
 
-      expect(fixture.jobs.get('call-1')?.state).toBe('denied');
-      expect(fixture.resolveJob).toHaveBeenCalledTimes(1);
+      expect(fixture.jobs.get('call-1')?.state).toBe('withdrawn');
+      expect(fixture.withdrawJob).toHaveBeenCalledTimes(1);
+      expect(fixture.resolveJob).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -1213,7 +1273,7 @@ describe('machine tool registry', () => {
       await host.close();
     });
 
-    it('denies the job, not withdraws it, when the person declines in chat', async () => {
+    it("keeps the person's denial, neither withdrawing nor resolving the job, when they decline in chat", async () => {
       const { fixture, host, interruptId } = await pausedOn({
         id: 'call-print',
         name: 'request_job',
@@ -1221,12 +1281,13 @@ describe('machine tool registry', () => {
       });
       expect(fixture.jobs.get('call-print')?.state).toBe('awaiting-approval');
 
+      fixture.person('call-print', 'deny');
       await host.resolveInterrupt({ runId: 'run-machine', interruptId, outcome: 'denied' });
+      await host.resume('chat-machine');
 
-      await vi.waitFor(() => {
-        expect(fixture.jobs.get('call-print')?.state).toBe('denied');
-      });
+      expect(fixture.jobs.get('call-print')?.state).toBe('denied');
       expect(fixture.withdrawJob).not.toHaveBeenCalled();
+      expect(fixture.resolveJob).not.toHaveBeenCalled();
       await host.close();
     });
   });
@@ -1394,10 +1455,10 @@ describe('request_job slicer options through the chat registry', () => {
     await host.registry.answerApproval?.({
       toolName: 'request_job',
       payload: { kind: 'job', jobId: 'call-answered' },
-      resolution: { interruptId: 'interrupt-1', outcome: 'denied' },
+      resolution: { interruptId: 'interrupt-1', outcome: 'cancelled' },
     });
 
-    expect(host.machines.jobs.get('call-answered')?.state).toBe('denied');
+    expect(host.machines.jobs.get('call-answered')?.state).toBe('withdrawn');
   });
 
   it("should hand runtime.export exactly the preset and options the agent chose, over the machine's own", async () => {

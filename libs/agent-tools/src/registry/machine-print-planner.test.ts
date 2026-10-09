@@ -251,14 +251,8 @@ describe('machine print planner', () => {
       contract,
       selectedMember: 'Metadata/plate_1.gcode',
     });
-    expect(result.configuration).toEqual({
-      expectedModel: 'X1C',
-      expectedBedType: 'textured-pei',
-      expectedMaterials: [{ slot: 2, materialId: 'PETG' }],
-      amsMapping: [2],
-      expectedNozzleDiameter: 0.4,
-      expectedFilamentDiameter: 1.75,
-    });
+    /* What the call chose only: the provider completes model, nozzle and materials from what it reports. */
+    expect(result.configuration).toEqual({ expectedBedType: 'textured-pei', amsMapping: [2] });
     expect(result.program).toMatchObject({
       name: 'pyramid.gcode.3mf',
       facts: { process: 'fff', layers: 3, filamentLength: 5 },
@@ -286,12 +280,74 @@ describe('machine print planner', () => {
     expect(deps.exportModel.mock.calls[0]![0].options).toMatchObject({ plate: 'high-temperature' });
   });
 
-  it('names the program alone when it cannot read the toolpath', async () => {
-    const garbage = Uint8Array.from([1, 2, 3, 4]);
+  it('says so when it cannot read the toolpath, and names the program as other', async () => {
+    const garbage = Uint8Array.from([0x50, 0x4b, 3, 4]);
     const deps = { ...dependencies(), readArtifact: async () => garbage };
     const result = await plan(deps);
-    expect(result.program).toEqual({ name: 'pyramid.gcode.3mf' });
+    expect(result.program).toEqual({ name: 'pyramid.gcode.3mf', facts: { process: 'other' } });
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        code: 'RUNTIME_CONTENT_UNSUPPORTED',
+        severity: 'warning',
+        message: expect.stringContaining(
+          'Tau could not read pyramid.gcode.3mf as manufacturing.toolpath.bambu-gcode-3mf',
+        ) as string,
+      }),
+    ]);
     expect(result.artifact).toMatchObject({ digest: `sha256:${await sha256Bytes(garbage)}`, length: 4 });
+  });
+
+  it('runs a finished program as is, in the container the machine accepts, slicing nothing', async () => {
+    const program = new TextEncoder().encode('G21\nG0 X0 Y0\n');
+    const deps = { ...dependencies(), readArtifact: vi.fn(async () => program) };
+    const router = fixtureEntry({ milling: true, run: false });
+    const planner = createMachinePrintPlanner(deps);
+    const { signal } = new AbortController();
+
+    const result = await planner({ toolCallId: 'call-1', artifact: 'cam/part.nc', machine: router, signal });
+
+    expect(deps.exportModel).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      artifact: {
+        projectId,
+        path: 'cam/part.nc',
+        digest: `sha256:${await sha256Bytes(program)}`,
+        length: program.byteLength,
+        mediaType: 'text/x-gcode',
+        contract: { id: 'tau.toolpath.gcode', version: 1 },
+        selectedMember: 'cam/part.nc',
+      },
+      configuration: {},
+      program: { name: 'part.nc' },
+    });
+    /* A printer takes print-ready containers only. */
+    await expect(
+      planner({ toolCallId: 'call-2', artifact: 'cam/part.nc', machine: machine(loaded), signal }),
+    ).rejects.toThrow(
+      'Workshop X1C accepts additive.fff (application/vnd.bambulab.gcode-3mf); cam/part.nc is not one of them.',
+    );
+  });
+
+  it('refuses a plate container that names no plate to run, rather than guess one', async () => {
+    const entry = machine(loaded);
+    const { jobs } = entry.descriptor.capabilities;
+    if (jobs.type !== 'supported') {
+      throw new Error('The fixture printer takes jobs.');
+    }
+    const unnamed: MachineDirectoryEntry = {
+      ...entry,
+      descriptor: {
+        ...entry.descriptor,
+        capabilities: {
+          ...entry.descriptor.capabilities,
+          jobs: { ...jobs, accepts: jobs.accepts.map((container) => ({ ...container, requiredMembers: [] })) },
+        },
+      },
+    };
+
+    await expect(plan(dependencies(), unnamed)).rejects.toThrow(
+      'Workshop X1C names no plate to run in application/vnd.bambulab.gcode-3mf.',
+    );
   });
 
   it('refuses before slicing when nothing is loaded or the provider is gone', async () => {
@@ -578,10 +634,6 @@ describe('machine print planner', () => {
       });
       const result = await plan(deps, entry);
       expect(result.configuration).toMatchObject({
-        expectedMaterials: [
-          { slot: 1, materialId: 'PLA' },
-          { slot: 0, materialId: 'PLA' },
-        ],
         amsMapping: [1, 0],
       });
       /* The first slice printed both parts with slot 0's preset; filament 1 prints from slot 1's. */
@@ -619,10 +671,6 @@ describe('machine print planner', () => {
       );
       expect(result.configuration).toMatchObject({
         amsMapping: [3, 0],
-        expectedMaterials: [
-          { slot: 3, materialId: 'PETG' },
-          { slot: 0, materialId: 'PLA' },
-        ],
       });
       expect(exported(deps)[1]).toMatchObject({
         filaments: ['Bambu PETG Basic @BBL X1C', 'Bambu PLA Basic @BBL X1C'],
@@ -649,10 +697,6 @@ describe('machine print planner', () => {
       const result = await plan(deps, entry);
       /* Each tray's own spelling, which preflight compares. */
       expect(result.configuration).toMatchObject({
-        expectedMaterials: [
-          { slot: 0, materialId: 'PLA' },
-          { slot: 2, materialId: 'pla' },
-        ],
         amsMapping: [0, 2],
       });
       expect(deps.exportModel).toHaveBeenCalledTimes(1);
@@ -712,10 +756,7 @@ describe('machine print planner', () => {
       });
       const deps = { ...withBambuStudio(), readArtifact: async () => onePart };
       const result = await plan(deps);
-      expect(result.configuration).toMatchObject({
-        expectedMaterials: [{ slot: 2, materialId: 'PETG' }],
-        amsMapping: [2],
-      });
+      expect(result.configuration).toMatchObject({ amsMapping: [2] });
       expect(deps.exportModel).toHaveBeenCalledTimes(1);
     });
   });

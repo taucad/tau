@@ -12,6 +12,7 @@ import type {
   MachineComponentValue,
   MachineDirectoryEntry,
   MachineHaltOutcome,
+  MachineInstalledCapabilities,
   MachineJob,
   MachineRemedy,
   MachineRun,
@@ -123,6 +124,25 @@ const quantityText = (value: unknown): string =>
 
 const percent = (fraction: number): string => `${String(Math.round(fraction * 100))}%`;
 
+/**
+ * What jobs a machine takes from Tau and what starting one asks of a person, in one line.
+ * @param jobs - The machine's job capability.
+ * @returns "Jobs: accepts additive.fff (application/vnd.bambulab.gcode-3mf); stored, then started by Tau …".
+ */
+const jobsText = (jobs: MachineInstalledCapabilities['jobs']): string => {
+  if (jobs.type === 'unsupported') {
+    return 'Jobs: this machine takes none from Tau.';
+  }
+  const accepts = jobs.accepts.map(({ technology, mediaType }) => `${technology} (${mediaType})`).join(', ');
+  const start =
+    jobs.start === 'remote' ? 'started by Tau once a person accepts it' : 'started by a person at the machine';
+  const confirms = [
+    ...jobs.attestations.map(({ label }) => label),
+    ...(jobs.safety.attended ? ['they are at the machine'] : []),
+  ];
+  return `Jobs (request_job): accepts ${accepts}; ${jobs.delivery === 'stored' ? 'sent whole' : 'streamed'}, then ${start}${confirms.length === 0 ? '' : `; the person confirms: ${confirms.join('; ')}`}.`;
+};
+
 /** One component's reported value in a few words. */
 const valueText = (value: MachineComponentValue): string => {
   switch (value.kind) {
@@ -175,6 +195,10 @@ const valueText = (value: MachineComponentValue): string => {
   }
 };
 
+/** A run stage in words, or nothing for a bare vendor stage number, which says nothing to a reader. */
+const readableStage = (stage: string | undefined): string | undefined =>
+  stage === undefined || /^\d+$/u.test(stage) ? undefined : stage;
+
 const runText = (run: MachineRun): string => {
   const { progress } = run;
   const counters = progress.counters
@@ -189,7 +213,8 @@ const runText = (run: MachineRun): string => {
     run.paused === undefined
       ? ''
       : ` (paused by ${run.paused.by}${run.paused.reason === undefined ? '' : `: ${run.paused.reason}`})`;
-  return `Run ${run.runId}: ${run.program?.name ?? 'program'} ${run.state}${paused}${facts.length === 0 ? '' : `, ${facts.join(', ')}`}${run.stage === undefined ? '' : `; ${run.stage}`}${run.origin === 'external' ? '; not started from Tau' : ''}.`;
+  const stage = readableStage(run.stage);
+  return `Run ${run.runId}: ${run.program?.name ?? 'program'} ${run.state}${paused}${facts.length === 0 ? '' : `, ${facts.join(', ')}`}${stage === undefined ? '' : `; ${stage}`}${run.origin === 'external' ? '; not started from Tau' : ''}.`;
 };
 
 /**
@@ -318,9 +343,8 @@ export const describeMachineText = (
     lines.push(...capabilities.actions.map((action) => actionText(entry, action, context.now)));
   }
   lines.push(`Stop (stop_machine, always open to you): ${outcomeText(entry, capabilities.stop)}`);
-  if (capabilities.jobs.type === 'unsupported') {
-    lines.push('Jobs: this machine takes none from Tau.');
-  } else if (context.jobs.length > 0) {
+  lines.push(jobsText(capabilities.jobs));
+  if (capabilities.jobs.type === 'supported' && context.jobs.length > 0) {
     lines.push('Recent jobs:');
     for (const { job, nextStep } of context.jobs) {
       lines.push(`- ${job.jobId} ${job.program.name}: ${job.state}${nextStep === undefined ? '' : `. ${nextStep}`}`);

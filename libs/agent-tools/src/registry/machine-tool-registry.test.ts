@@ -53,6 +53,7 @@ import {
   fixtureEntry,
   fixtureManifest,
   fixtureProvider,
+  fixtureRun,
   fixtureTimestamp,
 } from '#registry/machine.fixture.js';
 
@@ -143,8 +144,10 @@ const fixtureClient = (
   const withdrawJob = vi.fn<MachineClient['withdrawJob']>(async (request) =>
     update(request.jobId, { state: 'withdrawn', resolvedBy: request.resolvedBy }),
   );
-  const checkJob = vi.fn<MachineClient['checkJob']>(async () => ({
+  /* The provider completes nothing here: the completed configuration is what the call chose. */
+  const checkJob = vi.fn<MachineClient['checkJob']>(async (request) => ({
     status: 'blocked',
+    configuration: request.configuration,
     program: { name: 'pyramid.gcode.3mf', facts: { process: 'fff', layers: 125 } },
     checks: [
       { id: 'plate', label: 'Build plate', state: 'passed', source: 'observed' },
@@ -193,6 +196,8 @@ const fixtureClient = (
     resolveJob,
     withdrawJob,
     applyAction,
+    /* A person's surface records approvals; the agent's tools never call it. */
+    approveAction: unused,
     stop,
     beginHold: unused,
     renewHold: unused,
@@ -216,8 +221,6 @@ const fixtureClient = (
 
 /** Every machine tool, in listing order; the job tools need a planner. */
 const machineToolNames = [
-  'discover_machines',
-  'begin_machine_binding',
   'list_machines',
   'get_machine',
   'machine_action',
@@ -366,6 +369,46 @@ describe('machine tool registry', () => {
     });
   });
 
+  it('should offer no raw program, command or script input to the agent', () => {
+    const definitions = createMachineToolRegistry(fixtureClient().client, { planPrint }).list();
+    const propertyNames = (schema: unknown): string[] =>
+      typeof schema === 'object' && schema !== null
+        ? Object.entries(schema as Readonly<Record<string, unknown>>).flatMap(([key, value]) => [
+            ...(key === 'properties' && typeof value === 'object' && value !== null ? Object.keys(value) : []),
+            ...propertyNames(value),
+          ])
+        : [];
+
+    expect(definitions.flatMap(({ inputSchema }) => propertyNames(inputSchema))).not.toContainEqual(
+      expect.stringMatching(/gcode|command|raw|script/iu) as string,
+    );
+  });
+
+  it('should describe each machine tool exactly so', () => {
+    const definitions = createMachineToolRegistry(fixtureClient().client, { planPrint }).list();
+
+    expect(Object.fromEntries(definitions.map(({ name, description }) => [name, description]))).toMatchInlineSnapshot(`
+      {
+        "capture_machine_still": "Capture one authenticated, rate-limited, short-lived bounded still without changing machine or run state.",
+        "check_job": "Prepare exactly as request_job would (slice targetFile, or read artifact) and ask the machine whether it is ready for the program: ready, blocked (with the checks that fail and their remedies) or refused. Records no job and sends nothing to the machine.",
+        "get_machine": "Read one bound machine as it last reported: state, run and progress, components, activities and the questions they ask, alerts and checks with remedies, recent jobs and operations, what stop does, and every declared action with its parameters, what it does, who may use it and whether you may use it now. Read-only.
+
+      Read it before machine_action, and to follow an action or a job. Omit machineId when exactly one machine is bound.",
+        "get_print_profiles": "List the slicing presets and settings request_job can use for a bound machine with an fff process (a 3D printer); other machines take a finished program and have none. Read-only.
+
+      For a Bambu printer with Bambu Studio available it returns engine "bambu-studio": defaults (the presets chosen from the printer's model, nozzle, loaded filament and reported plate), the compatible printers, processes and filaments (source "user" marks the person's own), plates, and every setting's current value by group with enum choices. Pass profiles to read another selection, and keys for full descriptors. Otherwise it returns engine "reference" and why. The project's .tau/machines/settings/<typeId>.json keeps named profiles shared by machines of that type; savedProfiles lists their ids and the active one. Pass profileId to read another without changing the selection. machinePreferences reports the profile and source versions used; request_job arguments override its sparse values.",
+        "list_machines": "List every machine bound on this computer, one line each: id, name, model, connection, state and any run. Read-only.",
+        "machine_action": "Apply one declared action that get_machine lists, by componentId, action and parameters.
+
+      An action you may use now runs at once; one that needs approval pauses for the person to approve exactly this request in Tau; one only a person at the machine may use is refused with what the person must do. Report the message as it states it. Never resend an action that is confirming or unknown, and never work around a refusal with other tools. To halt the machine, use stop_machine.",
+        "request_job": "The only way to start a program on a machine. Name targetFile, a CAD source Tau slices (machines with an fff process: 3D printers), or artifact, a finished program in the project run as is (get_machine's Jobs line lists what the machine accepts). Nothing is transferred or started until a person accepts. A Tau-hosted turn waits for the answer; otherwise, or when only the person can confirm something, the job awaits approval in Tau's Print pane. Report the outcome as nextStep states it; an unconfirmed start is unknown, never "started". Never retry.
+
+      Call check_job first; for targetFile also test_model, the build-volume fit and get_print_profiles. When get_machine reports no plate, ask which is installed and pass plate. Under engine "bambu-studio" use bambuStudio.profiles and .settings as get_print_profiles names them; under the reference engine options accept only layerHeight, walls, infillPercent, infillPattern, supports, nozzleTemperature, bedTemperature, printSpeed, travelSpeed.",
+        "stop_machine": "Stop the machine now: its fastest halt, open to you at any time without approval, and not an emergency stop. Returns what the machine is left doing and how a person recovers it. To pause a run that can continue, use machine_action with run.pause.",
+      }
+    `);
+  });
+
   /* The file's reference options and the tool's are one list, owned twice: `@taucad/slicer` cannot import `@taucad/chat`. */
   it("should accept exactly the reference options a project's print intent may hold", () => {
     expect(Object.keys(slicingPreferencesSchema.shape.options.unwrap().shape).toSorted()).toEqual(
@@ -447,9 +490,23 @@ describe('machine tool registry', () => {
       expect(text).toContain(
         'Stop (stop_machine, always open to you): Leaves motion halts, heaters off, position kept; to recover: Home (machine_action motion motion.home).',
       );
+      expect(text).toContain(
+        'Jobs (request_job): accepts additive.fff (application/vnd.bambulab.gcode-3mf); sent whole, then started by Tau once a person accepts it.',
+      );
       /* Compact text, not the entry. */
       expect(text.length).toBeLessThan(3000);
       expect(text).not.toContain('legacyProjection');
+    });
+
+    it.each([
+      ['3', 'about 1 h 5 min left.'],
+      ['Heating the bed', 'about 1 h 5 min left; Heating the bed.'],
+    ])('leaves out a bare vendor stage number but keeps a stage in words: %s', async (stage, line) => {
+      const { client } = fixtureClient({ entries: [fixtureEntry({ run: { ...fixtureRun, stage } })] });
+
+      const result = await run(client, { toolName: 'get_machine', input: {} });
+
+      expect(result.content).toContain(line);
     });
 
     it('names the bound machines when the choice is missing, ambiguous or unknown', async () => {
@@ -499,6 +556,7 @@ describe('machine tool registry', () => {
         isError: false,
         content: {
           status: 'refused',
+          code: 'MACHINE_ACTION_PERSON_REQUIRED',
           message: 'Only a person at the machine can home. Ask the person to do it at the machine.',
         },
       });
@@ -513,6 +571,7 @@ describe('machine tool registry', () => {
 
       expect(machineActionOutputSchema.parse(result.content)).toEqual({
         status: 'refused',
+        code: 'MACHINE_ACTION_PRECONDITION_FAILED',
         message: 'Nothing was sent: Pause: only while a job runs.',
       });
       expect(fixture.applyAction).not.toHaveBeenCalled();
@@ -586,9 +645,10 @@ describe('machine tool registry', () => {
         expect.objectContaining({
           operationId: 'call-1',
           expectedRunId: 'run-1',
-          approval: { approvedBy: { kind: 'user', id: 'chat', label: 'Accepted in chat' }, operationId: 'call-1' },
         }),
       );
+      /* The person's Approve recorded the approval on the host (R15); the agent's request claims none. */
+      expect(fixture.applyAction.mock.calls[0]?.[0]).not.toHaveProperty('approval');
       /* Acknowledged, not observed: no watch. */
       expect(fixture.reconcileOperation).not.toHaveBeenCalled();
       expect(result.content).toEqual({
@@ -644,9 +704,51 @@ describe('machine tool registry', () => {
         expect.objectContaining({
           operationId: 'call-asked',
           expectedRunId: 'run-1',
-          approval: { approvedBy: { kind: 'user', id: 'chat', label: 'Accepted in chat' }, operationId: 'call-asked' },
         }),
       );
+      expect(fixture.applyAction.mock.calls[0]?.[0]).not.toHaveProperty('approval');
+    });
+
+    it('asks the person to approve it in Tau when the host holds no approval for the request', async () => {
+      const fixture = fixtureClient();
+      fixture.applyAction.mockResolvedValueOnce({
+        operationId: 'call-1',
+        machineId: 'machine-1',
+        kind: 'action',
+        observedAt: fixtureTimestamp,
+        status: 'rejected',
+        code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
+        message: 'No approval is recorded for this request.',
+      });
+
+      const result = await run(fixture.client, {
+        ...action('controller', 'run.cancel'),
+        approve: approveWith('approved'),
+      });
+
+      expect(result.content).toEqual({
+        status: 'needs-approval',
+        operationId: 'call-1',
+        code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
+        message:
+          "Cancel the print on Workshop X1C needs a person's approval, which Tau has not recorded. Ask the person to approve it in Tau.",
+      });
+    });
+
+    it('sends nothing after the person declined, on the next attempt either', async () => {
+      const fixture = fixtureClient();
+      const approve = Object.assign(approveWith('approved'), {
+        recall: vi.fn<NonNullable<NonNullable<HostToolInvocation['approve']>['recall']>>(async () => ({
+          payload: { kind: 'machine-action' },
+          resolution: { interruptId: 'interrupt-1', outcome: 'denied' },
+        })),
+      });
+
+      const result = await run(fixture.client, { ...action('controller', 'run.cancel'), approve });
+
+      expect(result.content).toMatchObject({ status: 'denied' });
+      expect(approve).not.toHaveBeenCalled();
+      expect(fixture.applyAction).not.toHaveBeenCalled();
     });
 
     it('tells an external agent that an approval-required action is for a person in Tau', async () => {
@@ -697,11 +799,98 @@ describe('machine tool registry', () => {
       });
 
       await expect(run(fixture.client, action('controller', 'run.pause'))).resolves.toMatchObject({
-        content: { status: 'rejected', message: 'Workshop X1C refused Pause: The machine changed since you looked.' },
+        content: {
+          status: 'rejected',
+          code: 'MACHINE_ACTION_CAPABILITIES_CHANGED',
+          message: 'Workshop X1C refused Pause: The machine changed since you looked.',
+        },
       });
       await expect(run(fixture.client, action('controller', 'run.pause'))).resolves.toMatchObject({
         content: { status: 'unknown', message: expect.stringContaining('Do not resend it') as string },
       });
+    });
+
+    it.each([
+      {
+        name: 'a light level the agent may set',
+        entry: fixtureEntry(),
+        call: action('chamber-light', 'level.set', { ratio: 0.5 }),
+        status: 'done',
+        sent: 1,
+      },
+      {
+        name: 'a speed profile the agent may choose',
+        entry: fixtureEntry(),
+        call: action('speed', 'option.set', { option: 'sport' }),
+        status: 'done',
+        sent: 1,
+      },
+      {
+        name: 'a jog only a person at the machine makes',
+        entry: fixtureEntry({ run: false }),
+        call: action('motion', 'motion.jog', { axis: 'x', distance: 1, feed: 600 }),
+        status: 'refused',
+        sent: 0,
+      },
+      {
+        name: 'a spindle only a person at the machine runs',
+        entry: fixtureEntry({ run: false, milling: true }),
+        call: action('spindle', 'spindle.set', { mode: 'off' }),
+        status: 'refused',
+        sent: 0,
+      },
+      {
+        name: 'a pause on a router, which leaves a tool in the work',
+        entry: fixtureEntry({ milling: true }),
+        call: action('controller', 'run.pause'),
+        status: 'needs-approval',
+        sent: 0,
+      },
+    ])('decides $name', async ({ entry, call, status, sent }) => {
+      const fixture = fixtureClient({ entries: [entry] });
+
+      const result = await run(fixture.client, call);
+
+      expect(machineActionOutputSchema.parse(result.content).status).toBe(status);
+      expect(fixture.applyAction).toHaveBeenCalledTimes(sent);
+    });
+
+    /* Testing is a person's mode: it never opens a designed action to an agent. */
+    it.each([true, undefined])(
+      'refuses an action not yet qualified to an agent with testing %s, asking no one',
+      async (testing) => {
+        const fixture = fixtureClient({ entries: [fixtureEntry(testing === undefined ? {} : { testing })] });
+        const approve = approveWith('approved');
+
+        const result = await run(fixture.client, { ...action('aux-fan', 'level.set', { ratio: 0.5 }), approve });
+
+        expect(result.content).toMatchObject({ status: 'refused', code: 'MACHINE_ACTION_UNQUALIFIED' });
+        expect(approve).not.toHaveBeenCalled();
+        expect(fixture.applyAction).not.toHaveBeenCalled();
+      },
+    );
+
+    it('puts the parameters and the prompt in the approval, so the person sees what they approve', async () => {
+      const fixture = fixtureClient();
+      const approve = approveWith('denied');
+
+      await run(fixture.client, { ...action('part-fan', 'level.set', { ratio: 0.5 }), approve });
+
+      const asked = approve.mock.calls[0]?.[0];
+      expect(asked?.prompt).toContain('Part fan ({"ratio":0.5}) on Workshop X1C?');
+      expect(asked?.payload).toMatchObject({ parameters: { ratio: 0.5 }, prompt: asked?.prompt });
+    });
+
+    it('sends the identical request for a retried call, so the host keeps one operation', async () => {
+      const fixture = fixtureClient();
+
+      const first = await run(fixture.client, action('chamber-light', 'switch.set', { on: true }));
+      const again = await run(fixture.client, action('chamber-light', 'switch.set', { on: true }));
+
+      expect(again.content).toEqual(first.content);
+      const [sent, resent] = fixture.applyAction.mock.calls.map(([{ signal: _signal, ...request }]) => request);
+      expect(resent).toEqual(sent);
+      expect(sent).toMatchObject({ operationId: 'call-1' });
     });
   });
 
@@ -735,6 +924,16 @@ describe('machine tool registry', () => {
 
       const result = await run(fixture.client, { toolName: 'request_job', input: { targetFile: 'main.ts' }, approve });
 
+      /* Asked first, with what the call chose; the request carries the provider's completion of it. */
+      expect(fixture.checkJob).toHaveBeenCalledExactlyOnceWith({
+        machineId: 'machine-1',
+        artifact: fixtureArtifact,
+        configuration: { expectedBedType: 'textured-pei' },
+        signal: expect.any(AbortSignal) as AbortSignal,
+      });
+      expect(fixture.checkJob.mock.invocationCallOrder[0]).toBeLessThan(
+        fixture.requestJob.mock.invocationCallOrder[0] ?? 0,
+      );
       expect(fixture.requestJob).toHaveBeenCalledExactlyOnceWith({
         machineId: 'machine-1',
         artifact: fixtureArtifact,
@@ -863,7 +1062,7 @@ describe('machine tool registry', () => {
       [{ state: 'started' }, 'has not reported the run since'],
       [{ state: 'awaiting-start' }, "a person starts it with the machine's own start"],
       [{ state: 'unknown' }, 'whether it runs is unknown'],
-      [{ state: 'failed', failure: { code: 'X', message: 'Out of filament.' } }, '"Out of filament."'],
+      [{ state: 'failed', failure: { code: 'MACHINE_JOB_FAILED', message: 'Out of filament.' } }, '"Out of filament."'],
     ] as const)('says what to do next for a job %o', async (patch, phrase) => {
       const fixture = fixtureClient();
       await run(fixture.client, { toolName: 'request_job', input: { targetFile: 'main.ts' } });
@@ -873,6 +1072,47 @@ describe('machine tool registry', () => {
 
       expect(result.content).toContain(`- call-1 pyramid.gcode.3mf: ${patch.state}.`);
       expect(result.content).toContain(phrase);
+    });
+  });
+
+  it('records no job when the machine refuses the program, and says why', async () => {
+    const fixture = fixtureClient();
+    fixture.checkJob.mockResolvedValueOnce({
+      status: 'refused',
+      code: 'MACHINE_JOB_UNSUPPORTED',
+      message: 'This machine does not accept this kind of program.',
+    });
+    const approve = approveWith('approved');
+
+    const result = await run(fixture.client, { toolName: 'request_job', input: { targetFile: 'main.ts' }, approve });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: {
+        message:
+          'Workshop X1C refused the program, so nothing was recorded or sent: This machine does not accept this kind of program. (MACHINE_JOB_UNSUPPORTED)',
+      },
+    });
+    expect(fixture.requestJob).not.toHaveBeenCalled();
+    expect(approve).not.toHaveBeenCalled();
+  });
+
+  it('runs a finished program as is on a router, asking the person to cut it', async () => {
+    const fixture = fixtureClient({ entries: [fixtureEntry({ milling: true, run: false })] });
+    planPrint.mockResolvedValueOnce({
+      artifact: { ...fixtureArtifact, path: 'cam/part.nc' },
+      configuration: {},
+      program: { name: 'part.nc', facts: { process: 'other' } },
+    });
+    const approve = approveWith('denied');
+
+    await run(fixture.client, { toolName: 'request_job', input: { artifact: 'cam/part.nc' }, approve });
+
+    expect(planPrint.mock.lastCall?.[0]).toMatchObject({ artifact: 'cam/part.nc' });
+    expect(planPrint.mock.lastCall?.[0]).not.toHaveProperty('targetFile');
+    expect(approve.mock.calls[0]?.[0]).toMatchObject({
+      key: 'job:machine-1:cam/part.nc',
+      prompt: 'Cut part.nc on Workshop X1C?',
     });
   });
 
@@ -966,11 +1206,9 @@ describe('machine tool registry', () => {
       await host.resume('chat-machine');
 
       expect(fixture.applyAction).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          operationId: 'call-cancel',
-          approval: expect.objectContaining({ operationId: 'call-cancel' }) as Record<string, unknown>,
-        }),
+        expect.objectContaining({ operationId: 'call-cancel' }),
       );
+      expect(fixture.applyAction.mock.calls[0]?.[0]).not.toHaveProperty('approval');
       expect(JSON.stringify(transport.requests.at(-1)?.messages)).toContain('Workshop X1C took Cancel the print.');
       await host.close();
     });
@@ -1080,6 +1318,16 @@ describe('machine tool registry', () => {
       expect((result.content as { defaults: Record<string, unknown> }).defaults).not.toHaveProperty('plate');
     });
 
+    it('slices nothing for a machine without an fff process', async () => {
+      const bambuStudio = engine();
+
+      await expect(profilesOf(bambuStudio, [fixtureEntry({ milling: true })])).resolves.toMatchObject({
+        isError: true,
+        content: { message: expect.stringContaining('has no fff process, so nothing is sliced for it') as string },
+      });
+      expect(bambuStudio.findBambuStudio).not.toHaveBeenCalled();
+    });
+
     it('names the reference engine for another vendor', async () => {
       const bambuStudio = engine();
       const other: MachineProvider = { ...fixtureProvider(), vendor: 'Prusa Research' };
@@ -1163,13 +1411,10 @@ describe('request_job slicer options through the chat registry', () => {
       path: expect.stringMatching(/^\.tau\/artifacts\/call-fine__/u) as string,
       mediaType: 'application/vnd.bambulab.gcode-3mf',
     });
-    expect(host.machines.requestJob.mock.calls[0]![0].configuration).toMatchObject({
-      expectedModel: 'X1C',
+    /* Only what the call chose; the provider completes the model, nozzle and materials from what it reports. */
+    expect(host.machines.requestJob.mock.calls[0]![0].configuration).toEqual({
       expectedBedType: 'textured-pei',
-      expectedMaterials: [{ slot: 0, materialId: 'PETG' }],
       amsMapping: [0],
-      expectedNozzleDiameter: 0.4,
-      expectedFilamentDiameter: 1.75,
     });
     expect(host.exportModel).toHaveBeenCalledExactlyOnceWith(
       {

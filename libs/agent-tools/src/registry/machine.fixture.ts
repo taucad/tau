@@ -8,6 +8,8 @@
 import {
   defineMachineAction,
   machineActionDescriptorOf,
+  parseMachineManifest,
+  parseMachineProvider,
   standardMachineAction,
   standardMachineActions,
 } from '@taucad/runtime/machine';
@@ -36,8 +38,8 @@ const halt: MachineHaltOutcome = {
   recovery: [{ type: 'action', componentId: 'motion', action: 'motion.home' }],
 };
 
-/** The X1C's declared actions: a light the agent may use, a pause, a cancel and a fan that need approval, a home that needs a person. */
-export const fixtureActions: readonly MachineActionDescriptor[] = [
+/** The chamber light switch; its form also serves as the fixture's start and binding form. */
+const chamberLight = machineActionDescriptorOf(
   defineMachineAction(
     {
       componentId: 'chamber-light',
@@ -54,56 +56,168 @@ export const fixtureActions: readonly MachineActionDescriptor[] = [
     },
     standardMachineActions['switch.set'].schema,
   ),
+);
+
+/**
+ * The X1C's declared actions: a light (switch and level) and a speed profile the agent may use, a pause, a cancel and
+ * a fan that need approval, a home and a jog that need a person, and an auxiliary fan not yet qualified.
+ */
+export const fixtureActions: readonly MachineActionDescriptor[] = [
+  chamberLight,
+  ...[
+    standardMachineAction({
+      id: 'run.pause',
+      componentId: 'controller',
+      label: 'Pause',
+      when: ['active'],
+      consequence: 'The print pauses after the current move.',
+      outcome: { ...halt, heaters: 'unchanged', recovery: [] },
+      confirms: 'observation',
+      qualification: qualified,
+    }),
+    standardMachineAction({
+      id: 'run.cancel',
+      componentId: 'controller',
+      label: 'Cancel the print',
+      when: ['active', 'held'],
+      consequence: 'The print stops and cannot be resumed.',
+      outcome: halt,
+      confirms: 'acknowledgement',
+      qualification: qualified,
+    }),
+    standardMachineAction({
+      id: 'level.set',
+      componentId: 'part-fan',
+      label: 'Part fan',
+      when: ['ready', 'active', 'held'],
+      confirms: 'observation',
+      qualification: qualified,
+    }),
+    standardMachineAction({
+      id: 'motion.home',
+      componentId: 'motion',
+      label: 'Home',
+      when: ['ready'],
+      qualification: qualified,
+    }),
+    standardMachineAction({
+      id: 'level.set',
+      componentId: 'chamber-light',
+      componentKind: 'light',
+      label: 'Chamber light level',
+      when: ['ready', 'active', 'held'],
+      confirms: 'acknowledgement',
+      qualification: qualified,
+    }),
+    standardMachineAction({
+      id: 'option.set',
+      componentId: 'speed',
+      componentKind: 'speed-profile',
+      label: 'Print speed',
+      when: ['active'],
+      confirms: 'acknowledgement',
+      qualification: qualified,
+    }),
+    standardMachineAction({
+      id: 'motion.jog',
+      componentId: 'motion',
+      label: 'Jog',
+      when: ['ready'],
+      qualification: qualified,
+    }),
+    standardMachineAction({
+      id: 'level.set',
+      componentId: 'aux-fan',
+      label: 'Auxiliary fan',
+      when: ['ready', 'active', 'held'],
+      confirms: 'acknowledgement',
+      qualification: { status: 'designed', reason: 'Not yet tried on this printer.' },
+    }),
+  ].map((definition) => machineActionDescriptorOf(definition)),
+];
+
+/** The spindle a router adds: only a person at the machine runs it. */
+const spindleAction = machineActionDescriptorOf(
   standardMachineAction({
-    id: 'run.pause',
-    componentId: 'controller',
-    label: 'Pause',
-    when: ['active'],
-    consequence: 'The print pauses after the current move.',
-    outcome: { ...halt, heaters: 'unchanged', recovery: [] },
-    confirms: 'observation',
-    qualification: qualified,
-  }),
-  standardMachineAction({
-    id: 'run.cancel',
-    componentId: 'controller',
-    label: 'Cancel the print',
-    when: ['active', 'held'],
-    consequence: 'The print stops and cannot be resumed.',
-    outcome: halt,
-    confirms: 'acknowledgement',
-    qualification: qualified,
-  }),
-  standardMachineAction({
-    id: 'level.set',
-    componentId: 'part-fan',
-    label: 'Part fan',
-    when: ['ready', 'active', 'held'],
-    confirms: 'observation',
-    qualification: qualified,
-  }),
-  standardMachineAction({
-    id: 'motion.home',
-    componentId: 'motion',
-    label: 'Home',
+    id: 'spindle.set',
+    componentId: 'spindle',
+    label: 'Spindle',
     when: ['ready'],
     qualification: qualified,
   }),
-].map((definition) => machineActionDescriptorOf(definition));
+);
 
-const accepts = [
-  {
-    contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-    mediaType: 'application/vnd.bambulab.gcode-3mf',
-    requiredMembers: ['Metadata/plate_1.gcode'],
-    payloadSelection: 'plate',
-    technology: 'additive.fff',
+const printReady = {
+  contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+  mediaType: 'application/vnd.bambulab.gcode-3mf',
+  requiredMembers: ['Metadata/plate_1.gcode'],
+  payloadSelection: 'plate',
+  technology: 'additive.fff',
+};
+
+const gcodeProgram = {
+  contract: { id: 'tau.toolpath.gcode', version: 1 },
+  mediaType: 'text/x-gcode',
+  requiredMembers: [],
+  payloadSelection: 'single',
+  technology: 'subtractive.milling',
+};
+
+/** What differs from the X1C manifest. */
+export type FixtureManifestInput = Readonly<{
+  attestations?: ReadonlyArray<{ id: string; label: string }>;
+  /** A router's milling process and spindle in place of the printer's process. */
+  milling?: boolean;
+}>;
+
+const fffProcess = {
+  type: 'fff',
+  version: 1,
+  geometry: {
+    unit: 'mm',
+    buildVolume: { x: 256, y: 256, z: 256 },
+    enclosure: { outer: { x: 389, y: 389, z: 457 }, enclosed: true, doors: ['front'] },
+    kinematics: 'corexy',
+    bedMotion: 'z',
+    origin: 'front-left',
+    toolheadHome: { x: 1, y: 1, z: 1 },
+    materialSystemMount: 'top',
   },
-] as const;
+  filamentDiameter: { value: 1.75, unit: 'mm' },
+  bed: {
+    maximumTemperature: { value: 110, unit: 'Cel' },
+    plates: [
+      { id: 'textured-pei', label: 'Textured PEI' },
+      { id: 'cool', label: 'Cool plate' },
+    ],
+  },
+  chamber: { enclosed: true, heated: false },
+  speedProfiles: [],
+  slicing: {
+    recommended: {
+      layerHeight: { value: 0.2, unit: 'mm' },
+      walls: 2,
+      infillPercent: 15,
+      nozzleTemperature: { value: 250, unit: 'Cel' },
+      bedTemperature: { value: 70, unit: 'Cel' },
+    },
+    presets: [
+      { id: 'fast', label: 'Fast', layerHeight: { value: 0.28, unit: 'mm' } },
+      { id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } },
+      { id: 'fine', label: 'Fine', layerHeight: { value: 0.12, unit: 'mm' } },
+    ],
+  },
+};
 
-/** The X1C manifest, as the provider would declare it. */
-export const fixtureManifest = (attestations: ReadonlyArray<{ id: string; label: string }> = []): MachineManifest =>
-  ({
+const millingProcess = { type: 'milling', version: 1, simultaneousAxes: 3, features: ['arcs'], workOffsets: ['G54'] };
+
+/**
+ * The X1C manifest, as the provider would declare it, parsed as a host admits one.
+ * @param input - What differs.
+ * @returns The manifest.
+ */
+export const fixtureManifest = ({ attestations = [], milling = false }: FixtureManifestInput = {}): MachineManifest =>
+  parseMachineManifest({
     version: 3,
     identity: { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'x1c', displayName: 'Bambu Lab X1C' },
     connection: { transport: 'network', exclusive: false, opening: 'nothing', identity: 'authenticated' },
@@ -134,6 +248,11 @@ export const fixtureManifest = (attestations: ReadonlyArray<{ id: string; label:
       },
       { id: 'bed', label: 'Bed', kind: 'heater' },
       { id: 'part-fan', label: 'Part fan', kind: 'fan' },
+      { id: 'aux-fan', label: 'Auxiliary fan', kind: 'fan' },
+      { id: 'speed', label: 'Print speed', kind: 'speed-profile' },
+      ...(milling
+        ? [{ id: 'spindle', label: 'Spindle', kind: 'spindle', control: 'switched', directions: ['clockwise'] }]
+        : []),
       {
         id: 'filament',
         label: 'Filament',
@@ -153,74 +272,34 @@ export const fixtureManifest = (attestations: ReadonlyArray<{ id: string; label:
         ],
       },
     ],
-    processes: [
-      {
-        type: 'fff',
-        version: 1,
-        geometry: {
-          unit: 'mm',
-          buildVolume: { x: 256, y: 256, z: 256 },
-          enclosure: { outer: { x: 389, y: 389, z: 457 }, enclosed: true, doors: ['front'] },
-          kinematics: 'corexy',
-          bedMotion: 'z',
-          origin: 'front-left',
-          toolheadHome: { x: 1, y: 1, z: 1 },
-          materialSystemMount: 'top',
-        },
-        filamentDiameter: { value: 1.75, unit: 'mm' },
-        bed: {
-          maximumTemperature: { value: 110, unit: 'Cel' },
-          plates: [
-            { id: 'textured-pei', label: 'Textured PEI' },
-            { id: 'cool', label: 'Cool plate' },
-          ],
-        },
-        chamber: { enclosed: true, heated: false },
-        speedProfiles: [],
-        slicing: {
-          recommended: {
-            layerHeight: { value: 0.2, unit: 'mm' },
-            walls: 2,
-            infillPercent: 15,
-            nozzleTemperature: { value: 250, unit: 'Cel' },
-            bedTemperature: { value: 70, unit: 'Cel' },
-          },
-          presets: [
-            { id: 'fast', label: 'Fast', layerHeight: { value: 0.28, unit: 'mm' } },
-            { id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } },
-            { id: 'fine', label: 'Fine', layerHeight: { value: 0.12, unit: 'mm' } },
-          ],
-        },
-      },
-    ],
-    actions: fixtureActions,
+    processes: [milling ? millingProcess : fffProcess],
+    actions: milling ? [...fixtureActions, spindleAction] : fixtureActions,
     holds: [],
     jobs: {
       type: 'supported',
-      accepts,
+      accepts: [milling ? gcodeProgram : printReady],
       delivery: 'stored',
       start: 'remote',
-      submission: fixtureActions[0]!.configuration,
+      submission: chamberLight.configuration,
       attestations,
       safety: { authority: 'approved-agent', attended: false, interlocks: [] },
     },
     stop: halt,
     observations: [],
     qualifications: [],
-  }) as unknown as MachineManifest;
+  });
 
 /** The provider over {@link fixtureManifest}. */
 export const fixtureProvider = (manifest = fixtureManifest()): MachineProvider =>
-  ({
+  parseMachineProvider({
     id: 'bambu',
     name: 'Bambu Lab',
     version: '1',
     protocolVersion: 2,
     vendor: 'Bambu Lab',
     manifest,
-    bindingConfiguration: fixtureActions[0]!.configuration,
-    queries: {},
-  }) as unknown as MachineProvider;
+    bindingConfiguration: chamberLight.configuration,
+  });
 
 const observation = (componentId: string, group: string, value: MachineComponentValue): ComponentObservation => ({
   componentId,
@@ -251,6 +330,10 @@ export type FixtureEntryInput = Readonly<{
   plate?: string | false;
   trays?: readonly FixtureTray[];
   attestations?: ReadonlyArray<{ id: string; label: string }>;
+  /** A router: milling in place of the printer's process. */
+  milling?: boolean;
+  /** The person's testing switch for this machine. */
+  testing?: boolean;
   snapshot?: Partial<MachineSnapshot>;
 }>;
 
@@ -275,7 +358,10 @@ export const fixtureRun: MachineRun = {
  * @returns The entry.
  */
 export const fixtureEntry = (input: FixtureEntryInput = {}): MachineDirectoryEntry => {
-  const manifest = fixtureManifest(input.attestations);
+  const manifest = fixtureManifest({
+    ...(input.attestations === undefined ? {} : { attestations: input.attestations }),
+    ...(input.milling === undefined ? {} : { milling: input.milling }),
+  });
   const trays = input.trays ?? [
     { unitId: 'ams-a', slotId: 'a1', materialType: 'PETG', profileId: 'GFG00', color: '#FF0000FF' },
   ];
@@ -326,6 +412,7 @@ export const fixtureEntry = (input: FixtureEntryInput = {}): MachineDirectoryEnt
     name: input.name ?? 'Workshop X1C',
     providerId: 'bambu',
     freshness: 'current',
+    ...(input.testing === undefined ? {} : { testing: input.testing }),
     descriptor: {
       id: 'physical-1',
       name: 'X1C',

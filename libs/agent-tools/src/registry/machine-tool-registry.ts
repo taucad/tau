@@ -9,15 +9,16 @@ import type {
   ToolRegistry,
 } from '@taucad/agent-host';
 import type { KernelIssue } from '@taucad/runtime';
-import { checkMachineAction } from '@taucad/runtime/machine';
+import { checkMachineAction, fffProcessOf, machineActionIntent } from '@taucad/runtime/machine';
 import type {
   MachineActionDescriptor,
   MachineApplyActionInput,
   MachineArtifactReference,
-  MachineBeginBindingInput,
   MachineClient,
   MachineDirectoryEntry,
+  MachineFailureCode,
   MachineJob,
+  MachineJobCheck,
   MachineProgramSummary,
   MachineProvider,
   MachineReceipt,
@@ -58,25 +59,6 @@ import {
 } from '#registry/print-profiles.js';
 import type { BambuStudioEngine, ResolvedMachinePreferences } from '#registry/print-profiles.js';
 
-const identity = z.string().min(1).max(256);
-const timestamp = z.iso.datetime({ offset: true });
-const candidate = z.strictObject({
-  id: identity,
-  name: identity,
-  endpoint: z.strictObject({ address: identity, interface: identity }),
-  claimedIdentity: z.strictObject({
-    serial: identity.optional(),
-    model: identity.optional(),
-  }),
-  observedAt: timestamp,
-  expiresAt: timestamp,
-  /* The host marks a discovered printer whose access code it already keeps; echoing it back is harmless. */
-  credential: z.enum(['saved']).optional(),
-});
-/* A typeless input side keeps the recursive JSON check off the wire, where it
- * would serialize as the `definitions` ref loops providers refuse. */
-const configuration = z.any().describe('Provider configuration: any JSON value.').pipe(z.json());
-
 /*
  * The slicer keys an agent may set. A job is sliced before anyone approves it,
  * so any other key (the engine, its service endpoint and token, the
@@ -85,7 +67,7 @@ const configuration = z.any().describe('Provider configuration: any JSON value.'
  */
 const allowedOptionKeys: ReadonlySet<string> = new Set<keyof SlicerOptionsInput>(printOptionKeys);
 
-const withOptionKeys = <Schema extends typeof requestJobInputSchema>(schema: Schema, tool: string) =>
+const withOptionKeys = <Schema extends typeof requestJobInputSchema>(schema: Schema, tool: string): Schema =>
   schema.superRefine(({ options = {} }, context) => {
     const refused = Object.keys(options).filter((key) => !allowedOptionKeys.has(key));
     if (refused.length > 0) {
@@ -100,10 +82,9 @@ const withOptionKeys = <Schema extends typeof requestJobInputSchema>(schema: Sch
 /*
  * The machine tools a CAD agent is offered take their inputs and descriptions
  * from `@taucad/chat`, the provider-facing contract; the rest are host tools.
+ * Discovery and binding are a person's, in Tau: an agent session holds no grant for them, so no tool offers them.
  */
 const inputs = {
-  discover_machines: z.strictObject({ providerId: identity, configuration }),
-  begin_machine_binding: z.strictObject({ candidate, name: identity }),
   [toolName.listMachines]: listMachinesInputSchema,
   [toolName.getMachine]: getMachineInputSchema,
   [toolName.machineAction]: machineActionInputSchema,
@@ -111,16 +92,12 @@ const inputs = {
   [toolName.getPrintProfiles]: getPrintProfilesInputSchema,
   [toolName.requestJob]: withOptionKeys(requestJobInputSchema, toolName.requestJob),
   [toolName.checkJob]: withOptionKeys(checkJobInputSchema, toolName.checkJob),
-  capture_machine_still: z.strictObject({ machineId: identity }),
+  capture_machine_still: z.strictObject({ machineId: z.string().min(1).max(256) }),
 } as const;
 
 type MachineToolName = keyof typeof inputs;
 
 const descriptions: Readonly<Record<MachineToolName, string>> = {
-  discover_machines:
-    'Run one bounded machine-provider discovery using non-secret provider configuration. Never provide credentials or certificate decisions.',
-  begin_machine_binding:
-    'Begin the trusted host-local binding ceremony for one discovered candidate. Credentials remain outside this tool.',
   [toolName.listMachines]: toolDescriptions[toolName.listMachines],
   [toolName.getMachine]: toolDescriptions[toolName.getMachine],
   [toolName.machineAction]: toolDescriptions[toolName.machineAction],
@@ -141,53 +118,66 @@ const asJson = (value: unknown): JsonValue => {
 /**
  * What `request_job` and `check_job` need from their host beyond the machine client.
  *
- * Slices the named source through the runtime export route to `gcode.3mf` —
- * the same route `export_model` takes, so the artifact is recorded in the
- * project and named by the project, its path and its digest — composes the
- * provider's submission configuration for the resolved machine (expected setup
- * from what the machine observes, since an agent cannot know a provider's
- * schema), and summarizes the program for the approval prompt.
+ * For a `targetFile`, slices it through the runtime export route to `gcode.3mf` — the same route `export_model`
+ * takes, so the artifact is recorded in the project and named by the project, its path and its digest. For an
+ * `artifact`, reads the finished program and names it the same way, in the container the machine accepts. Either
+ * way it returns only what the call chose of the provider's start form; the provider completes the rest from what
+ * the machine reports (`checkJob`), and summarizes the program for the approval prompt.
  *
  * @public
  */
 export type MachinePrintPlanner = (
-  input: Readonly<{
-    /** The tool call, for a deterministic artifact directory across retries. */
-    toolCallId: string;
-    /** Project-relative CAD source the agent named. */
-    targetFile: string;
-    /** The machine the job is for, as the directory currently observes it. */
-    machine: MachineDirectoryEntry;
-    preset?: 'fast' | 'standard' | 'fine' | undefined;
-    /** The plate the agent was told is installed; the machine's own report wins. */
-    plate?: string | undefined;
-    /** Slicer options, keys from `printOptionKeys` only; the slicer's own schema validates the values. */
-    options?: JsonObject | undefined;
-    /** Bambu Studio presets the agent chose; the machine's defaults fill the rest. */
-    profiles?: z.infer<typeof requestJobInputSchema>['profiles'];
-    /** Bambu Studio setting keys and values applied over the presets. */
-    settings?: z.infer<typeof requestJobInputSchema>['settings'];
-    /**
-     * The project's print intent file as this call read it, or undefined when
-     * the project has none. The planner applies it under the call's own
-     * choices when it names this machine's model.
-     */
-    preferences?: ResolvedMachinePreferences | undefined;
-    signal: AbortSignal;
-  }>,
+  input: Readonly<
+    {
+      /** The tool call, for a deterministic artifact directory across retries. */
+      toolCallId: string;
+      /** The machine the job is for, as the directory currently observes it. */
+      machine: MachineDirectoryEntry;
+      preset?: 'fast' | 'standard' | 'fine' | undefined;
+      /** The plate the agent was told is installed; the machine's own report wins. */
+      plate?: string | undefined;
+      /** Slicer options, keys from `printOptionKeys` only; the slicer's own schema validates the values. */
+      options?: JsonObject | undefined;
+      /** Bambu Studio presets the agent chose; the machine's defaults fill the rest. */
+      profiles?: BambuStudioInput['profiles'];
+      /** Bambu Studio setting keys and values applied over the presets. */
+      settings?: BambuStudioInput['settings'];
+      /**
+       * The project's print intent file as this call read it, or undefined when
+       * the project has none. The planner applies it under the call's own
+       * choices when it names this machine's model.
+       */
+      preferences?: ResolvedMachinePreferences | undefined;
+      signal: AbortSignal;
+    } & (
+      | {
+          /** Project-relative CAD source the agent named, to slice. */
+          targetFile: string;
+          artifact?: undefined;
+        }
+      | {
+          /** Project-relative finished program the agent named, run as is. */
+          artifact: string;
+          targetFile?: undefined;
+        }
+    )
+  >,
 ) => Promise<
   Readonly<{
     artifact: MachineArtifactReference;
-    /** The provider's submission configuration for this machine. */
+    /** What this call chose of the provider's start form; `checkJob` completes it. */
     configuration: MachineRequestJobInput['configuration'];
-    /** What the program is, as the slicer described it; the host's own parse wins. */
+    /** What the program is, as Tau read it; the host's own parse wins. */
     program: Partial<MachineProgramSummary> & Readonly<{ name: string }>;
     /** What the project's print intent contributed, or why it was ignored, for the tool result. */
     machinePreferences?: JsonObject | undefined;
-    /** What the slice could not honour although it was made (the export's warning issues); the agent tells the person. */
+    /** What the slice could not honour although it was made, or what Tau could not read; the agent tells the person. */
     warnings?: readonly KernelIssue[] | undefined;
   }>
 >;
+
+/** Engine-specific slicing fields of `request_job`. */
+type BambuStudioInput = NonNullable<z.infer<typeof requestJobInputSchema>['bambuStudio']>;
 
 /** Options for {@link createMachineToolRegistry}. @public */
 export type MachineToolRegistryOptions = {
@@ -277,8 +267,9 @@ const resolveMachine = async (
     }
     throw new Error(`No machine ${wanted} is bound. Bound machines: ${describeMachines(entries) || 'none'}.`);
   }
-  if (entries.length === 1) {
-    return entries[0]!;
+  const [only] = entries;
+  if (entries.length === 1 && only !== undefined) {
+    return only;
   }
   throw new Error(
     entries.length === 0
@@ -303,7 +294,7 @@ const requesterOf = (invocation: HostToolInvocation): MachineRequester =>
 // ───────────────────────────── Actions ─────────────────────────────
 
 type ActionStatus = 'done' | 'confirming' | 'refused' | 'needs-approval' | 'denied' | 'rejected' | 'unknown';
-type ActionReport = Readonly<{ status: ActionStatus; message: string; operationId?: string }>;
+type ActionReport = Readonly<{ status: ActionStatus; message: string; operationId?: string; code?: string }>;
 
 const delay = async (milliseconds: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -340,12 +331,13 @@ const parameterProblems = (descriptor: MachineActionDescriptor, parameters: Json
 };
 
 /** What `machine_action` sends, as asked before an approval and kept with it. */
-type ActionIntent = Omit<MachineApplyActionInput, 'requestedBy' | 'approval' | 'attended' | 'signal' | 'parameters'> &
-  Readonly<{ parameters: JsonObject; label: string; confirms: MachineActionDescriptor['confirms'] }>;
+type ActionIntent = Omit<MachineApplyActionInput, 'attended' | 'signal'> &
+  Readonly<{ label: string; confirms: MachineActionDescriptor['confirms'] }>;
 
 /**
  * Send one action and say what became of it: the receipt, and for an action the machine reports, whether it
- * showed the change within a few seconds.
+ * showed the change within a few seconds. An approval is never claimed here: the person's Approve recorded it on the
+ * host under this operation id (R15), and the host matches it to this exact request.
  */
 const applyIntent = async (
   client: MachineClient,
@@ -353,23 +345,36 @@ const applyIntent = async (
   context: Readonly<{
     entry: MachineDirectoryEntry;
     intent: ActionIntent;
-    approvedBy?: MachineRequester;
     confirmation: MachineToolRegistryOptions['confirmation'];
   }>,
 ): Promise<ActionReport> => {
-  const { entry, intent, approvedBy } = context;
+  const { entry, intent } = context;
   const { signal } = invocation;
   const { label, confirms, ...request } = intent;
   const receipt = await client.applyAction({
     ...request,
+    /* The caller asking now; a payload an older registry wrote carries none. */
     requestedBy: requesterOf(invocation),
-    ...(approvedBy === undefined ? {} : { approval: { approvedBy, operationId: intent.operationId } }),
     signal,
   });
   const { operationId } = intent;
   const named = `${label} on ${entry.name}`;
+  /* The host found no approval the person recorded for this exact request. */
+  if (receipt.status === 'rejected' && receipt.code === 'MACHINE_ACTION_APPROVAL_REQUIRED') {
+    return {
+      status: 'needs-approval',
+      operationId,
+      code: receipt.code,
+      message: `${named} needs a person's approval, which Tau has not recorded. Ask the person to approve it in Tau.`,
+    };
+  }
   if (receipt.status === 'rejected') {
-    return { status: 'rejected', operationId, message: `${entry.name} refused ${label}: ${receipt.message}` };
+    return {
+      status: 'rejected',
+      operationId,
+      code: receipt.code,
+      message: `${entry.name} refused ${label}: ${receipt.message}`,
+    };
   }
   if (receipt.status === 'unknown') {
     return {
@@ -393,8 +398,13 @@ const applyIntent = async (
       return { status: 'done', operationId, message: `${entry.name} shows ${label} done.` };
     }
     if (operation.state === 'rejected') {
-      const reason = operation.receipt?.status === 'rejected' ? `: ${operation.receipt.message}` : '';
-      return { status: 'rejected', operationId, message: `${entry.name} did not do ${label}${reason}.` };
+      const rejected = operation.receipt?.status === 'rejected' ? operation.receipt : undefined;
+      return {
+        status: 'rejected',
+        operationId,
+        ...(rejected === undefined ? {} : { code: rejected.code }),
+        message: `${entry.name} did not do ${label}${rejected === undefined ? '' : `: ${rejected.message}`}.`,
+      };
     }
     if (Date.now() >= deadline) {
       return {
@@ -415,6 +425,27 @@ const actionPrompt = (entry: MachineDirectoryEntry, descriptor: MachineActionDes
   const what = descriptor.consequence ?? descriptor.description;
   const outcome = descriptor.outcome === undefined ? '' : ` ${outcomeText(entry, descriptor.outcome)}`;
   return `${descriptor.label}${shown} on ${entry.name}?${what === undefined ? '' : ` ${what}`}${outcome}`;
+};
+
+/**
+ * A refusal in words, with what clears it.
+ * @param entry - The machine.
+ * @param check - Why the action is unavailable.
+ * @returns The report; nothing was sent.
+ */
+const refusedReport = (
+  entry: MachineDirectoryEntry,
+  check: Readonly<{ code: MachineFailureCode; message: string; remedy?: Parameters<typeof remedyText>[1] }>,
+): ActionReport => {
+  const remedy = check.remedy === undefined ? '' : ` It clears with ${sentence(remedyText(entry, check.remedy))}`;
+  return {
+    status: 'refused',
+    code: check.code,
+    message:
+      check.code === 'MACHINE_ACTION_PERSON_REQUIRED'
+        ? `${check.message} Ask the person to do it at the machine.${remedy}`
+        : `Nothing was sent: ${check.message}${remedy}`,
+  };
 };
 
 /**
@@ -446,12 +477,7 @@ const machineAction = async (
     }
     // SAFETY: this registry wrote the payload under this key from an `ActionIntent`.
     const intent = prior.payload['intent'] as unknown as ActionIntent;
-    return applyIntent(client, invocation, {
-      entry,
-      intent,
-      approvedBy: chatPerson('approved'),
-      confirmation: options.confirmation,
-    });
+    return applyIntent(client, invocation, { entry, intent, confirmation: options.confirmation });
   }
   const check = checkMachineAction({
     entry,
@@ -462,34 +488,28 @@ const machineAction = async (
     now: (options.now ?? Date.now)(),
   });
   if (check.status === 'unavailable') {
-    const remedy = check.remedy === undefined ? '' : ` It clears with ${sentence(remedyText(entry, check.remedy))}`;
-    return {
-      status: 'refused',
-      message:
-        check.code === 'MACHINE_ACTION_PERSON_REQUIRED'
-          ? `${check.message} Ask the person to do it at the machine.${remedy}`
-          : `Nothing was sent: ${check.message}${remedy}`,
-    };
+    return refusedReport(entry, check);
   }
-  // SAFETY: the check looked among actions, not holds, so its descriptor is an action's.
-  const descriptor = check.descriptor as MachineActionDescriptor;
+  const { descriptor } = check;
+  /* The check looked among actions, not holds. */
+  if (!('scope' in descriptor)) {
+    throw new Error(`${componentId} ${action} is a hold, which only a person at the machine uses.`);
+  }
   const problems = parameterProblems(descriptor, parameters);
   if (problems !== undefined) {
     return {
       status: 'refused',
+      code: 'MACHINE_ACTION_PARAMETERS_INVALID',
       message: `Nothing was sent: the parameters do not fit ${descriptor.label}.\n${problems}`,
     };
   }
+  /* The run, revision and version the agent saw: an approval for this run never reaches the next one. */
   const intent: ActionIntent = {
-    machineId: entry.machineId,
-    componentId,
-    action,
-    version: descriptor.version,
-    capabilityRevision: entry.descriptor.capabilities.revision,
-    /* The run the agent saw: an approval for this run never reaches the next one. */
-    expectedRunId: descriptor.scope === 'idle' ? null : (entry.snapshot.run?.runId ?? null),
-    operationId: invocation.toolCallId,
-    parameters,
+    ...machineActionIntent(entry, descriptor, {
+      operationId: invocation.toolCallId,
+      parameters,
+      requestedBy: requesterOf(invocation),
+    }),
     label: descriptor.label,
     confirms: descriptor.confirms,
   };
@@ -502,9 +522,11 @@ const machineAction = async (
       message: `${descriptor.label} on ${entry.name} needs a person's approval, which only Tau can ask for. Ask the person to do it in Tau.`,
     };
   }
+  const prompt = actionPrompt(entry, descriptor, parameters);
   const resolution = await invocation.approve({
     key,
-    prompt: actionPrompt(entry, descriptor, parameters),
+    prompt,
+    /* The Print pane shows the parameters and the prompt beside Approve: the person approves exactly this. */
     payload: {
       kind: 'machine-action',
       machineId: entry.machineId,
@@ -512,6 +534,8 @@ const machineAction = async (
       action,
       operationId: intent.operationId,
       label: descriptor.label,
+      parameters,
+      prompt,
       // SAFETY: every field of the intent is JSON.
       intent: intent as unknown as JsonObject,
     },
@@ -519,12 +543,8 @@ const machineAction = async (
   if (resolution.outcome !== 'approved') {
     return { status: 'denied', message: `The person declined ${descriptor.label} on ${entry.name}.` };
   }
-  return applyIntent(client, invocation, {
-    entry,
-    intent,
-    approvedBy: chatPerson('approved'),
-    confirmation: options.confirmation,
-  });
+  /* The person's Approve recorded the approval on the host before it answered this interrupt. */
+  return applyIntent(client, invocation, { entry, intent, confirmation: options.confirmation });
 };
 
 /**
@@ -549,6 +569,7 @@ const stopMachine = async (client: MachineClient, invocation: HostToolInvocation
       return {
         status: 'rejected',
         operationId,
+        code: receipt.code,
         message: `${entry.name} refused the stop: ${receipt.message} Tell the person to stop it at the machine now.`,
       };
     }
@@ -620,11 +641,11 @@ const nextStepOf = (job: MachineJob, entry: MachineDirectoryEntry | undefined): 
   const machineName = entry?.name ?? job.machineId;
   switch (job.state) {
     case 'awaiting-approval': {
-      const blocked = entry === undefined ? [] : job.checks.filter(({ state }) => state === 'blocked');
-      const blocking =
-        blocked.length === 0
-          ? ''
-          : ` ${sentence(`It cannot start until: ${blocked.map((check) => checkText(entry!, check)).join('; ')}`)}`;
+      const blocked =
+        entry === undefined
+          ? []
+          : job.checks.filter(({ state }) => state === 'blocked').map((check) => checkText(entry, check));
+      const blocking = blocked.length === 0 ? '' : ` ${sentence(`It cannot start until: ${blocked.join('; ')}`)}`;
       return `Waiting for a person to accept job ${jobId} in Tau's Print pane${paneStep(entry)}; accepting starts ${name}.${blocking} Do not retry; get_machine shows the job.`;
     }
     case 'awaiting-start': {
@@ -728,9 +749,18 @@ const settleApproval = async (
   });
 };
 
+/** What starting a program does, by process: a printer prints, a mill cuts, anything else runs it. */
+const processVerbs: Readonly<Record<string, string>> = { fff: 'Print', milling: 'Cut' };
+
 /** The one line the person decides on: "Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min." */
 const approvalPrompt = (job: MachineJob, entry: MachineDirectoryEntry): string => {
   const { program } = job;
+  /* A program the host has not read yet is `other`; the machine's own process names it then. */
+  const process =
+    program.facts.process === 'other'
+      ? entry.descriptor.capabilities.processes.find(({ type }) => type in processVerbs)?.type
+      : program.facts.process;
+  const verb = (process === undefined ? undefined : processVerbs[process]) ?? 'Run';
   const facts = [
     ...(program.facts.process === 'fff' && program.facts.layers !== undefined
       ? [`${String(program.facts.layers)} layers`]
@@ -738,7 +768,7 @@ const approvalPrompt = (job: MachineJob, entry: MachineDirectoryEntry): string =
     ...(program.estimatedDuration === undefined ? [] : [formatDuration(program.estimatedDuration)]),
   ];
   const confirmations = personOnlyApproval(entry);
-  return `Print ${program.name} on ${entry.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}${confirmations === undefined ? '' : ` Accept it in the Print pane, confirming: ${confirmations.join('; ')}.`}`;
+  return `${verb} ${program.name} on ${entry.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}${confirmations === undefined ? '' : ` Accept it in the Print pane, confirming: ${confirmations.join('; ')}.`}`;
 };
 
 const jobReport = (job: MachineJob, entry: MachineDirectoryEntry | undefined, extra: JsonObject = {}): JsonValue => {
@@ -751,7 +781,16 @@ const jobReport = (job: MachineJob, entry: MachineDirectoryEntry | undefined, ex
   };
 };
 
-/** Slice for one machine with the project's print intent: what both job tools start from. */
+/**
+ * Prepare the program for one machine and ask the machine about it: slice a `targetFile` with the project's print
+ * intent, or read a finished `artifact`, then `checkJob` with what the call chose, which the provider completes from
+ * what the machine reports. What both job tools start from; it records nothing.
+ *
+ * @param client - The negotiated machines facet.
+ * @param options - The planner and the project filesystem.
+ * @param call - The tool call, its parsed input and its machine.
+ * @returns The plan, the machine's check with the completed configuration, and what the call reports either way.
+ */
 const planJob = async (
   client: MachineClient,
   options: MachineToolRegistryOptions,
@@ -760,11 +799,17 @@ const planJob = async (
     parsed: z.infer<typeof requestJobInputSchema>;
     entry: MachineDirectoryEntry;
   }>,
-) => {
+): Promise<
+  Readonly<{
+    plan: Awaited<ReturnType<MachinePrintPlanner>>;
+    check: MachineJobCheck;
+    reported: JsonObject;
+  }>
+> => {
   const { invocation, parsed, entry } = call;
   const { planPrint } = options;
   if (!planPrint) {
-    throw new Error('This host cannot slice for printing.');
+    throw new Error('This host cannot prepare jobs.');
   }
   const { signal } = invocation;
   const providers = await client.listProviders({ signal });
@@ -772,35 +817,61 @@ const planJob = async (
   if (!provider) {
     throw new Error(`Provider ${entry.providerId} is unavailable.`);
   }
-  const plan = await planPrint({
+  const common = {
     toolCallId: invocation.toolCallId,
-    targetFile: parsed.targetFile,
     machine: entry,
-    preset: parsed.preset,
     plate: parsed.plate,
-    // SAFETY: a zod record of JSON values is a JSON object.
-    options: parsed.options as JsonObject | undefined,
-    profiles: parsed.profiles,
-    settings: parsed.settings,
-    preferences: await readPreferences(options, provider, { signal, profileId: parsed.profileId }),
+    signal,
+  };
+  const plan =
+    parsed.artifact === undefined
+      ? await planPrint({
+          ...common,
+          targetFile: sourceOf(parsed),
+          preset: parsed.preset,
+          // SAFETY: a zod record of JSON values is a JSON object.
+          options: parsed.options as JsonObject | undefined,
+          profiles: parsed.bambuStudio?.profiles,
+          settings: parsed.bambuStudio?.settings,
+          preferences: await readPreferences(options, provider, { signal, profileId: parsed.profileId }),
+        })
+      : await planPrint({ ...common, artifact: parsed.artifact });
+  signal.throwIfAborted();
+  const check = await client.checkJob({
+    machineId: entry.machineId,
+    artifact: plan.artifact,
+    configuration: plan.configuration,
     signal,
   });
-  signal.throwIfAborted();
   const reported = asJson({
     ...(plan.machinePreferences === undefined ? {} : { machinePreferences: plan.machinePreferences }),
     ...(plan.warnings === undefined ? {} : { warnings: plan.warnings }),
   }) as JsonObject;
-  return { plan, reported };
+  return { plan, check, reported };
 };
 
+/** What a job call names: its CAD source or its finished program; the input schema requires exactly one. */
+const sourceOf = (parsed: Readonly<{ targetFile?: string | undefined; artifact?: string | undefined }>): string => {
+  const source = parsed.targetFile ?? parsed.artifact;
+  if (source === undefined) {
+    throw new Error('Pass exactly one of targetFile or artifact.');
+  }
+  return source;
+};
+
+/** A refused program in words: nothing was recorded or sent. */
+const refusedText = (entry: MachineDirectoryEntry, check: Extract<MachineJobCheck, { status: 'refused' }>) =>
+  `${entry.name} refused the program, so nothing was recorded or sent: ${sentence(check.message)} (${check.code})`;
+
 /**
- * `request_job`: resolve the machine, slice with the project's print intent, request the job, and gate it.
+ * `request_job`: resolve the machine, prepare the program, check it, request the job, and gate it.
  *
  * @param client - The negotiated machines facet.
- * @param options - The planner that slices for it and the project filesystem.
+ * @param options - The planner that prepares it and the project filesystem.
  * @param invocation - The tool call, with its run approval when the host has one.
  * @returns The job, how the person answered when this call waited, the next step, what the project's print intent
  *   contributed, and what the slice could not honour.
+ * @throws When the machine refuses the program; no job is recorded then.
  */
 const requestJob = async (
   client: MachineClient,
@@ -812,7 +883,7 @@ const requestJob = async (
   const entry = await resolveMachine(client, parsed.machineId, signal);
   /* Under a Tau host asking paused the run, and this is its next attempt. The person answered the job they saw, so
    * that job is settled, not a new plan. */
-  const approvalKey = `job:${entry.machineId}:${parsed.targetFile}`;
+  const approvalKey = `job:${entry.machineId}:${sourceOf(parsed)}`;
   const prior = await invocation.approve?.recall?.(approvalKey);
   const priorJobId = prior?.payload['jobId'];
   if (prior !== undefined && typeof priorJobId === 'string') {
@@ -826,13 +897,17 @@ const requestJob = async (
     const settled = await settleApproval(client, { job, entry, resolution: prior.resolution, signal });
     return jobReport(settled, entry, { approval: prior.resolution.outcome });
   }
-  const { plan, reported } = await planJob(client, options, { invocation, parsed, entry });
+  const { plan, check, reported } = await planJob(client, options, { invocation, parsed, entry });
+  if (check.status === 'refused') {
+    throw new Error(refusedText(entry, check));
+  }
   /* Idempotent by the tool call: a retried call finds its own job rather than requesting a second one. */
   const jobId = invocation.toolCallId;
   const job = await client.requestJob({
     machineId: entry.machineId,
     artifact: plan.artifact,
-    configuration: plan.configuration,
+    /* The provider's completion of what the call chose: what the person approves is what starts. */
+    configuration: check.configuration,
     requestedBy: requesterOf(invocation),
     program: plan.program,
     jobId,
@@ -857,7 +932,7 @@ const requestJob = async (
   return jobReport(settled, entry, { approval: resolution.outcome, ...reported });
 };
 
-/** `check_job`: slice as `request_job` would and ask the machine, recording nothing. */
+/** `check_job`: prepare as `request_job` would and ask the machine, recording nothing. */
 const checkJob = async (
   client: MachineClient,
   options: MachineToolRegistryOptions,
@@ -866,15 +941,9 @@ const checkJob = async (
   const parsed = inputs.check_job.parse(invocation.input);
   const { signal } = invocation;
   const entry = await resolveMachine(client, parsed.machineId, signal);
-  const { plan, reported } = await planJob(client, options, { invocation, parsed, entry });
-  const check = await client.checkJob({
-    machineId: entry.machineId,
-    artifact: plan.artifact,
-    configuration: plan.configuration,
-    signal,
-  });
+  const { check, reported } = await planJob(client, options, { invocation, parsed, entry });
   if (check.status === 'refused') {
-    return { status: 'refused', message: `${check.message} (${check.code})`, ...reported };
+    return { status: 'refused', message: refusedText(entry, check), ...reported };
   }
   const checks = check.checks
     .filter(({ state }) => state !== 'passed')
@@ -904,6 +973,11 @@ const getPrintProfiles = async (
   const { signal } = invocation;
   const { machineId, ...rest } = inputs.get_print_profiles.parse(invocation.input);
   const entry = await resolveMachine(client, machineId, signal);
+  if (fffProcessOf(entry.descriptor.capabilities) === undefined) {
+    throw new Error(
+      `${entry.name} has no fff process, so nothing is sliced for it; request_job runs a finished program named by artifact.`,
+    );
+  }
   const providers = await client.listProviders({ signal });
   const provider = providers.find(({ id }) => id === entry.providerId);
   if (provider === undefined) {
@@ -924,28 +998,6 @@ const invokeMachine = async (
 ): Promise<JsonValue> => {
   const { input, signal, toolName: name } = invocation;
   switch (name) {
-    case 'discover_machines': {
-      const parsed = inputs.discover_machines.parse(input);
-      const events = [];
-      for await (const event of client.discover({ ...parsed, signal })) {
-        if (events.length === 256) {
-          throw new Error('Machine discovery exceeded the tool result limit.');
-        }
-        events.push(event);
-      }
-      return asJson({ events });
-    }
-    case 'begin_machine_binding': {
-      const parsed = inputs.begin_machine_binding.parse(input);
-      // SAFETY: the strict schema above is the JSON projection of MachineCandidate.
-      return asJson(
-        await client.beginBinding({
-          ...parsed,
-          candidate: parsed.candidate as MachineBeginBindingInput['candidate'],
-          signal,
-        }),
-      );
-    }
     case 'list_machines': {
       inputs.list_machines.parse(input);
       const { entries } = await client.list({ signal });

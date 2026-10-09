@@ -4,7 +4,7 @@ import type { MachineSettingsService, MachineSettingsRecord } from '@taucad/type
 import { readMachineConfiguration, machineSettingsPath } from '@taucad/runtime/machine/settings';
 import type { SavedSettingsValues } from '@taucad/runtime/machine/settings';
 import { slicingPreferences } from '@taucad/slicer/preferences';
-import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
+import { bambuSettingsConfiguration, bambuSlotOf } from '@taucad/bambu/settings';
 import { componentValue } from '@taucad/runtime/machine';
 import type {
   MachineComponent,
@@ -55,12 +55,9 @@ const bambuVendor = 'Bambu Lab';
  */
 export const isBambuProvider = (provider: MachineProvider): boolean => provider.vendor === bambuVendor;
 
-/** Bambu's tray number for the external spool. */
-const externalSpoolTray = 254;
-
 /**
- * One material slot as a Bambu printer numbers its trays (AMS unit n, slot k: `4n + k`; the external spool: 254),
- * the vocabulary of Bambu Studio's hints, the provider's submission configuration and the saved print intent.
+ * One material slot by the tray number the Bambu provider gives its address (`bambuSlotOf`), the vocabulary of
+ * Bambu Studio's hints, the provider's submission configuration and the saved print intent.
  * @internal
  */
 export type ObservedTray = Readonly<{
@@ -78,13 +75,10 @@ export type ObservedTray = Readonly<{
 type MaterialSystem = Extract<MachineComponent, { kind: 'material-system' }>;
 
 /**
- * The machine's material slots as Bambu tray numbers.
- *
- * ponytail: the numbering is Bambu's (4 trays per AMS, 254 for the external spool); another vendor's planner needs
- * its own.
+ * The machine's material slots as Bambu tray numbers, through the provider's own encoding.
  *
  * @param machine - The machine as observed.
- * @returns Every slot the material system reports, in its order; none when it reports nothing.
+ * @returns Every slot the material system reports that has a tray number, in its order; none when it reports nothing.
  * @internal
  */
 export const observedTrays = (machine: MachineDirectoryEntry): readonly ObservedTray[] => {
@@ -95,16 +89,14 @@ export const observedTrays = (machine: MachineDirectoryEntry): readonly Observed
   if (!declared || !value) {
     return [];
   }
-  const feeders = declared.units.filter((unit) => unit.kind === 'feeder');
   return value.slots.flatMap(({ slot, state, material }) => {
-    const unit = declared.units.find(({ id }) => id === slot.unitId);
-    const index = unit?.slots.findIndex(({ id }) => id === slot.slotId) ?? -1;
-    if (unit === undefined || index < 0) {
+    const tray = bambuSlotOf(slot);
+    if (tray === undefined) {
       return [];
     }
     return [
       {
-        slot: unit.kind === 'external' ? externalSpoolTray : feeders.indexOf(unit) * 4 + index,
+        slot: tray,
         address: slot,
         state,
         ...(material === undefined
@@ -118,15 +110,20 @@ export const observedTrays = (machine: MachineDirectoryEntry): readonly Observed
 /**
  * The external spool's tray number, when the machine has one.
  * @param manifest - The machine's manifest.
- * @returns 254, or undefined.
+ * @returns Its tray number, or undefined.
  * @internal
  */
-export const externalSpoolSlotOf = (manifest: Pick<MachineManifest, 'components'>): number | undefined =>
-  manifest.components.some(
-    (component) => component.kind === 'material-system' && component.units.some((unit) => unit.kind === 'external'),
-  )
-    ? externalSpoolTray
-    : undefined;
+export const externalSpoolSlotOf = (manifest: Pick<MachineManifest, 'components'>): number | undefined => {
+  for (const component of manifest.components) {
+    const unit =
+      component.kind === 'material-system' ? component.units.find(({ kind }) => kind === 'external') : undefined;
+    const slot = unit?.slots[0];
+    if (unit !== undefined && slot !== undefined) {
+      return bambuSlotOf({ unitId: unit.id, slotId: slot.id });
+    }
+  }
+  return undefined;
+};
 
 /**
  * The build plate the machine reports: a `plate` reading on any component.
@@ -253,7 +250,9 @@ type PrintPreferences = ResolvedMachinePreferences['preferences'];
 
 /** The slicing choices a call makes itself: `request_job`'s own arguments. @internal */
 export type PrintChoices = Readonly<
-  Pick<RequestJobInput, 'preset' | 'plate' | 'profiles'> & {
+  Pick<RequestJobInput, 'preset' | 'plate'> & {
+    /** Bambu Studio presets: `request_job`'s `bambuStudio.profiles`. */
+    profiles?: NonNullable<RequestJobInput['bambuStudio']>['profiles'];
     options?: JsonObject | undefined;
     settings?: JsonObject | undefined;
   }
@@ -420,6 +419,10 @@ export const applyMachinePreferences = (
     return { choices };
   }
   const intent = file.preferences;
+  const profile = file.record.profiles[file.profileId];
+  if (profile === undefined) {
+    throw new Error(`Saved profile ${file.profileId} does not exist for ${file.record.typeId}.`);
+  }
   const path = machineSettingsPath({ typeId: file.record.typeId });
   const { machine, bambuStudio } = target;
   /* What the file supplies either engine: each value the call leaves unset. */
@@ -432,11 +435,9 @@ export const applyMachinePreferences = (
       path,
       typeId: file.record.typeId,
       profileId: file.profileId,
-      profileName: file.record.profiles[file.profileId]!.name,
+      profileName: profile.name,
       configurationVersions: Object.fromEntries(
-        Object.entries(file.record.profiles[file.profileId]!.configurations).flatMap(([id, block]) =>
-          block ? [[id, block.version]] : [],
-        ),
+        Object.entries(profile.configurations).flatMap(([id, block]) => (block ? [[id, block.version]] : [])),
       ),
       applied: defined({ preset, plate, ...supplied }),
     },

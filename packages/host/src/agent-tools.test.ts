@@ -269,6 +269,8 @@ const printFixture = () => {
       model: 'X1C',
       capabilities: {
         components: [toolhead, filament],
+        /* Stamped by the host from the provider's manifest; none here, so a real (not simulated) printer. */
+        qualifications: [],
         jobs: {
           type: 'supported',
           accepts: [
@@ -716,7 +718,7 @@ describe('createHostToolRegistry', () => {
     expect(names).toContain('export_model');
   });
 
-  it('offers request_job only with a runtime, a project id and a machine, and slices at the requested quality through its own export route', async () => {
+  it('offers request_job with a project id and a machine, slices only with a runtime, at the requested quality through its own export route', async () => {
     const workspaceRoot = await makeWorkspace();
     const { sliced, slice, runtimeClient, projectId, requestJob, withdrawJob, machines } = printFixture();
     const names = (options: Partial<HostToolRegistryOptions>) =>
@@ -725,7 +727,17 @@ describe('createHostToolRegistry', () => {
         .map((tool) => tool.name);
     expect(names({ runtimeClient, projectId })).not.toContain('request_job');
     expect(names({ runtimeClient, machines })).not.toContain('request_job');
-    expect(names({ projectId, machines })).not.toContain('request_job');
+    /* Without a runtime there is no export route: finished programs only, and a CAD source refuses (U3-5). */
+    const programsOnly = createHostToolRegistry({ workspaceRoot, projectId, machines });
+    expect(programsOnly.list().map((tool) => tool.name)).toContain('request_job');
+    await expect(invoke(programsOnly, 'request_job', { targetFile: 'main.ts' })).resolves.toEqual({
+      isError: true,
+      content: {
+        errorCode: 'MACHINE_TOOL_ERROR',
+        message: 'This host cannot slice; name a finished program with artifact.',
+      },
+    });
+    expect(requestJob).not.toHaveBeenCalled();
     /* No revision history: a print names its project, not a revision. */
     const registry = createHostToolRegistry({ workspaceRoot, runtimeClient, projectId, machines });
     expect(registry.list().map((tool) => tool.name)).toContain('request_job');

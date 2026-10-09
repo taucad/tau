@@ -301,7 +301,7 @@ describe('plugin generator', () => {
     expect(machine).toContain('input.configuration.logicalId');
     expect(machine).toContain('TODO: implement manufacturing-fixture machine connection');
     expect(machine).toContain('const manifest: MachineManifestDefinition = {');
-    /* Manifest v3 under provider ABI 2: no actions until qualified, no holds, no jobs, and a declared stop. */
+    /* Manifest v3 under provider ABI 2: no actions declared yet, no holds, no jobs, and a declared stop. */
     expect(machine).toContain('  version: 3,');
     expect(machine).toContain('  actions: [],');
     expect(machine).toContain('  holds: [],');

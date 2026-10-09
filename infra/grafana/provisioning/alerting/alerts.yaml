@@ -36,7 +36,7 @@ groups:
               maxDataPoints: 20
         for: 1m
         annotations:
-          summary: Redis connection is down. Chat RPC, session management, and adapter services are degraded.
+          summary: Redis connection is down. Host relay presence, session routing and adapter services are degraded.
           runbook_url: ''
         labels:
           severity: critical

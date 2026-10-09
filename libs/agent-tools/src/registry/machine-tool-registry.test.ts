@@ -330,6 +330,9 @@ const approveWith = (outcome: InterruptResolution['outcome'], before?: () => voi
     return { interruptId: 'interrupt-1', outcome };
   });
 
+/** Every machine that runs jobs asks a person to confirm its work area is clear, which only the Print pane takes. */
+const inPrintPane = ' Accept it in the Print pane, confirming: The build plate is clear.';
+
 describe('machine tool registry', () => {
   it('registers explicit tools only for the negotiated and granted facet, and no bare start', () => {
     const registry = (machines: Parameters<typeof createChatToolRegistry>[0]['machines']) =>
@@ -506,7 +509,7 @@ describe('machine tool registry', () => {
         'Workshop X1C (machine-1): Bambu Lab X1C (simulated, no machine attached), firmware 01.08.00.00.',
       );
       expect(approve.mock.calls[0]?.[0].prompt).toBe(
-        'Simulated: Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min.',
+        `Simulated: Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min.${inPrintPane}`,
       );
       expect(actionApproval.mock.calls[0]?.[0].prompt).toMatch(/^Simulated: Cancel the print on Workshop X1C\?/u);
       expect(requestJobOutputSchema.parse(requested.content)).toMatchObject({ simulated: true });
@@ -575,7 +578,7 @@ describe('machine tool registry', () => {
         'Stop (stop_machine, always open to you): Leaves motion halts, heaters off, position kept; to recover: Home (machine_action motion motion.home).',
       );
       expect(text).toContain(
-        'Jobs (request_job): accepts additive.fff (application/vnd.bambulab.gcode-3mf); sent whole, then started by Tau once a person accepts it.',
+        'Jobs (request_job): accepts additive.fff (application/vnd.bambulab.gcode-3mf); sent whole, then started by Tau once a person accepts it; the person confirms: The build plate is clear.',
       );
       /* Compact text, not the entry. */
       expect(text.length).toBeLessThan(3000);
@@ -1131,7 +1134,7 @@ describe('machine tool registry', () => {
       });
       expect(approve).toHaveBeenCalledExactlyOnceWith({
         key: 'job:machine-1:main.ts',
-        prompt: 'Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min.',
+        prompt: `Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min.${inPrintPane}`,
         payload: {
           kind: 'job',
           jobId: 'call-1',
@@ -1168,7 +1171,8 @@ describe('machine tool registry', () => {
       await run(fixture.client, { toolName: 'request_job', input: { targetFile: 'main.ts' }, approve });
 
       expect(approve.mock.calls[0]?.[0].prompt).toBe(
-        'Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min. On the Cool plate, as stated; Workshop X1C does not report its plate.',
+        'Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min. On the Cool plate, as stated; ' +
+          `Workshop X1C does not report its plate.${inPrintPane}`,
       );
     });
 
@@ -1188,7 +1192,7 @@ describe('machine tool registry', () => {
         facts: { process: 'fff', layers: 125 },
       });
       expect(approve.mock.calls[0]?.[0]).toMatchObject({
-        prompt: 'Print pyramid.gcode.3mf on Workshop X1C? 125 layers.',
+        prompt: `Print pyramid.gcode.3mf on Workshop X1C? 125 layers.${inPrintPane}`,
       });
     });
 
@@ -1355,7 +1359,7 @@ describe('machine tool registry', () => {
     expect(planPrint.mock.lastCall?.[0]).not.toHaveProperty('targetFile');
     expect(approve.mock.calls[0]?.[0]).toMatchObject({
       key: 'job:machine-1:cam/part.nc',
-      prompt: 'Cut part.nc on Workshop X1C?',
+      prompt: `Cut part.nc on Workshop X1C?${inPrintPane}`,
     });
   });
 

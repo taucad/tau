@@ -279,7 +279,7 @@ const millingProcess = { type: 'milling', version: 1, simultaneousAxes: 3, featu
  * @returns The manifest.
  */
 export const fixtureManifest = ({
-  attestations = [],
+  attestations = [{ id: 'work-area-clear', label: 'The build plate is clear' }],
   milling = false,
   generic = false,
   simulated = false,
@@ -334,7 +334,7 @@ export const fixtureManifest = ({
       start: 'remote',
       submission: chamberLight.configuration,
       attestations,
-      safety: { authority: 'approved-agent', attended: false, interlocks: [] },
+      safety: { attended: false, interlocks: [] },
     },
     stop: halt,
     observations: [],

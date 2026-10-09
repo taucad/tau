@@ -274,11 +274,12 @@ const retiredToolPart = (part: unknown): DynamicToolUIPart | undefined => {
     return undefined;
   }
   const { type } = part;
+  if (!type.startsWith('tool-')) {
+    return undefined;
+  }
   // SAFETY: a static tool part carries every field a dynamic one does; only the name moves from `type` to `toolName`.
   // oxlint-disable-next-line typescript/consistent-type-assertions -- a persisted part of a retired tool has no static type.
-  return type.startsWith('tool-')
-    ? ({ ...part, type: 'dynamic-tool', toolName: type.slice(5) } as DynamicToolUIPart)
-    : undefined;
+  return { ...part, type: 'dynamic-tool', toolName: type.slice(5) } as DynamicToolUIPart;
 };
 
 // oxlint-disable-next-line complexity -- Part type dispatch requires many branches

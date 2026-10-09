@@ -1494,7 +1494,7 @@ export const FileEditor = memo(function ({
         editorRef.send({ type: 'openFile', path, source: 'user', readOnly: fileReadOnly });
       }}
     >
-      <div className='flex min-h-0 flex-1 flex-col'>
+      <div className='flex h-full min-h-0 flex-1 flex-col'>
         {result.observation.status === 'closed' || result.observation.status === 'error' ? (
           <div role='status' className='flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1 text-xs'>
             <span>File updates unavailable</span>

@@ -1383,3 +1383,121 @@ it('should retain uncommitted live output when a different historical run is cor
   }).state;
   expect(next.live).toBe(live.live);
 });
+
+const retainedPresentation = () => {
+  const rows = [
+    lifecycleRow(0, 'admitted'),
+    lifecycleRow(1, 'running'),
+    logRow(2, {
+      type: 'message.appended',
+      message: { id: 'durable-text', role: 'assistant', content: 'Retained answer.' },
+    }),
+    logRow(3, {
+      type: 'message.appended',
+      message: {
+        id: 'pending-tool',
+        role: 'tool-input',
+        toolCallId: 'pending-call',
+        toolName: 'read',
+        content: { path: 'main.ts' },
+      },
+    }),
+  ];
+  const folded = reduceChatProjection(initialChatProjection, {
+    type: 'batch',
+    answer: {
+      status: 'batch',
+      events: rows,
+      cursor: 0,
+      nextCursor: rows.length,
+      endCursor: rows.length,
+      sourceGeneration: 'retained-source',
+      sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+    },
+  }).state;
+  const { state } = reduceChatProjection(folded, {
+    type: 'live',
+    event: {
+      type: 'text-delta',
+      chatId: 'chat_1',
+      runId: 'run_1',
+      messageId: 'live-text',
+      contentIndex: 0,
+      delta: 'Still arriving.',
+      offset: 0,
+    },
+  });
+  return { state, rows };
+};
+
+describe('presentation identity for semantically empty observations', () => {
+  it.each([
+    { duplicate: false, damaged: false },
+    { duplicate: false, damaged: true },
+    { duplicate: true, damaged: false },
+    { duplicate: true, damaged: true },
+  ])('should retain presentation identities for duplicate=$duplicate damaged=$damaged', ({ duplicate, damaged }) => {
+    const { state, rows } = retainedPresentation();
+    expect(Object.keys(state.blocks)).not.toHaveLength(0);
+    expect(Object.keys(state.views)).not.toHaveLength(0);
+    expect(state.openTools['pending-call']).toEqual({ runId: 'run_1', toolName: 'read' });
+    expect(state.live?.runId).toBe('run_1');
+    const events = duplicate ? [rows[3]!] : [];
+    const endCursor = rows.length + events.length;
+    const sourceHealth = { historyIntact: !damaged, newerHistory: false, quarantined: damaged };
+    const next = reduceChatProjection(state, {
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        events,
+        cursor: rows.length,
+        nextCursor: endCursor,
+        endCursor,
+        sourceGeneration: 'retained-source',
+        sourceHealth,
+      },
+    }).state;
+
+    expect.soft(next.blocks).toBe(state.blocks);
+    expect.soft(next.views).toBe(state.views);
+    expect.soft(next.live).toBe(state.live);
+    expect.soft(next.openTools).toBe(state.openTools);
+    expect.soft(next.views['run_1']?.chunks).toBe(state.views['run_1']?.chunks);
+    expect(next.sourceHealth).toBe(sourceHealth);
+    expect(next.ledger.historyIntact).toBe(!damaged);
+    expect(next.ledger.position).toEqual({ ...state.ledger.position, cursor: endCursor });
+    expect(next.endCursor).toBe(endCursor);
+    expect(next.resetVersion).toBe(state.resetVersion);
+  });
+
+  it('should preserve authority refusal and reset behavior for an empty observation', () => {
+    const { state, rows } = retainedPresentation();
+    const changed = reduceChatProjection(state, {
+      type: 'batch',
+      answer: {
+        status: 'batch',
+        events: [],
+        cursor: rows.length,
+        nextCursor: rows.length,
+        endCursor: rows.length,
+        sourceGeneration: 'replacement-source',
+        sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+      },
+    });
+    expect(changed.emit).toEqual({ type: 'reread' });
+    expect(changed.state.ledger.position.cursor).toBe(0);
+    expect(changed.state.resetVersion).toBe(state.resetVersion + 1);
+    expect(changed.state.views).toEqual({});
+    expect(changed.state.live).toBeUndefined();
+    expect(changed.state.sourceHealth).toBeUndefined();
+
+    const unreadable = reduceChatProjection(state, {
+      type: 'batch',
+      answer: { status: 'refused', reason: 'unreadable' },
+    });
+    expect(unreadable.state.fault).toBe('unreadable');
+    expect(unreadable.state.views).toBe(state.views);
+    expect(unreadable.state.blocks).toBe(state.blocks);
+    expect(unreadable.state.ledger).toBe(state.ledger);
+  });
+});

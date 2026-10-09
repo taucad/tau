@@ -520,6 +520,9 @@ const foldRunViews = (
   views: ChatProjection['views'];
   blocks: ChatProjection['blocks'];
 }> => {
+  if (rows.length === 0) {
+    return { views: previousViews, blocks: previousBlocks };
+  }
   let views: Record<string, RunView> | undefined;
   let lastAdmittedAt = Object.values(previousViews).at(-1)?.admittedAt;
   const blockMaps = new Map<string, AgentHostLiveBlocks>();

@@ -9,7 +9,13 @@ import type {
   ToolRegistry,
 } from '@taucad/agent-host';
 import type { KernelIssue } from '@taucad/runtime';
-import { checkMachineAction, fffProcessOf, isSimulatedMachine, machineActionIntent } from '@taucad/runtime/machine';
+import {
+  checkMachineAction,
+  fffProcessOf,
+  isSimulatedMachine,
+  machineActionIntent,
+  personOnlyJobApproval,
+} from '@taucad/runtime/machine';
 import type {
   MachineActionDescriptor,
   MachineApplyActionInput,
@@ -631,15 +637,10 @@ const stopMachine = async (client: MachineClient, invocation: HostToolInvocation
 
 /** What the person must confirm or state that only Tau's Print pane can take from them. */
 const personOnlyApproval = (entry: MachineDirectoryEntry): readonly string[] | undefined => {
-  const { jobs } = entry.descriptor.capabilities;
-  if (jobs.type !== 'supported') {
-    return undefined;
-  }
-  const confirmations = [
-    ...jobs.attestations.map(({ label }) => label),
-    ...(jobs.safety.attended ? ['They are at the machine'] : []),
-  ];
-  return confirmations.length === 0 ? undefined : confirmations;
+  const approval = personOnlyJobApproval(entry.descriptor.capabilities);
+  return approval === undefined
+    ? undefined
+    : [...approval.attestations.map(({ label }) => label), ...(approval.attended ? ['They are at the machine'] : [])];
 };
 
 const paneStep = (entry: MachineDirectoryEntry | undefined): string => {

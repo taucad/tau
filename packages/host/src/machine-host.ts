@@ -62,6 +62,9 @@ import type { SecretVault, SecretVaultFacts, SecretVaultWriteOptions } from '#se
  *
  * A serve that fails closes both ends, so every call rejects with the channel
  * instead of hanging; closing the facet retires the served session with it.
+ * A handshake that fails, or a facet closed before its handshake, closes both
+ * ends too: `ready` still rejects for a caller that awaits it, and one that
+ * never does leaves no unhandled rejection behind.
  *
  * @param serve - Attach the host's end of the channel, e.g. `host.serve({ port, session })`.
  * @returns The available facet and its close.
@@ -81,6 +84,16 @@ export const localMachineFacet = (
     }
   };
   void attach();
+  const observeReadiness = async (): Promise<void> => {
+    try {
+      await client.ready;
+    } catch {
+      client.close();
+      port2.close();
+    }
+  };
+  // async-iife: readiness stays caller-visible while this observer owns failed-handshake cleanup.
+  void observeReadiness();
   return { available: true, ...client };
 };
 
@@ -625,8 +638,8 @@ const uploadFile = async (
 export type CreateNodeMachineRuntimeOptions = Readonly<{
   secrets: MachineSecretStore;
   /**
-   * The native serial driver for USB and serial controllers (Grbl, Carvera over USB). Absent, providers see no serial
-   * access and serial machines cannot be found or connected.
+   * The native serial driver for controllers on a USB or serial port. Absent, providers see no serial access and
+   * serial machines cannot be found or connected.
    */
   serial?: NodeMachineSerialDriver;
   /** Told every entry a provider logs. */

@@ -1009,11 +1009,6 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const project = agentProject;
     const machines = agentMachines;
     const filesystem = agentFileSystem;
-    /* No job starts from here on: a start the closing channel still admits would begin as the host goes away. */
-    machines?.host.quiesce();
-    agentRunReporter?.close();
-    agentRunReporter = undefined;
-    agentExternalAgents = [];
     const failures: unknown[] = [];
     const settle = async (operation: Promise<unknown> | undefined, retire: () => void): Promise<void> => {
       try {
@@ -1023,6 +1018,12 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         failures.push(error);
       }
     };
+    /* No job starts from here on: a start the closing channel still admits would begin as the host goes away. The
+     * gate is up at the call; the wait lets a start already past it settle before the host closes under it. */
+    await settle(machines?.host.quiesce(), () => undefined);
+    agentRunReporter?.close();
+    agentRunReporter = undefined;
+    agentExternalAgents = [];
     await settle(server?.close(), () => {
       agentServer = undefined;
     });

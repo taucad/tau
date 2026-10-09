@@ -140,6 +140,19 @@ describe('completeMachineBinding', () => {
     expect(completeBinding).not.toHaveBeenCalled();
   });
 
+  it('should refuse a candidate with no network address when its provider pins network services', async () => {
+    const { complete, completeBinding, probe } = ceremony({
+      candidate: {
+        ...candidateAt('192.168.0.112', serial),
+        endpoint: { transport: 'serial', path: '/dev/tty.usbserial' },
+      },
+    });
+
+    await expect(complete({ accessCode: printerCode })).rejects.toThrow('MACHINE_BINDING_ENDPOINT_INVALID');
+    expect(probe).not.toHaveBeenCalled();
+    expect(completeBinding).not.toHaveBeenCalled();
+  });
+
   it('should refuse a ceremony whose provider the host does not serve', async () => {
     const { complete, completeBinding, probe } = ceremony({ providerId: 'klipper' });
 

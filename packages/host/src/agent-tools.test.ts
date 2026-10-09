@@ -746,6 +746,7 @@ describe('createHostToolRegistry', () => {
         plate: 'textured-pei',
         nozzleDiameter: 0.4,
         filamentDiameter: 1.75,
+        filamentType: 'PLA',
         nozzleTemperature: 220,
         bedTemperature: 55,
         walls: 3,

@@ -44,6 +44,24 @@ describe('machineRouteGrants', () => {
   });
 });
 
+describe('localMachineFacet', () => {
+  it('should leave no unhandled rejection when closed before the host answers its handshake', async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      /* A serve that never attaches: the host's hello never arrives, as when a caller closes the facet at once. */
+      const facet = localMachineFacet(() => undefined);
+      facet.close();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+});
+
 describe('machineAgentGrants', () => {
   it("should withhold a person's own acts from an agent and keep what the machine tools call", () => {
     const operations = machineAgentGrants.map(({ operation }) => operation);

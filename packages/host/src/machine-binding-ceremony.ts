@@ -110,8 +110,8 @@ const bindingNeeds = (
  * Complete a ceremony `beginBinding` answered with `operator-action-required`.
  *
  * What the ceremony asks is what the candidate's provider declares. A simulated provider, or a machine whose
- * identity is only claimed (a Grbl on a serial port, a Carvera on the network), binds with no code. A machine that
- * authenticates takes an access code. Over the network, the services the provider's binding pins are pinned on
+ * identity is only claimed (a controller on a serial port, or a network one that takes no code), binds with no
+ * code. A machine that authenticates takes an access code. Over the network, the services the provider's binding pins are pinned on
  * first use from the address the provider will connect to: a required one must answer, an optional one that does
  * not is left unpinned and reported. A typed code is staged in memory for the connect and saved to the vault,
  * beside its pins, only once the binding commits, so a wrong code never reaches the vault. Without a typed code the
@@ -124,6 +124,7 @@ const bindingNeeds = (
  * @param input - The host, its providers, its secret custody, the ceremony and the typed code, if any.
  * @returns The host's own outcome.
  * @throws `MACHINE_BINDING_UNKNOWN_CEREMONY`, `MACHINE_PROVIDER_UNAVAILABLE` when the host serves no such provider,
+ * `MACHINE_BINDING_ENDPOINT_INVALID` when the provider pins network services and the candidate has no network address,
  * `MACHINE_CREDENTIAL_REQUIRED` when no code is typed or saved, `MACHINE_CREDENTIAL_TRUST_CHANGED` when the saved
  * code's pins no longer match, a required service's probe failure, or `MACHINE_CREDENTIAL_SAVE_FAILED` (the binding
  * is removed again; `cause.code` is the vault's code).

@@ -808,6 +808,7 @@ describe('the mounted /mcp route', () => {
           stop,
           revision: 'revision-1',
           incarnation: 'incarnation-1',
+          qualifications: [],
         },
       },
       snapshot: {

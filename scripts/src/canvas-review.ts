@@ -336,8 +336,9 @@ export const appendReviewEvent = async (
 
 // --- Git ------------------------------------------------------------------------------------------
 
+// Unbounded: `status` over Tau Brain lists megabytes of untracked research artifacts, past the 1 MiB default.
 const gitRaw = (cwd: string, ...arguments_: string[]): string =>
-  execFileSync('git', arguments_, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('git', arguments_, { cwd, encoding: 'utf8', maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe'] });
 const git = (cwd: string, ...arguments_: string[]): string => gitRaw(cwd, ...arguments_).trim();
 
 const reviewFile = /(?:^|\/)review\/[^/]+\.json$/;

@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 const git = (cwd: string, ...arguments_: string[]): string =>
-  execFileSync('git', arguments_, { cwd, encoding: 'utf8' }).trim();
+  execFileSync('git', arguments_, { cwd, encoding: 'utf8', maxBuffer: Infinity }).trim();
 
 /** A Git repository with `artifacts/demo/` holding one canvas file, like Tau Brain. */
 const repository = (): { root: string; artifacts: string; canvas: string } => {
@@ -195,6 +195,18 @@ describe('finishing a review', () => {
     writeFileSync(join(artifacts, 'demo', 'review', file!), '{}');
     expect(changedReviewEvents(artifacts)).toEqual([`artifacts/demo/review/${file}`]);
     expect(await finishReview({ canvas, root: artifacts })).toMatchObject({ status: 'refused', code: 'INVALID_EVENT' });
+  });
+
+  it('should read a status larger than the default child-process buffer', () => {
+    const { root, artifacts } = repository();
+    // 4500 untracked 240-character names: ~1.2 MB of porcelain, past execFileSync's 1 MiB default.
+    const noise = join(artifacts, 'demo', 'noise');
+    mkdirSync(noise);
+    for (let index = 0; index < 4500; index += 1) {
+      writeFileSync(join(noise, String(index).padStart(240, 'n')), '');
+    }
+    expect(git(root, 'status', '--porcelain=v1', '-z', '--untracked-files=all').length).toBeGreaterThan(1024 * 1024);
+    expect(changedReviewEvents(artifacts)).toEqual([]);
   });
 
   it('should report a canvas outside Git as read-only', async () => {

@@ -107,7 +107,7 @@ const fixtureConfiguration = defineConfiguration({
 });
 
 /* The daemon only lists what `--machines` admitted; the host names no real provider. */
-const fixtureMachine = defineMachine({
+const fixtureMachineDefinition = {
   id: 'fixture-printer',
   name: 'Fixture printer',
   version: '1',
@@ -172,6 +172,16 @@ const fixtureMachine = defineMachine({
   },
   async connect() {
     throw new Error('The fixture printer does not connect.');
+  },
+} satisfies Parameters<typeof defineMachine>[0];
+const fixtureMachine = defineMachine(fixtureMachineDefinition);
+/* The same machine on a serial port, which a daemon without serial access lists unavailable. */
+const fixtureSerialMachine = defineMachine({
+  ...fixtureMachineDefinition,
+  id: 'fixture-router',
+  manifest: {
+    ...fixtureMachineDefinition.manifest,
+    connection: { ...fixtureMachineDefinition.manifest.connection, transport: 'serial' },
   },
 });
 
@@ -780,7 +790,7 @@ describe('startHostDaemon', () => {
     const daemon = startHostDaemon({
       relayUrl: new URL('http://127.0.0.1:1'),
       runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
-      agent: { ...agentOptions, machines: { providers: [fixtureMachine()] } },
+      agent: { ...agentOptions, machines: { providers: [fixtureMachine(), fixtureSerialMachine()] } },
       onEvent: (event) => events.push(event),
     });
     await daemon.ready;
@@ -807,7 +817,11 @@ describe('startHostDaemon', () => {
     const client = connectMachineChannel(socket);
     try {
       const providers = await client.listProviders({});
-      expect(providers.map((provider) => provider.id)).toEqual(['fixture-printer']);
+      /* The daemon has no serial driver, so it says why it cannot serve a serial machine. */
+      expect(providers.map(({ id, unavailable }) => ({ id, unavailable }))).toEqual([
+        { id: 'fixture-printer', unavailable: undefined },
+        { id: 'fixture-router', unavailable: { reason: expect.stringContaining('serial ports') as string } },
+      ]);
       await expect(client.list({})).resolves.toMatchObject({ entries: [] });
     } finally {
       client.close();

@@ -3,10 +3,11 @@
  * `tau serve --machines` daemon: the network, secret and artifact runtime a
  * `createNodeMachineHost` needs, and its durable identity.
  *
- * Ported from the qualification script's runtime
- * (`packages/plugins/bambu/scripts/qualify-x1c.mts`) so both launchers run one
- * implementation. Every network operation is bounded by the provider's own
- * limits and pinned to the trust the binding ceremony recorded.
+ * Both launchers run this one implementation. The standard protocols it offers
+ * providers (TCP and TLS streams, UDP discovery, implicit-FTPS upload, RTSPS
+ * stills) take every endpoint, account and limit from the provider's call,
+ * and every TLS connection is pinned to the trust the binding ceremony
+ * recorded; nothing here knows a vendor.
  *
  * @public
  */
@@ -140,9 +141,8 @@ export const machineAgentGrants: readonly HostRouteGrant[] = machineRouteGrants.
 );
 
 /**
- * The machine providers every Tau host serves: the Bambu Lab X1C and A1 mini, a Grbl router and a Makera Carvera,
- * each beside its socket-free simulator. The vendor packages load on the first call, so a host that serves no
- * machines never touches them.
+ * The machine providers every Tau host serves: each first-party provider beside its socket-free simulator. The
+ * provider packages load on the first call, so a host that serves no machines never touches them.
  *
  * @returns One fresh registration per provider, for `createNodeMachineHost`.
  * @public
@@ -282,7 +282,7 @@ export type MachineSecretStore = Readonly<{
  *
  * const directory = '/var/lib/tau/machines';
  * const secrets = createMachineSecretStore({ vault: openSecretVault({ directory }), legacyDirectory: directory });
- * const release = secrets.stage('vault:machine/bambu/00M00A391800004', '12345678');
+ * const release = secrets.stage('vault:machine/acme/SN-0001', '12345678');
  * release();
  * ```
  */
@@ -555,7 +555,7 @@ const listenDatagrams = async function* (input: MachineDatagramListenInput): Asy
 /**
  * The artifact as 64 KiB views, without copying. basic-ftp's transfer watchdog reads progress from the data
  * socket's `bytesWritten`, which counts a chunk the moment it is queued: a whole-file chunk looks stalled for as
- * long as the printer takes to drain it, so a healthy upload that outlasts the timeout is aborted.
+ * long as the server takes to drain it, so a healthy upload that outlasts the timeout is aborted.
  * @param bytes - The artifact.
  * @yields Consecutive views of at most 64 KiB.
  */
@@ -650,15 +650,14 @@ export type CreateNodeMachineRuntimeOptions = Readonly<{
 /**
  * The host-owned runtime a machine host discovers, binds and prints with.
  *
- * Its `captureNetworkStill` decodes one JPEG from a pinned RTSPS camera with
- * the system `ffmpeg`, which plays a loopback proxy that answers the camera's
- * authentication itself, so the access code never reaches ffmpeg. Without an
- * ffmpeg, every capture rejects `MACHINE_STILL_FFMPEG_MISSING` rather than the
- * camera reporting stills unsupported.
+ * Its `uploadFile` stores one file over implicit FTPS (see `MachineFileUploadInput`). Its `captureNetworkStill`
+ * decodes one JPEG from a pinned RTSPS camera with the system `ffmpeg`, which plays a loopback proxy that answers the
+ * camera's authentication itself, so the credential never reaches ffmpeg. Without an ffmpeg, every capture rejects
+ * `MACHINE_STILL_FFMPEG_MISSING` rather than the camera reporting stills unsupported.
  *
  * @param options - Secret custody, artifact reader, log sink and `ffmpeg` lookup.
  * @returns The runtime for `createNodeMachineHost`, whose `credentials` answer
- * whether a printer's code is saved and forget a removed binding's code.
+ * whether a machine's credential is saved and forget a removed binding's credential.
  * @public
  */
 export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOptions): NodeMachineRuntime => {
@@ -702,7 +701,7 @@ export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOption
         captureNetworkStill: async (input) =>
           captureRtspsStill(input, {
             ffmpeg: await (options.findFfmpeg ?? findFfmpeg)(),
-            accessCode: async () => secrets.resolve(input.secretRef),
+            password: async () => secrets.resolve(input.secretRef),
             openUpstream: async () =>
               openSocket({
                 endpoint: input.endpoint,

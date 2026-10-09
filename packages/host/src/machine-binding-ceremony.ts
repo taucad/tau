@@ -151,10 +151,15 @@ export const completeMachineBinding = async (input: CompleteMachineBindingInput)
   }
   const { providerId, candidate } = pending;
   const { code, services } = bindingNeeds(input.providers, providerId);
+  /* Services are pinned at the network address the provider will connect to; a candidate without one pins nothing. */
+  const address = candidate.endpoint.transport === 'network' ? candidate.endpoint.address : undefined;
+  if (address === undefined && services.length > 0) {
+    throw new Error('MACHINE_BINDING_ENDPOINT_INVALID');
+  }
   const pin = async (): Promise<Readonly<Record<string, PinnedTrust>>> =>
     pinServices({
       probe: input.probeCertificateTrust ?? probeCertificateTrust,
-      address: candidate.endpoint.address,
+      address: address ?? '',
       services,
       unpinned: (service) => {
         input.onEvent?.({ type: 'service-unpinned', providerId, service });

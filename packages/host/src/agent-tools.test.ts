@@ -371,6 +371,18 @@ const printFixture = () => {
       entries: [entry],
     }),
     listProviders: async () => [provider],
+    /* The provider finds the program ready and completes what the call chose from the program, as R5 says. */
+    checkJob: vi.fn<MachineClient['checkJob']>(async () => ({
+      status: 'ready',
+      program: { name: 'main.gcode.3mf', facts: { process: 'fff' } },
+      checks: [],
+      configuration: {
+        amsMapping: [0],
+        expectedBedType: 'textured-pei',
+        expectedModel: 'X1C',
+        expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
+      },
+    })),
     requestJob,
     listJobs: async () =>
       Promise.all(
@@ -756,7 +768,7 @@ describe('createHostToolRegistry', () => {
       expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
       amsMapping: [0],
     });
-    expect(request.program).toEqual({ name: 'main.gcode.3mf' });
+    expect(request.program).toMatchObject({ name: 'main.gcode.3mf' });
     /* The slice the machine host will read is the one the runtime produced, recorded in the project. */
     expect(new Uint8Array(await readFile(join(workspaceRoot, request.artifact.path)))).toEqual(sliced);
 

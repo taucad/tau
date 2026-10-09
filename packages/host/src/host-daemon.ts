@@ -213,7 +213,7 @@ export type HostDaemonAgentOptions = {
    * `unsupported`. Printers live in the per-user machine store,
    * `<config>/machines`, which the desktop app opens too; while another Tau
    * app holds it, the daemon warns `MACHINE_STORE_OWNED_ELSEWHERE` and serves
-   * without machines. Access codes resolve from the host's secret vault (the
+   * without machines. Machine credentials resolve from the host's secret vault (the
    * macOS keychain, else that directory). The binding ceremony's native half
    * (the secret) has no daemon surface yet, so only providers that bind
    * without one — the simulator — complete here.
@@ -1009,6 +1009,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const project = agentProject;
     const machines = agentMachines;
     const filesystem = agentFileSystem;
+    /* No job starts from here on: a start the closing channel still admits would begin as the host goes away. */
+    machines?.host.quiesce();
     agentRunReporter?.close();
     agentRunReporter = undefined;
     agentExternalAgents = [];

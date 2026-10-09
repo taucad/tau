@@ -251,7 +251,7 @@ describe('captureNetworkStill', () => {
 describe('captureRtspsStill', () => {
   const options = (port: number): Parameters<typeof captureRtspsStill>[1] => ({
     ffmpeg,
-    accessCode: async () => accessCode,
+    password: async () => accessCode,
     openUpstream: async () => connectTcp(port),
   });
 

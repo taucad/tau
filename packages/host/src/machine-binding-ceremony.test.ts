@@ -20,7 +20,7 @@ const reference = `vault:machine/bambu/${serial}`;
 const candidateAt = (address: string, claimedSerial?: string): MachineCandidate => ({
   id: `bambu:${claimedSerial ?? address}`,
   name: 'Workshop X1C',
-  endpoint: { address, interface: 'en0' },
+  endpoint: { transport: 'network', address, interface: 'en0' },
   claimedIdentity: claimedSerial === undefined ? { model: 'X1C' } : { serial: claimedSerial, model: 'X1C' },
   observedAt: '2026-09-26T00:00:00.000Z',
   expiresAt: '2026-09-26T00:00:30.000Z',

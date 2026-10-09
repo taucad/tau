@@ -311,7 +311,13 @@ describe('createNodeMachineRuntime', () => {
     }
   });
 
-  it('should finish an FTPS upload that outlasts its timeout while the printer keeps reading', async () => {
+  /*
+   * The wire an implicit-FTPS upload speaks, pinned: TLS from the first byte, a login with the caller's own account,
+   * binary passive STOR of the caller's name, then SIZE to prove every byte landed. The data channel drains slower than
+   * the 1 s timeout allows for the whole file, so a whole-file write would trip basic-ftp's watchdog (it counts queued
+   * bytes as progress); 64 KiB pieces keep it fed.
+   */
+  it('should finish an FTPS upload that outlasts its timeout while the server keeps reading', async () => {
     const directory = await sandbox();
     /* The only way Node gets a self-signed certificate without a dependency. */
     execFileSync(
@@ -340,6 +346,7 @@ describe('createNodeMachineRuntime', () => {
     const upload = new Uint8Array(8 * 1024 * 1024).fill(7);
     let received = 0;
     let replyOnControl: ((line: string) => void) | undefined;
+    const commands: string[] = [];
     /* The data channel drains about 4 MiB/s, so the 8 MiB upload lasts twice the 1 s timeout. */
     const data = createTlsServer(credentials, (socket) => {
       socket.on('error', () => undefined);
@@ -364,6 +371,7 @@ describe('createNodeMachineRuntime', () => {
       socket.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
         for (const line of Buffer.from(chunk).toString('latin1').split('\r\n').filter(Boolean)) {
           const command = line.split(' ')[0]!.toUpperCase();
+          commands.push(command === 'PASS' ? 'PASS' : line);
           const answers = new Map([
             ['USER', '331 password'],
             ['PASS', '230 logged in'],
@@ -393,7 +401,7 @@ describe('createNodeMachineRuntime', () => {
           endpoint: { address: '127.0.0.1', port },
           trust: { type: 'pinned', digest: digest as Extract<MachineTransportTrust, { type: 'pinned' }>['digest'] },
           secretRef: 'vault:machine/fixture/printer-1',
-          username: 'bblp',
+          username: 'maker',
           remoteName: 'tau-fixture.gcode.3mf',
           bytes: upload,
           connectTimeout: 1000,
@@ -401,6 +409,20 @@ describe('createNodeMachineRuntime', () => {
         }),
       ).resolves.toEqual({ bytesWritten: upload.byteLength });
       expect(received).toBe(upload.byteLength);
+      expect(commands).toEqual([
+        'OPTS UTF8 ON',
+        'USER maker',
+        'PASS',
+        'FEAT',
+        'TYPE I',
+        'STRU F',
+        'OPTS UTF8 ON',
+        'PBSZ 0',
+        'PROT P',
+        'EPSV',
+        'STOR tau-fixture.gcode.3mf',
+        'SIZE tau-fixture.gcode.3mf',
+      ]);
     } finally {
       control.close();
       data.close();

@@ -12,7 +12,15 @@ import {
 
 const external = { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } };
 
-const harness = (runId: string, prior: ReadonlyArray<Record<string, unknown>> = [], onAccepted?: () => void) => {
+type TrackOptions = Parameters<typeof trackAgentTurn>[0];
+
+const harness = (
+  runId: string,
+  options: Partial<Pick<TrackOptions, 'identity' | 'usageMetrics' | 'onAccepted'>> & {
+    prior?: ReadonlyArray<Record<string, unknown>>;
+  } = {},
+) => {
+  const { prior = [], ...extra } = options;
   let projection: ChatProjection = initialChatProjection;
   let cursor = 0;
   const listeners = new Set<() => void>();
@@ -37,7 +45,7 @@ const harness = (runId: string, prior: ReadonlyArray<Record<string, unknown>> = 
     admittedAt: clock,
     now: () => clock,
     report,
-    ...(onAccepted === undefined ? {} : { onAccepted }),
+    ...extra,
     source: {
       getProjection: () => projection,
       subscribe: (listener) => {
@@ -73,6 +81,25 @@ const toolRows = (callId: string, kind: string, isError: boolean) => [
       isError,
       call: { toolCallId: callId, kind, status: isError ? 'failed' : 'completed' },
       metadata: external,
+    },
+  }),
+];
+
+/** One of Tau's own tool calls: no `external` origin, so the chunk keeps its Tau name and input. */
+const tauToolRows = (callId: string, toolName: string, io: { input: unknown; output: unknown }) => [
+  logRow(0, {
+    type: 'message.appended',
+    message: { id: `${callId}-in`, role: 'tool-input', toolCallId: callId, toolName, content: io.input },
+  }),
+  logRow(0, {
+    type: 'message.appended',
+    message: {
+      id: `${callId}-out`,
+      role: 'tool-output',
+      toolCallId: callId,
+      toolName,
+      content: io.output,
+      isError: false,
     },
   }),
 ];
@@ -189,7 +216,7 @@ describe('trackAgentTurn', () => {
       logRow(0, failed),
     ];
     const onAccepted = vi.fn();
-    const { publish, report } = harness('run_resume', attemptOne, onAccepted);
+    const { publish, report } = harness('run_resume', { prior: attemptOne, onAccepted });
     expect(report).not.toHaveBeenCalled();
     expect(onAccepted).not.toHaveBeenCalled();
     publish([logRow(0, { type: 'run.lifecycle', state: 'running', attempt: 2 })], 1300);
@@ -215,6 +242,72 @@ describe('trackAgentTurn', () => {
         tokens: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0 },
       },
     });
+  });
+
+  it('names Tau tools and folds the turn context only with usage-metrics consent, never its paths or messages', () => {
+    const { publish, report } = harness('run_ctx', {
+      identity: { agentId: 'tau', placement: 'browser' },
+      usageMetrics: { kernelId: 'replicad' },
+    });
+    publish([lifecycleRow(0, 'admitted', 'run_ctx'), lifecycleRow(0, 'running', 'run_ctx')], 1200);
+    publish(
+      [
+        ...tauToolRows('r1', 'read_file', {
+          input: { path: '.agents/skills/cad-replicad/reference/sketching.md' },
+          output: 'ten bytes!',
+        }),
+        ...tauToolRows('s1', 'use_skill', { input: { skillName: 'cad-replicad' }, output: { ok: true } }),
+        ...tauToolRows('e1', 'evaluate_model', {
+          input: { path: 'model.ts' },
+          output: {
+            status: 'error',
+            kernelIssues: [{ severity: 'error', type: 'runtime', message: 'draw is not a function' }],
+          },
+        }),
+        ...tauToolRows('w1', 'edit_file', {
+          input: { targetFile: 'model.ts', content: 'export default 1;' },
+          output: { ok: true },
+        }),
+      ],
+      1500,
+    );
+    publish([lifecycleRow(0, 'completed', 'run_ctx')], 2000);
+    const entry = report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
+    expect(entry.detail.toolCalls?.map((call) => call.tool)).toEqual([
+      'read_file',
+      'use_skill',
+      'evaluate_model',
+      'edit_file',
+    ]);
+    expect(entry.detail.context).toEqual({
+      kernelId: 'replicad',
+      skillsActivated: ['cad-replicad'],
+      callsBeforeFirstModelWrite: 3,
+      timeToFirstModelWrite: 500,
+      referenceLookups: [{ outcome: 'ok', count: 1 }],
+      referenceBytesRead: 10,
+      evaluations: [{ class: 'api_misuse', count: 1 }],
+      correctionsAfterError: 1,
+    });
+    const serialised = JSON.stringify(entry);
+    for (const secret of ['/', '.agents', 'sketching', '.md', '.ts', 'is not a function', 'export default']) {
+      expect(serialised).not.toContain(secret);
+    }
+  });
+
+  it('omits tool names and context without consent', () => {
+    const { publish, report } = harness('run_quiet');
+    publish([lifecycleRow(0, 'admitted', 'run_quiet'), lifecycleRow(0, 'running', 'run_quiet')], 1200);
+    publish(
+      [
+        ...tauToolRows('w1', 'edit_file', { input: { targetFile: 'model.ts' }, output: { ok: true } }),
+        lifecycleRow(0, 'completed', 'run_quiet'),
+      ],
+      1500,
+    );
+    const { detail } = report.mock.calls[0]![0] as Extract<ClientMetricEntry, { name: 'agent.turn' }>;
+    expect(detail.context).toBeUndefined();
+    expect(detail.toolCalls).toEqual([{ kind: 'edit', status: 'completed', count: 1 }]);
   });
 
   it('counts a cancelled run as cancelled', () => {

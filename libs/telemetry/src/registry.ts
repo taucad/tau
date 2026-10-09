@@ -558,6 +558,31 @@ export const TauMetrics = {
     }),
   }),
 
+  billingSupplierCostPicoUsd: defineCounter({
+    name: 'tau.billing.supplier_cost_picousd',
+    unit: '{picousd}',
+    description:
+      "Estimated supplier cost of each live-settled funded LLM call in pico-USD, priced from its reported usage at the pinned supplier rates (Tau's cost, never customer-visible)",
+    attributes: z.object({
+      'gen_ai.request.model': z.string(),
+      'gen_ai.provider.name': z.string(),
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+    }),
+  }),
+
+  billingSupplierUnpricedOperations: defineGauge({
+    name: 'tau.billing.supplier_unpriced_operations',
+    unit: '{operation}',
+    description:
+      'Terminal funded operations with no supplier cost estimate, by provider, sku and reason, after each hourly reconciliation',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'gen_ai.provider.name': z.string(),
+      'tau.billing.sku': z.string(),
+      'tau.billing.unpriced.reason': z.enum(['missing_rate', 'dimension_mismatch', 'absorbed']),
+    }),
+  }),
+
   billingProviderAccountRefusals: defineCounter({
     name: 'tau.billing.provider_account.refusals',
     unit: '{refusal}',
@@ -582,7 +607,7 @@ export const TauMetrics = {
         'genuine_saturation',
         'recovery_in_progress',
         'recovery_failed',
-        'supplier_route_paused',
+        'operator_route_paused',
       ]),
     }),
   }),

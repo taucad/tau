@@ -81,15 +81,6 @@ const requestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('recover-closure'), environment, accountId: id, closureId: id }).strict(),
   z.object({ operation: z.literal('monitor-tax'), environment, asOf: date }).strict(),
   z
-    .object({
-      operation: z.literal('sweep-supplier'),
-      environment,
-      pageSize: limit,
-      /** Milliseconds. */
-      unresolvedMaximumAge: z.number().int().min(0).max(2_592_000_000),
-    })
-    .strict(),
-  z
     .object({ operation: z.literal('reconcile-supplier-invoice'), environment, invoice: operatorSupplierInvoiceSchema })
     .strict(),
   z
@@ -197,9 +188,6 @@ export async function runBillingLifecycleCommand(input: {
     }
     case 'run-cash-scan': {
       return reconciliation.runScan(request);
-    }
-    case 'sweep-supplier': {
-      return supplier.sweepSupplierUsage(request);
     }
     case 'reconcile-supplier-invoice': {
       return supplier.reconcileInvoiceTotal(request.invoice);

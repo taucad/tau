@@ -269,6 +269,40 @@
         "service": "tau-api",
         "component": "billing"
       }
+    },
+    {
+      "uid": "billing-account-spend-blocked",
+      "title": "P0: Customer Chat Blocked by a Financial Case",
+      "condition": "account_spend_blocked",
+      "data": [
+        {
+          "refId": "account_spend_blocked",
+          "queryType": "",
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "max by (app, kind) (tau_billing_open_financial_cases{service_name=\"tau-api\",kind=~\"dispute_unresolved|orphan_local_receipt|invalid_grant_cause|entitlement_source_disagreement|journal_.+\"}) > 0",
+            "intervalMs": 15000,
+            "maxDataPoints": 20,
+            "refId": "account_spend_blocked"
+          }
+        }
+      ],
+      "noDataState": "OK",
+      "execErrState": "OK",
+      "for": "1h",
+      "annotations": {
+        "runbook_url": "docs/handbooks/cloud/playbooks/ledger-drift.md",
+        "summary": "A spend-blocking financial case (dispute, unbacked credit or journal drift; charter D11) has been open for more than 1 h. Every named account gets 403 BILLING_ACCOUNT_RESTRICTED on every model until an operator resolves it. Owed-money and fee kinds never block and are not in this rule. Grouped by Fly `app` and case kind."
+      },
+      "labels": {
+        "severity": "critical",
+        "service": "tau-api",
+        "component": "billing"
+      }
     }
   ]
 }

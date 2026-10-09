@@ -4,6 +4,7 @@ import type {
   BillableProviderWire,
 } from '#api/billing/billable-model-invocation.types.js';
 import type { NormalizedMeterItem, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
+import { providerFailureOf } from '#api/llm/provider-account-stream.js';
 
 type Usage = {
   input?: bigint;
@@ -202,6 +203,7 @@ export const createBillableModelEvidenceCollector = (
       }
     }
     const terminalEvent = events.some((event) => isTerminalEvent(wire, event));
+    const failureFrame = events.map((event) => providerFailureOf(event)).find((found) => found !== undefined);
     const terminal =
       wire === 'openai-completions'
         ? (terminalEvent && /(?:^|\r?\n)data:\s*\[DONE\](?:\r?\n|$)/u.test(new TextDecoder().decode(joined))) ||
@@ -282,6 +284,23 @@ export const createBillableModelEvidenceCollector = (
         kind: 'provider_rejected',
         executionStatus: 'rejected',
         normalizationEvidence: { version: 'provider-usage-v1', terminalReason: failure, fields: {} },
+      };
+    }
+    /* A supplier that failed its own stream before reporting any usage ran nothing it can bill,
+     * the same proof a pre-stream refusal gives, so the turn settles released at zero now instead
+     * of holding the customer's credits until the recovery deadline: on staging (2026-10-09, FD-12)
+     * a GPT-6 Luna `response.failed` on Tau's exhausted account kept a 717-atom hold and a
+     * "Running" row open for 300 s. Usage reported before the failure keeps the unknown path, since
+     * the supplier may charge for what it generated. */
+    if (failure === undefined && latest === undefined && failureFrame !== undefined) {
+      return {
+        kind: 'provider_rejected',
+        executionStatus: 'rejected',
+        normalizationEvidence: {
+          version: 'provider-usage-v1',
+          terminalReason: 'provider_failed',
+          fields: failureFrame.code === undefined ? {} : { providerCode: failureFrame.code },
+        },
       };
     }
     /* A cut at the authorized ceiling is the designed outcome of an in-stream control (R8),

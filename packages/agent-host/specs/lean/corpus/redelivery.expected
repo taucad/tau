@@ -8959,7 +8959,7 @@ rR 2 failed:f t 1 settled 0 0 1@1:0 - - resume
 rR 1 - t 1 unadmitted 0 0 1@0:3 - - admit
 rC 3 terminal 3:failed
 rP 14 0:4 2 1
-rN order@0:1,order@0:2,conflict@1:1,conflict@1:2,conflict@1:3,order@1:6,conflict@1:6,conflict@1:7,conflict@1:8,conflict@0:4
+rN order@0:1,order@0:2,conflict@1:1,conflict@1:2,conflict@1:3,order@1:6,conflict@1:6,conflict@1:7,conflict@1:8,order@0:4,conflict@0:4
 rU -
 X
 T log-108

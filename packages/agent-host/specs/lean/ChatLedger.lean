@@ -415,6 +415,8 @@ inductive AnomalyKind where
 
 /-- `ChatLedger`. `terms` maps a term to `(epoch, lastSequence)`. -/
 structure Ledger where
+  /-- Last nonduplicate semantic term; independent of the physical read boundary. -/
+  semanticTerm : Option Nat := none
   cursor : Nat := 0
   last : Option Key := none
   terms : List (Nat × (Nat × Nat)) := []
@@ -561,7 +563,7 @@ def Ledger.known (L : Ledger) (e : Row) : Ledger :=
 def Ledger.book (L0 : Ledger) (e : Row) (broken : Bool) (ep : Nat) : Ledger :=
   let L1 := if broken then L0.note .order e.key else L0
   { L1 with terms := upsert e.term (ep, e.seq) L1.terms, maxEpoch := max L1.maxEpoch e.epoch,
-            cursor := L1.cursor + 1, last := some e.key }
+            cursor := L1.cursor + 1, last := some e.key, semanticTerm := some e.term }
 
 /-- An opaque row: its run is unreadable, and an opaque history row breaks the history. -/
 def Ledger.markOpaque (L : Ledger) (e : Row) : Ledger :=
@@ -578,7 +580,7 @@ def Ledger.step (L : Ledger) (e : Row) : Option Ledger :=
   match lookup e.term L.terms with
   | some (ep, ls) =>
     if e.seq ≤ ls then none
-    else some (L.advance e (L.last.map Prod.fst ≠ some e.term ∨ e.seq ≠ ls + 1 ∨ e.epoch ≠ ep) ep)
+    else some (L.advance e (L.semanticTerm ≠ some e.term ∨ e.seq ≠ ls + 1 ∨ e.epoch ≠ ep) ep)
   | none => some (L.advance e (e.seq ≠ 0 ∨ claims L.maxEpoch e.epoch = false) e.epoch)
 
 def Ledger.stepD (L : Ledger) (e : Row) : Ledger := (L.step e).getD L

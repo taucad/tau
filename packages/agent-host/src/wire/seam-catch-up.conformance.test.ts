@@ -379,6 +379,60 @@ describe('SeamCatchUp compact fact conformance', () => {
 });
 
 describe('SeamCatchUp physical duplicate row conformance', () => {
+  it.each([1, 16])('keeps semantic term order across captured physical pages of %s rows', async (limit) => {
+    const row = (leaderEpoch: string, sequence: number, epoch: number) => ({
+      version: 1,
+      leaderEpoch,
+      sequence,
+      epoch,
+      recordedAt: 'now',
+      runId: 'r',
+      type: 'snapshot-context.refreshed',
+      messageId: 'm',
+      content: [],
+      ...(sequence === 1 ? { commandId: 'after-duplicate' } : {}),
+    });
+    const events = [row('first', 0, 1), row('second', 0, 2), row('first', 0, 1), row('first', 1, 1)];
+    const { launcher } = await healthFixture(events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+    let compact = emptyChatLedger;
+    const frames: CatchUpFrame[] = [];
+    for await (const frame of launcher.catchUp({ chatId: 'health', limit, maxBytes: 16_384 })) {
+      frames.push(frame);
+      if (frame.type === 'page') {
+        const result = foldProjectionFacts({ ledger: compact, answer: frame.answer });
+        if (result.kind !== 'folded') {
+          throw new Error('Expected captured compact fold');
+        }
+        compact = result.ledger;
+      }
+    }
+    expect(frames.at(-1)).toMatchObject({
+      type: 'validated',
+      position: { cursor: 4, last: { leaderEpoch: 'first', sequence: 1 } },
+    });
+    expect(compact.position).toMatchObject({ cursor: 4, last: { leaderEpoch: 'first', sequence: 1 } });
+    expect(compact.applied['after-duplicate']?.cursor).toBe(3);
+    expect(compact.anomalies).toContainEqual({ kind: 'order', row: { leaderEpoch: 'first', sequence: 1 } });
+    let raw = emptyChatLedger;
+    while (raw.position.cursor < events.length) {
+      // oxlint-disable-next-line no-await-in-loop -- each page uses the preceding physical boundary.
+      const answer = await launcher.read({
+        chatId: 'health',
+        cursor: raw.position.cursor,
+        limit,
+        maxBytes: 16_384,
+        sourceGeneration: raw.position.sourceGeneration,
+      });
+      const result = foldReadAnswer(raw, answer);
+      if (result.kind !== 'folded') {
+        throw new Error('Expected captured raw fold');
+      }
+      raw = result.ledger;
+    }
+    expect(raw.anomalies).toEqual(compact.anomalies);
+    expect(raw.applied).toEqual(compact.applied);
+  });
+
   it.each([
     { kind: 'known', limit: 1 },
     { kind: 'known', limit: 16 },

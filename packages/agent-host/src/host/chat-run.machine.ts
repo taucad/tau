@@ -908,6 +908,7 @@ export const chatRunMachine = setup({
     leaderEpoch: input.leaderEpoch,
     placement: input.placement,
     ledger: {
+      semanticLeaderEpoch: undefined,
       position: { cursor: 0 },
       terms: {},
       maxEpoch: 0,

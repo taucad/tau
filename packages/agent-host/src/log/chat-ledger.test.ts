@@ -92,6 +92,63 @@ describe('foldReadAnswer', () => {
   const rows = term([life('admitted'), life('running'), life('completed')]);
   const read = foldChatLedger(emptyChatLedger, rows);
 
+  it('keeps semantic ordering across a duplicate while advancing physical command positions', () => {
+    const first = term(
+      [
+        { type: 'snapshot-context.refreshed', messageId: 'm', content: [] },
+        { type: 'snapshot-context.refreshed', messageId: 'm', content: [], commandId: 'after-duplicate' },
+      ],
+      'first',
+      1,
+    );
+    const second = term([{ type: 'snapshot-context.refreshed', messageId: 'm', content: [] }], 'second', 2);
+    const physical = [first[0]!, second[0]!, first[0]!, first[1]!];
+
+    const folded = foldReadAnswer(emptyChatLedger, batch(0, physical));
+
+    expect(folded.kind).toBe('folded');
+    if (folded.kind !== 'folded') {
+      throw new Error('Expected an aligned physical batch');
+    }
+    expect(folded.ledger.anomalies).toEqual(foldChatLedger(emptyChatLedger, physical).anomalies);
+    expect(folded.ledger.anomalies).toContainEqual({ kind: 'order', row: { leaderEpoch: 'first', sequence: 1 } });
+    expect(folded.ledger.position).toEqual({ cursor: 4, last: { leaderEpoch: 'first', sequence: 1 } });
+    expect(folded.ledger.applied['after-duplicate']?.cursor).toBe(3);
+
+    const endingAtDuplicate = foldReadAnswer(emptyChatLedger, batch(0, physical.slice(0, 3)));
+    expect(endingAtDuplicate).toMatchObject({
+      kind: 'folded',
+      ledger: { position: { cursor: 3, last: { leaderEpoch: 'first', sequence: 0 } } },
+    });
+  });
+
+  it('keeps a closed semantic term closed when a duplicate ends the previous physical page', () => {
+    const first = term(
+      [
+        { type: 'snapshot-context.refreshed', messageId: 'm', content: [] },
+        { type: 'snapshot-context.refreshed', messageId: 'm', content: [], commandId: 'after-duplicate' },
+      ],
+      'first',
+      1,
+    );
+    const second = term([{ type: 'snapshot-context.refreshed', messageId: 'm', content: [] }], 'second', 2);
+    const prefix = foldReadAnswer(emptyChatLedger, batch(0, [first[0]!, second[0]!, first[0]!], 4));
+    if (prefix.kind !== 'folded') {
+      throw new Error('Expected an aligned prefix');
+    }
+    expect(prefix.ledger.position).toEqual({ cursor: 3, last: { leaderEpoch: 'first', sequence: 0 } });
+
+    const suffix = foldReadAnswer(prefix.ledger, batch(3, [first[1]!]));
+    expect(suffix).toMatchObject({
+      kind: 'folded',
+      ledger: {
+        position: { cursor: 4, last: { leaderEpoch: 'first', sequence: 1 } },
+        anomalies: [{ kind: 'order', row: { leaderEpoch: 'first', sequence: 1 } }],
+        applied: { 'after-duplicate': { cursor: 3 } },
+      },
+    });
+  });
+
   // CL-A4, T5
   it('should report a clamped read from a v1 server', () => {
     // A v1 server whose log holds one row answers a cursor of 3 at its end: 1, not 3.

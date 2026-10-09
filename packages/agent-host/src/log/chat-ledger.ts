@@ -117,6 +117,8 @@ export type LedgerAnomaly = Readonly<{ kind: 'opaque' | 'quarantined' | 'order' 
 
 /** @public */
 export type ChatLedger = Readonly<{
+  /** Last nonduplicate semantic term; physical duplicate boundaries do not change it. */
+  semanticLeaderEpoch: string | undefined;
   position: LedgerPosition;
   /** Per term (by `leaderEpoch`): its integer epoch, if it has one, and its last folded sequence. */
   terms: Readonly<Record<string, Readonly<{ epoch?: number; lastSequence: number }>>>;
@@ -144,6 +146,7 @@ export type ChatLedger = Readonly<{
 
 /** A frozen value, not a factory: the ledger is immutable. @public */
 export const emptyChatLedger: ChatLedger = Object.freeze({
+  semanticLeaderEpoch: undefined,
   position: Object.freeze({ cursor: 0 }),
   terms: Object.freeze({}),
   maxEpoch: 0,
@@ -559,7 +562,7 @@ const createFold = (ledger: ChatLedger) => {
     const opensTerm = term === undefined;
     const broken = opensTerm
       ? event.sequence !== 0 || (event.epoch === undefined ? draft.maxEpoch > 0 : epoch <= draft.maxEpoch)
-      : draft.position.last?.leaderEpoch !== event.leaderEpoch ||
+      : draft.semanticLeaderEpoch !== event.leaderEpoch ||
         event.sequence !== term.lastSequence + 1 ||
         epoch !== (term.epoch ?? 0);
     if (broken) {
@@ -575,6 +578,7 @@ const createFold = (ledger: ChatLedger) => {
           : { epoch: term.epoch }),
       lastSequence: event.sequence,
     };
+    draft.semanticLeaderEpoch = event.leaderEpoch;
     draft.maxEpoch = Math.max(draft.maxEpoch, epoch);
     const { cursor } = draft.position;
     draft.position = { cursor: cursor + 1, last: key };

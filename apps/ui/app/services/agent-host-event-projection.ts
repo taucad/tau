@@ -941,6 +941,12 @@ export type AgentHostApprovalContext = {
   readonly parameters?: Readonly<Record<string, unknown>> | undefined;
   /** For a machine action: the action version of that intent, which the host's approval record names (R15). */
   readonly version?: number | undefined;
+  /**
+   * For a machine action: the run the agent saw when it asked, `null` for none. The person approves the action for
+   * this run only (R16).
+   */
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the agent's statement that it saw no run.
+  readonly expectedRunId?: string | null | undefined;
 };
 
 /** One sign-in method an external agent offered. @public */
@@ -992,7 +998,11 @@ const interruptRequestSchema = z.looseObject({
       operationId: z.string().min(1).optional(),
       label: z.string().min(1).optional(),
       intent: z
-        .looseObject({ parameters: z.record(z.string(), z.unknown()).optional(), version: z.number().int().optional() })
+        .looseObject({
+          parameters: z.record(z.string(), z.unknown()).optional(),
+          version: z.number().int().optional(),
+          expectedRunId: z.string().min(1).nullable().optional(),
+        })
         .optional(),
     })
     .optional(),
@@ -1008,6 +1018,7 @@ const agentHostApprovalContextSchema = z.object({
   label: z.string().min(1).optional(),
   parameters: z.record(z.string(), z.unknown()).optional(),
   version: z.number().int().optional(),
+  expectedRunId: z.string().min(1).nullable().optional(),
 });
 
 /**
@@ -1024,6 +1035,8 @@ const approvalContextOf = (
           | {
               readonly parameters?: Readonly<Record<string, unknown>> | undefined;
               readonly version?: number | undefined;
+              // oxlint-disable-next-line typescript/no-restricted-types -- null is the agent's statement that it saw no run.
+              readonly expectedRunId?: string | null | undefined;
             }
           | undefined;
       })
@@ -1045,6 +1058,7 @@ const approvalContextOf = (
       label: context.label,
       parameters: context.intent?.parameters,
       version: context.intent?.version,
+      expectedRunId: context.intent?.expectedRunId,
     }).filter(([, value]) => value !== undefined),
   );
   return Object.keys(picked).length === 0 ? undefined : picked;

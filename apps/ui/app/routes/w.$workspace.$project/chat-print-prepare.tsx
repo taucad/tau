@@ -1,5 +1,4 @@
 import type { MachineSettingsProvenance } from '@taucad/runtime/machine/settings';
-import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
 import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
@@ -38,7 +37,7 @@ import type { BambuTray } from '#components/print/bambu-studio-presets.js';
 import { FilamentSlots } from '#components/print/filament-slots.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { SearchInput } from '#components/search-input.js';
-import { useBambuStudio } from '#components/print/use-bambu-studio.js';
+import { bambuPreferencesOf, rememberBambuSubmission, useBambuStudio } from '#components/print/use-bambu-studio.js';
 import type { BambuQualityPreset, BambuStudioChosen, BambuStudioMode } from '#components/print/use-bambu-studio.js';
 import { useMachineSettings } from '#components/print/use-machine-settings.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
@@ -523,7 +522,7 @@ export const usePrintPrepare = ({
     };
   }, [provider]);
 
-  const machineSettings = useMachineSettings(manifest);
+  const machineSettings = useMachineSettings(provider);
   const { intent, update: updateIntent } = machineSettings;
   /* Reference options no print intent may hold (the machine's nozzle, bed and plate, the engine) stay on screen. */
   const [screenOptions, setScreenOptions] = useState<Record<string, unknown>>({});
@@ -568,7 +567,7 @@ export const usePrintPrepare = ({
     slice !== undefined && slice.rendering === rendering ? slice.summary.filamentColors : modelColors;
   const preferenceKey = `${machineSettings.typeId ?? ''}:${machineSettings.record?.activeProfile ?? 'default'}:${entry?.machineId ?? ''}`;
   const submission = useMemo<Record<string, unknown>>(() => {
-    const preferences = machineSettings.machine;
+    const preferences = bambuPreferencesOf(provider, machineSettings.machine);
     const { material, plate: _plate, ...flags } = preferences ?? {};
     const fallback =
       entry && provider ? mappingOf(submissionDefaults(provider, entry, { manifest, filamentColors })) : [];
@@ -611,43 +610,13 @@ export const usePrintPrepare = ({
           ),
         ),
       });
+      /* Only Bambu's settings remember the choices; another provider's form keeps what it declares. */
       machineSettings.updateMachine((prior) => {
-        const { material: _material, bedLeveling: _bed, flowCalibration: _flow, timelapse: _time, ...rest } = prior;
-        const flags = Object.fromEntries(
-          ['bedLeveling', 'flowCalibration', 'timelapse'].flatMap((key) =>
-            typeof next[key] === 'boolean' ? [[key, next[key]]] : [],
-          ),
-        );
-        const mapping = Array.isArray(next['amsMapping'])
-          ? next['amsMapping'].map((slot): number | undefined =>
-              typeof slot === 'number' && slot >= 0 ? slot : undefined,
-            )
-          : [];
-        const material = mapping.every((slot) => slot === undefined)
-          ? undefined
-          : filamentColors.length > 1
-            ? {
-                ...prior.material,
-                slotsByColor: {
-                  ...prior.material?.slotsByColor,
-                  ...Object.fromEntries(
-                    filamentColors.flatMap((color, index) =>
-                      mapping[index] === undefined ? [] : [[color.toLowerCase(), mapping[index]]],
-                    ),
-                  ),
-                },
-              }
-            : { ...prior.material, defaultSlot: mapping[0] };
-        const plate = typeof next['expectedBedType'] === 'string' ? next['expectedBedType'] : prior.plate;
-        return bambuSettingsConfiguration.schema.parse({
-          ...rest,
-          ...flags,
-          ...(plate ? { plate } : {}),
-          ...(material ? { material } : {}),
-        });
+        const bambu = bambuPreferencesOf(provider, prior);
+        return bambu === undefined ? prior : rememberBambuSubmission(bambu, next, filamentColors);
       });
     },
-    [machineSettings.updateMachine, preferenceKey, filamentColors],
+    [machineSettings.updateMachine, preferenceKey, filamentColors, provider],
   );
 
   const effectiveSubmission = useMemo(() => {
@@ -2135,8 +2104,8 @@ export function PrepareStages({
       // The plate picked here replaces one set under Advanced, which would otherwise keep winning.
       const { expectedBedType: _advanced, ...rest } = submission;
       setSubmission(rest);
-      // SAFETY: plate ids are the manifest's; the serializer refuses one Bambu Studio does not name.
-      updateIntent((current) => ({ ...current, plate: value as PrintPreferences['plate'] }));
+      /* Plate ids are the manifest's; the provider's settings form validates the one saved. */
+      updateIntent((current) => ({ ...current, plate: value }));
     },
     [setSubmission, submission, updateIntent],
   );

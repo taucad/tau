@@ -43,6 +43,7 @@ import {
   usePrintPrepare,
 } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import type { PrepareActionFacts } from '#routes/w.$workspace.$project/chat-print-prepare.js';
+import { ProgramStage } from '#routes/w.$workspace.$project/chat-print-program.js';
 import { PrintNotice, PrintStages, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
 import { ActionApprovals, JobsSection } from '#routes/w.$workspace.$project/chat-print-send.js';
 import { formatAge } from '#routes/w.$workspace.$project/chat-print-summary.js';
@@ -439,7 +440,7 @@ function ConnectedPrintPanel({
     [directory.snapshot],
   );
   const { selected, select } = useMachinesSelection(projectId, entries);
-  const { jobs, error: jobsError } = useMachinesJobs(client, selected?.machineId);
+  const { jobs, error: jobsError, isStalled: isJobWatchStalled } = useMachinesJobs(client, selected?.machineId);
   const openJob = jobs.find((job) => isOpenJob(job));
   const provider = directory.providers.find(({ id }) => id === selected?.providerId);
   const header = (stop: React.ReactNode): React.JSX.Element => (
@@ -475,6 +476,7 @@ function ConnectedPrintPanel({
           entry={selected}
           provider={provider}
           jobs={jobs}
+          isJobWatchStalled={isJobWatchStalled}
           openJob={openJob}
           header={header}
           errors={[directory.error, jobsError]}
@@ -513,6 +515,7 @@ function MachinePanel({
   entry,
   provider,
   jobs,
+  isJobWatchStalled,
   openJob,
   header,
   errors,
@@ -523,6 +526,8 @@ function MachinePanel({
   readonly entry: MachineDirectoryEntry;
   readonly provider: ReturnType<typeof useMachineDirectory>['providers'][number] | undefined;
   readonly jobs: readonly MachineJob[];
+  /** The jobs watch keeps ending without news. */
+  readonly isJobWatchStalled: boolean;
   readonly openJob: MachineJob | undefined;
   readonly header: (stop: React.ReactNode) => React.JSX.Element;
   readonly errors: ReadonlyArray<string | undefined>;
@@ -569,13 +574,12 @@ function MachinePanel({
         )}
         <ActionApprovals client={client} control={control} bridge={bridge} />
         <PresenceRow control={control} presence={presence} />
-        <JobsSection client={client} control={control} jobs={jobs} bridge={bridge} />
-        {isFff || entry.descriptor.capabilities.jobs.type === 'unsupported' ? null : (
-          /* ponytail: choosing a program file here waits for a program picker; the agent and the machine send one. */
+        {isJobWatchStalled ? (
           <PrintNotice tone='neutral' role='status'>
-            Send a program to {entry.name} from the agent or at the machine.
+            Job updates from {entry.name} stopped. Tau keeps retrying; the jobs shown here may be out of date.
           </PrintNotice>
-        )}
+        ) : null}
+        <JobsSection client={client} control={control} jobs={jobs} bridge={bridge} />
         <Activities control={control} />
         <RunBlock control={control} jobs={jobs} />
         <PrintStages>
@@ -590,7 +594,10 @@ function MachinePanel({
               control={control}
               deferred={prepareDeferred}
             />
-          ) : null}
+          ) : (
+            /* A machine Tau does not slice for runs a program file from the project, through the same job. */
+            <ProgramStage client={client} control={control} isDefaultOpen={prepareDeferred === undefined} />
+          )}
           <PressureAdvanceStage control={control} />
           <HistoryStage entry={entry} jobs={jobs} />
           <InspectStage

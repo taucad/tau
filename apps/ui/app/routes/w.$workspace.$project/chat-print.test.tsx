@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import axe from 'axe-core';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import type { BoundFunctions, queries } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
@@ -19,11 +19,15 @@ import { ToolpathParseError, parseGcode } from '@taucad/slicer/toolpath';
 import type * as Toolpath from '@taucad/slicer/toolpath';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { projectFiles } from '#components/print/testing/project-files.js';
+import { bambuPreferencesOf } from '#components/print/use-bambu-studio.js';
+import { pendingMachineActionOf } from '#components/print/machine-action-approval.js';
+import { useMachineSettings } from '#components/print/use-machine-settings.js';
 import {
   bambuContainer,
   fffSlots,
   machineEntry,
   machineSnapshot,
+  carveraManifest,
   millingComponents,
   routerManifest,
   x1cManifest,
@@ -1871,6 +1875,7 @@ describe('Print pane monitor and controls', () => {
         label: 'Load',
         parameters: {},
         version: 1,
+        expectedRunId: null,
         prompt: approval.prompt,
       },
     ]);
@@ -1902,6 +1907,7 @@ describe('Print pane monitor and controls', () => {
         label: 'Chamber light',
         parameters: { on: true },
         version: 1,
+        expectedRunId: 'provider-run-1',
         prompt: approval.prompt,
       },
     ]);
@@ -1918,8 +1924,15 @@ describe('Print pane monitor and controls', () => {
     expect(fixture.approveAction).toHaveBeenCalledExactlyOnceWith({
       machineId: 'machine-1',
       operationId: 'op-9',
-      intent: { componentId: 'chamber-light', action: 'switch.set', version: 1, parameters: { on: true } },
+      intent: {
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        version: 1,
+        expectedRunId: 'provider-run-1',
+        parameters: { on: true },
+      },
       decision: 'approve',
+      approvedBy: { kind: 'user', id: 'operator', label: 'You' },
     });
     expect(fixture.approveAction.mock.invocationCallOrder[0]).toBeLessThan(respond.mock.invocationCallOrder[0]!);
     // The paused tool sends the action; the pane never applies the agent's intent itself.
@@ -1946,6 +1959,7 @@ describe('Print pane monitor and controls', () => {
         label: 'Chamber light',
         parameters: { on: true },
         version: 1,
+        expectedRunId: null,
         prompt: approval.prompt,
       },
     ]);
@@ -1996,6 +2010,7 @@ describe('Print pane monitor and controls', () => {
         label: 'Chamber light',
         parameters: { on: false },
         version: 1,
+        expectedRunId: null,
         prompt: approval.prompt,
       },
     ]);
@@ -3314,13 +3329,6 @@ describe('Print pane presence, Stop and jobs across machines', () => {
     expect(within(region).queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
   });
 
-  it('says where a program comes from on a machine Prepare does not slice for', async () => {
-    renderPane(createFixture({ entries: [router()] }).client);
-    await findMachine('Ready', 'Garage LongMill');
-    expect(screen.getByText('Send a program to Garage LongMill from the agent or at the machine.')).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Prepare' })).not.toBeInTheDocument();
-  });
-
   it('reads a run the machine stopped reporting as not reported, and says Tau did not stop it', async () => {
     const run = printing();
     renderPane(
@@ -3368,5 +3376,280 @@ describe('Print pane without printers', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Set up a machine' }));
 
     expect(screen.getByRole('status', { name: 'location' })).toHaveTextContent('?settings=machines');
+  });
+});
+
+/** The Carvera, idle with its cover shut: it stores the program and starts it from Tau. */
+const carvera = (): ReturnType<typeof entry> =>
+  machineEntry({
+    manifest: carveraManifest,
+    name: 'Desk Carvera',
+    providerId: 'carvera-simulator',
+    snapshot: machineSnapshot(millingComponents(carveraManifest)),
+  });
+
+/** The Program stage, opened. */
+const programRegion = (): HTMLElement => screen.getByRole('region', { name: 'Program' });
+
+/** Choose one of the files the Program stage lists. */
+const chooseProgram = async (user: ReturnType<typeof userEvent.setup>, path: string): Promise<void> => {
+  await user.click(await within(programRegion()).findByRole('combobox', { name: 'Program' }));
+  await user.click(screen.getByRole('option', { name: path }));
+};
+
+describe('Print pane program files', () => {
+  beforeEach(() => {
+    for (const [path, text] of [
+      ['jobs/face.nc', 'G21\nG0 X0 Y0\n'],
+      ['jobs/pocket.gcode', 'G21\nG1 X10 F600\n'],
+      ['notes.txt', 'Clamp on the left.\n'],
+      ['part.step', 'ISO-10303-21;\n'],
+    ] as const) {
+      projectFiles.write(path, text);
+    }
+  });
+
+  it.each([
+    { machine: router, name: 'Garage LongMill', isStreamed: true },
+    { machine: carvera, name: 'Desk Carvera', isStreamed: false },
+  ])(
+    'lists only the files $name accepts, and says when Tau feeds the whole run',
+    async ({ machine, name, isStreamed }) => {
+      const user = userEvent.setup();
+      renderPane(createFixture({ entries: [machine()] }).client);
+      await findMachine('Ready', name);
+      const program = await within(programRegion()).findByRole('combobox', { name: 'Program' });
+      await user.click(program);
+      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+        'jobs/face.nc',
+        'jobs/pocket.gcode',
+      ]);
+      await user.keyboard('{Escape}');
+      expect(
+        within(programRegion()).queryByText('Keep this computer awake: Tau feeds the program for the whole run.') !==
+          null,
+      ).toBe(isStreamed);
+      expect(screen.queryByText(/from the agent or at the machine/u)).not.toBeInTheDocument();
+    },
+  );
+
+  it('checks the chosen file with the machine and shows a blocked check with its remedy', async () => {
+    const fixture = createFixture({ entries: [router()] });
+    fixture.checkJob.mockResolvedValue({
+      status: 'blocked',
+      program: {
+        name: 'pocket.gcode',
+        facts: { process: 'milling', lines: 2, extents: {}, tools: [], workOffsets: [], uses: [] },
+      },
+      checks: [
+        {
+          id: 'homed',
+          label: 'The machine is homed',
+          state: 'blocked',
+          source: 'observed',
+          detail: 'Home before running a program.',
+          remedy: { type: 'action', componentId: 'motion', action: 'motion.home' },
+        },
+      ],
+      configuration: { startLine: 1 },
+    });
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await findMachine('Ready', 'Garage LongMill');
+    await chooseProgram(user, 'jobs/pocket.gcode');
+
+    const region = programRegion();
+    expect(await within(region).findByText('The machine is homed: Home before running a program.')).toBeInTheDocument();
+    expect(within(region).getByRole('list', { name: 'Checks' })).toHaveTextContent('The machine is homed');
+    expect(within(region).getByRole('button', { name: /^Home/u })).toBeInTheDocument();
+    expect(within(region).getByRole('button', { name: 'Review job' })).toBeDisabled();
+    const [checked] = fixture.checkJob.mock.lastCall ?? [];
+    expect(checked).toMatchObject({ machineId: 'machine-1', configuration: {} });
+    expect(checked?.artifact).toMatchObject({
+      projectId,
+      path: 'jobs/pocket.gcode',
+      mediaType: 'text/x-gcode',
+      selectedMember: 'jobs/pocket.gcode',
+    });
+    expect(checked?.artifact.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(fixture.requestJob).not.toHaveBeenCalled();
+  });
+
+  it('asks for the job with the form the machine completed, then starts it at the machine with every attestation', async () => {
+    const fixture = createFixture({ entries: [router()] });
+    fixture.checkJob.mockResolvedValue({
+      status: 'ready',
+      program: {
+        name: 'face.nc',
+        facts: { process: 'milling', lines: 2, extents: {}, tools: [], workOffsets: [], uses: [] },
+      },
+      checks: [],
+      configuration: { startLine: 1 },
+    });
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await findMachine('Ready', 'Garage LongMill');
+    const review = within(programRegion()).getByRole('button', { name: 'Review job' });
+    await waitFor(() => {
+      expect(review).toBeEnabled();
+    });
+    expect(within(programRegion()).getByText('2 lines')).toBeInTheDocument();
+    await user.click(review);
+    await waitFor(() => {
+      expect(fixture.requestJob).toHaveBeenCalledOnce();
+    });
+    const [requested] = fixture.requestJob.mock.calls[0] ?? [];
+    expect(requested).toMatchObject({
+      machineId: 'machine-1',
+      configuration: { startLine: 1 },
+      requestedBy: { kind: 'user' },
+      program: { name: 'face.nc' },
+      artifact: { path: 'jobs/face.nc', selectedMember: 'jobs/face.nc' },
+    });
+
+    const card = await screen.findByRole('region', { name: 'Job awaiting you: face.nc' });
+    const start = within(card).getByRole('button', { name: 'Send, then press Play' });
+    expect(start).toBeDisabled();
+    for (const checkbox of within(card).getAllByRole('checkbox')) {
+      // oxlint-disable-next-line no-await-in-loop -- the person ticks each statement in turn.
+      await user.click(checkbox);
+    }
+    expect(start).toBeDisabled();
+    await user.click(screen.getByRole('switch', { name: 'I am at the machine' }));
+    expect(start).toBeEnabled();
+    await user.click(start);
+    await waitFor(() => {
+      expect(fixture.resolveJob).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          decision: 'approve',
+          attended: true,
+          attestations: ['stock-clamped', 'bit-installed', 'router-on', 'work-area-clear'],
+        }),
+      );
+    });
+
+    fixture.journal(
+      agentJob({
+        jobId: requested?.jobId,
+        requestedBy: requested?.requestedBy,
+        program: { name: 'face.nc', facts: { process: 'other' } },
+        state: 'awaiting-start',
+        updatedAt: '2026-09-24T02:00:10.000Z',
+      }),
+    );
+    expect(await screen.findByText('Press start on Garage LongMill to begin face.nc')).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'Job' })).getByText(/Keep this computer awake: Tau feeds the program/u),
+    ).toBeInTheDocument();
+  });
+
+  it('says when the project has no file the machine runs', async () => {
+    projectFiles.clear();
+    renderPane(createFixture({ entries: [carvera()] }).client);
+    await findMachine('Ready', 'Desk Carvera');
+    expect(
+      await within(programRegion()).findByText(
+        'No program files in this project. Desk Carvera runs .gcode, .nc, .ngc, .tap, .cnc, .gc files.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(programRegion()).getByRole('button', { name: 'Review job' })).toBeDisabled();
+  });
+});
+
+describe('Print pane jobs watch', () => {
+  it('says once, quietly, when job updates keep stopping', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const fixture = createFixture();
+      const ended = async function* (): AsyncGenerator<never> {
+        yield* [];
+      };
+      renderPane({ ...fixture.client, watchJobs: () => ended() });
+      await findMachine('Ready');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(
+        screen
+          .getAllByRole('status')
+          .filter((status) => status.textContent.includes('Job updates from Workshop X1C stopped')),
+      ).toHaveLength(1);
+      expect(screen.getByText(/Tau keeps retrying; the jobs shown here may be out of date\./u)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Print settings from the provider’s own form', () => {
+  it('reads a Bambu preferences file saved before the form came from the provider', async () => {
+    /* Written as an earlier Tau saved it: the Bambu block under its source id, beside the slicing preferences. */
+    projectFiles.write(
+      '.tau/machines/settings/bambu.x1c.json',
+      `${JSON.stringify({
+        version: 1,
+        typeId: 'bambu.x1c',
+        activeProfile: 'default',
+        profiles: {
+          default: {
+            name: 'Default',
+            configurations: {
+              'slicer.bambu-studio.settings': { version: '1.0.0', values: { preset: 'fine' } },
+              'bambu.machine.settings': {
+                version: '1.0.0',
+                values: {
+                  plate: 'engineering',
+                  timelapse: true,
+                  material: { defaultSlot: 1, slotsByColor: { '#ff0000': 254 } },
+                },
+              },
+            },
+          },
+        },
+      })}\n`,
+    );
+    const { result } = renderHook(() => useMachineSettings(provider));
+    await waitFor(() => {
+      expect(result.current.file.status).toBe('current');
+    });
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.intent).toEqual({ preset: 'fine', plate: 'engineering' });
+    expect(bambuPreferencesOf(provider, result.current.machine)).toEqual({
+      plate: 'engineering',
+      timelapse: true,
+      material: { defaultSlot: 1, slotsByColor: { '#ff0000': 254 } },
+    });
+  });
+
+  it('reads no Bambu preferences for a provider whose form is not Bambu’s', () => {
+    expect(bambuPreferencesOf({ ...provider, settingsConfiguration: undefined }, { plate: 'cool' })).toBeUndefined();
+  });
+});
+
+describe('Agent machine actions an interrupt names', () => {
+  it('reads one only when its intent says which run the agent saw, null for none', () => {
+    const approval = {
+      interruptId: 'interrupt-9',
+      kind: 'approval',
+      prompt: 'Chamber light ({"on":true}) on Workshop X1C?',
+      options: [],
+      messageId: 'assistant-1',
+      approvalId: 'interrupt-9',
+      context: {
+        machineId: 'machine-1',
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        operationId: 'op-12',
+        parameters: { on: true },
+        version: 1,
+      },
+    } as const;
+    expect(pendingMachineActionOf(approval)).toBeUndefined();
+    expect(
+      pendingMachineActionOf({ ...approval, context: { ...approval.context, expectedRunId: null } }),
+    ).toMatchObject({
+      operationId: 'op-12',
+      expectedRunId: null,
+    });
   });
 });

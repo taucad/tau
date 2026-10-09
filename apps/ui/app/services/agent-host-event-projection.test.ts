@@ -799,14 +799,37 @@ describe('projectAgentHostEvent', () => {
           action: 'level.set',
           operationId: 'operation-2',
           label: 'Set speed',
-          intent: { machineId: 'machine-1', version: 2, parameters: { ratio: 1.5 } },
+          intent: { machineId: 'machine-1', version: 2, expectedRunId: 'run-7', parameters: { ratio: 1.5 } },
         },
       },
     });
     expect(parseAgentHostApproval((part as { input: unknown }).input)?.context).toMatchObject({
       parameters: { ratio: 1.5 },
       version: 2,
+      expectedRunId: 'run-7',
     });
+  });
+
+  it('keeps an intent that saw no run as null, so the approval admits it only while no run is in progress', () => {
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'approval-light',
+      phase: 'requested',
+      reason: 'Chamber light on Workshop X1C',
+      payload: {
+        kind: 'approval',
+        prompt: 'Chamber light ({"on":true}) on Workshop X1C?',
+        context: {
+          machineId: 'machine-1',
+          componentId: 'chamber-light',
+          action: 'switch.set',
+          operationId: 'operation-3',
+          intent: { version: 1, expectedRunId: null, parameters: { on: true } },
+        },
+      },
+    });
+    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context).toHaveProperty('expectedRunId', null);
   });
 
   it('projects a login an external agent is waiting on as facts, not a decision', () => {

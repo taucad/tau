@@ -52,12 +52,18 @@ export const reduceJobs = (
 export type JobsView = Readonly<{
   jobs: readonly MachineJob[];
   error: string | undefined;
+  /** The watch keeps ending without news: what is shown may be out of date while Tau keeps resyncing. */
+  isStalled: boolean;
 }>;
 
 /** The first wait before following the ledger again after its watch ended. Milliseconds. */
 const firstResync = 500;
 /** The longest wait between resyncs. Milliseconds. */
 const longestResync = 30_000;
+/** This many watches ending without news within {@link stallWindow} say the updates stopped. */
+const stallEndings = 3;
+/** Milliseconds. */
+const stallWindow = 60_000;
 
 /**
  * Wait, unless the wait is aborted first.
@@ -84,7 +90,8 @@ const pause = async (milliseconds: number, signal: AbortSignal): Promise<void> =
  *
  * The list seeds the projection and every watched transition folds into it; the host's store stays the only
  * authority. A watch that ends (a host restart, a transport resync) means resync: list again, then watch again,
- * waiting longer each time one ends without news. Unmount aborts the watch.
+ * waiting longer each time one ends without news. Three such endings within a minute mark the view stalled until news
+ * arrives; the resyncs go on. Unmount aborts the watch.
  *
  * @param client - The negotiated machines facet, or nothing while none is available.
  * @param machineId - The machine whose jobs to read, or nothing while none is selected.
@@ -94,6 +101,8 @@ const pause = async (milliseconds: number, signal: AbortSignal): Promise<void> =
 export const useMachinesJobs = (client: MachineClient | undefined, machineId: string | undefined): JobsView => {
   const [records, setRecords] = useState<ReadonlyMap<string, MachineJob>>(new Map());
   const [error, setError] = useState<string>();
+  /* The machine whose watch stalled: another machine's view starts unstalled. */
+  const [stalledFor, setStalledFor] = useState<string>();
 
   useEffect(() => {
     if (client === undefined || machineId === undefined) {
@@ -114,6 +123,8 @@ export const useMachinesJobs = (client: MachineClient | undefined, machineId: st
     const isAborted = (): boolean => signal.aborted;
     const observe = async (): Promise<void> => {
       let wait = firstResync;
+      /* When each watch since the last news ended. */
+      let endings: number[] = [];
       while (!isAborted()) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- each resync lists, then watches, in order; never in parallel.
@@ -127,6 +138,13 @@ export const useMachinesJobs = (client: MachineClient | undefined, machineId: st
           for await (const job of client.watchJobs({ machineId, signal })) {
             fold([job]);
             wait = firstResync;
+            endings = [];
+            setStalledFor(undefined);
+          }
+          const now = Date.now();
+          endings = [...endings.filter((at) => now - at < stallWindow), now];
+          if (endings.length >= stallEndings && !isAborted()) {
+            setStalledFor(machineId);
           }
         } catch (error_) {
           if (isAborted()) {
@@ -150,5 +168,5 @@ export const useMachinesJobs = (client: MachineClient | undefined, machineId: st
     () => [...records.values()].filter((job) => job.machineId === machineId).sort(byNewest),
     [machineId, records],
   );
-  return { jobs, error };
+  return { jobs, error, isStalled: stalledFor !== undefined && stalledFor === machineId };
 };

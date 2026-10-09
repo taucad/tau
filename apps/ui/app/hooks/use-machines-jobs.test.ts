@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { MachineClient, MachineJob, MachineListJobsInput } from '@taucad/runtime/machine';
 import {
@@ -100,5 +100,45 @@ describe('useMachinesJobs', () => {
 
     unmount();
     expect(signals.at(-1)?.aborted).toBe(true);
+  });
+
+  it('should say the updates stopped once three watches end without news within a minute, and clear on news', async () => {
+    vi.useFakeTimers();
+    try {
+      /* Three watches end at once (500 ms and 1 s apart by the backoff); the fourth brings news and stays open. */
+      const watchJobs = vi.fn((input: MachineListJobsInput): AsyncIterable<MachineJob> => {
+        if (watchJobs.mock.calls.length <= 3) {
+          return endedWatch();
+        }
+        const news = async function* (): AsyncGenerator<MachineJob> {
+          yield agentJob({ state: 'approved', updatedAt: later });
+          yield* openWatch(input.signal);
+        };
+        return news();
+      });
+      const client = { ...createFixture({ jobs: [agentJob()] }).client, watchJobs };
+      const { result, unmount } = renderHook(() => useMachinesJobs(client, 'machine-1'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(watchJobs).toHaveBeenCalledTimes(2);
+      expect(result.current.isStalled).toBe(false);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(watchJobs).toHaveBeenCalledTimes(3);
+      expect(result.current.isStalled).toBe(true);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(watchJobs).toHaveBeenCalledTimes(4);
+      expect(result.current.isStalled).toBe(false);
+      expect(result.current.jobs[0]?.state).toBe('approved');
+      unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

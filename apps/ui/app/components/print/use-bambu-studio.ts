@@ -11,7 +11,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MachineDirectoryEntry, MachineManifest, MachineProvider } from '@taucad/runtime/machine';
-import type { PrintPreferences, PrintPreferencesEdit } from '#components/print/use-machine-settings.js';
+import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
+import type {
+  MachinePreferences,
+  PrintPreferences,
+  PrintPreferencesEdit,
+} from '#components/print/use-machine-settings.js';
 import type {
   BambuMachineHints,
   BambuPlate,
@@ -42,6 +47,77 @@ export type BambuQualityPreset = NonNullable<BambuMachineHints['preset']>;
  * @public
  */
 export const isBambuProvider = (provider: MachineProvider | undefined): boolean => provider?.vendor === 'Bambu Lab';
+
+/** Bambu's saved print preferences: the start flags, the plate, and the slot each colour prints from. @public */
+export type BambuPreferences = ReturnType<typeof bambuSettingsConfiguration.schema.parse>;
+
+/**
+ * A provider's saved preferences read as Bambu's, when its settings form is Bambu's (by source id, never by provider
+ * id): the slots remembered per colour and the start flags live there.
+ *
+ * @param provider - The selected machine's provider.
+ * @param values - Its saved preferences.
+ * @returns The typed preferences, or nothing for another form or values that do not parse.
+ * @public
+ */
+export const bambuPreferencesOf = (
+  provider: MachineProvider | undefined,
+  values: MachinePreferences | undefined,
+): BambuPreferences | undefined => {
+  if (provider?.settingsConfiguration?.source.id !== bambuSettingsConfiguration.manifest.source.id) {
+    return undefined;
+  }
+  const parsed = bambuSettingsConfiguration.schema.safeParse(values ?? {});
+  return parsed.success ? parsed.data : undefined;
+};
+
+/**
+ * Remember Prepare's submission choices in Bambu's preferences: the start flags, the plate, and the slot each of
+ * the slice's colours prints from (one default slot for a single colour).
+ *
+ * @param prior - The preferences before.
+ * @param next - The submission as Prepare now holds it.
+ * @param filamentColors - The slice's filament colours, in filament order.
+ * @returns The preferences after.
+ * @public
+ */
+export const rememberBambuSubmission = (
+  prior: BambuPreferences,
+  next: Readonly<Record<string, unknown>>,
+  filamentColors: readonly string[],
+): BambuPreferences => {
+  const { material: _material, bedLeveling: _bed, flowCalibration: _flow, timelapse: _time, ...rest } = prior;
+  const flags = Object.fromEntries(
+    ['bedLeveling', 'flowCalibration', 'timelapse'].flatMap((key) =>
+      typeof next[key] === 'boolean' ? [[key, next[key]]] : [],
+    ),
+  );
+  const mapping = Array.isArray(next['amsMapping'])
+    ? next['amsMapping'].map((slot): number | undefined => (typeof slot === 'number' && slot >= 0 ? slot : undefined))
+    : [];
+  const material = mapping.every((slot) => slot === undefined)
+    ? undefined
+    : filamentColors.length > 1
+      ? {
+          ...prior.material,
+          slotsByColor: {
+            ...prior.material?.slotsByColor,
+            ...Object.fromEntries(
+              filamentColors.flatMap((color, index) =>
+                mapping[index] === undefined ? [] : [[color.toLowerCase(), mapping[index]]],
+              ),
+            ),
+          },
+        }
+      : { ...prior.material, defaultSlot: mapping[0] };
+  const plate = typeof next['expectedBedType'] === 'string' ? next['expectedBedType'] : prior.plate;
+  return bambuSettingsConfiguration.schema.parse({
+    ...rest,
+    ...flags,
+    ...(plate ? { plate } : {}),
+    ...(material ? { material } : {}),
+  });
+};
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

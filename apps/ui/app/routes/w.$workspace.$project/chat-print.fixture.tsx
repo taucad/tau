@@ -37,6 +37,7 @@ import type { DesktopBambuStudio } from '#filesystem/desktop-bridge.js';
 import type { PendingMachineAction } from '#components/print/machine-action-approval.js';
 import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { fffProcessOf } from '@taucad/runtime/machine';
+import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
 import { observedTrays, toolheadOf } from '#components/print/machine-facts.js';
 import {
   bambuContainer,
@@ -367,7 +368,12 @@ export const parametersMock = (actual: typeof ParametersModule): typeof Paramete
   },
 });
 
-export const provider: MachineProvider = { ...providerFor('bambu', x1cManifest), name: 'Bambu LAN' };
+export const provider: MachineProvider = {
+  ...providerFor('bambu', x1cManifest),
+  name: 'Bambu LAN',
+  /* As the Bambu provider declares it: the project's Bambu preferences live under this form's source id. */
+  settingsConfiguration: bambuSettingsConfiguration.manifest,
+};
 
 /** The simulator: the same printer shape on a simulated transport, and it accepts files from any slicer (P3). */
 export const simulatorProvider: MachineProvider = {

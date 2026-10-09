@@ -71,6 +71,8 @@ vi.mock('#components/geometry/graphics/three/renderer.js', () => ({
   },
 }));
 
+vi.mock('#components/geometry/graphics/three/render-fps-overlay.js', () => ({ RenderFpsOverlay: () => undefined }));
+
 vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => cameraRig,
 }));

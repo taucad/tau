@@ -162,7 +162,17 @@ const routes = [
     64_000,
     rates('3', '.3', '3.75', '15', '5m'),
   ),
-  route('anthropic-claude-haiku-4.5', 'Haiku 4.5', 'anthropic', 200_000, 64_000, rates('1', '.1', '1.25', '5', '5m')),
+  route(
+    'anthropic-claude-haiku-5.5',
+    'Haiku 5.5',
+    'anthropic',
+    1_000_000,
+    128_000,
+    rates('.5', '.05', '.625', '2.5', '5m'),
+    {
+      pricingRevision: '2026-10-10',
+    },
+  ),
   route(
     'openai-gpt-6-astra',
     'GPT-6 Astra',
@@ -266,6 +276,7 @@ const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly 
   ['openai-gpt-5.6-terra', { minimum: 272_001n, baseRates: rates('2', '.2', '2.5', '12', '30m') }],
   ['openai-gpt-5.6-luna', { minimum: 272_001n, baseRates: rates('.2', '.02', '.25', '1.2', '30m') }],
   ['openai-gpt-5.5', { minimum: 272_001n, baseRates: rates('5', '.5', undefined, '30') }],
+  ['anthropic-claude-haiku-5.5', { minimum: 100_001n, baseRates: rates('.1', '.01', '.125', '.5', '5m') }],
   ['google-gemini-3.1-pro', { minimum: 200_001n, baseRates: rates('2', '.2', undefined, '12') }],
   ['xai-grok-4.7', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],
   ['xai-grok-4.6', { minimum: 200_000n, baseRates: rates('2', '.5', undefined, '6') }],

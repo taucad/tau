@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import type { ContextPayload } from '@taucad/chat';
 import { contextMemoryMaxBytes, contextMemoryMaxLines } from '@taucad/chat/schemas';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { usePromptSkillsCatalog } from '#hooks/use-skills-catalog.js';
+import { useSkillsCatalogState } from '#hooks/use-skills-catalog.js';
 
 const agentsMdPath = '.tau/AGENTS.md';
 const decoder = new TextDecoder();
@@ -37,7 +37,8 @@ export function useContextPayload(): ContextPayload | undefined {
   const { readFile, treeService } = useFileManager();
   const [hasAgentsMd, setHasAgentsMd] = useState(false);
   const [memory, setMemory] = useState<Record<string, string> | undefined>();
-  const skills = usePromptSkillsCatalog();
+  const catalog = useSkillsCatalogState();
+  const skills = catalog.status === 'ready' ? catalog.prompt : undefined;
 
   useEffect(() => {
     if (!treeService) {
@@ -96,12 +97,12 @@ export function useContextPayload(): ContextPayload | undefined {
   }, [hasAgentsMd]);
 
   return useMemo((): ContextPayload | undefined => {
-    if (skills.length === 0 && !memory) {
+    if ((!skills || skills.length === 0) && !memory) {
       return undefined;
     }
 
     return {
-      skills: skills.length > 0 ? skills : undefined,
+      skills: skills && skills.length > 0 ? skills : undefined,
       memory,
     };
   }, [skills, memory]);

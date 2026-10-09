@@ -589,7 +589,7 @@
       "id": "D17",
       "bound": "Observed chat attachment retry after loss (250 ms doubling to a 30 s delay ceiling)",
       "site": "apps/ui/app/services/chat-session-store.ts",
-      "token": "observed.retry = setTimeout",
+      "token": "const retry = setTimeout",
       "class": "Backoff",
       "owner": "W9"
     },
@@ -803,6 +803,14 @@
       "token": "abandonAfter",
       "class": "External edge (backstop)",
       "owner": "W36"
+    },
+    {
+      "id": "D25",
+      "bound": "Charter D17: read-only oversized replay retirement after 2 s idle; cancelled by active reads/acquisition, never source freshness authority",
+      "site": "packages/agent-host/src/launchers/agent-launcher.ts",
+      "token": "retirements.get(chatId)",
+      "class": "Debounce",
+      "owner": "filesystem-projection-performance-charter / N2 N3"
     }
   ]
 }

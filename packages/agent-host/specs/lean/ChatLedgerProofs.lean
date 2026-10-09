@@ -1217,6 +1217,16 @@ theorem t6_redelivery_idempotent (L : Ledger) (xs ys : List Row) (h : ∀ y ∈ 
     rw [stepD_covered M y (hc y (by simp))]
     exact ih M fun z hz => hc z (by simp [hz])
 
+/-- D26: a duplicate physical boundary cannot reopen an earlier semantic term across pages. -/
+theorem d26_duplicate_boundary_keeps_semantic_term :
+    let a : Row := ⟨0, 0, 0, .U, 0, 0, 1, 0⟩
+    let b : Row := ⟨1, 0, 0, .U, 0, 1, 2, 0⟩
+    let next : Row := { a with seq := 1 }
+    let pageLedger := { fold {} [a, b, a] with cursor := 3, last := some a.key }
+    pageLedger.last = some a.key ∧ pageLedger.semanticTerm = some b.term ∧
+      ((pageLedger.stepD next).anomalies.contains (.order, next.key)) = true := by
+  decide
+
 /-! ## T8: the legality tables are total, and every refusal is a registry code -/
 
 /-- The run-refusal registry (W4's codes for the three tables and the host gate). -/

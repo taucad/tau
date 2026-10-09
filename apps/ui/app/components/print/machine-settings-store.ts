@@ -2,6 +2,9 @@
 /* oxlint-disable no-await-in-loop -- Refreshes coalesce and acquire one trailing generation at a time. */
 import { replaceEqualDeep } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
+import type { WatchEvent } from '@taucad/filesystem';
+import { ObservationService } from '@taucad/fs-client/observation-service';
+import type { ObservationRead, ObservationWatch, ObservationSnapshot } from '@taucad/fs-client/observation-service';
 import type {
   MachineSettingsService,
   MachineSettingsSnapshot,
@@ -18,6 +21,7 @@ export type SettingsProjection = Readonly<{
   draft?: MachineSettingsRecord;
   starting?: MachineSettingsRecord;
   pending: number;
+  observation?: Pick<ObservationSnapshot<never>, 'status' | 'error'>;
   failure?: Readonly<{
     profileId: string;
     operationId: string;
@@ -31,16 +35,13 @@ type Transition = {
   profileId: string;
 };
 type Entry = {
-  dirty: boolean;
   deferred: Transition[];
   state: SettingsProjection;
   revision: number;
   topic: Topic<void>;
-  loading?: Promise<void>;
   queue: Promise<void>;
+  observation: ObservationService<MachineSettingsSnapshot>;
   unsubscribe: () => void;
-  watching: boolean;
-  observers: number;
 };
 const initial: SettingsProjection = { file: { status: 'loading' }, pending: 0 };
 const freeze = <Value>(value: Value): Value => {
@@ -63,13 +64,13 @@ const emptyRecord = (typeId: MachineTypeId): MachineSettingsRecord => ({
 export class MachineSettingsStore {
   readonly #service: Promise<MachineSettingsService> | (() => Promise<MachineSettingsService>);
   #opened?: Promise<MachineSettingsService>;
-  readonly #observe: (typeId: MachineTypeId, refresh: () => void) => () => void;
+  readonly #observe: (typeId: MachineTypeId, onEvent: (event: WatchEvent) => void) => ObservationWatch;
   readonly #disposeService: () => void;
   readonly #entries = new Map<MachineTypeId, Entry>();
   #disposed = false;
   public constructor(
     service: Promise<MachineSettingsService> | (() => Promise<MachineSettingsService>),
-    observe: (typeId: MachineTypeId, refresh: () => void) => () => void,
+    observe: (typeId: MachineTypeId, onEvent: (event: WatchEvent) => void) => ObservationWatch,
     dispose: () => void,
   ) {
     this.#service = service;
@@ -82,25 +83,10 @@ export class MachineSettingsStore {
   public subscribe(typeId: MachineTypeId, handler: () => void): () => void {
     const entry = this.#entry(typeId);
     const off = entry.topic.subscribe(handler);
-    entry.observers += 1;
-    if (!entry.watching) {
-      entry.watching = true;
-      entry.unsubscribe = this.#observe(typeId, () => {
-        this.refresh(typeId).catch((error: unknown) => {
-          this.#readFailure(entry, error);
-        });
-      });
-      this.refresh(typeId).catch((error: unknown) => {
-        this.#readFailure(entry, error);
-      });
-    }
-    let active = true;
+    const lease = entry.observation.acquire();
     return () => {
-      if (active) {
-        active = false;
-        entry.observers -= 1;
-        off();
-      }
+      off();
+      lease.release();
     };
   }
   public record(typeId: MachineTypeId): MachineSettingsRecord | undefined {
@@ -130,55 +116,26 @@ export class MachineSettingsStore {
     this.#publish(entry, { ...entry.state, starting });
   }
   public async refresh(typeId: MachineTypeId): Promise<void> {
-    const entry = this.#entries.get(typeId) ?? this.#entry(typeId);
-    entry.dirty = true;
-    if (entry.loading) {
-      return entry.loading;
+    const entry = this.#entry(typeId);
+    const lease = entry.observation.activeLeaseCount === 0 ? entry.observation.acquire() : undefined;
+    try {
+      entry.observation.refresh();
+      await this.#settled(entry);
+    } finally {
+      lease?.release();
     }
-    entry.loading = (async () => {
-      do {
-        entry.dirty = false;
-        // A read reply cannot overtake the captured write/settlement queue.
-        const { queue } = entry;
-        await queue;
-        if (queue !== entry.queue) {
-          entry.dirty = true;
-          continue;
-        }
-        let file: MachineSettingsSnapshot;
-        try {
-          const service = await this.#ready();
-          file = await service.readMachineSettings(typeId);
-        } catch (error) {
-          if (queue === entry.queue) {
-            throw error;
-          }
-          entry.dirty = true;
-          continue;
-        }
-        if (queue !== entry.queue) {
-          entry.dirty = true;
-          continue;
-        }
-        const { state } = entry;
-        this.#publish(entry, {
-          ...state,
-          file,
-          ...(state.pending === 0 && !state.failure ? { draft: undefined } : {}),
-        });
-        // oxlint-disable-next-line typescript/no-unnecessary-condition -- The watch callback can set dirty while the acquisition is awaited.
-      } while (entry.dirty && !this.#disposed);
-    })().finally(() => {
-      entry.loading = undefined;
-    });
-    return entry.loading;
   }
   public update(typeId: MachineTypeId, edit: (record: MachineSettingsRecord) => MachineSettingsRecord): void {
     const started = performance.now();
     try {
       const entry = this.#entry(typeId);
       const base = this.record(typeId);
-      if (!base || entry.state.failure) {
+      if (
+        !base ||
+        Boolean(entry.state.failure) ||
+        entry.state.observation?.status === 'closed' ||
+        entry.state.observation?.status === 'error'
+      ) {
         return;
       }
       if (entry.state.pending + entry.deferred.length >= 32) {
@@ -273,6 +230,7 @@ export class MachineSettingsStore {
     this.#disposed = true;
     for (const entry of this.#entries.values()) {
       entry.unsubscribe();
+      entry.observation.dispose();
       entry.topic.dispose();
     }
     Promise.allSettled([...this.#entries.values()].map(async (entry) => this.#drain(entry)))
@@ -284,9 +242,54 @@ export class MachineSettingsStore {
     do {
       ({ queue } = entry);
       await queue;
-      await entry.loading;
+      if (!this.#disposed && entry.observation.activeLeaseCount > 0) {
+        await this.#settled(entry).catch(() => undefined);
+      }
       // oxlint-disable-next-line typescript/no-unnecessary-condition -- Settlement can append captured edits while the queue is awaited.
-    } while (queue !== entry.queue || entry.loading);
+    } while (queue !== entry.queue);
+  }
+  async #settled(entry: Entry): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      let off = (): void => undefined;
+      const check = (): void => {
+        const snapshot = entry.observation.getSnapshot();
+        if (snapshot.status === 'registering' || snapshot.status === 'pending') {
+          return;
+        }
+        off();
+        if (snapshot.status === 'ready') {
+          resolve();
+        } else {
+          reject(new Error(snapshot.error ?? 'Settings observation closed.'));
+        }
+      };
+      off = entry.observation.subscribe(check);
+      check();
+    });
+  }
+  async #read(typeId: MachineTypeId, entry: Entry, fence: ObservationRead): Promise<MachineSettingsSnapshot> {
+    const current = (): void => {
+      if (this.#disposed || !fence.isCurrent()) {
+        throw new Error('Settings acquisition superseded.');
+      }
+    };
+    for (;;) {
+      current();
+      const { queue } = entry;
+      await queue;
+      current();
+      if (queue !== entry.queue) {
+        continue;
+      }
+      const service = await this.#ready();
+      current();
+      const file = await service.readMachineSettings(typeId);
+      current();
+      if (queue !== entry.queue) {
+        continue;
+      }
+      return file;
+    }
   }
   async #ready(): Promise<MachineSettingsService> {
     this.#opened ??= typeof this.#service === 'function' ? this.#service() : this.#service;
@@ -302,27 +305,71 @@ export class MachineSettingsStore {
     }
     if (this.#entries.size >= 32) {
       const clean = [...this.#entries].find(
-        ([, entry]) => entry.observers === 0 && entry.state.pending === 0 && !entry.state.failure,
+        ([, entry]) => entry.observation.activeLeaseCount === 0 && entry.state.pending === 0 && !entry.state.failure,
       );
       if (!clean) {
         throw new Error('Too many pending machine preference types.');
       }
       clean[1].unsubscribe();
+      clean[1].observation.dispose();
       clean[1].topic.dispose();
       this.#entries.delete(clean[0]);
     }
+    const observation = new ObservationService<MachineSettingsSnapshot>({
+      resource: typeId,
+      watch: (invalidate, reset) =>
+        this.#observe(typeId, (event) => {
+          if (event.type === 'reset') {
+            reset();
+          } else {
+            invalidate();
+          }
+        }),
+      read: async (fence) => this.#read(typeId, entry, fence),
+      publish: (file) => {
+        const { state } = entry;
+        this.#publish(entry, {
+          ...state,
+          file,
+          observation: { status: 'ready' },
+          ...(state.pending === 0 && !state.failure ? { draft: undefined } : {}),
+        });
+      },
+    });
     const entry: Entry = {
-      dirty: false,
       deferred: [],
       state: { ...initial, starting: emptyRecord(typeId) },
       revision: 0,
       topic: new Topic({ name: 'MachineSettingsProjection' }),
       queue: Promise.resolve(),
+      observation,
       unsubscribe: () => undefined,
-      watching: false,
-      observers: 0,
     };
     this.#entries.set(typeId, entry);
+    entry.unsubscribe = observation.subscribe(() => {
+      if (observation.activeLeaseCount === 0 || this.#disposed) {
+        return;
+      }
+      const snapshot = observation.getSnapshot();
+      if (snapshot.status === 'error' || snapshot.status === 'closed') {
+        const error =
+          snapshot.error === 'Observation connection closed.' ? 'Settings observation closed.' : snapshot.error;
+        this.#readFailure(entry, error ?? 'Settings observation closed.', snapshot.status);
+      } else {
+        this.#publish(entry, {
+          ...entry.state,
+          ...(snapshot.status === 'ready' && snapshot.value !== undefined && entry.state.file.status === 'unavailable'
+            ? { file: snapshot.value }
+            : {}),
+          observation: {
+            status: snapshot.status,
+            ...(snapshot.status !== 'ready' && entry.state.observation?.error
+              ? { error: entry.state.observation.error }
+              : {}),
+          },
+        });
+      }
+    });
     return entry;
   }
   #publish(entry: Entry, state: SettingsProjection): void {
@@ -340,9 +387,13 @@ export class MachineSettingsStore {
       performance.measure('tau.machine-settings.publish', { start: started, end: performance.now() });
     }
   }
-  #readFailure(entry: Entry, error: unknown): void {
+  #readFailure(entry: Entry, error: unknown, status: 'closed' | 'error' = 'error'): void {
     this.#publish(entry, {
       ...entry.state,
+      observation: {
+        status,
+        error: error instanceof Error ? error.message : String(error),
+      },
       file: {
         status: 'unavailable',
         code: 'SETTINGS_UNAVAILABLE',

@@ -7,7 +7,7 @@
 import type { AttachmentReader } from '#harness/session-record.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import type { StorageDurabilityClass } from '#log/event-types.js';
-import type { AgentLiveEvent } from '#waist/ports.js';
+import type { SourceLiveEvent } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
 
@@ -44,7 +44,7 @@ export type LeadershipHost = Readonly<{
   /** Wake the chat's parked reads: a holder changed, or a row landed elsewhere. */
   wakeReads: (chatId: string) => void;
   /** Deliver a live delta another process's run published to this process's subscribers. */
-  publishLive: (event: AgentLiveEvent) => void;
+  publishLive: (event: SourceLiveEvent) => void;
 }>;
 
 /**
@@ -70,7 +70,7 @@ export type LeadershipPort = Readonly<{
   /** M1 became quiescent (no run executing, no command in flight, no settlement awaiting `acknowledge`) or left it. */
   quiescent: (chatId: string, quiescent: boolean) => void;
   /** A live delta of a run this process drives, for followers that watch it. */
-  liveEvent: (event: AgentLiveEvent) => void;
+  liveEvent: (event: SourceLiveEvent) => void;
   /** Take the chat to reconcile it; `wait` queues behind another holder instead of skipping it (RH-R16). */
   reconcile: (chatId: string, request: Readonly<{ wait: boolean }>) => void;
   close: () => Promise<void>;
@@ -84,6 +84,17 @@ export type ChatStoreBinding = Readonly<{
   attachments: AttachmentReader;
   /** The chat's durable bytes as they are now; never creates, locks or keeps a handle (RH-R1). */
   readBytes: (chatId: string) => Promise<Uint8Array<ArrayBuffer>>;
+  /** Acknowledged source observation; changes invalidate bytes, never authorize serving a cached view. */
+  observeBytes?:
+    | ((
+        chatId: string,
+        input: Readonly<{
+          signal: AbortSignal;
+          onChange: () => void;
+          onError: (error: unknown) => void;
+        }>,
+      ) => Promise<() => void>)
+    | undefined;
   /** A write open: the binding's lock, then a read of the log whose tail is the fence register (W3). */
   openWriter: (chatId: string) => Promise<EventLogAppender>;
   leadership: (host: LeadershipHost) => LeadershipPort;

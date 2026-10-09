@@ -160,7 +160,10 @@ export const ParametersNumber = React.memo(function ParametersNumber({
   /* The draft is the only local state: `text` is exactly what was typed, `base` is the authority
    * value the edit started from. A retained draft is seeded back on mount so collapsing a group
    * never discards an in-progress edit. */
-  const [draftText, setDraftText] = React.useState(() => commit?.draft(instancePointer)?.text ?? '');
+  const [retainedDraft, setRetainedDraft] = React.useState(() => commit?.draft(instancePointer));
+  const [draftText, setDraftText] = React.useState(() =>
+    retainedDraft?.final === undefined ? (retainedDraft?.text ?? '') : '',
+  );
   const [localValue, setLocalValue] = React.useState<Readonly<{ value: number; authorityValue: number }>>();
   const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
   const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding, authorityValue }));
@@ -196,20 +199,36 @@ export const ParametersNumber = React.memo(function ParametersNumber({
    * every writer of `draftText` mirrors it here; the ref is what keeps a committed draft from being
    * committed a second time. */
   const draftRef = React.useRef(draftText);
+  const currentSubmission = React.useRef<Record<string, unknown> | undefined>(undefined);
+  React.useEffect(
+    () => () => {
+      currentSubmission.current = undefined;
+    },
+    [],
+  );
   const retainDraft = (text: string, valid: boolean): void => {
+    currentSubmission.current = undefined;
     draftRef.current = text;
     setDraftText(text);
-    commit?.setDraft(instancePointer, text === '' ? undefined : { text, valid });
+    const draft = text === '' ? undefined : { text, valid };
+    setRetainedDraft(draft);
+    setInputDiagnostic(undefined);
+    commit?.setDraft(instancePointer, draft);
   };
 
-  // Drafts can be discarded from outside the row (the unsaved-drafts dialog), so a mounted row
-  // follows the retained draft rather than owning the only copy of it.
+  // Final settlement and external discard belong to the service, including while this row unmounts.
   React.useEffect(
     () =>
       commit?.subscribeDrafts(() => {
-        if (commit.draft(instancePointer) === undefined) {
+        const draft = commit.draft(instancePointer);
+        setRetainedDraft(draft);
+        if (draft === undefined || draft.final?.status === 'refused') {
           draftRef.current = '';
           setDraftText('');
+        }
+        if (draft?.final?.status === 'refused') {
+          setLocalValue(undefined);
+          setBase(authorityRef.current);
         }
       }),
     [commit, instancePointer],
@@ -247,7 +266,11 @@ export const ParametersNumber = React.memo(function ParametersNumber({
     // It does report a refusal: a transient value is superseded by design, and so is a final one a
     // newer edit displaced before it was applied, but anything else the authority refused must not
     // look entered.
+    const submission = {};
+    currentSubmission.current = submission;
     const isFinal = pressure === 'final';
+    const submittedText =
+      retainedText ?? formatDisplayValue(displayValue(native, binding, displayUnit), binding, displayUnit);
     if (isFinal) {
       setPendingFinals((count) => count + 1);
       globalThis.performance.mark('tau:parameter-edit', { detail: { pointer: instancePointer } });
@@ -257,7 +280,15 @@ export const ParametersNumber = React.memo(function ParametersNumber({
         const outcome = await commit.commit({
           pointer: instancePointer,
           value: native,
-          pressure,
+          ...(isFinal
+            ? {
+                pressure: 'final',
+                draft: {
+                  text: submittedText,
+                  valid: true,
+                },
+              }
+            : { pressure: 'transient' }),
           base: {
             pointer: instancePointer,
             value: submittedBase.value,
@@ -272,24 +303,23 @@ export const ParametersNumber = React.memo(function ParametersNumber({
             },
           },
         });
-        if (isFinal && outcome !== undefined) {
-          /* The shown value follows the authority once nothing of this row's is in flight (the
-           * `enteredAgainst` reset above), so a settled edit never flashes the previous value. */
-          if (outcome.status === 'committed' || outcome.status === 'cancelled-before-apply') {
-            return true;
-          }
-          const authority = authorityRef.current;
-          setLocalValue(undefined);
-          setBase(authority);
-          if (retainedText !== undefined) {
-            draftRef.current = '';
-            setDraftText('');
-            commit.setDraft(instancePointer, { text: retainedText, valid: true });
-          }
-          setInputDiagnostic('message' in outcome ? outcome.message : 'The parameter could not be saved.');
+        if (isFinal && (outcome?.status === 'committed' || outcome?.status === 'cancelled-before-apply')) {
+          return true;
         }
       } catch (error) {
-        setInputDiagnostic(error instanceof Error ? error.message : 'The parameter could not be saved.');
+        // Admission may fail before the service can create a pending draft. Only the current mounted
+        // gesture may show that local refusal; admitted settlement remains owned by the service.
+        if (currentSubmission.current === submission && commit.draft(instancePointer)?.final === undefined) {
+          if (isFinal) {
+            draftRef.current = submittedText;
+            setDraftText(submittedText);
+          }
+          setInputDiagnostic(
+            error instanceof Error || error instanceof DOMException
+              ? error.message
+              : 'The parameter could not be saved.',
+          );
+        }
       } finally {
         if (isFinal) {
           setPendingFinals((count) => count - 1);
@@ -321,8 +351,11 @@ export const ParametersNumber = React.memo(function ParametersNumber({
   };
 
   const commitText = (): void => {
+    const recovery = commit?.draft(instancePointer);
+    const retry = draftRef.current === '' && recovery?.final?.status === 'refused';
+    const text = retry ? recovery.text : draftRef.current;
     const parsed = parseInput({
-      text: draftRef.current,
+      text,
       locale: globalThis.navigator.language,
       inputUnit: displayUnit ?? '1',
       expectedUnit: binding.nativeUnit ?? '1',
@@ -343,8 +376,8 @@ export const ParametersNumber = React.memo(function ParametersNumber({
       setInputDiagnostic(diagnostic.message);
       return;
     }
-    const retainedText = draftRef.current;
-    const submittedBase = hasConflict ? currentBase : editBase;
+    const retainedText = text;
+    const submittedBase = retry || hasConflict ? currentBase : editBase;
     setInputDiagnostic(undefined);
     retainDraft('', true);
     setLocalValue({ value: displayValue(native.value.value, binding, displayUnit), authorityValue });
@@ -407,6 +440,7 @@ export const ParametersNumber = React.memo(function ParametersNumber({
       diagnostic={
         fieldProjection.diagnostic?.message ??
         inputDiagnostic ??
+        (retainedDraft?.final?.status === 'refused' ? retainedDraft.final.message : undefined) ??
         (hasConflict
           ? `This field changed to ${formatDisplayValue(committedDisplayValue, binding, displayUnit)} elsewhere. Enter to overwrite it, Escape to keep it.`
           : undefined)

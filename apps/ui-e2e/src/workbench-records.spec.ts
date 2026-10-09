@@ -2,6 +2,7 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 import { readWorkbenchTree, writeWorkbenchFile } from '#support/workbench-files.js';
+import { readProjectStorageState } from '#support/project-storage-state.js';
 
 const layoutPath = '/.tau/workbench/layout.json';
 const workspace = 'workbench-records-external';
@@ -112,9 +113,54 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
   const invalid = '{"version":1,"viewer":';
   await writeWorkbenchFile(layoutPath, invalid, workspace);
   await target.reload();
-  await target.expectVisible(selectors.getByRole('alert').getByRole('button', { name: 'Reset' }), 60_000);
+  const settingsTrigger = selectors.getByRole('button', { name: 'Settings not applied · 1 record', exact: true });
+  const layoutIssue = selectors.getByRole('listitem', { name: 'Pane layout', exact: true });
+  let invalidDocument: { href: string; timeOrigin: number };
+  try {
+    await target.expectVisible(settingsTrigger, 60_000);
+    invalidDocument = await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }));
+    await target.click(settingsTrigger);
+    await target.expectVisible(layoutIssue);
+    expect(await readFile(layoutPath)).toBe(invalid);
+    await target.click(layoutIssue.getByRole('button', { name: 'More actions for Pane layout', exact: true }));
+    await target.click(selectors.getByRole('menuitem', { name: 'Reset settings…', exact: true }));
+    await target.expectVisible(selectors.getByRole('alertdialog', { name: 'Reset pane layout?', exact: true }));
+  } catch (error) {
+    try {
+      const [physicalLayout, storage, dom] = await Promise.allSettled([
+        readFile(layoutPath),
+        readProjectStorageState(),
+        target.evaluate(() => ({
+          href: location.href,
+          timeOrigin: performance.timeOrigin,
+          body: document.body.textContent.slice(0, 12_000),
+          alerts: [...document.querySelectorAll('[role="alert"], [role="alertdialog"], [role="status"]')]
+            .slice(0, 16)
+            .map((element) => ({ role: element.getAttribute('role'), text: element.textContent.slice(0, 2048) })),
+          buttons: [...document.querySelectorAll('button')].slice(0, 80).map((element) => ({
+            label: element.getAttribute('aria-label'),
+            text: element.textContent.slice(0, 256),
+            expanded: element.getAttribute('aria-expanded'),
+          })),
+        })),
+      ]);
+      await target.writeArtifact(
+        'workbench-invalid-layout-precondition',
+        JSON.stringify({ expectedBytes: invalid, physicalLayout, storage, dom }),
+      );
+      await target.screenshot(undefined, 'workbench-invalid-layout-precondition.png');
+    } catch {
+      // Keep the original Reset assertion if optional evidence collection fails.
+    }
+    throw error;
+  }
   expect(await readFile(layoutPath)).toBe(invalid);
-  await target.click(selectors.getByRole('alert').getByRole('button', { name: 'Reset' }));
+  await target.click(
+    selectors.getByRole('alertdialog', { name: 'Reset pane layout?', exact: true }).getByRole('button', {
+      name: 'Reset settings',
+      exact: true,
+    }),
+  );
   await expect
     .poll(
       async () => {
@@ -125,13 +171,25 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
     )
     .toBe(1);
 
+  expect(await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }))).toEqual(
+    invalidDocument,
+  );
+
   const newer = JSON.stringify({ ...arranged, version: 2 });
   await writeWorkbenchFile(layoutPath, newer, workspace);
   await target.reload();
-  await target.expectVisible(selectors.getByRole('alert'), 60_000);
-  expect(await target.textContent(selectors.getByRole('alert'))).toContain('Update Tau');
-  await target.expectCount(selectors.getByRole('alert').getByRole('button', { name: 'Reset' }), 0);
+  await target.expectVisible(settingsTrigger, 60_000);
+  const newerDocument = await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }));
+  await target.click(settingsTrigger);
+  await target.expectVisible(layoutIssue);
+  expect(await target.textContent(layoutIssue)).toContain('until this project is opened with a newer Tau');
+  await target.expectCount(layoutIssue.getByRole('button', { name: 'More actions for Pane layout', exact: true }), 0);
+  await target.expectCount(selectors.getByRole('menuitem', { name: 'Reset settings…', exact: true }), 0);
+  await target.expectCount(selectors.getByRole('alertdialog', { name: 'Reset pane layout?', exact: true }), 0);
   expect(await readFile(layoutPath)).toBe(newer);
+  expect(await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }))).toEqual(
+    newerDocument,
+  );
 });
 
 test('adopts a valid external WebAccess layout edit without a reload', async () => {

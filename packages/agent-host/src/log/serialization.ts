@@ -1,4 +1,5 @@
-import { classifyLogRow, parseLogEvent } from '#log/event-schema.js';
+import { classifyLogJson, parseLogEvent } from '#log/event-schema.js';
+import { canonicalJson } from '#log/canonical-json.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const encoder = new TextEncoder();
@@ -7,9 +8,40 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 /** One row kept by a tolerant read; `opaque` rows are carried but never folded or executed (CL-R1). @internal */
 export type ReadRow = { readonly event: AgentLogEvent; readonly opaque: boolean };
 
-type ParsedEventLog = {
+class ParsedReplayIdentity {
+  #text: string | undefined;
+  #canonical: string | undefined;
+
+  public constructor(text: string) {
+    this.#text = text;
+  }
+
+  public canonical(): string {
+    if (this.#canonical !== undefined) {
+      return this.#canonical;
+    }
+    const text = this.#text;
+    if (text === undefined) {
+      throw new Error('A replay identity has neither source text nor canonical content.');
+    }
+    const row = classifyLogJson(text);
+    if (row.class === 'quarantined') {
+      throw new Error('A parser-owned replay identity no longer classifies.');
+    }
+    this.#canonical = canonicalJson(row.event);
+    this.#text = undefined;
+    return this.#canonical;
+  }
+}
+
+/** Immutable-source identity minted only by this parser; its constructor is not exported. @internal */
+export type ReplayIdentity = ParsedReplayIdentity;
+/** A kept replay row whose original identity survives later exposed-object mutation. @internal */
+export type ReplayReadRow = ReadRow & { readonly identity: ReplayIdentity };
+
+type ParsedEventLog<Row extends ReadRow = ReadRow> = {
   /** Known and opaque rows in file order: exactly what the cursor indexes. */
-  readonly rows: readonly ReadRow[];
+  readonly rows: readonly Row[];
   readonly events: readonly AgentLogEvent[];
   /** Lines with no valid row envelope: skipped, reported by byte offset and excluded from the cursor (CL-R1). */
   readonly quarantined: readonly number[];
@@ -24,11 +56,9 @@ type ByteLine = { readonly start: number; readonly end: number; readonly termina
 const splitByteLines = (bytes: Uint8Array<ArrayBuffer>): ByteLine[] => {
   const lines: ByteLine[] = [];
   let start = 0;
-  for (let index = 0; index < bytes.byteLength; index++) {
-    if (bytes[index] === 10) {
-      lines.push({ start, end: index, terminated: true });
-      start = index + 1;
-    }
+  for (let end = bytes.indexOf(10, start); end !== -1; end = bytes.indexOf(10, start)) {
+    lines.push({ start, end, terminated: true });
+    start = end + 1;
   }
   if (start < bytes.byteLength) {
     lines.push({ start, end: bytes.byteLength, terminated: false });
@@ -36,10 +66,10 @@ const splitByteLines = (bytes: Uint8Array<ArrayBuffer>): ByteLine[] => {
   return lines;
 };
 
-const valueOf = (bytes: Uint8Array<ArrayBuffer>, line: ByteLine): unknown => {
+const textOf = (bytes: Uint8Array<ArrayBuffer>, line: ByteLine): string | undefined => {
   const contentEnd = line.end > line.start && bytes[line.end - 1] === 13 ? line.end - 1 : line.end;
   try {
-    return JSON.parse(decoder.decode(bytes.subarray(line.start, contentEnd))) as unknown;
+    return decoder.decode(bytes.subarray(line.start, contentEnd));
   } catch {
     return undefined;
   }
@@ -52,7 +82,9 @@ const valueOf = (bytes: Uint8Array<ArrayBuffer>, line: ByteLine): unknown => {
  *
  * @internal
  */
-export const parseEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventLog => {
+function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: true): ParsedEventLog<ReplayReadRow>;
+function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: false): ParsedEventLog;
+function parseBytes(bytes: Uint8Array<ArrayBuffer>, replay: boolean): ParsedEventLog {
   const lines = splitByteLines(bytes);
   const rows: ReadRow[] = [];
   const quarantined: number[] = [];
@@ -60,7 +92,8 @@ export const parseEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventL
   let needsSeparator = false;
 
   for (const line of lines) {
-    const classified = classifyLogRow(valueOf(bytes, line));
+    const text = textOf(bytes, line);
+    const classified = text === undefined ? ({ class: 'quarantined' } as const) : classifyLogJson(text);
     if (classified.class === 'quarantined') {
       if (!line.terminated) {
         return {
@@ -74,7 +107,16 @@ export const parseEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventL
       }
       quarantined.push(line.start);
     } else {
-      rows.push({ event: classified.event, opaque: classified.class === 'opaque' });
+      const row = { event: classified.event, opaque: classified.class === 'opaque' };
+      if (replay) {
+        if (text === undefined) {
+          throw new Error('A classified replay row has no decoded source text.');
+        }
+        const owned: ReplayReadRow = { ...row, identity: new ParsedReplayIdentity(text) };
+        rows.push(owned);
+      } else {
+        rows.push(row);
+      }
     }
     validByteLength = line.end + (line.terminated ? 1 : 0);
     needsSeparator = !line.terminated;
@@ -88,7 +130,24 @@ export const parseEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventL
     needsSeparator,
     discardedTail: false,
   };
-};
+}
+
+/**
+ * Parse ordinary kept rows without retaining private replay identities.
+ * @internal
+ * @param bytes - Captured log bytes.
+ * @returns The tolerant physical rows and byte boundary.
+ */
+export const parseEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventLog => parseBytes(bytes, false);
+
+/**
+ * Parse kept rows with immutable source identities for the private captured replay owner.
+ * @internal
+ * @param bytes - Captured log bytes consumed synchronously before row exposure.
+ * @returns Tolerant physical rows carrying their original identity witnesses.
+ */
+export const parseReplayEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventLog<ReplayReadRow> =>
+  parseBytes(bytes, true);
 
 /**
  * Serialize one validated event as exactly one newline-terminated JSON object.

@@ -386,10 +386,22 @@ export function useChatEditor({
     editor.commands.clearContent();
   }, [editor]);
 
+  // Catalog settlement is external to Tiptap transactions; derive the open menu without mirroring it in state.
+  const popupItems = slashCommandState === undefined ? [] : getSlashCommandItems(slashCommandState.query);
+  const triggerPosition = editor.state.selection.from - (slashCommandState?.query.length ?? 0) - 1;
+  const trigger = triggerPosition < 0 ? '' : editor.state.doc.textBetween(triggerPosition, triggerPosition + 1);
+  const currentSlashCommandState =
+    slashCommandState === undefined
+      ? undefined
+      : {
+          ...slashCommandState,
+          items: trigger === '$' ? popupItems.filter((item) => item.label.startsWith('$')) : popupItems,
+        };
+
   return {
     editor,
     contextSuggestionState,
-    slashCommandState,
+    slashCommandState: currentSlashCommandState,
     contextKeydownRef,
     slashKeydownRef,
     clearEditor,

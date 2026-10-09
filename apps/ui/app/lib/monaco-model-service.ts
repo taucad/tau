@@ -368,17 +368,17 @@ export class MonacoModelService {
 
     if (uri.scheme === 'file') {
       const path = canonicalWorkspacePath(uri.path);
-      const result = await this.contentService.resolve(path);
-      if (result.kind !== 'text') {
-        model.dispose();
-        this.editorHolds.delete(path);
-        this.backgroundAccessTimes.delete(path);
-        this.syncedPaths.delete(path);
-        this.forget(path);
-        this.markerService.removeUri(uri.toString());
+      const { contentService, epoch, monaco } = this;
+      const result = await contentService.resolve(path);
+      if (
+        this.epoch !== epoch ||
+        this.contentService !== contentService ||
+        this.monaco !== monaco ||
+        monaco.editor.getModel(uri) !== model
+      ) {
         return;
       }
-      this.adoptContent(path, model, result.content);
+      this.applyOutcomeChange({ path, result });
       return;
     }
 
@@ -424,6 +424,9 @@ export class MonacoModelService {
     const uri = this.createUri(event.path);
     const model = this.monaco.editor.getModel(uri);
     if (!model) {
+      return;
+    }
+    if (event.result.kind === 'error' || event.result.kind === 'loading') {
       return;
     }
     if (this.rebases.has(event.path)) {
@@ -514,13 +517,15 @@ export class MonacoModelService {
     }
     if (state.completion === completion && this.editorSaves.get(state.path) === state) {
       const currentPath = state.path;
-      this.editorSaves.delete(currentPath);
       if (failure instanceof EditorSaveConflictError) {
+        this.editorSaves.delete(currentPath);
         return this.awaitRebase(currentPath, failure.base, contentService);
       }
       if (!failed) {
+        this.editorSaves.delete(currentPath);
         this.applyOutcomeChange({ path: currentPath, result: contentService.peekOutcome(currentPath) });
       }
+      // A failed save still owns unsaved model text and its original checked-write base.
     }
     /* The caller owns persistence errors; a refusal is not one — the edit is merged or recorded for a person. */
     if (failed && !(failure instanceof EditorSaveConflictError)) {
@@ -914,7 +919,7 @@ export class MonacoModelService {
 
     if (existingModel) {
       /* A refused edit is merged from the outcome, which this write already published. */
-      if (!this.rebases.has(path)) {
+      if (!this.editorSaves.has(path) && !this.rebases.has(path)) {
         this.adoptContent(path, existingModel, data);
       }
     } else if (source === 'user') {

@@ -1,10 +1,12 @@
 import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
-import type { AgentLiveEvent, AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
+import type { SourceLiveEvent, AgentLogEvent, Channel, StorageDurabilityClass } from '@taucad/agent-host';
 import { isGatewayProviderKind } from '@taucad/agent-host';
 import { connectAgentWorkerChannel, createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import { agentWireLimits } from '@taucad/agent-host/wire';
 import type {
   AgentChannelAdmissionConfig,
+  CatchUpFrame,
+  CatchUpInput,
   CommandAnswer,
   HostCommand,
   ReadAnswer,
@@ -167,6 +169,10 @@ export type AgentHostReadInput = {
   readonly cursor: number;
   /** The key of the row at `cursor - 1`, so an owner can refuse a reader on another history. */
   readonly last?: ReadRequest['last'] | undefined;
+  /** Opaque incarnation of the authoritative bytes returned by the preceding batch. */
+  readonly sourceGeneration?: ReadRequest['sourceGeneration'] | undefined;
+  /** Exact host health observed with the preceding source and position. */
+  readonly sourceHealth?: ReadRequest['sourceHealth'] | undefined;
 };
 
 /**
@@ -180,6 +186,8 @@ export type AgentHostClient = {
   hostCommand(command: HostCommand): Promise<CommandAnswer>;
   /** One read of the chat's durable rows; a refusal means the reader resets to cursor 0, never a clamp. */
   read(input: AgentHostReadInput): Promise<ReadAnswer>;
+  /** One immutable capture; pages remain provisional until its final validation marker. */
+  catchUp(input: CatchUpInput): AsyncIterable<CatchUpFrame>;
   /**
    * Follow one chat's durable rows from `cursor`: one outstanding long-poll read at a time (SC-R14).
    * ponytail: rows are handed over one by one, in the push shape the page projection folds; W9 replaces it.
@@ -197,7 +205,7 @@ export type AgentHostClient = {
   /** Read-only, non-durable preview for one chat; it never admits, retries, or settles a run. */
   subscribeLive(
     chatId: string,
-    listener: (chatId: string, event: AgentLiveEvent) => void,
+    listener: (chatId: string, event: SourceLiveEvent) => void,
     onEnded?: () => void,
   ): () => void;
   close(): Promise<void>;
@@ -310,6 +318,8 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
           chatId: input.chatId,
           cursor: input.cursor,
           ...(input.last === undefined ? {} : { last: input.last }),
+          ...(input.sourceGeneration === undefined ? {} : { sourceGeneration: input.sourceGeneration }),
+          ...(input.sourceHealth === undefined ? {} : { sourceHealth: input.sourceHealth }),
           limit: agentWireLimits.batchRows,
           maxBytes: agentWireLimits.batchBytes,
           ...(signal === undefined ? {} : { signal }),
@@ -326,7 +336,7 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
         await transport.ready;
         await run(operation.signal);
       } catch (error) {
-        if (!operation.signal.aborted) {
+        if (!operation.signal.aborted && !(error instanceof AgentHostWorkerError && error.code === 'LEADERSHIP_LOST')) {
           transportFailure ??= toWorkerError(error, 'WORKER_STREAM_FAILED');
         }
       } finally {
@@ -343,13 +353,20 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
   };
 
   const follow: AgentHostClient['subscribe'] = (...parameters) => {
-    const [{ chatId, cursor: from, last: initialLast }, listener, onEnded, onAnswer] = parameters;
+    const [
+      { chatId, cursor: from, last: initialLast, sourceGeneration: initialGeneration, sourceHealth: initialHealth },
+      listener,
+      onEnded,
+      onAnswer,
+    ] = parameters;
     return consume(async (signal) => {
       let cursor = from;
       let last = initialLast;
+      let sourceGeneration = initialGeneration;
+      let sourceHealth = initialHealth;
       while (!signal.aborted) {
         // oxlint-disable-next-line no-await-in-loop -- one outstanding long-poll read per chat (SC-R14).
-        const answer = await read({ chatId, cursor, last }, signal);
+        const answer = await read({ chatId, cursor, last, sourceGeneration, sourceHealth }, signal);
         if (isAborted(signal)) {
           return;
         }
@@ -359,6 +376,8 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
             // SC-R12: never a clamp; the reader starts over, and the projection drops rows it already holds.
             cursor = 0;
             last = undefined;
+            sourceGeneration = undefined;
+            sourceHealth = undefined;
             continue;
           }
           throw new AgentHostWorkerError(
@@ -376,6 +395,8 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
         }
         cursor = answer.nextCursor;
         last = projectedLast ?? last;
+        sourceGeneration = answer.sourceGeneration;
+        sourceHealth = answer.sourceHealth;
       }
     }, onEnded);
   };
@@ -391,6 +412,30 @@ export const createAgentHostClient = (transport: AgentHostTransport): AgentHostC
   return {
     hostCommand: async (command) => guarded(async () => transport.execute(command), 'WORKER_PROTOCOL_FAILED'),
     read: async (input) => read(input),
+    catchUp: async function* catchUp(input) {
+      const operation = new AbortController();
+      const signal = input.signal === undefined ? operation.signal : AbortSignal.any([operation.signal, input.signal]);
+      streamSubscriptions.add(operation);
+      const release = (): void => {
+        streamSubscriptions.delete(operation);
+      };
+      signal.addEventListener('abort', release, { once: true });
+      try {
+        await guarded(async () => transport.ready, 'WORKER_PROTOCOL_FAILED');
+        signal.throwIfAborted();
+        for await (const frame of transport.catchUp({ ...input, signal })) {
+          signal.throwIfAborted();
+          yield frame;
+        }
+      } catch (error) {
+        if (!signal.aborted) {
+          throw toWorkerError(error, 'WORKER_STREAM_FAILED');
+        }
+      } finally {
+        signal.removeEventListener('abort', release);
+        release();
+      }
+    },
     subscribe: follow,
     subscribeLive: (chatId, listener, onEnded) =>
       consume(async (signal) => {

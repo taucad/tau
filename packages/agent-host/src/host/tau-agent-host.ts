@@ -5,6 +5,7 @@
  * remaining callers.
  */
 
+import { sameSourceHealth } from '#log/projection-facts.js';
 import { waitFor } from 'xstate';
 
 import { createTurnContextSnapshot } from '#harness/cad-middleware.js';
@@ -40,6 +41,7 @@ import {
   chatRunState,
   emptyChatLedger,
   foldChatLedger,
+  foldPhysicalChatLedger,
   gateRows,
   isForeignInvocation,
   isRepeatSettlement,
@@ -945,7 +947,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       return store.ledger;
     }
     const log = await logOf(chatId);
-    const read = foldChatLedger(emptyChatLedger, await log.read());
+    const read = foldPhysicalChatLedger(emptyChatLedger, await log.read());
     // `read` returns rows only; a quarantined line the ledger never saw still breaks the history (CL-S2).
     const folded = (await log.historyIntact()) ? read : { ...read, historyIntact: false };
     store.ledger = folded;
@@ -974,17 +976,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /** Resolves on the chat's next durable row, the host closing, or `signal`. */
-  const nextRow = async (chatId: string, signal?: AbortSignal): Promise<void> =>
-    new Promise<void>((resolve) => {
-      const store = storeOf(chatId);
-      const woken = (): void => {
-        store.readers.delete(woken);
-        signal?.removeEventListener('abort', woken);
-        resolve();
-      };
-      store.readers.add(woken);
-      signal?.addEventListener('abort', woken, { once: true });
-    });
+  const nextRow = (chatId: string, signal?: AbortSignal): Readonly<{ promise: Promise<void>; release(): void }> => {
+    const waiting = Promise.withResolvers<void>();
+    const store = storeOf(chatId);
+    const release = (): void => {
+      store.readers.delete(release);
+      signal?.removeEventListener('abort', release);
+      waiting.resolve();
+    };
+    store.readers.add(release);
+    signal?.addEventListener('abort', release, { once: true });
+    if (signal?.aborted) {
+      release();
+    }
+    return { promise: waiting.promise, release };
+  };
 
   /* D13: a run edits only through its placement's lease, so a host with no placement runs none. */
   const refuseUnplaced = (): void => {
@@ -1408,10 +1414,25 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const store = storeOf(chatId);
       store.live.add(attemptKeyOf(key));
       const append = driverAppender({ chatId, key, leaderEpoch });
+      const opening = logOf(chatId);
+      const capturedLog = store.log;
+      const capturedDeliver = store.deliver;
+      const publishLive = (event: AgentLiveEvent): void | Promise<void> => {
+        if (
+          closed ||
+          store.log !== capturedLog ||
+          capturedDeliver === undefined ||
+          store.deliver !== capturedDeliver ||
+          !store.live.has(attemptKeyOf(key))
+        ) {
+          return;
+        }
+        return options.onLiveEvent?.(event);
+      };
       if (kind === 'external') {
         return deferredDriver(
           (async () => {
-            const log = await logOf(chatId);
+            const log = await opening;
             const events = await log.read();
             const admission = admittedRowOf(events, runId)?.admission;
             const marker = externalTurnOf(events)?.marker;
@@ -1474,7 +1495,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
                 /* Session state the agent reports between prompts outlives the attempt: not gated by it (VSC3). */
                 appendSession: driverAppender({ chatId, key, leaderEpoch, gated: false }),
                 publishLive: async (event) => {
-                  await options.onLiveEvent?.({ ...event, chatId, runId });
+                  await publishLive({ ...event, chatId, runId });
                 },
                 remember,
               },
@@ -1488,7 +1509,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       }
       return deferredDriver(
         (async () => {
-          const log = await logOf(chatId);
+          const log = await opening;
           const events = await log.read();
           const admission = admittedRowOf(events, runId)?.admission;
           const resumed = events.findLast(
@@ -1536,7 +1557,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               createId,
               now,
               onCompaction: options.onCompaction,
-              onLiveEvent: options.onLiveEvent,
+              onLiveEvent: publishLive,
               clock: options.clock,
               streamStall: options.delays?.streamStall,
             });
@@ -1932,7 +1953,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           throw coded('HOST_CLOSED' satisfies RefusalCode, 'The Tau agent host is closed.');
         }
         // oxlint-disable-next-line no-await-in-loop -- as above.
-        await nextRow(chatId);
+        await nextRow(chatId).promise;
       }
     },
     resolveInterrupt: async ({ runId, commandId, ...resolution }) => {
@@ -2001,6 +2022,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     },
     read: async ({ signal, ...request }) => {
       assertOpen();
+      signal?.throwIfAborted();
       const { chatId } = request;
       for (;;) {
         if (registry.isFenced(chatId)) {
@@ -2008,23 +2030,46 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
         /* SC-R14: register the wake before reading, so a row appended while the read is in flight is not missed. */
         const woken = nextRow(chatId, signal);
-        // oxlint-disable-next-line no-await-in-loop -- a long poll re-reads after each wake.
-        const answer = await readBatchOf(chatId, request);
-        if (answer.status === 'refused') {
-          return { status: 'refused', chatId, reason: answer.reason, expected: answer.expected };
+        try {
+          // The existing chat queue owns append/dropLog as well as this bounded observation; parking stays outside it.
+          // oxlint-disable-next-line no-await-in-loop -- a long poll re-observes after each wake.
+          const answer = await serial(chatId, async (): Promise<ReadAnswer> => {
+            signal?.throwIfAborted();
+            const log = await logOf(chatId);
+            const ledger = await ledgerOf(chatId);
+            const batch = await log.readBatch(request);
+            if (batch.status === 'refused') {
+              return { status: 'refused', chatId, reason: batch.reason, expected: batch.expected };
+            }
+            const [intact, anomalies] = await Promise.all([log.historyIntact(), log.anomalies()]);
+            return {
+              status: 'batch',
+              chatId,
+              cursor: batch.cursor,
+              nextCursor: batch.nextCursor,
+              endCursor: batch.endCursor,
+              events: [...batch.events],
+              sourceHealth: {
+                historyIntact: ledger.historyIntact && intact,
+                newerHistory: ledger.newerHistory,
+                quarantined: anomalies.some((anomaly) => anomaly.kind === 'quarantined'),
+              },
+            };
+          });
+          if (
+            answer.status === 'refused' ||
+            answer.events.length > 0 ||
+            !sameSourceHealth(request.sourceHealth, answer.sourceHealth) ||
+            closed ||
+            signal?.aborted
+          ) {
+            return answer;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one park per empty read.
+          await woken.promise;
+        } finally {
+          woken.release();
         }
-        if (answer.events.length > 0 || closed || signal?.aborted) {
-          return {
-            status: 'batch',
-            chatId,
-            cursor: answer.cursor,
-            nextCursor: answer.nextCursor,
-            endCursor: answer.endCursor,
-            events: [...answer.events],
-          };
-        }
-        // oxlint-disable-next-line no-await-in-loop -- one park per empty read.
-        await woken;
       }
     },
     readEvents: async ({ chatId, cursor, limit, maxBytes }) => {

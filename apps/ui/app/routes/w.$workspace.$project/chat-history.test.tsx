@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useImperativeHandle } from 'react';
+import { StrictMode, useImperativeHandle } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import type { MyUIMessage } from '@taucad/chat';
@@ -497,6 +497,71 @@ describe('ChatHistory — turn group rendering', () => {
 
     expect(capturedVirtuoso.totalCount).toBe(3);
     expect(typeof capturedVirtuoso.itemContent).toBe('function');
+  });
+
+  it('opens hydrated history after StrictMode cancels the first pending scroll frame', () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let frameId = 0;
+    const requestSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      frameId += 1;
+      frames.set(frameId, callback);
+      return frameId;
+    });
+    const cancelSpy = vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation((id) => {
+      frames.delete(id);
+    });
+    try {
+      setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
+      render(
+        <StrictMode>
+          <ChatHistory />
+        </StrictMode>,
+      );
+      act(() => {
+        for (const [id, callback] of frames) {
+          frames.delete(id);
+          callback(0);
+        }
+      });
+      expect(cancelSpy).toHaveBeenCalled();
+      expect(scrollToIndexMock).toHaveBeenCalledExactlyOnceWith({ index: 'LAST', align: 'start', behavior: 'instant' });
+    } finally {
+      requestSpy.mockRestore();
+      cancelSpy.mockRestore();
+    }
+  });
+
+  it('opens an already hydrated transcript at its latest turn without repinning same-turn output', () => {
+    const callbacks: FrameRequestCallback[] = [];
+    const requestAnimationFrameSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    });
+    try {
+      setMockMessages([
+        message('u1', 'user'),
+        message('a1', 'assistant'),
+        message('u2', 'user'),
+        message('a2', 'assistant'),
+      ]);
+      const view = render(<ChatHistory />);
+      act(() => {
+        callbacks.at(-1)?.(0);
+      });
+      expect(scrollToIndexMock).toHaveBeenCalledExactlyOnceWith({ index: 'LAST', align: 'start', behavior: 'instant' });
+      expect(capturedVirtuoso.followOutput?.(false)).toBe(false);
+      setMockMessages([
+        message('u1', 'user'),
+        message('a1', 'assistant'),
+        message('u2', 'user'),
+        message('a2', 'assistant'),
+      ]);
+      view.rerender(<ChatHistory className='same-turn-updated' />);
+      expect(scrollToIndexMock).toHaveBeenCalledTimes(1);
+      expect(callbacks).toHaveLength(1);
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+    }
   });
 
   it('uses instant live following and pins a batched user plus assistant turn', () => {

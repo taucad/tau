@@ -1,3 +1,14 @@
+export { projectionFactSchema, projectionSourceHealthSchema, projectionBatchSchema } from '#log/projection-facts.js';
+export type {
+  ProjectionFact,
+  KnownProjectionFact,
+  KnownProjectionEvent,
+  ProjectionEffect,
+  ProjectionSourceHealth,
+  ProjectionBatch,
+} from '#log/projection-facts.js';
+export { foldProjectionFacts } from '#log/chat-ledger.js';
+export type { FoldProjectionFactsInput } from '#log/chat-ledger.js';
 export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
@@ -104,6 +115,7 @@ export type { PromptCacheControl } from '#log/event-types.js';
 export type {
   DurableEventLog,
   AgentLiveEvent,
+  SourceLiveEvent,
   HostRun,
   HostRunFailure,
   HostRunSnapshot,

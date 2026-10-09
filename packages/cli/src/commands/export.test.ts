@@ -182,6 +182,7 @@ describe('exportCommand', () => {
     expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: { width: 150 },
+      watch: false,
     });
     expect(exportFunction).toHaveBeenCalledWith('glb', {});
     expect(closeDocument).toHaveBeenCalledOnce();
@@ -203,6 +204,7 @@ describe('exportCommand', () => {
     expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: { width: '20in' },
+      watch: false,
     });
     expect(exportFunction).toHaveBeenCalledWith('glb', {});
   });
@@ -331,6 +333,7 @@ describe('exportCommand', () => {
         label: '',
         nested: { values: [1, 'two', false] },
       },
+      watch: false,
     });
     expect(exportFunction).toHaveBeenCalledWith('glb', {
       options: {
@@ -357,6 +360,7 @@ describe('exportCommand', () => {
     expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: {},
+      watch: false,
     });
     expect(exportFunction).toHaveBeenCalledWith('glb', {
       options: {},
@@ -627,6 +631,7 @@ describe('exportCommand', () => {
     expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: {},
+      watch: false,
     });
     expect(exportFunction).toHaveBeenCalledWith('usda', {});
   });

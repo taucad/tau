@@ -4,7 +4,7 @@ import type { ProviderMessage } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { ChatSessionStore } from '#services/chat-session-store.js';
-import { lifecycleRow, logRow, publishLogRows } from '#machines/chat-projection.fixture.js';
+import { lifecycleRow, logRow, publishLogRows, writerOwnedCatchUp } from '#machines/chat-projection.fixture.js';
 
 const visible = (messages: readonly MyUIMessage[]): Array<{ id: string; text: string }> =>
   messages.map((message) => ({
@@ -12,7 +12,9 @@ const visible = (messages: readonly MyUIMessage[]): Array<{ id: string; text: st
     text: message.parts.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join(''),
   }));
 
-const createStore = (): ChatSessionStore => {
+const createStore = (
+  foreign?: Readonly<{ readdir: () => Promise<string[]>; readFile: () => Promise<Uint8Array<ArrayBuffer>> }>,
+): ChatSessionStore => {
   const store = new ChatSessionStore();
   const missing = async (): Promise<never> => {
     throw Object.assign(new Error('Missing record'), { code: 'ENOENT' });
@@ -31,8 +33,9 @@ const createStore = (): ChatSessionStore => {
     consumeChatStartupRequest: async () => undefined,
     commitCancelledDraftRestore: async () => undefined,
     client: {
-      readFile: missing,
-      readdir: async () => [],
+      readFile: async (path) =>
+        foreign !== undefined && path.endsWith('/peer.jsonl') ? foreign.readFile() : missing(),
+      readdir: foreign?.readdir ?? (async () => []),
       exists: async () => false,
       writeFile: async () => undefined,
       rmdir: async () => undefined,
@@ -43,6 +46,88 @@ const createStore = (): ChatSessionStore => {
 };
 
 describe('ChatSessionStore with the pinned real SDK', () => {
+  it.each(['running', 'paused'] as const)(
+    'should defer foreign storage refresh during %s until the host settles while preserving active local output',
+    async (phase) => {
+      const encode = new TextEncoder();
+      let foreignRows: readonly unknown[] = [];
+      const readFile = vi.fn(async () =>
+        encode.encode(foreignRows.map((row) => JSON.stringify(row)).join('\n') + '\n'),
+      );
+      const store = createStore({ readdir: async () => (foreignRows.length === 0 ? [] : ['peer.jsonl']), readFile });
+      const { chat } = store.acquire('chat', 'project');
+      await vi.waitFor(() => {
+        expect(store.get('chat')?.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      publishLogRows(store, 'chat', [
+        {
+          ...lifecycleRow(0, 'admitted', 'local'),
+          admission: {
+            kind: 'tau',
+            turnId: 'local-u',
+            message: { id: 'local-u', role: 'user', content: 'Local prompt' },
+          },
+        },
+        lifecycleRow(1, 'running', 'local'),
+        logRow(2, {
+          runId: 'local',
+          type: 'message.appended',
+          message: { id: 'local-a', role: 'assistant', content: [{ type: 'text', text: 'Held local output' }] },
+        }),
+      ]);
+      await vi.waitFor(() => {
+        expect(visible(chat.messages).map((message) => message.text)).toContain('Held local output');
+      });
+      foreignRows = [
+        {
+          ...lifecycleRow(0, 'admitted', 'foreign'),
+          leaderEpoch: 'peer',
+          recordedAt: '2026-09-27T00:00:00.000Z',
+          admission: {
+            kind: 'tau',
+            turnId: 'peer-u',
+            message: { id: 'peer-u', role: 'user', content: 'Foreign prompt' },
+          },
+        },
+        { ...lifecycleRow(1, 'running', 'foreign'), leaderEpoch: 'peer' },
+        {
+          ...logRow(2, {
+            runId: 'foreign',
+            type: 'message.appended',
+            message: { id: 'peer-a', role: 'assistant', content: [{ type: 'text', text: 'Unique foreign answer' }] },
+          }),
+          leaderEpoch: 'peer',
+        },
+        { ...lifecycleRow(3, 'completed', 'foreign'), leaderEpoch: 'peer' },
+      ];
+      if (phase === 'paused') {
+        publishLogRows(store, 'chat', [lifecycleRow(3, 'paused', 'local')], 3);
+        await vi.waitFor(() => {
+          expect(chat.status).toBe('ready');
+        });
+      }
+      const terminalCursor = phase === 'paused' ? 4 : 3;
+      try {
+        await store.refreshFromStorage('chat');
+        expect(readFile).not.toHaveBeenCalled();
+        expect(visible(chat.messages).map((message) => message.text)).toContain('Held local output');
+        publishLogRows(store, 'chat', [lifecycleRow(terminalCursor, 'completed', 'local')], terminalCursor);
+        await vi.waitFor(() => {
+          expect(visible(chat.messages).map((message) => message.text)).toEqual([
+            'Foreign prompt',
+            'Unique foreign answer',
+            'Local prompt',
+            'Held local output',
+          ]);
+        });
+        expect(readFile).toHaveBeenCalledTimes(1);
+      } finally {
+        publishLogRows(store, 'chat', [lifecycleRow(terminalCursor + 1, 'completed', 'local')], terminalCursor + 1);
+        store.release('chat');
+      }
+    },
+  );
+
   it.each([
     { kind: 'text', checkpoint: false },
     { kind: 'thinking', checkpoint: false },
@@ -63,11 +148,14 @@ describe('ChatSessionStore with the pinned real SDK', () => {
       const hostCommand = vi.fn<AgentHostClient['hostCommand']>();
       const connect = async () => ({
         hostCommand,
+        catchUp: writerOwnedCatchUp,
         read: vi.fn<AgentHostClient['read']>(),
         subscribe: (...parameters: Parameters<AgentHostClient['subscribe']>) => {
           queueMicrotask(() => {
             parameters[3]?.({
               status: 'batch',
+              sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+              sourceGeneration: 'writer-live',
               chatId: 'chat',
               cursor: parameters[0].cursor,
               nextCursor: startCursor,
@@ -126,7 +214,13 @@ describe('ChatSessionStore with the pinned real SDK', () => {
         expect(deliverLive).toBeDefined();
         expect(chat.messages[0]?.id).toBe('u');
       });
-      const identity = { chatId: 'chat', runId: 'run_1', messageId: 'assistant-1', contentIndex: 0 };
+      const identity = {
+        sourceGeneration: 'writer-live',
+        chatId: 'chat',
+        runId: 'run_1',
+        messageId: 'assistant-1',
+        contentIndex: 0,
+      };
       deliverLive?.('chat', {
         ...identity,
         type: kind === 'text' ? 'text-delta' : 'thinking-delta',

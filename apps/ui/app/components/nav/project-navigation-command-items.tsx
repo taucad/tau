@@ -15,14 +15,35 @@ const hasSlugs = (
 ): project is ProjectListItem & { slugs: NonNullable<ProjectListItem['slugs']> } => project.slugs !== undefined;
 
 function ProjectThumbnail({ projectId }: { readonly projectId: string }): React.JSX.Element {
-  const thumbnailSource = useProjectThumbnail(projectId);
-  return <CommandPaletteThumbnail src={thumbnailSource} fallback={<Folder aria-hidden />} />;
+  const thumbnail = useProjectThumbnail(projectId);
+  useCommandPaletteItems(
+    `thumbnail-health-${projectId}`,
+    () =>
+      thumbnail.status === 'error' || thumbnail.status === 'closed'
+        ? [
+            {
+              id: `retry-thumbnail-${projectId}`,
+              label: 'Retry project thumbnail',
+              detail: thumbnail.error,
+              group: 'Projects',
+              icon: <Folder aria-hidden />,
+              action: thumbnail.refresh,
+            },
+          ]
+        : [],
+    [projectId, thumbnail.status, thumbnail.error, thumbnail.refresh],
+  );
+  return (
+    <span title={thumbnail.error}>
+      <CommandPaletteThumbnail src={thumbnail.url} fallback={<Folder aria-hidden />} />
+    </span>
+  );
 }
 
 /** Registers every navigable project and non-deleted chat with global search. */
 export function ProjectNavigationCommandItems(): undefined {
-  const { projects } = useProjects();
-  const { chats } = useAllChats();
+  const { projects, error: projectError, retry: retryProjects } = useProjects();
+  const { chats, error: chatError, retry: retryChats } = useAllChats();
   const navigableProjects = useMemo(
     () =>
       projects
@@ -38,6 +59,34 @@ export function ProjectNavigationCommandItems(): undefined {
   useCommandPaletteItems(
     'project-navigation',
     (): CommandPaletteItem[] => [
+      ...(projectError
+        ? [
+            {
+              id: 'retry-project-observation',
+              label: 'Retry project updates',
+              detail: projectError.message,
+              group: 'Projects',
+              icon: <Folder aria-hidden />,
+              action: () => {
+                void retryProjects();
+              },
+            },
+          ]
+        : []),
+      ...(chatError
+        ? [
+            {
+              id: 'retry-chat-observation',
+              label: 'Retry chat updates',
+              detail: chatError.message,
+              group: 'Chats',
+              icon: <MessageSquare aria-hidden />,
+              action: () => {
+                void retryChats();
+              },
+            },
+          ]
+        : []),
       ...navigableProjects.map((project) => ({
         id: `project-${project.id}`,
         label: project.name,
@@ -65,7 +114,7 @@ export function ProjectNavigationCommandItems(): undefined {
         ];
       }),
     ],
-    [chats, navigableProjects, projectsById],
+    [chats, navigableProjects, projectsById, projectError, chatError, retryProjects, retryChats],
   );
 
   return undefined;

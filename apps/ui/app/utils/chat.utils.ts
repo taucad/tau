@@ -544,7 +544,7 @@ export function serializeMessage(message: MyUIMessage): string {
  * @param title - Title for the transcript (e.g. the chat name)
  * @returns Markdown transcript string
  */
-export function serializeTranscript(messages: MyUIMessage[], title: string): string {
+export function serializeTranscript(messages: readonly MyUIMessage[], title: string): string {
   const exportDate = formatExportDate(new Date());
   const header = `# ${title}\n\n_Exported on ${exportDate} from ${metaConfig.userAgent}_`;
 

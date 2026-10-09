@@ -242,7 +242,7 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
   });
 
   it('should admit ACP images and PDFs offline without using the stale Tau model', () => {
-    mockActiveModel = { ...makeResolvedModel('anthropic-claude-haiku-4.5'), isResolved: false, model: undefined };
+    mockActiveModel = { ...makeResolvedModel('anthropic-claude-haiku-5.5'), isResolved: false, model: undefined };
     draftState = {
       ...defaultDraftState,
       draftAttachments: [storedRef({ hash: 'a'.repeat(64), mediaType: 'image/png' })],

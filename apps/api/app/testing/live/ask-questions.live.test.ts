@@ -41,7 +41,7 @@ import { expectCompleted, toolCalls } from '#testing/live/live-assertions.js';
  * decision instead of modelling for real.
  */
 
-const modelId = 'anthropic-claude-haiku-4.5';
+const modelId = 'anthropic-claude-haiku-5.5';
 
 const memoryRecord = (): QuestionRecordFileSystem & { readonly files: Map<string, string> } => {
   const files = new Map<string, string>();

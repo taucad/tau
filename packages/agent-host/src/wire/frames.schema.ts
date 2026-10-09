@@ -3,24 +3,23 @@
  */
 
 import { z } from 'zod';
+import { agentWireLimits } from '#wire/limits.js';
 
+import { projectionBatchSchema, projectionSourceHealthSchema } from '#log/projection-facts.js';
 import { jsonValueSchema } from '#log/event-schema.js';
 import type { JsonValue } from '#log/event-types.js';
-import type { AgentLiveEvent } from '#waist/ports.js';
+import type { SourceLiveEvent } from '#waist/ports.js';
 import { chatIdSchema, commandAnswerSchema, commandFrameSchema, commandVerbs } from '#wire/commands.schema.js';
 import type { CommandAnswer, CommandFrame, CommandVerb } from '#wire/commands.schema.js';
 
 /** The agent protocol version the rpc hello carries as `wire`; today's unversioned protocol counts as 1. @public */
-export const agentWireVersion = 2;
+export const agentWireVersion = 3;
 
 /** The owner's hello payload: its agent protocol version and build, compared for equality (I32). @public */
 export const agentWireHelloSchema = z.strictObject({ wire: z.literal(agentWireVersion), build: z.string().min(1) });
 
 /** The owner's hello. @public */
 export type AgentWireHello = z.infer<typeof agentWireHelloSchema>;
-
-/** Upper bounds a reader may ask for: rows per batch, and serialized bytes per batch. @public */
-export const agentWireLimits = { batchRows: 16, batchBytes: 1_048_576 } as const;
 
 const position = z.number().int().nonnegative();
 const chatId = chatIdSchema;
@@ -38,6 +37,9 @@ export const readRequestSchema = z.strictObject({
   chatId,
   cursor: position,
   last: rowKeySchema.optional(),
+  /** Source identity acquired at cursor zero; launchers refuse a missing/stale token at positive cursors. */
+  sourceGeneration: z.string().min(1).optional(),
+  sourceHealth: projectionSourceHealthSchema.optional(),
   limit: z.number().int().positive().max(agentWireLimits.batchRows),
   maxBytes: z.number().int().positive().max(agentWireLimits.batchBytes),
 });
@@ -62,6 +64,8 @@ export const readAnswerSchema = z.discriminatedUnion('status', [
       cursor: position,
       nextCursor: position,
       endCursor: position,
+      sourceGeneration: z.string().min(1).optional(),
+      sourceHealth: projectionSourceHealthSchema,
       events: z.array(z.unknown()),
     })
     .refine((batch) => batch.nextCursor === batch.cursor + batch.events.length && batch.endCursor >= batch.nextCursor, {
@@ -77,6 +81,7 @@ export const readAnswerSchema = z.discriminatedUnion('status', [
         endCursor: position.optional(),
         last: rowKeySchema.optional(),
         generation: z.number().int().positive().optional(),
+        sourceGeneration: z.string().min(1).optional(),
       })
       .optional(),
   }),
@@ -92,6 +97,41 @@ const liveEventBase = {
   contentIndex: z.number().int().nonnegative(),
 };
 const liveToolEventBase = { ...liveEventBase, toolCallId: z.string().min(1), toolName: z.string().min(1) };
+
+/** One immutable catch-up stream request; cursor and source are captured by its owner. @public */
+export const catchUpRequestSchema = readRequestSchema.pick({ chatId: true, limit: true, maxBytes: true });
+/** The portable request for one catch-up lease. @public */
+export type CatchUpRequest = z.infer<typeof catchUpRequestSchema>;
+/** Catch-up request with consumer-local cancellation. @public */
+export type CatchUpInput = CatchUpRequest & { readonly signal?: AbortSignal | undefined };
+/** A captured end position validated against current authoritative bytes. @public */
+export const catchUpPositionSchema = z.strictObject({
+  cursor: position,
+  last: rowKeySchema.optional(),
+  sourceGeneration: z.string().min(1),
+});
+/** Provisional pages become publishable only after their matching validated marker. @public */
+export const catchUpFrameSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('page'),
+    answer: projectionBatchSchema,
+  }),
+  z.strictObject({
+    type: z.literal('validated'),
+    position: catchUpPositionSchema,
+    observedEndCursor: position,
+    health: projectionSourceHealthSchema,
+  }),
+  z.strictObject({
+    type: z.literal('refused'),
+    answer: z.union([
+      readAnswerSchema.options[1],
+      z.strictObject({ status: z.literal('refused'), chatId, reason: z.enum(['capacity-exceeded', 'writer-owned']) }),
+    ]),
+  }),
+]);
+/** One immutable catch-up page, validation marker or refusal. @public */
+export type CatchUpFrame = z.infer<typeof catchUpFrameSchema>;
 
 /** One ephemeral model delta (`liveEvents`); `offset` is optional on both legs and only ACP produces it (drift 8). @public */
 export const agentLiveEventSchema = z.discriminatedUnion('type', [
@@ -123,6 +163,12 @@ export const agentLiveEventSchema = z.discriminatedUnion('type', [
     output: jsonValueSchema,
     isError: z.boolean(),
   }),
+]);
+
+/** A current-protocol live delta carrying its authoritative writer incarnation. @public */
+export const sourceLiveEventSchema = z.discriminatedUnion('type', [
+  agentLiveEventSchema.options[0].extend({ sourceGeneration: z.string().min(1) }),
+  ...agentLiveEventSchema.options.slice(1).map((schema) => schema.extend({ sourceGeneration: z.string().min(1) })),
 ]);
 
 /** One revision-root projection or page-facing outcome, served beside the agent verbs on the daemon leg. @public */
@@ -158,7 +204,8 @@ export type AgentWireProtocol = {
   };
   readonly notifies: Record<never, never>;
   readonly listens: {
-    readonly liveEvents: { args: Readonly<{ chatId: string }>; event: AgentLiveEvent };
+    readonly catchUp: { args: CatchUpRequest; event: CatchUpFrame };
+    readonly liveEvents: { args: Readonly<{ chatId: string }>; event: SourceLiveEvent };
     readonly revisionEvents: { args: undefined; wireArgs: unknown; event: AgentChannelRevisionEvent };
   };
 };
@@ -185,7 +232,8 @@ export const agentWireProtocolSchemas = {
   },
   notifies: {},
   listens: {
-    liveEvents: { args: z.strictObject({ chatId }), event: agentLiveEventSchema },
+    catchUp: { args: catchUpRequestSchema, event: catchUpFrameSchema },
+    liveEvents: { args: z.strictObject({ chatId }), event: sourceLiveEventSchema },
     revisionEvents: { args: z.null(), event: agentChannelRevisionEventSchema },
   },
 };

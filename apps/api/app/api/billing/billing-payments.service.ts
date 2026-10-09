@@ -4125,12 +4125,20 @@ export class BillingPaymentsService {
       if (binding === undefined) throw new Error('Customer binding disappeared');
       if (binding.stripeCustomerId !== null) return { binding, dispatch: false, leg: undefined };
       const existing = await tx
-        .select()
+        .select({
+          leg: billingProviderLeg,
+          dispatching: sql<boolean>`coalesce(${billingProviderLeg.state} = 'dispatched' and ${billingProviderLeg.leaseUntil} > clock_timestamp(), false)`,
+        })
         .from(billingProviderLeg)
         .where(and(eq(billingProviderLeg.customerBindingId, binding.id), eq(billingProviderLeg.kind, 'customer')))
         .limit(1)
         .for('update');
-      if (existing[0] !== undefined) return { binding, dispatch: false, leg: existing[0] };
+      /* Another request's create is still inside its dispatch lease, so Stripe may not have answered it. Searching for
+       * its Customer now would race that create: search lags a new Customer, and a burst of first purchases would
+       * become a burst of searches Stripe rate-limits. The request reports the creation as unresolved instead, as it
+       * does when a search misses, and a retry finds the Customer bound. */
+      if (existing[0]?.dispatching === true) throw new ConflictException({ code: 'customer_creation_outcome_unknown' });
+      if (existing[0] !== undefined) return { binding, dispatch: false, leg: existing[0].leg };
       const legId = randomUUID();
       // Stripe addresses receipts, invoices and the portal to the Customer's email, and Checkout prefills it.
       const [contact] = await tx
@@ -4163,6 +4171,8 @@ export class BillingPaymentsService {
           idempotencyKey: `tau:${legId}`,
           state: 'dispatched',
           dispatchStartedAt: new Date(),
+          // Outlasts this request's create, which Stripe answers or times out within seconds.
+          leaseUntil: sql`date_trunc('milliseconds', clock_timestamp()) + interval '30 seconds'`,
           nextAttemptAt: new Date(),
         })
         .returning();

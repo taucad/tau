@@ -95,6 +95,10 @@ let taxTransactionPosts = 0;
 let paymentIntentFixtureId = 'pi_foundation_paid';
 let paymentChargeFixtureId = 'ch_foundation_paid';
 let ambiguousCustomerSearch = false;
+/** Milliseconds Stripe takes to answer a Customer create, so concurrent first purchases overlap it. */
+let customerCreateLatency = 0;
+/** Stripe refuses Customer searches with a 429, as it refuses part of a burst of them. */
+let customerSearchRateLimited = false;
 // Hosted Checkout saves a card without setting the customer's invoice default.
 let customerInvoiceDefaultCard = true;
 const foundationCard = {
@@ -204,17 +208,27 @@ const server = createServer((request, response) => {
         tau_customer_binding_id: form.get('metadata[tau_customer_binding_id]') ?? '',
       };
       latestCustomerContact = { email: form.get('email') ?? undefined, name: form.get('name') ?? undefined };
-      response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(
-        JSON.stringify({
-          id: latestCustomerId,
-          object: 'customer',
-          address: latestCustomerAddress,
-          livemode: false,
-          metadata: latestCustomerMetadata,
-        }),
-      );
+      const customer = JSON.stringify({
+        id: latestCustomerId,
+        object: 'customer',
+        address: latestCustomerAddress,
+        livemode: false,
+        metadata: latestCustomerMetadata,
+      });
+      setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(customer);
+      }, customerCreateLatency);
     });
+    return;
+  }
+  if (request.method === 'GET' && url.pathname === '/v1/customers/search' && customerSearchRateLimited) {
+    response.writeHead(429, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        error: { type: 'invalid_request_error', code: 'rate_limit', message: 'Request rate limit exceeded.' },
+      }),
+    );
     return;
   }
   if (url.pathname === '/v1/tax/calculations' && request.method === 'POST') {
@@ -737,6 +751,66 @@ describe('billing payments PostgreSQL foundation', () => {
       .where(and(eq(billingPurchase.accountId, owner!.accountId), eq(billingPurchase.requestId, requestId)));
     expect(purchases).toHaveLength(1);
     expect(requests.filter((request) => request === 'POST /v1/customers')).toHaveLength(1);
+  });
+
+  // Staging, 2026-10-09: 50 concurrent first top-ups answered one 200, 47 409s and two 500s.
+  it('should answer concurrent first top-ups with one prepared action and typed conflicts only', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Concurrent Top-ups', email: `${userId}@test.invalid`, emailVerified: true });
+    const posts = requests.filter((request) => request === 'POST /v1/customers').length;
+    const searches = requests.filter((request) => request === 'GET /v1/customers/search').length;
+    // Stripe takes a moment to create the Customer, and refuses the burst of searches waiting requests would send.
+    customerCreateLatency = 250;
+    customerSearchRateLimited = true;
+    const settled = await Promise.allSettled(
+      Array.from({ length: 50 }, async () =>
+        payments.prepareTopup(userId, {
+          requestId: randomUUID(),
+          returnPath: '/settings/billing',
+          amountMinor: '537',
+          method: 'checkout',
+        }),
+      ),
+    ).finally(() => {
+      customerCreateLatency = 0;
+      customerSearchRateLimited = false;
+    });
+    const answers = settled.map((result) => {
+      if (result.status === 'fulfilled') {
+        return result.value.state;
+      }
+      const reason: unknown = result.reason;
+      if (!(reason instanceof ConflictException)) {
+        return reason;
+      }
+      const body = reason.getResponse();
+      return typeof body === 'object' && 'code' in body ? body.code : body;
+    });
+    expect(answers.filter((answer) => answer === 'prepared')).toHaveLength(1);
+    // Requests that arrive while the Customer create is in flight are refused before any search.
+    expect(answers).toContain('customer_creation_outcome_unknown');
+    expect(
+      answers.filter(
+        (answer) =>
+          answer !== 'prepared' &&
+          answer !== 'action_already_pending' &&
+          answer !== 'customer_creation_outcome_unknown',
+      ),
+    ).toEqual([]);
+    const [owner] = await database
+      .select()
+      .from(billingOwnerBinding)
+      .where(and(eq(billingOwnerBinding.authUserId, userId), eq(billingOwnerBinding.environment, 'development')));
+    const purchases = await database
+      .select()
+      .from(billingPurchase)
+      .where(eq(billingPurchase.accountId, owner?.accountId ?? ''));
+    expect(purchases.map((purchase) => purchase.state)).toEqual(['prepared']);
+    expect(requests.filter((request) => request === 'POST /v1/customers')).toHaveLength(posts + 1);
+    // A request that finds the Customer still being created answers without asking Stripe for it.
+    expect(requests.filter((request) => request === 'GET /v1/customers/search')).toHaveLength(searches);
   });
 
   it('reclaims expired source and inbox leases with a new generation and rejects a stale claimant write', async () => {

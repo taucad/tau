@@ -149,6 +149,8 @@ async function main(): Promise<void> {
         }
         // Outside the fixture, the deployment's write key performs mutations only where it collects.
         const writeKey = process.env.STRIPE_SECRET_KEY;
+        // A refund goes out only under the operator-held Refunds-Write key; Stripe refuses the create key.
+        const refundKey = process.env.STRIPE_REFUND_SECRET_KEY;
         const collection = protectedKey
           ? null
           : resolveBillingCollection({
@@ -167,9 +169,13 @@ async function main(): Promise<void> {
                 protectedStripe: createBillingStripeClient({ secretKey: protectedKey, fixtureUrl }),
                 fixture: { monthlyPriceId, topupProductId },
               }
-            : writeKey && collection
-              ? { protectedStripe: createBillingStripeClient({ secretKey: writeKey, fixtureUrl }), collection }
-              : {}),
+            : {
+                ...(collection ? { collection } : {}),
+                ...(writeKey && collection
+                  ? { protectedStripe: createBillingStripeClient({ secretKey: writeKey, fixtureUrl }) }
+                  : {}),
+                ...(refundKey ? { refundStripe: createBillingStripeClient({ secretKey: refundKey, fixtureUrl }) } : {}),
+              }),
           environment: financialEnvironmentSchema.parse(environment),
           stripeAccountId,
           livemode: mode === 'true',

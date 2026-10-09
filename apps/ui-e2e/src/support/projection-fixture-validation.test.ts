@@ -52,6 +52,10 @@ describe('immutable projection fixture Node proof', () => {
       fixtureSha256: expected.fixtureSha256,
     });
   });
+  it('keeps the default plain-history anchor when explicit expectations are omitted', () => {
+    const { bytes } = fixture();
+    expect(() => validateProjectionFixtureBytes(bytes)).toThrow('SHA mismatch');
+  });
   it('rejects changed bytes even when the same fixture path would be used', () => {
     const { bytes, expected } = fixture();
     expect(() => validateProjectionFixtureBytes(Buffer.concat([bytes, Buffer.from(' ')]), expected)).toThrow(

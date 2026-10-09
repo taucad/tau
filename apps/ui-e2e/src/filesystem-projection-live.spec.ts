@@ -8,6 +8,7 @@ import {
 } from '@taucad/agent-host';
 import type { ProjectionBenchmarkFixture } from '#support/filesystem-projection.js';
 import { decodeProjectionFile } from '#support/filesystem-projection-writer.js';
+import type { ProjectionClosure } from '#support/filesystem-projection-writer.js';
 import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
@@ -1665,4 +1666,82 @@ for (const byteLength of [256, 65_536]) {
       }),
     );
   });
+}
+
+const toolSeedDirectory = (import.meta as ImportMeta & { readonly env: Readonly<Record<string, string | undefined>> })
+  .env['VITE_TAU_E2E_PROJECTION_TOOL_SEED_DIRECTORY'];
+
+for (const seed of [
+  { bytes: 256, sha256: 'a0d1e0d76752f77e3b5814e704a66203ade349e9902a9fa442c1369f271bb078' },
+  { bytes: 65_536, sha256: 'c02202230f323ee62fa2ab0dc38d73065fddb1c00bd3e450eb82486e4893c3da' },
+]) {
+  test.skipIf(!toolSeedDirectory)(
+    `validates two authentic projection tool turns from ${seed.bytes} byte seed`,
+    async () => {
+      const digest = async (text: string): Promise<string> =>
+        [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))]
+          .map((byte) => byte.toString(16).padStart(2, '0'))
+          .join('');
+      const sourceText = await target.readFixtureText(
+        `${toolSeedDirectory}/projection-tool-seed-${seed.bytes}-closure.json`,
+      );
+      expect(await digest(sourceText)).toBe(seed.sha256);
+      const source = JSON.parse(sourceText) as ProjectionClosure;
+      const histories = source.files.filter((file) => /^\.tau\/chats\/[^/]+\/events\.jsonl$/u.test(file.path));
+      expect(histories).toHaveLength(1);
+      const historyPath = histories[0]!.path;
+      const chatId = historyPath.split('/')[2]!;
+      const original = new TextDecoder().decode(decodeProjectionFile(histories[0]!));
+      const sourceMessages = reduceEventLog(parseEventLog(original));
+      expect(sourceMessages).toHaveLength(8);
+      const history = createProjectionHistory(original, 2);
+      expect(history).toMatchObject({ turns: 2, rows: 34, messages: 16 });
+      const rows = parseEventLog(history.text);
+      const messages = reduceEventLog(rows);
+      const ledger = foldChatLedger(emptyChatLedger, rows);
+      expect(ledger.historyIntact).toBe(true);
+      expect(ledger.anomalies).toEqual([]);
+      expect(Object.keys(ledger.runs)).toHaveLength(2);
+      expect(rows.filter((row) => row.type === 'turn.finalized')).toHaveLength(2);
+      expect(rows.filter((row) => row.type === 'message.envelope-replaced')).toHaveLength(8);
+      const outputs = messages.filter((message) => message.role === 'tool-output');
+      const originalOutputs = sourceMessages.filter((message) => message.role === 'tool-output');
+      const inputs = messages.filter((message) => message.role === 'tool-input');
+      expect(inputs.map((message) => message.toolName)).toEqual([
+        'create_file',
+        'read_file',
+        'create_file',
+        'read_file',
+      ]);
+      expect(outputs.map((message) => message.toolCallId)).toEqual(inputs.map((message) => message.toolCallId));
+      expect(new Set(messages.map((message) => message.id)).size).toBe(16);
+      expect(outputs).toHaveLength(4);
+      expect(new Set(outputs.map((message) => message.toolCallId)).size).toBe(4);
+      expect(outputs.map((message) => message.content)).toEqual([
+        ...originalOutputs.map((message) => message.content),
+        ...originalOutputs.map((message) => message.content),
+      ]);
+      const fixture = await createProjectionBenchmarkFixture(source, chatId, history);
+      expect(fixture.excludedChatDirectories).toEqual([]);
+      expect(fixture.closure.files.filter((file) => file.path !== historyPath)).toEqual(
+        source.files
+          .filter((file) => file.path !== historyPath)
+          .sort((left, right) => left.path.localeCompare(right.path)),
+      );
+      const fixtureText = JSON.stringify(fixture);
+      const artifactName = `projection-tool-${seed.bytes}-two-turns.json`;
+      await target.writeArtifact(artifactName, fixtureText);
+      const expected = {
+        fixtureSha256: await digest(fixtureText),
+        historySha256: await digest(history.text),
+        turns: 2,
+      };
+      const proof = await target.validateProjectionFixture(artifactName, expected);
+      expect(proof).toMatchObject({ turnCount: 2, rowCount: 34, historyIntact: true, anomalyCount: 0 });
+      await target.writeArtifact(
+        `projection-tool-${seed.bytes}-two-turns-proof.json`,
+        JSON.stringify({ seed, expected, proof }),
+      );
+    },
+  );
 }

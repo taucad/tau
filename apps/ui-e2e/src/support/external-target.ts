@@ -219,7 +219,10 @@ export type UiBrowserCommands = {
   uiDragTarget(source: string, target: string, surface?: TargetSurface): Promise<void>;
   uiDownloadTarget(triggerSelector: string): Promise<TargetDownload>;
   uiWriteArtifactChunk(name: string, base64: string, offset: number, finalSha256?: string): Promise<void>;
-  uiValidateProjectionFixture(path: string): Promise<ProjectionFixtureProof>;
+  uiValidateProjectionFixture(
+    path: string,
+    expected?: { fixtureSha256: string; historySha256: string; turns: number },
+  ): Promise<ProjectionFixtureProof>;
   uiReadFixtureChunk(path: string, offset: number): Promise<{ readonly base64: string; readonly eof: boolean }>;
   uiStartObservedDownloads(): Promise<void>;
   uiReadObservedDownloads(): Promise<readonly TargetDownload[]>;
@@ -497,8 +500,10 @@ export const writeArtifact = async (name: string, content: string): Promise<void
   }
 };
 
-export const validateProjectionFixture = (path: string): Promise<ProjectionFixtureProof> =>
-  server.commands.uiValidateProjectionFixture(path);
+export const validateProjectionFixture = (
+  path: string,
+  expected?: { fixtureSha256: string; historySha256: string; turns: number },
+): Promise<ProjectionFixtureProof> => server.commands.uiValidateProjectionFixture(path, expected);
 
 /** Read exact immutable fixture UTF8 through bounded binary replies. */
 export const readFixtureText = async (path: string): Promise<string> => {

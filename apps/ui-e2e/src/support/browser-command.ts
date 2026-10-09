@@ -2677,15 +2677,15 @@ export const uiWriteArtifactChunk: BrowserCommand<
 };
 
 /** Validate the immutable benchmark in Node and return only exact small manifest proof. */
-export const uiValidateProjectionFixture: BrowserCommand<[path: string], ProjectionFixtureProof> = async (
-  _context,
-  path,
-) => {
+export const uiValidateProjectionFixture: BrowserCommand<
+  [path: string, expected?: { fixtureSha256: string; historySha256: string; turns: number }],
+  ProjectionFixtureProof
+> = async (_context, path, expected) => {
   const bytes = await readFile(isAbsolute(path) ? path : resolve(outputRoot, path));
   if (!(bytes.buffer instanceof ArrayBuffer)) {
     throw new Error('Node fixture bytes must have an owned ArrayBuffer.');
   }
-  return validateProjectionFixtureBytes(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  return validateProjectionFixtureBytes(new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), expected);
 };
 
 /** Read immutable fixture input in bounded binary chunks, without WebSocket-sized whole-file replies. */

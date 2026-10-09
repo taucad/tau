@@ -211,7 +211,8 @@ jobs:
           key: ${{ needs.plan.outputs.geospec-key }}
           mode: save
 
-      - name: Retain the OCCT and toolchain preparation
+      - &retain-geospec-preparation
+        name: Retain the OCCT and toolchain preparation
         if: always() && steps.prepare.outcome == 'success' && github.event_name != 'pull_request'
         uses: ./.github/actions/geospec-preparation-save
         with:
@@ -227,22 +228,14 @@ jobs:
   # 9 minutes off the critical path of a run that changes the native source closure
   # (run 37437873976). The producer still serves the Linux lanes, which consume its
   # transport.
-  #
-  # The suites run as two Vitest shards on separate runners. Each shard repeats the
-  # setup, product and consumer steps (about 6 minutes), but the suites themselves took
-  # 300-357 s in one job, most of it one project, and set the end of most `main` runs.
   geospec-darwin:
-    name: Run GeoSpec Darwin host suites (${{ matrix.shard }}/2)
+    name: Run GeoSpec Darwin host suites
     needs: [plan]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       needs.plan.outputs.geospec-required == 'true' &&
       needs.plan.outputs.geospec-darwin-tests == 'true'
     runs-on: macos-15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
     steps:
       - *checkout-darwin
       - *setup-nx-darwin
@@ -275,16 +268,9 @@ jobs:
       # https://github.com/taucad/tau/issues/342
       - name: Run complete affected Darwin host suites
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
-        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache -- --shard=${{ matrix.shard }}/2
+        run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api,tag:ci:quarantined --skip-nx-cache
 
-      # One shard saves, so both never race for the same cache key.
-      - name: Retain the OCCT and toolchain preparation
-        if: always() && steps.prepare.outcome == 'success' && github.event_name != 'pull_request' && matrix.shard == 1
-        uses: ./.github/actions/geospec-preparation-save
-        with:
-          generation: ${{ steps.prepare.outputs.generation }}
-          preparation-hit: ${{ steps.prepare.outputs.preparation-hit }}
-          cargo-hit: ${{ steps.prepare.outputs.cargo-hit }}
+      - *retain-geospec-preparation
 
   # Saves the macOS pnpm store that the Darwin jobs above only restore, after them so
   # the save delays nothing. actions/cache saves only from a successful job, and nothing
@@ -955,6 +941,10 @@ jobs:
       STRIPE_READ_SECRET_KEY: ${{ secrets.STRIPE_TEST_READ_RESTRICTED_KEY }}
       STRIPE_REFUND_SECRET_KEY: ${{ secrets.STRIPE_TEST_REFUND_RESTRICTED_KEY }}
       STRIPE_ACCOUNT_ID: ${{ secrets.STRIPE_TEST_ACCOUNT_ID }}
+      # The test account's own catalog. The lane copies `.env.example` into `.env`, whose placeholders
+      # name no real Stripe object; exported values win over `.env` for Nx and for dotenv in vitest.
+      STRIPE_PRICE_ID_PRO_MONTHLY: ${{ secrets.STRIPE_TEST_PRICE_ID_PRO_MONTHLY }}
+      STRIPE_PRODUCT_ID_CREDIT_PACK: ${{ secrets.STRIPE_TEST_PRODUCT_ID_CREDIT_PACK }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -963,16 +953,17 @@ jobs:
         id: gate
         run: |
           set=0
-          for value in "$STRIPE_SECRET_KEY" "$STRIPE_READ_SECRET_KEY" "$STRIPE_REFUND_SECRET_KEY" "$STRIPE_ACCOUNT_ID"; do
+          for value in "$STRIPE_SECRET_KEY" "$STRIPE_READ_SECRET_KEY" "$STRIPE_REFUND_SECRET_KEY" "$STRIPE_ACCOUNT_ID" \
+            "$STRIPE_PRICE_ID_PRO_MONTHLY" "$STRIPE_PRODUCT_ID_CREDIT_PACK"; do
             if [ -n "$value" ]; then set=$((set + 1)); fi
           done
           if [ "$set" -eq 0 ]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "::notice title=Billing e2e skipped::No STRIPE_TEST_* secret is configured; the real Stripe lane runs once the payments work adds them."
-          elif [ "$set" -eq 4 ]; then
+          elif [ "$set" -eq 6 ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::error::Only $set of the four STRIPE_TEST_* secrets are set; set all four or none."
+            echo "::error::Only $set of the six STRIPE_TEST_* secrets are set; set all six or none."
             exit 1
           fi
 

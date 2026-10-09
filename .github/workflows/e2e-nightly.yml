@@ -240,7 +240,7 @@ jobs:
 
   # runtime-e2e's Darwin host suite, quarantined out of ci.yml's Darwin lane until its
   # 11 failing tests pass here: https://github.com/taucad/tau/issues/342. The steps
-  # mirror ci.yml's `geospec-darwin` job, without its shards.
+  # mirror ci.yml's `geospec-darwin` job.
   runtime-e2e-darwin:
     name: Runtime end-to-end on Darwin (quarantined, #342)
     runs-on: macos-15

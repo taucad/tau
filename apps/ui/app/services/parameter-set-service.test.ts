@@ -1,6 +1,12 @@
+import { createElement } from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
+import type { ParameterCommit } from '#components/geometry/parameters/rjsf-context.js';
 import { parameterEntryPath } from '@taucad/types';
 import { compileParameterManifest } from '@taucad/parameters';
-import type { ParameterManifest, ParameterSetRequestBase } from '@taucad/parameters';
+import type { ParameterManifest, ParameterSetOutcome, ParameterSetRequestBase } from '@taucad/parameters';
 import { describe, expect, it, vi } from 'vitest';
 import { createParameterSetService } from '#services/parameter-set-service.js';
 
@@ -57,10 +63,13 @@ const serviceFixture = (initialRecord?: string, watchReady = Promise.resolve()) 
   let watchEvent: ((event: { type: string }) => void) | undefined;
   const exists = vi.fn(async (path: string) => files.has(path));
   let gate: Promise<void> | undefined;
+  const nextWriteGates: Array<Promise<void>> = [];
   let loseNextReply = false;
   const writes: WriteInput[] = [];
+  const writeAttempts: WriteInput[] = [];
   const writeFileChecked = async (input: WriteInput) => {
-    await gate;
+    writeAttempts.push(input);
+    await (nextWriteGates.shift() ?? gate);
     const conflict = input.preconditions.find(({ path, expected }) => !sameBytes(files.get(path), expected));
     if (conflict !== undefined) {
       const actual = files.get(conflict.path);
@@ -94,31 +103,33 @@ const serviceFixture = (initialRecord?: string, watchReady = Promise.resolve()) 
     rmdir: async () => undefined,
     mkdir: async () => undefined,
   } as unknown as Parameters<typeof createParameterSetService>[0]['client'];
-  const service = createParameterSetService({
-    rootDirectory: fixtureRoot,
-    client,
-    watchReady: ({ paths }, onEvent) => {
-      watchEvent = onEvent;
-      const stops = paths.map((path) => {
-        const listener = (): void => {
-          onEvent({ type: 'change' });
+  const createService = () =>
+    createParameterSetService({
+      rootDirectory: fixtureRoot,
+      client,
+      watchReady: ({ paths }, onEvent) => {
+        watchEvent = onEvent;
+        const stops = paths.map((path) => {
+          const listener = (): void => {
+            onEvent({ type: 'change' });
+          };
+          const current = listeners.get(path) ?? new Set();
+          current.add(listener);
+          listeners.set(path, current);
+          return () => current.delete(listener);
+        });
+        return {
+          ready: watchReady,
+          closed: watchClosed.promise,
+          unsubscribe: () => {
+            for (const stop of stops) {
+              stop();
+            }
+          },
         };
-        const current = listeners.get(path) ?? new Set();
-        current.add(listener);
-        listeners.set(path, current);
-        return () => current.delete(listener);
-      });
-      return {
-        ready: watchReady,
-        closed: watchClosed.promise,
-        unsubscribe: () => {
-          for (const stop of stops) {
-            stop();
-          }
-        },
-      };
-    },
-  });
+      },
+    });
+  const service = createService();
   const manifestFor = async (source = 'source:1'): Promise<ParameterManifest> => {
     const sourceRevision = await digestBytes(encoder.encode(source));
     return compileParameterManifest({
@@ -164,7 +175,7 @@ const serviceFixture = (initialRecord?: string, watchReady = Promise.resolve()) 
       ...(input.base === undefined
         ? {}
         : { base: { pointer: input.pointer, value: input.base, binding: fixtureBinding } }),
-      ...(input.pressure === undefined ? {} : { pressure: input.pressure }),
+      ...(input.pressure === 'transient' ? { pressure: 'transient' } : { pressure: 'final' }),
     });
   const draftKey = (pointer: string) => ({
     target: service.target('main.ts'),
@@ -176,6 +187,8 @@ const serviceFixture = (initialRecord?: string, watchReady = Promise.resolve()) 
       .groups?.['default']?.values[name];
   return {
     service,
+    createPeerService: createService,
+    writeAttempts,
     exists,
     closeWatch: () => {
       watchClosed.resolve();
@@ -201,6 +214,13 @@ const serviceFixture = (initialRecord?: string, watchReady = Promise.resolve()) 
       gate = release.promise;
       return () => {
         gate = undefined;
+        release.resolve();
+      };
+    },
+    holdNextWrite: () => {
+      const release = Promise.withResolvers<void>();
+      nextWriteGates.push(release.promise);
+      return () => {
         release.resolve();
       };
     },
@@ -277,6 +297,65 @@ describe('parameter set service behaviours', () => {
     });
     expect(fixture.stored('width')).toBe(40);
     await fixture.service.close();
+  });
+
+  it('settles two independent service edits against an absent sidecar with exactly one same-base winner', async () => {
+    const fixture = serviceFixture();
+    const peer = fixture.createPeerService();
+    const manifest = await fixture.manifestFor();
+    await Promise.all([fixture.service.resolve('main.ts', manifest), peer.resolve('main.ts', manifest)]);
+    const firstActor = fixture.service.actor('main.ts');
+    const secondActor = peer.actor('main.ts');
+    if (!firstActor || !secondActor) {
+      throw new Error('Expected two resolved parameter actors');
+    }
+    expect(firstActor).not.toBe(secondActor);
+    const firstSettled: ParameterSetOutcome[] = [];
+    const secondSettled: ParameterSetOutcome[] = [];
+    const firstSubscription = firstActor.on('settled', ({ outcome }) => {
+      firstSettled.push(outcome);
+    });
+    const secondSubscription = secondActor.on('settled', ({ outcome }) => {
+      secondSettled.push(outcome);
+    });
+    const release = fixture.hold();
+    const first = fixture.commit(manifest, { pointer: '/width', value: 21, base: 100 });
+    const second = peer.commitValue(peer.target('main.ts'), manifest, {
+      group: 'default',
+      pointer: '/width',
+      value: 22,
+      base: { pointer: '/width', value: 100, binding: fixtureBinding },
+    });
+    const outcomes = Promise.all([first, second]);
+    try {
+      await vi.waitFor(() => {
+        expect(fixture.writeAttempts).toHaveLength(2);
+      });
+      expect(fixture.files.has(fixtureRecordPath)).toBe(false);
+      expect(fixture.writes).toHaveLength(0);
+      expect(firstSettled).toHaveLength(0);
+      expect(secondSettled).toHaveLength(0);
+      for (const attempt of fixture.writeAttempts) {
+        expect(attempt.preconditions).toEqual([{ path: fixtureRecordPath, expected: null }]);
+      }
+      release();
+      const [firstOutcome, secondOutcome] = await outcomes;
+      expect([firstOutcome.status, secondOutcome.status].toSorted()).toEqual(['committed', 'rejected']);
+      expect(firstOutcome.status === 'committed' ? secondOutcome : firstOutcome).toMatchObject({
+        status: 'rejected',
+        code: 'STALE_MANIFEST',
+      });
+      expect(firstSettled).toEqual([firstOutcome]);
+      expect(secondSettled).toEqual([secondOutcome]);
+      expect(fixture.writes).toHaveLength(1);
+      expect(fixture.stored('width')).toBe(firstOutcome.status === 'committed' ? 21 : 22);
+    } finally {
+      release();
+      await Promise.allSettled([outcomes]);
+      firstSubscription.unsubscribe();
+      secondSubscription.unsubscribe();
+      await Promise.all([fixture.service.close(), peer.close()]);
+    }
   });
 
   it('commits another field while one field is superseded', async () => {
@@ -596,5 +675,544 @@ describe('parameter set service behaviours', () => {
         2,
       )}\n`,
     );
+  });
+});
+
+describe('parameter refusal survives row replacement with the real service', () => {
+  it.each([
+    'before settlement',
+    'after settlement',
+    'before settlement with newer same-text draft',
+    'stepper before settlement',
+    'slider before settlement',
+    'before settlement with newer final',
+  ] as const)('preserves the winning display and the losing intent when replaced %s', async (replacement) => {
+    const fixture = serviceFixture();
+    const peer = fixture.createPeerService();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
+    await peer.resolve('main.ts', manifest);
+    const user = userEvent.setup();
+    const outcomes: ParameterSetOutcome[] = [];
+    const pending: Array<Promise<ParameterSetOutcome>> = [];
+    const target = fixture.service.target('main.ts');
+    const commit: ParameterCommit = {
+      target,
+      group: 'default',
+      draft: (pointer) => fixture.service.draft(fixture.draftKey(pointer)),
+      setDraft: (pointer, draft) => {
+        fixture.service.setDraft(fixture.draftKey(pointer), draft);
+      },
+      subscribeDrafts: fixture.service.subscribeDrafts,
+      commit: async (field) => {
+        const operation = fixture.service.commitValue(target, manifest, { group: 'default', ...field });
+        pending.push(operation);
+        const outcome = await operation;
+        outcomes.push(outcome);
+        return outcome;
+      },
+      setValue: async (field) => {
+        await fixture.service.submitValue(target, manifest, { group: 'default', ...field });
+      },
+    };
+    const row = (value: number) =>
+      createElement(
+        TooltipProvider,
+        null,
+        createElement(ParametersNumber, {
+          value,
+          defaultValue: 100,
+          min: 0,
+          max: 200,
+          step: 1,
+          fieldProjection: {
+            instancePointer: '/width',
+            parameterId: 'width',
+            schema: { resource: 'urn:test:service-parameters', pointer: '/properties/width' },
+            representation: 'binary64',
+            constraints: {},
+            guessed: false,
+            status: 'unit-bearing',
+            nativeUnit: 'mm',
+            displayUnit: 'mm',
+            adornment: 'mm',
+            quantityKind: lengthKind,
+            space: 'linear',
+          },
+          edit: { kind: 'authoritative', commit },
+          onChange: vi.fn(),
+          'aria-label': 'Concurrent width',
+        }),
+      );
+    let rendered = render(row(100));
+    const release = fixture.holdNextWrite();
+    try {
+      const field = screen.getByRole('spinbutton', { name: 'Concurrent width' });
+      if (replacement !== 'slider before settlement') {
+        await user.click(field);
+      }
+      if (replacement === 'slider before settlement') {
+        const slider = rendered.container.querySelector<HTMLElement>('[data-slot="slider-input"]');
+        if (!slider) {
+          throw new Error('Expected the actual numeric slider.');
+        }
+        Object.defineProperty(slider, 'offsetWidth', { configurable: true, value: 100 });
+        for (const [type, clientX] of [
+          ['pointerdown', 0],
+          ['pointermove', 10],
+          ['pointerup', 10],
+        ] as const) {
+          const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX });
+          Object.defineProperty(event, 'pointerId', { value: 1 });
+          fireEvent(slider, event);
+        }
+      } else if (replacement === 'stepper before settlement') {
+        await user.keyboard('{ArrowUp}');
+      } else {
+        await user.clear(field);
+        await user.type(field, '21');
+        await user.keyboard('{Enter}');
+      }
+      await waitFor(() => {
+        expect(fixture.writeAttempts).toHaveLength(1);
+      });
+      const winner = await peer.commitValue(peer.target('main.ts'), manifest, {
+        group: 'default',
+        pointer: '/width',
+        value: 22,
+        base: { pointer: '/width', value: 100, binding: fixtureBinding },
+      });
+      expect(winner.status).toBe('committed');
+      expect(fixture.stored('width')).toBe(22);
+      if (replacement === 'after settlement') {
+        await act(async () => {
+          release();
+          await Promise.all(pending);
+        });
+      }
+      rendered.unmount();
+      rendered = render(row(22));
+      const replacementField = screen.getByRole('spinbutton', { name: 'Concurrent width' });
+      expect(replacementField).not.toBe(field);
+      if (
+        replacement === 'before settlement with newer same-text draft' ||
+        replacement === 'before settlement with newer final'
+      ) {
+        await user.click(replacementField);
+        await user.clear(replacementField);
+        await user.type(replacementField, '21');
+        if (replacement === 'before settlement with newer final') {
+          await user.keyboard('{Enter}');
+        }
+      }
+      await act(async () => {
+        release();
+        await Promise.all(pending);
+      });
+      const newerFinal = replacement === 'before settlement with newer final';
+      if (newerFinal) {
+        rendered.rerender(row(21));
+      }
+      expect(outcomes).toHaveLength(newerFinal ? 2 : 1);
+      const outcome = outcomes.find((result) => result.status === 'rejected');
+      expect(outcome).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+      expect(fixture.stored('width')).toBe(newerFinal ? 21 : 22);
+      expect(fixture.writes).toHaveLength(newerFinal ? 2 : 1);
+      if (newerFinal) {
+        expect(fixture.service.draft(fixture.draftKey('/width'))).toBeUndefined();
+      } else {
+        expect(fixture.service.draft(fixture.draftKey('/width'))).toMatchObject({
+          text:
+            replacement === 'stepper before settlement'
+              ? '101'
+              : replacement === 'slider before settlement'
+                ? '120'
+                : '21',
+          valid: true,
+        });
+      }
+      if (outcome?.status !== 'rejected') {
+        throw new Error('Expected the checked losing edit to be rejected.');
+      }
+      if (replacement === 'before settlement with newer same-text draft' || newerFinal) {
+        expect(replacementField).toHaveValue('21');
+        expect(screen.queryByText(outcome.message)).not.toBeInTheDocument();
+      } else {
+        expect(replacementField).toHaveValue('22');
+        expect(screen.getByText(outcome.message)).toBeVisible();
+      }
+    } finally {
+      release();
+      await act(async () => {
+        await Promise.allSettled(pending);
+      });
+      rendered.unmount();
+      fixture.service.discardDrafts('main.ts');
+      await fixture.service.close();
+      await peer.close();
+    }
+  });
+});
+
+describe('admitted final parameter intent survives owner closure', () => {
+  it.each([
+    ['initial resolution', 'close'],
+    ['held write', 'close'],
+    ['initial resolution', 'rename'],
+    ['held write', 'rename'],
+  ] as const)('settles an admitted non-UI final during %s before %s retires its actor', async (phase, ending) => {
+    const initialReady = Promise.withResolvers<void>();
+    const fixture = serviceFixture(
+      undefined,
+      phase === 'initial resolution' ? initialReady.promise : Promise.resolve(),
+    );
+    const manifest = await fixture.manifestFor();
+    if (phase === 'held write') {
+      await fixture.service.resolve('main.ts', manifest);
+    }
+    const release =
+      phase === 'initial resolution'
+        ? () => {
+            initialReady.resolve();
+          }
+        : fixture.holdNextWrite();
+    const final = fixture.commit(manifest, { pointer: '/width', value: 21, base: 100 });
+    const finalResult = Promise.allSettled([final]);
+    let prepared: Awaited<ReturnType<typeof fixture.service.prepareFileOperation>> | undefined;
+    let finished = false;
+    try {
+      await vi.waitFor(() => {
+        if (phase === 'initial resolution') {
+          expect(fixture.service.actor('main.ts')).toBeDefined();
+          expect(fixture.exists).not.toHaveBeenCalled();
+        } else {
+          expect(fixture.writeAttempts).toHaveLength(1);
+        }
+      });
+      const admittedActor = fixture.service.actor('main.ts');
+      expect(admittedActor).toBeDefined();
+      const endingOperation =
+        ending === 'close'
+          ? fixture.service.close()
+          : fixture.service.prepareFileOperation({ kind: 'move', oldPath: 'main.ts', newPath: 'renamed.ts' });
+      const endingResult = Promise.allSettled([endingOperation]);
+      release();
+      const [finalSettled] = await finalResult;
+      const [ownerSettled] = await endingResult;
+      if (ownerSettled.status === 'fulfilled' && ownerSettled.value !== undefined) {
+        prepared = ownerSettled.value;
+      }
+      expect(finalSettled).toMatchObject({ status: 'fulfilled', value: { status: 'committed' } });
+      expect(ownerSettled.status).toBe('fulfilled');
+      expect(fixture.writes).toHaveLength(1);
+      expect(fixture.stored('width')).toBe(21);
+      expect(admittedActor?.getSnapshot().status).toBe('done');
+      if (ownerSettled.status === 'fulfilled' && ownerSettled.value !== undefined) {
+        await ownerSettled.value.commit();
+        finished = true;
+        expect(fixture.files.has(fixtureRecordPath)).toBe(false);
+        expect(parseEntry(fixture.files.get(`${fixtureRoot}/${parameterEntryPath('renamed.ts')}`))).toMatchObject({
+          groups: { default: { values: { width: 21 } } },
+        });
+      }
+    } finally {
+      release();
+      await finalResult;
+      if (!finished) {
+        await prepared?.rollback();
+      }
+      await fixture.service.close();
+    }
+  });
+});
+
+describe('retained final intent is settled before owner disposal', () => {
+  it.each(['success', 'refusal'] as const)('waits for a held final %s before closing', async (result) => {
+    const fixture = serviceFixture();
+    const peer = fixture.createPeerService();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
+    await peer.resolve('main.ts', manifest);
+    const actor = fixture.service.actor('main.ts');
+    const release = fixture.holdNextWrite();
+    const operation = fixture.service.commitValue(fixture.service.target('main.ts'), manifest, {
+      group: 'default',
+      pointer: '/width',
+      value: 21,
+      pressure: 'final',
+      base: { pointer: '/width', value: 100, binding: fixtureBinding },
+      draft: { text: '21', valid: true },
+    });
+    const operationResult = Promise.allSettled([operation]);
+    try {
+      await vi.waitFor(() => {
+        expect(fixture.writeAttempts).toHaveLength(1);
+      });
+      if (result === 'refusal') {
+        expect(
+          await peer.commitValue(peer.target('main.ts'), manifest, {
+            group: 'default',
+            pointer: '/width',
+            value: 22,
+            base: { pointer: '/width', value: 100, binding: fixtureBinding },
+          }),
+        ).toMatchObject({ status: 'committed' });
+      }
+      const closing = Promise.allSettled([fixture.service.close()]);
+      release();
+      const [settled] = await operationResult;
+      const [closed] = await closing;
+      expect(settled).toMatchObject({
+        status: 'fulfilled',
+        value: { status: result === 'success' ? 'committed' : 'rejected' },
+      });
+      if (result === 'success') {
+        expect(closed).toMatchObject({ status: 'fulfilled' });
+        expect(actor?.getSnapshot().status).toBe('done');
+        expect(fixture.service.draft(fixture.draftKey('/width'))).toBeUndefined();
+      } else {
+        expect(closed).toMatchObject({ status: 'rejected', reason: { code: 'UNSAVED_PARAMETER_DRAFTS' } });
+        expect(actor?.getSnapshot().status).not.toBe('done');
+        expect(fixture.service.draft(fixture.draftKey('/width'))).toMatchObject({
+          text: '21',
+          final: { status: 'refused' },
+        });
+        expect(fixture.stored('width')).toBe(22);
+      }
+    } finally {
+      release();
+      await operationResult;
+      fixture.service.discardDrafts('main.ts');
+      await fixture.service.close();
+      await peer.close();
+    }
+  });
+});
+
+describe('final intent refused before actor admission', () => {
+  it.each(['closing', 'closed', 'relocating'] as const)(
+    'retains recovery intent while %s without starting a write',
+    async (phase) => {
+      const fixture = serviceFixture();
+      const manifest = await fixture.manifestFor();
+      const target = fixture.service.target('main.ts');
+      const key = fixture.draftKey('/width');
+      const ending =
+        phase === 'relocating'
+          ? fixture.service.prepareFileOperation({ kind: 'move', oldPath: 'main.ts', newPath: 'renamed.ts' })
+          : fixture.service.close();
+      const endingResult = Promise.allSettled([ending]);
+      if (phase === 'closed') {
+        await endingResult;
+      }
+      const refused = fixture.service.commitValue(target, manifest, {
+        group: 'default',
+        pointer: '/width',
+        value: 21,
+        pressure: 'final',
+        base: { pointer: '/width', value: 100, binding: fixtureBinding },
+        draft: { text: '21', valid: true },
+      });
+      await expect(refused).rejects.toThrow();
+      expect(fixture.writeAttempts).toHaveLength(0);
+      if (phase === 'closed') {
+        expect(fixture.service.draft(key)).toBeUndefined();
+        expect(fixture.service.actor('main.ts')).toBeUndefined();
+      } else {
+        expect(fixture.service.draft(key)).toMatchObject({ text: '21', valid: true, final: { status: 'refused' } });
+      }
+      const [settled] = await endingResult;
+      if (settled.status === 'fulfilled' && settled.value !== undefined) {
+        await settled.value.rollback();
+      }
+      fixture.service.discardDrafts('main.ts');
+      await fixture.service.close();
+    },
+  );
+});
+
+it.each(['relocating', 'closing', 'closed'] as const)(
+  'preserves a pre-admission %s refusal at its live owner boundary',
+  async (phase) => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    const target = fixture.service.target('main.ts');
+    await fixture.service.resolve('main.ts', manifest);
+    const release = fixture.holdNextWrite();
+    const admitted =
+      phase === 'closed' ? undefined : fixture.commit(manifest, { pointer: '/width', value: 20, base: 100 });
+    if (admitted !== undefined) {
+      await vi.waitFor(() => {
+        expect(fixture.writeAttempts).toHaveLength(1);
+      });
+    }
+    const ending = Promise.allSettled([
+      phase === 'relocating'
+        ? fixture.service.prepareFileOperation({ kind: 'move', oldPath: 'main.ts', newPath: 'renamed.ts' })
+        : fixture.service.close(),
+    ]);
+    if (phase === 'closed') {
+      await ending;
+    }
+    const commit: ParameterCommit = {
+      target,
+      group: 'default',
+      draft: (pointer) => fixture.service.draft(fixture.draftKey(pointer)),
+      setDraft: (pointer, draft) => {
+        fixture.service.setDraft(fixture.draftKey(pointer), draft);
+      },
+      subscribeDrafts: fixture.service.subscribeDrafts,
+      commit: async (field) => fixture.service.commitValue(target, manifest, { group: 'default', ...field }),
+      setValue: async (field) => {
+        await fixture.service.submitValue(target, manifest, { group: 'default', ...field });
+      },
+    };
+    const row = createElement(
+      TooltipProvider,
+      null,
+      createElement(ParametersNumber, {
+        value: 100,
+        defaultValue: 100,
+        fieldProjection: {
+          instancePointer: '/width',
+          parameterId: 'width',
+          schema: { resource: 'urn:test:service-parameters', pointer: '/properties/width' },
+          representation: 'binary64',
+          constraints: {},
+          guessed: false,
+          status: 'unit-bearing',
+          nativeUnit: 'mm',
+          displayUnit: 'mm',
+          adornment: 'mm',
+          quantityKind: lengthKind,
+          space: 'linear',
+        },
+        edit: { kind: 'authoritative', commit },
+        onChange: vi.fn(),
+        'aria-label': 'Relocating width',
+      }),
+    );
+    let rendered = render(row);
+    try {
+      const user = userEvent.setup();
+      const field = screen.getByRole('spinbutton', { name: 'Relocating width' });
+      await user.clear(field);
+      await user.type(field, '21');
+      await user.keyboard('{Enter}');
+      const message =
+        phase === 'relocating' ? 'Parameters for main.ts are being relocated.' : 'The parameter service is closed.';
+      expect(await screen.findByText(message)).toBeVisible();
+      if (phase === 'closed') {
+        expect(field).toHaveValue('21');
+        expect(fixture.service.draft(fixture.draftKey('/width'))).toBeUndefined();
+        expect(fixture.service.actor('main.ts')).toBeUndefined();
+        await user.clear(field);
+        await user.type(field, '23');
+        expect(field).toHaveValue('23');
+        expect(fixture.service.draft(fixture.draftKey('/width'))).toBeUndefined();
+      } else {
+        rendered.unmount();
+        rendered = render(row);
+        expect(screen.getByRole('spinbutton', { name: 'Relocating width' })).toHaveValue('100');
+        expect(screen.getByText(message)).toBeVisible();
+        expect(fixture.service.draft(fixture.draftKey('/width'))).toMatchObject({
+          text: '21',
+          final: { status: 'refused' },
+        });
+      }
+      expect(fixture.writeAttempts).toHaveLength(phase === 'closed' ? 0 : 1);
+    } finally {
+      rendered.unmount();
+      release();
+      await admitted;
+      const [result] = await ending;
+      if (result.status === 'fulfilled' && result.value !== undefined) {
+        await result.value.rollback();
+      }
+      if (phase !== 'closed') {
+        expect(result).toMatchObject({ status: 'rejected', reason: { code: 'UNSAVED_PARAMETER_DRAFTS' } });
+      }
+      fixture.service.discardDrafts('main.ts');
+      await fixture.service.close();
+    }
+  },
+);
+
+describe('final parameter teardown admission boundary', () => {
+  it.each(['close', 'relocate'] as const)(
+    'keeps late intent outside the service while %s teardown is held',
+    async (ending) => {
+      const fixture = serviceFixture();
+      const manifest = await fixture.manifestFor();
+      await fixture.service.resolve('main.ts', manifest);
+      const actor = fixture.service.actor('main.ts');
+      const release = fixture.holdNextWrite();
+      const transient = fixture.commit(manifest, { pointer: '/width', value: 20, base: 100, pressure: 'transient' });
+      await vi.waitFor(() => {
+        expect(fixture.writeAttempts).toHaveLength(1);
+      });
+      const finishing =
+        ending === 'close'
+          ? fixture.service.close()
+          : fixture.service.prepareFileOperation({ kind: 'move', oldPath: 'main.ts', newPath: 'renamed.ts' });
+      const settled = Promise.allSettled([finishing]);
+      try {
+        await vi.waitFor(() => {
+          expect(actor?.getSnapshot().context.closing).toBe(true);
+        });
+        fixture.service.setDraft(fixture.draftKey('/width'), { text: '21', valid: true });
+        await expect(
+          fixture.service.commitValue(fixture.service.target('main.ts'), manifest, {
+            group: 'default',
+            pointer: '/width',
+            value: 21,
+            base: { pointer: '/width', value: 100, binding: fixtureBinding },
+            draft: { text: '21', valid: true },
+          }),
+        ).rejects.toThrow();
+        expect(fixture.service.draft(fixture.draftKey('/width'))).toBeUndefined();
+        expect(fixture.writeAttempts).toHaveLength(1);
+      } finally {
+        release();
+        await transient;
+        const [result] = await settled;
+        if (result.status === 'fulfilled' && result.value !== undefined) {
+          await result.value.rollback();
+        }
+        fixture.service.discardDrafts('main.ts');
+        await fixture.service.close();
+      }
+    },
+  );
+
+  it('recreates a completed sibling after another actor refuses close as uncertain', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
+    await fixture.service.resolve('other.ts', manifest);
+    const completed = fixture.service.actor('main.ts');
+    const uncertain = fixture.service.actor('other.ts');
+    fixture.loseNextReply();
+    expect(
+      await fixture.service.commitValue(fixture.service.target('other.ts'), manifest, {
+        group: 'default',
+        pointer: '/width',
+        value: 21,
+        base: { pointer: '/width', value: 100, binding: fixtureBinding },
+      }),
+    ).toMatchObject({ status: 'indeterminate' });
+    await expect(fixture.service.close()).rejects.toMatchObject({ code: 'WRITE_UNCERTAIN' });
+    expect(completed?.getSnapshot().status).toBe('done');
+    expect(uncertain?.getSnapshot().matches({ open: 'uncertain' })).toBe(true);
+    try {
+      await expect(fixture.service.resolve('main.ts', manifest)).resolves.toBeDefined();
+      expect(fixture.service.actor('main.ts')).not.toBe(completed);
+      expect(fixture.service.actor('other.ts')).toBe(uncertain);
+    } finally {
+      fixture.files.delete(`${fixtureRoot}/${parameterEntryPath('other.ts')}`);
+      uncertain?.send({ type: 'resolve', resolution: manifest.identity.resolution });
+      await fixture.service.resolve('other.ts', manifest);
+      await fixture.service.close();
+    }
   });
 });

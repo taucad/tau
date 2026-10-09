@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { recordSettledGenAiUsage } from '#api/billing/credit-ledger.service.js';
+import { CreditLedgerService, recordSettledGenAiUsage } from '#api/billing/credit-ledger.service.js';
+import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
+import type { DatabaseService } from '#database/database.service.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 
 const attributes = {
@@ -75,5 +77,44 @@ describe('recordSettledGenAiUsage', () => {
     );
 
     expect(metrics.billingSupplierCostPicoUsd.add).not.toHaveBeenCalled();
+  });
+});
+
+describe('CreditLedgerService.recordFundedWorkDenial', () => {
+  /** A ledger whose owner lookup finds no binding: the denial stops there, after its input checks. */
+  const unboundLedger = () => {
+    const select = vi.fn(() => ({ from: () => ({ where: async () => [] }) }));
+    const ledger = new CreditLedgerService(
+      { database: { select } } as unknown as Pick<DatabaseService, 'database'>,
+      {} as BillingPolicyService,
+    );
+    return { ledger, select };
+  };
+  const denial = (requestDigest: string): Parameters<CreditLedgerService['recordFundedWorkDenial']>[0] => ({
+    environment: 'development',
+    authUserId: 'user',
+    attemptKey: 'attempt_0000000001',
+    requestDigest,
+  });
+
+  it('should accept the hmac-sha256 request digest a funded invocation sends', async () => {
+    const { ledger, select } = unboundLedger();
+
+    await expect(ledger.recordFundedWorkDenial(denial(`hmac-sha256:${'a'.repeat(64)}`))).resolves.toBeUndefined();
+
+    expect(select).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['a bare hex digest', 'a'.repeat(64)],
+    ['an upper-case digest', `hmac-sha256:${'A'.repeat(64)}`],
+    ['a short digest', `hmac-sha256:${'a'.repeat(63)}`],
+    ['another algorithm', `sha256:${'a'.repeat(64)}`],
+  ])('should refuse %s before reading the database', async (_name, requestDigest) => {
+    const { ledger, select } = unboundLedger();
+
+    await expect(ledger.recordFundedWorkDenial(denial(requestDigest))).rejects.toThrow('Invalid funded request digest');
+
+    expect(select).not.toHaveBeenCalled();
   });
 });

@@ -757,7 +757,7 @@ describe('billing reload native service foundation', { concurrent: false }, () =
       environment: 'development',
       authUserId,
       attemptKey: randomUUID(),
-      requestDigest: 'a'.repeat(64),
+      requestDigest: `hmac-sha256:${'a'.repeat(64)}`,
     });
     const unconsentedUser = await seedUser();
     const unconsentedAccountId = await ledger.ensureAccountBinding({
@@ -773,7 +773,11 @@ describe('billing reload native service foundation', { concurrent: false }, () =
     await ledger.recordFundedWorkDenial(denial(consented.userId));
     await expect(
       database.query.billingReloadWork.findFirst({ where: eq(billingReloadWork.accountId, consented.accountId) }),
-    ).resolves.toMatchObject({ state: 'pending', reasonKind: 'insufficient_funds' });
+    ).resolves.toMatchObject({
+      state: 'pending',
+      reasonKind: 'insufficient_funds',
+      reasonRequestDigest: `hmac-sha256:${'a'.repeat(64)}`,
+    });
     await database
       .update(billingReloadWork)
       .set({ state: 'done', leaseUntil: null, nextAttemptAt: new Date('9999-12-31T00:00:00Z') })

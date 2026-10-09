@@ -20,6 +20,9 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
     await transaction`REVOKE ALL ON ALL TABLES IN SCHEMA billing FROM PUBLIC`;
     await transaction`GRANT USAGE ON SCHEMA billing TO tau_billing_runtime, tau_billing_policy_publisher`;
     await transaction`GRANT SELECT ON ALL TABLES IN SCHEMA billing TO tau_billing_runtime`;
+    /* Stripe Customer creation and the operations worker's recovery notices address the account owner, so the
+     * billing role reads these three columns of the auth user and nothing else in `public`. */
+    await transaction`GRANT SELECT (id, name, email) ON public."user" TO tau_billing_runtime`;
     await transaction`REVOKE SELECT ON ALL TABLES IN SCHEMA billing FROM tau_billing_policy_publisher`;
     await transaction`GRANT SELECT ON billing.billing_policy, billing.billing_policy_activation,
       billing.billing_policy_activation_cancellation, billing.billing_policy_head TO tau_billing_policy_publisher`;

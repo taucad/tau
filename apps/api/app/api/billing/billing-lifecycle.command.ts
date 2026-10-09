@@ -5,7 +5,7 @@ import type { DatabaseService } from '#database/database.service.js';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
-import { BillingCashService } from '#api/billing/billing-cash.service.js';
+import { BillingCashService, maximumRefundReasonLength } from '#api/billing/billing-cash.service.js';
 import { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
 import {
   BillingSupplierReconciliationService,
@@ -50,7 +50,7 @@ const requestSchema = z.discriminatedUnion('operation', [
       approvedMaximumGrossMinor: money,
       reviewActorId: id,
       reviewedAt: date,
-      reason: z.string().min(1).max(2000),
+      reason: z.string().min(1).max(maximumRefundReasonLength),
       requestId: id,
     })
     .strict(),
@@ -96,13 +96,35 @@ const requestSchema = z.discriminatedUnion('operation', [
 ]);
 
 /**
+ * Refuses a refund key that cannot be this mode's Refunds-Write restricted key. The API's environment
+ * schema makes the same checks when it boots with the key set; `billing-command lifecycle` reads the key
+ * from the operator's shell, so it checks here before a Stripe client is built from it.
+ */
+export function assertRefundKey(input: {
+  readonly refundKey: string;
+  readonly livemode: boolean;
+  readonly createKey: string | undefined;
+  readonly readKey: string | undefined;
+}): void {
+  const prefix = input.livemode ? 'rk_live_' : 'rk_test_';
+  if (!input.refundKey.startsWith(prefix)) {
+    throw new Error(`STRIPE_REFUND_SECRET_KEY must be a ${prefix} restricted key for this Stripe mode`);
+  }
+  if (input.refundKey === input.createKey || input.refundKey === input.readKey) {
+    throw new Error('STRIPE_REFUND_SECRET_KEY must differ from the create and read keys');
+  }
+}
+
+/**
  * Strict protected-job composition. Provider mutations need the write key together with either the
- * isolated local fixture or a collection the deployment is allowed to perform.
+ * isolated local fixture or a collection the deployment is allowed to perform. A refund is sent only with
+ * the operator-held refund key (`refundStripe`): Stripe refuses refunds from the deployment's create key.
  */
 export async function runBillingLifecycleCommand(input: {
   database: Pick<DatabaseService, 'database'>;
   sourceStripe: Stripe;
   protectedStripe?: Stripe;
+  refundStripe?: Stripe;
   environment: z.infer<typeof environment>;
   stripeAccountId: string;
   livemode: boolean;
@@ -114,18 +136,28 @@ export async function runBillingLifecycleCommand(input: {
   if (request.environment !== input.environment) {
     throw new Error('Lifecycle request environment mismatch');
   }
-  const writeOperation = ['reload-work', 'expire-reload', 'prepare-renewal', 'recover-renewals', 'execute-refund'];
+  const writeOperation = ['reload-work', 'expire-reload', 'prepare-renewal', 'recover-renewals'];
   const fixture = input.environment === 'development' && !input.livemode ? input.fixture : undefined;
   const collection = fixture ? ({ kind: 'local_fixture', ...fixture } as const) : input.collection;
   if (writeOperation.includes(request.operation) && (!collection || !input.protectedStripe)) {
     throw new Error('Lifecycle provider mutations require a write key and an enabled collection');
+  }
+  // The loopback fixture's one protected key stands in for every Stripe key, the refund key included.
+  const refundStripe = fixture ? input.protectedStripe : input.refundStripe;
+  if (request.operation === 'execute-refund') {
+    if (!collection) {
+      throw new Error('Lifecycle provider mutations require a write key and an enabled collection');
+    }
+    if (!refundStripe) {
+      throw new Error('execute-refund requires STRIPE_REFUND_SECRET_KEY, the Refunds-Write restricted key');
+    }
   }
   const config = { environment: input.environment, stripeAccountId: input.stripeAccountId, livemode: input.livemode };
   const policy = new BillingPolicyService(input.database);
   const ledger = new CreditLedgerService(input.database, policy);
   const cash = new BillingCashService(
     input.database,
-    input.protectedStripe ?? input.sourceStripe,
+    (request.operation === 'execute-refund' ? refundStripe : input.protectedStripe) ?? input.sourceStripe,
     input.sourceStripe,
     ledger,
     config,
@@ -161,7 +193,9 @@ export async function runBillingLifecycleCommand(input: {
       return payments.recoverRenewalOffers(request);
     }
     case 'prepare-refund': {
-      return cash.prepareReviewedRefund(request);
+      // The refund service parses a strict reviewed request, so the command's own `operation` key stays here.
+      const { operation, ...reviewed } = request;
+      return cash.prepareReviewedRefund(reviewed);
     }
     case 'execute-refund': {
       return cash.executeReviewedRefund({

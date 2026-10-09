@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { CircleAlert, CircleDashed, Ellipsis } from 'lucide-react';
+import { CircleAlert, Ellipsis } from 'lucide-react';
 import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import {
@@ -127,9 +127,7 @@ export function RecordIssuesAction(): React.JSX.Element {
   const [resetting, setResetting] = useState<RecordIssue>();
   const projectName = projectRef.getSnapshot().context.project?.name ?? 'this project';
   const name = summary
-    ? summary.state === 'reading'
-      ? summary.label
-      : `${summary.label} · ${String(summary.count)} ${summary.count === 1 ? 'record' : 'records'}`
+    ? `${summary.label} · ${String(summary.count)} ${summary.count === 1 ? 'record' : 'records'}`
     : '';
   // The dialog outlives the trigger: a reset that settles the last record removes the trigger, not the dialog.
   return (
@@ -213,13 +211,7 @@ function RecordIssuesPopover({
   readonly onReset: (issue: RecordIssue) => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
-  const Icon = summary.state === 'reading' ? CircleDashed : CircleAlert;
-  const tone =
-    summary.state === 'unconfirmed'
-      ? 'text-feature'
-      : summary.state === 'reading'
-        ? 'text-muted-foreground'
-        : 'text-warning';
+  const tone = summary.state === 'unconfirmed' ? 'text-feature' : 'text-warning';
   const counted = `${summary.label} · ${String(summary.count)}`;
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -229,14 +221,13 @@ function RecordIssuesPopover({
           size='label'
           data-slot='record-issues-trigger'
           aria-label={name}
-          aria-busy={summary.state === 'reading' || undefined}
           tooltip={name}
           className='@max-xl/viewer:px-1.5'
         >
-          <Icon aria-hidden className={cn('size-3.5', tone)} />
+          <CircleAlert aria-hidden className={cn('size-3.5', tone)} />
           {/* Below `@xl/viewer` the label folds to the count, like Share and Export fold to their icons. */}
-          <span className='hidden @xl/viewer:inline'>{summary.state === 'reading' ? summary.label : counted}</span>
-          {summary.state === 'reading' ? null : <span className='tabular-nums @xl/viewer:hidden'>{summary.count}</span>}
+          <span className='hidden @xl/viewer:inline'>{counted}</span>
+          <span className='tabular-nums @xl/viewer:hidden'>{summary.count}</span>
         </PaneButton>
       </PopoverTrigger>
       <PopoverContent

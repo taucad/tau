@@ -188,7 +188,8 @@ describe('ViewSettingsSyncHost', () => {
       });
       expect(memory.watchClosures).toHaveLength(2);
       expect(setViewRecord).not.toHaveBeenCalled();
-      expect(readRecordIssues('p')[0]?.state).toBe('reading');
+      // Re-registering is not a problem: the issue clears instead of flashing a reading state.
+      expect(readRecordIssues('p')).toEqual([]);
       await act(async () => {
         ready.resolve();
       });

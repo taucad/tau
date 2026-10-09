@@ -52,8 +52,6 @@ export type CadChatClient = {
    * historical user-message metadata (which is retained for display).
    */
   edit: (messageId: string, input: CadChatSubmitInput) => void;
-  /** Abort the in-flight request, if any. */
-  stop: () => void;
   /**
    * Approve or deny a durable external-tool interrupt and resume it with the current agent config.
    *
@@ -98,7 +96,7 @@ const promotionToastId = 'chat-attachment-promotion';
  *   client's `messages`/`status`/`error` reads.
  * - {@link useChatActions} — the gesture entry point into the session store.
  *
- * Exposes profile-aware verbs (`submit`, `edit`, `stop`). Verb identities are
+ * Exposes profile-aware verbs (`submit`, `edit`). Verb identities are
  * stable across renders as long as the underlying actions and agent identity
  * don't change.
  *
@@ -189,10 +187,6 @@ export const useCadChatClient = (): CadChatClient => {
     [actions, withAttachments],
   );
 
-  const stop = useCallback(() => {
-    actions.stop();
-  }, [actions]);
-
   const respondToToolApproval = useCallback(
     async (
       approvalId: string,
@@ -217,7 +211,6 @@ export const useCadChatClient = (): CadChatClient => {
   return {
     submit,
     edit,
-    stop,
     respondToToolApproval,
     steerOrSubmit,
     messages,

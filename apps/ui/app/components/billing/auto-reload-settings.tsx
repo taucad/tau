@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { skipToken, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatCreditAtoms } from '@taucad/billing';
 import type { WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
@@ -20,8 +21,8 @@ import {
   prepareReloadConsent,
   revokeReloadConsent,
 } from '#lib/billing-lifecycle-client.js';
+import { reloadConsentQueryKey } from '#hooks/use-auto-reload-enabled.js';
 import { useFinancialSession } from '#providers/financial-session-provider.js';
-import type { FinancialSessionRequest } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
 
@@ -34,74 +35,86 @@ const formatHours = (seconds: number): string => {
 const consentStateLabel: Record<WireAutoReloadConsent['state'], string> = {
   pending_setup: 'Waiting for card setup',
   enabled: 'On',
-  paused_terms: 'Paused because the terms changed. Turn it off, then review the new terms.',
+  paused_terms: 'Paused because the terms changed. Review the new terms to continue.',
   disabled_failures: 'Off after failed payments',
   revoked: 'Off',
 };
 /* eslint-enable @typescript-eslint/naming-convention -- end wire state keys. */
 
+/** Consents new terms can replace: billing refuses new terms only while a consent waits for its card or is on. */
+const reviewableStates: ReadonlySet<WireAutoReloadConsent['state']> = new Set([
+  'paused_terms',
+  'disabled_failures',
+  'revoked',
+]);
+
 const money = (minor: string): string => `US$${(Number(minor) / 100).toFixed(2)}`;
+
+/** Milliseconds between reads while billing confirms a card setup the customer may already have finished. */
+const setupConfirmationInterval = 2000;
+/** Milliseconds a mounted card keeps reading; after that, focusing the page or reopening the card reads again. */
+const setupConfirmationWindow = 60_000;
+
+/** What the card shows for its read of the consent: the consent, a failure with Retry, or a loading line. */
+const loadState = (read: {
+  readonly data: unknown;
+  readonly isError: boolean;
+  readonly isFetching: boolean;
+}): 'loaded' | 'failed' | 'loading' =>
+  read.data !== undefined ? 'loaded' : read.isError && !read.isFetching ? 'failed' : 'loading';
+
+/** Whether the consent waits on a card setup in Checkout, which billing confirms some seconds after it is done. */
+const isConfirmingSetup = (consent: WireAutoReloadConsent | undefined): boolean =>
+  consent?.state === 'pending_setup' &&
+  (consent.setupAction?.state === 'redirect_required' || consent.setupAction?.state === 'processing');
 
 /** Explicit quote, acceptance, setup, and revocation controls for automatic credit reload. */
 export function AutoReloadSettings({
   binding,
 }: {
+  /** Carries the account subject once known, so the consent read is the entry `useAutoReloadEnabled` shares. */
   readonly binding: PaymentActionBinding | undefined;
 }): React.JSX.Element {
   const financial = useFinancialSession();
+  const queryClient = useQueryClient();
   const { isResolved, paymentCollectionAvailable } = useEntitlements();
-  const [load, setLoad] = useState<'loading' | 'loaded' | 'failed'>('loading');
-  const [consent, setConsent] = useState<WireAutoReloadConsent>();
-  const [action, setAction] = useState<WirePaymentAction>();
+  const [confirmingUntil] = useState(() => Date.now() + setupConfirmationWindow);
+  const queryKey = reloadConsentQueryKey(binding);
+  /* The entry `useAutoReloadEnabled` reads, so a refresh here, or a billing invalidation after a payment
+   * return, updates both. Each read captures the financial session, so a purge aborts and fences it. */
+  const reload = useQuery({
+    queryKey,
+    queryFn:
+      binding === undefined
+        ? skipToken
+        : async () => (await getReloadConsent({ ...binding, financialSession: financial.capture() })) ?? null,
+    // The card shows a failed read with its own Retry at once.
+    retry: false,
+    meta: { handlesErrorLocally: true },
+    refetchInterval: (query) =>
+      isConfirmingSetup(query.state.data ?? undefined) && Date.now() < confirmingUntil
+        ? setupConfirmationInterval
+        : false,
+  });
+  /** A control's answer for the setup, which stands until the next read of the consent replaces it. */
+  const [answer, setAnswer] = useState<{ readonly readAt: number; readonly action: WirePaymentAction }>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const consent = reload.data ?? undefined;
+  const answered = answer?.readAt === reload.dataUpdatedAt ? answer.action : undefined;
+  /* The setup the controls act on: a control's fresh answer, else the open setup of a consent still waiting
+   * for its card. A paused or disabled consent still reports the setup that once enabled it, and offering to
+   * continue that beside the review of new terms would send the customer back into a finished Checkout. */
+  const action = answered ?? (consent?.state === 'pending_setup' ? (consent.setupAction ?? undefined) : undefined);
+  const load = loadState(reload);
+  const canReview = load === 'loaded' && (!consent || reviewableStates.has(consent.state));
 
-  /* Runs on the binding's identity and again from Retry; the caller captures the financial token. */
-  const loadConsent = (currentBinding: PaymentActionBinding, token: FinancialSessionRequest): void => {
-    setLoad('loading');
-    // async-iife: bootstrap
-    void (async () => {
-      try {
-        const value = await getReloadConsent({ ...currentBinding, financialSession: token });
-        if (token.isCurrent()) {
-          setConsent(value);
-          setAction(value?.setupAction ?? undefined);
-          setLoad('loaded');
-        }
-      } catch {
-        if (token.isCurrent()) {
-          setLoad('failed');
-        }
-      }
-    })();
+  const answerSetup = (next: WirePaymentAction): void => {
+    setAnswer({ readAt: reload.dataUpdatedAt, action: next });
   };
-
-  useEffect(() => {
-    if (!binding) {
-      return;
-    }
-    // oxlint-disable-next-line react/set-state-in-effect -- the owned GET starts from a visible loading state
-    loadConsent(
-      {
-        apiBaseUrl: binding.apiBaseUrl,
-        environment: binding.environment,
-        ownerId: binding.ownerId,
-        subjectId: binding.subjectId,
-      },
-      financial.capture(),
-    );
-  }, [binding?.apiBaseUrl, binding?.environment, binding?.ownerId, binding?.subjectId, financial]);
-
+  /** Reads the consent again; a failed read rejects, so `run` reports it. */
   const refresh = async (): Promise<void> => {
-    if (!binding) {
-      return;
-    }
-    const token = financial.capture();
-    const next = await getReloadConsent({ ...binding, financialSession: token });
-    if (token.isCurrent()) {
-      setConsent(next);
-      setAction(next?.setupAction ?? undefined);
-    }
+    await queryClient.invalidateQueries({ queryKey }, { throwOnError: true });
   };
   const run = async (operation: () => Promise<void>): Promise<void> => {
     const guard = financial.capture();
@@ -142,15 +155,7 @@ export function AutoReloadSettings({
             <p className='text-muted-foreground' role='alert'>
               Automatic reload settings could not be loaded.
             </p>
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => {
-                if (binding) {
-                  loadConsent(binding, financial.capture());
-                }
-              }}
-            >
+            <Button variant='ghost' size='sm' onClick={() => void reload.refetch()}>
               Retry
             </Button>
           </div>
@@ -196,7 +201,7 @@ export function AutoReloadSettings({
                   action.actionId,
                 );
                 if (token.isCurrent()) {
-                  setAction(next);
+                  answerSetup(next);
                   followPaymentRedirect(next);
                   if (next.state !== 'redirect_required') {
                     await refresh();
@@ -222,7 +227,7 @@ export function AutoReloadSettings({
                   action.actionId,
                 );
                 if (token.isCurrent()) {
-                  setAction(next);
+                  answerSetup(next);
                 }
               })
             }
@@ -230,7 +235,7 @@ export function AutoReloadSettings({
             Continue setup
           </Button>
         ) : undefined}
-        {load === 'loaded' && (!consent || consent.state === 'revoked') ? (
+        {canReview ? (
           <Button
             disabled={busy || !binding || !isResolved || !paymentCollectionAvailable}
             onClick={() =>
@@ -244,7 +249,7 @@ export function AutoReloadSettings({
                   },
                 );
                 if (token.isCurrent()) {
-                  setAction(next);
+                  answerSetup(next);
                   await refresh();
                 }
               })
@@ -253,7 +258,7 @@ export function AutoReloadSettings({
             Review automatic reload
           </Button>
         ) : undefined}
-        {load === 'loaded' && isResolved && !paymentCollectionAvailable && (!consent || consent.state === 'revoked') ? (
+        {canReview && isResolved && !paymentCollectionAvailable ? (
           <p className='text-muted-foreground'>{purchasesUnavailableMessage}</p>
         ) : undefined}
         {consent && consent.state !== 'revoked' ? (
@@ -268,8 +273,7 @@ export function AutoReloadSettings({
                   consent.consentId,
                 );
                 if (token.isCurrent()) {
-                  setConsent(next);
-                  setAction(undefined);
+                  queryClient.setQueryData<WireAutoReloadConsent>(queryKey, next);
                 }
               })
             }

@@ -34,8 +34,8 @@ describe('createReporter', () => {
     const backend = createMockBackend();
     const reporter = createReporter(backend, TauMetrics);
 
-    reporter['rpcCallDuration']!(0.5, { 'rpc.method': 'render' });
-    expect(backend.recordHistogram).toHaveBeenCalledWith('rpc.server.call.duration', 0.5, { 'rpc.method': 'render' });
+    reporter['wsMessageSize']!(512, { 'ws.direction': 'inbound' });
+    expect(backend.recordHistogram).toHaveBeenCalledWith('ws.message.size', 512, { 'ws.direction': 'inbound' });
   });
 
   it('should delegate gauge metrics to recordGauge', () => {

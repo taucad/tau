@@ -197,3 +197,15 @@ GccInt_Bisec: declare class GccInt_Bisec extends Standard_Transient
   [Symbol.dispose](): void;
 
 GccInt_IType: typeof GccInt_IType[keyof typeof GccInt_IType]
+
+  readonly GccInt_Lin: 'GccInt_Lin'
+
+  readonly GccInt_Cir: 'GccInt_Cir'
+
+  readonly GccInt_Ell: 'GccInt_Ell'
+
+  readonly GccInt_Par: 'GccInt_Par'
+
+  readonly GccInt_Hpr: 'GccInt_Hpr'
+
+  readonly GccInt_Pnt: 'GccInt_Pnt'

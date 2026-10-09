@@ -3,13 +3,24 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { wirePaymentActionSchema } from '@taucad/billing';
 
-// The harness creates and deletes accounts and drives Checkout, so the guard is an allowlist: production accounts
-// and money live under tau.new, and a hostname production gains later must not pass by default.
-const extraHost = process.env['TAU_E2E_ALLOW_HOST'];
-const allowedHosts = new Set(['taucad.dev', 'localhost', '127.0.0.1', ...(extraHost === undefined ? [] : [extraHost])]);
-const refuseProduction = (value: string): string => {
+/**
+ * The origin of a stack the harness may drive, or a throw. It creates and deletes accounts and pays Checkout, so the
+ * guard is an allowlist: production accounts and money live under tau.new, which no setting can admit, and a hostname
+ * production gains later must not pass by default. `extraHost` (TAU_E2E_ALLOW_HOST) names one other stack.
+ *
+ * @param value - The configured app or API URL.
+ * @param extraHost - One more hostname to admit, never tau.new or one of its subdomains.
+ * @returns The URL's origin.
+ * @throws When the host is production or outside the allowlist.
+ */
+export const harnessOrigin = (value: string, extraHost?: string): string => {
   const url = new URL(value);
-  if (!allowedHosts.has(url.hostname) && !url.hostname.endsWith('.taucad.dev')) {
+  const { hostname } = url;
+  if (hostname === 'tau.new' || hostname.endsWith('.tau.new')) {
+    throw new Error(`Refusing ${url.origin}: tau.new is production, and the billing harness never drives it`);
+  }
+  const allowed = hostname === 'taucad.dev' || hostname.endsWith('.taucad.dev') || hostname === extraHost;
+  if (!allowed && hostname !== 'localhost' && hostname !== '127.0.0.1') {
     throw new Error(
       `Refusing ${url.origin}: the billing harness drives taucad.dev stacks or localhost; TAU_E2E_ALLOW_HOST names one other`,
     );
@@ -46,8 +57,14 @@ const cookieExpired = (cookie: string): boolean =>
     });
 
 /** The app and API under test: staging unless the environment names another stack. */
-export const baseUrl = refuseProduction(process.env['TAU_E2E_BASE_URL'] ?? 'https://taucad.dev');
-export const apiUrl = refuseProduction(process.env['TAU_E2E_API_URL'] ?? 'https://api.taucad.dev');
+export const baseUrl = harnessOrigin(
+  process.env['TAU_E2E_BASE_URL'] ?? 'https://taucad.dev',
+  process.env['TAU_E2E_ALLOW_HOST'],
+);
+export const apiUrl = harnessOrigin(
+  process.env['TAU_E2E_API_URL'] ?? 'https://api.taucad.dev',
+  process.env['TAU_E2E_ALLOW_HOST'],
+);
 
 export type ApiCall = {
   readonly at: string;
@@ -157,6 +174,25 @@ export const ok = <Schema extends z.ZodType>(response: ApiResponse, schema: Sche
     );
   }
   return schema.parse(response.body);
+};
+
+/**
+ * The refusal code of any error body: the envelope's `code`, else its `error`, else the gateway envelope's
+ * `error.type`; `none` when the body carries none of them.
+ */
+export const refusalCode = (response: ApiResponse): string => {
+  const body = z
+    .object({
+      code: z.string().optional(),
+      error: z.union([z.string(), z.object({ type: z.string() }).loose()]).optional(),
+    })
+    .loose()
+    .safeParse(response.body);
+  if (!body.success) {
+    return 'none';
+  }
+  const { code, error } = body.data;
+  return code ?? (typeof error === 'string' ? error : error?.type) ?? 'none';
 };
 
 /** Parses an error body; rows compare its `error` (message codes) or `code` (conflict codes). */

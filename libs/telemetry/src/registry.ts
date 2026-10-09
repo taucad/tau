@@ -1,40 +1,28 @@
 /* eslint-disable @typescript-eslint/naming-convention -- OTEL attribute names use dot-notation */
 import { z } from 'zod';
 import { defineCounter, defineHistogram, defineGauge, defineUpDownCounter } from '#define-metric.js';
-import { agentPlacements, agentToolKinds } from '#ingest.js';
+import {
+  agentPlacements,
+  agentToolKinds,
+  builtInSkillSlugs,
+  evaluationClasses,
+  geospecRunStatuses,
+  kernelIds,
+  lookupOutcomes,
+  tauToolNames,
+} from '#ingest.js';
 
 /**
  * Canonical metric registry for Tau.
  *
  * Canonical metrics with OTEL-compliant names. Renames from legacy:
  * - `ws.connections.total` -> `ws.disconnections` (counters must not use `.total`)
- * - `sse.events.total` -> `sse.events` (counters must not use `.total`)
  * - `kernel.execution.total` -> `kernel.executions` (counters must be pluralized, no `.total`)
  *
  * @public
  */
 export const TauMetrics = {
-  // --- WebSocket / RPC ---
-
-  rpcCallDuration: defineHistogram({
-    name: 'rpc.server.call.duration',
-    unit: 's',
-    description: 'RPC round-trip latency',
-    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60],
-    attributes: z.object({
-      'rpc.method': z.string().optional(),
-      'rpc.status': z.string().optional(),
-    }),
-  }),
-
-  rpcActiveCalls: defineUpDownCounter({
-    name: 'rpc.server.active_calls',
-    unit: '{call}',
-    description: 'Currently in-flight RPC calls',
-    attributes: z.object({
-      'rpc.method': z.string().optional(),
-    }),
-  }),
+  // --- WebSocket ---
 
   wsActiveConnections: defineUpDownCounter({
     name: 'ws.connections.active',
@@ -88,34 +76,6 @@ export const TauMetrics = {
       'ws.gateway': z.enum(['hosts', 'kernels', 'none']),
       reason: z.enum(['unauthenticated', 'forbidden', 'auth_error', 'unknown_route', 'server_shutdown']),
     }),
-  }),
-
-  rpcDeliveryEvents: defineCounter({
-    name: 'rpc.delivery.events',
-    unit: '{event}',
-    description: 'Durable chat RPC delivery transitions by plane and outcome',
-    attributes: z.object({
-      'rpc.delivery.stage': z.string(),
-      'rpc.delivery.outcome': z.string().optional(),
-      'rpc.delivery.transport': z.string().optional(),
-    }),
-  }),
-
-  rpcDeliveryWakeDuration: defineHistogram({
-    name: 'rpc.delivery.wake.duration',
-    unit: 's',
-    description: 'Time spent waiting for a durable RPC response wake-up',
-    buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
-    attributes: z.object({
-      'rpc.delivery.transport': z.string(),
-    }),
-  }),
-
-  rpcActiveRunRooms: defineUpDownCounter({
-    name: 'rpc.delivery.rooms.active',
-    unit: '{room}',
-    description: 'Run rooms currently retained by authenticated RPC sockets',
-    attributes: z.object({}),
   }),
 
   // --- AI / LLM (GenAI semantic conventions) ---
@@ -403,22 +363,6 @@ export const TauMetrics = {
     }),
   }),
 
-  sseActiveConnections: defineUpDownCounter({
-    name: 'sse.connections.active',
-    unit: '{connection}',
-    description: 'Active SSE streams',
-    attributes: z.object({}),
-  }),
-
-  sseEvents: defineCounter({
-    name: 'sse.events',
-    unit: '{event}',
-    description: 'SSE events emitted',
-    attributes: z.object({
-      'sse.event.type': z.string().optional(),
-    }),
-  }),
-
   publicationViewsTotal: defineCounter({
     name: 'publication.views',
     unit: '{view}',
@@ -623,6 +567,31 @@ export const TauMetrics = {
     }),
   }),
 
+  billingSupplierCostPicoUsd: defineCounter({
+    name: 'tau.billing.supplier_cost_picousd',
+    unit: '{picousd}',
+    description:
+      "Estimated supplier cost of each live-settled funded LLM call in pico-USD, priced from its reported usage at the pinned supplier rates (Tau's cost, never customer-visible)",
+    attributes: z.object({
+      'gen_ai.request.model': z.string(),
+      'gen_ai.provider.name': z.string(),
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+    }),
+  }),
+
+  billingSupplierUnpricedOperations: defineGauge({
+    name: 'tau.billing.supplier_unpriced_operations',
+    unit: '{operation}',
+    description:
+      'Terminal funded operations with no supplier cost estimate, by provider, sku and reason, after each hourly reconciliation',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      'gen_ai.provider.name': z.string(),
+      'tau.billing.sku': z.string(),
+      'tau.billing.unpriced.reason': z.enum(['missing_rate', 'dimension_mismatch', 'absorbed']),
+    }),
+  }),
+
   billingProviderAccountRefusals: defineCounter({
     name: 'tau.billing.provider_account.refusals',
     unit: '{refusal}',
@@ -647,7 +616,7 @@ export const TauMetrics = {
         'genuine_saturation',
         'recovery_in_progress',
         'recovery_failed',
-        'supplier_route_paused',
+        'operator_route_paused',
       ]),
     }),
   }),
@@ -740,6 +709,8 @@ export const TauMetrics = {
       'agent.id': z.string(),
       'agent.placement': z.enum(agentPlacements),
       outcome: z.enum(['completed', 'cancelled', 'error', 'refused']),
+      /** Present only when the turn reported its context (usage metrics allowed). */
+      'kernel.id': z.enum(kernelIds).optional(),
     }),
   }),
 
@@ -773,6 +744,8 @@ export const TauMetrics = {
     attributes: z.object({
       'agent.id': z.string(),
       'tool.kind': z.enum(agentToolKinds),
+      /** Tau's own tools only; absent (`""` in PromQL) for ACP rows and turns without usage metrics. */
+      'tool.name': z.enum(tauToolNames).optional(),
       status: z.enum(['completed', 'failed']),
     }),
   }),
@@ -794,6 +767,105 @@ export const TauMetrics = {
     attributes: z.object({
       'agent.id': z.string(),
       'error.code': z.string(),
+    }),
+  }),
+
+  // --- Client-reported: agent context (agent usage telemetry blueprint) ---
+  // Recorded only from turns that carry `detail.context`; every label is a bounded vocabulary from `ingest.ts`.
+
+  agentCallsBeforeFirstWrite: defineHistogram({
+    name: 'tau.agent.calls_before_first_write',
+    unit: '{call}',
+    description: 'Tool calls an agent made before its first model-file write in a turn (reported by client)',
+    buckets: [0, 1, 2, 3, 5, 8, 13, 20, 30, 50, 100],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+    }),
+  }),
+
+  agentTimeToFirstWrite: defineHistogram({
+    name: 'tau.agent.time_to_first_write',
+    unit: 's',
+    description: 'Agent turn admission to its first model-file write (reported by client)',
+    buckets: [5, 10, 20, 30, 60, 120, 300, 600, 1800],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+    }),
+  }),
+
+  agentReferenceLookups: defineCounter({
+    name: 'tau.agent.reference_lookups',
+    unit: '{call}',
+    description: 'Skill-reference lookups an agent made, by outcome (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+      'lookup.outcome': z.enum(lookupOutcomes),
+    }),
+  }),
+
+  agentReferenceBytes: defineHistogram({
+    name: 'tau.agent.reference_bytes',
+    unit: 'By',
+    description: "Skill-reference bytes Tau's own tools read in a turn (reported by client)",
+    buckets: [1024, 4096, 16_384, 32_768, 65_536, 131_072, 262_144, 1_048_576],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+    }),
+  }),
+
+  agentSkillActivations: defineCounter({
+    name: 'tau.agent.skill_activations',
+    unit: '{activation}',
+    description: 'Skills an agent activated in a turn; user-authored skills count as custom (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      skill: z.enum([...builtInSkillSlugs, 'custom']),
+    }),
+  }),
+
+  agentEvaluations: defineCounter({
+    name: 'tau.agent.evaluations',
+    unit: '{evaluation}',
+    description: 'Model evaluations an agent ran, by how they ended (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+      'evaluation.class': z.enum(evaluationClasses),
+    }),
+  }),
+
+  agentCorrectionsAfterError: defineHistogram({
+    name: 'tau.agent.corrections_after_error',
+    unit: '{write}',
+    description: 'Model-file writes that followed a failed evaluation in a turn (reported by client)',
+    buckets: [0, 1, 2, 3, 5, 10],
+    attributes: z.object({
+      'agent.id': z.string(),
+      'kernel.id': z.enum(kernelIds),
+    }),
+  }),
+
+  agentGeospecAssertions: defineCounter({
+    name: 'tau.agent.geospec_assertions',
+    unit: '{assertion}',
+    description: 'GeoSpec assertions an agent ran, by result (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      result: z.enum(['passed', 'failed']),
+    }),
+  }),
+
+  agentGeospecRuns: defineCounter({
+    name: 'tau.agent.geospec_runs',
+    unit: '{run}',
+    description: 'GeoSpec test runs an agent started, by run status (reported by client)',
+    attributes: z.object({
+      'agent.id': z.string(),
+      'run.status': z.enum(geospecRunStatuses),
     }),
   }),
 

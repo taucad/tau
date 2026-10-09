@@ -1045,7 +1045,27 @@ BRepFill_Sweep: declare class BRepFill_Sweep
 
 BRepFill_ThruSectionErrorStatus: typeof BRepFill_ThruSectionErrorStatus[keyof typeof BRepFill_ThruSectionErrorStatus]
 
+  readonly BRepFill_ThruSectionErrorStatus_Done: 'BRepFill_ThruSectionErrorStatus_Done'
+
+  readonly BRepFill_ThruSectionErrorStatus_NotDone: 'BRepFill_ThruSectionErrorStatus_NotDone'
+
+  readonly BRepFill_ThruSectionErrorStatus_NotSameTopology: 'BRepFill_ThruSectionErrorStatus_NotSameTopology'
+
+  readonly BRepFill_ThruSectionErrorStatus_ProfilesInconsistent: 'BRepFill_ThruSectionErrorStatus_ProfilesInconsistent'
+
+  readonly BRepFill_ThruSectionErrorStatus_WrongUsage: 'BRepFill_ThruSectionErrorStatus_WrongUsage'
+
+  readonly BRepFill_ThruSectionErrorStatus_Null3DCurve: 'BRepFill_ThruSectionErrorStatus_Null3DCurve'
+
+  readonly BRepFill_ThruSectionErrorStatus_Failed: 'BRepFill_ThruSectionErrorStatus_Failed'
+
 BRepFill_TransitionStyle: typeof BRepFill_TransitionStyle[keyof typeof BRepFill_TransitionStyle]
+
+  readonly BRepFill_Modified: 'BRepFill_Modified'
+
+  readonly BRepFill_Right: 'BRepFill_Right'
+
+  readonly BRepFill_Round: 'BRepFill_Round'
 
 BRepFill_TrimEdgeTool: declare class BRepFill_TrimEdgeTool
 
@@ -1101,5 +1121,11 @@ BRepFill_TrimShellCorner: declare class BRepFill_TrimShellCorner
   [Symbol.dispose](): void;
 
 BRepFill_TypeOfContact: typeof BRepFill_TypeOfContact[keyof typeof BRepFill_TypeOfContact]
+
+  readonly BRepFill_NoContact: 'BRepFill_NoContact'
+
+  readonly BRepFill_Contact: 'BRepFill_Contact'
+
+  readonly BRepFill_ContactOnBorder: 'BRepFill_ContactOnBorder'
 
 BRepFill_DataMapOfShapeHArray2OfShape: NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher

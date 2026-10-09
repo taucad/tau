@@ -1,6 +1,72 @@
 # libcascade — IFSelect (2)
 
-31 top-level symbols. Signatures are verbatim typescript.
+32 top-level symbols. Signatures are verbatim typescript.
+
+IFSelect_SelectPointed: declare class IFSelect_SelectPointed extends IFSelect_SelectBase
+
+  // IFSelect_SelectPointed.constructor (constructor)
+  constructor();
+
+  // IFSelect_SelectPointed.Clear (method)
+  Clear(): void;
+
+  // IFSelect_SelectPointed.IsSet (method)
+  IsSet(): boolean;
+
+  // IFSelect_SelectPointed.SetEntity (method)
+  SetEntity(item: Standard_Transient): void;
+
+  // IFSelect_SelectPointed.SetList (method)
+  SetList(list: NCollection_HSequence_handle_Standard_Transient): void;
+
+  // IFSelect_SelectPointed.Add (method)
+  Add(item: Standard_Transient): boolean;
+
+  // IFSelect_SelectPointed.Remove (method)
+  Remove(item: Standard_Transient): boolean;
+
+  // IFSelect_SelectPointed.Toggle (method)
+  Toggle(item: Standard_Transient): boolean;
+
+  // IFSelect_SelectPointed.AddList (method)
+  AddList(list: NCollection_HSequence_handle_Standard_Transient): boolean;
+
+  // IFSelect_SelectPointed.RemoveList (method)
+  RemoveList(list: NCollection_HSequence_handle_Standard_Transient): boolean;
+
+  // IFSelect_SelectPointed.ToggleList (method)
+  ToggleList(list: NCollection_HSequence_handle_Standard_Transient): boolean;
+
+  // IFSelect_SelectPointed.Rank (method)
+  Rank(item: Standard_Transient): number;
+
+  // IFSelect_SelectPointed.NbItems (method)
+  NbItems(): number;
+
+  // IFSelect_SelectPointed.Item (method)
+  Item(num: number): Standard_Transient;
+
+  // IFSelect_SelectPointed.Update (method)
+  Update(control: Interface_CopyControl): void;
+  Update(trf: IFSelect_Transformer): void;
+
+  // IFSelect_SelectPointed.Label (method)
+  Label(): TCollection_AsciiString;
+
+  // IFSelect_SelectPointed.get_type_name (method)
+  static get_type_name(): string;
+
+  // IFSelect_SelectPointed.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // IFSelect_SelectPointed.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // IFSelect_SelectPointed.delete (method)
+  delete(): void;
+
+  // IFSelect_SelectPointed.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 IFSelect_SelectRange: declare class IFSelect_SelectRange extends IFSelect_SelectExtract
 

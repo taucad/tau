@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
@@ -18,8 +19,10 @@ import type {
   QualifiedBillableInvocation,
 } from '#api/billing/billable-model-invocation.types.js';
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
-import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import type { TerminalEvidence } from '#api/billing/credit-ledger.types.js';
+import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import type { BillingPolicyService } from '#api/billing/billing-policy.service.js';
+import type { DatabaseService } from '#database/database.service.js';
+import type { TerminalEvidence, TerminalReceipt } from '#api/billing/credit-ledger.types.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
@@ -33,7 +36,6 @@ const qualification = (): QualifiedBillableInvocation => ({
   sku: 'model:route',
   meterContractId: 'meter',
   maximumQuantities: [{ dimension: 'uncached_input', tier: null, quantity: 10n }],
-  supplierMaximumPicoUsd: 10n,
   maximumResponseBytes: 128,
   replica: { schemaVersion: 1, meterContractIds: ['meter'] },
   invocation: {
@@ -55,7 +57,6 @@ const qualification = (): QualifiedBillableInvocation => ({
       failed: () => ({ kind: 'absorbed_unknown' }),
     }),
     executeOnce: vi.fn(async () => new Response('ok')),
-    classifyFinality: () => ({ state: 'unknown' }),
   },
 });
 
@@ -104,6 +105,7 @@ const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {
     ...genAiMetrics(),
     billingFundedOperationTerminals: { add: vi.fn() },
     billingProviderAccountRefusals: { add: vi.fn() },
+    billingSupplierCostPicoUsd: { add: vi.fn() },
   };
   const row = {
     ...qualified,
@@ -126,7 +128,12 @@ const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {
     markDispatchAccepted: vi.fn(async () => true),
     getDispatchTimeRemaining: vi.fn(async () => 30_000),
     recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
-    terminalizeOperation: vi.fn(async () => ({ chargedAtoms: 0n })),
+    terminalizeOperation: vi.fn(
+      async (): Promise<Pick<TerminalReceipt, 'chargedAtoms' | 'supplierCostPicoUsd'>> => ({
+        chargedAtoms: 0n,
+        supplierCostPicoUsd: 0n,
+      }),
+    ),
   };
   const service = new BillableModelInvocationService(
     ledger as unknown as CreditLedgerService,
@@ -763,7 +770,6 @@ describe('BillableModelInvocationService', () => {
         // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
         new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
         undefined,
-        undefined,
         shutdown,
       );
       row.requestDigest = (
@@ -786,7 +792,7 @@ describe('BillableModelInvocationService', () => {
       await result.completion;
     };
 
-    it('should settle the step at once as absorbed, labelled service_restart, and release its spend hold', async () => {
+    it('should settle the step at once as absorbed, labelled service_restart', async () => {
       const shutdown = new ShutdownService();
       const { ledger, service } = midStream(shutdown);
       shutdown.stop();
@@ -800,7 +806,7 @@ describe('BillableModelInvocationService', () => {
         normalizationEvidence: { terminalReason: 'service_restart' },
       });
       expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ evidence: recorded?.evidence, expireSpendHold: true }),
+        expect.objectContaining({ evidence: recorded?.evidence }),
       );
     });
 
@@ -905,6 +911,86 @@ describe('BillableModelInvocationService', () => {
     expect(admitted[0].invocation.jointInputMaximum?.quantity).toBe('10');
     expect(admitted[0].maximumQuantities).toStrictEqual(qualified.maximumQuantities);
     expect(qualified.adapter.executeOnce).toHaveBeenCalledOnce();
+  });
+
+  it('should record an exact-count credit denial and refuse with its shortfall, not fall back to the byte bound', async () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    const counted: Record<string, string> = { qualification: 'controlled-local-zero' };
+    const qualified: QualifiedBillableInvocation = {
+      ...qualification(),
+      inputCount: { capability: counted as unknown as InputCountCapability },
+      maximumQuantities: [
+        { dimension: 'uncached_input', tier: null, quantity: 10n },
+        { dimension: 'output', tier: null, quantity: 4n },
+      ],
+      invocation: {
+        ...qualification().invocation,
+        jointInputMaximum: { version: 'joint-input-v1', quantity: '10' },
+      },
+    };
+    // The real denial recorder, over an owner lookup that finds no binding: it checks the digest, then stops.
+    const ownerLookup = vi.fn(async () => []);
+    const owners = new CreditLedgerService(
+      { database: { select: () => ({ from: () => ({ where: ownerLookup }) }) } } as unknown as Pick<
+        DatabaseService,
+        'database'
+      >,
+      {} as BillingPolicyService,
+    );
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      inputCountEligibility: vi.fn(async () => ({
+        status: 'denied',
+        reason: 'insufficient_credit',
+        requiredCreditAtoms: 8n,
+        availableCreditAtoms: 1n,
+      })),
+      recordFundedWorkDenial: vi.fn(async (input: Parameters<CreditLedgerService['recordFundedWorkDenial']>[0]) =>
+        owners.recordFundedWorkDenial(input),
+      ),
+      // What the byte bound would answer: the same refusal, with a larger requirement.
+      admitOperation: vi.fn(async () => ({
+        status: 'denied',
+        reason: 'insufficient_credit',
+        requiredCreditAtoms: 48n,
+        availableCreditAtoms: 1n,
+      })),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      genAiMetrics() as unknown as MetricsService,
+    );
+
+    try {
+      const refusal: unknown = await service.invoke(intent()).catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(LlmGatewayError);
+      expect((refusal as LlmGatewayError).getStatus()).toBe(402);
+      expect((refusal as LlmGatewayError).getResponse()).toMatchObject({
+        error: {
+          type: 'INSUFFICIENT_CREDIT',
+          details: { requiredCreditAtoms: '8', availableCreditAtoms: '1', routeId: 'route' },
+        },
+      });
+      expect(ledger.recordFundedWorkDenial).toHaveBeenCalledExactlyOnceWith({
+        environment: 'development',
+        authUserId: 'user',
+        attemptKey: 'attempt_0000000001',
+        requestDigest: expect.stringMatching(/^hmac-sha256:[a-f0-9]{64}$/u) as unknown,
+      });
+      expect(ownerLookup).toHaveBeenCalledOnce();
+      expect(ledger.admitOperation).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('recovers an expired owner pool and retries the same admission once before dispatch', async () => {
@@ -1103,6 +1189,91 @@ describe('BillableModelInvocationService', () => {
     expect(ledger.recoverDueLlmOperationsForOwner).not.toHaveBeenCalled();
     expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
     expect(metrics.billingVoidedAdmissions.add).toHaveBeenCalledWith(1, { 'deployment.environment': 'development' });
+  });
+
+  it('should answer an operator-paused route with 503 MODEL_ROUTE_PAUSED naming the route', async () => {
+    const qualified = qualification();
+    const metrics = { ...genAiMetrics(), billingFundedOperationDenials: { add: vi.fn() } };
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'route_paused' })),
+      recoverDueLlmOperationsForOwner: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+      metrics as unknown as MetricsService,
+    );
+
+    const refusal = await service.invoke(intent()).catch((error: unknown) => error);
+
+    if (!(refusal instanceof LlmGatewayError)) {
+      throw new TypeError('Expected a typed gateway refusal');
+    }
+    expect(refusal.getStatus()).toBe(503);
+    expect(refusal.getResponse()).toEqual({
+      type: 'error',
+      error: {
+        type: 'MODEL_ROUTE_PAUSED',
+        message: "This model route is paused by Tau's operators.",
+        details: { routeId: qualified.routeId },
+      },
+    });
+    expect(metrics.billingFundedOperationDenials.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'deployment.environment': 'development',
+      'tau.billing.capacity_pool': 'primary',
+      'tau.billing.denial.reason': 'operator_route_paused',
+    });
+    expect(ledger.recoverDueLlmOperationsForOwner).not.toHaveBeenCalled();
+    expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+  });
+
+  it('should answer a restricted account with 403 BILLING_ACCOUNT_RESTRICTED, never a provider outage', async () => {
+    const qualified = qualification();
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(async () => ({ status: 'denied', reason: 'account_restricted' })),
+      recoverDueLlmOperationsForOwner: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: () => qualified },
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+
+    const refusal = await service.invoke(intent()).catch((error: unknown) => error);
+
+    if (!(refusal instanceof LlmGatewayError)) {
+      throw new TypeError('Expected a typed gateway refusal');
+    }
+    expect(refusal.getStatus()).toBe(403);
+    expect(refusal.getResponse()).toEqual({
+      type: 'error',
+      error: { type: 'BILLING_ACCOUNT_RESTRICTED', message: 'This Tau billing account is restricted.' },
+    });
+    expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+  });
+
+  it('should keep the retired supplier-pause and provider-outage restriction sentences out of the API', () => {
+    // Assembled here so this guard does not match itself.
+    const retired = [
+      ['This model route is paused while Tau reconciles', 'its supplier evidence'].join(' '),
+      ['Model admission failed:', 'account_restricted'].join(' '),
+    ];
+    const root = resolve(import.meta.dirname, '../..');
+    const sources = readdirSync(root, { recursive: true, encoding: 'utf8' }).filter((path) => path.endsWith('.ts'));
+    const offenders = sources.filter((path) => {
+      const content = readFileSync(join(root, path), 'utf8');
+      return retired.some((sentence) => content.includes(sentence));
+    });
+
+    expect(sources.length).toBeGreaterThan(100);
+    expect(offenders).toEqual([]);
   });
 
   it('returns recovery-unavailable while another claimant owns an expired operation', async () => {
@@ -1366,7 +1537,8 @@ describe('BillableModelInvocationService', () => {
   });
 
   /* R1 in-stream + V4 (Cloud): the relayed frame carries Tau's code, and the turn that
-   * carried no usage settles absorbed — no meter item, no customer charge. */
+   * carried no usage settles rejected at once — no meter item, no customer charge, no hold
+   * left to the recovery deadline. */
   it('should rewrite the captured in-stream supplier refusal and settle the turn at zero charge', async () => {
     const qualified = { ...qualification(), maximumResponseBytes: 64 * 1024 };
     qualified.adapter.createEvidenceCollector = () =>
@@ -1387,14 +1559,20 @@ describe('BillableModelInvocationService', () => {
       `event: error\ndata: {"type":"error","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider's account is unavailable.","error":{"type":"tau_gateway","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider's account is unavailable.","details":{"providerId":"openai","providerCode":"credit_balance_exhausted","accountOwner":"tau"}}}\n\n`,
     );
     expect(relayed).not.toContain('You have no credits remaining');
-    // No usage was reported, so nothing is metered onto the customer and nothing terminalizes.
+    // No usage was reported before the supplier failed: the turn is released now, like a pre-stream refusal.
+    const rejected = {
+      kind: 'provider_rejected',
+      executionStatus: 'rejected',
+      normalizationEvidence: { version: 'provider-usage-v1', terminalReason: 'provider_failed', fields: {} },
+    };
     const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
-    expect(recorded?.evidence).toMatchObject({ kind: 'absorbed_unknown', executionStatus: 'unknown' });
-    expect(Object.keys(recorded?.evidence ?? {})).not.toContain('meterItems');
-    expect(ledger.terminalizeOperation).not.toHaveBeenCalled();
+    expect(recorded?.evidence).toEqual(rejected);
+    expect(ledger.terminalizeOperation).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ evidence: rejected }),
+    );
     expect(metrics.billingFundedOperationTerminals.add).toHaveBeenCalledWith(
       1,
-      expect.objectContaining({ 'tau.billing.terminal.kind': 'absorbed_unknown' }),
+      expect.objectContaining({ 'tau.billing.terminal.kind': 'provider_rejected' }),
     );
   });
 
@@ -1443,6 +1621,8 @@ describe('BillableModelInvocationService', () => {
     const settle = async (
       meterItems: Extract<TerminalEvidence, { kind: 'final_usage' }>['meterItems'],
       stream?: boolean,
+      // oxlint-disable-next-line typescript/no-restricted-types -- null is an unpriced receipt
+      supplierCostPicoUsd: bigint | null = 0n,
     ) => {
       const qualified = qualification();
       qualified.normalizedRequest = {
@@ -1468,7 +1648,7 @@ describe('BillableModelInvocationService', () => {
         failed: () => ({ kind: 'absorbed_unknown' }),
       });
       const harness = exhaustionHarness(qualified);
-      harness.ledger.terminalizeOperation.mockResolvedValue({ chargedAtoms: 2500n });
+      harness.ledger.terminalizeOperation.mockResolvedValue({ chargedAtoms: 2500n, supplierCostPicoUsd });
       const result = await harness.service.invoke(intent());
       if (result.state !== 'streaming') {
         throw new Error('Invocation did not stream');
@@ -1477,6 +1657,37 @@ describe('BillableModelInvocationService', () => {
       await result.completion;
       return harness.metrics;
     };
+
+    it('should count the receipt supplier cost with the charge labels plus the environment', async () => {
+      const metrics = await settle(
+        [
+          { dimension: 'uncached_input', tier: null, quantity: 7n },
+          { dimension: 'output', tier: null, quantity: 5n },
+        ],
+        undefined,
+        1_750_000n,
+      );
+
+      expect(metrics.billingSupplierCostPicoUsd.add).toHaveBeenCalledExactlyOnceWith(1_750_000, {
+        'gen_ai.request.model': 'model',
+        'gen_ai.provider.name': 'openai',
+        'deployment.environment': 'development',
+      });
+    });
+
+    it.each([
+      ['a known zero', 0n],
+      ['an unpriced receipt', null],
+    ])('should not count supplier cost for %s', async (_label, supplierCostPicoUsd) => {
+      const metrics = await settle(
+        [{ dimension: 'uncached_input', tier: null, quantity: 7n }],
+        undefined,
+        supplierCostPicoUsd,
+      );
+
+      expect(metrics.genAiCost.add).toHaveBeenCalledOnce();
+      expect(metrics.billingSupplierCostPicoUsd.add).not.toHaveBeenCalled();
+    });
 
     it('records tokens, the charged USD and a successful duration', async () => {
       const metrics = await settle([
@@ -1554,7 +1765,7 @@ describe('BillableModelInvocationService', () => {
     it('records a refused admission as one errored duration with no tokens or cost', async () => {
       const qualified = qualification();
       const { ledger, metrics, service } = exhaustionHarness(qualified);
-      ledger.admitOperation.mockResolvedValue({ status: 'denied', reason: 'budget_unavailable' } as unknown as Awaited<
+      ledger.admitOperation.mockResolvedValue({ status: 'denied', reason: 'policy_unavailable' } as unknown as Awaited<
         ReturnType<typeof ledger.admitOperation>
       >);
 
@@ -1562,7 +1773,7 @@ describe('BillableModelInvocationService', () => {
 
       expect(metrics.genAiOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
         ...labels,
-        'error.type': 'budget_unavailable',
+        'error.type': 'policy_unavailable',
       });
       expect(metrics.genAiTokenUsage.record).not.toHaveBeenCalled();
       expect(metrics.genAiCost.add).not.toHaveBeenCalled();

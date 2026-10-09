@@ -1,99 +1,24 @@
 # Zoo KCL JSON Export Patch
 
-This folder contains the modifications needed for the Zoo Modeling App repository to export KCL standard library documentation as JSON for use in Tau.
+[gen_std_tests.patch.rs](./gen_std_tests.patch.rs) adds a `test_export_stdlib_json` test to the Zoo Modeling App's `rust/kcl-lib/src/docs/gen_std_tests.rs`. It writes the KCL standard library (functions, types, constants, modules, `deprecated_since` and doc-comment examples with their sketch syntax) as JSON for Tau's api-extractor. It walks `walk_stdlib()`, so the `std::solver` sketch-block module is included.
 
-## Quick Start
+The vendored export must match the kcl-lib version Tau's runtime runs. Upstream bumps `kcl-wasm-lib` `0.1.N` and `kcl-lib` `0.2.N` together, so `@taucad/kcl-wasm-lib@0.1.184` (pnpm catalog) needs the `kcl-lib` `0.2.184` export; `src/languages/kcl/extract.test.ts` enforces this.
 
-If you have the Zoo repo already cloned at `repos/zoo-modeling-app`:
+## Regenerate
 
-```bash
-# Apply the patch and generate JSON
-cd repos/zoo-modeling-app/rust
-EXPECTORATE=overwrite cargo test -p kcl-lib test_export_stdlib_json --release
-
-# Then run the Tau extraction
-cd ../../..
-pnpm tsx libs/api-extractor/src/extract-kcl-api.ts
-```
-
-## Fresh Zoo Repo Setup
-
-### 1. Clone the Zoo repository
+Use the upstream commit the runtime was built from (the `rebuild-kcl-wasm-lib` skill records it; `0.1.184` = `9b0ecedff5`). A separate worktree keeps `repos/zoo-modeling-app` on its checked-out commit:
 
 ```bash
-cd repos
-git clone https://github.com/KittyCAD/modeling-app.git zoo-modeling-app
-cd zoo-modeling-app
+git -C repos/zoo-modeling-app worktree add --detach "$SCRATCH/zoo" 9b0ecedff5
+cat libs/api-extractor/src/zoo-kcl-patch/gen_std_tests.patch.rs \
+  >> "$SCRATCH/zoo/rust/kcl-lib/src/docs/gen_std_tests.rs"
+cd "$SCRATCH/zoo/rust"
+CARGO_TARGET_DIR="$SCRATCH/target" EXPECTORATE=overwrite \
+  cargo test -p kcl-lib --lib test_export_stdlib_json
+cp "$SCRATCH/zoo/docs/kcl-std/kcl-stdlib-export.json" \
+  libs/api-extractor/src/generated/kcl/kcl-stdlib-export.json
 ```
 
-### 2. Apply the patch to gen_std_tests.rs
+The debug test build needs about 2.5 GB in `CARGO_TARGET_DIR`; delete it afterwards. If upstream renames an item the patch uses (`docs_for_type`, `mod_name_std`, the `kcl_doc` structs), adapt the patch to the new names and keep the JSON field names stable.
 
-Copy the patched file from this folder to the Zoo repo:
-
-```bash
-cp /path/to/tau/libs/api-extractor/src/zoo-kcl-patch/gen_std_tests.rs \
-   repos/zoo-modeling-app/rust/kcl-lib/src/docs/gen_std_tests.rs
-```
-
-Or manually add the following to `rust/kcl-lib/src/docs/gen_std_tests.rs`:
-
-1. **Add JSON builder helper functions** after `docs_for_type()` (around line 377):
-   - `build_function_json()`
-   - `build_const_json()`
-   - `build_type_json()`
-   - `build_module_json()`
-
-2. **Add the JSON export test** after `test_generate_stdlib_markdown_docs()`:
-   - `test_export_stdlib_json()`
-
-See [gen_std_tests.patch.rs](./gen_std_tests.patch.rs) for the exact code to add.
-
-### 3. Generate the JSON export
-
-```bash
-cd repos/zoo-modeling-app/rust
-
-# First run creates the file (use EXPECTORATE=overwrite)
-EXPECTORATE=overwrite cargo test -p kcl-lib test_export_stdlib_json --release
-
-# Subsequent runs will verify the file hasn't changed
-cargo test -p kcl-lib test_export_stdlib_json --release
-```
-
-This generates: `repos/zoo-modeling-app/docs/kcl-std/kcl-stdlib-export.json`
-
-### 4. Run Tau extraction
-
-```bash
-cd /path/to/tau
-pnpm tsx libs/api-extractor/src/extract-kcl-api.ts
-```
-
-This:
-
-Copies the JSON from the Zoo repo to `libs/api-extractor/src/generated/kcl/`.
-
-## Output Files
-
-| File                     | Description                     |
-| ------------------------ | ------------------------------- |
-| `kcl-stdlib-export.json` | Raw JSON from Zoo repo (copied) |
-
-The corpus and the rendered reference are produced from that vendored export by
-`src/languages/kcl/extract.ts`, not here.
-
-## Updating When KCL Changes
-
-When the Zoo repo updates their KCL stdlib:
-
-1. Pull latest Zoo changes: `cd repos/zoo-modeling-app && git pull`
-2. Re-run the JSON export: `cd rust && EXPECTORATE=overwrite cargo test -p kcl-lib test_export_stdlib_json --release`
-3. Re-run Tau extraction: `pnpm tsx libs/api-extractor/src/extract-kcl-api.ts`
-4. Commit the updated generated files
-
-## Notes
-
-- The patch reuses existing JSON construction code from the Handlebars template rendering
-- No new Rust dependencies are required
-- The `expectorate` crate handles file writing (same as existing markdown docs)
-- The test will fail if the JSON output changes (run with `EXPECTORATE=overwrite` to update)
+Then update the expectations in `src/languages/kcl/extract.test.ts` and regenerate the skill bundles. The corpus and the rendered reference come from the vendored export through `src/languages/kcl/extract.ts`.

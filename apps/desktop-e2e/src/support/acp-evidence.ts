@@ -74,6 +74,25 @@ export const toolResult = (
   return result.content;
 };
 
+/**
+ * The chat ledger's current run and its lifecycle state, from the rows written so far.
+ * A line still being written is skipped rather than failing the read.
+ */
+export const currentRun = (events: string): { readonly runId: string; readonly lifecycle?: string } | undefined => {
+  const rows = events
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .flatMap((line): unknown[] => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
+  const { currentRunId, runs } = foldChatLedger(emptyChatLedger, rows);
+  return currentRunId === undefined ? undefined : { runId: currentRunId, lifecycle: runs[currentRunId]?.lifecycle };
+};
+
 /** Resolve the terminal run instead of accidentally accepting an older successful result: the chat ledger's current run. */
 export const latestCompletedRun = (events: string): string => {
   const rows = events

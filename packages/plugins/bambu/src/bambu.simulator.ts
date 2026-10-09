@@ -44,6 +44,8 @@ export type BambuSimulatorFault =
   | 'camera-unavailable'
   | 'certificate-changed'
   | 'partial-transfer'
+  /** Report no `plate_type`, as a printer that cannot tell which plate is on its bed. */
+  | 'plate-unreported'
   | 'protected-mode'
   /** Send no report after a write, as a P1 or a busy X1C lags its acknowledgements; the next push shows it. */
   | 'push-lag'
@@ -715,7 +717,7 @@ export const createBambuSimulator = async (
       cooling_fan_speed: fan('part'),
       ...(x1c ? { big_fan1_speed: fan('auxiliary'), big_fan2_speed: fan('chamber') } : {}),
       ...(x1c ? { lights_report: [{ node: 'chamber_light', mode: light ? 'on' : 'off' }] } : {}),
-      plate_type: 'textured_plate',
+      ...(faults.has('plate-unreported') ? {} : { plate_type: 'textured_plate' }),
       wifi_signal: '-45dBm',
       sdcard: true,
       // An X1C with an AMS spool in the toolhead reports ASSIST (3), not IDLE, between procedures.
@@ -1194,6 +1196,13 @@ export const createBambuSimulator = async (
         parser: { id: 'tau.bambu.gcode-3mf', version: '1' },
         memberMd5: '0'.repeat(32),
         plate: new Uint8Array(0),
+        // The reference plate is sliced for this printer, its 0.4 mm nozzle, the textured plate and tray 0's PLA.
+        slice: {
+          printerModel: x1c ? 'Bambu Lab X1 Carbon' : 'Bambu Lab A1 mini',
+          nozzleDiameter: 0.4,
+          bedType: 'Textured PEI Plate',
+          filaments: [{ type: 'PLA', color: '#F2F2F2', diameter: 1.75, used: true }],
+        },
       };
     }
     const { prepareBambuArtifact } = await import('#bambu.archive.js');

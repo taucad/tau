@@ -50,6 +50,96 @@ const readProducer = (
   return undefined;
 };
 
+/** One filament of the sliced project, in project order. @internal */
+export type BambuSlicedFilament = Readonly<{
+  /** `filament_type`, such as `PLA`. */
+  type: string;
+  /** `filament_colour` as `#RRGGBB`, upper case. */
+  color?: string;
+  /** `filament_diameter`, in millimetres. */
+  diameter?: number;
+  /** Whether this plate prints it: listed in `slice_info.config`, or every filament when that names none. */
+  used: boolean;
+}>;
+
+/** What the slice itself says it was made for; a fact the file does not state is absent. @internal */
+export type BambuSliceFacts = Readonly<{
+  /** `printer_model`, such as `Bambu Lab X1 Carbon`. */
+  printerModel?: string;
+  /** `nozzle_diameter`, in millimetres. */
+  nozzleDiameter?: number;
+  /** `curr_bed_type`, such as `Textured PEI Plate`. */
+  bedType?: string;
+  filaments: readonly BambuSlicedFilament[];
+}>;
+
+const configScanBytes = 1024 * 1024;
+const configStart = '; CONFIG_BLOCK_START';
+const configEnd = '; CONFIG_BLOCK_END';
+const colorEntry = /^#([\da-f]{6})(?:[\da-f]{2})?$/iu;
+const usedFilament = /<filament\s+id="(\d{1,3})"/gu;
+
+/**
+ * Read the facts a check compares with the printer from the plate G-code's config block (Bambu Studio writes it after
+ * the header; another slicer may write it at the end) and the plate's filament list in `slice_info.config`.
+ * @param plate - The plate G-code.
+ * @param sliceInfo - `Metadata/slice_info.config`, when present.
+ * @returns The facts the slice states.
+ * @internal
+ */
+export const readBambuSliceFacts = (
+  plate: Uint8Array<ArrayBuffer>,
+  sliceInfo: Uint8Array<ArrayBuffer> | undefined,
+): BambuSliceFacts => {
+  const decoder = new TextDecoder();
+  const ends = [plate.subarray(0, configScanBytes), plate.subarray(-configScanBytes)].map((bytes) =>
+    decoder.decode(bytes),
+  );
+  const block =
+    ends
+      .map((text) => {
+        const start = text.indexOf(configStart);
+        const end = start === -1 ? -1 : text.indexOf(configEnd, start);
+        return end === -1 ? undefined : text.slice(start, end);
+      })
+      .find((text) => text !== undefined) ?? '';
+  const setting = (name: string): string | undefined =>
+    new RegExp(`^;\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'mu').exec(block)?.[1];
+  const list = (name: string): readonly string[] =>
+    setting(name)
+      ?.split(/[;,]/u)
+      .map((entry) => entry.trim().replaceAll('"', '')) ?? [];
+  const number = (text: string | undefined): number | undefined => {
+    const value = Number(text);
+    return text === undefined || text === '' || !Number.isFinite(value) ? undefined : value;
+  };
+  const colors = list('filament_colour');
+  const diameters = list('filament_diameter');
+  const listed = new Set(
+    [...(sliceInfo === undefined ? '' : decoder.decode(sliceInfo)).matchAll(usedFilament)].map((match) =>
+      Number(match[1]),
+    ),
+  );
+  const printerModel = setting('printer_model');
+  const bedType = setting('curr_bed_type');
+  const nozzleDiameter = number(list('nozzle_diameter')[0]);
+  return {
+    ...(printerModel === undefined ? {} : { printerModel }),
+    ...(nozzleDiameter === undefined ? {} : { nozzleDiameter }),
+    ...(bedType === undefined ? {} : { bedType }),
+    filaments: list('filament_type').map((type, index) => {
+      const color = colorEntry.exec(colors[index] ?? '')?.[1];
+      const diameter = number(diameters[index]);
+      return {
+        type,
+        ...(color === undefined ? {} : { color: `#${color.toUpperCase()}` }),
+        ...(diameter === undefined ? {} : { diameter }),
+        used: listed.size === 0 || listed.has(index + 1),
+      };
+    }),
+  };
+};
+
 /** A verified immutable Bambu container retained only for the following transfer. @internal */
 export type BambuPreparedArtifact = Readonly<{
   bytes: Uint8Array<ArrayBuffer>;
@@ -61,6 +151,8 @@ export type BambuPreparedArtifact = Readonly<{
   plate: Uint8Array<ArrayBuffer>;
   /** The slicer named by the plate header and slice metadata, when recognized. */
   producer?: BambuArtifactProducer;
+  /** What the slice says it was made for: printer, nozzle, plate and filaments. */
+  slice: BambuSliceFacts;
 }>;
 
 const fail = (code: string): never => {
@@ -173,6 +265,7 @@ export const prepareBambuArtifact = async (
   }
   const plate = extracted[plateMember]!;
   const producer = readProducer(plate, extracted[sliceInfoMember]);
+  const slice = readBambuSliceFacts(plate, extracted[sliceInfoMember]);
   return Object.freeze({
     bytes,
     digest,
@@ -181,5 +274,6 @@ export const prepareBambuArtifact = async (
     memberMd5: createHash('md5').update(plate).digest('hex'),
     plate,
     ...(producer ? { producer: Object.freeze(producer) } : {}),
+    slice,
   });
 };

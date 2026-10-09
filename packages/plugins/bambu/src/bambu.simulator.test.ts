@@ -69,6 +69,51 @@ const plateGcode = [
   'M107',
 ].join('\n');
 
+/** What Bambu Studio records for an X1C 0.4 mm slice on the textured plate with tray 0's white PLA. */
+const x1cSlice: Readonly<Record<string, string>> = {
+  curr_bed_type: 'Textured PEI Plate',
+  filament_colour: '#F2F2F2',
+  filament_diameter: '1.75',
+  filament_type: 'PLA',
+  nozzle_diameter: '0.4',
+  printer_model: 'Bambu Lab X1 Carbon',
+};
+const slices = new Map<string, Uint8Array<ArrayBuffer>>();
+/** The host's artifact reader over every container `sliced` made. */
+const readSlices: NonNullable<NonNullable<Parameters<typeof createBambuSimulator>[0]>['readArtifact']> =
+  async function* ({ artifact: requested }) {
+    const bytes = slices.get(requested.digest);
+    if (bytes !== undefined) {
+      yield bytes;
+    }
+  };
+/**
+ * A `.gcode.3mf` whose plate carries these config-block settings, and the reference to it.
+ * @param settings - The config block; `x1cSlice` by default.
+ * @param used - The 1-based filaments `slice_info.config` lists for the plate; all when omitted.
+ */
+const sliced = (
+  settings: Readonly<Record<string, string>> = x1cSlice,
+  used?: readonly number[],
+): MachineArtifactReference => {
+  const block = Object.entries(settings).map(([key, value]) => `; ${key} = ${value}`);
+  const container = zipSync({
+    'Metadata/plate_1.gcode': encoder.encode(
+      ['; CONFIG_BLOCK_START', ...block, '; CONFIG_BLOCK_END', plateGcode].join('\n'),
+    ),
+    ...(used === undefined
+      ? {}
+      : {
+          'Metadata/slice_info.config': encoder.encode(
+            `<config><plate>${used.map((id) => `<filament id="${String(id)}"/>`).join('')}</plate></config>`,
+          ),
+        }),
+  });
+  const digest = `sha256:${createHash('sha256').update(container).digest('hex')}` as MachineArtifactReference['digest'];
+  slices.set(digest, Uint8Array.from(container));
+  return { ...artifact, digest, length: container.byteLength };
+};
+
 /** A clock the test moves by hand, in seconds. */
 const manualClock = () => {
   let elapsed = 0;
@@ -197,14 +242,18 @@ const a = (index: number) => ({ unitId: 'ams-a', slotId: `a${String(index)}` });
 const spool = { unitId: 'external', slotId: 'spool' };
 
 /** Prepare, transfer and start the job; hands back the run id. */
-const startJob = async (simulator: BambuSimulator, runArtifact: MachineArtifactReference = artifact) => {
+const startJob = async (
+  simulator: BambuSimulator,
+  runArtifact: MachineArtifactReference = artifact,
+  expectedMachineId = 'simulated-x1c',
+) => {
   const { jobs } = simulator.session;
   if (jobs.type !== 'supported' || jobs.delivery !== 'stored') {
     throw new Error('expected stored jobs');
   }
   const base = {
     operationId: 'job-1',
-    expectedMachineId: 'simulated-x1c',
+    expectedMachineId,
     artifact: runArtifact,
     configuration,
     signal,
@@ -403,18 +452,8 @@ describe('Simulated X1C accessory actions', () => {
 
 describe('Simulated X1C jobs and run control', () => {
   it('should upload and start the uploaded plate, then print it layer by layer on the injected clock', async () => {
-    const container = zipSync({ 'Metadata/plate_1.gcode': encoder.encode(plateGcode) });
-    const containerArtifact: MachineArtifactReference = {
-      ...artifact,
-      digest: `sha256:${createHash('sha256').update(container).digest('hex')}` as MachineArtifactReference['digest'],
-      length: container.byteLength,
-    };
-    const { simulator, after } = await open({
-      async *readArtifact() {
-        yield Uint8Array.from(container);
-      },
-    });
-    const { runId } = await startJob(simulator, containerArtifact);
+    const { simulator, after } = await open({ readArtifact: readSlices });
+    const { runId } = await startJob(simulator, sliced());
     expect(simulator.writes()).toEqual([expect.stringMatching(/^upload:tau-.*\.gcode\.3mf$/u), 'project_file']);
     expect(lastRequest(simulator, 'project_file')).toMatchObject({
       param: 'Metadata/plate_1.gcode',
@@ -467,6 +506,37 @@ describe('Simulated X1C jobs and run control', () => {
     });
   });
 
+  it('should not read a later pause as the agent’s when the printer refused the agent’s pause', async () => {
+    const { simulator } = await open({ model: 'A1 mini' });
+    const { runId } = await startJob(simulator, artifact, 'simulated-a1-mini');
+    simulator.setDeveloperMode(false);
+    await expect(actOnRun(simulator, 'controller:run.pause', { runId, requester: 'agent' })).resolves.toMatchObject({
+      receipt: { status: 'rejected' },
+    });
+    simulator.setDeveloperMode(true);
+    // Paused from another client, as from the screen: the printer reports it like any remote pause.
+    const screen = await simulator.connect();
+    const { actions } = screen;
+    if (actions.type !== 'supported') {
+      throw new Error('expected actions');
+    }
+    await actions.apply({
+      operationId: 'screen-pause',
+      componentId: 'controller',
+      action: 'run.pause',
+      version: 1,
+      expectedRunId: runId,
+      parameters: {},
+      requestedBy: { kind: 'user' },
+      signal,
+    });
+    await settle();
+    await expect(simulator.session.getSnapshot({ signal })).resolves.toMatchObject({
+      run: { paused: { by: 'person' } },
+    });
+    await screen.close();
+  });
+
   it('should stop urgently and reconcile the stop and the start from proof', async () => {
     const { simulator } = await open();
     await startJob(simulator);
@@ -509,22 +579,45 @@ describe('Simulated X1C jobs and run control', () => {
     expect(simulator.writes().includes('project_file')).toBe(false);
   });
 
-  it('should block a job whose material does not match the slot', async () => {
+  it('should refuse a transfer and a start once the session is closed, sending nothing', async () => {
     const { simulator } = await open();
+    const { jobs } = simulator.session;
+    if (jobs.type !== 'supported' || jobs.delivery !== 'stored') {
+      throw new Error('expected stored jobs');
+    }
+    const base = { operationId: 'job-1', expectedMachineId: 'simulated-x1c', artifact, configuration, signal };
+    const prepared = await jobs.prepare(base);
+    if (prepared.status === 'refused' || prepared.remoteName === undefined) {
+      throw new Error('expected a preparation');
+    }
+    await simulator.session.close();
+    const sent = { ...base, remoteName: prepared.remoteName, providerData: prepared.providerData };
+    const unavailable = { status: 'rejected', code: 'MACHINE_UNAVAILABLE' };
+    await expect(jobs.transfer({ ...sent, operationId: 'transfer-1' })).resolves.toMatchObject(unavailable);
+    await expect(
+      jobs.start({ ...sent, operationId: 'start-1', transferId: prepared.remoteName }),
+    ).resolves.toMatchObject(unavailable);
+    expect(simulator.writes()).toEqual([]);
+  });
+
+  it('should block a job whose material does not match the slot', async () => {
+    const { simulator } = await open({ readArtifact: readSlices });
     const { jobs } = simulator.session;
     if (jobs.type !== 'supported') {
       throw new Error('expected jobs');
     }
+    // A PETG slice mapped to tray 0's PLA, though the form claims PLA.
     const prepared = await jobs.prepare({
       operationId: 'job-1',
       expectedMachineId: 'simulated-x1c',
-      artifact,
-      configuration: { ...configuration, expectedMaterials: [{ slot: 0, materialId: 'petg' }] },
+      artifact: sliced({ ...x1cSlice, filament_type: 'PETG' }),
+      configuration,
       signal,
     });
     expect(prepared).toMatchObject({ status: 'blocked' });
     expect(prepared.status !== 'refused' && prepared.checks.find(({ id }) => id === 'filament')).toMatchObject({
       state: 'blocked',
+      detail: 'The slot mapped to the PETG filament holds PLA.',
     });
   });
 
@@ -811,6 +904,27 @@ describe('Simulated X1C admission at the moment of sending', () => {
     expect(simulator.writes()).toEqual(before);
   });
 
+  it('should refuse at the moment of sending once the report is older than its group allows', async () => {
+    const { simulator, time } = await open();
+    const material = {
+      materialType: 'PETG',
+      color: '#ff8800ff',
+      preset: { profileId: 'GFG99', settingId: 'GFSG99' },
+      nozzleTemperature: { min: 230, max: 260 },
+    };
+    // No report for two minutes: setting a slot needs the filament group, good for ninety seconds.
+    time.advance(120);
+    await expect(act(simulator, 'filament:material.set', { slot: a(3), material })).resolves.toMatchObject({
+      receipt: { status: 'rejected', code: 'MACHINE_ACTION_STALE_OBSERVATION' },
+    });
+    expect(simulator.writes()).toEqual([]);
+    simulator.push();
+    await settle();
+    await expect(act(simulator, 'filament:material.set', { slot: a(3), material })).resolves.toMatchObject({
+      receipt: { status: 'accepted' },
+    });
+  });
+
   it('should refuse a control the printer does not declare, and anything once the session is closed', async () => {
     const { simulator } = await open({ model: 'A1 mini' });
     await expect(act(simulator, 'chamber-light:switch.set', { on: true })).resolves.toMatchObject({
@@ -987,31 +1101,147 @@ describe('Simulated printer faults the session must survive', () => {
 });
 
 describe('Simulated X1C start form', () => {
-  it('should complete a partial form from the printer, keeping what the caller chose', async () => {
-    const { simulator } = await open();
+  /** Complete, validate and prepare a job in the host's order; hands back the form and the blocked checks. */
+  const check = async (simulator: BambuSimulator, program: MachineArtifactReference, given: unknown) => {
     const { jobs } = simulator.session;
     if (jobs.type !== 'supported' || jobs.completeConfiguration === undefined) {
       throw new Error('expected a form completion');
     }
-    const complete = async (configuration: Readonly<Record<string, number[] | boolean>>) =>
-      jobs.completeConfiguration?.({ expectedMachineId: 'simulated-x1c', artifact, configuration, signal });
-    const completed = await complete({});
+    const completed = await jobs.completeConfiguration({
+      expectedMachineId: 'simulated-x1c',
+      artifact: program,
+      // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- a person's or agent's form is any JSON.
+      configuration: given as Parameters<NonNullable<typeof jobs.completeConfiguration>>[0]['configuration'],
+      signal,
+    });
+    const parsed = bambuSubmissionConfiguration.schema.safeParse(completed);
+    if (!parsed.success) {
+      throw new Error(`expected a valid form, got ${JSON.stringify(completed)}`);
+    }
+    const prepared = await jobs.prepare({
+      operationId: 'check',
+      expectedMachineId: 'simulated-x1c',
+      artifact: program,
+      configuration: parsed.data,
+      signal,
+    });
+    if (prepared.status === 'refused') {
+      throw new Error(`expected a preparation, got ${JSON.stringify(prepared)}`);
+    }
+    return { completed, prepared, blocked: prepared.checks.filter(({ state }) => state === 'blocked') };
+  };
+  // The person's form as Prepare once filled it from the printer, and the agent's finished program (no form).
+  const { operatorConfirmedBedType: _stated, ...personForm } = configuration;
+  const paths = [
+    ['the person', personForm],
+    ['the agent', {}],
+  ] as const;
+
+  it('should complete a partial form from the file and the printer, keeping what the caller chose', async () => {
+    const { simulator } = await open({ readArtifact: readSlices });
+    const program = sliced();
+    const { completed, blocked } = await check(simulator, program, {});
     expect(completed).toEqual({
-      expectedModel: 'X1C',
-      expectedFilamentDiameter: 1.75,
-      expectedNozzleDiameter: 0.4,
-      expectedBedType: 'textured-pei',
-      amsMapping: [0],
-      expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
       bedLeveling: true,
       flowCalibration: true,
       timelapse: false,
+      amsMapping: [0],
+      expectedModel: 'X1C',
+      expectedNozzleDiameter: 0.4,
+      expectedFilamentDiameter: 1.75,
+      expectedBedType: 'textured-pei',
+      expectedMaterials: [{ slot: 0, materialId: 'PLA' }],
     });
-    expect(bambuSubmissionConfiguration.schema.safeParse(completed).success).toBe(true);
-    await expect(complete({ amsMapping: [1], timelapse: true })).resolves.toMatchObject({
-      amsMapping: [1],
-      expectedMaterials: [{ slot: 1, materialId: 'PETG' }],
-      timelapse: true,
+    expect(blocked).toEqual([]);
+    // A chosen slot wins over the inferred one; what the file was sliced for does not change.
+    await expect(check(simulator, program, { amsMapping: [1], timelapse: true })).resolves.toMatchObject({
+      completed: { amsMapping: [1], expectedMaterials: [{ slot: 1, materialId: 'PLA' }], timelapse: true },
+      blocked: [expect.objectContaining({ id: 'filament', detail: 'The slot mapped to the PLA filament holds PETG.' })],
+    });
+  });
+
+  it.each(paths)('should block a file sliced for another printer, nozzle or plate, sent by %s', async (_, form) => {
+    const { simulator } = await open({ readArtifact: readSlices });
+    const blockedBy = async (settings: Readonly<Record<string, string>>) => {
+      const { blocked } = await check(simulator, sliced(settings), form);
+      return blocked.map(({ id, detail }) => ({ id, detail }));
+    };
+    await expect(blockedBy({ ...x1cSlice, printer_model: 'Bambu Lab A1 mini' })).resolves.toEqual([
+      { id: 'model', detail: 'The file was sliced for a Bambu Lab A1 mini; this printer is an X1C.' },
+    ]);
+    await expect(blockedBy({ ...x1cSlice, nozzle_diameter: '0.2' })).resolves.toEqual([
+      { id: 'nozzle', detail: 'The file was sliced for a 0.2 mm nozzle; this printer has a 0.4 mm nozzle.' },
+    ]);
+    await expect(blockedBy({ ...x1cSlice, curr_bed_type: 'Cool Plate' })).resolves.toEqual([
+      { id: 'plate', detail: 'Put the Cool Plate the file was sliced for on the printer.' },
+    ]);
+    // A file that states none of it is blocked on each, with the remedy of slicing it for this printer.
+    const silent = await check(simulator, sliced({}), form);
+    expect(silent.blocked.map(({ id }) => id)).toEqual(['model', 'nozzle', 'plate', 'filament']);
+    expect(silent.blocked[0]).toMatchObject({
+      detail: 'The file does not say which printer it was sliced for.',
+      remedy: { type: 'person', instruction: 'Slice it in Bambu Studio for this X1C, then send it again.' },
+    });
+  });
+
+  it('should map each printed filament to a loaded tray of its material, nearest in colour', async () => {
+    const { simulator } = await open({ readArtifact: readSlices });
+    await act(simulator, 'filament:material.set', {
+      slot: a(3),
+      material: {
+        materialType: 'PLA',
+        color: '#e01010ff',
+        preset: { profileId: 'GFA00', settingId: 'GFSA00' },
+        nozzleTemperature: { min: 190, max: 230 },
+      },
+    });
+    const threeFilaments = {
+      ...x1cSlice,
+      filament_colour: '#FF0000;#1E5AA8;#000000',
+      filament_diameter: '1.75,1.75,1.75',
+      filament_type: 'PLA;PETG;ABS',
+    };
+    // The plate prints the red PLA and the PETG; the ABS is the project's, not this plate's.
+    await expect(check(simulator, sliced(threeFilaments, [1, 2]), {})).resolves.toMatchObject({
+      completed: {
+        amsMapping: [2, 1, -1],
+        expectedMaterials: [
+          { slot: 2, materialId: 'PLA' },
+          { slot: 1, materialId: 'PETG' },
+        ],
+      },
+      blocked: [],
+    });
+    // Printed, the ABS has no tray to come from.
+    await expect(check(simulator, sliced(threeFilaments), {})).resolves.toMatchObject({
+      completed: { amsMapping: [2, 1, -1] },
+      blocked: [
+        expect.objectContaining({ id: 'filament', detail: 'Load ABS into a slot and map the filament to it.' }),
+      ],
+    });
+  });
+
+  it('should refuse to complete a form for a file that fails verification, as preparation does', async () => {
+    const { simulator } = await open({ readArtifact: readSlices });
+    const { jobs } = simulator.session;
+    if (jobs.type !== 'supported' || jobs.completeConfiguration === undefined) {
+      throw new Error('expected a form completion');
+    }
+    // The reader serves nothing for this digest, so the bytes never match it.
+    await expect(
+      jobs.completeConfiguration({ expectedMachineId: 'simulated-x1c', artifact, configuration: {}, signal }),
+    ).rejects.toMatchObject({ code: 'MACHINE_JOB_ARTIFACT_INVALID' });
+  });
+
+  it('should keep the plate a person or agent says is installed when the printer reports none', async () => {
+    const { simulator } = await open({ readArtifact: readSlices, faults: ['plate-unreported'] });
+    const program = sliced();
+    await expect(check(simulator, program, { operatorConfirmedBedType: 'textured-pei' })).resolves.toMatchObject({
+      completed: { operatorConfirmedBedType: 'textured-pei', expectedBedType: 'textured-pei' },
+      blocked: [],
+    });
+    await expect(check(simulator, program, {})).resolves.toMatchObject({
+      blocked: [expect.objectContaining({ id: 'plate', detail: 'Say which plate is on the printer.' })],
     });
   });
 });

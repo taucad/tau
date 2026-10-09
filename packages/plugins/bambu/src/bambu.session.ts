@@ -37,7 +37,7 @@ import { checkMachineActionAtSend } from '@taucad/runtime/machine';
 import { checkOperation, createQuantity, quantityKinds } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
 
-import type { BambuPreparedArtifact } from '#bambu.archive.js';
+import type { BambuPreparedArtifact, BambuSlicedFilament } from '#bambu.archive.js';
 import {
   bambuAmsControl,
   bambuCalibrationDelete,
@@ -113,15 +113,20 @@ export type BambuLink = Readonly<{
   close(): Promise<void>;
 }>;
 
-/** The admitted submission form. @internal */
+/**
+ * The admitted submission form. The `expected*` keys are what the slice says it was made for, as completion reads
+ * them from the file; preparation checks the file's own facts, so a stated value cannot make a check pass.
+ * @internal
+ */
 export type BambuSubmission = Readonly<{
   amsMapping: readonly number[];
   bedLeveling: boolean;
-  expectedBedType: string;
-  expectedFilamentDiameter: number;
+  expectedBedType?: string;
+  expectedFilamentDiameter?: number;
   expectedMaterials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>;
-  expectedModel: BambuModel;
-  expectedNozzleDiameter: number;
+  expectedModel?: BambuModel;
+  expectedNozzleDiameter?: number;
+  /** The plate a person or agent says is installed, for a printer that does not report one. */
   operatorConfirmedBedType?: string;
   flowCalibration: boolean;
   timelapse: boolean;
@@ -249,6 +254,32 @@ const newAmsProtocol = (status: BambuStatus | undefined): boolean => bambuBit(st
 
 const millimetres = (quantity: Quantity | undefined): number | undefined =>
   quantity === undefined ? undefined : Number(quantity.value);
+
+/**
+ * The `printer_model` Bambu Studio writes into a slice for a printer.
+ * @param model - The printer.
+ * @returns Its slice name.
+ */
+const slicedPrinterModel = (model: BambuModel): string =>
+  model === 'X1C' ? 'Bambu Lab X1 Carbon' : 'Bambu Lab A1 mini';
+
+/**
+ * How far apart two `#RRGGBB[AA]` colours are.
+ * @param left - One colour.
+ * @param right - The other.
+ * @returns 0–3, or `undefined` when either is not a colour.
+ */
+const colorDistance = (left: string | undefined, right: string | undefined): number | undefined => {
+  const channels = (color: string | undefined) =>
+    /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})/iu
+      .exec(color ?? '')
+      ?.slice(1)
+      .map((hex) => Number.parseInt(hex, 16) / 255);
+  const [a, b] = [channels(left), channels(right)];
+  return a === undefined || b === undefined
+    ? undefined
+    : a.reduce((sum, value, index) => sum + Math.abs(value - (b[index] ?? 0)), 0);
+};
 
 const sameDiameter = (observed: Quantity | undefined, declared: number): boolean => {
   if (!observed) {
@@ -384,8 +415,12 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
   let calibration: Calibration | undefined;
   /** The calibration this session last asked for, so a system print without a known file name is still named. */
   let requestedCalibration: { method: Calibration['method']; operationId: string } | undefined;
-  /** A pause an agent asked for, until the run has shown it and left it: the printer reports every remote pause alike. */
-  let agentPause: { runId: string; shown: boolean } | undefined;
+  /**
+   * A pause an agent asked for, until the run has shown it and left it: the printer reports every remote pause alike.
+   * One the printer refused, or did not show within the reply window, is dropped so a later pause from the screen
+   * reads as the person's.
+   */
+  let agentPause: { runId: string; shown: boolean; until: number } | undefined;
   let readSequence = 90_000;
   let lastEmitted: MachineReport | undefined;
   let closed = false;
@@ -567,7 +602,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     if (agentPause !== undefined) {
       if (status.gcodeState === 'PAUSE') {
         agentPause.shown = true;
-      } else if (agentPause.shown) {
+      } else if (agentPause.shown || Date.now() > agentPause.until) {
         agentPause = undefined;
       }
     }
@@ -1226,7 +1261,10 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
           request: bambuRunCommand(sequence, command),
           after: () => {
             if (command === 'pause') {
-              agentPause = action.requestedBy.kind === 'agent' ? { runId, shown: false } : undefined;
+              agentPause =
+                action.requestedBy.kind === 'agent'
+                  ? { runId, shown: false, until: Date.now() + replyWindow }
+                  : undefined;
             }
           },
         };
@@ -1582,6 +1620,7 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       name: input.name,
       capabilities: capabilities(),
       report: report(),
+      observations: manifest.observations,
       componentId: action.componentId,
       action: action.action,
       expectedRunId: action.expectedRunId,
@@ -1666,6 +1705,9 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
           : acknowledged && reply.result === 'fail'
             ? rejected('MACHINE_ACTION_PROVIDER_REJECTED', reply.reason ?? 'The printer refused the command.')
             : { status: 'accepted', observedAt: now() };
+    if (key === 'controller:run.pause' && entry.receipt.status !== 'accepted' && agentPause?.shown === false) {
+      agentPause = undefined;
+    }
     return entry.receipt;
   };
 
@@ -1834,45 +1876,64 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     name === undefined ? undefined : (bambuPlateForBedType(name, printer)?.id ?? name);
 
   /**
-   * Complete a partial start form from what the printer reports, in this provider's own keys: the model, the
-   * installed nozzle, the 1.75 mm filament, the plate on the bed, the loaded tray as the one filament and its
-   * material, and Bambu Studio's defaults (bed levelling and flow calibration on, timelapse off). What the caller
-   * gave wins. Read-only.
-   *
-   * ponytail: a plate's filament count is not read here, so an unmapped job maps its one filament to the loaded
-   * tray; a multi-filament plate names its `amsMapping`.
-   * @param input - The partial form.
+   * The loaded tray of a filament's material nearest its colour; the current tray wins a tie.
+   * @param filament - A filament the plate prints.
+   * @returns Its slot, or `undefined` when no loaded tray holds its material.
+   */
+  const nearestTray = (filament: BambuSlicedFilament): number | undefined =>
+    trays()
+      .filter((tray) => tray.state === 'loaded' && tray.materialId?.toLowerCase() === filament.type.toLowerCase())
+      .map((tray) => ({
+        slot: tray.slot,
+        distance: colorDistance(tray.color, filament.color) ?? 0,
+        current: tray.slot === status?.currentMaterialSlot,
+      }))
+      .sort((left, right) => left.distance - right.distance || Number(right.current) - Number(left.current))[0]?.slot;
+
+  /**
+   * Complete a partial start form, in this provider's own keys. What the file was sliced for (model, nozzle, filament
+   * diameter, plate, each filament's material) comes from the file, never from the printer, so a check cannot compare
+   * the printer with itself. The printer fills only what the file cannot say: each printed filament's slot (a loaded
+   * tray of its material, nearest in colour; `-1` when none holds it, which the check blocks) and Bambu Studio's
+   * defaults (bed levelling and flow calibration on, timelapse off). A stated mapping, plate or option wins. Read-only.
+   * @param input - The partial form and the program it is for.
    * @returns The completed form.
    */
   const completeConfiguration: NonNullable<MachineJobs['completeConfiguration']> = async ({
+    artifact: reference,
     configuration,
     signal,
   }) => {
     signal.throwIfAborted();
     const given = isFields(configuration) ? configuration : {};
-    const plate = status?.bedType === undefined ? undefined : bambuPlateForBedType(status.bedType, printer)?.id;
-    const loaded =
-      status?.currentMaterialSlot ??
-      trays().find((tray) => tray.state === 'loaded' && tray.materialId !== undefined)?.slot;
+    let slice: BambuPreparedArtifact['slice'];
+    try {
+      ({ slice } = await input.readArtifact(reference, signal));
+    } catch {
+      // Refused as preparation refuses it, so the job fails with the same code wherever the file is first read.
+      throw new BambuProtocolError('MACHINE_JOB_ARTIFACT_INVALID', 'The artifact failed bounded verification.');
+    }
     const mapping = given['amsMapping'];
     const amsMapping = Array.isArray(mapping)
       ? mapping.filter((slot): slot is number => typeof slot === 'number')
-      : loaded === undefined
-        ? []
-        : [loaded];
+      : slice.filaments.map((filament) => (filament.used ? (nearestTray(filament) ?? -1) : -1));
+    const chosen = Object.fromEntries(Object.entries(given).filter(([key]) => !key.startsWith('expected')));
     return {
-      expectedModel: model,
-      expectedFilamentDiameter: 1.75,
-      ...definedFields({ expectedNozzleDiameter: millimetres(status?.nozzleDiameter), expectedBedType: plate }),
-      amsMapping,
-      expectedMaterials: amsMapping.flatMap((slot) => {
-        const materialId = trayOf(slot)?.materialId;
-        return materialId === undefined ? [] : [{ slot, materialId }];
-      }),
       bedLeveling: true,
       flowCalibration: true,
       timelapse: false,
-      ...given,
+      ...chosen,
+      amsMapping,
+      ...definedFields({
+        expectedModel: slice.printerModel === slicedPrinterModel(model) ? model : undefined,
+        expectedNozzleDiameter: slice.nozzleDiameter,
+        expectedFilamentDiameter: slice.filaments.find(({ used }) => used)?.diameter,
+        expectedBedType: plateIdOf(slice.bedType),
+      }),
+      expectedMaterials: slice.filaments.flatMap((filament, index) => {
+        const slot = amsMapping[index];
+        return filament.used && slot !== undefined && slot >= 0 ? [{ slot, materialId: filament.type }] : [];
+      }),
     };
   };
 
@@ -1893,16 +1954,14 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       return refused('MACHINE_JOB_ARTIFACT_INVALID', 'The artifact failed bounded verification.');
     }
     const { configuration } = jobInput;
-    const external = configuration.amsMapping.includes(bambuExternalSpoolSlot);
-    const bedType = status?.bedType ?? configuration.operatorConfirmedBedType;
+    const { slice } = artifact;
+    const installedPlate = status?.bedType ?? configuration.operatorConfirmedBedType;
     const observedModel = status?.model ?? model;
-    const matched =
-      configuration.amsMapping.length === configuration.expectedMaterials.length &&
-      configuration.expectedMaterials.every(
-        (expected, index) =>
-          configuration.amsMapping[index] === expected.slot &&
-          trayOf(expected.slot)?.materialId?.toLowerCase() === expected.materialId.toLowerCase(),
-      );
+    const printed = slice.filaments.flatMap((filament, index) =>
+      filament.used ? [{ ...filament, slot: configuration.amsMapping[index] ?? -1 }] : [],
+    );
+    const external = printed.some(({ slot }) => slot === bambuExternalSpoolSlot);
+    const unmatched = printed.find(({ type, slot }) => trayOf(slot)?.materialId?.toLowerCase() !== type.toLowerCase());
     const computed = (
       id: string,
       label: string,
@@ -1914,29 +1973,62 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
       source: 'computed',
       ...(passed ? {} : { detail, ...(remedy ? { remedy } : {}) }),
     });
+    // A fact the file does not state blocks its check: the printer cannot stand in for it.
+    const reslice: MachineCheck['remedy'] = {
+      type: 'person',
+      instruction: `Slice it in Bambu Studio for this ${observedModel}, then send it again.`,
+    };
+    const unstated = (fact: string): string => `The file does not say which ${fact} it was sliced for.`;
     const printerChecks: MachineCheck[] = [
       computed('model', 'Sliced for this printer', {
-        passed: observedModel === configuration.expectedModel,
-        detail: `This printer is a ${observedModel}.`,
+        passed: slice.printerModel === slicedPrinterModel(model),
+        detail:
+          slice.printerModel === undefined
+            ? unstated('printer')
+            : `The file was sliced for a ${slice.printerModel}; this printer is an ${observedModel}.`,
+        remedy: reslice,
       }),
       computed('nozzle', 'Nozzle matches the slice', {
         passed:
-          sameDiameter(status?.nozzleDiameter, configuration.expectedNozzleDiameter) &&
-          configuration.expectedFilamentDiameter === 1.75,
-        detail: 'The installed nozzle differs from the one the file was sliced for.',
+          slice.nozzleDiameter !== undefined &&
+          sameDiameter(status?.nozzleDiameter, slice.nozzleDiameter) &&
+          printed.length > 0 &&
+          printed.every(({ diameter }) => diameter === 1.75),
+        detail:
+          slice.nozzleDiameter === undefined
+            ? unstated('nozzle')
+            : printed.every(({ diameter }) => diameter === 1.75)
+              ? `The file was sliced for a ${String(slice.nozzleDiameter)} mm nozzle; this printer has a ${String(nozzleDiameter())} mm nozzle.`
+              : 'The file was sliced for filament other than 1.75 mm.',
+        remedy: reslice,
       }),
       computed('plate', 'Build plate matches the slice', {
-        passed: plateIdOf(bedType) === plateIdOf(configuration.expectedBedType),
-        detail: 'Put the plate the file was sliced for on the printer.',
-        remedy: { type: 'person', instruction: 'Put the plate the file was sliced for on the printer.' },
+        passed:
+          slice.bedType !== undefined &&
+          installedPlate !== undefined &&
+          plateIdOf(installedPlate) === plateIdOf(slice.bedType),
+        detail:
+          slice.bedType === undefined
+            ? unstated('build plate')
+            : installedPlate === undefined
+              ? 'Say which plate is on the printer.'
+              : `Put the ${slice.bedType} the file was sliced for on the printer.`,
+        remedy:
+          slice.bedType === undefined
+            ? reslice
+            : { type: 'person', instruction: `Put the ${slice.bedType} on the printer.` },
       }),
       computed('filament', 'Filament matches the plate', {
-        passed: matched && (!external || configuration.amsMapping.length === 1),
+        passed: printed.length > 0 && unmatched === undefined && (!external || printed.length === 1),
         detail:
-          external && configuration.amsMapping.length > 1
-            ? 'The external spool can only feed a one-filament print. Map every filament to an AMS slot.'
-            : 'A mapped slot holds a different material.',
-        remedy: { type: 'action', componentId: 'filament', action: 'material.set' },
+          printed.length === 0
+            ? unstated('filament')
+            : external && printed.length > 1
+              ? 'The external spool can only feed a one-filament print. Map every filament to an AMS slot.'
+              : unmatched === undefined || unmatched.slot < 0
+                ? `Load ${unmatched?.type ?? 'the filament'} into a slot and map the filament to it.`
+                : `The slot mapped to the ${unmatched.type} filament holds ${trayOf(unmatched.slot)?.materialId ?? 'nothing'}.`,
+        remedy: printed.length === 0 ? reslice : { type: 'action', componentId: 'filament', action: 'material.set' },
       }),
       ...(input.requireBambuStudio
         ? [
@@ -1973,8 +2065,8 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         model: observedModel,
         firmware: firmware ?? 'unknown',
         nozzle: nozzleDiameter(),
-        bedType: bedType ?? 'unknown',
-        materials: configuration.amsMapping.map((slot) => ({
+        bedType: installedPlate ?? 'unknown',
+        materials: printed.map(({ slot }) => ({
           slot,
           materialId: trayOf(slot)?.materialId ?? 'unknown',
           profileId: trayOf(slot)?.profileId ?? 'unknown',
@@ -1991,6 +2083,9 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     const existing = ledger.get(jobInput.operationId);
     if (existing?.kind === 'transfer' && existing.receipt !== undefined) {
       return existing.receipt;
+    }
+    if (!link.connected() || closed) {
+      return rejected('MACHINE_UNAVAILABLE', 'The printer is not connected.');
     }
     const providerRecord = isRecord(jobInput.providerData) ? jobInput.providerData : undefined;
     if (jobInput.expectedMachineId !== serial || !remoteNamePattern.test(jobInput.remoteName)) {
@@ -2047,6 +2142,10 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
     const existing = ledger.get(jobInput.operationId);
     if (existing?.kind === 'start' && existing.receipt !== undefined) {
       return existing.receipt;
+    }
+    // Nothing is sent over a link that is down, so the start is refused rather than left unknown.
+    if (!link.connected() || closed) {
+      return rejected('MACHINE_UNAVAILABLE', 'The printer is not connected.');
     }
     const providerRecord = isRecord(jobInput.providerData) ? jobInput.providerData : undefined;
     const memberMd5 = providerRecord?.['memberMd5'];
@@ -2106,7 +2205,11 @@ export const openBambuSession = async (input: BambuSessionInput): Promise<Machin
         use_ams: configuration.amsMapping.length > 0 && !external,
         ams_mapping: external ? configuration.amsMapping.map(() => -1) : configuration.amsMapping,
         ams_mapping2: configuration.amsMapping.map((slot) =>
-          external ? { ams_id: 255, slot_id: 0 } : { ams_id: Math.floor(slot / 4), slot_id: slot % 4 },
+          external
+            ? { ams_id: 255, slot_id: 0 }
+            : slot < 0
+              ? { ams_id: 255, slot_id: 255 }
+              : { ams_id: Math.floor(slot / 4), slot_id: slot % 4 },
         ),
         cfg: '0',
         profile_id: '0',

@@ -38,27 +38,32 @@ const traySlots = (last: number, ...extra: number[]) =>
 
 /**
  * Submission schema shared by the LAN provider and the simulator. Trays 0–15 are the four AMS units an X1C takes;
- * the installed capabilities name the ones the printer reports.
+ * the installed capabilities name the ones the printer reports. The `expected*` keys are what the file says it was
+ * sliced for, filled from the file; one the file does not state is left out and preparation blocks on it.
  * @internal
  */
 export const bambuSubmissionConfiguration = defineConfiguration({
   id: 'bambu.machine.submission',
-  version: '1.2.0',
+  version: '1.3.0',
   schema: z.strictObject({
     amsMapping: z.array(traySlots(15, -1)).max(16).default([]),
     bedLeveling: z.boolean().default(true),
-    expectedBedType: z.string().min(1).max(64),
+    expectedBedType: z.string().min(1).max(64).optional(),
     expectedFilamentDiameter: quantity({
       unit: 'mm',
       quantityKind: quantityKinds.diameter,
       space: 'linear',
-    }).positive(),
+    })
+      .positive()
+      .optional(),
     expectedMaterials: z
       .array(z.strictObject({ slot: traySlots(15), materialId: z.string().min(1).max(128) }))
-      .min(1)
-      .max(16),
-    expectedModel: z.literal('X1C'),
-    expectedNozzleDiameter: quantity({ unit: 'mm', quantityKind: quantityKinds.diameter, space: 'linear' }).positive(),
+      .max(16)
+      .default([]),
+    expectedModel: z.literal('X1C').optional(),
+    expectedNozzleDiameter: quantity({ unit: 'mm', quantityKind: quantityKinds.diameter, space: 'linear' })
+      .positive()
+      .optional(),
     operatorConfirmedBedType: z.string().min(1).max(64).optional(),
     flowCalibration: z.boolean().default(true),
     timelapse: z.boolean().default(false),
@@ -69,14 +74,14 @@ export const bambuSubmissionConfiguration = defineConfiguration({
 /** The A1 mini's submission schema: one AMS lite and its own model name. @internal */
 export const bambuA1MiniSubmissionConfiguration = defineConfiguration({
   id: 'bambu.a1-mini.submission',
-  version: '1.0.0',
+  version: '1.1.0',
   schema: bambuSubmissionConfiguration.schema.extend({
-    expectedModel: z.literal('A1 mini'),
+    expectedModel: z.literal('A1 mini').optional(),
     amsMapping: z.array(traySlots(3, -1)).max(4).default([]),
     expectedMaterials: z
       .array(z.strictObject({ slot: traySlots(3), materialId: z.string().min(1).max(128) }))
-      .min(1)
-      .max(4),
+      .max(4)
+      .default([]),
   }),
   ui: { version: 1, rjsf: {} },
 });

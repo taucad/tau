@@ -457,9 +457,10 @@ export const connectBambuMachine = async (
   }
   client.on('error', (error) => {
     // MQTT.js errors carry no credential; a bounded message is enough to tell a dropped link from a refusal.
-    // oxlint-disable-next-line promise/prefer-await-to-then, tau-lint/no-async-iife -- an event handler cannot await; a failed host log has nowhere else to go.
+    // oxlint-disable-next-line tau-lint/no-async-iife -- an event handler cannot await.
     void runtime
       .log({ level: 'warning', message: `Bambu MQTT error: ${error.message.slice(0, 200)}` })
+      // oxlint-disable-next-line promise/prefer-await-to-then -- a failed host log has nowhere else to go.
       .catch(() => undefined);
   });
   try {

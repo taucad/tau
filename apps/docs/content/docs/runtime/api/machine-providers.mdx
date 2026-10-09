@@ -76,7 +76,8 @@ export const manifest: MachineManifestDefinition = {
 export const binding = defineConfiguration({
   id: 'example.router.binding',
   version: '1.0.0',
-  schema: z.object({ port: z.string() }),
+  // Only how to talk to it: the serial path is the discovery endpoint, and the person names the machine at bind.
+  schema: z.object({ baudRate: z.number().int().positive().default(115_200) }),
   ui: { version: 1, rjsf: {} },
 });
 ```

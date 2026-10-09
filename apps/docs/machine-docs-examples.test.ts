@@ -81,5 +81,8 @@ describe('machine docs code examples', () => {
     })();
 
     expect(provider.manifest.identity.typeId).toBe('example.router');
+    // Settings finds with an empty configuration, so a binding may not require anything a person has not entered.
+    const found = await binding.schema['~standard'].validate({});
+    expect(found.issues).toBeUndefined();
   });
 });

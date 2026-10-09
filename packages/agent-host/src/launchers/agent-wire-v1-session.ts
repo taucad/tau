@@ -113,7 +113,8 @@ export const createV1Session = (
     const answer: ReadAnswer = await launcher.read({
       chatId,
       cursor,
-      ...(sourceGenerations.has(chatId) ? { sourceGeneration: sourceGenerations.get(chatId)! } : {}),
+      // A v1 cursor-zero observation bootstraps current authority, including after reader-to-writer handoff.
+      ...(cursor > 0 && sourceGenerations.has(chatId) ? { sourceGeneration: sourceGenerations.get(chatId)! } : {}),
       limit,
       maxBytes: Math.min(maxBytes, batchBytes),
     });

@@ -67,6 +67,9 @@ type Harness = {
   /** Commands the current owner's effect ran, across owners. */
   readonly effects: HostCommand[];
   readonly closes: CloseInfo[];
+  /** Completed scalar read observations, for explicit legacy reader/writer handoff controls. */
+  readonly reads: Array<{ cursor: number; following: boolean; status: string; sourceGeneration: string | undefined }>;
+  holdNextFollowingRead(): { readonly held: Promise<void>; release(): void };
   dial(options?: { readonly livenessTimeout?: number }): AgentChannelClient;
   rows(): Promise<readonly AgentLogEvent[]>;
 };
@@ -107,6 +110,7 @@ const harness = async (): Promise<Harness> => {
   let succession: Promise<void> = Promise.resolve();
   const sockets = new Set<WebSocket>();
   const hung = new Set<Port<unknown>>();
+  let followingGate: { hold(): Promise<void> } | undefined;
 
   /** An owner death: its socket and its memory go; the next owner reopens the same directory. */
   const die = async (): Promise<void> => {
@@ -130,6 +134,23 @@ const harness = async (): Promise<Harness> => {
     fault: 'none',
     effects: [],
     closes: [],
+    reads: [],
+    holdNextFollowingRead: () => {
+      const held = Promise.withResolvers<void>();
+      const released = Promise.withResolvers<void>();
+      followingGate = {
+        hold: async () => {
+          held.resolve();
+          await released.promise;
+        },
+      };
+      return {
+        held: held.promise,
+        release: () => {
+          released.resolve();
+        },
+      };
+    },
     dial: (options = {}) => {
       const client = createAgentChannelClient({
         connect: () => new WebSocket(url),
@@ -188,7 +209,19 @@ const harness = async (): Promise<Harness> => {
       },
       read: async (input) => {
         await succession;
-        return owner.read(input);
+        const gate = input.signal === undefined ? undefined : followingGate;
+        if (gate !== undefined) {
+          followingGate = undefined;
+        }
+        const answer = await owner.read(input);
+        state.reads.push({
+          cursor: input.cursor,
+          following: input.signal !== undefined,
+          status: answer.status,
+          sourceGeneration: input.sourceGeneration,
+        });
+        await gate?.hold();
+        return answer;
       },
       liveEvents: (input) => owner.liveEvents(input),
     };
@@ -483,6 +516,48 @@ const v1Daemon = async (answer: (request: V1Request) => Promise<V1Response>) => 
 };
 
 describe('mixed builds during the compatibility window (I32)', () => {
+  it('should replay a v1 keyless start after its empty reader becomes a completed writer source', async () => {
+    const seam = await harness();
+    const v1 = createChannelClient<AgentWireCompatProtocol>({
+      port: agentChannelPort(new WebSocket(seam.url)),
+      sessionKey: 'tau-agent',
+    });
+    disposers.push(() => {
+      v1.close();
+    });
+    const gate = seam.holdNextFollowingRead();
+    try {
+      const empty = await v1.call('request', { type: 'tail', chatId, cursor: 0, limit: 1 });
+      expect(empty).toMatchObject({ type: 'tail', batch: { cursor: 0, endCursor: 0, events: [] } });
+      // Hold the old-generation response through writer handoff and replay, so this background follow cannot update the session map.
+      await gate.held;
+      expect(seam.reads.some((read) => read.following && read.cursor === 0 && read.status === 'batch')).toBe(true);
+      const current = seam.dial();
+      await current.execute(startCommand('writer-start'));
+      await followToEnd(current);
+      const replay = await v1.call('request', {
+        type: 'start',
+        chatId,
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'user-run-1', role: 'user', content: 'hello' },
+      });
+      expect(replay).toMatchObject({
+        type: 'result',
+        operation: 'start',
+        snapshot: { runId: 'run-1', state: 'completed' },
+      });
+      expect(admittedRows(await seam.rows())).toHaveLength(1);
+      expect(seam.effects.filter((command) => command.type === 'start')).toHaveLength(1);
+      const suffix = await v1.call('request', { type: 'tail', chatId, cursor: 1, limit: 1 });
+      expect(suffix).toMatchObject({ type: 'tail', batch: { cursor: 1, nextCursor: 2 } });
+      expect(seam.reads.at(-1)).toMatchObject({ cursor: 1, status: 'batch' });
+      expect(typeof seam.reads.at(-1)?.sourceGeneration).toBe('string');
+    } finally {
+      gate.release();
+    }
+  });
+
   it('v1 client, v2 daemon: should serve the v1 request call, and replay a keyless start by its run id', async () => {
     const seam = await harness();
     const socket = new WebSocket(seam.url);

@@ -796,7 +796,10 @@ const approvalPrompt = (job: MachineJob, entry: MachineDirectoryEntry, statedPla
       : []),
     ...(program.estimatedDuration === undefined ? [] : [formatDuration(program.estimatedDuration)]),
   ];
-  const plate = fffProcessOf(entry.descriptor.capabilities)?.bed.plates.find(({ id }) => id === statedPlate);
+  const plate =
+    statedPlate === undefined
+      ? undefined
+      : fffProcessOf(entry.descriptor.capabilities)?.bed.plates.find(({ id }) => id === statedPlate);
   const confirmations = personOnlyApproval(entry);
   const simulated = isSimulatedMachine(entry.descriptor.capabilities) ? 'Simulated: ' : '';
   return `${simulated}${verb} ${program.name} on ${entry.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}${plate === undefined ? '' : ` On the ${plate.label}, as stated; ${entry.name} does not report its plate.`}${confirmations === undefined ? '' : ` Accept it in the Print pane, confirming: ${confirmations.join('; ')}.`}`;

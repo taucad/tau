@@ -377,8 +377,10 @@ describe('machine tool registry', () => {
       registry.invoke({ toolCallId: 'call-1', toolName: 'check_job', input, signal: new AbortController().signal });
 
     expect(registry.list().map(({ name }) => name)).toEqual(expect.arrayContaining(['request_job', 'check_job']));
+    /* The content, not just the flag: an unexpected throw would surface as MACHINE_TOOL_ERROR. */
     await expect(check({ artifact: '.tau/artifacts/call-0/pyramid.gcode.3mf' })).resolves.toMatchObject({
       isError: false,
+      content: { status: 'blocked', simulated: false, program: { name: 'pyramid.gcode.3mf' } },
     });
     expect(fixture.checkJob).toHaveBeenCalledTimes(1);
     await expect(check({ targetFile: 'main.ts' })).resolves.toEqual({

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   formatCreditAtoms,
@@ -13,6 +15,7 @@ import { baseUrl, failure, ok } from '#support/api.js';
 import type { ApiResponse } from '#support/api.js';
 import {
   checkoutSession,
+  evidenceStamp,
   openBrowser,
   payInCheckout,
   screenshot,
@@ -59,7 +62,7 @@ import {
   uiRecheckSeconds,
   waitForSettlement,
 } from '#support/payments.js';
-import { matrixRow, runId } from '#support/results.js';
+import { matrixRow, runDirectory, runId } from '#support/results.js';
 import type { Verdict } from '#support/results.js';
 
 const billingReturnPath = '/?settings=billing';
@@ -534,15 +537,21 @@ describe('funded journey', () => {
         prompt: 'Reply with the single word OK.',
         maximumTokens: 32,
       });
+      // The whole stream is the evidence of what billing had to price; the usage event alone cannot say what is missing.
+      const streamFile = `${evidenceStamp()}-fd-12-luna-stream.txt`;
+      await writeFile(join(runDirectory, streamFile), call.stream ?? '');
       evidence.push(
         `GPT-6 Luna: ${describeCall(call)}`,
-        `final usage event: ${finalUsage(call.streamTail) ?? 'none in the stream tail'}`,
+        `final usage event: ${finalUsage(call.stream) ?? 'none in the stream'}`,
+        streamFile,
       );
       expect(call.status).toBe(200);
       expect(call.operationId).toBeDefined();
       // The invocation deadline is 300 s: a turn whose usage billing cannot price settles only when that runs out.
       const operation = await waitForTerminal(account.api, call.operationId ?? '', 330_000);
-      evidence.push(describeOperation(operation));
+      const operationFile = `${evidenceStamp()}-fd-12-luna-operation.json`;
+      await writeFile(join(runDirectory, operationFile), JSON.stringify(operation, null, 2));
+      evidence.push(describeOperation(operation), operationFile);
       if (operation.state !== 'terminal') {
         evidence.push('still pending 330 s after the stream ended');
         return { outcome: 'fail', defect: 'F-30', evidence };

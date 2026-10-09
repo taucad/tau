@@ -73,6 +73,8 @@ export type GatewayCall = ApiCall & {
   readonly streamed?: string;
   /** The last 2,000 characters of the streamed body, where a provider's final usage event lands. */
   readonly streamTail?: string;
+  /** The whole stream as the gateway sent it, for the evidence file of a row that keeps it. */
+  readonly stream?: string;
   /** Whatever the `whileStreaming` probe returned, read after the headers and before the body. */
   readonly probe?: unknown;
 };
@@ -125,7 +127,15 @@ export const callGateway = async (api: Api, route: GatewayRoute, options: CallOp
     response.ok && options.whileStreaming !== undefined ? await options.whileStreaming(operationId) : undefined;
   const text = await response.text();
   if (response.ok) {
-    return { ...call, attemptId, operationId, streamed: text.slice(0, 2000), streamTail: text.slice(-2000), probe };
+    return {
+      ...call,
+      attemptId,
+      operationId,
+      streamed: text.slice(0, 2000),
+      streamTail: text.slice(-2000),
+      stream: text,
+      probe,
+    };
   }
   let parsed: unknown = text;
   try {

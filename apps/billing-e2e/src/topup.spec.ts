@@ -300,7 +300,7 @@ describe('funded journey', () => {
       expect(title).toBe('Credit limit reached');
       // Main's preflight card has no run behind it: it says "Add credits, then send your message." and offers no
       // Resume; a gateway 402 instead prefixes "Tau paused this turn:" and offers Resume.
-      expect(text).toMatch(/\b\d+ more credits? needed for Haiku 4\.5\./u);
+      expect(text).toMatch(/\b\d+ more credits? needed for Haiku 5\.5\./u);
       expect(buttons).toEqual(expect.arrayContaining(['Billing', 'Switch model']));
       expect(holds.holds).toHaveLength(0);
       return { outcome: 'pass', evidence };
@@ -480,13 +480,13 @@ describe('funded journey', () => {
       if (paid?.action.state !== 'fulfilled') {
         return { outcome: 'blocked', defect: 'H-03', evidence: ['TU-01 left no funded account'] };
       }
-      // The program's pathway: a short design on Haiku 4.5, its hold read while the answer still streams.
+      // The program's pathway: a short design on Haiku 5.5, its hold read while the answer still streams.
       haiku = await callGateway(account.api, 'haiku', {
         prompt: designPrompt,
         maximumTokens: 400,
         whileStreaming: async () => readHolds(account),
       });
-      evidence.push(`Haiku 4.5: ${describeCall(haiku)}`);
+      evidence.push(`Haiku 5.5: ${describeCall(haiku)}`);
       const isUpstreamRefused = haiku.refusal?.error.type === 'UPSTREAM_REJECTED';
       let call = haiku;
       if (isUpstreamRefused) {
@@ -707,7 +707,7 @@ describe('funded journey', () => {
       const { page } = browsing;
       await usagePage(page).open();
       const text = await pageText(page, 4000);
-      evidence.push(`Haiku 4.5: ${describeCall(haiku)}`, await screenshot(page, 'fd-11-usage'));
+      evidence.push(`Haiku 5.5: ${describeCall(haiku)}`, await screenshot(page, 'fd-11-usage'));
       if (haiku.status !== 200) {
         evidence.push(
           `no Haiku design ran to list; /usage lists the GPT-6 Luna call (US-02): ${text.includes('GPT-6 Luna') ? 'yes' : 'no'}`,
@@ -716,7 +716,7 @@ describe('funded journey', () => {
           ? { outcome: 'blocked', defect: 'F-24', evidence }
           : { outcome: 'fail', defect: 'unclassified', evidence };
       }
-      expect(text).toContain('Haiku 4.5');
+      expect(text).toContain('Haiku 5.5');
       return { outcome: 'pass', evidence };
     }),
   );

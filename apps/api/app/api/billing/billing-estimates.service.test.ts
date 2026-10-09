@@ -140,8 +140,11 @@ describe('BillingEstimatesService', () => {
     const estimates = await harness().service.getModelEstimates({ authUserId: owner.id });
 
     expect(estimates.routes.map((route) => route.routeId)).toStrictEqual([...billableModelRouteIds]);
-    /* A 120 KB body proves the premium threshold unreachable on every tiered route. */
-    expect(estimates.routes.every((route) => route.tier === 'base')).toBe(true);
+    /* A 120 KB body proves the premium threshold unreachable on every tiered route except
+     * Haiku 5.5, whose 100K-token threshold the body's worst-case bound can cross. */
+    expect(estimates.routes.filter((route) => route.tier !== 'base').map((route) => route.routeId)).toStrictEqual([
+      'anthropic-claude-haiku-5.5',
+    ]);
     expect(estimates.routes.every((route) => BigInt(route.typicalHoldAtoms) > 0n)).toBe(true);
   });
 

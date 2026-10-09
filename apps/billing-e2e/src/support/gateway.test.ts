@@ -13,7 +13,7 @@ const insufficient = {
   error: {
     type: 'INSUFFICIENT_CREDIT',
     message: 'Insufficient credit',
-    details: { requiredCreditAtoms: '1200', availableCreditAtoms: '0', routeId: 'anthropic-claude-haiku-4.5' },
+    details: { requiredCreditAtoms: '1200', availableCreditAtoms: '0', routeId: 'anthropic-claude-haiku-5.5' },
   },
 };
 
@@ -59,7 +59,7 @@ describe('describeCall', () => {
       refusal: gatewayErrorSchema.parse(insufficient),
     });
     expect(line).toBe(
-      '/v1/llm/anthropic/v1/messages 402 INSUFFICIENT_CREDIT "Insufficient credit" {"requiredCreditAtoms":"1200","availableCreditAtoms":"0","routeId":"anthropic-claude-haiku-4.5"} attempt att_1 (req_9)',
+      '/v1/llm/anthropic/v1/messages 402 INSUFFICIENT_CREDIT "Insufficient credit" {"requiredCreditAtoms":"1200","availableCreditAtoms":"0","routeId":"anthropic-claude-haiku-5.5"} attempt att_1 (req_9)',
     );
   });
 });

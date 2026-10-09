@@ -269,32 +269,42 @@ describe('provider-facing tool schema compatibility', () => {
     const schema = providerSchemaFor(toolName.requestJob);
 
     expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
+      'artifact',
+      'bambuStudio',
       'machineId',
       'options',
       'plate',
       'preset',
       'profileId',
-      'profiles',
-      'settings',
       'targetFile',
     ]);
-    expect(schema.required).toEqual(['targetFile']);
+    /* Exactly one of targetFile and artifact, checked at runtime. */
+    expect(schema.required ?? []).toEqual([]);
     expect(schema.properties?.['options']).toEqual({
       description: 'Slicer options: a JSON object mapping option names to JSON values.',
     });
-    expect(schema.properties?.['settings']).toEqual({
-      description: 'Bambu Studio settings: a JSON object mapping setting keys from get_print_profiles to values.',
+    expect(schema.properties?.['bambuStudio']).toMatchObject({
+      properties: {
+        settings: {
+          description: 'Bambu Studio settings: a JSON object mapping setting keys from get_print_profiles to values.',
+        },
+      },
     });
   });
 
   it('should bound request_job Bambu Studio settings at runtime', () => {
     const schema = requestJobInputSchema;
     /* Bambu Studio's own setting keys. */
-    const settings = (key: string, value: unknown) => ({ targetFile: 'main.ts', settings: { [key]: value } });
+    const settings = (key: string, value: unknown) => ({
+      targetFile: 'main.ts',
+      bambuStudio: { settings: { [key]: value } },
+    });
 
     expect(schema.safeParse(settings('sparse_infill_density', '20%')).success).toBe(true);
     expect(schema.safeParse(settings('wall_loops', { nested: 1 })).success).toBe(false);
-    expect(schema.safeParse({ targetFile: 'main.ts', profiles: { filaments: [] } }).success).toBe(false);
+    expect(schema.safeParse({ targetFile: 'main.ts', bambuStudio: { profiles: { filaments: [] } } }).success).toBe(
+      false,
+    );
   });
 
   it('should offer machine_action its parameters as a plain described object slot, validated at runtime', () => {

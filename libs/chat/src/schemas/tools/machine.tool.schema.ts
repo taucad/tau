@@ -109,30 +109,68 @@ export const machineActionInputSchema = z.strictObject({
 /** @public */
 export const stopMachineInputSchema = z.strictObject({ machineId: machineChoiceSchema });
 
-/** @public */
-export const requestJobInputSchema = z.strictObject({
-  profileId: z
-    .string()
-    .min(1)
-    .max(64)
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
+/** What a job runs: a CAD source Tau slices, or a finished program run as is. Exactly one. */
+const jobSourceShape = {
+  targetFile: rootedFilePathSchema
+    .max(512)
     .optional()
-    .describe('Saved preference profile for this request only; does not change the shared active profile.'),
-  machineId: machineChoiceSchema,
-  targetFile: rootedFilePathSchema.max(512).describe('Project-relative CAD source file to slice and print.'),
-  preset: z.enum(['fast', 'standard', 'fine']).optional(),
-  plate: z
-    .string()
-    .min(1)
-    .max(64)
+    .describe('Project-relative CAD source file Tau slices; only for a machine with an fff process (a 3D printer).'),
+  artifact: rootedFilePathSchema
+    .max(512)
     .optional()
     .describe(
-      'Build plate installed, by its manifest plate id. Required when the machine does not report its plate; ask the person which plate is on it rather than guess.',
+      'Project-relative finished program the machine runs as is, such as a .nc file; get_machine lists what it accepts.',
     ),
-  options: slicerOptionsSchema.optional(),
-  profiles: printProfilesSchema.optional(),
-  settings: bambuSettingsSchema.optional(),
-});
+};
+
+/** The slicing choices; they apply to a `targetFile` only. */
+const slicingFields = ['preset', 'options', 'bambuStudio'] as const;
+
+/** @public */
+export const requestJobInputSchema = z
+  .strictObject({
+    profileId: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
+      .optional()
+      .describe('Saved preference profile for this request only; does not change the shared active profile.'),
+    machineId: machineChoiceSchema,
+    ...jobSourceShape,
+    preset: z.enum(['fast', 'standard', 'fine']).optional(),
+    plate: z
+      .string()
+      .min(1)
+      .max(64)
+      .optional()
+      .describe(
+        'Build plate installed, by its manifest plate id. Required when the machine does not report its plate; ask the person which plate is on it rather than guess.',
+      ),
+    options: slicerOptionsSchema.optional(),
+    bambuStudio: z
+      .strictObject({ profiles: printProfilesSchema.optional(), settings: bambuSettingsSchema.optional() })
+      .optional()
+      .describe('Only when get_print_profiles reports engine "bambu-studio".'),
+  })
+  .superRefine((input, context) => {
+    if ((input.targetFile === undefined) === (input.artifact === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['targetFile'],
+        message: 'Pass exactly one of targetFile or artifact.',
+      });
+    }
+    if (input.artifact !== undefined) {
+      for (const field of slicingFields.filter((key) => input[key] !== undefined)) {
+        context.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `${field} slices a targetFile; an artifact runs as is.`,
+        });
+      }
+    }
+  });
 
 /** @public */
 export const getPrintProfilesInputSchema = z.strictObject({
@@ -152,7 +190,7 @@ export const getPrintProfilesInputSchema = z.strictObject({
     .describe('Setting keys to describe in full: title, description, type, unit, range and choices.'),
 });
 
-/** `check_job` slices exactly as `request_job` would and asks the machine, recording nothing. @public */
+/** `check_job` prepares exactly as `request_job` would and asks the machine, recording nothing. @public */
 export const checkJobInputSchema = requestJobInputSchema;
 
 /** Every state a job can be observed in: `MachineJobState`, `@taucad/runtime/machine`. */
@@ -238,6 +276,7 @@ export const machineActionOutputSchema = z.looseObject({
     ),
   message: z.string().describe('What to tell the person, with any remedy.'),
   operationId: z.string().optional(),
+  code: z.string().optional().describe('The machine failure code, when refused or rejected.'),
 });
 
 /** @public */

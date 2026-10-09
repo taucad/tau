@@ -249,8 +249,11 @@ const rendererCloseStepsMilliseconds = 2 * 10_000;
  */
 const machineBindingMilliseconds = 60_000;
 
-/** How long quit waits for the utility to say whether a program is streaming: one directory read. */
-const machineStreamingMilliseconds = 5000;
+/**
+ * How long quit waits for the utility to say whether a program is streaming. The utility first quiesces the machine
+ * host, which waits up to 10 s for job starts already admitted, so this bound sits above that wait.
+ */
+const machineStreamingMilliseconds = 12_000;
 
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).

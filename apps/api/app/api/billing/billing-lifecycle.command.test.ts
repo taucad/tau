@@ -4,7 +4,7 @@ import { mockDeep } from 'vitest-mock-extended';
 import { ZodError } from 'zod';
 import type { DatabaseService } from '#database/database.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
-import { runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
+import { assertRefundKey, runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
 import { maximumRefundReasonLength } from '#api/billing/billing-cash.service.js';
 
 describe('protected lifecycle command boundary', () => {
@@ -161,5 +161,39 @@ describe('operator refund commands', () => {
       }),
     ).rejects.toThrow(ZodError);
     expect(database.database.transaction).toHaveBeenCalledOnce();
+  });
+});
+
+describe('refund key guard', () => {
+  const keys = { createKey: 'rk_live_create', readKey: 'rk_live_read' } as const;
+
+  it('should accept a mode-matched refund key that differs from the create and read keys', () => {
+    expect(() => {
+      assertRefundKey({ refundKey: 'rk_live_refund', livemode: true, ...keys });
+    }).not.toThrow();
+    expect(() => {
+      assertRefundKey({ refundKey: 'rk_test_refund', livemode: false, createKey: undefined, readKey: undefined });
+    }).not.toThrow();
+  });
+
+  it('should refuse a refund key of the other Stripe mode', () => {
+    expect(() => {
+      assertRefundKey({ refundKey: 'rk_test_refund', livemode: true, ...keys });
+    }).toThrow('rk_live_ restricted key');
+    expect(() => {
+      assertRefundKey({ refundKey: 'rk_live_refund', livemode: false, ...keys });
+    }).toThrow('rk_test_ restricted key');
+    expect(() => {
+      assertRefundKey({ refundKey: 'sk_live_secret', livemode: true, ...keys });
+    }).toThrow('rk_live_ restricted key');
+  });
+
+  it('should refuse the create key and the read key as the refund key', () => {
+    expect(() => {
+      assertRefundKey({ refundKey: keys.createKey, livemode: true, ...keys });
+    }).toThrow('differ from the create and read keys');
+    expect(() => {
+      assertRefundKey({ refundKey: keys.readKey, livemode: true, ...keys });
+    }).toThrow('differ from the create and read keys');
   });
 });

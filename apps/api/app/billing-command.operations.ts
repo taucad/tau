@@ -89,6 +89,17 @@ export const recordOpenCases = async (input: {
 };
 
 /**
+ * The worker turns recovery notices into email only when it knows where the app lives and how to send.
+ * Without either, no transport is built and the notices stay pending, untouched: `EmailService` without
+ * `RESEND_API_KEY` renders and returns, which would mark a notice delivered that nobody received.
+ */
+export const recoveryNoticeEmailOrigin = (env: Readonly<Record<string, string | undefined>>): string | undefined => {
+  const frontendURL = env['TAU_FRONTEND_URL']?.trim() ?? '';
+  const resendApiKey = env['RESEND_API_KEY']?.trim() ?? '';
+  return frontendURL !== '' && resendApiKey !== '' ? frontendURL : undefined;
+};
+
+/**
  * Drains the recovery-notice outbox once. A notice that used its last attempt is a `billing.alert`:
  * its customer was never told, and only an operator can re-queue it.
  */

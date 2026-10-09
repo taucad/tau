@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mockDeep } from 'vitest-mock-extended';
-import { deliverRecoveryNotices, recordOpenCases, runHourlyOperationsJobs } from '#billing-command.operations.js';
+import {
+  deliverRecoveryNotices,
+  recordOpenCases,
+  recoveryNoticeEmailOrigin,
+  runHourlyOperationsJobs,
+} from '#billing-command.operations.js';
 import type {
   HourlyOperationsJobs,
   OperationsGaugeMetrics,
@@ -185,3 +190,23 @@ describe('billing operations worker', () => {
     });
   });
 });
+
+/* eslint-disable @typescript-eslint/naming-convention -- fixtures mirror process.env UPPER_SNAKE keys */
+describe('recovery notice email origin', () => {
+  it('should hand the worker the frontend origin only with both the origin and a Resend key', () => {
+    expect(recoveryNoticeEmailOrigin({ TAU_FRONTEND_URL: 'https://tau.new', RESEND_API_KEY: 're_live_1' })).toBe(
+      'https://tau.new',
+    );
+  });
+
+  it('should build no transport without a Resend key, so pending notices are never marked delivered', () => {
+    expect(recoveryNoticeEmailOrigin({ TAU_FRONTEND_URL: 'https://tau.new' })).toBeUndefined();
+    expect(recoveryNoticeEmailOrigin({ TAU_FRONTEND_URL: 'https://tau.new', RESEND_API_KEY: '   ' })).toBeUndefined();
+  });
+
+  it('should build no transport without the frontend origin the notices link to', () => {
+    expect(recoveryNoticeEmailOrigin({ RESEND_API_KEY: 're_live_1' })).toBeUndefined();
+    expect(recoveryNoticeEmailOrigin({ TAU_FRONTEND_URL: '', RESEND_API_KEY: 're_live_1' })).toBeUndefined();
+  });
+});
+/* eslint-enable @typescript-eslint/naming-convention -- end process.env fixture scope */

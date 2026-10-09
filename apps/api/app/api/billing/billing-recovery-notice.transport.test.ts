@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import type { DatabaseService } from '#database/database.service.js';
-import type { EmailService } from '#email/email.service.js';
 
 type OwnerRows = ReadonlyArray<{ readonly email: string }>;
 
@@ -26,11 +25,7 @@ const createTransport = (rows: OwnerRows) => {
     sendAutoReloadDisabled: vi.fn(async () => undefined),
     sendAutoReloadActionRequired: vi.fn(async () => undefined),
   };
-  const transport = new BillingRecoveryNoticeEmailTransport(
-    databaseReturning(rows),
-    email as unknown as EmailService,
-    'https://tau.new',
-  );
+  const transport = new BillingRecoveryNoticeEmailTransport(databaseReturning(rows), email, 'https://tau.new');
   return { transport, email };
 };
 

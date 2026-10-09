@@ -96,6 +96,26 @@ const requestSchema = z.discriminatedUnion('operation', [
 ]);
 
 /**
+ * Refuses a refund key that cannot be this mode's Refunds-Write restricted key. The API's environment
+ * schema makes the same checks when it boots with the key set; `billing-command lifecycle` reads the key
+ * from the operator's shell, so it checks here before a Stripe client is built from it.
+ */
+export function assertRefundKey(input: {
+  readonly refundKey: string;
+  readonly livemode: boolean;
+  readonly createKey: string | undefined;
+  readonly readKey: string | undefined;
+}): void {
+  const prefix = input.livemode ? 'rk_live_' : 'rk_test_';
+  if (!input.refundKey.startsWith(prefix)) {
+    throw new Error(`STRIPE_REFUND_SECRET_KEY must be a ${prefix} restricted key for this Stripe mode`);
+  }
+  if (input.refundKey === input.createKey || input.refundKey === input.readKey) {
+    throw new Error('STRIPE_REFUND_SECRET_KEY must differ from the create and read keys');
+  }
+}
+
+/**
  * Strict protected-job composition. Provider mutations need the write key together with either the
  * isolated local fixture or a collection the deployment is allowed to perform. A refund is sent only with
  * the operator-held refund key (`refundStripe`): Stripe refuses refunds from the deployment's create key.

@@ -11,7 +11,6 @@ import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
-import type { EmailService } from '#email/email.service.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl) {
@@ -63,11 +62,7 @@ const payments = new BillingPaymentsService(
     stripeAccountId: 'acct_notice_native',
     livemode: false,
   }),
-  new BillingRecoveryNoticeEmailTransport(
-    { database: workerDatabase },
-    email as unknown as EmailService,
-    'https://tau.example',
-  ),
+  new BillingRecoveryNoticeEmailTransport({ database: workerDatabase }, email, 'https://tau.example'),
 );
 
 const seedOwner = async (): Promise<{ readonly accountId: string; readonly email: string }> => {

@@ -62,6 +62,7 @@ const exportTessellationSchema = z.object({
       minimumAngle: minimumAngle().optional(),
       minimumSize: minimumSize().optional(),
     })
+    .describe("Leave a field empty to use the model's own $fn, $fa or $fs.")
     .default({}),
 });
 

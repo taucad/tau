@@ -110,6 +110,15 @@ describe('extractTypescriptApi over replicad', () => {
     expect(drawCircle?.signatures?.[0]?.text).not.toContain('/**');
   });
 
+  it('should render aliased exports under their exported name', () => {
+    const textOf = (name: string): string | undefined =>
+      corpus.entries.find((entry) => entry.name === name)?.signatures?.[0]?.text;
+    expect(textOf('makeCylinder')).toBe(
+      'export declare function makeCylinder(radius: number, height: number, location?: Point, direction?: Direction): Solid;',
+    );
+    expect(textOf('makeDirection')).toBe('export declare function makeDirection(direction: Direction): Point;');
+  });
+
   it('addresses class members individually, with source locations', () => {
     const sketch = corpus.entries.find((entry) => entry.name === 'Sketch');
     expect(sketch?.kind).toBe('class');
@@ -249,6 +258,10 @@ export declare namespace task {
   function only(callback: () => void): void;
 }
 export { task as first, task as second };
+export declare const makeCylinder: <T>(radius: number, height?: T) => string;
+export declare function resolveDirection(direction: string): number;
+export declare const makeDirection: typeof resolveDirection;
+export const halve = (value: number = 2): number => value / 2;
 export declare namespace cyclic {
   export import self = cyclic;
   export function read(): string;
@@ -354,6 +367,24 @@ export declare namespace cyclic {
         `typescript:${name}.only`,
       ]);
     }
+  });
+
+  it('should name every callable export by its exported name', () => {
+    const textsOf = (name: string): readonly string[] | undefined =>
+      corpus.entries.find((entry) => entry.name === name)?.signatures?.map((signature) => signature.text);
+    expect(textsOf('makeCylinder')).toEqual([
+      'export declare function makeCylinder<T>(radius: number, height?: T): string;',
+    ]);
+    expect(textsOf('makeDirection')).toEqual(['export declare function makeDirection(direction: string): number;']);
+    expect(textsOf('resolveDirection')).toEqual([
+      'export declare function resolveDirection(direction: string): number;',
+    ]);
+    expect(textsOf('first')).toEqual(['export declare function first<T>(callback: () => T): T;']);
+    expect(textsOf('scale')).toEqual([
+      'export declare function scale(factor: number): string;',
+      'export declare function scale(x: number, y: number): string;',
+    ]);
+    expect(textsOf('halve')).toEqual(['export declare function halve(value: number = 2): number;']);
   });
 
   it('should terminate namespace cycles while retaining noncyclic members', () => {

@@ -2,11 +2,14 @@ import type { BillingAccountClosureService } from '#api/billing/billing-account-
 import type { HostsService } from '#api/hosts/hosts.service.js';
 import type { BetterAuthOptions, LogLevel as BetterAuthLogLevel, ModelNames } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { APIError } from 'better-auth/api';
 import { apiKey } from '@better-auth/api-key';
 import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
 import type { ConfigService } from '@nestjs/config';
 import type { LogLevel } from '@nestjs/common';
-import { Logger } from '@nestjs/common';
+import { ConflictException, Logger } from '@nestjs/common';
+import { wirePaymentActionSchema } from '@taucad/billing';
+import type { WirePaymentAction } from '@taucad/billing';
 import type { IdPrefix } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -30,6 +33,44 @@ const storageTombstoneGrace = 30 * 24 * 60 * 60 * 1000;
 // rather than implying a local time the reader would have to second-guess.
 const formatChangedAt = (at: Date): string =>
   `${new Intl.DateTimeFormat('en-NZ', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(at)} UTC`;
+
+/** A refused deletion as Better Auth answers it: the billing closure endpoint's `code` and pending payment `action`. */
+type DeletionRefusalBody = {
+  readonly code: string;
+  readonly message: string;
+  readonly action?: WirePaymentAction;
+};
+
+/**
+ * Rethrows the financial closure's refusal as Better Auth's own error type.
+ *
+ * Better Auth answers anything else a hook throws with an empty 500, so a deletion refused while a payment
+ * was still pending reached the customer as an internal error. The conflict keeps the `code`, the message
+ * and the pending payment `action` that the billing closure endpoint answers the same refusal with.
+ *
+ * @param error - What `prepareForAuthDeletion` threw.
+ * @returns A Better Auth 409 for a closure conflict; any other error unchanged.
+ */
+const deletionRefusal = (error: unknown): unknown => {
+  if (!(error instanceof ConflictException)) {
+    return error;
+  }
+  const response = error.getResponse();
+  const fields = typeof response === 'object' ? response : {};
+  const message =
+    typeof response === 'string'
+      ? response
+      : 'message' in fields && typeof fields.message === 'string'
+        ? fields.message
+        : error.message;
+  const action = wirePaymentActionSchema.safeParse('action' in fields ? fields.action : undefined);
+  const body: DeletionRefusalBody = {
+    code: 'code' in fields && typeof fields.code === 'string' ? fields.code : 'CONFLICT',
+    message,
+    ...(action.success ? { action: action.data } : {}),
+  };
+  return new APIError('CONFLICT', body);
+};
 
 /**
  * Mapping between BetterAuth models and ID prefixes.
@@ -152,7 +193,11 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
          * of its own, so writing first bought nothing to pay for that.
          */
         beforeDelete: async (user, request) => {
-          await options.closure?.prepareForAuthDeletion({ authUserId: user.id, request });
+          try {
+            await options.closure?.prepareForAuthDeletion({ authUserId: user.id, request });
+          } catch (error) {
+            throw deletionRefusal(error);
+          }
           /* After the closure, which may still refuse: a cloud host holds a
              clone of the account's project, so it stops before the account
              goes, and never for a deletion that was refused (W10 a4). */

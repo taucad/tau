@@ -78,7 +78,6 @@ export const MenuSliderItem = ({
     onScrubChange={onValueChange}
     onInputCommit={onValueChange}
     onStep={onStep}
-    onPointerDown={stopPointerPropagation}
     onPointerMove={stopPointerPropagation}
     onPointerUp={stopPointerPropagation}
     onPointerCancel={stopPointerPropagation}

@@ -207,6 +207,14 @@ Blend_CurvPointFuncInv: declare class Blend_CurvPointFuncInv extends math_Functi
 
 Blend_DecrochStatus: typeof Blend_DecrochStatus[keyof typeof Blend_DecrochStatus]
 
+  readonly Blend_NoDecroch: 'Blend_NoDecroch'
+
+  readonly Blend_DecrochRst1: 'Blend_DecrochRst1'
+
+  readonly Blend_DecrochRst2: 'Blend_DecrochRst2'
+
+  readonly Blend_DecrochBoth: 'Blend_DecrochBoth'
+
 Blend_FuncInv: declare class Blend_FuncInv extends math_FunctionSetWithDerivatives
 
   // Blend_FuncInv.NbVariables (method)
@@ -508,6 +516,22 @@ Blend_RstRstFunction: declare class Blend_RstRstFunction extends Blend_AppFuncti
   [Symbol.dispose](): void;
 
 Blend_Status: typeof Blend_Status[keyof typeof Blend_Status]
+
+  readonly Blend_StepTooLarge: 'Blend_StepTooLarge'
+
+  readonly Blend_StepTooSmall: 'Blend_StepTooSmall'
+
+  readonly Blend_Backward: 'Blend_Backward'
+
+  readonly Blend_SamePoints: 'Blend_SamePoints'
+
+  readonly Blend_OnRst1: 'Blend_OnRst1'
+
+  readonly Blend_OnRst2: 'Blend_OnRst2'
+
+  readonly Blend_OnRst12: 'Blend_OnRst12'
+
+  readonly Blend_OK: 'Blend_OK'
 
 Blend_SurfCurvFuncInv: declare class Blend_SurfCurvFuncInv extends math_FunctionSetWithDerivatives
 

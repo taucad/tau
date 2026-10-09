@@ -570,7 +570,12 @@ const initializeServicesActor = fromSafeAsync<
     if (backend === 'webaccess') {
       await proxy.pollExternalChanges(normalizePath(context.rootDirectory));
     }
-    await initializedTreeService.listDirectory('', { signal });
+    // A project registered after worker boot answers ROOT_UNAVAILABLE until
+    // configureProjectRoots runs; its tree stays unresolved rather than failing start-up.
+    await viewProxy.ready;
+    if (viewProxy.hello.payload.state !== 'unavailable') {
+      await initializedTreeService.listDirectory('', { signal });
+    }
 
     signal.throwIfAborted();
     ownsConstructed = false;

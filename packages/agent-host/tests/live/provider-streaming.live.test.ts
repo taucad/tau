@@ -28,7 +28,7 @@ const defaults: Record<ProviderCase['providerKind'], Omit<ProviderCase, 'provide
     reasoning: { effort: 'high', summary: 'detailed' },
   },
   anthropic: {
-    modelId: 'anthropic-claude-haiku-4.5',
+    modelId: 'anthropic-claude-haiku-5.5',
     contextWindow: 200_000,
     reasoning: { budgetTokens: 4000, display: 'summarized' },
   },

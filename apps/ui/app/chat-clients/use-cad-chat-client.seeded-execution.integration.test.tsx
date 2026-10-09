@@ -139,6 +139,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
  * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
 vi.mock('#hooks/use-draft-image-error-toast.js', () => ({ useDraftImageErrorToast: () => undefined }));
+/* ChatTurnHost reads the usage-metrics preference through react-query; this scope has no query client. */
+vi.mock('#hooks/use-privacy-preferences.js', () => ({ usePrivacyPreferences: () => ({ preferences: undefined }) }));
 vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   readRootedBridgeCapabilities: async () => ({ writable: true, durability: 'exclusive-append' }),
   waitForRootedBridgeOpener: async () => undefined,

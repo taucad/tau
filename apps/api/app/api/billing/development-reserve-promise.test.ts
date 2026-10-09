@@ -103,6 +103,7 @@ describe('development reserve promise', () => {
     const policy = developmentPolicy();
     const tiered = policy.routes.filter((route) => route.routeId.endsWith(':long-context'));
     expect(tiered.map((route) => route.routeId)).toEqual([
+      'anthropic-claude-haiku-5.5:long-context',
       'openai-gpt-6-astra:long-context',
       'openai-gpt-6-sol:long-context',
       'openai-gpt-6-luna:long-context',

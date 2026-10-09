@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { BillingSessionProvider, useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { formatCreditAtoms } from '@taucad/billing';
+import type { WirePaymentAction } from '@taucad/billing';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { authClient } from '#lib/auth-client.js';
 import { ENV } from '#environment.config.js';
@@ -49,9 +50,11 @@ const BillingSessionBridge = ({ children }: { readonly children: ReactNode }): R
 };
 
 // Checkout returns to the same URL whether the customer paid or cancelled, and a paid session is only
-// settled later by the payments worker, so the returned action can still read `redirect_required`.
+// settled later by the payments worker, so the returned action can still read `redirect_required`, or
+// `attention_required` while billing waits to hear how a card authentication or a retried payment ended.
 // The toast for the state we can see is raised immediately; these bound a background re-check that
-// replaces it once the action settles, so a paid Checkout stops offering "Resume Checkout".
+// replaces it once the action settles, so a paid Checkout stops offering "Resume Checkout". A card setup
+// or payment only billing can confirm gets a neutral toast, and a warning only if the re-check runs out.
 const returnSettleAttempts = 10;
 const returnSettleIntervalMilliseconds = 2000;
 const settlingStates = new Set(['redirect_required', 'processing', 'funds_received']);
@@ -60,6 +63,16 @@ const settlingStates = new Set(['redirect_required', 'processing', 'funds_receiv
 const purchaseCheckoutPurposes = new Set(['manual_topup', 'subscription_checkout']);
 const paymentActionParameter = stringParameter();
 const paymentActionIdPattern = /^[A-Za-z0-9._:-]{1,128}$/u;
+
+/** Whether billing has yet to hear how the payment ended, which settles the action without the customer. */
+const isAwaitingOutcome = (action: WirePaymentAction): boolean =>
+  action.state === 'attention_required' &&
+  action.attention?.reason === 'provider_outcome_unknown' &&
+  action.attention.action === 'wait';
+
+/** Whether the action may still settle on its own, so the return keeps re-reading it for a while. */
+const isSettling = (action: WirePaymentAction): boolean =>
+  settlingStates.has(action.state) || isAwaitingOutcome(action);
 
 export const useCloudPaymentActionReturn = (): void => {
   const { apiBaseUrl, environment, userId } = useBillingSession();
@@ -89,20 +102,23 @@ export const useCloudPaymentActionReturn = (): void => {
     inspected.current = true;
     const binding = { apiBaseUrl, environment, ownerId: userId, financialSession: financialSession.capture() };
     let active = true;
-    type PaymentAction = Awaited<ReturnType<typeof getPaymentAction>>;
-    const announce = (action: PaymentAction): string | number | undefined => {
+    const announce = (action: WirePaymentAction): string | number | undefined => {
       if (action.state === 'fulfilled' || action.state === 'completed') {
         // Balance, plan and saved card all changed; cached entitlements would otherwise stay Free for minutes.
         void queryClient.invalidateQueries({ queryKey: ['billing'] });
       }
       switch (action.state) {
         case 'fulfilled': {
-          return action.receipt
-            ? toast.success(`${formatCreditAtoms(BigInt(action.receipt.grantedCreditAtoms))} credits added.`)
-            : undefined;
+          if (!action.receipt) {
+            return undefined;
+          }
+          const added = `${formatCreditAtoms(BigInt(action.receipt.grantedCreditAtoms))} credits added.`;
+          // A paid Pro subscription settles here with its first credits; billing never reports it as completed.
+          return toast.success(action.purpose === 'subscription_checkout' ? `Tau Pro is active. ${added}` : added);
         }
         case 'completed': {
-          return action.purpose === 'subscription_checkout' ? toast.success('Tau Pro is active.') : undefined;
+          // Only a card setup completes; every purchase settles as fulfilled, with its receipt.
+          return action.purpose === 'reload_setup' ? toast.success('Automatic reload is on.') : undefined;
         }
         case 'funds_received': {
           return toast('Payment received. Credits are still being added.');
@@ -111,6 +127,11 @@ export const useCloudPaymentActionReturn = (): void => {
           return toast('Payment is still processing.');
         }
         case 'redirect_required': {
+          if (action.purpose === 'reload_setup') {
+            // A finished card setup reads redirect_required until the billing worker confirms it, so the
+            // re-check below offers to continue only if it is still open when that runs out.
+            return toast('Confirming your card for automatic reload.');
+          }
           // eslint-disable-next-line tau-lint/no-engineering-vocabulary-in-copy -- Stripe Checkout is the payment product's own name, not a revision checkout.
           return toast.warning('Checkout is ready to continue.', {
             action: {
@@ -124,6 +145,10 @@ export const useCloudPaymentActionReturn = (): void => {
           });
         }
         case 'attention_required': {
+          if (isAwaitingOutcome(action)) {
+            // Billing has yet to hear how the payment ended; the re-check below warns only if it never does.
+            return toast('Payment is still processing.');
+          }
           if (action.attention?.action !== 'continue_hosted') {
             return toast.warning('Your payment needs attention. Reopen billing to continue.');
           }
@@ -148,11 +173,42 @@ export const useCloudPaymentActionReturn = (): void => {
         }
         case 'failed':
         case 'canceled': {
-          return toast.warning('Payment was not completed.');
+          // A card setup moves no money, so it is left or refused rather than unpaid.
+          return toast.warning(
+            action.purpose === 'reload_setup'
+              ? 'Card setup for automatic reload was not completed.'
+              : 'Payment was not completed.',
+          );
         }
         default: {
           return undefined;
         }
+      }
+    };
+    /** Replaces the neutral toast of a card setup or payment the re-check never saw confirmed with a warning. */
+    const warnUnsettled = (action: WirePaymentAction, neutralToast: string | number | undefined): void => {
+      const isSetupOpen = action.purpose === 'reload_setup' && action.state === 'redirect_required';
+      if (!isSetupOpen && !isAwaitingOutcome(action)) {
+        return;
+      }
+      if (neutralToast !== undefined) {
+        toast.dismiss(neutralToast);
+      }
+      if (isSetupOpen) {
+        // The customer left the card setup before finishing it, or billing has yet to confirm it.
+        toast.warning('Automatic reload is waiting for card setup.', {
+          action: {
+            label: 'Continue setup',
+            onClick: () => {
+              if (active && binding.financialSession.isCurrent()) {
+                followPaymentRedirect(action);
+              }
+            },
+          },
+        });
+      } else {
+        // Billing is still waiting on Stripe; nothing here needs the customer, so the toast says so.
+        toast.warning('Billing has not confirmed your payment yet. Check back in a few minutes.');
       }
     };
     const inspectReturn = async (): Promise<void> => {
@@ -178,7 +234,7 @@ export const useCloudPaymentActionReturn = (): void => {
         }
         clearReturnedActionRef.current('');
         let toastId = announce(action);
-        for (let attempt = 0; attempt < returnSettleAttempts && settlingStates.has(action.state); attempt++) {
+        for (let attempt = 0; attempt < returnSettleAttempts && isSettling(action); attempt++) {
           // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one action
           await new Promise((resolve) => {
             setTimeout(resolve, returnSettleIntervalMilliseconds);
@@ -193,7 +249,7 @@ export const useCloudPaymentActionReturn = (): void => {
           if (!active) {
             return;
           }
-          if (settled.state === action.state) {
+          if (settled.state === action.state && settled.attention?.action === action.attention?.action) {
             continue;
           }
           action = settled;
@@ -202,6 +258,8 @@ export const useCloudPaymentActionReturn = (): void => {
           }
           toastId = announce(action);
         }
+        // The re-check is over: a card setup or payment it never saw confirmed now needs the customer.
+        warnUnsettled(action, toastId);
       } catch {
         if (active) {
           // A failed check must not leave the parameter to re-run on every reload.

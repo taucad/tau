@@ -9,15 +9,15 @@ extrusions
 
   ExtrudeFromSlicesOptions: export interface ExtrudeFromSlicesOptions<Base>
 
-    numberOfSlices: number
+    numberOfSlices?: number
 
-    capStart: boolean
+    capStart?: boolean
 
-    capEnd: boolean
+    capEnd?: boolean
 
-    close: boolean
+    close?: boolean
 
-    callback: (progress: number, index: number, base: Base) => Slice
+    callback?: (progress: number, index: number, base: Base) => Slice
 
   // extrusions.extrudeLinear (function)
   declare function extrudeLinear(options: ExtrudeLinearOptions, geometry: Geometry): Geom3
@@ -25,11 +25,11 @@ extrusions
 
   ExtrudeLinearOptions: export interface ExtrudeLinearOptions
 
-    height: number
+    height?: number
 
-    twistAngle: number
+    twistAngle?: number
 
-    twistSteps: number
+    twistSteps?: number
 
   // extrusions.extrudeRectangular (function)
   declare function extrudeRectangular(options: ExtrudeRectangularOptions, geometry: Geometry): Geom3
@@ -37,43 +37,43 @@ extrusions
 
   ExtrudeRectangularOptions: export interface ExtrudeRectangularOptions
 
-    size: number
+    size?: number
 
-    height: number
+    height?: number
 
-    corners: Corners
+    corners?: Corners
 
-    segments: number
+    segments?: number
 
   // extrusions.extrudeRotate (function)
   declare function extrudeRotate(options: ExtrudeRotateOptions, geometry: Geom2): Geom3
 
   ExtrudeRotateOptions: export interface ExtrudeRotateOptions
 
-    angle: number
+    angle?: number
 
-    startAngle: number
+    startAngle?: number
 
-    overflow: 'cap'
+    overflow?: 'cap'
 
-    segments: number
+    segments?: number
 
   // extrusions.extrudeHelical (function)
   declare function extrudeHelical(options: ExtrudeHelicalOptions, geometry: Geom2): Geom3
 
   ExtrudeHelicalOptions: export interface ExtrudeHelicalOptions
 
-    angle: number
+    angle?: number
 
-    startAngle: number
+    startAngle?: number
 
-    pitch: number
+    pitch?: number
 
-    height: number
+    height?: number
 
-    endOffset: number
+    endOffset?: number
 
-    segmentsPerRotation: number
+    segmentsPerRotation?: number
 
   // extrusions.project (function)
   declare function project(options: ProjectOptions, geometry: Geom3): Geom2
@@ -82,9 +82,9 @@ extrusions
 
   ProjectOptions: export interface ProjectOptions
 
-    axis: Vec3
+    axis?: Vec3
 
-    origin: Vec3
+    origin?: Vec3
 
   slice
 

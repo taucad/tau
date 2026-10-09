@@ -196,9 +196,7 @@ function ViewSettingsSyncEntry({
   const observed = useObservation(observation);
   const sourceHealth: RecordHealth | undefined = observed.error
     ? { ...(health ?? store.health()), read: 'unavailable', error: observed.error }
-    : observed.status === 'pending' || observed.status === 'registering'
-      ? { ...(health ?? store.health()), read: 'retrying' }
-      : health;
+    : health;
   const issueState = recordIssueState(notice, sourceHealth);
   const issue = useMemo((): RecordIssue | undefined => {
     if (!issueState) {

@@ -269,7 +269,7 @@ export const plans = [
       ['No training on your designs'],
       ['Hosted design verification', 'soon'],
     ],
-    cta: ['Choose Pro in Tau', '/settings/billing'],
+    cta: ['Choose Pro in Tau', '/?settings=billing'],
   },
   {
     id: 'enterprise',

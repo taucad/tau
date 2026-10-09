@@ -30,6 +30,13 @@ export const grepInputSchema = z.object({
     .min(0)
     .optional()
     .describe('Number of leading matches to skip before applying headLimit. Defaults to 0.'),
+  context: z
+    .number()
+    .int()
+    .min(0)
+    .max(20)
+    .optional()
+    .describe('Lines to return before and after each match (0-20, default 0), like ripgrep -C.'),
 });
 
 /** Canonical grep-match schema shared with the RPC transport. @public */
@@ -37,6 +44,14 @@ export const grepMatchSchema = z.object({
   file: rootedFilePathSchema.describe('The file path where the match was found.'),
   line: z.number().describe('The line number of the match (1-based).'),
   content: z.string().describe('The content of the matching line.'),
+  before: z
+    .array(z.string())
+    .optional()
+    .describe('Up to `context` lines immediately before the match, in file order. Present only when context > 0.'),
+  after: z
+    .array(z.string())
+    .optional()
+    .describe('Up to `context` lines immediately after the match, in file order. Present only when context > 0.'),
 });
 
 /** @public */

@@ -7,8 +7,9 @@ import { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.js';
 import { selectCadFailureIssues, selectCadLoadingPhase } from '#machines/cad.machine.js';
 
 /**
- * The running build phase, as a pill in the viewer bar's skin at the top of the viewer: absolutely placed by its
- * host, so the bar never grows or shrinks around it, and where a person waiting on a build is looking. "Build
+ * The running build phase, as a pill in the viewer bar's skin: absolutely placed by its host (centred in an empty
+ * viewer, in the upper sixth over a model), so the bar never grows or shrinks around it, and where a person waiting
+ * on a build is looking. "Build
  * failed" and the issue counts stay in the bar's status segment. Once the build settles, the Zoo upgrade banner takes
  * the slot when the failure calls for it.
  */

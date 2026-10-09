@@ -640,7 +640,6 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
       retrySave: async () => true,
     } as const;
     try {
-      publishRecordIssue('bracket', 'entries', { ...settings, state: 'reading' });
       expect(collapsed('bracket')).toEqual({ mark: 'none', sentence: 'Live' });
       publishRecordIssue('bracket', 'entries', { ...settings, state: 'invalid' });
       publishRecordIssue('bracket', 'layout', {

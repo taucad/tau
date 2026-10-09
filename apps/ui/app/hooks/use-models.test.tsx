@@ -65,7 +65,7 @@ describe('useModels', () => {
     it('should keep the last Tau choice for switching back from an external agent', () => {
       respond([]);
       const { result } = renderHook(() => useModels(), { wrapper });
-      const tau: TauAgentExecution = { kind: 'tau', model: 'anthropic-claude-haiku-4.5', effort: 'low' };
+      const tau: TauAgentExecution = { kind: 'tau', model: 'anthropic-claude-haiku-5.5', effort: 'low' };
       act(() => {
         result.current.rememberExecution(tau);
         result.current.rememberExecution(codex);

@@ -41,7 +41,7 @@ test('carries the name in one header row and lists the meta in the chat menu', a
   const menuText = (await target.textContent(selectors.getByRole('menu'))) ?? '';
   expect(menuText).toContain('Activity');
   expect(menuText).toContain('Runs on');
-  expect(menuText).toContain('Haiku 4.5');
+  expect(menuText).toContain('Haiku 5.5');
   expect(menuText).toContain('Credits');
   await target.keyboardPress('Escape');
   await target.expectHidden(selectors.getByRole('menu'));

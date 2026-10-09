@@ -21,15 +21,13 @@ describe('main geometry', () => {
 });
 ```
 
-Python: `load_model` / `expect_geo` from `geospec`. Below needs pytest's plugin scope; `geospec_engine_factory` configures its host. Standalone needs a `GeoSpecEngine` context; code models need export capability. Desktop `test_model` discovers TS/JS only.
+Specs are always TypeScript or JavaScript, whatever the model's kernel: `loadModel({ file })` evaluates `main.ts`, `main.tsx`, `main.py`, `main.scad`, `main.kcl` or `main.cs` through Tau's runtime. `test_model` discovers `*.geospec.ts` and `*.geospec.js` only.
 
-```python
-from geospec import expect_geo, load_model
+Every matcher takes one expectation object:
 
-def test_envelope():
-    model = load_model(file="part.glb", source_unit="mm")
-    expect_geo(model).to_have_bounding_box(size={"x": 120}, tolerance=1)
-```
+- Wrong: `expectGeo(model).toHaveVolume(5000, { tolerance: 5 })`. Correct: `expectGeo(model).toHaveVolume({ value: 5000, tolerance: 5 })`.
+- Wrong: `await expectGeo(model)…`. Correct: await `loadModel`, then assert synchronously.
+- Wrong: exact-feature matchers on a mesh kernel (Manifold, JSCAD, OpenSCAD, PicoGK, PicoVoxel). Correct: `toBeValidBrep`, `toHaveTopologyCounts`, the face, hole, pattern, chamfer, fillet and wall-thickness matchers, `toHaveStepUnits`, `toHaveProductStructure` and `toHaveVoidContinuity` need STEP BRep evidence and report unsupported on meshes; assert meshes with bounds, volume, surface area, connected components and `toBeWatertight`.
 
 ## Coverage
 
@@ -46,4 +44,4 @@ Test assemblies and independent units; preserve sibling coverage when adding fil
 
 Fix geometry at its root; never weaken tolerances, delete assertions, or reduce detail to pass.
 
-Host/framework API: `public-api-index.md`; ordinary authoring: `api-index.md`.
+`public-api-index.md` covers the host and framework API; authoring needs only the Core API below and `api-*` files.

@@ -537,6 +537,10 @@ MAT_Node: declare class MAT_Node extends Standard_Transient
 
 MAT_Side: typeof MAT_Side[keyof typeof MAT_Side]
 
+  readonly MAT_Left: 'MAT_Left'
+
+  readonly MAT_Right: 'MAT_Right'
+
 MAT_TListNodeOfListOfBisector: declare class MAT_TListNodeOfListOfBisector extends Standard_Transient
 
   // MAT_TListNodeOfListOfBisector.constructor (constructor)

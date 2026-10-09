@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { closeAccount, createAccount, hasSession } from '#support/account.js';
@@ -144,6 +145,62 @@ describe('security', () => {
         };
       } finally {
         await closeAccount(unverified);
+      }
+    }),
+  );
+
+  it(
+    'should answer a burst of 50 prepares with one quote and no duplicates [SE-06 P1]',
+    matrixRow('SE-06', 'P1', async (evidence) => {
+      const account = await createAccount('se06');
+      try {
+        const started = Date.now();
+        // Never confirmed: no Checkout session is created, and closeAccount cancels the one quote.
+        const answers = await Promise.all(
+          Array.from({ length: 50 }, async () =>
+            account.api.request('POST', '/v1/billing/payment-actions/topup', { body: topup(), retryRateLimit: false }),
+          ),
+        );
+        const seconds = (Date.now() - started) / 1000;
+        const prepared = answers
+          .filter(({ status }) => status === 200)
+          .map((answer) => wirePaymentActionSchema.parse(answer.body));
+        const conflicts = answers.filter(({ status }) => status === 409).map((answer) => failure(answer));
+        const limited = answers.filter(({ status }) => status === 429).length;
+        const other = answers.filter(({ status }) => ![200, 409, 429].includes(status));
+        const otherBodies = [
+          ...new Set(other.map(({ status, body }) => `${status} ${JSON.stringify(body).slice(0, 200)}`)),
+        ];
+        const ids = new Set(prepared.map(({ actionId }) => actionId));
+        const listed = ok(
+          await account.api.request('GET', '/v1/billing/payment-actions'),
+          z.array(wirePaymentActionSchema),
+        );
+        const open = listed.filter(({ state }) => !['canceled', 'failed', 'fulfilled', 'completed'].includes(state));
+        evidence.push(
+          `50 prepares in ${seconds.toFixed(1)} s: ${prepared.length} × 200 (${ids.size} distinct), ${conflicts.length} × 409 ${[
+            ...new Set(conflicts.map(({ code }) => code)),
+          ].join('/')}, ${limited} × 429, ${other.length} other ${other.map(({ status }) => status).join('/')}`,
+          `open actions afterwards ${open.map(({ actionId, state }) => `${actionId} ${state}`).join(', ')}`,
+          ...otherBodies.map((body) => `answered ${body}`),
+          ...(other.length === 0
+            ? []
+            : [`other request ids ${other.map(({ requestId }) => requestId ?? '?').join(', ')}`]),
+        );
+        expect(ids.size).toBe(1);
+        expect(other).toHaveLength(0);
+        // A 409 either hands back the one pending quote or says the first prepare's Stripe customer is still being made.
+        expect(
+          conflicts.every(
+            ({ code, action }) =>
+              (code === 'action_already_pending' && ids.has(action?.actionId ?? '')) ||
+              code === 'customer_creation_outcome_unknown',
+          ),
+        ).toBe(true);
+        expect(open).toHaveLength(1);
+        return { outcome: 'pass', evidence };
+      } finally {
+        await closeAccount(account);
       }
     }),
   );

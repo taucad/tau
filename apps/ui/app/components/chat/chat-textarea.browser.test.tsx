@@ -36,7 +36,7 @@ vi.doMock('#components/chat/chat-agent-sheet.js', () => ({
   ChatAgentSheet: () => (
     <Button variant='ghost' size='sm' className='h-7 min-w-0 shrink'>
       <span data-slot='trigger-model' className='truncate'>
-        Haiku 4.5
+        Haiku 5.5
       </span>
     </Button>
   ),

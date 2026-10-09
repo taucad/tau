@@ -34,19 +34,30 @@ const indexSummary = (entry: ApiEntry): string => {
 
 const memberCount = (entry: ApiEntry): number => (entry.members ?? []).length;
 
+type IndexLine = {
+  readonly text: string;
+  /** Display name and kind: what a reader distinguishes a line by. */
+  readonly key: string;
+  readonly id: string;
+};
+
 /** One entry's index lines: the symbol, then each of its members indented. */
 const indexLines = (
   entry: ApiEntry,
   context: { readonly parent?: string; readonly depth?: number; readonly parentCategory?: string } = {},
-): readonly string[] => {
+): readonly IndexLine[] => {
   const { parent = '', depth = 0, parentCategory } = context;
   const summary = indexSummary(entry);
   const members = memberCount(entry);
   const suffix = `${members === 0 ? '' : ` [${members} members]`}${entry.category === undefined || entry.category === parentCategory ? '' : ` [category: ${entry.category}]`}`;
   const path = entry.path ?? (parent === '' ? undefined : parent);
   const name = path === undefined ? entry.name : `${path}.${entry.name}`;
-  const lines = [
-    `${'  '.repeat(depth)}${name} (${entry.kind})${suffix}${summary === '' ? '' : ` — ${summary}`} [id: ${entry.id}]`,
+  const lines: IndexLine[] = [
+    {
+      text: `${'  '.repeat(depth)}${name} (${entry.kind})${suffix}${summary === '' ? '' : ` — ${summary}`}`,
+      key: `${name} (${entry.kind})`,
+      id: entry.id,
+    },
   ];
   for (const member of entry.members ?? []) {
     lines.push(...indexLines(member, { parent: name, depth: depth + 1, parentCategory: entry.category }));
@@ -79,15 +90,21 @@ export const renderIndex = (
     '',
     `${corpus.metadata.packageName} ${corpus.metadata.packageVersion} · ${corpus.metadata.totalEntries} symbols · extracted by ${corpus.metadata.extractor}.`,
     '',
-    'Every symbol appears here exactly once. The heading above each block names the file with its signature.',
+    'Every symbol appears here exactly once. The heading above each block names the file with its signature; grep the skill directory for `name(` to land on the declaration directly.',
     '',
   ];
 
-  for (const shard of shards) {
-    lines.push(`## ${shard.title} — \`${shard.slug}.md\`${shard.tier === 'cold' ? ' (on demand)' : ''}`, '');
-    for (const entry of shard.entries) {
-      lines.push(...indexLines(entry));
+  const blocks = shards.map((shard) => ({ shard, rows: shard.entries.flatMap((entry) => indexLines(entry)) }));
+  const keyCount = new Map<string, number>();
+  for (const { rows } of blocks) {
+    for (const row of rows) {
+      keyCount.set(row.key, (keyCount.get(row.key) ?? 0) + 1);
     }
+  }
+  for (const { shard, rows } of blocks) {
+    lines.push(`## ${shard.title} — \`${shard.slug}.md\`${shard.tier === 'cold' ? ' (on demand)' : ''}`, '');
+    // The id disambiguates only where two lines would otherwise read the same.
+    lines.push(...rows.map((row) => ((keyCount.get(row.key) ?? 0) > 1 ? `${row.text} [id: ${row.id}]` : row.text)));
     lines.push('');
   }
 
@@ -125,6 +142,18 @@ const parameterLines = (entry: ApiEntry, indent: string): readonly string[] =>
     .filter((parameter) => parameter.description !== undefined && parameter.description !== '')
     .map((parameter) => `${indent}//   ${parameter.name}: ${firstSentence(parameter.description ?? '')}`);
 
+/** Upstream usage examples, commented so a shard stays valid source-language text. */
+// ponytail: one example per entry; KCL carries up to six each, which tripled the zoo reference. Raise when a kernel needs variants.
+const exampleLines = (entry: ApiEntry, indent: string): readonly string[] =>
+  (entry.docs?.examples ?? []).slice(0, 1).flatMap((example) => [
+    `${indent}// Example${example.caption === undefined || example.caption === '' ? '' : ` (${example.caption.trim()})`}:`,
+    ...example.code
+      .replaceAll('\r\n', '\n')
+      .trim()
+      .split('\n')
+      .map((line) => `${indent}//   ${line.trimEnd()}`),
+  ]);
+
 /** Normalize declarations from upstream while preserving their source-language layout. */
 const sourceLines = (text: string, indent: string): readonly string[] =>
   text
@@ -132,13 +161,39 @@ const sourceLines = (text: string, indent: string): readonly string[] =>
     .split('\n')
     .map((line) => `${indent}${line.trimEnd()}`);
 
+/**
+ * Rewrite the renderers' `//` annotation lines in the corpus language's own
+ * comment syntax. Only Python differs, and no Python line starts with `//`.
+ *
+ * @param lines - Rendered lines.
+ * @param language - The corpus language.
+ * @returns The lines, with Python annotations as `#` comments.
+ * @internal
+ */
+export const nativeComments = (
+  lines: readonly string[],
+  language: ApiCorpus['metadata']['language'],
+): readonly string[] =>
+  language === 'python' ? lines.map((line) => line.replace(/^(\s*)\/\/( |$)/u, '$1#$2')) : lines;
+
+/**
+ * A non-callable entry as its declaration reads: modifiers, name, `?` when optional, then the type.
+ *
+ * @param entry - A property, constant or type without signatures.
+ * @returns `static readonly name?: Type`, with each part only when it applies.
+ * @public
+ */
+export const labelledDeclaration = (entry: ApiEntry): string =>
+  `${entry.static === true ? 'static ' : ''}${entry.readonly === true ? 'readonly ' : ''}${entry.name}${
+    entry.optional === true ? '?' : ''
+  }${entry.type === undefined ? '' : `: ${entry.type.text}`}`;
+
 const renderEntryBody = (entry: ApiEntry, depth: number, parentCategory?: string): readonly string[] => {
   const indent = '  '.repeat(depth);
   const lines: string[] = [...annotationLines(entry, indent, parentCategory)];
 
   if (entry.signatures === undefined || entry.signatures.length === 0) {
-    const rendered = `${entry.name}${entry.type === undefined ? '' : `: ${entry.type.text}`}`;
-    lines.push(...sourceLines(rendered, indent));
+    lines.push(...sourceLines(labelledDeclaration(entry), indent));
   } else {
     const name = entry.path === undefined ? entry.name : `${entry.path}.${entry.name}`;
     lines.push(`${indent}// ${name} (${entry.kind})`);
@@ -147,7 +202,7 @@ const renderEntryBody = (entry: ApiEntry, depth: number, parentCategory?: string
     }
   }
 
-  lines.push(...parameterLines(entry, indent));
+  lines.push(...parameterLines(entry, indent), ...exampleLines(entry, indent));
 
   for (const member of entry.members ?? []) {
     lines.push('');
@@ -174,7 +229,7 @@ export const renderShard = (shard: ShardPlanEntry, corpus: ApiCorpus): string =>
   ];
 
   for (const entry of shard.entries) {
-    lines.push(...renderEntryBody(entry, 0), '');
+    lines.push(...nativeComments(renderEntryBody(entry, 0), corpus.metadata.language), '');
   }
 
   return `${lines.join('\n').trimEnd()}\n`;
@@ -201,7 +256,7 @@ export const renderReferenceMap = (
   const lines = [
     '## API reference',
     '',
-    `All ${options.totalSymbols} symbols are listed in \`${options.indexFile}\`. Grep it for a name, then read only the file its heading names.`,
+    `To read any other signature, grep the skill directory for the name followed by \`(\` (or the bare type name): each hit is the declaration line and names its file; read a few lines around it for overloads and parameter notes. \`${options.indexFile}\` lists all ${options.totalSymbols} symbols by file.`,
     '',
   ];
   if (eager.length <= 12) {

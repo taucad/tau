@@ -164,6 +164,9 @@ export type CompactStripeEvent = {
 /* eslint-disable @typescript-eslint/naming-convention -- Stripe request schemas preserve provider wire field names. */
 const metadataSchema = z.record(z.string(), z.string());
 const idempotencyKeySchema = z.string().min(1).max(255);
+// Stripe's limits on a Customer's contact: 512 characters of email, 256 of name.
+const customerEmailMaximum = 512;
+const customerNameMaximum = 256;
 const checkoutContractSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -219,6 +222,24 @@ const checkoutRequestSchema = z
   })
   .strict();
 
+/**
+ * The owner contact a new Customer carries, so Stripe can address its receipts, invoices and portal.
+ * A blank value, or one longer than Stripe accepts, is left out rather than failing the purchase.
+ *
+ * @param owner - The account owner's email and display name, or undefined when the owner row is gone.
+ * @returns The `email` and `name` create parameters to send.
+ */
+export function stripeCustomerContact(
+  owner: { readonly email: string; readonly name: string } | undefined,
+): Pick<Stripe.CustomerCreateParams, 'email' | 'name'> {
+  const email = owner?.email.trim() ?? '';
+  const name = owner?.name.trim() ?? '';
+  return {
+    ...(email !== '' && email.length <= customerEmailMaximum ? { email } : {}),
+    ...(name !== '' && name.length <= customerNameMaximum ? { name } : {}),
+  };
+}
+
 /** Parses persisted JSON into the closed create-leg contract before any dispatch. */
 export function parseStripeCreateLeg(input: unknown): StripeCreateLeg {
   const envelope = z.looseObject({ kind: z.enum(['customer', 'checkout', 'payment_intent', 'portal']) }).parse(input);
@@ -228,7 +249,13 @@ export function parseStripeCreateLeg(input: unknown): StripeCreateLeg {
         .object({
           kind: z.literal('customer'),
           idempotencyKey: idempotencyKeySchema,
-          request: z.object({ metadata: metadataSchema.optional() }).strict(),
+          request: z
+            .object({
+              email: z.string().min(1).max(customerEmailMaximum).optional(),
+              name: z.string().min(1).max(customerNameMaximum).optional(),
+              metadata: metadataSchema.optional(),
+            })
+            .strict(),
         })
         .strict()
         .parse(input);
@@ -476,6 +503,22 @@ export async function cancelStripeSubscription(
     throw new Error('Stripe subscription identity is required');
   }
   return stripe.subscriptions.cancel(input.stripeSubscriptionId, {}, { idempotencyKey: input.idempotencyKey });
+}
+
+/**
+ * Whether a Stripe subscription is scheduled to end instead of renewing.
+ *
+ * Classic billing mode records a period-end cancellation as `cancel_at_period_end: true`.
+ * Flexible billing mode, which every subscription Tau creates uses and which the Customer
+ * Portal schedules against, leaves that field false and sets `cancel_at` to the period's end
+ * instead (Stripe changelog 2025-05-28, `cancel_at` enums; the parameter is deprecated since).
+ * On staging (2026-10-09, PR-04) a portal cancellation reached Tau as `cancel_at` alone, so the
+ * account kept announcing its renewal. Both spellings mean one thing to Tau: the plan ends.
+ */
+export function isStripeSubscriptionEnding(
+  subscription: Pick<Stripe.Subscription, 'cancel_at' | 'cancel_at_period_end'>,
+): boolean {
+  return subscription.cancel_at_period_end || subscription.cancel_at !== null;
 }
 
 /* eslint-disable @typescript-eslint/naming-convention -- Stripe schedule fields preserve provider wire names. */
@@ -876,7 +919,7 @@ function assertPaymentIntentRequest(
 function assertClosedCreateRequest(leg: StripeCreateLeg): void {
   const allowed = new Set(
     leg.kind === 'customer'
-      ? ['metadata']
+      ? ['email', 'metadata', 'name']
       : leg.kind === 'payment_intent'
         ? [
             'amount',

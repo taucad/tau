@@ -195,6 +195,26 @@ describe('native model loader ownership', () => {
     expect(first.load?.artifacts[0]?.sha256).not.toBe(second.load?.artifacts[0]?.sha256);
     await loader.releaseAll();
   });
+  it('should report a failing host source read as a typed load diagnostic', async () => {
+    const { engine, ingestSubject } = testEngine();
+    const loader = createGeoSpecNativeModelLoader({
+      engine,
+      readSource: async () => {
+        throw new Error('ENOENT: no such file or directory');
+      },
+    });
+    await expect(loader({ source: 'missing.glb', format: 'glb' })).rejects.toMatchObject({
+      diagnostics: [
+        {
+          code: 'GEOSPEC_NATIVE_SOURCE_READ_FAILED',
+          message: 'The host source reader could not read missing.glb: ENOENT: no such file or directory',
+          details: { source: 'missing.glb' },
+        },
+      ],
+    });
+    expect(ingestSubject).not.toHaveBeenCalled();
+    await loader.releaseAll();
+  });
   it('should reject ignored STEP source-unit overrides before reading or admission', async () => {
     const { engine, ingestSubject } = testEngine();
     const readSource = vi.fn(async () => Uint8Array.of(1));
@@ -286,6 +306,7 @@ describe('native model loader ownership', () => {
     expect(exportModel).toHaveBeenCalledTimes(3);
     expect(vi.mocked(runtime.open).mock.calls[2]?.[0]).toMatchObject({
       source: { files: { 'main.ts': 'model B' } },
+      watch: false,
     });
     await loader.releaseAll();
     expect(releaseSubject).toHaveBeenCalledTimes(1);
@@ -336,6 +357,39 @@ describe('native model loader ownership', () => {
     expect(ingestSubject).toHaveBeenCalledTimes(1);
     expect(releaseSubject).toHaveBeenCalledTimes(1);
     expect(terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it('should keep releaseAll pending until an owned Runtime shutdown settles', async () => {
+    const { engine } = testEngine();
+    const closed = Promise.withResolvers<void>();
+    const terminate = vi.fn();
+    const shutdown = vi.fn(async () => closed.promise);
+    const exported: Awaited<ReturnType<RuntimeDocument['export']>> = {
+      success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation-1',
+      files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.of(9) }],
+      issues: [],
+    };
+    const document = mock<RuntimeDocument>({ export: vi.fn(async () => exported) });
+    const runtime: GeoSpecRuntimeClient = {
+      connect: vi.fn(async () => undefined),
+      open: vi.fn(() => document),
+      terminate,
+      shutdown,
+    };
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime: async () => runtime });
+    await loader({ code: { 'main.ts': 'model' }, file: 'main.ts', format: 'glb' });
+
+    const cleanup = loader.releaseAll();
+    await vi.waitFor(() => {
+      expect(shutdown).toHaveBeenCalledTimes(1);
+    });
+    const pending = Symbol('pending');
+    await expect(Promise.race([cleanup, Promise.resolve(pending)])).resolves.toBe(pending);
+    closed.resolve();
+    await expect(cleanup).resolves.toBeUndefined();
+    expect(terminate).not.toHaveBeenCalled();
   });
 
   it('should settle an in-flight admission before releasing its subject', async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { classifyLogRow, parseLogEvent, projectionEffectSchemas } from '#log/event-schema.js';
 import { projectLogRow, projectionFactSchema } from '#log/projection-facts.js';
+import { parseEventLogBytes } from '#log/serialization.js';
 
 const envelope = { version: 1, leaderEpoch: 'e', sequence: 0, recordedAt: 'now', runId: 'r' };
 const message = { id: 'm', role: 'user', content: 'hello' };
@@ -38,6 +39,18 @@ const previousEffectUnion = z.union(projectionEffectSchemas);
 
 // Keep the pre-dispatch union as a differential oracle: selected validators must produce identical compact data.
 describe('owned compact fact mapping', () => {
+  it.each(bodies)('classifies parser-owned JSON identically to the generic reader for $type', (body) => {
+    const value = { ...envelope, ...body, extra: { retained: true } };
+    const classified = classifyLogRow(value);
+    expect(classified.class).toBe('known');
+    if (classified.class !== 'known') {
+      throw new Error('Expected a known vocabulary fixture');
+    }
+    const parsed = parseEventLogBytes(new TextEncoder().encode(JSON.stringify(value) + '\n'));
+    expect(parsed.rows).toEqual([{ event: classified.event, opaque: false }]);
+    expect(parsed.quarantined).toEqual([]);
+  });
+
   it.each(bodies)('preserves the previous union result for $type', (body) => {
     const classified = classifyLogRow({ ...envelope, ...body });
     expect(classified.class).toBe('known');

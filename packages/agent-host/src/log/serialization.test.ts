@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { classifyLogRow } from '#log/event-schema.js';
 import { parseEventLogBytes } from '#log/serialization.js';
 
 const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
@@ -60,5 +61,26 @@ describe('byte log line boundaries', () => {
     expect(parsed.events).toEqual([event]);
     expect(parsed.quarantined).toEqual([0]);
     expect(parsed.validByteLength).toBe(bytes.length);
+  });
+});
+
+// The generic reader remains the oracle for plain JSON; no generic getter/proxy inputs enter this path.
+describe('parser-owned JSON classification', () => {
+  it.each([
+    '{"version":1,"leaderEpoch":"e","sequence":0,"recordedAt":"now","runId":"r","type":"run.lifecycle","state":"future"}',
+    '{"version":2,"leaderEpoch":"e","sequence":0,"recordedAt":"now","runId":"r","type":"run.lifecycle","state":"running"}',
+    '{"version":1,"leaderEpoch":"e","sequence":0,"recordedAt":"now","runId":"r","type":"snapshot-context.refreshed","messageId":"m","content":1e400}',
+    '{"version":1,"leaderEpoch":"e","sequence":0,"recordedAt":"now","runId":"r","type":"future.row","__proto__":{"own":true}}',
+    '{"version":1,"leaderEpoch":"e","sequence":1e400,"recordedAt":"now","runId":"r","type":"future.row"}',
+    '{}',
+    'null',
+    '[]',
+  ])('preserves tolerant classification for %s', (text) => {
+    const classified = classifyLogRow(JSON.parse(text) as unknown);
+    const parsed = parseEventLogBytes(encode(text + '\n'));
+    expect(parsed.rows).toEqual(
+      classified.class === 'quarantined' ? [] : [{ event: classified.event, opaque: classified.class === 'opaque' }],
+    );
+    expect(parsed.quarantined).toEqual(classified.class === 'quarantined' ? [0] : []);
   });
 });

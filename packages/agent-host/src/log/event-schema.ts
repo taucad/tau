@@ -490,6 +490,40 @@ export const classifyLogRow = (value: unknown): ClassifiedRow => {
   return known.success ? { class: 'known', event: known.data as AgentLogEvent } : { class: 'opaque', event: carried };
 };
 
+const knownJsonInputsByType = new Map<string, z.ZodType>();
+for (const schema of knownLogEventSchema.options) {
+  const type = schema.shape.type.value;
+  if (!knownJsonInputsByType.has(type)) {
+    const variants = knownLogEventSchema.options.filter((candidate) => candidate.shape.type.value === type);
+    knownJsonInputsByType.set(type, variants.length === 1 ? schema : z.union(variants));
+  }
+}
+
+/**
+ * Classify a freshly parsed JSON line using the existing validators for its own type.
+ * The value cannot escape before classification; generic callers retain the original union and getter semantics.
+ * @param text - Decoded JSON, with no caller-supplied reviver or object references.
+ * @returns The same tolerant row class as the generic reader.
+ * @internal
+ */
+export const classifyLogJson = (text: string): ClassifiedRow => {
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    return { class: 'quarantined' };
+  }
+  const envelope = rowEnvelopeSchema.safeParse(value);
+  if (!envelope.success) {
+    return { class: 'quarantined' };
+  }
+  const known = knownJsonInputsByType.get(envelope.data.type)?.safeParse(value);
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the validated opaque envelope is carried unchanged.
+  return known?.success
+    ? { class: 'known', event: known.data as AgentLogEvent }
+    : { class: 'opaque', event: value as AgentLogEvent };
+};
+
 /** Rows whose loss leaves the provider history wrong; an opaque one breaks the chat's history (CL-R2). @internal */
 export const historyRowTypes: ReadonlySet<string> = new Set([
   'message.appended',

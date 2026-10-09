@@ -1,4 +1,4 @@
-import { classifyLogRow, parseLogEvent } from '#log/event-schema.js';
+import { classifyLogJson, parseLogEvent } from '#log/event-schema.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const encoder = new TextEncoder();
@@ -34,10 +34,10 @@ const splitByteLines = (bytes: Uint8Array<ArrayBuffer>): ByteLine[] => {
   return lines;
 };
 
-const valueOf = (bytes: Uint8Array<ArrayBuffer>, line: ByteLine): unknown => {
+const textOf = (bytes: Uint8Array<ArrayBuffer>, line: ByteLine): string | undefined => {
   const contentEnd = line.end > line.start && bytes[line.end - 1] === 13 ? line.end - 1 : line.end;
   try {
-    return JSON.parse(decoder.decode(bytes.subarray(line.start, contentEnd))) as unknown;
+    return decoder.decode(bytes.subarray(line.start, contentEnd));
   } catch {
     return undefined;
   }
@@ -58,7 +58,8 @@ export const parseEventLogBytes = (bytes: Uint8Array<ArrayBuffer>): ParsedEventL
   let needsSeparator = false;
 
   for (const line of lines) {
-    const classified = classifyLogRow(valueOf(bytes, line));
+    const text = textOf(bytes, line);
+    const classified = text === undefined ? ({ class: 'quarantined' } as const) : classifyLogJson(text);
     if (classified.class === 'quarantined') {
       if (!line.terminated) {
         return {

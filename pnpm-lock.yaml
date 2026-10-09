@@ -1779,6 +1779,9 @@ importers:
 
   apps/billing-e2e:
     devDependencies:
+      '@taucad/agent-host':
+        specifier: workspace:*
+        version: link:../../packages/agent-host
       '@taucad/billing':
         specifier: workspace:*
         version: link:../libs/billing

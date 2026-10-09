@@ -1104,6 +1104,27 @@ describe('machine tool registry', () => {
           'Workshop X1C took the stop. Leaves motion halts, heaters off, position kept; to recover: Home (machine_action motion motion.home).',
       });
     });
+
+    it('says whether the beam goes off on a machine that declares it', async () => {
+      const entry = fixtureEntry();
+      const { capabilities } = entry.descriptor;
+      const laser: MachineDirectoryEntry = {
+        ...entry,
+        descriptor: {
+          ...entry.descriptor,
+          capabilities: { ...capabilities, stop: { ...capabilities.stop, emission: 'off' } },
+        },
+      };
+
+      const result = await run(fixtureClient({ entries: [laser] }).client, { toolName: 'stop_machine', input: {} });
+
+      expect(result.content).toEqual({
+        status: 'done',
+        operationId: 'call-1',
+        message:
+          'Workshop X1C took the stop. Leaves motion halts, beam off, heaters off, position kept; to recover: Home (machine_action motion motion.home).',
+      });
+    });
   });
 
   describe('request_job', () => {

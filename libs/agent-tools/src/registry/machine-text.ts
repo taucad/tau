@@ -66,6 +66,7 @@ export const outcomeText = (entry: MachineDirectoryEntry, outcome: MachineHaltOu
   const parts = [
     `motion ${outcome.motion}`,
     ...(outcome.spindle === 'none' ? [] : [`spindle ${outcome.spindle}`]),
+    ...(outcome.emission === undefined || outcome.emission === 'none' ? [] : [`beam ${outcome.emission}`]),
     ...(outcome.heaters === 'none' ? [] : [`heaters ${outcome.heaters}`]),
     `position ${outcome.position === 'kept' ? 'kept' : 'may be lost'}`,
   ];

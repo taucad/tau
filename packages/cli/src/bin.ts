@@ -44,6 +44,10 @@ const subCommands: Record<string, CommandDef> = {
     const { exportCommand } = await import('./commands/export.js');
     return exportCommand as CommandDef;
   }),
+  install: lazyCommand('install', 'Lock and install a project’s npm packages', async () => {
+    const { installCommand } = await import('./commands/install.js');
+    return installCommand as CommandDef;
+  }),
   view: lazyCommand('view', 'Render a bounded WebP preview of a CAD file and print its path', async () => {
     const { viewCommand } = await import('./commands/view.js');
     return viewCommand as CommandDef;

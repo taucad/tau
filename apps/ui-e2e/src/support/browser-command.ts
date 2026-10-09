@@ -1842,7 +1842,7 @@ const installProjectionAcquisitionProbe = (): {
 } => {
   type Receipt = {
     path: string;
-    identity: 'observed-path' | 'unqualified-basename';
+    identity: 'observed-path' | 'unqualified-basename' | 'unknown';
     getFileCalls: number;
     /** Milliseconds. */
     getFileDuration: number;
@@ -1852,41 +1852,39 @@ const installProjectionAcquisitionProbe = (): {
     bytes: number;
     pending: number;
   };
+  type Sample = {
+    operation: 'getFile' | 'arrayBuffer';
+    path: string;
+    identity: Receipt['identity'];
+    stack: string | undefined;
+    startedAt: number;
+    completedAt?: number;
+    bytes?: number;
+    size?: number;
+    error?: string;
+  };
   const paths = new WeakMap<object, string>();
   const receipts = new Map<string, Receipt>();
+  const samples: Sample[] = [];
+  let unretainedReceiptCalls = 0;
+  let targetSamples = 0;
+  let unknownSamples = 0;
+  let droppedTargetSamples = 0;
+  let droppedUnknownSamples = 0;
   const constructors = {
     fileHandle: typeof FileSystemFileHandle !== 'undefined',
     directoryHandle: typeof FileSystemDirectoryHandle !== 'undefined',
     blob: typeof Blob !== 'undefined',
   };
-  if (!constructors.fileHandle || !constructors.directoryHandle || !constructors.blob) {
+  if (!constructors.blob) {
     return { installed: false, constructors };
   }
-  const directory = FileSystemDirectoryHandle.prototype.getDirectoryHandle;
-  const handle = FileSystemDirectoryHandle.prototype.getFileHandle;
-  const { getFile } = FileSystemFileHandle.prototype;
-  const { arrayBuffer } = Blob.prototype;
-  FileSystemDirectoryHandle.prototype.getDirectoryHandle = async function (...args) {
-    const result = await directory.apply(this, args);
-    paths.set(result, `${paths.get(this) ?? this.name}/${args[0]}`);
-    return result;
-  };
-  FileSystemDirectoryHandle.prototype.getFileHandle = async function (...args) {
-    const result = await handle.apply(this, args);
-    paths.set(result, `${paths.get(this) ?? this.name}/${args[0]}`);
-    return result;
-  };
-  FileSystemFileHandle.prototype.getFile = async function () {
-    const observedPath = paths.get(this);
-    const path = observedPath ?? this.name;
-    if (!path.endsWith('/events.jsonl') && !(observedPath === undefined && path === 'events.jsonl')) {
-      return getFile.call(this);
-    }
+  const receiptOf = (path: string, identity: Receipt['identity']): Receipt | undefined => {
     let receipt = receipts.get(path);
     if (receipt === undefined && receipts.size < 16) {
       receipt = {
         path,
-        identity: observedPath === undefined ? 'unqualified-basename' : 'observed-path',
+        identity,
         getFileCalls: 0,
         getFileDuration: 0,
         arrayBufferCalls: 0,
@@ -1896,25 +1894,108 @@ const installProjectionAcquisitionProbe = (): {
       };
       receipts.set(path, receipt);
     }
-    const start = performance.now();
-    if (receipt !== undefined) {
-      receipt.getFileCalls++;
-      receipt.pending++;
+    if (receipt === undefined) {
+      unretainedReceiptCalls++;
     }
-    try {
-      const file = await getFile.call(this);
-      paths.set(file, path);
-      return file;
-    } finally {
-      if (receipt !== undefined) {
-        receipt.getFileDuration += performance.now() - start;
-        receipt.pending--;
-      }
-    }
+    return receipt;
   };
+  const sampleOf = (
+    operation: Sample['operation'],
+    path: string,
+    identity: Receipt['identity'],
+  ): Sample | undefined => {
+    if (identity === 'unknown') {
+      if (unknownSamples >= 4) {
+        droppedUnknownSamples++;
+        return undefined;
+      }
+      unknownSamples++;
+    } else {
+      if (targetSamples >= 16) {
+        droppedTargetSamples++;
+        return undefined;
+      }
+      targetSamples++;
+    }
+    const sample: Sample = {
+      operation,
+      path,
+      identity,
+      stack: new Error('Acquisition caller').stack?.slice(0, 4096),
+      startedAt: performance.timeOrigin + performance.now(),
+    };
+    samples.push(sample);
+    return sample;
+  };
+  const directory = constructors.directoryHandle ? FileSystemDirectoryHandle.prototype.getDirectoryHandle : undefined;
+  const handle = constructors.directoryHandle ? FileSystemDirectoryHandle.prototype.getFileHandle : undefined;
+  const getFile = constructors.fileHandle ? FileSystemFileHandle.prototype.getFile : undefined;
+  const { arrayBuffer } = Blob.prototype;
+  if (directory !== undefined && handle !== undefined) {
+    FileSystemDirectoryHandle.prototype.getDirectoryHandle = async function (...args) {
+      const result = await directory.apply(this, args);
+      paths.set(result, `${paths.get(this) ?? this.name}/${args[0]}`);
+      return result;
+    };
+    FileSystemDirectoryHandle.prototype.getFileHandle = async function (...args) {
+      const result = await handle.apply(this, args);
+      paths.set(result, `${paths.get(this) ?? this.name}/${args[0]}`);
+      return result;
+    };
+  }
+  if (getFile !== undefined) {
+    FileSystemFileHandle.prototype.getFile = async function () {
+      const observedPath = paths.get(this);
+      const path = observedPath ?? this.name;
+      if (!path.endsWith('/events.jsonl') && !(observedPath === undefined && path === 'events.jsonl')) {
+        return getFile.call(this);
+      }
+      const identity = observedPath === undefined ? 'unqualified-basename' : 'observed-path';
+      const receipt = receiptOf(path, identity);
+      const sample = sampleOf('getFile', path, identity);
+      const start = performance.now();
+      if (receipt !== undefined) {
+        receipt.getFileCalls++;
+        receipt.pending++;
+      }
+      try {
+        const file = await getFile.call(this);
+        paths.set(file, path);
+        return file;
+      } catch (error) {
+        if (sample !== undefined) {
+          sample.error = String(error).slice(0, 4096);
+        }
+        throw error;
+      } finally {
+        if (sample !== undefined) {
+          sample.completedAt = performance.timeOrigin + performance.now();
+        }
+        if (receipt !== undefined) {
+          receipt.getFileDuration += performance.now() - start;
+          receipt.pending--;
+        }
+      }
+    };
+  }
   Blob.prototype.arrayBuffer = async function () {
-    const path = paths.get(this);
-    const receipt = path === undefined ? undefined : receipts.get(path);
+    const observedPath = paths.get(this);
+    const name = 'name' in this && typeof this.name === 'string' ? this.name : undefined;
+    if (observedPath === undefined && name !== undefined && name !== 'events.jsonl') {
+      return arrayBuffer.call(this);
+    }
+    const path = observedPath ?? name ?? '<unknown-blob>';
+    let identity: Receipt['identity'] = 'observed-path';
+    if (observedPath === undefined) {
+      identity = name === undefined ? 'unknown' : 'unqualified-basename';
+    } else if (path === 'events.jsonl') {
+      identity = 'unqualified-basename';
+    }
+    const receipt = receiptOf(path, identity);
+    const sample = sampleOf('arrayBuffer', path, identity);
+    if (sample !== undefined) {
+      sample.size = this.size;
+    }
     const start = performance.now();
     if (receipt !== undefined) {
       receipt.arrayBufferCalls++;
@@ -1922,11 +2003,22 @@ const installProjectionAcquisitionProbe = (): {
     }
     try {
       const bytes = await arrayBuffer.call(this);
+      if (sample !== undefined) {
+        sample.bytes = bytes.byteLength;
+      }
       if (receipt !== undefined) {
         receipt.bytes += bytes.byteLength;
       }
       return bytes;
+    } catch (error) {
+      if (sample !== undefined) {
+        sample.error = String(error).slice(0, 4096);
+      }
+      throw error;
     } finally {
+      if (sample !== undefined) {
+        sample.completedAt = performance.timeOrigin + performance.now();
+      }
       if (receipt !== undefined) {
         receipt.arrayBufferDuration += performance.now() - start;
         receipt.pending--;
@@ -1937,12 +2029,21 @@ const installProjectionAcquisitionProbe = (): {
     __tauProjectionAcquisition: {
       read: () => ({
         kind: 'native-file-handle-getFile-and-Blob-arrayBuffer',
+        constructors,
+        unretainedReceiptCalls,
+        droppedTargetSamples,
+        droppedUnknownSamples,
         receipts: [...receipts.values()].map((entry) => ({ ...entry })),
+        samples: samples.map((sample) => ({ ...sample })),
       }),
       restore: () => {
-        FileSystemDirectoryHandle.prototype.getDirectoryHandle = directory;
-        FileSystemDirectoryHandle.prototype.getFileHandle = handle;
-        FileSystemFileHandle.prototype.getFile = getFile;
+        if (directory !== undefined && handle !== undefined) {
+          FileSystemDirectoryHandle.prototype.getDirectoryHandle = directory;
+          FileSystemDirectoryHandle.prototype.getFileHandle = handle;
+        }
+        if (getFile !== undefined) {
+          FileSystemFileHandle.prototype.getFile = getFile;
+        }
         Blob.prototype.arrayBuffer = arrayBuffer;
       },
     },

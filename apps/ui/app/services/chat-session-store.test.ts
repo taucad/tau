@@ -2094,22 +2094,30 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
     const original = createOwner();
     const replacement = createOwner();
     const beginReplacement = Promise.withResolvers<void>();
-    const nextRead = Promise.withResolvers<Parameters<AgentHostTransport['read']>[0]>();
+    const validationHeld = Promise.withResolvers<void>();
     const releaseNextRead = Promise.withResolvers<void>();
     let reads = 0;
+    let captures = 0;
     const transport: AgentHostTransport = {
       ready: Promise.resolve(),
       execute: async (command) => replacement.execute(command),
-      catchUp: (input) => original.catchUp(input),
+      async *catchUp(input) {
+        captures += 1;
+        const owner = captures === 1 ? original : replacement;
+        for await (const frame of owner.catchUp(input)) {
+          if (captures > 1 && frame.type === 'validated') {
+            validationHeld.resolve();
+            await releaseNextRead.promise;
+          }
+          yield frame;
+        }
+      },
       liveEvents: (id, signal) => replacement.liveEvents({ chatId: id, signal }),
       close: () => undefined,
       read: async (input) => {
         reads += 1;
         if (reads === 1) {
           await beginReplacement.promise;
-        } else if (reads === 2) {
-          nextRead.resolve(input);
-          await releaseNextRead.promise;
         }
         return replacement.read(input);
       },
@@ -2127,12 +2135,13 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
         expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
       });
       beginReplacement.resolve();
-      const requested = await nextRead.promise;
-      // The real follow loop must discard the retired generation/health before its next read.
+      await validationHeld.promise;
+      const requested = store.getProjection(chatId)?.ledger.position;
+      // Old authority is gone before fresh empty capture validates and ordinary follow resumes.
       expect({
-        cursor: requested.cursor,
-        sourceGeneration: requested.sourceGeneration,
-        sourceHealth: requested.sourceHealth,
+        cursor: requested?.cursor,
+        sourceGeneration: requested?.sourceGeneration,
+        sourceHealth: store.getProjection(chatId)?.sourceHealth,
         usageReady: store.historicalUsageReady(chatId, projectId),
         attached: store.getAttachmentStatus(chatId) === 'attached',
       }).toEqual({
@@ -2144,7 +2153,8 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       });
       releaseNextRead.resolve();
       await vi.waitFor(() => {
-        expect(reads).toBe(3);
+        expect(reads).toBe(2);
+        expect(captures).toBe(2);
         expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
         expect(store.getAttachmentStatus(chatId)).toBe('attached');
       });
@@ -2159,6 +2169,308 @@ describe('ChatSessionStore — run accounting per project (R2)', () => {
       await rm(workspaceRoot, { recursive: true, force: true });
     }
   });
+
+  for (const replacementEmpty of [false, true]) {
+    it(`should retain mounted SDK messages until reset recapture validates ${replacementEmpty ? 'an empty' : 'a changed'} source`, async () => {
+      const chatId = 'chat_mounted_reset_capture';
+      const projectId = 'project_mounted_reset_capture';
+      const runId = 'run_mounted_reset_capture';
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
+      store.setDependencies(deps);
+      const rows = (content: string) => [
+        ...runningRows(runId),
+        logRow(2, {
+          runId,
+          type: 'message.appended',
+          message: { id: 'mounted-reply', role: 'assistant', content },
+        }),
+        lifecycleRow(3, 'completed', runId),
+      ];
+      const reset = Promise.withResolvers<void>();
+      const validation = Promise.withResolvers<void>();
+      const caughtReplacement = Promise.withResolvers<void>();
+      const catchUp = vi.fn<AgentHostTransport['catchUp']>(async function* (): AsyncIterable<CatchUpFrame> {
+        const recovering = catchUp.mock.calls.length > 1;
+        const sourceGeneration = recovering ? 'replacement' : 'original';
+        const captured =
+          recovering && replacementEmpty ? [] : rows(recovering ? 'New validated reply' : 'Previous reply');
+        if (captured.length > 0) {
+          yield {
+            type: 'page',
+            answer: {
+              status: 'batch',
+              chatId,
+              sourceGeneration,
+              cursor: 0,
+              nextCursor: captured.length,
+              endCursor: captured.length,
+              facts: captured.map((row) => compactRow(row)),
+            },
+          };
+        }
+        if (recovering) {
+          caughtReplacement.resolve();
+          await validation.promise;
+        }
+        yield {
+          type: 'validated',
+          health: { historyIntact: true, newerHistory: false, quarantined: false },
+          position: {
+            cursor: captured.length,
+            sourceGeneration,
+            ...(captured.length === 0 ? {} : { last: { leaderEpoch: 'g1', sequence: 3 } }),
+          },
+          observedEndCursor: captured.length,
+        };
+      });
+      const read = vi.fn<AgentHostTransport['read']>(async (input) => {
+        if (read.mock.calls.length === 1) {
+          await reset.promise;
+          return { status: 'refused', chatId, reason: 'identity-mismatch' };
+        }
+        await new Promise<void>((resolve) => {
+          if (input.signal?.aborted) {
+            resolve();
+          } else {
+            input.signal?.addEventListener(
+              'abort',
+              () => {
+                resolve();
+              },
+              { once: true },
+            );
+          }
+        });
+        throw new DOMException('Read stopped', 'AbortError');
+      });
+      const client = createAgentHostClient({
+        ready: Promise.resolve(),
+        read,
+        catchUp,
+        async *liveEvents(_id, signal) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          yield* [];
+        },
+        execute: async () => {
+          throw new Error('Recovery must not send a command.');
+        },
+        close: () => undefined,
+      });
+      const unpublish = store.publishProjectHostConnector(projectId, async () => client);
+      const session = store.acquire(chatId, projectId);
+      try {
+        await vi.waitFor(() => {
+          expect(JSON.stringify(session.messages)).toContain('Previous reply');
+          expect(read).toHaveBeenCalledOnce();
+          expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
+        });
+        const { messages } = session.chat;
+        const first = messages[0];
+        reset.resolve();
+        await vi.waitFor(() => {
+          expect(store.getProjection(chatId)?.ledger.position.cursor).toBe(0);
+          expect(store.historicalUsageReady(chatId, projectId)).toBe(false);
+        });
+        // Existing store/SDK boundary control: revoking authority must not overwrite mounted messages.
+        expect(session.chat.messages).toBe(messages);
+        expect(session.messages[0]).toBe(first);
+        expect(store.getAttachmentStatus(chatId)).not.toBe('attached');
+        expect(await store.steerProjectedRun(chatId, 'must not target the retired run')).toBe(false);
+        expect(await store.cancelProjectedRun(chatId)).toBe('absent');
+        await vi.waitFor(() => {
+          expect(catchUp).toHaveBeenCalledTimes(2);
+        });
+        await caughtReplacement.promise;
+        expect(session.chat.messages).toBe(messages);
+        expect(store.getProjection(chatId)?.ledger.runs[runId]).toBeUndefined();
+        expect(read).toHaveBeenCalledOnce();
+        validation.resolve();
+        await vi.waitFor(() => {
+          expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
+          expect(store.getProjection(chatId)?.ledger.position.sourceGeneration).toBe('replacement');
+          if (replacementEmpty) {
+            expect(session.messages).toEqual([]);
+          } else {
+            expect(JSON.stringify(session.messages)).toContain('New validated reply');
+            expect(JSON.stringify(session.messages)).not.toContain('Previous reply');
+          }
+        });
+        expect(store.get(chatId)).toBe(session);
+      } finally {
+        reset.resolve();
+        validation.resolve();
+        store.release(chatId);
+        unpublish();
+        await client.close();
+      }
+    });
+  }
+
+  for (const nonempty of [false, true]) {
+    it(`should withhold currentness and retain live ownership during a cursor-zero ${nonempty ? 'nonempty' : 'empty'} generation reset`, async () => {
+      const chatId = 'chat_zero_generation_reset';
+      const projectId = 'project_zero_generation_reset';
+      const runId = 'run_zero_generation_reset';
+      const store = new ChatSessionStore({ chatSession });
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
+      store.setDependencies(deps);
+      const rows = nonempty
+        ? [
+            ...runningRows(runId),
+            logRow(2, {
+              runId,
+              type: 'message.appended',
+              message: { id: 'zero-reply', role: 'assistant', content: 'New zero reply' },
+            }),
+            lifecycleRow(3, 'completed', runId),
+          ]
+        : [];
+      const reset = Promise.withResolvers<void>();
+      const validation = Promise.withResolvers<void>();
+      let liveSignal: AbortSignal | undefined;
+      const close = vi.fn();
+      const catchUp = vi.fn<AgentHostTransport['catchUp']>(async function* (): AsyncIterable<CatchUpFrame> {
+        const recovering = catchUp.mock.calls.length > 1;
+        const sourceGeneration = recovering ? 'replacement-zero' : 'original-zero';
+        const captured = recovering ? rows : [];
+        if (captured.length > 0) {
+          yield {
+            type: 'page',
+            answer: {
+              status: 'batch',
+              chatId,
+              sourceGeneration,
+              cursor: 0,
+              nextCursor: captured.length,
+              endCursor: captured.length,
+              facts: captured.map((row) => compactRow(row)),
+            },
+          };
+        }
+        if (recovering) {
+          await validation.promise;
+        }
+        yield {
+          type: 'validated',
+          health: { historyIntact: true, newerHistory: false, quarantined: false },
+          position: {
+            cursor: captured.length,
+            sourceGeneration,
+            ...(captured.length === 0 ? {} : { last: { leaderEpoch: 'g1', sequence: 3 } }),
+          },
+          observedEndCursor: captured.length,
+        };
+      });
+      const read = vi.fn<AgentHostTransport['read']>(async (input) => {
+        if (read.mock.calls.length === 1) {
+          await reset.promise;
+          return {
+            status: 'batch',
+            chatId,
+            sourceGeneration: 'replacement-zero',
+            sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+            cursor: 0,
+            nextCursor: rows.length,
+            endCursor: rows.length,
+            events: rows,
+          };
+        }
+        await new Promise<void>((resolve) => {
+          if (input.signal?.aborted) {
+            resolve();
+          } else {
+            input.signal?.addEventListener(
+              'abort',
+              () => {
+                resolve();
+              },
+              { once: true },
+            );
+          }
+        });
+        throw new DOMException('Read stopped', 'AbortError');
+      });
+      const liveEvents = vi.fn<AgentHostTransport['liveEvents']>(async function* (_id, signal) {
+        liveSignal = signal;
+        await new Promise<void>((resolve) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        yield* [];
+      });
+      const client = createAgentHostClient({
+        ready: Promise.resolve(),
+        read,
+        catchUp,
+        liveEvents,
+        close,
+        execute: async () => {
+          throw new Error('Read reset cannot send commands.');
+        },
+      });
+      const unpublish = store.publishProjectHostConnector(projectId, async () => client);
+      const session = store.acquire(chatId, projectId);
+      let unsubscribe: () => void = () => undefined;
+      try {
+        await vi.waitFor(() => {
+          expect(read).toHaveBeenCalledOnce();
+          expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+        const { messages } = session.chat;
+        const snapshots: Array<{ current: boolean; attached: boolean }> = [];
+        unsubscribe = store.subscribeProjection(chatId, () => {
+          snapshots.push({
+            current: store.historicalUsageReady(chatId, projectId),
+            attached: store.getAttachmentStatus(chatId) === 'attached',
+          });
+        });
+        reset.resolve();
+        await vi.waitFor(() => {
+          expect(catchUp).toHaveBeenCalledTimes(2);
+        });
+        await settle();
+        expect.soft(snapshots.length).toBeGreaterThan(0);
+        expect.soft(snapshots.some((snapshot) => snapshot.current || snapshot.attached)).toBe(false);
+        expect.soft(store.historicalUsageReady(chatId, projectId)).toBe(false);
+        expect.soft(liveSignal?.aborted).toBe(false);
+        expect.soft(close).not.toHaveBeenCalled();
+        expect.soft(session.chat.messages).toBe(messages);
+        expect.soft(read).toHaveBeenCalledOnce();
+        unsubscribe();
+        validation.resolve();
+        await vi.waitFor(() => {
+          expect(store.historicalUsageReady(chatId, projectId)).toBe(true);
+          expect(store.getProjection(chatId)?.ledger.position.sourceGeneration).toBe('replacement-zero');
+          expect(store.getProjection(chatId)?.ledger.position.cursor).toBe(rows.length);
+        });
+        expect(liveEvents).toHaveBeenCalledOnce();
+      } finally {
+        unsubscribe();
+        reset.resolve();
+        validation.resolve();
+        store.release(chatId);
+        unpublish();
+        await client.close();
+      }
+    });
+  }
 
   it('materializes validated warm catch-up before and after delayed metadata hydration', async () => {
     const chatId = 'chat_validated_warm_hydration';

@@ -2511,6 +2511,19 @@ export class ChatSessionStore {
       if (published === context) {
         return;
       }
+      if (published !== undefined && published.resetVersion !== context.resetVersion) {
+        this.#answeredLogReads.delete(chatId);
+        this.#validatedDisplays.delete(projection);
+        const session = this.#sessions.get(chatId);
+        if (session !== undefined) {
+          session.seedLocalLogEmpty = false;
+          session.seedLocalLogCheck = undefined;
+        }
+        const observed = this.#observed.get(chatId);
+        if (observed?.status === 'attached') {
+          observed.status = 'lost';
+        }
+      }
       published = context;
       const nextAttention = selectCaughtUp(context) ? selectAttentionRow(context) : attention;
       if (nextAttention !== attention) {

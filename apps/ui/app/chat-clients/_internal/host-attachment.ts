@@ -66,6 +66,7 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
     if (closed) {
       return;
     }
+    const previousResetVersion = input.projection.getSnapshot().context.resetVersion;
     const previousSource = input.projection.getSnapshot().context.ledger.position.sourceGeneration;
     if (previousSource !== observedSource) {
       pending = undefined;
@@ -121,6 +122,9 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
       } else if (answer.reason === 'owner-fenced') {
         report({ type: 'attachment.lost', reason: answer.reason });
       }
+    } else if (input.projection.getSnapshot().context.resetVersion !== previousResetVersion) {
+      // A canonical reset asks for a fresh capture; it neither made progress nor proved an empty current log.
+      return selectPosition(input.projection.getSnapshot().context).last;
     } else if (
       answer.events.length > 0 &&
       selectPosition(input.projection.getSnapshot().context).cursor < answer.nextCursor
@@ -392,7 +396,13 @@ export const hostAttachment = createCallbackLogic<EventObject, HostAttachmentInp
           if (answer.status === 'refused' && answer.reason === 'owner-fenced') {
             readerFenced = true;
           }
-          return onAnswer(answer);
+          const { resetVersion } = input.projection.getSnapshot().context;
+          const last = onAnswer(answer);
+          if (input.projection.getSnapshot().context.resetVersion !== resetVersion) {
+            // Retire this ordinary reader before it can replay the replacement one raw page at a time.
+            void beginRead();
+          }
+          return last;
         },
       );
     } catch (error) {

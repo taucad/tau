@@ -382,7 +382,7 @@ export const longMillManifest = (
         { id: 'protection-worn', label: 'Eye and hearing protection are on' },
         { id: 'work-area-clear', label: 'The previous part is removed and the bed is clear' },
       ],
-      safety: { authority: 'person', attended: true, interlocks: [] },
+      safety: { attended: true, interlocks: [] },
     },
     // Feed hold, then a reset once motion has stopped: position is kept and the relays drop.
     stop: { motion: 'decelerates', spindle: 'stops', heaters: 'none', position: 'kept', recovery: [] },

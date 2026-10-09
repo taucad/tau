@@ -26,7 +26,7 @@ import type { PeerCertificate, TLSSocket } from 'node:tls';
 import { MessageChannel } from 'node:worker_threads';
 import type { MessagePort } from 'node:worker_threads';
 
-import { connectMachineChannel } from '@taucad/runtime/machine';
+import { connectMachineChannel, withMachineCode } from '@taucad/runtime/machine';
 import type {
   MachineArtifactReference,
   MachineClient,
@@ -711,19 +711,25 @@ export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOption
           return options.secrets.resolve(input.reference);
         },
         uploadFile: async (input) => uploadFile(input, options.secrets),
-        captureNetworkStill: async (input) =>
-          captureRtspsStill(input, {
-            ffmpeg: await (options.findFfmpeg ?? findFfmpeg)(),
-            password: async () => secrets.resolve(input.secretRef),
-            openUpstream: async () =>
-              openSocket({
-                endpoint: input.endpoint,
-                transport: 'tls',
-                trust: input.trust,
-                connectTimeout: input.connectTimeout,
-                signal: input.signal,
-              }),
-          }),
+        captureNetworkStill: async (input) => {
+          try {
+            return await captureRtspsStill(input, {
+              ffmpeg: await (options.findFfmpeg ?? findFfmpeg)(),
+              password: async () => secrets.resolve(input.secretRef),
+              openUpstream: async () =>
+                openSocket({
+                  endpoint: input.endpoint,
+                  transport: 'tls',
+                  trust: input.trust,
+                  connectTimeout: input.connectTimeout,
+                  signal: input.signal,
+                }),
+            });
+          } catch (error) {
+            /* Capture refuses as `new Error('MACHINE_STILL_*')`; the provider gets the typed code to keep or map. */
+            throw withMachineCode(error);
+          }
+        },
       }),
   });
 };

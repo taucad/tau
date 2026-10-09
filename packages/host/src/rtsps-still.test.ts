@@ -238,7 +238,10 @@ describe('captureNetworkStill', () => {
   });
 
   it('should reject with a fixed code when ffmpeg is missing', async () => {
-    await expect(capture(pin, async () => undefined)).rejects.toThrow('MACHINE_STILL_FFMPEG_MISSING');
+    await expect(capture(pin, async () => undefined)).rejects.toMatchObject({
+      code: 'MACHINE_STILL_FFMPEG_MISSING',
+      message: 'MACHINE_STILL_FFMPEG_MISSING',
+    });
   });
 
   it('should reject with a fixed code when ffmpeg cannot start', async () => {

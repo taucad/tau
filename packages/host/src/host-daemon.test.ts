@@ -58,6 +58,11 @@ vi.mock('@taucad/runtime/host', async (importOriginal) => {
 });
 /* A machine host whose quiesce a case times out with a start still in flight, counting the resumes it hands out. */
 const machineQuiesce = vi.hoisted(() => ({ isStartInFlight: false, resumes: 0 }));
+/* What the machine host answers when asked which machines a streamed run feeds, in place of its own answer (the host
+ * owns that read and its tests). */
+const machineStreaming = vi.hoisted(() => ({
+  machines: undefined as undefined | ReadonlyArray<Readonly<{ machineId: string; name: string }>>,
+}));
 vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
   const original = await importOriginal<typeof runtimeHostNode>();
   return {
@@ -74,6 +79,7 @@ vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
           }
           return host.quiesce(options);
         },
+        streamingMachines: async () => machineStreaming.machines ?? host.streamingMachines(),
       };
     },
   };
@@ -976,6 +982,54 @@ describe('startHostDaemon', () => {
       );
     } finally {
       machineQuiesce.isStartInFlight = false;
+    }
+  }, 20_000);
+
+  it('should keep the computer awake while a streamed run feeds a machine, and let go when it ends or Tau Host stops', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-machines-awake-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.env['TAU_SECRET_VAULT'] = 'memory';
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    await writeHostCredential({
+      v: 1,
+      deviceId: 'device-1',
+      credential: 'secret-credential-value-that-never-enters-a-url',
+    });
+    /* A stub, so no test holds the real computer awake. */
+    const release = vi.fn();
+    const keepAwake = { hold: vi.fn(() => release) };
+    const router = [{ machineId: 'router', name: 'Router' }];
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const daemon = startHostDaemon({
+        relayUrl: new URL('http://127.0.0.1:1'),
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-failing-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(temporaryDirectory)),
+          machines: { providers: [fixtureMachine()], keepAwake },
+        },
+      });
+      await daemon.ready;
+      /* The host's own answer: nothing streams. */
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(keepAwake.hold).not.toHaveBeenCalled();
+
+      machineStreaming.machines = router;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(keepAwake.hold).toHaveBeenCalledOnce();
+      machineStreaming.machines = [];
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(release).toHaveBeenCalledOnce();
+
+      machineStreaming.machines = router;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(keepAwake.hold).toHaveBeenCalledTimes(2);
+      await daemon.close();
+      expect(release).toHaveBeenCalledTimes(2);
+      expect(await daemon.closed).toEqual({ cause: 'requested' });
+    } finally {
+      vi.useRealTimers();
+      machineStreaming.machines = undefined;
     }
   }, 20_000);
 

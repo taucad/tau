@@ -50,6 +50,8 @@ import {
   readProjectId,
 } from '#machine-host.js';
 import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
+import { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
+import type { KeepAwakeBlocker } from '#keep-awake.js';
 import { openSecretVault } from '#secret-vault.js';
 import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
@@ -217,8 +219,18 @@ export type HostDaemonAgentOptions = {
    * macOS keychain, else that directory). The binding ceremony's native half
    * (the secret) has no daemon surface yet, so only providers that bind
    * without one — the simulator — complete here.
+   *
+   * While a streamed run is feeding a machine, the daemon keeps the computer
+   * awake with `keepAwake`, by default {@link platformKeepAwakeBlocker}: a
+   * computer that sleeps leaves the machine waiting mid-run. Where it cannot,
+   * it warns `MACHINE_HOST` once.
    */
-  readonly machines?: { readonly providers: CreateNodeMachineHostInput['providers'] } | undefined;
+  readonly machines?:
+    | {
+        readonly providers: CreateNodeMachineHostInput['providers'];
+        readonly keepAwake?: KeepAwakeBlocker | undefined;
+      }
+    | undefined;
 };
 
 /** Options for {@link startHostDaemon}. @public */
@@ -502,6 +514,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   let agentRunReporter: RunReporter | undefined;
   let agentFileSystem: AgentFileSystemAuthority | undefined;
   let agentMachines: NonNullable<AgentServerOptions['machines']> | undefined;
+  /* Releases the computer when the agent stops; set while a machine host serves. */
+  let stopKeepingAwake: (() => void) | undefined;
   /* Close failures of a released candidate root's runtime, reported by the next `stopAgent`. */
   const agentRuntimeCloseFailures: unknown[] = [];
 
@@ -978,6 +992,20 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     agentProject = project;
     agentServer = server;
     agentMachines = machines;
+    if (machines) {
+      const warnMachineHost = (message: string): void => {
+        emit({ type: 'warning', code: 'MACHINE_HOST', message });
+      };
+      stopKeepingAwake = keepAwakeWhileStreaming({
+        streamingMachines: async () => machines.host.streamingMachines(),
+        blocker: agent.machines?.keepAwake ?? platformKeepAwakeBlocker({ warn: warnMachineHost }),
+        log: (level, event, detail) => {
+          if (level === 'error') {
+            warnMachineHost(`${event}: ${detail instanceof Error ? detail.message : String(detail)}`);
+          }
+        },
+      });
+    }
     agentExternalAgents = externalAgents;
     /* PH19 ruling 2: the API keeps a run *directory*. The reporter reads the
      * launcher's own durable rows — the rows the log is written from — and
@@ -1037,6 +1065,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     agentRunReporter?.close();
     agentRunReporter = undefined;
     agentExternalAgents = [];
+    /* The runs end with the host; nothing streams once it closes. */
+    stopKeepingAwake?.();
+    stopKeepingAwake = undefined;
     await settle(server?.close(), () => {
       agentServer = undefined;
     });

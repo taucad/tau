@@ -104,6 +104,11 @@ export type MachineHaltOutcome = Readonly<{
   heaters: 'off' | 'unchanged' | 'none';
   /** Whether the machine still knows where it is afterwards. */
   position: 'kept' | 'may-be-lost';
+  /**
+   * What a beam (a laser) does: `off` it stops emitting, `unchanged` it keeps its state, `none` the machine has no
+   * beam. Absent on a machine without one; a provider with a beam declares it.
+   */
+  emission?: 'off' | 'unchanged' | 'none';
   /** Actions that make the machine usable again, in order. */
   recovery: readonly MachineRemedy[];
 }>;
@@ -496,7 +501,11 @@ export const standardMachineAction = (
     outcome?: MachineHaltOutcome;
     confirms?: MachineActionDescriptor['confirms'];
     qualification?: MachineActionQualification;
-    /** A narrower schema than the family's. */
+    /**
+     * A narrower schema than the family's. The provider's obligation, not checked here: narrow a family's schema
+     * (fewer choices, tighter ranges, required fields), never widen it, so every request it admits is one the family
+     * admits and a consumer that renders the family's form never sends something this machine reads differently.
+     */
     schema?: ProviderSchema;
   }>,
 ): MachineActionDefinition => {
@@ -542,6 +551,7 @@ export const machineJogHold = (
     bound: number;
     interlocks?: readonly string[];
     qualification?: MachineActionQualification;
+    /** A narrower schema than the standard jog's; narrow it, never widen it (see {@link standardMachineAction}). */
     schema?: ProviderSchema;
   }>,
 ): MachineHoldDefinition => {

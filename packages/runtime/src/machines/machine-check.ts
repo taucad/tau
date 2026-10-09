@@ -175,19 +175,22 @@ export const checkMachineAction = (input: MachineActionCheckInput): MachineActio
       });
     }
   }
-  const motion = entry.descriptor.capabilities.components.find((component) => component.kind === 'motion');
-  // A machine without homing (no `motion.home` installed) only ever works from its work zero; there is nothing to gate.
-  const canHome =
-    motion !== undefined && machineActionOf(entry, { componentId: motion.id, action: 'motion.home' }) !== undefined;
-  // Homing, waking and unlocking are how a machine recovers its position, so they are never gated on it.
-  if (descriptor.effects.includes('motion') && motion !== undefined && canHome && !recovers.has(action)) {
-    const trust = componentValue(snapshot.components, motion.id, 'motion')?.trust;
-    if (trust === 'lost' || trust === 'unknown') {
-      return unavailable(
-        'MACHINE_ACTION_PRECONDITION_FAILED',
-        trust === 'lost' ? 'The position was lost. Home first.' : 'The position is not known yet. Home first.',
-        { descriptor, remedy: { type: 'action', componentId: motion.id, action: 'motion.home' } },
-      );
+  // Homing, waking and unlocking are how a machine recovers its position, so they are never gated on it. Every motion
+  // group that can home must trust its position (a second toolhead or a rotary unit can be lost on its own); a group
+  // without homing (no `motion.home` installed) only ever works from its work zero, so there is nothing to gate.
+  if (descriptor.effects.includes('motion') && !recovers.has(action)) {
+    for (const motion of entry.descriptor.capabilities.components) {
+      const canHome =
+        motion.kind === 'motion' &&
+        machineActionOf(entry, { componentId: motion.id, action: 'motion.home' }) !== undefined;
+      const trust = canHome ? componentValue(snapshot.components, motion.id, 'motion')?.trust : undefined;
+      if (trust === 'lost' || trust === 'unknown') {
+        return unavailable(
+          'MACHINE_ACTION_PRECONDITION_FAILED',
+          trust === 'lost' ? 'The position was lost. Home first.' : 'The position is not known yet. Home first.',
+          { descriptor, remedy: { type: 'action', componentId: motion.id, action: 'motion.home' } },
+        );
+      }
     }
   }
   for (const interlock of descriptor.safety.interlocks) {

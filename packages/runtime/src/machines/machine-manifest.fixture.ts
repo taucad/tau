@@ -124,8 +124,8 @@ export const machineManifestDefinitionFixture: MachineManifestDefinition = {
     ],
     delivery: 'stored',
     start: 'remote',
-    attestations: [{ id: 'plate-clear', label: 'The plate is clear.' }],
-    safety: { authority: 'approved-agent', attended: false, interlocks: [] },
+    attestations: [{ id: 'work-area-clear', label: 'The plate is clear.' }],
+    safety: { attended: false, interlocks: [] },
   },
   stop: { motion: 'halts', spindle: 'none', heaters: 'off', position: 'may-be-lost', recovery: [] },
   observations: [

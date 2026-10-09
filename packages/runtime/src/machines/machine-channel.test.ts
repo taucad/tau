@@ -254,7 +254,7 @@ describe('machine channel', () => {
           jobId: 'job-1',
           decision: 'approve',
           resolvedBy: requester,
-          attestations: ['plate-clear'],
+          attestations: ['work-area-clear'],
           attended: true,
           transferOperationId: 'transfer-1',
           startOperationId: 'start-1',
@@ -335,6 +335,35 @@ describe('machine channel', () => {
       await expect(discovery[Symbol.asyncIterator]().next()).resolves.toEqual({
         done: false,
         value: { type: 'found', candidate },
+      });
+    } finally {
+      fixture.client.close();
+      fixture.server.dispose();
+    }
+  });
+
+  it("should carry a milling program's posted-for model across the channel", async () => {
+    const program: MachineJob['program'] = {
+      name: 'impeller.nc',
+      facts: {
+        process: 'milling',
+        lines: 12_000,
+        extents: { x: { min: 0, max: 80 }, a: { min: -30, max: 30 } },
+        tools: [{ number: 1 }],
+        workOffsets: ['G54'],
+        uses: [],
+        postedFor: 'table-table-ac',
+      },
+    };
+    const fixture = open({
+      operations: { checkJob: async () => ({ status: 'ready', program, checks: [], configuration: {} }) },
+    });
+    try {
+      await expect(fixture.client.checkJob({ machineId: 'machine-1', artifact, configuration: {} })).resolves.toEqual({
+        status: 'ready',
+        program,
+        checks: [],
+        configuration: {},
       });
     } finally {
       fixture.client.close();

@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
 import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
-import { fffProcessOf, parseMachineManifest, personOnlyJobApproval } from '#machines/machine-manifest.js';
+import {
+  fffProcessOf,
+  machineCredentialOf,
+  parseMachineManifest,
+  personOnlyJobApproval,
+} from '#machines/machine-manifest.js';
 
 const [light, pause] = machineManifestFixture.actions;
 const fff = fffProcessOf(machineManifestFixture);
+const fixtureJobs = machineManifestFixture.jobs.type === 'supported' ? machineManifestFixture.jobs : undefined;
 
 describe('parseMachineManifest', () => {
   it('round-trips a manifest through a structured clone and freezes the result', () => {
@@ -35,6 +41,16 @@ describe('parseMachineManifest', () => {
       processes: [{ ...fff, bed: { ...fff?.bed, heater: 'bed' } }],
     });
     expect(fffProcessOf(parsed)?.bed.heater).toBe('bed');
+  });
+
+  it("admits a laser's halt emission and a claimed identity that takes a secret", () => {
+    const parsed = parseMachineManifest({
+      ...machineManifestFixture,
+      connection: { ...machineManifestFixture.connection, identity: 'claimed', credential: 'secret' },
+      stop: { ...machineManifestFixture.stop, emission: 'off' },
+    });
+    expect(parsed.stop.emission).toBe('off');
+    expect(machineCredentialOf(parsed.connection)).toBe('secret');
   });
 
   it.each(['gcode', '.GCODE', '.g code'])('refuses the accepted extension %j', (extension) => {
@@ -115,8 +131,31 @@ describe('parseMachineManifest', () => {
         observations: [{ group: 'positions', label: 'Positions', staleAfter: 1000, delivery: 'latest' }],
       },
     ],
+    [
+      'a job start that declares who approves it (a person always does)',
+      {
+        ...machineManifestFixture,
+        jobs: { ...fixtureJobs, safety: { ...fixtureJobs?.safety, authority: 'person' } },
+      },
+    ],
+    [
+      'a machine that runs jobs without the work-area-clear attestation',
+      {
+        ...machineManifestFixture,
+        jobs: { ...fixtureJobs, attestations: [{ id: 'plate-clear', label: 'The plate is clear.' }] },
+      },
+    ],
   ])('refuses %s', (_label, candidate) => {
     expect(() => parseMachineManifest(candidate)).toThrow();
+  });
+});
+
+describe('machineCredentialOf', () => {
+  it('asks for a secret exactly when the identity is authenticated, unless the provider says otherwise', () => {
+    expect(machineCredentialOf({ identity: 'authenticated' })).toBe('secret');
+    expect(machineCredentialOf({ identity: 'claimed' })).toBe('none');
+    expect(machineCredentialOf({ identity: 'claimed', credential: 'secret' })).toBe('secret');
+    expect(machineCredentialOf({ identity: 'authenticated', credential: 'none' })).toBe('none');
   });
 });
 

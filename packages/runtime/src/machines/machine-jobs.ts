@@ -110,6 +110,8 @@ export type MachineProgramSummary = Readonly<{
         maximumFeed?: number;
         workOffsets: readonly string[];
         uses: ReadonlyArray<'tool-change' | 'coolant' | 'probing' | 'program-stop' | 'inverse-time-feed'>;
+        /** The machine or kinematic model the post-processor wrote the program for, in its own words. */
+        postedFor?: string;
       }>
     /** Not read yet, or nothing known about the program. */
     | Readonly<{ process: 'other' }>

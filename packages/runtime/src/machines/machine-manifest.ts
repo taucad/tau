@@ -68,6 +68,7 @@ const haltOutcomeSchema = z.strictObject({
   spindle: z.enum(['stops', 'keeps-turning', 'none']),
   heaters: z.enum(['off', 'unchanged', 'none']),
   position: z.enum(['kept', 'may-be-lost']),
+  emission: z.enum(['off', 'unchanged', 'none']).optional(),
   recovery: z.array(remedySchema).max(8),
 });
 
@@ -77,6 +78,9 @@ const safetySchema = z.strictObject({
   interlocks: z.array(identifier).max(8),
   maximumDuration: z.number().int().positive().max(86_400_000).optional(),
 });
+
+/** A job's start floor: who approves it is not declared, because a person always resolves a job. */
+const jobSafetySchema = safetySchema.omit({ authority: true });
 
 const actionId = z.union([identifier, namespaced]);
 
@@ -339,9 +343,13 @@ const jobsSchema = z.discriminatedUnion('type', [
     /** `at-machine`: a person presses the machine's own start after Tau has loaded the program. */
     start: z.enum(['remote', 'at-machine']),
     submission: configurationManifestSchema,
-    /** What a person vouches for before a start; recorded with the job. */
+    /**
+     * What a person vouches for before a start; recorded with the job. Every machine that runs jobs asks for
+     * {@link machineWorkAreaClearAttestation}: a person confirms the last run was taken off before the next starts.
+     */
     attestations: z.array(z.strictObject({ id: identifier, label: sentence })).max(16),
-    safety: safetySchema,
+    /** Attendance and interlocks for the start. A person always approves a job, so there is no `authority`. */
+    safety: jobSafetySchema,
   }),
 ]);
 
@@ -361,7 +369,17 @@ export const machineManifestSchema = z.strictObject({
     exclusive: z.boolean(),
     /** Many serial controllers restart when their port opens. */
     opening: z.enum(['nothing', 'resets-controller']),
+    /**
+     * `authenticated`: the machine proves who it is (a pinned certificate). `claimed`: it only says who it is, so a
+     * binding is pinned to the endpoint it was made at and a person re-confirms the machine after a move.
+     */
     identity: z.enum(['authenticated', 'claimed']),
+    /**
+     * Whether binding asks the person for a secret (an access code, an API key). Absent: `secret` exactly when
+     * `identity` is `authenticated`; read it through {@link machineCredentialOf}. Independent of `identity`, so a
+     * machine with an API key and no proof of who it is declares `claimed` with `secret`.
+     */
+    credential: z.enum(['none', 'secret']).optional(),
     /**
      * TLS services a binding pins on first use, each under the `serviceTrust` name the provider reads (`mqtt`,
      * `camera`); a `required` one that does not answer refuses the binding. Absent: nothing is pinned.
@@ -470,12 +488,42 @@ export const personOnlyJobApproval = (
   return { attestations: jobs.attestations, attended: jobs.safety.attended };
 };
 
+/**
+ * Whether binding a machine asks for a secret: its declared `connection.credential`, or else `secret` exactly when
+ * its identity is `authenticated`. The one place that default lives.
+ * @param connection - The manifest's connection facts.
+ * @returns `secret` when binding takes a code or key, `none` otherwise.
+ * @public
+ */
+export const machineCredentialOf = (
+  connection: Pick<MachineConnectionFacts, 'identity' | 'credential'>,
+): 'none' | 'secret' => connection.credential ?? (connection.identity === 'authenticated' ? 'secret' : 'none');
+
+/**
+ * The attestation id every machine that runs jobs declares: before a start a person confirms the work area is
+ * clear, so a finished part or a tool left in the work is never run into.
+ * @public
+ */
+export const machineWorkAreaClearAttestation = 'work-area-clear';
+
 /** Remedy and outcome shapes, for consumers that parse them. @internal */
 export const machineRemedySchema: z.ZodType<MachineRemedy> = remedySchema;
 /** @internal */
 export const machineHaltOutcomeSchema: z.ZodType<MachineHaltOutcome> = haltOutcomeSchema;
 /** @internal */
 export const machineActionSafetySchema: z.ZodType<MachineActionSafety> = safetySchema;
+
+/**
+ * Every machine that runs jobs asks a person to confirm its work area is clear before a start.
+ * @param jobs - The manifest's job facts.
+ */
+const assertWorkAreaClear = (jobs: z.infer<typeof machineManifestSchema>['jobs']): void => {
+  if (jobs.type === 'supported' && !jobs.attestations.some(({ id }) => id === machineWorkAreaClearAttestation)) {
+    throw new TypeError(
+      `parseMachineManifest: a machine that runs jobs declares the ${machineWorkAreaClearAttestation} attestation.`,
+    );
+  }
+};
 
 const assertReferences = (manifest: z.infer<typeof machineManifestSchema>): void => {
   const components = new Map(manifest.components.map((component) => [component.id, component]));
@@ -511,6 +559,7 @@ const assertReferences = (manifest: z.infer<typeof machineManifestSchema>): void
       throw new TypeError(`parseMachineManifest: ${component.id} moves an undeclared axis.`);
     }
   }
+  assertWorkAreaClear(manifest.jobs);
   const bedHeater = fffProcessOf(manifest)?.bed.heater;
   if (bedHeater !== undefined && components.get(bedHeater)?.kind !== 'heater') {
     throw new TypeError(`parseMachineManifest: the bed heater ${bedHeater} is not a heater component.`);

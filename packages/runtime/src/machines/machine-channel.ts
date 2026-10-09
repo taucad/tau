@@ -286,6 +286,7 @@ const programSchema = z.strictObject({
       maximumFeed: z.number().nonnegative().optional(),
       workOffsets: z.array(z.string().min(1).max(16)).max(32),
       uses: z.array(z.enum(['tool-change', 'coolant', 'probing', 'program-stop', 'inverse-time-feed'])).max(8),
+      postedFor: identitySchema.optional(),
     }),
     z.strictObject({ process: z.literal('other') }),
     z.strictObject({

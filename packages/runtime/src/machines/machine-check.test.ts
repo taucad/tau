@@ -149,6 +149,44 @@ describe('checkMachineAction', () => {
     ).toMatchObject({ code: 'MACHINE_ACTION_PRECONDITION_FAILED', remedy: { action: 'motion.home' } });
   });
 
+  it('keeps motion until every motion group that can home trusts its position', () => {
+    const twoGroups: MachineActionCheckEntry['descriptor']['capabilities'] = {
+      ...capabilities,
+      components: [...capabilities.components, { id: 'rotary', label: 'Rotary unit', kind: 'motion', axes: ['a'] }],
+      actions: [
+        ...capabilities.actions,
+        machineActionDescriptorOf(
+          standardMachineAction({ id: 'motion.home', componentId: 'rotary', label: 'Home', when: ['ready'] }),
+        ),
+      ],
+    };
+    const rotaryLost = fixtureObservation('rotary', 'position', {
+      kind: 'motion',
+      homed: { a: false },
+      trust: 'lost',
+      position: { machine: { a: 0 }, work: { a: 0 } },
+      workOffset: { id: 'G54', revision: '1', origin: { a: 0 } },
+      mode: 'normal',
+      feed: 0,
+      limits: [],
+    });
+    expect(
+      check({
+        componentId: 'motion',
+        action: 'motion.jog',
+        kind: 'hold',
+        attended: true,
+        entry: {
+          descriptor: { capabilities: twoGroups },
+          snapshot: fixtureReport({ components: [...fixtureReport().components, rotaryLost] }),
+        },
+      }),
+    ).toMatchObject({
+      code: 'MACHINE_ACTION_PRECONDITION_FAILED',
+      remedy: { type: 'action', componentId: 'rotary', action: 'motion.home' },
+    });
+  });
+
   it('refuses while an interlock is not safe, naming what makes it safe', () => {
     const door = (state: 'safe' | 'unsafe') => ({
       action: 'level.set',

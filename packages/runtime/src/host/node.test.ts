@@ -1227,7 +1227,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       jobId,
       decision: 'approve',
       resolvedBy: operator,
-      attestations: ['plate-clear'],
+      attestations: ['work-area-clear'],
       transferOperationId: `transfer-${suffix}`,
       startOperationId: `start-${suffix}`,
     });
@@ -1263,7 +1263,12 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       }),
     ).rejects.toThrow('MACHINE_UNAVAILABLE');
     await expect(
-      agentClient.resolveJob({ jobId: 'job-1', decision: 'approve', resolvedBy: agent, attestations: ['plate-clear'] }),
+      agentClient.resolveJob({
+        jobId: 'job-1',
+        decision: 'approve',
+        resolvedBy: agent,
+        attestations: ['work-area-clear'],
+      }),
     ).rejects.toThrow('A person must approve this job in Tau.');
     await expect(
       fixture.client.resolveJob({ jobId: 'job-1', decision: 'approve', resolvedBy: operator }),
@@ -1276,7 +1281,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
       state: 'started',
       resolvedBy: operator,
       attended: false,
-      attestations: [{ id: 'plate-clear', by: operator }],
+      attestations: [{ id: 'work-area-clear', by: operator }],
       transferOperationId: 'transfer-job-1',
       startOperationId: 'start-job-1',
       transferId: 'transfer-transfer-job-1',
@@ -1656,19 +1661,6 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     };
   };
 
-  it("should hold a job's start to a person's approval even when the machine declares agent authority", async () => {
-    const jobs = storedJobs();
-    const descriptor = withJobFacts((facts) => ({ safety: { ...facts.safety, authority: 'agent' } }));
-    const fixture = await boundPrinter(jobs.facet, { descriptor });
-    const agentClient = await fixture.serveAs(agentActor);
-    await request(agentClient, 'job-1');
-    await expect(
-      agentClient.resolveJob({ jobId: 'job-1', decision: 'approve', resolvedBy: agent, attestations: ['plate-clear'] }),
-    ).rejects.toThrow('A person must approve this job in Tau.');
-    expect(jobs.transfer).not.toHaveBeenCalled();
-    await fixture.close();
-  });
-
   it('should admit approving a job again as the first approval: a person, at the machine, never an agent', async () => {
     const jobs = storedJobs();
     let isProven = false;
@@ -1688,7 +1680,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
         jobId: 'job-1',
         decision: 'approve',
         resolvedBy: operator,
-        attestations: ['plate-clear'],
+        attestations: ['work-area-clear'],
         ...extra,
       });
     jobs.transfer.mockResolvedValueOnce({ status: 'unknown', reason: 'reply lost', observedAt });
@@ -1700,7 +1692,12 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('j
     await fixture.client.reconcileOperation({ machineId, operationId: 'transfer-1' });
     await expect(fixture.client.listJobs({})).resolves.toMatchObject([{ state: 'starting' }]);
     await expect(
-      agentClient.resolveJob({ jobId: 'job-1', decision: 'approve', resolvedBy: agent, attestations: ['plate-clear'] }),
+      agentClient.resolveJob({
+        jobId: 'job-1',
+        decision: 'approve',
+        resolvedBy: agent,
+        attestations: ['work-area-clear'],
+      }),
     ).rejects.toThrow('A person must approve this job in Tau.');
     await expect(resolve(fixture.client)).rejects.toThrow('Say you are at the machine first.');
     await expect(resolve(fixture.client, { attended: true, attestations: [] })).rejects.toThrow(

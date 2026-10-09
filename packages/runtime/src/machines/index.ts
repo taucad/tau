@@ -11,8 +11,10 @@ export type { MachineChannelClient, MachineChannelEndpoint } from '#machines/mac
 export {
   fffProcessOf,
   isSimulatedMachine,
+  machineCredentialOf,
   machineManifestSchema,
   machineObservationGroups,
+  machineWorkAreaClearAttestation,
   millingProcessOf,
   parseMachineManifest,
   personOnlyJobApproval,
@@ -114,6 +116,8 @@ export type {
 } from '#machines/machine-jobs.js';
 export type {
   MachineActionApproval,
+  MachineActionExtensions,
+  MachineActionParameters,
   MachineApplyActionInput,
   MachineApproveActionInput,
   MachineBeginBindingInput,

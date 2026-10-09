@@ -8,6 +8,7 @@
  * @module
  */
 
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { CacheValue } from '@taucad/cache-core';
 
 import type {
@@ -82,21 +83,42 @@ export type MachineBindingRemoval = Readonly<{
 }>;
 
 /**
- * One retained intent. Keep `operationId` across reconnects and reloads; the same id never applies twice.
+ * A provider's own actions by id, each with the schema its parameters take, for a caller that types its requests to
+ * one provider: `MachineClient<{ 'acme.spool.read-tag': typeof readTagSchema }>`.
  * @public
  */
-export type MachineApplyActionInput = Readonly<{
+export type MachineActionExtensions = Readonly<Record<string, StandardSchemaV1>>;
+
+/**
+ * The parameters one action takes: its schema's input for a declared extension, otherwise `unknown` (the host
+ * validates every request against the installed descriptor either way).
+ * @public
+ */
+export type MachineActionParameters<
+  Extensions extends MachineActionExtensions,
+  Action extends string,
+> = Action extends keyof Extensions ? StandardSchemaV1.InferInput<Extensions[Action]> : unknown;
+
+/**
+ * One retained intent. Keep `operationId` across reconnects and reloads; the same id never applies twice. With
+ * `Extensions`, the parameters of a provider's own action are typed by its schema.
+ * @public
+ */
+export type MachineApplyActionInput<
+  Extensions extends MachineActionExtensions = Record<never, never>,
+  Action extends string = string,
+> = Readonly<{
   machineId: string;
   componentId: string;
   /** The capability revision the caller was shown; a changed one refuses the request. */
   capabilityRevision: string;
   operationId: string;
-  action: string;
+  action: Action;
   version: number;
   /** The run the caller saw; `null` for an action that needs no run. */
   // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run; absent would be no statement.
   expectedRunId: string | null;
-  parameters: unknown;
+  parameters: MachineActionParameters<Extensions, Action>;
   /** Who is asking: the label to show. The host takes the kind and id from the session; an agent never states attendance. */
   requestedBy: MachineRequester;
   /** The person states they are at the machine. Refused from an agent. */
@@ -210,8 +232,12 @@ export type MachineReconcileOperationInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-/** Browser-safe machines facet shared by the workbench and agent tools. @public */
-export type MachineClient = Readonly<{
+/**
+ * Browser-safe machines facet shared by the workbench and agent tools. `Extensions` types the parameters of one
+ * provider's own actions in `applyAction`; without it every action's parameters are `unknown`.
+ * @public
+ */
+export type MachineClient<Extensions extends MachineActionExtensions = Record<never, never>> = Readonly<{
   listProviders(input: MachineListProvidersInput): Promise<readonly MachineProvider[]>;
   discover(input: MachineDiscoverInput): AsyncIterable<MachineDiscoveryFrame>;
   beginBinding(input: MachineBeginBindingInput): Promise<MachineBindingOutcome>;
@@ -236,7 +262,9 @@ export type MachineClient = Readonly<{
   withdrawJob(input: MachineWithdrawJobInput): Promise<MachineJob>;
 
   /** Apply one declared action once. Returns the latest receipt for this operation id; never repeats a send. */
-  applyAction(input: MachineApplyActionInput): Promise<MachineReceipt<'action'>>;
+  applyAction<Action extends string>(
+    input: MachineApplyActionInput<Extensions, Action>,
+  ): Promise<MachineReceipt<'action'>>;
   /** A person approves or denies an agent's pending action. Person sessions only. */
   approveAction(input: MachineApproveActionInput): Promise<MachineActionApproval>;
   /** Stop the machine now. */

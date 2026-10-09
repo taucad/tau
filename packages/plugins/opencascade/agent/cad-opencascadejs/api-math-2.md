@@ -1,6 +1,39 @@
 # libcascade — math (2)
 
-5 top-level symbols. Signatures are verbatim typescript.
+6 top-level symbols. Signatures are verbatim typescript.
+
+math_Uzawa: declare class math_Uzawa
+
+  // math_Uzawa.constructor (constructor)
+  constructor(Cont: math_Matrix, Secont: math_VectorBase_double, StartingPoint: math_VectorBase_double, EpsLix?: number, EpsLic?: number, NbIterations?: number);
+  constructor(Cont: math_Matrix, Secont: math_VectorBase_double, StartingPoint: math_VectorBase_double, Nci: number, Nce: number, EpsLix?: number, EpsLic?: number, NbIterations?: number);
+
+  // math_Uzawa.IsDone (method)
+  IsDone(): boolean;
+
+  // math_Uzawa.Value (method)
+  Value(): math_VectorBase_double;
+
+  // math_Uzawa.InitialError (method)
+  InitialError(): math_VectorBase_double;
+
+  // math_Uzawa.Duale (method)
+  Duale(V: math_VectorBase_double): void;
+
+  // math_Uzawa.Error (method)
+  Error(): math_VectorBase_double;
+
+  // math_Uzawa.NbIterations (method)
+  NbIterations(): number;
+
+  // math_Uzawa.InverseCont (method)
+  InverseCont(): math_Matrix;
+
+  // math_Uzawa.delete (method)
+  delete(): void;
+
+  // math_Uzawa.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
 
 math_ValueAndWeight: declare class math_ValueAndWeight
 

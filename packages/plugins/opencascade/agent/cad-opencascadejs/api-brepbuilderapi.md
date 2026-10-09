@@ -107,7 +107,31 @@ BRepBuilderAPI_Copy: declare class BRepBuilderAPI_Copy extends BRepBuilderAPI_Mo
 
 BRepBuilderAPI_EdgeError: typeof BRepBuilderAPI_EdgeError[keyof typeof BRepBuilderAPI_EdgeError]
 
+  readonly BRepBuilderAPI_EdgeDone: 'BRepBuilderAPI_EdgeDone'
+
+  readonly BRepBuilderAPI_PointProjectionFailed: 'BRepBuilderAPI_PointProjectionFailed'
+
+  readonly BRepBuilderAPI_ParameterOutOfRange: 'BRepBuilderAPI_ParameterOutOfRange'
+
+  readonly BRepBuilderAPI_DifferentPointsOnClosedCurve: 'BRepBuilderAPI_DifferentPointsOnClosedCurve'
+
+  readonly BRepBuilderAPI_PointWithInfiniteParameter: 'BRepBuilderAPI_PointWithInfiniteParameter'
+
+  readonly BRepBuilderAPI_DifferentsPointAndParameter: 'BRepBuilderAPI_DifferentsPointAndParameter'
+
+  readonly BRepBuilderAPI_LineThroughIdenticPoints: 'BRepBuilderAPI_LineThroughIdenticPoints'
+
 BRepBuilderAPI_FaceError: typeof BRepBuilderAPI_FaceError[keyof typeof BRepBuilderAPI_FaceError]
+
+  readonly BRepBuilderAPI_FaceDone: 'BRepBuilderAPI_FaceDone'
+
+  readonly BRepBuilderAPI_NoFace: 'BRepBuilderAPI_NoFace'
+
+  readonly BRepBuilderAPI_NotPlanar: 'BRepBuilderAPI_NotPlanar'
+
+  readonly BRepBuilderAPI_CurveProjectionFailed: 'BRepBuilderAPI_CurveProjectionFailed'
+
+  readonly BRepBuilderAPI_ParametersOutOfRange: 'BRepBuilderAPI_ParametersOutOfRange'
 
 BRepBuilderAPI_FastSewing: declare class BRepBuilderAPI_FastSewing extends Standard_Transient
 
@@ -146,6 +170,24 @@ BRepBuilderAPI_FastSewing: declare class BRepBuilderAPI_FastSewing extends Stand
   [Symbol.dispose](): void;
 
 BRepBuilderAPI_FastSewing_FS_Statuses: typeof BRepBuilderAPI_FastSewing_FS_Statuses[keyof typeof BRepBuilderAPI_FastSewing_FS_Statuses]
+
+  readonly FS_OK: 'FS_OK'
+
+  readonly FS_Degenerated: 'FS_Degenerated'
+
+  readonly FS_FindVertexError: 'FS_FindVertexError'
+
+  readonly FS_FindEdgeError: 'FS_FindEdgeError'
+
+  readonly FS_FaceWithNullSurface: 'FS_FaceWithNullSurface'
+
+  readonly FS_NotNaturalBoundsFace: 'FS_NotNaturalBoundsFace'
+
+  readonly FS_InfiniteSurface: 'FS_InfiniteSurface'
+
+  readonly FS_EmptyInput: 'FS_EmptyInput'
+
+  readonly FS_Exception: 'FS_Exception'
 
 BRepBuilderAPI_FindPlane: declare class BRepBuilderAPI_FindPlane
 
@@ -594,6 +636,14 @@ BRepBuilderAPI_NurbsConvert: declare class BRepBuilderAPI_NurbsConvert extends B
 
 BRepBuilderAPI_PipeError: typeof BRepBuilderAPI_PipeError[keyof typeof BRepBuilderAPI_PipeError]
 
+  readonly BRepBuilderAPI_PipeDone: 'BRepBuilderAPI_PipeDone'
+
+  readonly BRepBuilderAPI_PipeNotDone: 'BRepBuilderAPI_PipeNotDone'
+
+  readonly BRepBuilderAPI_PlaneNotIntersectGuide: 'BRepBuilderAPI_PlaneNotIntersectGuide'
+
+  readonly BRepBuilderAPI_ImpossibleContact: 'BRepBuilderAPI_ImpossibleContact'
+
 BRepBuilderAPI_Sewing: declare class BRepBuilderAPI_Sewing extends Standard_Transient
 
   // BRepBuilderAPI_Sewing.constructor (constructor)
@@ -745,7 +795,25 @@ BRepBuilderAPI_Sewing: declare class BRepBuilderAPI_Sewing extends Standard_Tran
 
 BRepBuilderAPI_ShapeModification: typeof BRepBuilderAPI_ShapeModification[keyof typeof BRepBuilderAPI_ShapeModification]
 
+  readonly BRepBuilderAPI_Preserved: 'BRepBuilderAPI_Preserved'
+
+  readonly BRepBuilderAPI_Deleted: 'BRepBuilderAPI_Deleted'
+
+  readonly BRepBuilderAPI_Trimmed: 'BRepBuilderAPI_Trimmed'
+
+  readonly BRepBuilderAPI_Merged: 'BRepBuilderAPI_Merged'
+
+  readonly BRepBuilderAPI_BoundaryModified: 'BRepBuilderAPI_BoundaryModified'
+
 BRepBuilderAPI_ShellError: typeof BRepBuilderAPI_ShellError[keyof typeof BRepBuilderAPI_ShellError]
+
+  readonly BRepBuilderAPI_ShellDone: 'BRepBuilderAPI_ShellDone'
+
+  readonly BRepBuilderAPI_EmptyShell: 'BRepBuilderAPI_EmptyShell'
+
+  readonly BRepBuilderAPI_DisconnectedShell: 'BRepBuilderAPI_DisconnectedShell'
+
+  readonly BRepBuilderAPI_ShellParametersOutOfRange: 'BRepBuilderAPI_ShellParametersOutOfRange'
 
 BRepBuilderAPI_Transform: declare class BRepBuilderAPI_Transform extends BRepBuilderAPI_ModifyShape
 
@@ -769,6 +837,12 @@ BRepBuilderAPI_Transform: declare class BRepBuilderAPI_Transform extends BRepBui
   [Symbol.dispose](): void;
 
 BRepBuilderAPI_TransitionMode: typeof BRepBuilderAPI_TransitionMode[keyof typeof BRepBuilderAPI_TransitionMode]
+
+  readonly BRepBuilderAPI_Transformed: 'BRepBuilderAPI_Transformed'
+
+  readonly BRepBuilderAPI_RightCorner: 'BRepBuilderAPI_RightCorner'
+
+  readonly BRepBuilderAPI_RoundCorner: 'BRepBuilderAPI_RoundCorner'
 
 BRepBuilderAPI_VertexInspector: declare class BRepBuilderAPI_VertexInspector
 
@@ -803,3 +877,11 @@ BRepBuilderAPI_VertexInspector: declare class BRepBuilderAPI_VertexInspector
   [Symbol.dispose](): void;
 
 BRepBuilderAPI_WireError: typeof BRepBuilderAPI_WireError[keyof typeof BRepBuilderAPI_WireError]
+
+  readonly BRepBuilderAPI_WireDone: 'BRepBuilderAPI_WireDone'
+
+  readonly BRepBuilderAPI_EmptyWire: 'BRepBuilderAPI_EmptyWire'
+
+  readonly BRepBuilderAPI_DisconnectedWire: 'BRepBuilderAPI_DisconnectedWire'
+
+  readonly BRepBuilderAPI_NonManifoldWire: 'BRepBuilderAPI_NonManifoldWire'

@@ -107,14 +107,19 @@ type Harness = {
   readonly checkouts: Map<string, TurnCheckout>;
   /** Every host revision event, in order. */
   readonly events: HostRevisionEvent[];
-  readonly settlementFor: (runId: string) => Promise<TurnFinalizedEvent>;
+  /** One attempt's settlement, once the launcher has heard it acknowledged and its chat rests. */
+  readonly settlementFor: (runId: string, attempt?: number) => Promise<TurnFinalizedEvent>;
   readonly leaseIds: () => Promise<readonly string[]>;
   readonly refs: () => Promise<readonly string[]>;
   readonly port: RevisionPort;
   readonly revisions: ProjectRevisions;
   /** Every attempt the placement session was asked to admit, in order. */
   readonly admitted: TurnAttemptKey[];
+  /** Every acknowledge answer the launcher heard, in order; only an applied one lets its chat rest and admit the next command. */
+  readonly acknowledged: Array<Readonly<{ key: TurnAttemptKey; answer: AcknowledgeAnswer }>>;
 };
+
+type AcknowledgeAnswer = Awaited<ReturnType<TurnPlacementPort['acknowledge']>>;
 
 /**
  * One launcher over a temp workspace whose only tool writes `main.ts`.
@@ -169,15 +174,26 @@ const harness = async (
   };
   const responses = new Map<string, number>();
   const events: HostRevisionEvent[] = [];
+  /* Keyed `<runId>:<attempt>`: the root's `turn.finalized` carries no attempt, so its nth event for a run is attempt n. */
   const settlements = new Map<string, PromiseWithResolvers<TurnFinalizedEvent>>();
-  /* The root's settlement, once M1 has appended its row and acknowledged it: the lease is gone, so the chat is free. */
-  const settlementFor = async (runId: string): Promise<TurnFinalizedEvent> => {
-    const pending = settlements.get(runId) ?? Promise.withResolvers<TurnFinalizedEvent>();
-    settlements.set(runId, pending);
+  const finalized = new Map<string, number>();
+  const acknowledged: Array<Readonly<{ key: TurnAttemptKey; answer: AcknowledgeAnswer }>> = [];
+  /*
+   * The root's settlement, once M1 has appended its row and heard its acknowledge answered: the chat is free.
+   * The lease is retired inside the acknowledge, before that answer reaches M1, and M1 answers a command sent in
+   * between `CHAT_RUN_LIVE{settling}` — so the lease file going is too early a signal to send the next command on.
+   */
+  const settlementFor = async (runId: string, attempt = 1): Promise<TurnFinalizedEvent> => {
+    const id = `${runId}:${String(attempt)}`;
+    const pending = settlements.get(id) ?? Promise.withResolvers<TurnFinalizedEvent>();
+    settlements.set(id, pending);
     const settlement = await pending.promise;
     await expect
-      .poll(() => existsSync(join(workspaceRoot, '.tau', 'runs', `${runId}.json`)), { timeout: 10_000 })
-      .toBe(false);
+      .poll(() => acknowledged.find(({ key }) => key.runId === runId && key.attempt === attempt)?.answer, {
+        timeout: 10_000,
+      })
+      .toMatchObject({ status: 'applied' });
+    expect(existsSync(join(workspaceRoot, '.tau', 'runs', `${runId}.json`))).toBe(false);
     return settlement;
   };
   const created = createPort(workspaceRoot, checkoutsDirectory);
@@ -193,13 +209,23 @@ const harness = async (
       if (event.type !== 'turn.finalized') {
         return;
       }
-      const pending = settlements.get(event.runId) ?? Promise.withResolvers<TurnFinalizedEvent>();
-      settlements.set(event.runId, pending);
+      const attempt = (finalized.get(event.runId) ?? 0) + 1;
+      finalized.set(event.runId, attempt);
+      const id = `${event.runId}:${String(attempt)}`;
+      const pending = settlements.get(id) ?? Promise.withResolvers<TurnFinalizedEvent>();
+      settlements.set(id, pending);
       pending.resolve(event);
     },
   });
   const placement = revisions.placement(() => toolRegistry);
   const admitted: TurnAttemptKey[] = [];
+  const wrapped = (options.wrapPlacement ?? ((port: TurnPlacementPort) => port))({
+    ...placement,
+    admit: async (input) => {
+      admitted.push(input.key);
+      return placement.admit(input);
+    },
+  });
   const launcher = createNodeLauncher({
     workspaceRoot,
     gatewayBaseUrl: 'https://gateway.example',
@@ -207,13 +233,15 @@ const harness = async (
     systemPrompt: 'You are Tau.',
     toolRegistry,
     /* The grant's tools are this registry: the probe writes the live tree whatever the checkout (W8 TS-S4). */
-    turnPlacement: (options.wrapPlacement ?? ((port: TurnPlacementPort) => port))({
-      ...placement,
-      admit: async (input) => {
-        admitted.push(input.key);
-        return placement.admit(input);
+    turnPlacement: {
+      ...wrapped,
+      /* Outermost, so it records the answer exactly when M1 hears it; a refusal is kept so a wait on it names the code. */
+      acknowledge: async (input) => {
+        const answer = await wrapped.acknowledge(input);
+        acknowledged.push({ key: input.key, answer });
+        return answer;
       },
-    }),
+    },
     auth: () => 'daemon-bearer',
     fetch: (async (_url: string, init: { body?: string }) => {
       const body = String(init.body ?? '');
@@ -251,6 +279,7 @@ const harness = async (
     port,
     revisions,
     admitted,
+    acknowledged,
     leaseIds: async () => {
       try {
         const runs = await readdir(join(workspaceRoot, '.tau', 'runs'));
@@ -961,7 +990,8 @@ for (const row of ports) {
 
       await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
       const first = await held.settlementFor('run-1');
-      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-2' });
+      /* Asserted: refused here, the wait below would only time out, naming no cause. */
+      expect(await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-2' })).toMatchObject({ status: 'applied' });
       const second = await held.settlementFor('run-2');
 
       /* The claim the deleted `turn-revision` suite held as "descends the next
@@ -1260,14 +1290,11 @@ for (const row of ports) {
       });
 
       await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
-      await expect
-        .poll(async () => settlementsOf(held.launcher).then((settlements) => settlements?.length), {
-          timeout: 10_000,
-        })
-        .toBe(1);
-      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
+      /* Acknowledged, not merely settled: a resume sent while M1 is still settling is `CHAT_RUN_LIVE{settling}`. */
+      await held.settlementFor('run-1');
       const rested = await held.launcher.host.ledger('chat-1');
       expect(rested.runs['run-1']).toMatchObject({ lifecycle: 'failed', attempt: 1 });
+      expect(rested.runs['run-1']?.settlements).toHaveLength(1);
 
       const resumed = await held.launcher.execute({
         type: 'resume',
@@ -1276,12 +1303,7 @@ for (const row of ports) {
       });
 
       expect(resumed.status).toBe('applied');
-      await expect
-        .poll(async () => settlementsOf(held.launcher).then((settlements) => settlements?.length), {
-          timeout: 10_000,
-        })
-        .toBe(2);
-      await expect.poll(async () => held.leaseIds(), { timeout: 10_000 }).toEqual([]);
+      await held.settlementFor('run-1', 2);
       const settled = await held.launcher.host.ledger('chat-1');
       expect(settled.runs['run-1']?.settlements.map(({ attempt, event }) => [attempt, event.type])).toEqual([
         [1, 'turn.finalized'],

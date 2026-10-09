@@ -4,17 +4,17 @@
 
 BooleanOperationOptions: export declare interface BooleanOperationOptions
 
-  optimisation: "none" | "commonFace" | "sameFace"
+  optimisation?: "none" | "commonFace" | "sameFace"
 
 BSplineApproximationConfig: export declare interface BSplineApproximationConfig
 
-  tolerance: number
+  tolerance?: number
 
-  degMax: number
+  degMax?: number
 
-  degMin: number
+  degMin?: number
 
-  smoothing: null | [number, number, number]
+  smoothing?: null | [number, number, number]
 
 CurveLike: export declare interface CurveLike
 
@@ -95,9 +95,9 @@ DrawingInterface: export declare interface DrawingInterface
 
 ExtrusionProfile: export declare interface ExtrusionProfile
 
-  profile: "s-curve" | "linear"
+  profile?: "s-curve" | "linear"
 
-  endFactor: number
+  endFactor?: number
 
 FaceTriangulation: export declare interface FaceTriangulation
 
@@ -266,33 +266,33 @@ GenericSketcher: export declare interface GenericSketcher<ReturnType>
 
 GenericSweepConfig: export declare interface GenericSweepConfig
 
-  frenet: boolean
+  frenet?: boolean
 
-  auxiliarySpine: Wire | Edge
+  auxiliarySpine?: Wire | Edge
 
-  law: null | Law_Function
+  law?: null | Law_Function
 
-  transitionMode: "right" | "transformed" | "round"
+  transitionMode?: "right" | "transformed" | "round"
 
-  withContact: boolean
+  withContact?: boolean
 
-  support: TopoDS_Shape
+  support?: TopoDS_Shape
 
-  forceProfileSpineOthogonality: boolean
+  forceProfileSpineOthogonality?: boolean
 
 LoftConfig: export declare interface LoftConfig
 
-  ruled: boolean
+  ruled?: boolean
 
-  startPoint: Point
+  startPoint?: Point
 
-  endPoint: Point
+  endPoint?: Point
 
 MeshOptions: export declare interface MeshOptions
 
-  tolerance: number
+  tolerance?: number
 
-  angularTolerance: number
+  angularTolerance?: number
 
 MeshShapeMesh: export declare interface MeshShapeMesh
 
@@ -359,7 +359,7 @@ Shape3DLike: export declare interface Shape3DLike<ShapeT, MeshT, OtherT = ShapeT
   // Shape3DLike.mesh (method)
   mesh(options?: MeshOptionsT): MeshT;
 
-  boundingBox: BoundingBox
+  readonly boundingBox: BoundingBox
 
 ShapeEdgeMesh: export declare interface ShapeEdgeMesh
 
@@ -415,7 +415,7 @@ SketchInterface: export declare interface SketchInterface
 
 STLExportOptions: export declare interface STLExportOptions extends MeshOptions
 
-  binary: boolean
+  binary?: boolean
 
 TopologyMap: export declare interface TopologyMap
 

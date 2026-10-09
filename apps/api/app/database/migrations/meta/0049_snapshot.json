@@ -1,5 +1,5 @@
 {
-  "id": "c547b1bb-215a-477a-9414-28aa8ae2122b",
+  "id": "f11ae996-1cd0-49f5-bfa0-eb8c7cb62c1f",
   "prevId": "4ee144b8-4015-4fbd-97f5-e206530e5858",
   "version": "7",
   "dialect": "postgresql",
@@ -4477,6 +4477,13 @@
       "name": "billing_route_pause",
       "schema": "billing",
       "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()::text"
+        },
         "environment": {
           "name": "environment",
           "type": "text",
@@ -4493,6 +4500,12 @@
           "name": "operation_id",
           "type": "text",
           "primaryKey": false,
+          "notNull": false
+        },
+        "actor": {
+          "name": "actor",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
         "reason": {
@@ -4507,9 +4520,50 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "resumed_at": {
+          "name": "resumed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resumed_by": {
+          "name": "resumed_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resume_reason": {
+          "name": "resume_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "billing_route_pause_active": {
+          "name": "billing_route_pause_active",
+          "columns": [
+            {
+              "expression": "environment",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sku",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"billing\".\"billing_route_pause\".\"resumed_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "billing_route_pause_operation_id_credit_operation_id_fk": {
           "name": "billing_route_pause_operation_id_credit_operation_id_fk",
@@ -4532,12 +4586,7 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "billing_route_pause_environment_sku_pk": {
-          "name": "billing_route_pause_environment_sku_pk",
-          "columns": ["environment", "sku"]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -5502,13 +5551,13 @@
           "name": "spend_budget_hold_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "risk_budget_hold_id": {
           "name": "risk_budget_hold_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "dispatch_state": {
           "name": "dispatch_state",
@@ -5528,8 +5577,7 @@
           "name": "supplier_state",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'reserved'"
+          "notNull": false
         },
         "generation": {
           "name": "generation",
@@ -5631,6 +5679,18 @@
         "output_tokens": {
           "name": "output_tokens",
           "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_cost_pico_usd": {
+          "name": "supplier_cost_pico_usd",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_cost_unpriced_reason": {
+          "name": "supplier_cost_unpriced_reason",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         }
@@ -5842,6 +5902,10 @@
         "credit_operation_dispatch": {
           "name": "credit_operation_dispatch",
           "value": "\"billing\".\"credit_operation\".\"history_version\" IS NULL OR \"billing\".\"credit_operation\".\"customer_state\" <> 'settled' OR \"billing\".\"credit_operation\".\"dispatch_intent_at\" IS NOT NULL"
+        },
+        "credit_operation_supplier_cost": {
+          "name": "credit_operation_supplier_cost",
+          "value": "(\"billing\".\"credit_operation\".\"supplier_cost_pico_usd\" IS NULL OR (\"billing\".\"credit_operation\".\"supplier_cost_pico_usd\" >= 0 AND \"billing\".\"credit_operation\".\"supplier_cost_unpriced_reason\" IS NULL)) AND (\"billing\".\"credit_operation\".\"supplier_cost_unpriced_reason\" IS NULL OR \"billing\".\"credit_operation\".\"supplier_cost_unpriced_reason\" IN ('missing_rate','dimension_mismatch','absorbed')) AND (\"billing\".\"credit_operation\".\"customer_state\" <> 'pending' OR (\"billing\".\"credit_operation\".\"supplier_cost_pico_usd\" IS NULL AND \"billing\".\"credit_operation\".\"supplier_cost_unpriced_reason\" IS NULL))"
         },
         "credit_operation_terminal": {
           "name": "credit_operation_terminal",
@@ -9712,13 +9776,6 @@
         },
         "allows_ai_training": {
           "name": "allows_ai_training",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "allows_usage_metrics": {
-          "name": "allows_usage_metrics",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,

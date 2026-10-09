@@ -21,6 +21,7 @@ import { ChatErrorRateLimit } from '#routes/w.$workspace.$project/chat-error-rat
 import { ChatErrorTool } from '#routes/w.$workspace.$project/chat-error-tool.js';
 import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
 import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
+import { ChatErrorAccountRestricted } from '#routes/w.$workspace.$project/chat-error-account-restricted.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
 import { isResumableRun } from '@taucad/agent-host';
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
@@ -85,6 +86,31 @@ function tryFormatJson(text: string): string {
   } catch {
     return text;
   }
+}
+
+/**
+ * The refusal as the card received it, for Tau Debug: the transport's raw text
+ * when it kept one, otherwise the coded fields themselves. A card whose copy is
+ * the page's own still discloses what the gateway said, but only here.
+ *
+ * @param error - The parsed failure.
+ * @param rawDetail - Its formatted raw text, when it carried one.
+ * @returns Pretty-printed JSON.
+ */
+function codedRefusalRaw(error: NormalizedChatError, rawDetail: string | undefined): string {
+  return (
+    rawDetail ??
+    JSON.stringify(
+      {
+        code: error.code,
+        message: error.message,
+        ...(error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus }),
+        ...(error.details === undefined ? {} : { details: error.details }),
+      },
+      null,
+      2,
+    )
+  );
 }
 
 /**
@@ -205,6 +231,27 @@ function codedErrorCard({
         }
       />
     );
+  }
+
+  /* Tau's operators paused this model's route (W6): another model still answers, so the card offers the switch and a
+   * Try again that sends on whichever model is chosen. Resuming would re-send to the paused route, so the card neither
+   * offers it nor promises the turn, and the gateway's sentence stays in Tau Debug (IS3). */
+  if (code === 'MODEL_ROUTE_PAUSED') {
+    return (
+      <ChatErrorPausedTurn
+        className={className}
+        title='This model is paused'
+        reason="Tau's operators have paused this model. Switch to another model to continue."
+        resumable={false}
+        canSwitchModel
+        raw={codedRefusalRaw(error, rawDetail)}
+      />
+    );
+  }
+
+  // Spending on the account is held (W11a): the account's, not the route's, so neither Resume nor another model helps.
+  if (category === 'accountRestricted') {
+    return <ChatErrorAccountRestricted className={className} raw={codedRefusalRaw(error, rawDetail)} />;
   }
 
   // A refusal of the request itself resumes once the model or its settings

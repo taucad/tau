@@ -341,8 +341,15 @@
     {
       "idx": 49,
       "version": "7",
-      "when": 1791502487577,
-      "tag": "0049_user_allows_usage_metrics",
+      "when": 1791499107880,
+      "tag": "0049_supplier_simplification",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791526758725,
+      "tag": "0050_user_allows_usage_metrics",
       "breakpoints": true
     }
   ]

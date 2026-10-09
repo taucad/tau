@@ -1,6 +1,6 @@
 # libcascade — StepGeom (3)
 
-47 top-level symbols. Signatures are verbatim typescript.
+37 top-level symbols. Signatures are verbatim typescript.
 
 StepGeom_Polyline: declare class StepGeom_Polyline extends StepGeom_BoundedCurve
 
@@ -39,6 +39,12 @@ StepGeom_Polyline: declare class StepGeom_Polyline extends StepGeom_BoundedCurve
   [Symbol.dispose](): void;
 
 StepGeom_PreferredSurfaceCurveRepresentation: typeof StepGeom_PreferredSurfaceCurveRepresentation[keyof typeof StepGeom_PreferredSurfaceCurveRepresentation]
+
+  readonly StepGeom_pscrCurve3d: 'StepGeom_pscrCurve3d'
+
+  readonly StepGeom_pscrPcurveS1: 'StepGeom_pscrPcurveS1'
+
+  readonly StepGeom_pscrPcurveS2: 'StepGeom_pscrPcurveS2'
 
 StepGeom_QuasiUniformCurve: declare class StepGeom_QuasiUniformCurve extends StepGeom_BSplineCurve
 
@@ -837,6 +843,14 @@ StepGeom_ToroidalSurface: declare class StepGeom_ToroidalSurface extends StepGeo
 
 StepGeom_TransitionCode: typeof StepGeom_TransitionCode[keyof typeof StepGeom_TransitionCode]
 
+  readonly StepGeom_tcDiscontinuous: 'StepGeom_tcDiscontinuous'
+
+  readonly StepGeom_tcContinuous: 'StepGeom_tcContinuous'
+
+  readonly StepGeom_tcContSameGradient: 'StepGeom_tcContSameGradient'
+
+  readonly StepGeom_tcContSameGradientSameCurvature: 'StepGeom_tcContSameGradientSameCurvature'
+
 StepGeom_TrimmedCurve: declare class StepGeom_TrimmedCurve extends StepGeom_BoundedCurve
 
   // StepGeom_TrimmedCurve.constructor (constructor)
@@ -923,6 +937,12 @@ StepGeom_TrimmingMember: declare class StepGeom_TrimmingMember extends StepData_
   [Symbol.dispose](): void;
 
 StepGeom_TrimmingPreference: typeof StepGeom_TrimmingPreference[keyof typeof StepGeom_TrimmingPreference]
+
+  readonly StepGeom_tpCartesian: 'StepGeom_tpCartesian'
+
+  readonly StepGeom_tpParameter: 'StepGeom_tpParameter'
+
+  readonly StepGeom_tpUnspecified: 'StepGeom_tpUnspecified'
 
 StepGeom_TrimmingSelect: declare class StepGeom_TrimmingSelect extends StepData_SelectType
 
@@ -1155,23 +1175,3 @@ StepGeom_VectorOrDirection: declare class StepGeom_VectorOrDirection extends Ste
 StepGeom_Array1OfCartesianPoint: NCollection_Array1_handle_StepGeom_CartesianPoint
 
 StepGeom_Array1OfCompositeCurveSegment: NCollection_Array1_handle_StepGeom_CompositeCurveSegment
-
-StepGeom_Array1OfPcurveOrSurface: NCollection_Array1_StepGeom_PcurveOrSurface
-
-StepGeom_Array1OfSurfaceBoundary: NCollection_Array1_StepGeom_SurfaceBoundary
-
-StepGeom_Array1OfTrimmingSelect: NCollection_Array1_StepGeom_TrimmingSelect
-
-StepGeom_Array2OfCartesianPoint: NCollection_Array2_handle_StepGeom_CartesianPoint
-
-StepGeom_Array2OfSurfacePatch: NCollection_Array2_handle_StepGeom_SurfacePatch
-
-StepGeom_HArray1OfCartesianPoint: NCollection_HArray1_handle_StepGeom_CartesianPoint
-
-StepGeom_HArray1OfCompositeCurveSegment: NCollection_HArray1_handle_StepGeom_CompositeCurveSegment
-
-StepGeom_HArray1OfPcurveOrSurface: NCollection_HArray1_StepGeom_PcurveOrSurface
-
-StepGeom_HArray1OfSurfaceBoundary: NCollection_HArray1_StepGeom_SurfaceBoundary
-
-StepGeom_HArray1OfTrimmingSelect: NCollection_HArray1_StepGeom_TrimmingSelect

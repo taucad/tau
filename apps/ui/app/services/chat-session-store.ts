@@ -2916,6 +2916,7 @@ export class ChatSessionStore {
         const retained = this.#retainSeedUntilLogged(session, messages);
         const previous = session.chat.messages;
         if (previous.length !== retained.length || retained.some((message, index) => message !== previous[index])) {
+          this.#messagePresentations.delete(session.chatId);
           session.chat.messages = retained;
         }
         session.failedTranscriptProjection = undefined;

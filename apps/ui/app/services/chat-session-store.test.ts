@@ -2680,6 +2680,81 @@ describe('ChatSessionStore', () => {
     });
   });
 
+  it('refreshes the presented middle assistant after a durable envelope correction with unchanged transcript edges', async () => {
+    const store = createStore();
+    const chatId = 'chat_middle_correction';
+    const session = store.acquire(chatId, 'project_middle_correction');
+    try {
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      const rows = ['first', 'middle', 'last'].flatMap((name, index) => {
+        const sequence = index * 4;
+        const runId = `run_${name}`;
+        return [
+          lifecycleRow(sequence, 'admitted', runId),
+          logRow(sequence + 1, {
+            runId,
+            type: 'message.appended',
+            message: { id: `user_${name}`, role: 'user', content: `Question ${name}` },
+          }),
+          logRow(sequence + 2, {
+            runId,
+            type: 'message.appended',
+            message: { id: `assistant_${name}`, role: 'assistant', content: `Answer ${name}` },
+          }),
+          lifecycleRow(sequence + 3, 'completed', runId),
+        ];
+      });
+      publishLogRows(store, chatId, rows);
+      await store.preparePresentation(chatId, new AbortController().signal);
+      const original = session.messages;
+      expect(original.map((message) => message.role)).toEqual([
+        'user',
+        'assistant',
+        'user',
+        'assistant',
+        'user',
+        'assistant',
+      ]);
+      const middleId = original[3]!.id;
+      const before = store.getMessagePresentation(chatId);
+      expect(before.messagesById.get(middleId)?.parts).toContainEqual(
+        expect.objectContaining({ type: 'text', text: 'Answer middle' }),
+      );
+
+      publishLogRows(
+        store,
+        chatId,
+        [
+          logRow(12, {
+            runId: 'run_middle',
+            type: 'message.envelope-replaced',
+            messageId: 'assistant_middle',
+            replacement: { id: 'assistant_middle', role: 'assistant', content: 'Corrected durable answer' },
+          }),
+        ],
+        12,
+      );
+      await store.preparePresentation(chatId, new AbortController().signal);
+
+      expect(session.messages).toHaveLength(original.length);
+      expect(session.messages[0]).toBe(original[0]);
+      expect(session.messages.at(-1)).toBe(original.at(-1));
+      expect(session.messages.find((message) => message.id === middleId)?.parts).toContainEqual(
+        expect.objectContaining({ type: 'text', text: 'Corrected durable answer' }),
+      );
+      const after = store.getMessagePresentation(chatId);
+      expect(after.messagesById.get(middleId)?.parts).toContainEqual(
+        expect.objectContaining({ type: 'text', text: 'Corrected durable answer' }),
+      );
+      expect(after.order).toEqual(before.order);
+      expect(after.groups).toEqual(before.groups);
+    } finally {
+      store.release(chatId);
+    }
+  });
+
   it('keeps structural and command selections stable across a long text-only stream', () => {
     const store = createStore();
     const session = store.acquire('chat_presented', 'project_1');

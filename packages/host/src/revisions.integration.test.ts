@@ -13,7 +13,6 @@ import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -323,23 +322,14 @@ const settlementsOf = async (launcher: AgentLauncher, runId = 'run-1') => {
 /**
  * Admit one Tau turn the way a client does.
  *
- * A start that lands while the chat's last attempt is still settling is refused
- * `CHAT_RUN_LIVE{settling}` (retry class `wait`), which the page re-sends until
- * it is admitted; so does this client. The window is real: the attempt's lease
- * file is gone before M1 hears the placement's acknowledge, so a start sent
- * right after `settlementFor` can land in it.
- *
  * @param launcher - The recording launcher.
  * @param turn - The chat and the client's idempotency key for the run.
- * @param until - When to stop re-sending and return the refusal as it is.
- * @returns The first answer that is not the settling refusal.
  */
 const startTurn = async (
   launcher: AgentLauncher,
   turn: { readonly chatId: string; readonly runId: string; readonly checkoutId?: string },
-  until = Date.now() + 10_000,
-): Promise<CommandAnswer> => {
-  const answer = await launcher.execute({
+): Promise<CommandAnswer> =>
+  launcher.execute({
     type: 'start',
     commandId: `start-${turn.runId}`,
     payload: {
@@ -356,17 +346,6 @@ const startTurn = async (
       config: { systemPrompt: 'You are Tau.', toolChoice: 'auto', model },
     },
   });
-  if (
-    answer.status === 'refused' &&
-    answer.code === 'CHAT_RUN_LIVE' &&
-    answer.details?.['state'] === 'settling' &&
-    Date.now() < until
-  ) {
-    await delay(50);
-    return startTurn(launcher, turn, until);
-  }
-  return answer;
-};
 
 const ports = [
   {

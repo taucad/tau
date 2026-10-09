@@ -17,8 +17,10 @@ import type { ServicesHostOptions, UtilityMessage, UtilityPort } from '#tau/serv
 
 /* The runtime the utility builds, kept so a case can call its artifact reader
  * directly: through a print, every read failure is the simulator's one
- * `ARTIFACT_INVALID`. */
+ * `MACHINE_JOB_ARTIFACT_INVALID`. */
 const runtimeOptions = vi.hoisted(() => [] as Array<Parameters<typeof TauHost.createNodeMachineRuntime>[0]>);
+/* A directory a case lists in place of the store's, for runs no simulator can be left in. */
+const listed = vi.hoisted(() => ({ entries: undefined as undefined | readonly unknown[] }));
 
 vi.mock('@taucad/host', async (importOriginal) => {
   const actual = await importOriginal<typeof TauHost>();
@@ -27,6 +29,11 @@ vi.mock('@taucad/host', async (importOriginal) => {
     createNodeMachineRuntime: (options: Parameters<typeof TauHost.createNodeMachineRuntime>[0]) => {
       runtimeOptions.push(options);
       return actual.createNodeMachineRuntime(options);
+    },
+    localMachineFacet: (serve: Parameters<typeof TauHost.localMachineFacet>[0]) => {
+      const facet = actual.localMachineFacet(serve);
+      const { entries } = listed;
+      return entries === undefined ? facet : { ...facet, list: async () => ({ cursor: undefined, entries }) };
     },
   };
 });
@@ -99,13 +106,26 @@ const machinesHarness = async () => {
   await mkdir(join(sandbox, 'authority'));
   const [alpha, beta] = await Promise.all([writeProject(rootA, 'alpha', alphaId), writeProject(rootB, 'beta', betaId)]);
   const log = vi.fn();
-  const completions: Completion[] = [];
+  /* Each answer the utility gives main, by request: a ceremony connects the provider, so it takes as long as that. */
+  const answers = new Map<string, PromiseWithResolvers<unknown>>();
+  const answer = (requestId: string): PromiseWithResolvers<unknown> => {
+    const existing = answers.get(requestId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const created = Promise.withResolvers<unknown>();
+    answers.set(requestId, created);
+    return created;
+  };
   const host = createServicesHost({
     authorityDirectory: join(sandbox, 'authority'),
     machinesDirectory: store,
     log,
-    machineBindingCompleted: (...completion) => {
-      completions.push(completion);
+    machineBindingCompleted: (requestId, result) => {
+      answer(requestId).resolve(result);
+    },
+    machinesStreaming: (requestId, machines) => {
+      answer(requestId).resolve(machines);
     },
   });
   host.handleMessage(frame({ type: 'allowRoots', roots: [rootA, rootB] }));
@@ -130,10 +150,13 @@ const machinesHarness = async () => {
         ...(code === undefined ? {} : { accessCode: code }),
       }),
     );
-    await vi.waitFor(() => {
-      expect(completions.map(([answered]) => answered)).toContain(requestId);
-    });
-    return completions.find(([answered]) => answered === requestId)![1];
+    return answer(requestId).promise as Promise<Completion[1]>;
+  };
+
+  /** Main's question before a quit: the machines a streamed run is feeding. */
+  const streaming = async (requestId: string): Promise<readonly string[]> => {
+    host.handleMessage(frame({ type: 'machines-streaming', requestId }));
+    return answer(requestId).promise as Promise<readonly string[]>;
   };
 
   const bindSimulator = async (
@@ -176,7 +199,7 @@ const machinesHarness = async () => {
     host.dispose();
     await rm(sandbox, { recursive: true, force: true });
   };
-  return { alpha, beta, bindSimulator, cleanup, completeCeremony, connect, host, log, rootA, rootB, store };
+  return { alpha, beta, bindSimulator, cleanup, completeCeremony, connect, host, log, rootA, rootB, store, streaming };
 };
 
 describe('createServicesHost — machines', () => {
@@ -217,7 +240,7 @@ describe('createServicesHost — machines', () => {
         ['bambu-simulator', machineId],
       ]);
       expect(machines.log).toHaveBeenCalledWith('machines.vault', { kind: 'file' });
-      /* The simulator has no network endpoint: nothing was probed and no code was saved. */
+      /* A simulator takes no code: nothing was probed and the typed code was not saved. */
       expect(existsSync(join(machines.store, 'secrets.json'))).toBe(false);
       expect(JSON.stringify(machines.log.mock.calls)).not.toContain(accessCode);
 
@@ -263,7 +286,7 @@ describe('createServicesHost — machines', () => {
       /* Alpha's file at that path is not the one the digest names, and beta's is not alpha's. */
       await expect(job('alpha', alphaId)).resolves.toMatchObject({
         state: 'failed',
-        failure: { code: 'ARTIFACT_INVALID' },
+        failure: { code: 'MACHINE_JOB_ARTIFACT_INVALID' },
       });
       await expect(job('beta', betaId)).resolves.toMatchObject({ state: 'started' });
       /* Job history is the store's: every connection sees both. */
@@ -313,7 +336,7 @@ describe('createServicesHost — machines', () => {
         'grbl-simulator',
         'makera-carvera-simulator',
       ]) {
-        /* The binding ceremony asks no code of an RFC 6761 `.invalid` address; this harness's vault would hide that. */
+        /* A simulator's provider declares only simulation, so the ceremony asks it no code. */
         for await (const event of client.discover({ providerId, configuration: { logicalId: providerId } })) {
           if (event.type === 'found') {
             expect(event.candidate.endpoint.address).toMatch(/\.invalid$/u);
@@ -328,6 +351,32 @@ describe('createServicesHost — machines', () => {
       await machines.cleanup();
     }
   }, 60_000);
+
+  it('should tell main which machines a streamed run is feeding, and none before the store opens or while none streams', async () => {
+    const machines = await machinesHarness();
+    try {
+      await expect(machines.streaming('before-open')).resolves.toEqual([]);
+      const client = machines.connect();
+      await machines.bindSimulator(client);
+      await expect(machines.streaming('idle')).resolves.toEqual([]);
+
+      const entry = (name: string, run: Readonly<Record<string, string>> | undefined) => ({
+        name,
+        snapshot: run === undefined ? {} : { run },
+      });
+      listed.entries = [
+        entry('Router', { delivery: 'streamed', state: 'running' }),
+        entry('Mill', { delivery: 'streamed', state: 'finishing' }),
+        entry('Lathe', { delivery: 'streamed', state: 'completed' }),
+        entry('Printer', { delivery: 'stored', state: 'running' }),
+        entry('Idle', undefined),
+      ];
+      await expect(machines.streaming('streaming')).resolves.toEqual(['Router', 'Mill']);
+    } finally {
+      listed.entries = undefined;
+      await machines.cleanup();
+    }
+  }, 30_000);
 
   it('should answer MACHINE_STORE_OWNED_ELSEWHERE while another Tau app holds the store, and serve once it lets go', async () => {
     const machines = await machinesHarness();

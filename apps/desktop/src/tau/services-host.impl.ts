@@ -40,16 +40,15 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
-import { bambuA1MiniMachine, bambuA1MiniSimulatorMachine, bambuMachine, bambuSimulatorMachine } from '@taucad/bambu';
-import { carveraMachine, carveraSimulatorMachine } from '@taucad/carvera';
-import { grblMachine, grblSimulatorMachine } from '@taucad/grbl';
 import {
   completeMachineBinding,
   createMachineSecretStore,
   createNodeMachineRuntime,
   createProjectHostActor,
+  defaultMachineProviders,
   keyedResource,
   localMachineFacet,
+  machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
   openSecretVault,
@@ -68,8 +67,8 @@ import { createChannelServer, wrapMessagePortMain } from '@taucad/rpc';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
-import type { NodeMachineHost } from '@taucad/runtime/host/node';
-import type { MachineArtifactReference, MachineBindingOutcome } from '@taucad/runtime/machine';
+import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
+import type { MachineArtifactReference, MachineBindingOutcome, MachineRun } from '@taucad/runtime/machine';
 import type { HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { packageVersion } from '@taucad/runtime/metadata';
@@ -122,7 +121,11 @@ type MachineHostServices = Readonly<{
   admission: HostAdmissionAuthority;
   identity: MachineHostIdentity;
   secrets: MachineSecretStore;
+  providers: CreateNodeMachineHostInput['providers'];
 }>;
+
+/* A streamed run this utility is still feeding. */
+const streamingRunStates: ReadonlySet<MachineRun['state']> = new Set(['starting', 'running', 'paused', 'finishing']);
 
 type RuntimeFileSystemDisposer = {
   drain(): Promise<void>;
@@ -288,6 +291,8 @@ export type ServicesHostOptions = {
     requestId: string,
     result: Readonly<{ outcome: MachineBindingOutcome }> | Readonly<{ error: string }>,
   ) => void;
+  /** Reply to main with the machines a streamed run is feeding now, by name, so quit can refuse (Q-streamed-host). */
+  readonly machinesStreaming?: (requestId: string, machines: readonly string[]) => void;
   /** Tell main this project can record nothing, so a person is told (W5). */
   readonly onRevisionsUnavailable?: (
     workspaceRoot: string,
@@ -343,6 +348,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     legacyMachinesDirectory,
     machineBindingCompleted,
     machinesDirectory,
+    machinesStreaming,
     onRevisionsUnavailable,
     quiesced,
     requestRuntimePort,
@@ -592,23 +598,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const vault = openSecretVault({ directory: storeRoot, env: process.env });
     const secrets = createMachineSecretStore({ vault, legacyDirectory: storeRoot });
     log('machines.vault', { kind: vault.kind });
+    const providers = await defaultMachineProviders();
     const host = await createNodeMachineHost({
       storeRoot,
       ...(legacyMachinesDirectory === undefined ? {} : { legacyStoreRoots: [legacyMachinesDirectory] }),
       ...identity,
       admission,
-      providers: [
-        bambuMachine(),
-        bambuA1MiniMachine(),
-        bambuSimulatorMachine(),
-        bambuA1MiniSimulatorMachine(),
-        // ponytail: no native serial driver yet, so the real Grbl provider discovers nothing; add `serialport` here.
-        grblMachine(),
-        grblSimulatorMachine(),
-        carveraMachine(),
-        carveraSimulatorMachine(),
-      ],
+      providers,
       runtime: createNodeMachineRuntime({
+        // ponytail: no native serial driver yet, so the real Grbl provider discovers nothing; add `serialport` here.
         secrets,
         /* The last scan's roots first; a miss, or roots that no longer hold
          * the file, rescans once, since projects appear, move and go. */
@@ -633,7 +631,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       },
     });
     log('machine-host-opened', { hostId: identity.hostId });
-    return { host, admission, identity, secrets };
+    return { host, admission, identity, secrets, providers };
   };
 
   // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the once-per-utility contract.
@@ -663,6 +661,37 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const { host } = await pending;
     await host.close();
     log('machine-host-closed');
+  };
+
+  /**
+   * The machines a streamed run is feeding now, by name. This utility feeds such a program line by line for its
+   * whole run, so quitting would cut it mid-run (Q-streamed-host); `finishing` still has lines in flight.
+   *
+   * @returns The machines' names; none while the store is not open here.
+   */
+  const streamingMachines = async (): Promise<readonly string[]> => {
+    const pending = machineHost;
+    if (pending === undefined) {
+      return [];
+    }
+    const { host, admission } = await pending;
+    const session = host.issueSession({
+      actor: { kind: 'user', id: 'desktop' },
+      grants: [{ route: 'machines', operation: 'machines.list' }],
+    });
+    const facet = localMachineFacet((port) => host.serve({ port, session }));
+    try {
+      if (!facet.available) {
+        return [];
+      }
+      const { entries } = await facet.list({});
+      return entries
+        .filter(({ snapshot: { run } }) => run?.delivery === 'streamed' && streamingRunStates.has(run.state))
+        .map(({ name }) => name);
+    } finally {
+      facet.close();
+      admission.revoke(session);
+    }
   };
 
   /**
@@ -714,8 +743,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * the connection is answered `MACHINE_STORE_OWNED_ELSEWHERE`.
    *
    * @param port - The utility's leg of main's `MessageChannelMain`.
+   * @param caller - Who the session is for: the window's person, granted every operation, or the agent, whose
+   * session the host issues as an agent with {@link machineAgentGrants}, whatever its calls claim.
    */
-  const serveMachines = async (port: UtilityPort): Promise<void> => {
+  const serveMachines = async (port: UtilityPort, caller: 'person' | 'agent'): Promise<void> => {
     let services: MachineHostServices;
     try {
       services = await ensureMachineHost();
@@ -739,7 +770,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       port.close();
       return;
     }
-    const session = services.host.issueSession({ actor: { kind: 'user', id: 'desktop' }, grants: machineRouteGrants });
+    const session = services.host.issueSession(
+      caller === 'agent'
+        ? { actor: { kind: 'agent', id: 'tau' }, grants: machineAgentGrants }
+        : { actor: { kind: 'user', id: 'desktop' }, grants: machineRouteGrants },
+    );
     /* `@taucad/rpc` reports the port's death to the channel server, which
      * closes itself; the session is revoked with it. */
     const channel = services.host.serve({ port: wrapMessagePortMain(port), session });
@@ -937,9 +972,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     }
     const route = `/mcp/${randomUUID()}`;
     /* The agent's own machines facet: served by this utility's machine host
-     * over an in-process channel once it opens, on a session of its own beside
-     * the window's. One per actor, so every host it opens offers the same one. */
-    const machines = localMachineFacet(async (port) => serveMachines(port));
+     * over an in-process channel once it opens, on an agent session of its own
+     * beside the window's. One per actor, so every host it opens offers the same one. */
+    const machines = localMachineFacet(async (port) => serveMachines(port, 'agent'));
     let servedHost: ProjectHost | undefined;
     const actor = createProjectHostActor({
       root: workspaceRoot,
@@ -1085,6 +1120,22 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         }
         return;
       }
+      case 'machines-streaming': {
+        const { requestId } = frame;
+        if (typeof requestId !== 'string') {
+          return;
+        }
+        // async-iife: bootstrap -- a control frame has no caller to await the directory read.
+        void (async () => {
+          try {
+            machinesStreaming?.(requestId, await streamingMachines());
+          } catch (error) {
+            /* Unanswered, main's bound decides; the reason stays in the log. */
+            log('machines.streaming-unread', error instanceof Error ? error.message : String(error), 'warn');
+          }
+        })();
+        return;
+      }
       case 'machine-binding-complete': {
         /* The secret half of the ceremony, and the only frame that carries a
          * code: pinned from the endpoint the provider connects to, never the
@@ -1096,10 +1147,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         // async-iife: bootstrap -- a control frame has no caller to await the ceremony.
         void (async () => {
           try {
-            const { host, secrets } = await ensureMachineHost();
+            const { host, secrets, providers } = await ensureMachineHost();
             const outcome = await completeMachineBinding({
               host,
               secrets,
+              providers,
               ceremonyId,
               ...(typeof accessCode === 'string' ? { accessCode } : {}),
               onEvent: ({ type, providerId }) => {
@@ -1473,7 +1525,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         }
         case 'machines': {
           // async-iife: bootstrap -- the host opens on first use; a control frame has no caller to return to.
-          void serveMachines(port);
+          void serveMachines(port, 'person');
           return;
         }
         default: {

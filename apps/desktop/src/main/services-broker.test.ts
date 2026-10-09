@@ -329,6 +329,29 @@ describe('createServicesBroker', () => {
     await expect(failed).rejects.toThrow('MACHINE_BINDING_UNKNOWN');
   });
 
+  it('should ask a running utility which machines a program streams to, and answer none without one', async () => {
+    const { broker, spawns } = brokerHarness();
+    /* Asking never spawns a utility: one that is not running feeds nothing. */
+    await expect(broker.streamingMachines(1000)).resolves.toEqual([]);
+    expect(spawns).toHaveLength(0);
+
+    broker.connect('nodeFs');
+    const asked = broker.streamingMachines(1000);
+    const question = (spawns[0]?.posted ?? []).find(
+      (message): message is Record<string, unknown> =>
+        typeof message === 'object' &&
+        message !== null &&
+        'type' in message &&
+        message['type'] === 'machines-streaming',
+    );
+    spawns[0]?.message({
+      type: 'machines-streaming-answered',
+      requestId: question?.['requestId'],
+      machines: ['LongMill'],
+    });
+    await expect(asked).resolves.toEqual(['LongMill']);
+  });
+
   it('should never replay or log an access code, and complete without one when none was typed', async () => {
     const { broker, log, spawns } = brokerHarness();
     const bindingFrames = (spawned: Spawned | undefined): Array<Record<string, unknown>> =>

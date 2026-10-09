@@ -58,6 +58,7 @@ const state = vi.hoisted(() => ({
     status: 'bound',
     machineId: 'workshop-x1c',
   })),
+  servicesStreaming: vi.fn(async (_boundMilliseconds: number): Promise<readonly string[]> => []),
   runtimePrewarm: vi.fn(),
   runtimeMaxUtilities: undefined as number | undefined,
   servicesQuiesce: vi.fn(
@@ -278,6 +279,7 @@ vi.mock('#main/services-broker.js', () => ({
       post: vi.fn(),
       connect: state.servicesConnect,
       completeMachineBinding: state.servicesCompleteBinding,
+      streamingMachines: state.servicesStreaming,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,
       computeProjectRoot: (root: string) =>
@@ -623,6 +625,31 @@ describe('desktop main compute owner', () => {
       expect(order.indexOf('quiesce')).toBeGreaterThanOrEqual(0);
       expect(order.indexOf('quiesce')).toBeLessThan(order.indexOf('dispose'));
       expect(state.log).toHaveBeenCalledWith('info', 'main.renderer-quiesce', { outcome: 'quiesced' });
+    },
+    bootMilliseconds,
+  );
+
+  /* Q-streamed-host: quitting would stop a machine this app is feeding mid-run, so there is no way past it. */
+  it(
+    'should refuse to quit while a program streams, before anything is quiesced, with no Quit anyway',
+    async () => {
+      await bootstrap();
+      state.servicesStreaming.mockResolvedValueOnce(['LongMill']);
+
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: ['Keep Tau open'],
+        message: 'A program is streaming to LongMill; stop it first.',
+      });
+      expect(state.sentToRenderer).not.toContain(quitChannels.ask);
+      expect(state.servicesQuiesce).not.toHaveBeenCalled();
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+      expect(app.quit).not.toHaveBeenCalled();
     },
     bootMilliseconds,
   );

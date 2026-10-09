@@ -127,6 +127,14 @@ export type ServicesBroker = {
    * Not a control frame: a secret is never replayed onto a fresh fork.
    */
   completeMachineBinding(input: MachineBindingCompletion, boundMilliseconds: number): Promise<MachineBindingOutcome>;
+  /**
+   * The machines a streamed run is feeding now, by name, so quit can refuse before anything is quiesced
+   * (Q-streamed-host). No utility, no stream.
+   *
+   * @param boundMilliseconds - How long to wait for the utility's answer before rejecting.
+   * @returns The machines' names.
+   */
+  streamingMachines(boundMilliseconds: number): Promise<readonly string[]>;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
   /** Original project identity retained for an admitted execution root. */
@@ -184,6 +192,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
   const bindingWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<MachineBindingOutcome>>>();
   let bindingRequest = 0;
+  const streamingWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<readonly string[]>>>();
+  let streamingRequest = 0;
   /* Roots with a release in flight, by how many. `releaseAgentHost` awaits the
    * utility, and a window that remounts inside that wait re-adopts the project
    * under the attachment id that is releasing. */
@@ -315,6 +325,13 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           );
         }
       }
+      return;
+    }
+    if (type === 'machines-streaming-answered' && typeof requestId === 'string') {
+      const { machines } = frame as Record<string, unknown>;
+      streamingWaiters
+        .get(requestId)
+        ?.resolve(Array.isArray(machines) ? machines.filter((name): name is string => typeof name === 'string') : []);
       return;
     }
     if (type === 'quiesced' || type === 'quiesce-failed') {
@@ -656,6 +673,27 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           clearTimeout(bindingTimeout);
         }
         bindingWaiters.delete(requestId);
+      }
+    },
+    async streamingMachines(boundMilliseconds) {
+      const spawned = utility;
+      if (spawned === undefined) {
+        return [];
+      }
+      streamingRequest += 1;
+      const requestId = `machines-streaming-${String(streamingRequest)}`;
+      const pending = Promise.withResolvers<readonly string[]>();
+      streamingWaiters.set(requestId, pending);
+      const bound = setTimeout(() => {
+        pending.reject(new Error('The desktop machine host did not say whether a program is streaming.'));
+      }, boundMilliseconds);
+      bound.unref();
+      try {
+        spawned.postMessage({ type: 'machines-streaming', requestId });
+        return await pending.promise;
+      } finally {
+        clearTimeout(bound);
+        streamingWaiters.delete(requestId);
       }
     },
     post(message) {

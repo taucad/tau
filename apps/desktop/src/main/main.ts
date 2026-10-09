@@ -249,6 +249,9 @@ const rendererCloseStepsMilliseconds = 2 * 10_000;
  */
 const machineBindingMilliseconds = 60_000;
 
+/** How long quit waits for the utility to say whether a program is streaming: one directory read. */
+const machineStreamingMilliseconds = 5000;
+
 /**
  * How long quit waits for the renderer's sessions registry (D31, P49).
  *
@@ -1327,6 +1330,33 @@ const bootstrapElectronApp = async (): Promise<void> => {
          * edits of a quit were recorded by nothing. A timeout or negative
          * acknowledgement leaves the app live so the same owners can retry.
          */
+        /*
+         * Q-streamed-host, before anything is quiesced: this app feeds a
+         * streamed program line by line for its whole run, so quitting would
+         * stop the machine mid-run. There is no *Quit anyway*; the person
+         * stops the program first. An unanswered question goes on to the hold
+         * below, which offers its own way out.
+         */
+        let streaming: readonly string[] = [];
+        try {
+          streaming = await services.streamingMachines(machineStreamingMilliseconds);
+        } catch (error) {
+          log.log('error', 'main.streaming-unknown', error);
+        }
+        if (streaming.length > 0) {
+          log.log('info', 'main.quit-refused-streaming', { machines: streaming.length });
+          await dialog.showMessageBox({
+            type: 'warning',
+            buttons: ['Keep Tau open'],
+            defaultId: 0,
+            cancelId: 0,
+            message: `A program is streaming to ${new Intl.ListFormat('en', { type: 'conjunction' }).format(streaming)}; stop it first.`,
+            detail: 'Tau sends the program as the machine runs it. Quitting now would stop the machine mid-run.',
+          });
+          quitting = false;
+          shutdown = undefined;
+          return;
+        }
         /*
          * The renderer's half first (P49): the browser-side registry owns the
          * file manager, compute admission and every `chat-session`, and only

@@ -34,11 +34,18 @@ const formatHours = (seconds: number): string => {
 const consentStateLabel: Record<WireAutoReloadConsent['state'], string> = {
   pending_setup: 'Waiting for card setup',
   enabled: 'On',
-  paused_terms: 'Paused because the terms changed. Turn it off, then review the new terms.',
+  paused_terms: 'Paused because the terms changed. Review the new terms to continue.',
   disabled_failures: 'Off after failed payments',
   revoked: 'Off',
 };
 /* eslint-enable @typescript-eslint/naming-convention -- end wire state keys. */
+
+/** Consents new terms can replace: billing refuses new terms only while a consent waits for its card or is on. */
+const reviewableStates: ReadonlySet<WireAutoReloadConsent['state']> = new Set([
+  'paused_terms',
+  'disabled_failures',
+  'revoked',
+]);
 
 const money = (minor: string): string => `US$${(Number(minor) / 100).toFixed(2)}`;
 
@@ -55,6 +62,7 @@ export function AutoReloadSettings({
   const [action, setAction] = useState<WirePaymentAction>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const canReview = load === 'loaded' && (!consent || reviewableStates.has(consent.state));
 
   /* Runs on the binding's identity and again from Retry; the caller captures the financial token. */
   const loadConsent = (currentBinding: PaymentActionBinding, token: FinancialSessionRequest): void => {
@@ -230,7 +238,7 @@ export function AutoReloadSettings({
             Continue setup
           </Button>
         ) : undefined}
-        {load === 'loaded' && (!consent || consent.state === 'revoked') ? (
+        {canReview ? (
           <Button
             disabled={busy || !binding || !isResolved || !paymentCollectionAvailable}
             onClick={() =>
@@ -253,7 +261,7 @@ export function AutoReloadSettings({
             Review automatic reload
           </Button>
         ) : undefined}
-        {load === 'loaded' && isResolved && !paymentCollectionAvailable && (!consent || consent.state === 'revoked') ? (
+        {canReview && isResolved && !paymentCollectionAvailable ? (
           <p className='text-muted-foreground'>{purchasesUnavailableMessage}</p>
         ) : undefined}
         {consent && consent.state !== 'revoked' ? (

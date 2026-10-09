@@ -28,6 +28,22 @@ const financial = vi.hoisted(() => ({
 }));
 vi.mock('#providers/financial-session-provider.js', () => ({ useFinancialSession: () => financial }));
 const binding = { apiBaseUrl: 'https://api.tau.new', environment: 'development', ownerId: 'user-a' } as const;
+const consentIn = (state: string, minimumCadenceSeconds = 3600) => ({
+  consentId: 'consent-a',
+  subjectId: 'account-a',
+  state,
+  setupAction: null,
+  paymentMethod: null,
+  terms: {
+    principalMinor: '2500',
+    quotedTaxMinor: '0',
+    grossCeilingMinor: '2500',
+    monthlyGrossCapMinor: '10000',
+    thresholdAtoms: '1000000',
+    minimumCadenceSeconds,
+    terminalFailureLimit: 2,
+  },
+});
 
 describe('AutoReloadSettings', () => {
   beforeEach(() => {
@@ -59,27 +75,36 @@ describe('AutoReloadSettings', () => {
     expect(screen.queryByText(/try again/i)).toBeNull();
   });
   it('names the reload cadence in singular or plural hours', async () => {
-    const consent = (minimumCadenceSeconds: number) => ({
-      state: 'enabled',
-      setupAction: null,
-      paymentMethod: null,
-      terms: {
-        principalMinor: '2500',
-        quotedTaxMinor: '0',
-        grossCeilingMinor: '2500',
-        monthlyGrossCapMinor: '10000',
-        thresholdAtoms: '1000000',
-        minimumCadenceSeconds,
-        terminalFailureLimit: 2,
-      },
-    });
-    getReloadConsent.mockResolvedValue(consent(3600));
+    getReloadConsent.mockResolvedValue(consentIn('enabled', 3600));
     const { unmount } = render(<AutoReloadSettings binding={binding} />);
     expect(await screen.findByText('1 hour')).toBeInTheDocument();
     unmount();
-    getReloadConsent.mockResolvedValue(consent(7200));
+    getReloadConsent.mockResolvedValue(consentIn('enabled', 7200));
     render(<AutoReloadSettings binding={binding} />);
     expect(await screen.findByText('2 hours')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['disabled_failures', 'Off after failed payments'],
+    ['paused_terms', 'Paused because the terms changed. Review the new terms to continue.'],
+  ])('should offer a review of new terms directly when the consent is %s', async (state, status) => {
+    getReloadConsent.mockResolvedValue(consentIn(state));
+    prepareReloadConsent.mockResolvedValue({ state: 'prepared' });
+    render(<AutoReloadSettings binding={binding} />);
+    expect(await screen.findByText(status)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Turn off automatic reload' })).toBeEnabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Review automatic reload' }));
+    expect(prepareReloadConsent).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerId: 'user-a' }),
+      expect.objectContaining({ requestId: 'request-a' }),
+    );
+  });
+
+  it.each(['pending_setup', 'enabled'])('should not offer a review while the consent is %s', async (state) => {
+    getReloadConsent.mockResolvedValue(consentIn(state));
+    render(<AutoReloadSettings binding={binding} />);
+    expect(await screen.findByRole('button', { name: 'Turn off automatic reload' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Review automatic reload' })).toBeNull();
   });
 
   it('points a customer without a saved billing address to a Checkout purchase first', async () => {

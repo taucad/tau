@@ -44,6 +44,12 @@ const checkoutAction = (state: string, receipt: unknown = null) => ({
 /** The card setup Checkout that turns automatic reload on. */
 const cardSetup = (state: string) => ({ ...checkoutAction(state), purpose: 'reload_setup' });
 
+/** A paid Checkout whose outcome billing has yet to hear, as after a card authentication or a retried payment. */
+const outcomeUnknown = {
+  ...checkoutAction('attention_required'),
+  attention: { reason: 'provider_outcome_unknown', action: 'wait' },
+};
+
 /** A toast button as the code under test builds it; its click handlers ignore the event. */
 type ToastButton = { readonly onClick: () => unknown };
 
@@ -208,6 +214,95 @@ describe('useCloudPaymentActionReturn', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('should re-read a payment whose outcome billing has yet to hear and announce the credits it adds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      getPaymentAction
+        .mockResolvedValueOnce(outcomeUnknown)
+        .mockResolvedValue(checkoutAction('fulfilled', { grantedCreditAtoms: '5370000' }));
+      vi.mocked(toast).mockReturnValueOnce('processing');
+      returnFromCheckout();
+      await waitFor(() => {
+        expect(toast).toHaveBeenCalledWith('Payment is still processing.');
+      });
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await waitFor(() => {
+        expect(toast.success).toHaveBeenCalledWith('537 credits added.');
+      });
+      expect(toast.dismiss).toHaveBeenCalledWith('processing');
+      expect(toast.warning).not.toHaveBeenCalled();
+      expect(recoverPaymentAction).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should say a payment needs attention only once the re-check runs out without hearing its outcome', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      getPaymentAction.mockResolvedValue(outcomeUnknown);
+      vi.mocked(toast).mockReturnValueOnce('processing');
+      returnFromCheckout();
+      await waitFor(() => {
+        expect(toast).toHaveBeenCalledWith('Payment is still processing.');
+      });
+
+      await vi.advanceTimersByTimeAsync(18_000);
+      expect(toast.warning).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await waitFor(() => {
+        expect(toast.warning).toHaveBeenCalledWith('Your payment needs attention. Reopen billing to continue.');
+      });
+      expect(getPaymentAction).toHaveBeenCalledTimes(11);
+      expect(toast.dismiss).toHaveBeenCalledWith('processing');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should offer to continue in Checkout when a payment billing waited on turns out to need the customer', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      getPaymentAction.mockResolvedValueOnce(outcomeUnknown).mockResolvedValue({
+        ...checkoutAction('attention_required'),
+        attention: { reason: 'authentication_required', action: 'continue_hosted' },
+      });
+      returnFromCheckout();
+      await waitFor(() => {
+        expect(toast).toHaveBeenCalledWith('Payment is still processing.');
+      });
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await waitFor(() => {
+        expect(toast.warning).toHaveBeenCalledWith(
+          'Your payment needs attention.',
+          expect.objectContaining({ action: expect.objectContaining({ label: 'Continue in Checkout' }) as unknown }),
+        );
+      });
+      await vi.advanceTimersByTimeAsync(4000);
+      // Only the customer can move it on now, so it is read no further.
+      expect(getPaymentAction).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should say Tau Pro is active along with the credits a paid subscription added', async () => {
+    getPaymentAction.mockResolvedValue({
+      ...checkoutAction('fulfilled', { grantedCreditAtoms: '20000000' }),
+      purpose: 'subscription_checkout',
+    });
+    returnFromCheckout();
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Tau Pro is active. 2000 credits added.');
+    });
+    expect(toast.success).toHaveBeenCalledOnce();
   });
 
   it('should not recover an action that already settled', async () => {

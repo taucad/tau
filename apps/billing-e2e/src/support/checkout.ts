@@ -184,24 +184,30 @@ const completeChallenge = async (page: Page): Promise<boolean> => {
 
 /**
  * Clicks Pay (or Subscribe) and follows what Checkout does next for up to `budget` ms: it leaves for the app, shows a
- * card error, or opens a 3D Secure challenge, which this completes. From some hosts the click never submits (H-01), so
- * a quiet page gets Enter on the button and then in the CVC field before the attempt counts as stuck.
+ * card error, or opens a 3D Secure challenge, which this completes. An error still showing from the previous card is
+ * not this attempt's answer: it is ignored until Checkout clears it, and only an error shown after that is a refusal.
+ * From some hosts the click never submits (H-01), so a quiet page gets Enter on the button and then in the CVC field
+ * before the attempt counts as stuck.
  */
 const submitPayment = async (page: Page, budget = 90_000): Promise<PayAttempt> => {
   const submit = page.locator('[data-testid="hosted-payment-submit-button"]');
+  const previous = await checkoutError(page);
   await submit.scrollIntoViewIfNeeded();
   await submit.click();
   const deadline = Date.now() + budget;
   let challenged = false;
   let nudges = 0;
   let quietSince = Date.now();
+  let previousCleared = previous === undefined;
   while (Date.now() < deadline) {
     if (new URL(page.url()).hostname !== 'checkout.stripe.com') {
       return { outcome: 'left', challenged };
     }
     // oxlint-disable-next-line no-await-in-loop -- one poll of the open Checkout page at a time
     const message = await checkoutError(page);
-    if (message !== undefined) {
+    if (message === undefined) {
+      previousCleared = true;
+    } else if (previousCleared || message !== previous) {
       return { outcome: 'refused', message };
     }
     // oxlint-disable-next-line no-await-in-loop -- one poll of the open Checkout page at a time
@@ -317,24 +323,30 @@ export const payInCheckout = async (
   await tracing.start({ screenshots: true, snapshots: true });
   const attempts: PayAttempt[] = [];
   let summary = '';
-  for (const card of input.cards) {
-    // oxlint-disable-next-line no-await-in-loop -- each card is tried only after the previous one was refused
-    await fillCard(page, card, input.email);
-    // oxlint-disable-next-line no-await-in-loop -- the summary is read with the address in, before the click
-    summary = await checkoutSummary(page);
-    // oxlint-disable-next-line no-await-in-loop -- one Pay attempt at a time
-    const attempt = await submitPayment(page);
-    attempts.push(attempt);
-    if (attempt.outcome !== 'refused') {
-      break;
+  let isPaid = false;
+  try {
+    for (const card of input.cards) {
+      // oxlint-disable-next-line no-await-in-loop -- each card is tried only after the previous one was refused
+      await fillCard(page, card, input.email);
+      // oxlint-disable-next-line no-await-in-loop -- the summary is read with the address in, before the click
+      summary = await checkoutSummary(page);
+      // oxlint-disable-next-line no-await-in-loop -- one Pay attempt at a time
+      const attempt = await submitPayment(page);
+      attempts.push(attempt);
+      if (attempt.outcome !== 'refused') {
+        break;
+      }
     }
-  }
-  const isPaid = attempts.at(-1)?.outcome === 'left';
-  if (isPaid) {
-    await recordPayment(input.row, sessionId);
+    isPaid = attempts.at(-1)?.outcome === 'left';
+    if (isPaid) {
+      await recordPayment(input.row, sessionId);
+    }
+  } finally {
+    // Stopped however the attempts ended: a trace left running fails the next payment's `tracing.start` in this
+    // context, and an attempt that threw is the one whose trace matters most.
+    await tracing.stop(isPaid ? {} : { path: join(runDirectory, `${sessionId}-trace.zip`) });
   }
   const trace = isPaid ? undefined : `${sessionId}-trace.zip`;
-  await tracing.stop(trace === undefined ? {} : { path: join(runDirectory, trace) });
   return { sessionId, attempts, isPaid, summary, trace };
 };
 
@@ -347,15 +359,35 @@ export type PaymentRead = {
   readonly requestId?: string;
 };
 
+/** The app's payment-action reads: `GET …/payment-actions/<id>` and `POST …/payment-actions/<id>/recover`. */
+const paymentActionPath = /^\/v1\/billing\/payment-actions\/[^/]+(?:\/recover)?$/u;
+
+/**
+ * Whether `pathname` reads or recovers a payment action: the one `actionId` names, or any action when the watcher
+ * was registered before its action existed.
+ */
+export const isWatchedPaymentPath = (pathname: string, actionId?: string): boolean => {
+  if (!paymentActionPath.test(pathname)) {
+    return false;
+  }
+  if (actionId === undefined) {
+    return true;
+  }
+  const scope = `/v1/billing/payment-actions/${actionId}`;
+  return pathname === scope || pathname === `${scope}/recover`;
+};
+
 /**
  * Records the app's own payment-action reads and recovers from now on, so a row can tell whether the webhook settled
- * a paid Checkout before the return page looked, or the return page's recover settled it.
+ * a paid Checkout before the return page looked, or the return page's recover settled it. The listener lives as long
+ * as the page, so a row that knows its `actionId` names it and gets that action's reads only, not a later row's; the
+ * subscription row registers before its action exists and leaves the id out.
  */
-export const watchPaymentReads = (page: Page): PaymentRead[] => {
+export const watchPaymentReads = (page: Page, actionId?: string): PaymentRead[] => {
   const reads: PaymentRead[] = [];
   page.on('response', async (response) => {
     const url = new URL(response.url());
-    if (url.origin !== apiUrl || !/^\/v1\/billing\/payment-actions\/[^/]+(?:\/recover)?$/u.test(url.pathname)) {
+    if (url.origin !== apiUrl || !isWatchedPaymentPath(url.pathname, actionId)) {
       return;
     }
     // Recorded in answer order now; the state is filled in once the body is read.

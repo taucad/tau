@@ -105,7 +105,12 @@ describe('marketing copy in the app', () => {
       await billingSettings(page).open();
       await billingSettings(page).addCredits();
       const terms = topupModal(page).dialog.getByRole('link', { name: 'Terms' });
-      const href = (await terms.getAttribute('href')) ?? 'no href';
+      // A modal without the link, or a link without an href, fails in its own words rather than as a driver timeout.
+      const href = await terms.getAttribute('href', { timeout: 15_000 }).catch(() => null);
+      if (href === null) {
+        evidence.push('Add credits modal has no "Terms" link with an href', await screenshot(page, 'mk-03-terms'));
+        return { outcome: 'fail', defect: 'unclassified', evidence };
+      }
       const pricing = await pageCopy('/pricing/');
       const marketing = [...pricing.html.matchAll(/href="([^"]*\/legal\/[^"]*)"/gu)].map(([, target]) => target ?? '');
       const legal = await fetch(`${baseUrl}/legal/terms`);

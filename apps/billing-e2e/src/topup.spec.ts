@@ -82,7 +82,7 @@ const startCheckoutTopup = async (
   await modal.chooseAmount(dollars);
   const { action: quote } = await modal.reviewInCheckout();
   // Registered before Continue, so the return page's own GET and recover are all seen.
-  const reads = watchPaymentReads(page);
+  const reads = watchPaymentReads(page, quote.actionId);
   await modal.confirm();
   return { quote, reads };
 };
@@ -805,7 +805,7 @@ describe('3D Secure', () => {
         `paused ${describeAction(paused)}: "${await modal.text()}"`,
       );
       evidence.push(await screenshot(page, 'tu-04-attention'));
-      const reads = watchPaymentReads(page);
+      const reads = watchPaymentReads(page, quote.actionId);
       await modal.continueInCheckout();
       const continued = await payInCheckout(page, {
         row: 'TU-04',

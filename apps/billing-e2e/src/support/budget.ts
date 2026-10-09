@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import process from 'node:process';
 import { z } from 'zod';
 import { HarnessBlock, runDirectory, runId } from '#support/results.js';
 
@@ -55,12 +56,18 @@ export const assertPaymentAllowed = async (row: string): Promise<void> => {
   }
 };
 
-/** Records one successful payment against the row's allowance. */
+/**
+ * Records one successful payment against the row's allowance. The ledger is replaced through a rename, so a reader
+ * never meets a half-written file; the staging rows run one after another (`fileParallelism: false`), so no two
+ * writers race for it.
+ */
 export const recordPayment = async (row: string, reference: string): Promise<void> => {
   const entries = await readLedger();
   await mkdir(runDirectory, { recursive: true });
+  const replacement = `${ledgerPath}.${process.pid}.tmp`;
   await writeFile(
-    ledgerPath,
+    replacement,
     `${JSON.stringify([...entries, { row, reference, at: new Date().toISOString() }], undefined, 2)}\n`,
   );
+  await rename(replacement, ledgerPath);
 };

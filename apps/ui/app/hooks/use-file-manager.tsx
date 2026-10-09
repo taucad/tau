@@ -44,6 +44,7 @@ import { FileManagerNotReadyError } from '#filesystem/workspace-errors.js';
 import { reprovideAgentHostProjects } from '#services/agent-host-client.js';
 import { fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
+import { ENV } from '#environment.config.js';
 
 type FileManagerSnapshot = SnapshotFrom<typeof fileManagerMachine>;
 
@@ -1004,7 +1005,7 @@ export function FileManagerProvider({
           const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
           abort.signal.throwIfAborted();
           const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(root, 'working-copy'));
-          const watch = proxy.watchReady({ paths: [path], ...options }, listener);
+          let watch = proxy.watchReady({ paths: [path], ...options }, listener);
           disposeConnection = () => {
             if (!disposedConnection) {
               disposedConnection = true;
@@ -1012,6 +1013,22 @@ export function FileManagerProvider({
               proxy.dispose();
             }
           };
+          if (ENV.TAU_DEBUG) {
+            const fixture = (
+              globalThis as typeof globalThis & {
+                __tauE2eObservationWatch?: {
+                  wrapRecordWatch?(
+                    root: string,
+                    path: string,
+                    watch: ReturnType<FileSystemBridgeRootedProxy['watchReady']>,
+                  ): ReturnType<FileSystemBridgeRootedProxy['watchReady']>;
+                };
+              }
+            ).__tauE2eObservationWatch;
+            if (fixture?.wrapRecordWatch) {
+              watch = fixture.wrapRecordWatch(root, path, watch);
+            }
+          }
           if (abort.signal.aborted) {
             disposeConnection();
             abort.signal.throwIfAborted();

@@ -8,7 +8,9 @@ import {
   projectionProject,
   writeProjectionProjectFile,
 } from '#support/filesystem-projection.js';
-import { readProjectTree } from '#support/project-storage-state.js';
+import { readProjectStorageState, readProjectTree } from '#support/project-storage-state.js';
+import type { WorkbenchObservationEvidence } from '#support/workbench-files.js';
+import { controlWorkbenchObservation, restoreWorkbenchObservation } from '#support/workbench-files.js';
 
 afterEach(async () => {
   await target.closeSecondary();
@@ -413,4 +415,156 @@ test.skipIf(!metadataManualEnabled)('manual browser metadata inventory and thumb
     });
   }
   expect(ended).toBe(true);
+});
+
+test('recovers one project metadata watch while a healthy sibling keeps converging without navigation', async () => {
+  await target.setViewport({ width: 1440, height: 900 });
+  await target.navigate('/__e2e/project-file-tree?observation=1&metadataPair=1&chat=1&watch=.tau%2Fchats');
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
+  const storage = await readProjectStorageState();
+  const projects = await Promise.all(
+    storage.configs.map(async (config) => {
+      const tree = await readProjectTree(config);
+      const manifest = JSON.parse(tree['/tau.json']!) as Record<string, unknown>;
+      return { config, tree, manifest };
+    }),
+  );
+  const healthy = projects.find(({ manifest }) => manifest['name'] === 'Metadata healthy A');
+  const sibling = projects.find(({ manifest }) => manifest['name'] === 'Metadata sibling B');
+  if (!healthy || !sibling) {
+    throw new Error('The metadata pair fixture did not persist both actual projects.');
+  }
+  const chatRecord = (tree: Readonly<Record<string, string>>, name: string) => {
+    for (const [path, content] of Object.entries(tree)) {
+      if (/^\/\.tau\/chats\/[^/]+\/chat\.json$/u.test(path)) {
+        const record = JSON.parse(content) as Record<string, unknown>;
+        if (record['name'] === name) {
+          return { path: path.slice(1), record };
+        }
+      }
+    }
+    throw new Error(`Missing physical chat metadata for ${name}.`);
+  };
+  const healthyChat = chatRecord(healthy.tree, 'Metadata A retained');
+  const siblingChat = chatRecord(sibling.tree, 'Metadata B retained');
+  expect(healthyChat.record['resourceId']).toBe(healthy.config.projectId);
+  expect(siblingChat.record['resourceId']).toBe(sibling.config.projectId);
+  const healthyRoot = `/projects/${healthy.config.projectId}/.tau/chats`;
+  const siblingRoot = `/projects/${sibling.config.projectId}/.tau/chats`;
+  const healthyList = selectors.getByCss(`[id="project-chats-${healthy.config.projectId}"]`);
+  const siblingList = selectors.getByCss(`[id="project-chats-${sibling.config.projectId}"]`);
+  for (const name of ['Metadata healthy A', 'Metadata sibling B']) {
+    const expand = selectors.getByRole('button', { name: `Expand ${name}`, exact: true });
+    // oxlint-disable-next-line no-await-in-loop -- Each actual disclosure must be inspected before its gesture.
+    if (await target.isVisible(expand)) {
+      // oxlint-disable-next-line no-await-in-loop -- Expand the two independent sidebar owners in order.
+      await target.click(expand);
+    }
+  }
+  await target.expectVisible(healthyList.getByText('Metadata A retained', { exact: true }));
+  await target.expectVisible(siblingList.getByText('Metadata B retained', { exact: true }));
+  const evidence = async (): Promise<WorkbenchObservationEvidence> =>
+    target.evaluate(() => {
+      const control = (
+        globalThis as typeof globalThis & {
+          __tauE2eObservationWatch?: { evidence(): WorkbenchObservationEvidence };
+        }
+      ).__tauE2eObservationWatch;
+      if (!control) {
+        throw new Error('The rooted metadata watch fixture is unavailable.');
+      }
+      return control.evidence();
+    });
+  const initial = await evidence();
+  expect(initial.registrations[healthyRoot]).toBeGreaterThan(0);
+  expect(initial.registrations[siblingRoot]).toBeGreaterThan(0);
+  const identity = await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }));
+  const retry = siblingList.getByRole('button', { name: 'Retry loading chats', exact: true });
+  try {
+    const closed = await controlWorkbenchObservation('close', siblingRoot);
+    expect(closed.closed).toBeGreaterThan(0);
+    await target.expectVisible(retry);
+    await target.expectVisible(siblingList.getByText('Metadata B retained', { exact: true }));
+    await controlWorkbenchObservation('hold', siblingRoot);
+    await target.click(retry);
+    await expect
+      .poll(async () => {
+        const current = await evidence();
+        return current.registrations[siblingRoot];
+      })
+      .toBeGreaterThan(initial.registrations[siblingRoot]!);
+    const healthyText = JSON.stringify({ ...healthyChat.record, name: 'Metadata A while B held' });
+    const siblingText = JSON.stringify({ ...siblingChat.record, name: 'Metadata B after acknowledgment' });
+    const healthyWrite = await writeProjectionProjectFile(healthy.config, healthyChat.path, healthyText);
+    const siblingWrite = await writeProjectionProjectFile(sibling.config, siblingChat.path, siblingText);
+    const heldHealthyTree = await readProjectTree(healthy.config);
+    const heldSiblingTree = await readProjectTree(sibling.config);
+    expect(heldHealthyTree[`/${healthyChat.path}`]).toBe(healthyText);
+    expect(heldSiblingTree[`/${siblingChat.path}`]).toBe(siblingText);
+    await target.expectVisible(healthyList.getByText('Metadata A while B held', { exact: true }));
+    await target.expectVisible(siblingList.getByText('Metadata B retained', { exact: true }));
+    await target.expectCount(siblingList.getByText('Metadata B after acknowledgment', { exact: true }), 0);
+    const held = await evidence();
+    expect(held.registrations[healthyRoot]).toBe(initial.registrations[healthyRoot]);
+    await controlWorkbenchObservation('release', siblingRoot);
+    await target.expectCount(retry, 0);
+    await target.expectVisible(siblingList.getByText('Metadata B after acknowledgment', { exact: true }));
+
+    await controlWorkbenchObservation('close', siblingRoot);
+    await target.expectVisible(retry);
+    await controlWorkbenchObservation('reject', siblingRoot);
+    const beforeRejected = await evidence();
+    await target.click(retry);
+    await expect
+      .poll(async () => {
+        const current = await evidence();
+        return current.registrations[siblingRoot];
+      })
+      .toBeGreaterThan(beforeRejected.registrations[siblingRoot]!);
+    await target.expectVisible(retry);
+    const rejectedHealthyText = JSON.stringify({ ...healthyChat.record, name: 'Metadata A while B failed' });
+    const rejectedHealthyWrite = await writeProjectionProjectFile(
+      healthy.config,
+      healthyChat.path,
+      rejectedHealthyText,
+    );
+    await target.expectVisible(healthyList.getByText('Metadata A while B failed', { exact: true }));
+    const rejected = await evidence();
+    expect(rejected.registrations[healthyRoot]).toBe(initial.registrations[healthyRoot]);
+    await controlWorkbenchObservation('release', siblingRoot);
+    await target.click(retry);
+    await target.expectCount(retry, 0);
+    await target.expectVisible(siblingList.getByText('Metadata B after acknowledgment', { exact: true }));
+    const final = await evidence();
+    expect(final.registrations[healthyRoot]).toBe(initial.registrations[healthyRoot]);
+    expect(final.active.find(({ path }) => path === healthyRoot)).toEqual(
+      initial.active.find(({ path }) => path === healthyRoot),
+    );
+    const finalIdentity = await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }));
+    expect(finalIdentity).toEqual(identity);
+    await target.writeArtifact(
+      'metadata-scoped-retry.json',
+      JSON.stringify(
+        {
+          healthy: healthy.config,
+          sibling: sibling.config,
+          healthyRoot,
+          siblingRoot,
+          initial,
+          held,
+          rejected,
+          final,
+          identity,
+          finalIdentity,
+          healthyWrite,
+          siblingWrite,
+          rejectedHealthyWrite,
+        },
+        null,
+        2,
+      ),
+    );
+  } finally {
+    await restoreWorkbenchObservation();
+  }
 });

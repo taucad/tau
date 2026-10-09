@@ -1,6 +1,8 @@
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
+import type { ObservationWatch } from '@taucad/fs-client/observation-service';
+import type { FileSystemBridgeRootedProxy } from '@taucad/fs-bridge';
 import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
@@ -285,15 +287,10 @@ const installObservationWatchControls = (paths: readonly string[]): void => {
       throw new Error(`Observation fixture does not own ${path}.`);
     }
   };
-  WorkerChangeChannel.prototype.watchReady = function (this: WorkerChangeChannel, request, handler) {
-    const watch = original.call(this, request, handler);
-    const path = request.paths.find((candidate) => allowed.has(candidate));
-    if (path === undefined) {
-      return watch;
-    }
+  let restored = false;
+  const capture = (path: string, watch: ObservationWatch): ObservationWatch => {
     const watches = active.get(path) ?? new Set<CapturedWatch>();
     if (watches.size >= 32) {
-      watch.dispose();
       throw new Error('Observation fixture watch bound exceeded.');
     }
     active.set(path, watches);
@@ -332,7 +329,11 @@ const installObservationWatchControls = (paths: readonly string[]): void => {
     void forwardClosure();
     return {
       ready: (async (): Promise<void> => {
-        await Promise.all([watch.ready, gate.promise]);
+        await watch.ready;
+        await gate.promise;
+        if (!watches.has(captured)) {
+          throw new Error(`Observation fixture closed ${path} before acknowledgment.`);
+        }
         if (mode === 'rejected') {
           throw new Error(`Observation fixture rejected ${path}.`);
         }
@@ -341,47 +342,91 @@ const installObservationWatchControls = (paths: readonly string[]): void => {
       dispose: captured.dispose,
     };
   };
-  Object.assign(globalThis, {
-    __tauE2eObservationWatch: {
-      close: (path: string): number => {
-        requirePath(path);
-        const watches = [...(active.get(path) ?? [])];
+  WorkerChangeChannel.prototype.watchReady = function (this: WorkerChangeChannel, request, handler) {
+    const watch = original.call(this, request, handler);
+    const path = request.paths.find((candidate) => allowed.has(candidate));
+    if (restored || path === undefined) {
+      return watch;
+    }
+    try {
+      return capture(path, watch);
+    } catch (error) {
+      watch.dispose();
+      throw error;
+    }
+  };
+  const control = {
+    wrapRecordWatch: (
+      root: string,
+      path: string,
+      watch: ReturnType<FileSystemBridgeRootedProxy['watchReady']>,
+    ): ReturnType<FileSystemBridgeRootedProxy['watchReady']> => {
+      if (restored || path !== '.tau/chats' || !allowed.has(path)) {
+        return watch;
+      }
+      if (!/^\/projects\/[^/]+$/u.test(root) || root.split('/').includes('..') || root.length > 256) {
+        return watch;
+      }
+      const key = `${root}/${path}`;
+      if (!allowed.has(key) && allowed.size >= 16) {
+        throw new Error('Observation fixture rooted watch bound exceeded.');
+      }
+      allowed.add(key);
+      const captured = capture(key, { ready: watch.ready, closed: watch.closed, dispose: watch.unsubscribe });
+      return {
+        ready: captured.ready,
+        closed: (async (): Promise<void> => {
+          await captured.closed;
+        })(),
+        unsubscribe: captured.dispose,
+      };
+    },
+    close: (path: string): number => {
+      requirePath(path);
+      const watches = [...(active.get(path) ?? [])];
+      for (const watch of watches) {
+        watch.dispose();
+      }
+      return watches.length;
+    },
+    hold: (path: string): void => {
+      requirePath(path);
+      modes.set(path, 'held');
+    },
+    reject: (path: string): void => {
+      requirePath(path);
+      modes.set(path, 'rejected');
+    },
+    release: (path: string): void => {
+      requirePath(path);
+      modes.delete(path);
+      for (const watch of active.get(path) ?? []) {
+        watch.release();
+      }
+    },
+    evidence: () => ({
+      registrations: { ...registrations },
+      disposed,
+      active: [...active].map(([path, watches]) => ({ path, watches: watches.size })),
+    }),
+    restore: (): void => {
+      if (restored) {
+        return;
+      }
+      restored = true;
+      WorkerChangeChannel.prototype.watchReady = original;
+      for (const watches of active.values()) {
         for (const watch of watches) {
           watch.dispose();
         }
-        return watches.length;
-      },
-      hold: (path: string): void => {
-        requirePath(path);
-        modes.set(path, 'held');
-      },
-      reject: (path: string): void => {
-        requirePath(path);
-        modes.set(path, 'rejected');
-      },
-      release: (path: string): void => {
-        requirePath(path);
-        modes.delete(path);
-        for (const watch of active.get(path) ?? []) {
-          watch.release();
-        }
-      },
-      evidence: () => ({
-        registrations: { ...registrations },
-        disposed,
-        active: [...active].map(([path, watches]) => ({ path, watches: watches.size })),
-      }),
-      restore: (): void => {
-        WorkerChangeChannel.prototype.watchReady = original;
-        for (const watches of active.values()) {
-          for (const watch of watches) {
-            watch.dispose();
-          }
-        }
-        modes.clear();
-      },
+      }
+      modes.clear();
+      if (previous.__tauE2eObservationWatch === control) {
+        delete previous.__tauE2eObservationWatch;
+      }
     },
-  });
+  };
+  Object.assign(globalThis, { __tauE2eObservationWatch: control });
 };
 
 export const loader = async (): Promise<Response> => {
@@ -455,9 +500,24 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
 
     const seed = async (): Promise<void> => {
       try {
+        const location = await resolveLocation();
+        const metadataPair =
+          searchParameters.get('observation') === '1' && searchParameters.get('metadataPair') === '1';
+        if (metadataPair) {
+          await createProject({
+            location,
+            project: { ...createSeedProject(mainFixture), name: 'Metadata sibling B' },
+            chatName: 'Metadata B retained',
+            activeKernel: 'replicad',
+            files: buildSeedFiles(0, 0),
+          });
+        }
         const project = await createProject({
-          location: await resolveLocation(),
-          project: createSeedProject(mainFixture),
+          location,
+          project: metadataPair
+            ? { ...createSeedProject(mainFixture), name: 'Metadata healthy A' }
+            : createSeedProject(mainFixture),
+          ...(metadataPair ? { chatName: 'Metadata A retained' } : {}),
           activeKernel: 'replicad',
           files: buildSeedFiles(bulkFileCount, binaryMib),
           ...(seededPrompt === undefined

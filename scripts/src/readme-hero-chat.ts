@@ -642,6 +642,8 @@ const port: RevisionPort | undefined = values.mint
   ? createNativeGitRevisionPort({ repositoryPath: projectDir })
   : undefined;
 let baseHead: RevisionId | undefined;
+/** Where `main` stood when the run was admitted; a re-run replaces the showcase revision it minted last time. */
+let mainHead: RevisionId | undefined;
 let minted: { revisionId: string; treeId: string | undefined } | undefined;
 
 const provenanceOf = (turnCut: 'base' | 'result'): RevisionProvenance => ({
@@ -691,6 +693,7 @@ const mintBase = async (store: RevisionPort): Promise<RevisionId> => {
 const mintResult = async (
   store: RevisionPort,
   base: RevisionId,
+  expectedHead: RevisionId,
 ): Promise<{ revisionId: RevisionId; treeId: string | undefined }> => {
   const baseTree = await store.readTree(base);
   if (baseTree === undefined) {
@@ -711,7 +714,7 @@ const mintResult = async (
     summary: revisionSummary,
   });
   const result = revisionId(receipt.commitId);
-  await publish(store, base, result);
+  await publish(store, expectedHead, result);
   const record = await store.readRevision(result);
   return { revisionId: result, treeId: record?.treeId };
 };
@@ -833,7 +836,15 @@ const placement: TurnPlacementPort = {
   admit: async ({ requestId, key }) => {
     changedKey = key;
     if (port !== undefined) {
-      baseHead = (await port.readRef('main')) ?? (await mintBase(port));
+      mainHead = await port.readRef('main');
+      if (mainHead === undefined) {
+        baseHead = await mintBase(port);
+        mainHead = baseHead;
+      } else {
+        const head = await port.readRevision(mainHead);
+        const minted = head?.provenance.turnId === 'msg_hero_user_1' && head.provenance.turnCut === 'result';
+        baseHead = minted ? (head.parents[0] ?? mainHead) : mainHead;
+      }
     }
     return {
       requestId,
@@ -842,8 +853,8 @@ const placement: TurnPlacementPort = {
     };
   },
   complete: async ({ requestId, key }) => {
-    if (port !== undefined && baseHead !== undefined) {
-      minted = await mintResult(port, baseHead);
+    if (port !== undefined && baseHead !== undefined && mainHead !== undefined) {
+      minted = await mintResult(port, baseHead, mainHead);
     }
     const revision =
       minted === undefined

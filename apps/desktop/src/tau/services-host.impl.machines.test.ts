@@ -8,6 +8,7 @@ import { MessageChannel } from 'node:worker_threads';
 import { zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as TauHost from '@taucad/host';
+import type * as RuntimeHostNode from '@taucad/runtime/host/node';
 import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import { connectMachineChannel } from '@taucad/runtime/machine';
 import type { MachineArtifactReference, MachineCandidate, MachineChannelClient } from '@taucad/runtime/machine';
@@ -25,6 +26,29 @@ const listed = vi.hoisted(() => ({
   /* A directory read that fails, as a busy store does. */
   error: undefined as undefined | Error,
 }));
+/* The order in which quiescing gates the machine host's starts, reads its runs and lets starts go again. */
+const gate = vi.hoisted(() => [] as string[]);
+
+vi.mock('@taucad/runtime/host/node', async (importOriginal) => {
+  const actual = await importOriginal<typeof RuntimeHostNode>();
+  return {
+    ...actual,
+    createNodeMachineHost: async (input: Parameters<typeof actual.createNodeMachineHost>[0]) => {
+      const host = await actual.createNodeMachineHost(input);
+      return {
+        ...host,
+        quiesce: () => {
+          gate.push('quiesce');
+          const resume = host.quiesce();
+          return () => {
+            gate.push('resume');
+            resume();
+          };
+        },
+      };
+    },
+  };
+});
 
 vi.mock('@taucad/host', async (importOriginal) => {
   const actual = await importOriginal<typeof TauHost>();
@@ -41,11 +65,20 @@ vi.mock('@taucad/host', async (importOriginal) => {
         return {
           ...facet,
           list: async () => {
+            gate.push('list');
             throw error;
           },
         };
       }
-      return entries === undefined ? facet : { ...facet, list: async () => ({ cursor: undefined, entries }) };
+      return entries === undefined
+        ? facet
+        : {
+            ...facet,
+            list: async () => {
+              gate.push('list');
+              return { cursor: undefined, entries };
+            },
+          };
     },
   };
 });
@@ -69,10 +102,25 @@ const configuration = {
   flowCalibration: true,
   timelapse: false,
 } as const;
-/* One heated layer: enough plate for the simulator to read and start. */
-const plateGcode = ['M140 S60', 'M104 S200', 'G28', 'M190 S60', 'M109 S200', ';LAYER_CHANGE', 'G1 Z0.2 F600'].join(
-  '\n',
-);
+/* One heated layer, sliced for the simulated X1C (its CONFIG_BLOCK states what it was sliced for): enough plate for
+ * the simulator to check, read and start. */
+const plateGcode = [
+  '; CONFIG_BLOCK_START',
+  '; curr_bed_type = Textured PEI Plate',
+  '; filament_colour = #F2F2F2',
+  '; filament_diameter = 1.75',
+  '; filament_type = PLA',
+  '; nozzle_diameter = 0.4',
+  '; printer_model = Bambu Lab X1 Carbon',
+  '; CONFIG_BLOCK_END',
+  'M140 S60',
+  'M104 S200',
+  'G28',
+  'M190 S60',
+  'M109 S200',
+  ';LAYER_CHANGE',
+  'G1 Z0.2 F600',
+].join('\n');
 
 const projectIdFor = (name: string): string => `proj_${name.padEnd(21, '0')}`;
 const alphaId = projectIdFor('alpha');
@@ -240,6 +288,8 @@ describe('createServicesHost — machines', () => {
         'makera-carvera',
         'makera-carvera-simulator',
       ]);
+      /* No serial driver ships yet: the Grbl provider is listed with why, its simulator is not. */
+      expect(providers.filter(({ unavailable }) => unavailable !== undefined).map(({ id }) => id)).toEqual(['grbl']);
       expect(existsSync(join(machines.store, 'store.json'))).toBe(true);
 
       await expect(machines.completeCeremony('bind-unknown', 'no-such-ceremony', accessCode)).resolves.toEqual({
@@ -351,7 +401,8 @@ describe('createServicesHost — machines', () => {
         /* A simulator's provider declares only simulation, so the ceremony asks it no code. */
         for await (const event of client.discover({ providerId, configuration: { logicalId: providerId } })) {
           if (event.type === 'found') {
-            expect(event.candidate.endpoint.address).toMatch(/\.invalid$/u);
+            const { endpoint } = event.candidate;
+            expect(endpoint.transport === 'network' ? endpoint.address : endpoint.path).toMatch(/\.invalid$/u);
             break;
           }
         }
@@ -397,9 +448,12 @@ describe('createServicesHost — machines', () => {
       await machines.bindSimulator(client);
 
       listed.entries = [{ name: 'Router', snapshot: { run: { delivery: 'streamed', state: 'running' } } }];
+      gate.length = 0;
       await expect(machines.host.quiesce()).rejects.toMatchObject({
         refusal: { type: 'quiesce-refused', reason: 'streaming', machines: ['Router'] },
       });
+      /* Starts stop before the runs are read, so none begins in between, and go again when nothing closes. */
+      expect(gate).toEqual(['quiesce', 'list', 'resume']);
       await expect(client.list({})).resolves.toMatchObject({ entries: [expect.anything()] });
 
       listed.entries = undefined;
@@ -409,8 +463,10 @@ describe('createServicesHost — machines', () => {
       });
       await expect(client.list({})).resolves.toMatchObject({ entries: [expect.anything()] });
 
-      /* The person chose to quit anyway: the machine host closes with the rest. */
+      /* The person chose to quit anyway: the machine host closes with the rest, starting nothing first. */
+      gate.length = 0;
       await machines.host.quiesce({ quitIfStreamingUnknown: true });
+      expect(gate).toEqual(['quiesce', 'list']);
       await expect(client.list({})).rejects.toThrow();
     } finally {
       listed.entries = undefined;

@@ -1321,14 +1321,22 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   const beginQuiesce = async (quitIfStreamingUnknown: boolean): Promise<void> => {
     quiescing = true;
     /* Q-streamed-host, authoritative: read again here, with no new session admitted, because a stream may have begun
-     * since main asked. Closing the machine host would cut it mid-run, so nothing closes; a later quit asks again. */
+     * since main asked. Closing the machine host would cut it mid-run, so nothing closes; a later quit asks again.
+     * The machine host starts no job from here on, so none begins between this read and its close. */
+    let resumeStarts = (): void => undefined;
     const refuse = (refusal: QuiesceRefusal): never => {
+      resumeStarts();
       quiescing = false;
       quiescence = undefined;
       throw new ServicesQuiesceRefusedError(refusal);
     };
     let streaming: readonly string[] = [];
     try {
+      const opened = machineHost;
+      if (opened !== undefined) {
+        const { host } = await opened;
+        resumeStarts = host.quiesce();
+      }
       streaming = await streamingMachines();
     } catch (error) {
       if (!quitIfStreamingUnknown) {

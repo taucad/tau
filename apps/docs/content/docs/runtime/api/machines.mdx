@@ -7,7 +7,7 @@ wordBudgetOverride: 1700
 
 # Machines API
 
-Import browser-safe contracts from `@taucad/runtime/machine`. `MachineClient` is the machines facet that a workbench, Tau's agent tools and external agents share. Four kinds of operation cause a physical effect: `applyAction` (one declared action), the hold operations (a control held down), `stop`, and `resolveJob` (the only way a program is transferred or started). Every other operation reads, binds or reconciles. An accepted receipt means the machine took the command, not that its physical result has happened.
+Import browser-safe contracts from `@taucad/runtime/machine`. `MachineClient` is the machines facet that a workbench, Tau's agent tools and external agents share. Four kinds of operation cause a physical effect: `applyAction` (one declared action), the hold operations (a control held down), `stop`, and `resolveJob` (the only way a program is transferred or started). `approveAction` authorizes one; every other operation reads, binds or reconciles. An accepted receipt means the machine took the command, not that its physical result has happened.
 
 ## Discovery and binding
 
@@ -41,7 +41,7 @@ A hold is a control that acts while a person holds it: the standard held jog in 
 
 ## Authority, attendance and qualification
 
-Every request names a `MachineRequester`. A descriptor's `MachineAuthority` floor is `agent` (admitted only for the host's low-risk list, see `isUnattendedAction`), `approved-agent` (a person, or an agent after a person approved this exact intent) or `person`. A provider or host setting may raise a floor, never lower it. `attended` is a person's statement that they are at the machine: recorded with the operation, refused from an agent, and not a safety function. Interlocks named by an action must report safe.
+Every request names a `MachineRequester`. A descriptor's `MachineAuthority` floor is `agent` (admitted only for the host's low-risk list, see `isUnattendedAction`), `approved-agent` (a person, or an agent after a person approved this exact intent) or `person`. A person approves on their own session: `approveAction` takes `MachineApproveActionInput` (the agent's `operationId`, the intent shown with its run, `approve` or `deny`) and returns `MachineActionApproval`. The host keeps it with an intent digest for 10 minutes; a restart drops it. The agent's matching intent and `operationId` is admitted once; anything else, a denial included, is refused with `MACHINE_ACTION_APPROVAL_REQUIRED`. Agent sessions never approve actions or decide jobs. A provider or host setting may raise a floor, never lower it. `attended` is a person's statement that they are at the machine: recorded with the operation, refused from an agent, and not a safety function. Interlocks named by an action must report safe.
 
 A qualification is `qualified` against a `MachineQualificationProfile` (hardware or simulation evidence for a model and firmware), or `designed` or `unsupported` with a reason. Simulation never qualifies hardware. `setTesting` takes `MachineSetTestingInput` and returns the updated entry: in Testing mode a person may try `designed` controls on that machine to qualify them. Testing is a person's mode: an agent's request for a `designed` action is refused with Testing on.
 
@@ -49,7 +49,7 @@ A qualification is `qualified` against a `MachineQualificationProfile` (hardware
 
 `checkJob` takes `MachineCheckJobInput` and returns a `MachineJobCheck`: the parsed `MachineProgramSummary`, each `MachineCheck`, and the completed start-form values, or a refusal. It sends nothing and records nothing. `requestJob` takes `MachineRequestJobInput` and returns a `MachineJob`; the same `jobId` returns the existing job. `listJobs` and `watchJobs` take `MachineListJobsInput`; when `watchJobs` completes, list and watch again.
 
-A job moves through `MachineJobState` values from `preparing` and `awaiting-approval` to `started`, or ends `denied`, `withdrawn`, `rejected`, `unknown` or `failed`. `MachinePreparedJob` binds artifact, machine, configuration and setup digests with an expiry. `resolveJob` takes `MachineResolveJobInput`: approval carries the attestations the person made, their attendance, and the transfer and start operation ids the host will use. `withdrawJob` takes `MachineWithdrawJobInput`. The descriptor's `MachineJobFacts` say whether delivery is `stored` or `streamed` and whether a person starts the job at the machine.
+A job moves through `MachineJobState` values from `preparing` and `awaiting-approval` to `started`, or ends `denied`, `withdrawn`, `rejected`, `unknown` or `failed`. `MachinePreparedJob` binds artifact, machine, configuration and setup digests with an expiry. `resolveJob` takes `MachineResolveJobInput`: approval carries the attestations the person made, their attendance, and the transfer and start operation ids the host will use. Only a person's session decides a job; the agent then reads it. `withdrawJob` takes `MachineWithdrawJobInput`. The descriptor's `MachineJobFacts` say whether delivery is `stored` or `streamed` and whether a person starts the job at the machine.
 
 ## Operations
 

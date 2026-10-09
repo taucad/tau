@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
 import { legalUrl } from '#constants/meta.constants.js';
 import { AlertCircle, Check, ChevronDown, Circle, Contrast, Laptop, Moon, ShieldCheck, Sun } from 'lucide-react';
@@ -66,6 +67,7 @@ export function GeneralSettings(): React.JSX.Element {
   // T15/AD15: paid tiers carry a contractual no-train guarantee — the
   // projection forces `trainingConsent: false`, so no toggle is rendered.
   const { hasNoTrainGuarantee } = useCommercialFeatures();
+  const usageMetricsDescriptionId = useId();
   const { themeWithSystem, setTheme, currentOption } = useTheme();
   const { hue, setHue, resetHue } = useColor();
   const [areCodeInlayHintsEnabled, setCodeInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
@@ -205,93 +207,116 @@ export function GeneralSettings(): React.JSX.Element {
                 <AlertCircle className='size-4 shrink-0' />
                 <span>Unable to load privacy preferences. Check your connection and refresh.</span>
               </div>
-            ) : hasNoTrainGuarantee ? (
-              <div className='flex flex-col gap-1'>
-                <div className='flex items-center gap-2 font-medium'>
-                  <ShieldCheck className='size-4 text-primary' />
-                  No-train guarantee
-                </div>
-                <p className='text-sm text-muted-foreground'>
-                  Your plan never trains on your data — prompts and designs are excluded from AI training as part of
-                  your subscription.{' '}
-                  <a
-                    href={legalUrl('privacy#9.2.1')}
-                    target='_blank'
-                    rel='noopener noreferrer'
-                    className='underline hover:text-foreground'
-                  >
-                    Learn more
-                  </a>
-                </p>
-              </div>
             ) : (
-              <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-                <div className='flex flex-col gap-1'>
-                  <div className='flex items-center gap-2 font-medium'>
-                    {currentModeId === 'share' ? (
-                      <>
-                        <Check className='size-4 text-primary' />
-                        Data Sharing Enabled
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck className='size-4 text-primary' />
-                        Privacy Mode Enabled
-                      </>
-                    )}
+              <>
+                {hasNoTrainGuarantee ? (
+                  <div className='flex flex-col gap-1'>
+                    <div className='flex items-center gap-2 font-medium'>
+                      <ShieldCheck className='size-4 text-primary' />
+                      No-train guarantee
+                    </div>
+                    <p className='text-sm text-muted-foreground'>
+                      Your plan never trains on your data — prompts and designs are excluded from AI training as part of
+                      your subscription.{' '}
+                      <a
+                        href={legalUrl('privacy#9.2.1')}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        className='underline hover:text-foreground'
+                      >
+                        Learn more
+                      </a>
+                    </p>
                   </div>
-                  <p className='text-sm text-muted-foreground'>
-                    {currentModeId === 'share' ? (
-                      <>
-                        Your prompts and generated designs will be stored and used to improve our AI features.{' '}
-                        <a
-                          href={legalUrl('privacy#9.2.1')}
-                          target='_blank'
-                          rel='noopener noreferrer'
-                          className='underline hover:text-foreground'
-                        >
-                          Learn more
-                        </a>
-                      </>
-                    ) : (
-                      <>
-                        No training. Your data is not used to improve AI features.{' '}
-                        <a
-                          href={legalUrl('privacy#9.2.1')}
-                          target='_blank'
-                          rel='noopener noreferrer'
-                          className='underline hover:text-foreground'
-                        >
-                          Learn more
-                        </a>
-                      </>
-                    )}
-                  </p>
-                </div>
-                <ComboBoxResponsive
-                  title='Privacy Mode'
-                  description='Select how your data is used'
-                  groupedItems={[{ name: 'Privacy Settings', items: privacyModes }]}
-                  getValue={(item) => item.id}
-                  value={currentMode}
-                  isSearchEnabled={false}
-                  renderLabel={(item, selectedItem) => (
-                    <span className='flex w-full items-center justify-between gap-4'>
-                      <div className='flex flex-col gap-0.5'>
-                        <span className='font-medium'>{item.name}</span>
-                        <span className='text-xs text-muted-foreground'>{item.description}</span>
+                ) : (
+                  <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
+                    <div className='flex flex-col gap-1'>
+                      <div className='flex items-center gap-2 font-medium'>
+                        {currentModeId === 'share' ? (
+                          <>
+                            <Check className='size-4 text-primary' />
+                            Data Sharing Enabled
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className='size-4 text-primary' />
+                            Privacy Mode Enabled
+                          </>
+                        )}
                       </div>
-                      {selectedItem?.id === item.id ? <Check className='size-4 shrink-0' /> : null}
+                      <p className='text-sm text-muted-foreground'>
+                        {currentModeId === 'share' ? (
+                          <>
+                            Your prompts and generated designs will be stored and used to improve our AI features.{' '}
+                            <a
+                              href={legalUrl('privacy#9.2.1')}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              className='underline hover:text-foreground'
+                            >
+                              Learn more
+                            </a>
+                          </>
+                        ) : (
+                          <>
+                            No training. Your data is not used to improve AI features.{' '}
+                            <a
+                              href={legalUrl('privacy#9.2.1')}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              className='underline hover:text-foreground'
+                            >
+                              Learn more
+                            </a>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                    <ComboBoxResponsive
+                      title='Privacy Mode'
+                      description='Select how your data is used'
+                      groupedItems={[{ name: 'Privacy Settings', items: privacyModes }]}
+                      getValue={(item) => item.id}
+                      value={currentMode}
+                      isSearchEnabled={false}
+                      renderLabel={(item, selectedItem) => (
+                        <span className='flex w-full items-center justify-between gap-4'>
+                          <div className='flex flex-col gap-0.5'>
+                            <span className='font-medium'>{item.name}</span>
+                            <span className='text-xs text-muted-foreground'>{item.description}</span>
+                          </div>
+                          {selectedItem?.id === item.id ? <Check className='size-4 shrink-0' /> : null}
+                        </span>
+                      )}
+                      onSelect={handlePrivacyModeChange}
+                    >
+                      <Button variant='outline' disabled={isUpdating} className='w-40 justify-between'>
+                        <span className='truncate'>{currentMode.name}</span>
+                        <ChevronDown className='size-4 shrink-0 opacity-50' />
+                      </Button>
+                    </ComboBoxResponsive>
+                  </div>
+                )}
+                {/* Usage metrics are not training data, so the no-train guarantee does not replace this choice. */}
+                <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
+                  <div className='flex flex-col gap-1'>
+                    <span className='font-medium'>Share anonymous usage metrics</span>
+                    <span id={usageMetricsDescriptionId} className='text-sm text-muted-foreground'>
+                      Reports counts about how the agent works — tool calls, lookups, errors — with no prompts, code,
+                      file names or identity. Operational health metrics are always sent.
                     </span>
-                  )}
-                  onSelect={handlePrivacyModeChange}
-                >
-                  <Button variant='outline' disabled={isUpdating} className='w-40 justify-between'>
-                    <span className='truncate'>{currentMode.name}</span>
-                    <ChevronDown className='size-4 shrink-0 opacity-50' />
-                  </Button>
-                </ComboBoxResponsive>
-              </div>
+                  </div>
+                  <Switch
+                    aria-label='Share anonymous usage metrics'
+                    aria-describedby={usageMetricsDescriptionId}
+                    checked={preferences?.allowsUsageMetrics ?? true}
+                    disabled={isUpdating}
+                    onCheckedChange={(checked) => {
+                      updatePreferences({ allowsUsageMetrics: checked });
+                    }}
+                  />
+                </div>
+              </>
             )}
           </CardContent>
         </SettingsSectionCard>

@@ -31,9 +31,11 @@ vi.mock('react-router', () => ({
   useSearchParams: (): [URLSearchParams, () => void] => [new URLSearchParams(), vi.fn()],
 }));
 
+let mockAllowsUsageMetrics: boolean;
+
 vi.mock('#hooks/use-privacy-preferences.js', () => ({
   usePrivacyPreferences: () => ({
-    preferences: { allowsAiTraining: false },
+    preferences: { allowsAiTraining: false, allowsUsageMetrics: mockAllowsUsageMetrics },
     isLoading: false,
     error: undefined,
     updatePreferences: mockUpdatePreferences,
@@ -155,6 +157,7 @@ describe('GeneralSettings', () => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
     mockCodeInlayHintsValue = false;
     mockPointerCursorsValue = false;
+    mockAllowsUsageMetrics = true;
   });
 
   it('replaces the consent toggle with the no-train guarantee on paid tiers (T15/AD15)', () => {
@@ -190,6 +193,39 @@ describe('GeneralSettings', () => {
       }
     },
   );
+
+  it.each(['free', 'pro'] as const)(
+    'should offer the usage metrics switch beside the training choice on every tier (%s)',
+    (tier) => {
+      useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
+
+      render(<GeneralSettings />);
+
+      const toggle = screen.getByRole('switch', { name: 'Share anonymous usage metrics' });
+      expect(toggle).toHaveAttribute('data-state', 'checked');
+      expect(toggle).toHaveAccessibleDescription(/no prompts, code, file names or identity/i);
+    },
+  );
+
+  it('should persist switching usage metrics off', async () => {
+    render(<GeneralSettings />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('switch', { name: 'Share anonymous usage metrics' }));
+
+    expect(mockUpdatePreferences).toHaveBeenCalledWith({ allowsUsageMetrics: false });
+  });
+
+  it('should render usage metrics as off when the user switched them off', () => {
+    mockAllowsUsageMetrics = false;
+
+    render(<GeneralSettings />);
+
+    expect(screen.getByRole('switch', { name: 'Share anonymous usage metrics' })).toHaveAttribute(
+      'data-state',
+      'unchecked',
+    );
+  });
 
   it('should render code inlay hints disabled by default', () => {
     render(<GeneralSettings />);

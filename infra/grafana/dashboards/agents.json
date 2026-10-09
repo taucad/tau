@@ -192,10 +192,227 @@
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 }
     },
     {
-      "title": "Tau-funded LLM calls through the API gateway, by surface",
+      "title": "Agent context",
       "type": "row",
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 38 },
+      "panels": []
+    },
+    {
+      "title": "Calls Before First Write p50",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(tau_agent_calls_before_first_write_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 39 }
+    },
+    {
+      "title": "Time to First Write p50",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(tau_agent_time_to_first_write_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])))"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 39 }
+    },
+    {
+      "title": "Reference Lookup Failure Share",
+      "description": "Skill-reference lookups that ended zero_match, not_found or tool_error.",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "(sum(rate(tau_agent_reference_lookups_total{service_name=~\"$service\",agent_id=~\"$agent\",lookup_outcome!=\"ok\"}[1h])) or vector(0)) / clamp_min(sum(rate(tau_agent_reference_lookups_total{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])), 1e-10)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 0.3 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 39 }
+    },
+    {
+      "title": "API Misuse Share",
+      "description": "Model evaluations classified api_misuse, of all evaluations.",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "(sum(rate(tau_agent_evaluations_total{service_name=~\"$service\",agent_id=~\"$agent\",evaluation_class=\"api_misuse\"}[1h])) or vector(0)) / clamp_min(sum(rate(tau_agent_evaluations_total{service_name=~\"$service\",agent_id=~\"$agent\"}[1h])), 1e-10)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 0.3 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 39 }
+    },
+    {
+      "title": "Calls Before First Write p50 / p95 by Agent and Kernel",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, agent_id, kernel_id) (rate(tau_agent_calls_before_first_write_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}} {{kernel_id}} p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, agent_id, kernel_id) (rate(tau_agent_calls_before_first_write_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}} {{kernel_id}} p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 }
+    },
+    {
+      "title": "Time to First Write p50 / p95 by Agent and Kernel",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, agent_id, kernel_id) (rate(tau_agent_time_to_first_write_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}} {{kernel_id}} p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, agent_id, kernel_id) (rate(tau_agent_time_to_first_write_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}} {{kernel_id}} p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 }
+    },
+    {
+      "title": "Reference Lookups by Outcome",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, kernel_id, lookup_outcome) (rate(tau_agent_reference_lookups_total{service_name=~\"$service\",agent_id=~\"$agent\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{kernel_id}} {{lookup_outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 52 }
+    },
+    {
+      "title": "Reference Lookup Failure Share by Agent and Kernel",
+      "description": "Skill-reference lookups that ended zero_match, not_found or tool_error.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "(sum by (agent_id, kernel_id) (rate(tau_agent_reference_lookups_total{service_name=~\"$service\",agent_id=~\"$agent\",lookup_outcome!=\"ok\"}[15m])) or 0 * sum by (agent_id, kernel_id) (rate(tau_agent_reference_lookups_total{service_name=~\"$service\",agent_id=~\"$agent\"}[15m]))) / clamp_min(sum by (agent_id, kernel_id) (rate(tau_agent_reference_lookups_total{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])), 1e-10)",
+          "legendFormat": "{{agent_id}} {{kernel_id}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 52 }
+    },
+    {
+      "title": "Reference Bytes Read p50 / p95",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, agent_id, kernel_id) (rate(tau_agent_reference_bytes_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}} {{kernel_id}} p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, agent_id, kernel_id) (rate(tau_agent_reference_bytes_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}} {{kernel_id}} p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 }
+    },
+    {
+      "title": "Skill Activations by Skill",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, skill) (rate(tau_agent_skill_activations_total{service_name=~\"$service\",agent_id=~\"$agent\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{skill}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 }
+    },
+    {
+      "title": "Evaluations by Class",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, kernel_id, evaluation_class) (rate(tau_agent_evaluations_total{service_name=~\"$service\",agent_id=~\"$agent\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{kernel_id}} {{evaluation_class}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 68 }
+    },
+    {
+      "title": "Corrections After Error p95",
+      "description": "Model-file writes in a turn that followed a failed evaluation.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, agent_id, kernel_id) (rate(tau_agent_corrections_after_error_bucket{service_name=~\"$service\",agent_id=~\"$agent\"}[15m])))",
+          "legendFormat": "{{agent_id}} {{kernel_id}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 68 }
+    },
+    {
+      "title": "GeoSpec Runs by Status",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, run_status) (rate(tau_agent_geospec_runs_total{service_name=~\"$service\",agent_id=~\"$agent\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{run_status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 20 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 76 }
+    },
+    {
+      "title": "GeoSpec Assertions Passed / Failed",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (agent_id, result) (rate(tau_agent_geospec_assertions_total{service_name=~\"$service\",agent_id=~\"$agent\"}[5m]))",
+          "legendFormat": "{{agent_id}} {{result}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 76 }
+    },
+    {
+      "title": "Tau-funded LLM calls through the API gateway, by surface",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 84 },
       "panels": []
     },
     {
@@ -209,7 +426,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "currencyUSD" } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 39 }
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 85 }
     },
     {
       "title": "Tokens by Model and Type",
@@ -221,7 +438,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "short" } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 39 }
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 85 }
     },
     {
       "title": "LLM Calls by Surface and Outcome",
@@ -233,7 +450,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 47 }
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 93 }
     },
     {
       "title": "LLM Latency p95 and TTFT p95",
@@ -249,7 +466,7 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 47 }
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 93 }
     },
     {
       "title": "Agent & LLM Warnings and Errors",
@@ -262,7 +479,7 @@
         }
       ],
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending" },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 55 }
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 101 }
     }
   ]
 }

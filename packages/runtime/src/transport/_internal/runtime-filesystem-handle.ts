@@ -47,11 +47,20 @@ import type { FileSystemBridgeConnection } from '@taucad/fs-bridge';
  * @internal
  */
 export type RuntimeFileSystemHandle =
-  | { readonly kind: 'inline'; readonly create: () => RuntimeFileSystemBase }
+  | { readonly kind: 'inline'; readonly create: () => InlineRuntimeFileSystemBase }
   | {
       readonly kind: 'channel';
       readonly create: () => FileSystemBridgeConnection;
     };
+
+/**
+ * An inline filesystem whose disposal finishes asynchronously, such as a Node
+ * adapter whose native watcher closures settle on the owning event loop.
+ * `disposeAsync` disposes and resolves once those resources are released.
+ *
+ * @internal
+ */
+export type InlineRuntimeFileSystemBase = RuntimeFileSystemBase & { disposeAsync?(): Promise<void> };
 
 /* Module-private symbol — not exported, so external callers cannot
  * forge or extract a `RuntimeFileSystem` payload outside the runtime

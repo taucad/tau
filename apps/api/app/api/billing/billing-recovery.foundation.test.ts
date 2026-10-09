@@ -23,6 +23,7 @@ import {
 } from '#api/billing/credit-ledger.service.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 import type { QualifiedAdmissionInput, TerminalEvidence } from '#api/billing/credit-ledger.types.js';
+import type { MetricsService } from '#telemetry/metrics.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (!databaseUrl) {
@@ -318,5 +319,46 @@ describe('LLM recovery that cannot deadlock', () => {
     const [account] = await database.select().from(creditAccount).where(eq(creditAccount.id, fixture.accountId));
     expect(account).toMatchObject({ purchasedHeldAtoms: 0n, purchasedAtoms: 10_000n });
     expect(await readCase(admitted.operationId)).toMatchObject({ evidence: { reason: 'time_to_live' } });
+  });
+});
+
+describe('LLM recovery telemetry', () => {
+  it('should record the cost and tokens of an operation recovery settles from retained usage', async () => {
+    const genAiCost = { add: vi.fn() };
+    const genAiTokenUsage = { record: vi.fn() };
+    const recovering = new CreditLedgerService({ database }, new BillingPolicyService({ database }), {
+      genAiCost,
+      genAiTokenUsage,
+    } as unknown as MetricsService);
+    const fixture = await createFixture();
+    const admitted = await admit(fixture, `telemetry-${randomUUID()}`, 40n);
+    await recovering.recordInvocationEvidence({
+      operationId: admitted.operationId,
+      accountId: fixture.accountId,
+      requestDigest: admitted.requestDigest,
+      evidence: {
+        kind: 'final_usage',
+        usageOccurredAt: new Date(),
+        meterItems: [{ dimension: 'uncached_input', tier: null, quantity: 5n }],
+      },
+    });
+    await makeDue(admitted.operationId);
+
+    const result = await recovering.recoverDueLlmOperations({ environment, limit: 100, accountId: fixture.accountId });
+
+    expect(result.resolved).toBe(1);
+    const row = await readOperation(admitted.operationId);
+    expect(row.customerState).toBe('settled');
+    const attributes = {
+      'gen_ai.request.model': 'test-model',
+      'gen_ai.provider.name': row.providerId ?? 'unknown',
+      'tau.surface': 'gateway',
+      'tau.activity': 'agent',
+    };
+    expect(genAiCost.add).toHaveBeenCalledExactlyOnceWith(Number(row.chargedAtoms ?? 0n) / 1_000_000, attributes);
+    expect(genAiTokenUsage.record).toHaveBeenCalledExactlyOnceWith(5, {
+      ...attributes,
+      'gen_ai.token.type': 'input',
+    });
   });
 });

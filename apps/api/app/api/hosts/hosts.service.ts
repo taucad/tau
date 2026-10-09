@@ -873,7 +873,8 @@ export class HostsService implements OnModuleDestroy {
       .where(and(eq(hostDevice.id, grant.deviceId), isNull(hostDevice.revokedAt)))
       .limit(1);
     if (device.length === 0) {
-      options.socket.close(1008, 'device revoked');
+      // 4003, like `revokeDevice`'s closes: one cause, one code, whichever socket hears it first.
+      options.socket.close(4003, 'device revoked');
       return;
     }
     await this.parkRoute({ ...options, side: 'host', deviceId: grant.deviceId });

@@ -299,7 +299,11 @@ const loadFromRuntime = async (options: RuntimeOptions, forensic?: ForensicSink)
         ]);
   } finally {
     if (owned) {
-      runtime.terminate();
+      if (runtime.shutdown) {
+        await runtime.shutdown();
+      } else {
+        runtime.terminate();
+      }
     }
   }
 };
@@ -426,7 +430,11 @@ export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): Mana
       }
       try {
         const runtime = await sharedRuntime;
-        runtime.terminate();
+        if (runtime.shutdown) {
+          await runtime.shutdown();
+        } else {
+          runtime.terminate();
+        }
       } catch {
         // Runtime creation failed, so there is no live client to terminate.
       }

@@ -93,6 +93,8 @@ const accepted: Extract<MachineManifestDefinition['jobs'], { type: 'supported' }
     requiredMembers: ['Metadata/plate_1.gcode'],
     payloadSelection: 'plate',
     technology: 'additive.fff',
+    // A sliced plate, as Bambu Studio names it; preparation refuses any other name (`bambu.archive.ts`).
+    extensions: ['.gcode.3mf'],
   },
 ];
 

@@ -577,7 +577,7 @@ export const parseBambuDiscoveryDatagram = (
   return Object.freeze({
     id: `${model === 'X1C' ? 'bambu' : 'bambu-a1-mini'}:${serial ?? address}`,
     name,
-    endpoint: Object.freeze({ address, interface: networkInterface }),
+    endpoint: Object.freeze({ transport: 'network', address, interface: networkInterface }),
     claimedIdentity: Object.freeze({ model, ...(serial ? { serial } : {}) }),
     observedAt: input.observedAt,
     expiresAt: input.expiresAt,

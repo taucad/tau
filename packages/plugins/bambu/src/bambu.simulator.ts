@@ -1368,7 +1368,7 @@ const simulatorParts = (model: BambuModel, input: Readonly<{ simulator?: BambuSi
         candidate: {
           id,
           name: `Simulated ${model}`,
-          endpoint: { address: 'simulator.invalid', interface: 'simulator' },
+          endpoint: { transport: 'network', address: 'simulator.invalid', interface: 'simulator' },
           claimedIdentity: { serial: x1c ? 'simulated-x1c' : 'simulated-a1-mini', model },
           observedAt,
           expiresAt: new Date(Date.parse(observedAt) + 5 * 60_000).toISOString(),

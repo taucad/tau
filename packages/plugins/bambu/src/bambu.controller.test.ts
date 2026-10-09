@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
+import { MessageChannel } from 'node:worker_threads';
+
+import { createHostAdmissionAuthority } from '@taucad/runtime/host';
+import { createNodeMachineHost } from '@taucad/runtime/host/node';
+import { connectMachineChannel } from '@taucad/runtime/machine';
 
 import type {
   MachineArtifactReference,
@@ -10,6 +18,7 @@ import type {
 import { zipSync } from 'fflate';
 import { describe, expect, it, vi } from 'vitest';
 
+import { bambuA1MiniMachine, bambuMachine } from '#bambu.machine.js';
 import { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
 
 const report =
@@ -200,7 +209,7 @@ const artifactOf = (bytes: Uint8Array<ArrayBuffer>): MachineArtifactReference =>
 const candidate = {
   id: 'bambu:00M00A000000001',
   name: 'Workshop X1C',
-  endpoint: { address: '192.0.2.10', interface: 'test0' },
+  endpoint: { transport: 'network', address: '192.0.2.10', interface: 'test0' } as const,
   claimedIdentity: { serial: '00M00A000000001', model: 'X1C' },
   observedAt: '2026-09-14T00:00:00.000Z',
   expiresAt: '2026-09-14T00:00:30.000Z',
@@ -642,6 +651,119 @@ describe('Bambu read-only controller', () => {
     },
   );
 
+  it.each([
+    { providerId: 'bambu', model: 'X1C', serial: '00M00A000000001', printerType: 'BL-P001' },
+    { providerId: 'bambu-a1-mini', model: 'A1 mini', serial: '0300AA000000001', printerType: 'N1' },
+  ] as const)(
+    'should list and connect a $model binding an earlier build stored, address in its configuration',
+    async ({ providerId, model, serial, printerType }) => {
+      versionReply.serial = serial;
+      statusReply.printerType = printerType;
+      const root = await mkdtemp(join(tmpdir(), 'tau-bambu-store-'));
+      try {
+        // Exactly as the store at f1fd08a32 wrote it: an endpoint without `transport`, and the binding form 1.1.0
+        // (`address` and `serial` in the configuration).
+        await writeFile(join(root, 'store.json'), JSON.stringify({ version: 1 }), { mode: 0o600 });
+        await mkdir(join(root, 'workshop'), { mode: 0o700 });
+        await writeFile(
+          join(root, 'workshop', 'machine.json'),
+          JSON.stringify({
+            version: 1,
+            id: 'workshop',
+            name: 'Workshop',
+            providerId,
+            physicalId: serial,
+            candidate: {
+              id: `${providerId}:${serial}`,
+              name: 'Workshop',
+              endpoint: { address: '192.0.2.10', interface: 'manual' },
+              claimedIdentity: { serial, model },
+              observedAt: '2026-09-14T00:00:00.000Z',
+              expiresAt: '2026-09-14T00:00:30.000Z',
+            },
+            configuration: { logicalId: 'Workshop', address: '192.0.2.10', serial, wireForm: 'a' },
+            connection: { secretRef: 'vault:bambu', serviceTrust: { mqtt: { type: 'pinned', digest: pinnedDigest } } },
+            boundAt: '2026-09-14T00:00:00.000Z',
+          }),
+          { mode: 0o600 },
+        );
+        await chmod(root, 0o700);
+        const connectStream = vi.fn(async () => ({
+          readable: (async function* () {
+            yield* [];
+          })(),
+          write: vi.fn(async () => undefined),
+          close: vi.fn(async () => undefined),
+        }));
+        const clock = { now: () => new Date().toISOString() };
+        const onError = vi.fn();
+        const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
+        const host = await createNodeMachineHost({
+          storeRoot: root,
+          hostId: 'host-1',
+          authorityId: 'authority-1',
+          admission,
+          providers: [bambuMachine(), bambuA1MiniMachine()],
+          runtime: {
+            discovery: {
+              clock,
+              async *listenDatagrams() {
+                yield* [];
+              },
+            },
+            connection: () => ({
+              clock,
+              log: vi.fn(async () => undefined),
+              connectStream,
+              resolveSecret: vi.fn(async () => '12345678'),
+              async *readArtifact() {
+                yield* [];
+              },
+            }),
+          },
+          onError,
+        });
+        const ports = new MessageChannel();
+        const server = host.serve({
+          port: ports.port1,
+          session: host.issueSession({
+            actor: { kind: 'user', id: 'operator' },
+            grants: [
+              { route: 'machines', operation: 'machines.list' },
+              { route: 'machines', operation: 'machines.get' },
+            ],
+          }),
+        });
+        const client = connectMachineChannel(ports.port2);
+        try {
+          await client.ready;
+          const listed = await client.list({});
+          expect(listed.entries.map((entry) => [entry.machineId, entry.providerId])).toEqual([
+            ['workshop', providerId],
+          ]);
+          await vi.waitFor(async () => {
+            await expect(client.get({ machineId: 'workshop' })).resolves.toMatchObject({
+              freshness: 'current',
+              descriptor: { id: serial, model },
+            });
+          });
+          expect(connectStream).toHaveBeenCalledWith(
+            expect.objectContaining({ endpoint: { address: '192.0.2.10', port: 8883 } }),
+          );
+          expect(onError).not.toHaveBeenCalled();
+        } finally {
+          client.close();
+          server.dispose();
+          await host.close();
+        }
+      } finally {
+        versionReply.serial = '00M00A000000001';
+        statusReply.printerType = 'BL-P001';
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('should emit a bounded manual candidate without opening a datagram listener', async () => {
     const listenDatagrams = vi.fn(async function* () {
       yield* [];
@@ -650,9 +772,9 @@ describe('Bambu read-only controller', () => {
       {
         configuration: {
           logicalId: 'Workshop',
-          address: 'x1c.local',
           serial: '00M00A000000001',
         },
+        endpoint: { transport: 'network', address: 'x1c.local' },
         signal: new AbortController().signal,
       },
       { clock: { now: () => '2026-09-14T00:00:00.000Z' }, listenDatagrams },
@@ -665,19 +787,24 @@ describe('Bambu read-only controller', () => {
     expect(discovered).toMatchObject([
       {
         type: 'found',
-        candidate: { endpoint: { address: 'x1c.local', interface: 'manual' } },
+        candidate: { endpoint: { transport: 'network', address: 'x1c.local', interface: 'manual' } },
       },
     ]);
     expect(listenDatagrams).not.toHaveBeenCalled();
   });
 
-  it('should refuse a manual address or serial with a sentence a person can act on', async () => {
+  it('should refuse a manual address, port or serial with a sentence a person can act on', async () => {
     const listenDatagrams = vi.fn(async function* () {
       yield* [];
     });
-    const discover = async (configuration: Readonly<{ address: string; serial?: string }>): Promise<void> => {
+    const discover = async (entry: Readonly<{ address: string; port?: number; serial?: string }>): Promise<void> => {
+      const { serial, ...endpoint } = entry;
       for await (const _event of discoverBambuMachines(
-        { configuration: { logicalId: 'Workshop', ...configuration }, signal: new AbortController().signal },
+        {
+          configuration: { logicalId: 'Workshop', ...(serial === undefined ? {} : { serial }) },
+          endpoint: { transport: 'network', ...endpoint },
+          signal: new AbortController().signal,
+        },
         { clock: { now: () => '2026-09-14T00:00:00.000Z' }, listenDatagrams },
       )) {
         // Refused before anything is yielded.
@@ -686,6 +813,11 @@ describe('Bambu read-only controller', () => {
     await expect(discover({ address: 'http://x1c' })).rejects.toMatchObject({
       code: 'BAMBU_MANUAL_ADDRESS_INVALID',
       message: 'Enter a valid IP address or printer hostname.',
+    });
+    // Its MQTT, camera and FTPS services each have their own fixed port, so one entered port names none of them.
+    await expect(discover({ address: 'x1c.local', port: 8883 })).rejects.toMatchObject({
+      code: 'BAMBU_MANUAL_ADDRESS_INVALID',
+      message: 'A Bambu printer answers on its own fixed ports; enter the address without a port.',
     });
     // An A1 mini serial is not an X1C serial.
     await expect(discover({ address: 'x1c.local', serial: '0300AA000000001' })).rejects.toMatchObject({

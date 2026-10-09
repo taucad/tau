@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import { Duplex } from 'node:stream';
 
 import type {
+  MachineCandidate,
   MachineConnectInput,
   MachineConnectionRuntime,
   MachineDiscoveryEvent,
@@ -30,10 +31,9 @@ import {
 import { openBambuSession } from '#bambu.session.js';
 import type { BambuSubmission } from '#bambu.session.js';
 
-/** The admitted binding. @internal */
+/** The admitted binding; where the printer is lives in the discovery endpoint, not here. @internal */
 export type BambuBinding = Readonly<{
   logicalId: string;
-  address?: string;
   serial?: string;
   /** Which variant of the commands the clients disagree on to send; (a), Bambu Studio's, by default. */
   wireForm?: BambuWireForm;
@@ -48,8 +48,21 @@ type Binding = BambuBinding;
  */
 const advertisementWindow = 11_000;
 
+/**
+ * The printer's network address. A Bambu printer is a network machine, so the host never hands it a serial candidate.
+ * @internal
+ * @param candidate - The candidate being connected.
+ * @returns The address its services answer at.
+ */
+export const bambuCandidateAddress = (candidate: Pick<MachineCandidate, 'endpoint'>): string => {
+  if (candidate.endpoint.transport !== 'network') {
+    throw new BambuProtocolError('BAMBU_MANUAL_ADDRESS_INVALID', 'A Bambu printer is reached over the network.');
+  }
+  return candidate.endpoint.address;
+};
+
 /** Execute one bounded provider discovery pass through the host-owned datagram port.
- * @param input - Qualified provider configuration and cancellation.
+ * @param input - Qualified provider configuration, the address a person entered (if any) and cancellation.
  * @param runtime - Host-owned bounded datagram authority.
  * @param model - Model admitted by this provider.
  * @returns Normalized discovery events.
@@ -59,8 +72,18 @@ export async function* discoverBambuMachines(
   runtime: MachineDiscoveryRuntime,
   model: BambuModel = 'X1C',
 ): AsyncGenerator<MachineDiscoveryEvent> {
-  if (input.configuration.address) {
-    const { address } = input.configuration;
+  if (input.endpoint !== undefined) {
+    // A serial endpoint finds nothing: the host refuses one before it reaches a network provider.
+    if (input.endpoint.transport !== 'network') {
+      return;
+    }
+    const { address, port } = input.endpoint;
+    if (port !== undefined) {
+      throw new BambuProtocolError(
+        'BAMBU_MANUAL_ADDRESS_INVALID',
+        'A Bambu printer answers on its own fixed ports; enter the address without a port.',
+      );
+    }
     if (input.configuration.serial && !isBambuSerial(input.configuration.serial, model)) {
       throw new BambuProtocolError('BAMBU_SERIAL_INVALID', 'The serial does not match the selected printer model.');
     }
@@ -76,7 +99,7 @@ export async function* discoverBambuMachines(
       candidate: Object.freeze({
         id: `${model === 'X1C' ? 'bambu' : 'bambu-a1-mini'}:${input.configuration.serial ?? address}`,
         name: input.configuration.logicalId,
-        endpoint: Object.freeze({ address, interface: 'manual' }),
+        endpoint: Object.freeze({ transport: 'network', address, interface: 'manual' }),
         claimedIdentity: Object.freeze({
           serial: input.configuration.serial,
           model,
@@ -264,7 +287,7 @@ const openMqttStream = async (
 ): Promise<MachineNetworkStream> => {
   try {
     return await runtime.connectStream({
-      endpoint: { address: input.candidate.endpoint.address, port: 8883 },
+      endpoint: { address: bambuCandidateAddress(input.candidate), port: 8883 },
       transport: 'tls',
       trust,
       connectTimeout: 10_000,
@@ -304,7 +327,7 @@ const captureA1MiniStill = async (
   }
   const captureSignal = AbortSignal.any([signal, input.signal, AbortSignal.timeout(60_000)]);
   const stream = await runtime.connectStream({
-    endpoint: { address: input.candidate.endpoint.address, port: 6000 },
+    endpoint: { address: bambuCandidateAddress(input.candidate), port: 6000 },
     transport: 'tls',
     trust,
     connectTimeout: 10_000,
@@ -386,7 +409,7 @@ const bambuStillCapture = (
       }
       return captureNetworkStill({
         endpoint: {
-          address: input.candidate.endpoint.address,
+          address: bambuCandidateAddress(input.candidate),
           port: 322,
         },
         trust,
@@ -531,7 +554,7 @@ export const connectBambuMachine = async (
         throw new BambuProtocolError('MACHINE_TRANSFER_UNAVAILABLE');
       }
       const { bytesWritten } = await runtime.uploadFile({
-        endpoint: { address: input.candidate.endpoint.address, port: 990 },
+        endpoint: { address: bambuCandidateAddress(input.candidate), port: 990 },
         trust: input.connection.serviceTrust['ftp'] ?? trust,
         secretRef: input.connection.secretRef,
         username: 'bblp',

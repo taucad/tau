@@ -23,7 +23,6 @@ const machineDefinition = await resolveRuntimePluginDefinition('machine', bambuM
 type MachineBinding = Parameters<typeof machineDefinition.connect>[0]['configuration'];
 expectTypeOf<MachineBinding>().toEqualTypeOf<{
   logicalId: string;
-  address?: string;
   serial?: string;
   wireForm?: 'a' | 'b' | 'c';
 }>();

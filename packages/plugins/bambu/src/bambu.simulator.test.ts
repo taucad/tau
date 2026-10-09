@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 
 import type {
   ComponentObservation,
@@ -7,6 +8,8 @@ import type {
   MachineReport,
   MaterialSlotSnapshot,
 } from '@taucad/runtime/machine';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import { slicerTranscoder } from '@taucad/slicer';
 import { zipSync } from 'fflate';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -1158,6 +1161,51 @@ describe('Simulated X1C start form', () => {
       completed: { amsMapping: [1], expectedMaterials: [{ slot: 1, materialId: 'PLA' }], timelapse: true },
       blocked: [expect.objectContaining({ id: 'filament', detail: 'The slot mapped to the PLA filament holds PETG.' })],
     });
+  });
+
+  it('should pass the model, nozzle, plate and filament checks for a reference-engine slice for the X1C', async () => {
+    const quiet = (): void => undefined;
+    const services = {
+      logger: { log: quiet, debug: quiet, trace: quiet, warn: quiet, error: quiet, custom: quiet },
+      tracer: { startSpan: () => ({ end: quiet }) },
+      signal,
+    };
+    const transcoder = await resolveRuntimePluginDefinition('transcoder', slicerTranscoder());
+    const result = await transcoder.transcode(
+      {
+        from: 'glb',
+        to: 'gcode.3mf',
+        files: [
+          {
+            name: 'cube.glb',
+            // The slicer's own fixture: a 20 mm cube.
+            bytes: Uint8Array.from(await readFile(new URL('../../slicer/src/__fixtures__/cube.glb', import.meta.url))),
+            mimeType: 'model/gltf-binary',
+          },
+        ],
+        options: { engine: 'reference', filamentType: 'PLA' },
+      },
+      services,
+      await transcoder.initialize({}, services),
+    );
+    if (!result.success) {
+      throw new Error(`expected a slice, got ${JSON.stringify(result.issues)}`);
+    }
+    const bytes = Uint8Array.from(result.data[0]!.bytes);
+    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}` as MachineArtifactReference['digest'];
+    slices.set(digest, bytes);
+    const { simulator } = await open({ readArtifact: readSlices });
+    const { prepared } = await check(simulator, { ...artifact, digest, length: bytes.byteLength }, {});
+    expect(
+      prepared.checks
+        .filter(({ id }) => ['model', 'nozzle', 'plate', 'filament'].includes(id))
+        .map(({ id, state }) => [id, state]),
+    ).toEqual([
+      ['model', 'passed'],
+      ['nozzle', 'passed'],
+      ['plate', 'passed'],
+      ['filament', 'passed'],
+    ]);
   });
 
   it.each(paths)('should block a file sliced for another printer, nozzle or plate, sent by %s', async (_, form) => {

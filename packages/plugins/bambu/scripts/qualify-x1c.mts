@@ -74,6 +74,7 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { Client as FtpClient } from 'basic-ftp';
 import { z } from 'zod';
 
+import { bambuCandidateAddress } from '#bambu.host.js';
 import { bambuMachine } from '#bambu.machine.js';
 import { parseBambuDiscoveryDatagram } from '#bambu.protocol.js';
 
@@ -250,7 +251,7 @@ const runPassiveDiscovery = async (): Promise<void> => {
             identitySha256: digest(Uint8Array.from(Buffer.from(candidate.claimedIdentity.serial))),
           }
         : {}),
-      endpointSha256: digest(Uint8Array.from(Buffer.from(candidate.endpoint.address))),
+      endpointSha256: digest(Uint8Array.from(Buffer.from(bambuCandidateAddress(candidate)))),
       observedAt: candidate.observedAt,
       expiresAt: candidate.expiresAt,
     })}\n`,
@@ -320,7 +321,7 @@ const resolveCurrentConfiguration = async (
   }
   const candidate = await discoverPassiveX1c();
   return relocateConfiguration(configuration, {
-    address: candidate.endpoint.address,
+    address: bambuCandidateAddress(candidate),
     model: candidate.claimedIdentity.model,
     serial: candidate.claimedIdentity.serial,
   });
@@ -346,14 +347,14 @@ const prepareReadOnlyConfiguration = async (): Promise<void> => {
     throw new QualificationError('X1C_DISCOVERY_SERIAL_MISSING');
   }
   const [observedMqtt, observedCamera] = await Promise.all([
-    probeCertificate(candidate.endpoint.address, 8883),
-    probeCertificate(candidate.endpoint.address, 322),
+    probeCertificate(bambuCandidateAddress(candidate), 8883),
+    probeCertificate(bambuCandidateAddress(candidate), 322),
   ]);
   if (observedMqtt !== mqtt || observedCamera !== camera) {
     throw new QualificationError('X1C_APPROVED_TRUST_PIN_MISMATCH');
   }
   const configuration = configurationSchema.parse({
-    address: candidate.endpoint.address,
+    address: bambuCandidateAddress(candidate),
     serial,
     logicalId: 'workshop-x1c',
     mode: 'developer-lan',
@@ -378,7 +379,7 @@ const prepareReadOnlyConfiguration = async (): Promise<void> => {
       stage: 'prepare-read-only',
       prepared: true,
       identitySha256: digest(Uint8Array.from(Buffer.from(serial))),
-      endpointSha256: digest(Uint8Array.from(Buffer.from(candidate.endpoint.address))),
+      endpointSha256: digest(Uint8Array.from(Buffer.from(bambuCandidateAddress(candidate)))),
       trustMatched: { mqtt: true, camera: true },
     })}\n`,
   );
@@ -829,7 +830,7 @@ const openSession = async (
   const observedAt = new Date().toISOString();
   const event = await definition
     .discover(
-      { configuration, signal },
+      { configuration, endpoint: { transport: 'network', address: configuration.address }, signal },
       {
         clock: { now: () => new Date().toISOString() },
         async *listenDatagrams() {
@@ -1365,9 +1366,9 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
         providerId: 'bambu',
         configuration: {
           logicalId: activeConfiguration.logicalId,
-          address: activeConfiguration.address,
           serial: activeConfiguration.serial,
         },
+        endpoint: { transport: 'network', address: activeConfiguration.address },
         signal: cancellation.signal,
       })) {
         if (event.type !== 'lost' && event.candidate.claimedIdentity.serial === activeConfiguration.serial) {
@@ -1653,9 +1654,9 @@ const main = async (): Promise<void> => {
           identitySha256: candidate.claimedIdentity.serial
             ? digest(Uint8Array.from(Buffer.from(candidate.claimedIdentity.serial)))
             : undefined,
-          endpointSha256: digest(Uint8Array.from(Buffer.from(candidate.endpoint.address))),
-          mqtt: await probeCertificate(candidate.endpoint.address, 8883),
-          camera: await probeCertificate(candidate.endpoint.address, 322),
+          endpointSha256: digest(Uint8Array.from(Buffer.from(bambuCandidateAddress(candidate)))),
+          mqtt: await probeCertificate(bambuCandidateAddress(candidate), 8883),
+          camera: await probeCertificate(bambuCandidateAddress(candidate), 322),
         })}\n`,
       );
       return;

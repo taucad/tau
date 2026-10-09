@@ -1836,9 +1836,13 @@ export const uiSampleCameraDuringClick: BrowserCommand<[selector: string, frameC
 };
 
 // Installed only in an explicitly opted-in diagnostic worker before application startup.
-const installProjectionAcquisitionProbe = (): void => {
+const installProjectionAcquisitionProbe = (): {
+  installed: boolean;
+  constructors: { fileHandle: boolean; directoryHandle: boolean; blob: boolean };
+} => {
   type Receipt = {
     path: string;
+    identity: 'observed-path' | 'unqualified-basename';
     getFileCalls: number;
     /** Milliseconds. */
     getFileDuration: number;
@@ -1850,8 +1854,13 @@ const installProjectionAcquisitionProbe = (): void => {
   };
   const paths = new WeakMap<object, string>();
   const receipts = new Map<string, Receipt>();
-  if (typeof FileSystemFileHandle === 'undefined' || typeof FileSystemDirectoryHandle === 'undefined') {
-    return;
+  const constructors = {
+    fileHandle: typeof FileSystemFileHandle !== 'undefined',
+    directoryHandle: typeof FileSystemDirectoryHandle !== 'undefined',
+    blob: typeof Blob !== 'undefined',
+  };
+  if (!constructors.fileHandle || !constructors.directoryHandle || !constructors.blob) {
+    return { installed: false, constructors };
   }
   const directory = FileSystemDirectoryHandle.prototype.getDirectoryHandle;
   const handle = FileSystemDirectoryHandle.prototype.getFileHandle;
@@ -1868,14 +1877,16 @@ const installProjectionAcquisitionProbe = (): void => {
     return result;
   };
   FileSystemFileHandle.prototype.getFile = async function () {
-    const path = paths.get(this) ?? this.name;
-    if (!path.endsWith('/events.jsonl')) {
+    const observedPath = paths.get(this);
+    const path = observedPath ?? this.name;
+    if (!path.endsWith('/events.jsonl') && !(observedPath === undefined && path === 'events.jsonl')) {
       return getFile.call(this);
     }
     let receipt = receipts.get(path);
     if (receipt === undefined && receipts.size < 16) {
       receipt = {
         path,
+        identity: observedPath === undefined ? 'unqualified-basename' : 'observed-path',
         getFileCalls: 0,
         getFileDuration: 0,
         arrayBufferCalls: 0,
@@ -1936,6 +1947,7 @@ const installProjectionAcquisitionProbe = (): void => {
       },
     },
   });
+  return { installed: true, constructors };
 };
 
 const startWorkerCpuProfiles = async (
@@ -1951,6 +1963,7 @@ const startWorkerCpuProfiles = async (
     readonly attachedAt: number;
     startedAt?: number;
     resumedAt?: number;
+    acquisitionInstallation?: unknown;
     error?: string;
     ready: Promise<void>;
   };
@@ -2030,8 +2043,9 @@ const startWorkerCpuProfiles = async (
       try {
         if (!stopping) {
           if (process.env['VITE_TAU_E2E_PROJECTION_MULTICHAT'] === 'true') {
-            await command(sessionId, 'Runtime.evaluate', {
+            worker.acquisitionInstallation = await command(sessionId, 'Runtime.evaluate', {
               expression: `(${installProjectionAcquisitionProbe.toString()})()`,
+              returnByValue: true,
             });
           }
           await command(sessionId, 'Profiler.enable');
@@ -2063,13 +2077,21 @@ const startWorkerCpuProfiles = async (
       workers.map(async (worker, index) => {
         await worker.ready;
         let profilePath: string | undefined;
+        let acquisition: unknown;
+        let acquisitionError: string | undefined;
+        if (process.env['VITE_TAU_E2E_PROJECTION_MULTICHAT'] === 'true') {
+          try {
+            acquisition = await command(worker.sessionId, 'Runtime.evaluate', {
+              expression:
+                '(() => { const probe = globalThis.__tauProjectionAcquisition; if (!probe) return { available: false }; try { return { available: true, ...probe.read() }; } finally { probe.restore(); } })()',
+              returnByValue: true,
+            });
+          } catch (error) {
+            acquisitionError = String(error);
+          }
+        }
         try {
           if (worker.startedAt !== undefined) {
-            if (process.env['VITE_TAU_E2E_PROJECTION_MULTICHAT'] === 'true') {
-              await command(worker.sessionId, 'Runtime.evaluate', {
-                expression: 'globalThis.__tauProjectionAcquisition?.restore()',
-              });
-            }
             const result = await command(worker.sessionId, 'Profiler.stop');
             if (typeof result !== 'object' || result === null || !('profile' in result)) {
               throw new Error('Worker profiler returned no profile.');
@@ -2080,7 +2102,7 @@ const startWorkerCpuProfiles = async (
         } catch (error) {
           worker.error = `${worker.error ?? ''} Stop: ${String(error)}`;
         }
-        return { ...worker, ready: undefined, profilePath, stoppedAt: Date.now() };
+        return { ...worker, ready: undefined, profilePath, acquisition, acquisitionError, stoppedAt: Date.now() };
       }),
     );
     await cdp.send('Target.setAutoAttach', { autoAttach: false, waitForDebuggerOnStart: false, flatten: false });

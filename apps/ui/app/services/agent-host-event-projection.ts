@@ -921,7 +921,7 @@ export type AgentHostApproval = {
    * The durable record this interrupt gates, when the tool named one.
    *
    * A job request writes `{ jobId, machineId, fileName }` and a machine action
-   * `{ machineId, componentId, action, operationId, label }`, so the Print pane
+   * `{ machineId, componentId, action, operationId, label, intent }`, so the Print pane
    * can answer the same interrupt the banner shows; other tools may write nothing.
    */
   readonly context?: AgentHostApprovalContext | undefined;
@@ -937,6 +937,10 @@ export type AgentHostApprovalContext = {
   readonly action?: string | undefined;
   readonly operationId?: string | undefined;
   readonly label?: string | undefined;
+  /** For a machine action: the parameters of the exact intent the person approves, from the tool's `intent`. */
+  readonly parameters?: Readonly<Record<string, unknown>> | undefined;
+  /** For a machine action: the action version of that intent, which the host's approval record names (R15). */
+  readonly version?: number | undefined;
 };
 
 /** One sign-in method an external agent offered. @public */
@@ -987,6 +991,9 @@ const interruptRequestSchema = z.looseObject({
       action: z.string().min(1).optional(),
       operationId: z.string().min(1).optional(),
       label: z.string().min(1).optional(),
+      intent: z
+        .looseObject({ parameters: z.record(z.string(), z.unknown()).optional(), version: z.number().int().optional() })
+        .optional(),
     })
     .optional(),
 });
@@ -999,6 +1006,8 @@ const agentHostApprovalContextSchema = z.object({
   action: z.string().min(1).optional(),
   operationId: z.string().min(1).optional(),
   label: z.string().min(1).optional(),
+  parameters: z.record(z.string(), z.unknown()).optional(),
+  version: z.number().int().optional(),
 });
 
 /**
@@ -1008,7 +1017,17 @@ const agentHostApprovalContextSchema = z.object({
  * @returns Only the correlation keys present, or `undefined` when none are.
  */
 const approvalContextOf = (
-  context: (AgentHostApprovalContext & { readonly requestId?: string | undefined }) | undefined,
+  context:
+    | (AgentHostApprovalContext & {
+        readonly requestId?: string | undefined;
+        readonly intent?:
+          | {
+              readonly parameters?: Readonly<Record<string, unknown>> | undefined;
+              readonly version?: number | undefined;
+            }
+          | undefined;
+      })
+    | undefined,
 ): AgentHostApprovalContext | undefined => {
   if (!context) {
     return undefined;
@@ -1024,6 +1043,8 @@ const approvalContextOf = (
       action: context.action,
       operationId: context.operationId,
       label: context.label,
+      parameters: context.intent?.parameters,
+      version: context.intent?.version,
     }).filter(([, value]) => value !== undefined),
   );
   return Object.keys(picked).length === 0 ? undefined : picked;

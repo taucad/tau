@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { z } from 'zod';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   ComponentObservation,
@@ -10,7 +11,12 @@ import type {
 } from '@taucad/runtime/machine';
 import { useMachineControl, usePresence, presenceLease } from '#hooks/use-machine-control.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
-import { Activities, ControlStage } from '#routes/w.$workspace.$project/chat-print-controls.js';
+import {
+  Activities,
+  ControlStage,
+  formChoices,
+  formNumber,
+} from '#routes/w.$workspace.$project/chat-print-controls.js';
 import { PressureAdvanceStage } from '#routes/w.$workspace.$project/chat-print-materials.js';
 import {
   MachineAlerts,
@@ -19,7 +25,9 @@ import {
   isObservationStale,
 } from '#routes/w.$workspace.$project/chat-print-monitor.js';
 import { PrintStages } from '#routes/w.$workspace.$project/chat-print-section.js';
+import { machineActionDescriptorOf, machineJogHold, standardMachineAction } from '@taucad/runtime/machine';
 import {
+  carveraManifest,
   fffComponents,
   known,
   machineEntry,
@@ -80,6 +88,20 @@ function Harness({
   );
 }
 
+const surfaces = (client: MachineClient, machine: MachineDirectoryEntry, attended: boolean): React.JSX.Element => (
+  <Harness client={client} machine={machine} isAttended={attended}>
+    {(control) => (
+      <>
+        <MachineAlerts control={control} />
+        <Activities control={control} />
+        <MonitorStage control={control} />
+        <ControlStage client={client} control={control} />
+        <PressureAdvanceStage control={control} />
+      </>
+    )}
+  </Harness>
+);
+
 const renderControl = (
   machine: MachineDirectoryEntry,
   {
@@ -87,20 +109,12 @@ const renderControl = (
     fixture = createFixture({ entries: [machine] }),
   }: { attended?: boolean; fixture?: PrintClientFixture } = {},
 ) => {
-  const view = render(
-    <Harness client={fixture.client} machine={machine} isAttended={attended}>
-      {(control) => (
-        <>
-          <MachineAlerts control={control} />
-          <Activities control={control} />
-          <MonitorStage control={control} />
-          <ControlStage client={fixture.client} control={control} />
-          <PressureAdvanceStage control={control} />
-        </>
-      )}
-    </Harness>,
-  );
-  return { ...view, fixture };
+  const view = render(surfaces(fixture.client, machine, attended));
+  /** The machine reports again: the same surfaces over the new observation. */
+  const observe = (next: MachineDirectoryEntry): void => {
+    view.rerender(surfaces(fixture.client, next, attended));
+  };
+  return { ...view, fixture, observe };
 };
 
 const openStage = (title: string): HTMLElement => {
@@ -179,6 +193,13 @@ describe('Control on a milling machine', () => {
         attended: true,
       }),
     );
+
+    // The keyboard sends a step once, as a click does.
+    within(control).getByRole('button', { name: 'Jog X+' }).focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(fixture.applyAction).toHaveBeenCalledTimes(2);
+    });
 
     await user.click(within(control).getByRole('button', { name: 'Zero X here' }));
     await waitFor(() => {
@@ -284,6 +305,9 @@ describe('Control on a milling machine', () => {
     });
     const { fixture } = renderControl(alarm, { attended: true });
     const alert = screen.getByRole('alert', { name: 'Machine alert' });
+    // An alert reads in the feature tone; red is only for Stop and cancel (#321).
+    expect(alert).toHaveClass('border-feature/30');
+    expect(alert.className).not.toMatch(/destructive/u);
     expect(alert).toHaveTextContent('At the machine: Move the gantry off the switch.');
     await user.click(within(alert).getByRole('button', { name: /^Unlock/u }));
     await waitFor(() => {
@@ -297,20 +321,162 @@ describe('Control on a milling machine', () => {
 describe('press and hold', () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  const holdJog = (fixture: PrintClientFixture): HTMLElement => {
-    renderControl(router(), { attended: true, fixture });
+  const holdJog = (
+    fixture: PrintClientFixture,
+    machine = router(),
+    name = 'Jog X+',
+  ): Readonly<{ jog: HTMLElement; observe: (next: MachineDirectoryEntry) => void }> => {
+    const { observe } = renderControl(machine, { attended: true, fixture });
     const control = openStage('Control');
     fireEvent.click(within(control).getByRole('radio', { name: 'Hold to jog' }));
     expect(control).toHaveTextContent('the machine stops by itself within 150 ms');
-    return within(control).getByRole('button', { name: 'Jog X+' });
+    return { jog: within(control).getByRole('button', { name }), observe };
   };
+
+  /** Press and wait until the machine granted the hold. */
+  const press = async (fixture: PrintClientFixture, jog: HTMLElement): Promise<void> => {
+    fireEvent.pointerDown(jog);
+    await waitFor(() => {
+      expect(fixture.beginHold).toHaveBeenCalledOnce();
+    });
+    await waitFor(() => {
+      expect(jog).toHaveAttribute('aria-pressed', 'true');
+    });
+  };
+
+  it('keeps a hold while the machine reports itself moving, and keeps its button live to let go', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fixture = createFixture({ entries: [router()] });
+    const { jog, observe } = holdJog(fixture);
+    await press(fixture, jog);
+    // Grbl reports Jog as active: that is the hold itself, not a reason to stop.
+    observe(router({ snapshot: machineSnapshot(millingComponents(routerManifest), { state: { status: 'active' } }) }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(120);
+    });
+    expect(fixture.endHold).not.toHaveBeenCalled();
+    expect(fixture.renewHold.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(jog).toBeEnabled();
+    fireEvent.pointerUp(jog);
+    await waitFor(() => {
+      expect(fixture.endHold).toHaveBeenCalledExactlyOnceWith({ holdId: 'hold-1' });
+    });
+  });
+
+  it.each([
+    { when: 'the observation goes stale', next: () => router({ freshness: 'stale' }) },
+    {
+      when: 'the machine goes into alarm',
+      next: () =>
+        router({ snapshot: machineSnapshot(millingComponents(routerManifest), { state: { status: 'alarm' } }) }),
+    },
+  ])('lets go and stops renewing when $when', async ({ next }) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fixture = createFixture({ entries: [router()] });
+    const { jog, observe } = holdJog(fixture);
+    await press(fixture, jog);
+    observe(next());
+    await waitFor(() => {
+      expect(fixture.endHold).toHaveBeenCalledExactlyOnceWith({ holdId: 'hold-1' });
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent(/^Garage LongMill stopped the jog: /u);
+    const renewals = fixture.renewHold.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(fixture.renewHold).toHaveBeenCalledTimes(renewals);
+  });
+
+  it.each([
+    { where: 'a release anywhere on the page', release: () => fireEvent.pointerUp(document.body) },
+    { where: 'a cancelled pointer', release: () => fireEvent.pointerCancel(globalThis.window) },
+    { where: 'the window losing focus', release: () => fireEvent.blur(globalThis.window) },
+    {
+      where: 'the page being hidden',
+      release: () => {
+        vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+        fireEvent(document, new Event('visibilitychange'));
+      },
+    },
+  ])('ends a hold on $where', async ({ release }) => {
+    const fixture = createFixture({ entries: [router()] });
+    const { jog } = holdJog(fixture);
+    await press(fixture, jog);
+    act(release);
+    await waitFor(() => {
+      expect(fixture.endHold).toHaveBeenCalledExactlyOnceWith({ holdId: 'hold-1' });
+    });
+    expect(jog).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('says so when the machine ended the hold, and lets go', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fixture = createFixture({ entries: [router()] });
+    fixture.renewHold.mockResolvedValue({ status: 'ended' });
+    const { jog } = holdJog(fixture);
+    await press(fixture, jog);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Garage LongMill ended the jog.');
+    expect(jog).toHaveAttribute('aria-pressed', 'false');
+    // The machine already ended it: nothing to release.
+    expect(fixture.endHold).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet when the release finds the hold already ended, and says any other failure', async () => {
+    const fixture = createFixture({ entries: [router()] });
+    fixture.endHold.mockRejectedValueOnce(new Error('MACHINE_HOLD_ENDED'));
+    const { jog } = holdJog(fixture);
+    await press(fixture, jog);
+    fireEvent.pointerUp(jog);
+    await waitFor(() => {
+      expect(fixture.endHold).toHaveBeenCalledOnce();
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    fixture.endHold.mockRejectedValueOnce(new Error('MACHINE_CHANNEL_CLOSED'));
+    fixture.beginHold.mockClear();
+    await press(fixture, jog);
+    fireEvent.pointerUp(jog);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Garage LongMill did not confirm the end of the jog (MACHINE_CHANNEL_CLOSED)',
+    );
+  });
+
+  it('holds with Space once despite key repeat and lets go on key up', async () => {
+    const fixture = createFixture({ entries: [router()] });
+    const { jog } = holdJog(fixture);
+    fireEvent.keyDown(jog, { key: ' ' });
+    fireEvent.keyDown(jog, { key: ' ', repeat: true });
+    await waitFor(() => {
+      expect(fixture.beginHold).toHaveBeenCalledOnce();
+    });
+    fireEvent.keyUp(jog, { key: ' ' });
+    await waitFor(() => {
+      expect(fixture.endHold).toHaveBeenCalledExactlyOnceWith({ holdId: 'hold-1' });
+    });
+  });
+
+  it('holds the bed up as Z− on a machine whose bed rides Z', async () => {
+    const fixture = createFixture({ entries: [router()] });
+    const bedOnZ = {
+      ...routerManifest,
+      axes: routerManifest.axes.map((axis) => (axis.id === 'z' ? ({ ...axis, carries: 'work' } as const) : axis)),
+    };
+    const { jog } = holdJog(fixture, router({ manifest: bedOnZ }), 'Jog Z−, bed up');
+    fireEvent.pointerDown(jog);
+    await waitFor(() => {
+      expect(fixture.beginHold).toHaveBeenCalledWith(
+        expect.objectContaining({ parameters: { axis: 'z', direction: -1, feed: 1000 } }),
+      );
+    });
+  });
 
   it('begins a hold on press, renews it every half lease, and ends it on release', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const fixture = createFixture({ entries: [router()] });
-    const jog = holdJog(fixture);
+    const { jog } = holdJog(fixture);
 
     fireEvent.pointerDown(jog);
     await waitFor(() => {
@@ -343,11 +509,46 @@ describe('press and hold', () => {
     expect(fixture.renewHold).toHaveBeenCalledTimes(renewals);
   });
 
+  it('ends a granted hold when the pane goes away', async () => {
+    const fixture = createFixture({ entries: [router()] });
+    const { jog } = holdJog(fixture);
+    await press(fixture, jog);
+    cleanup();
+    await waitFor(() => {
+      expect(fixture.endHold).toHaveBeenCalledExactlyOnceWith({ holdId: 'hold-1' });
+    });
+  });
+
+  it.each([
+    {
+      scenario: 'refused',
+      refuse: (fixture: PrintClientFixture) =>
+        fixture.beginHold.mockResolvedValueOnce({
+          status: 'rejected',
+          code: 'MACHINE_ACTION_BUSY',
+          message: 'The machine is busy.',
+        }),
+    },
+    {
+      scenario: 'failed',
+      refuse: (fixture: PrintClientFixture) =>
+        fixture.beginHold.mockRejectedValueOnce(new Error('The machine is busy.')),
+    },
+  ])('lets go and says why when the machine $scenario the hold', async ({ refuse }) => {
+    const fixture = createFixture({ entries: [router()] });
+    refuse(fixture);
+    const { jog } = holdJog(fixture);
+    fireEvent.pointerDown(jog);
+    expect(await screen.findByText('The machine is busy.')).toBeInTheDocument();
+    expect(jog).toHaveAttribute('aria-pressed', 'false');
+    expect(fixture.renewHold).not.toHaveBeenCalled();
+  });
+
   it('ends a hold released before the machine granted it, and never renews it', async () => {
     const fixture = createFixture({ entries: [router()] });
     const granted = Promise.withResolvers<{ status: 'held'; holdId: string; lease: number }>();
     fixture.beginHold.mockReturnValueOnce(granted.promise);
-    const jog = holdJog(fixture);
+    const { jog } = holdJog(fixture);
 
     fireEvent.pointerDown(jog);
     fireEvent.pointerUp(jog);
@@ -459,7 +660,9 @@ describe('Monitor and materials on a printer', () => {
         ? known('part-fan', 'accessories', { kind: 'level', ratio: 0.47 })
         : observation,
     );
-    const { fixture } = renderControl(entry({ testing: true, snapshot: machineSnapshot(components, { components }) }));
+    const { fixture, observe } = renderControl(
+      entry({ testing: true, snapshot: machineSnapshot(components, { components }) }),
+    );
     const control = openStage('Control');
     const speed = within(control).getByRole('combobox', { name: 'Part fan' });
     expect(within(control).getByText('47 %')).toBeInTheDocument();
@@ -474,6 +677,15 @@ describe('Monitor and materials on a printer', () => {
     });
     expect(speed).toHaveTextContent('0 %');
     expect(within(control).getByText('47 %')).toBeInTheDocument();
+
+    // The program sets the fan: the list follows what the machine reports, not the earlier choice.
+    const programmed = fffComponents().map((observation) =>
+      observation.componentId === 'part-fan'
+        ? known('part-fan', 'accessories', { kind: 'level', ratio: 0.75 })
+        : observation,
+    );
+    observe(entry({ testing: true, snapshot: machineSnapshot(programmed, { components: programmed }) }));
+    expect(speed).toHaveTextContent('75 %');
   });
 
   it('lists the pressure-advance table, deletes a row, and saves a value by hand', async () => {
@@ -609,5 +821,136 @@ describe('describeRun', () => {
   it('states the run with its first counter and the time left', () => {
     expect(describeRun(printing())).toBe('Running · layer 42 of 125 · 9 min left');
     expect(describeRun(entry())).toBeUndefined();
+  });
+});
+
+describe('controls read from what the machine declares', () => {
+  it("runs the probe cycle chosen from the machine's own list", async () => {
+    const user = userEvent.setup();
+    const carvera = machineEntry({
+      manifest: carveraManifest,
+      name: 'Shop Carvera',
+      providerId: 'carvera-simulator',
+      testing: true,
+      snapshot: machineSnapshot([
+        ...millingComponents(carveraManifest),
+        known('cover', 'inputs', { kind: 'interlock', state: 'safe' }),
+      ]),
+    });
+    const { fixture } = renderControl(carvera, { attended: true });
+    const control = openStage('Control');
+    await user.click(within(control).getByRole('combobox', { name: 'Wireless probe cycle' }));
+    await user.click(screen.getByRole('option', { name: 'corner' }));
+    await user.click(within(control).getByRole('button', { name: /^Probe/u }));
+    await waitFor(() => {
+      expect(fixture.applyAction).toHaveBeenCalledWith(
+        expect.objectContaining({ componentId: 'probe', action: 'probe.run', parameters: { cycle: 'corner' } }),
+      );
+    });
+  });
+
+  it("keeps a feed and a duration inside the form's bounds and prefers its default", () => {
+    const fast = machineActionDescriptorOf(
+      machineJogHold({
+        componentId: 'motion',
+        lease: 100,
+        bound: 150,
+        schema: z.strictObject({
+          axis: z.string(),
+          direction: z.union([z.literal(1), z.literal(-1)]),
+          feed: z.number().positive().max(600),
+        }),
+      }),
+    );
+    expect(formNumber(fast, 'feed', 1000)).toBe(600);
+    const timed = machineActionDescriptorOf(
+      standardMachineAction({
+        id: 'spindle.set',
+        componentId: 'router',
+        label: 'Router',
+        when: ['ready'],
+        schema: z.discriminatedUnion('mode', [
+          z.strictObject({ mode: z.literal('off') }),
+          z.strictObject({ mode: z.literal('clockwise'), duration: z.number().positive().default(30) }),
+        ]),
+      }),
+    );
+    expect(formNumber(timed, 'duration', 10)).toBe(30);
+    expect(formChoices(timed, 'cycle')).toEqual([]);
+  });
+
+  it('says why a designed control waits for testing, and why an unsupported one is not offered here', () => {
+    const unsupportedHome = {
+      ...routerManifest,
+      actions: routerManifest.actions.map((descriptor) =>
+        descriptor.id === 'motion.home'
+          ? {
+              ...descriptor,
+              qualification: { status: 'unsupported', reason: 'This machine has no homing switches.' } as const,
+            }
+          : descriptor,
+      ),
+    };
+    renderControl(router({ manifest: unsupportedHome, testing: undefined }), { attended: true });
+    const control = openStage('Control');
+    expect(within(control).getByRole('button', { name: 'Jog X+' })).toBeDisabled();
+    expect(
+      within(control).getByText(/^Jog is not yet qualified on this machine\. Turn on testing/u),
+    ).toBeInTheDocument();
+    const home = within(control).getByRole('button', { name: /^Home/u });
+    expect(home).toBeDisabled();
+    expect(home).toHaveAttribute('title', 'This machine has no homing switches.');
+  });
+});
+
+describe('Monitor readings', () => {
+  it("shows a provider's own readings under their component, and siblings of an unknown reading", () => {
+    const components = [
+      ...fffComponents().filter((observation) => observation.componentId !== 'tool-0'),
+      {
+        componentId: 'tool-0',
+        group: 'temperature',
+        receivedAt: observedAt,
+        knowledge: 'unknown',
+        reason: 'Unreadable report',
+      },
+      known('chamber', 'bambu.environment', {
+        kind: 'readings',
+        values: [{ id: 'humidity', label: 'Humidity', value: 40 }],
+      }),
+    ] satisfies readonly ComponentObservation[];
+    renderControl(entry({ snapshot: machineSnapshot(components) }));
+    const monitor = screen.getByRole('region', { name: 'Monitor' });
+    expect(within(monitor).getByRole('heading', { name: /chamber/iu })).toBeInTheDocument();
+    expect(monitor).toHaveTextContent('Humidity40');
+    // One component unknown, its siblings still read.
+    expect(monitor).toHaveTextContent('Bed24 °C');
+    expect(monitor).not.toHaveTextContent('Nozzle');
+  });
+
+  it.each([
+    { trust: 'homed', label: 'Homed' },
+    { trust: 'kept', label: 'Kept since homing' },
+    { trust: 'lost', label: 'Lost' },
+    { trust: 'unknown', label: 'Not homed' },
+  ] as const)('reads a position trusted as $trust as $label', ({ trust, label }) => {
+    const components = millingComponents(routerManifest).map(
+      (observation): ComponentObservation =>
+        observation.componentId === 'motion' && observation.knowledge === 'known' && observation.value.kind === 'motion'
+          ? { ...observation, value: { ...observation.value, trust } }
+          : observation,
+    );
+    renderControl(router({ snapshot: machineSnapshot(components) }));
+    const monitor = screen.getByRole('region', { name: 'Monitor' });
+    expect(monitor).toHaveTextContent(label);
+  });
+
+  it('marks the position stale once it is past the time it stays valid', () => {
+    const expired = millingComponents(routerManifest).map(
+      (observation): ComponentObservation =>
+        observation.componentId === 'motion' ? { ...observation, validUntil: '2026-09-24T01:59:59.000Z' } : observation,
+    );
+    renderControl(router({ snapshot: machineSnapshot(expired) }));
+    expect(within(screen.getByRole('region', { name: 'Monitor' })).getByText('Stale')).toBeInTheDocument();
   });
 });

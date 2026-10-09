@@ -15,6 +15,7 @@ import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import {
   declaredSlots,
+  formatQuantity,
   isExternalSlot,
   materialSystemOf,
   materialSystemValue,
@@ -33,7 +34,6 @@ import {
   declaredAction,
 } from '#routes/w.$workspace.$project/chat-print-controls.js';
 import { PrintRow, PrintStage, StaleBadge } from '#routes/w.$workspace.$project/chat-print-section.js';
-import { formatQuantity } from '#routes/w.$workspace.$project/chat-print-summary.js';
 
 /**
  * What a slot holds, in a few words: the material, or why there is none.

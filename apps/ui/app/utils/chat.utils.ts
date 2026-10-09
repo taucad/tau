@@ -305,7 +305,7 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
   [toolName.requestJob]: {
     input: (input) =>
       joinLines(
-        `targetFile: ${input.targetFile}`,
+        input.artifact === undefined ? `targetFile: ${input.targetFile}` : `artifact: ${input.artifact}`,
         input.machineId === undefined ? undefined : `machineId: ${input.machineId}`,
         input.preset === undefined ? undefined : `preset: ${input.preset}`,
       ),
@@ -319,7 +319,7 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
   [toolName.checkJob]: {
     input: (input) =>
       joinLines(
-        `targetFile: ${input.targetFile}`,
+        input.artifact === undefined ? `targetFile: ${input.targetFile}` : `artifact: ${input.artifact}`,
         input.machineId === undefined ? undefined : `machineId: ${input.machineId}`,
       ),
     output: (output) =>

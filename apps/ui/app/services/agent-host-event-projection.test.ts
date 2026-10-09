@@ -783,6 +783,32 @@ describe('projectAgentHostEvent', () => {
     expect(parseAgentHostApproval((part as { input: unknown }).input)?.context).toStrictEqual(context);
   });
 
+  it('keeps the parameters and version of the intent a machine action pauses on, so the person approves exactly it', () => {
+    const [part] = projectAgentHostEvent({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'approval-speed',
+      phase: 'requested',
+      reason: 'Set speed on Workshop X1C',
+      payload: {
+        kind: 'approval',
+        prompt: 'Set speed ({"ratio":1.5}) on Workshop X1C?',
+        context: {
+          machineId: 'machine-1',
+          componentId: 'speed',
+          action: 'level.set',
+          operationId: 'operation-2',
+          label: 'Set speed',
+          intent: { machineId: 'machine-1', version: 2, parameters: { ratio: 1.5 } },
+        },
+      },
+    });
+    expect(parseAgentHostApproval((part as { input: unknown }).input)?.context).toMatchObject({
+      parameters: { ratio: 1.5 },
+      version: 2,
+    });
+  });
+
   it('projects a login an external agent is waiting on as facts, not a decision', () => {
     expect(
       projectAgentHostEvent({

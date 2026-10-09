@@ -4,12 +4,16 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { MyUIMessage } from '@taucad/chat';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import type { MachineClient } from '@taucad/runtime/machine';
+import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { CombinedChatState } from '#hooks/use-chat.js';
+import { createFixture } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 
 const respondToToolApproval = vi.fn(async () => undefined);
 let messages: readonly MyUIMessage[] = [];
 let activeExecution: CombinedChatState['activeExecution'];
+let machines: RuntimeTransportFacet<MachineClient> = { available: false, reason: 'unsupported' };
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector: <T,>(selector: (state: CombinedChatState) => T): T =>
@@ -18,6 +22,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
   useCadChatClient: () => ({ respondToToolApproval }),
 }));
+vi.mock('#hooks/use-machines.js', () => ({ useMachinesFacet: () => machines }));
 
 const { ChatApprovalBanner, pendingAgentHostApprovals } = await import('#components/chat/chat-approval-banner.js');
 
@@ -60,6 +65,12 @@ describe('pendingAgentHostApprovals', () => {
     expect(pendingAgentHostApprovals([approvalMessage(pendingInput, 'output-available')])).toEqual([]);
   });
 
+  it('keeps the job or machine action an interrupt names, so the Print pane can answer it', () => {
+    const context = { jobId: 'job-1', machineId: 'machine-1' };
+
+    expect(pendingAgentHostApprovals([approvalMessage({ ...pendingInput, context })])[0]?.context).toEqual(context);
+  });
+
   it('drops an interrupt a terminal run left behind, so it cannot hide a later one', () => {
     const laterRun = { id: 'assistant-2', role: 'assistant', parts: [] } as unknown as MyUIMessage;
 
@@ -100,6 +111,7 @@ describe('ChatApprovalBanner', () => {
     vi.clearAllMocks();
     messages = [];
     activeExecution = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
+    machines = { available: false, reason: 'unsupported' };
   });
 
   it('renders nothing while no approval is pending', () => {
@@ -212,6 +224,66 @@ describe('ChatApprovalBanner', () => {
     await user.click(screen.getByRole('button', { name: 'Reject' }));
 
     expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', false, { optionId: 'reject' });
+  });
+
+  it("records an agent's machine action on the host through the person's session before answering", async () => {
+    const fixture = createFixture();
+    machines = { available: true, ...fixture.client };
+    messages = [
+      approvalMessage({
+        ...pendingInput,
+        options: [],
+        prompt: 'Chamber light ({"on":true}) on Workshop X1C?',
+        context: {
+          machineId: 'machine-1',
+          componentId: 'chamber-light',
+          action: 'switch.set',
+          operationId: 'op-1',
+          parameters: { on: true },
+          version: 1,
+        },
+      }),
+    ];
+    const user = userEvent.setup();
+
+    render(<ChatApprovalBanner />);
+    await user.click(screen.getByRole('button', { name: 'Deny' }));
+
+    await vi.waitFor(() => {
+      expect(respondToToolApproval).toHaveBeenCalledExactlyOnceWith('interrupt-1', false, { optionId: undefined });
+    });
+    expect(fixture.approveAction).toHaveBeenCalledExactlyOnceWith({
+      machineId: 'machine-1',
+      operationId: 'op-1',
+      intent: { componentId: 'chamber-light', action: 'switch.set', version: 1, parameters: { on: true } },
+      decision: 'deny',
+    });
+    expect(fixture.approveAction.mock.invocationCallOrder[0]).toBeLessThan(
+      respondToToolApproval.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("leaves an agent's machine action unanswered where no machines are reachable", async () => {
+    messages = [
+      approvalMessage({
+        ...pendingInput,
+        options: [],
+        context: {
+          machineId: 'machine-1',
+          componentId: 'chamber-light',
+          action: 'switch.set',
+          operationId: 'op-1',
+          parameters: { on: true },
+          version: 1,
+        },
+      }),
+    ];
+    const user = userEvent.setup();
+
+    render(<ChatApprovalBanner />);
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(respondToToolApproval).not.toHaveBeenCalled();
   });
 
   /* A Tau tool gated by the API offers no option list of its own. */

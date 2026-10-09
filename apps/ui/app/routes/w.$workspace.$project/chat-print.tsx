@@ -1,14 +1,14 @@
 import { useMemo } from 'react';
 import { CircleAlert, CircleCheck, Drill, LoaderCircle, OctagonX, PauseCircle, Printer, RefreshCw } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { fffProcessOf } from '@taucad/runtime/machine';
+import { fffProcessOf, isSimulatedMachine } from '@taucad/runtime/machine';
 import type { MachineClient, MachineDirectoryEntry, MachineJob } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
-import { describeOutcome, isSimulatedProvider } from '#components/print/machine-facts.js';
+import { describeOutcome } from '#components/print/machine-facts.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
@@ -298,7 +298,8 @@ function PrintFooter({ entry }: { readonly entry: MachineDirectoryEntry | undefi
 
 /**
  * Whether Stop has anything to stop: the machine working or held, a run or an activity in progress, a jog held, or an
- * operation Tau sent still in flight. An idle machine shows no Stop (operator ruling, 2026-10-05).
+ * operation Tau sent still in flight. An idle machine shows no Stop (operator ruling, 2026-10-05). A stale machine
+ * whose last report was not idle keeps it: it may be moving now.
  *
  * @param control - The control.
  * @returns True while something could be stopped.
@@ -307,6 +308,7 @@ function PrintFooter({ entry }: { readonly entry: MachineDirectoryEntry | undefi
 export const hasSomethingToStop = (control: MachineControl): boolean => {
   const { state, activities, operations } = control.entry.snapshot;
   return (
+    (control.entry.freshness === 'stale' && state.status !== 'ready' && state.status !== 'asleep') ||
     state.status === 'active' ||
     state.status === 'held' ||
     isRunOwned(control.entry) ||
@@ -318,8 +320,8 @@ export const hasSomethingToStop = (control: MachineControl): boolean => {
 };
 
 /**
- * Stop, one press away whenever something could be stopped and never waiting for approval: what it does on this
- * machine is said beside it.
+ * Stop, one press away whenever something could be stopped and never waiting for approval or for an earlier Stop:
+ * each press is its own operation. What it does on this machine is said beside it.
  *
  * @param properties - The control.
  * @returns The button.
@@ -335,7 +337,7 @@ function StopButton({ control }: { readonly control: MachineControl }): React.JS
         type='button'
         size='xs'
         variant='destructive'
-        disabled={!canStop || control.isStopping}
+        disabled={!canStop}
         title={canStop ? outcome : 'Not connected: use the machine’s own stop.'}
         aria-describedby={descriptionId}
         onClick={() => {
@@ -364,6 +366,7 @@ function PrintHeader({
   select,
   refresh,
   stop,
+  isSimulated,
 }: {
   readonly entries: readonly MachineDirectoryEntry[];
   readonly selected: MachineDirectoryEntry | undefined;
@@ -371,6 +374,8 @@ function PrintHeader({
   readonly select: ReturnType<typeof useMachinesSelection>['select'];
   readonly refresh: () => void;
   readonly stop: React.ReactNode;
+  /** Whether the selected machine's provider runs only on a simulated transport. */
+  readonly isSimulated: boolean;
 }): React.JSX.Element {
   const presentation = selected ? presentMachine(selected, openJob) : undefined;
   const Icon = presentation?.icon ?? Printer;
@@ -398,7 +403,7 @@ function PrintHeader({
       ) : (
         <span className='min-w-0 flex-1'>No machines</span>
       )}
-      {selected !== undefined && isSimulatedProvider(selected.providerId) ? (
+      {isSimulated ? (
         <Badge variant='outline' className='shrink-0'>
           Simulated
         </Badge>
@@ -434,9 +439,9 @@ function ConnectedPrintPanel({
     [directory.snapshot],
   );
   const { selected, select } = useMachinesSelection(projectId, entries);
-  const presence = usePresence();
-  const { jobs, error: jobsError } = useMachinesJobs(client, selected?.machineId, projectId);
+  const { jobs, error: jobsError } = useMachinesJobs(client, selected?.machineId);
   const openJob = jobs.find((job) => isOpenJob(job));
+  const provider = directory.providers.find(({ id }) => id === selected?.providerId);
   const header = (stop: React.ReactNode): React.JSX.Element => (
     <PrintHeader
       entries={entries}
@@ -445,6 +450,7 @@ function ConnectedPrintPanel({
       select={select}
       refresh={directory.refresh}
       stop={stop}
+      isSimulated={provider !== undefined && isSimulatedMachine(provider.manifest)}
     />
   );
   return (
@@ -467,10 +473,9 @@ function ConnectedPrintPanel({
           bridge={bridge}
           isShown={isShown}
           entry={selected}
-          provider={directory.providers.find(({ id }) => id === selected.providerId)}
+          provider={provider}
           jobs={jobs}
           openJob={openJob}
-          presence={presence}
           header={header}
           errors={[directory.error, jobsError]}
         />
@@ -509,7 +514,6 @@ function MachinePanel({
   provider,
   jobs,
   openJob,
-  presence,
   header,
   errors,
 }: {
@@ -520,10 +524,11 @@ function MachinePanel({
   readonly provider: ReturnType<typeof useMachineDirectory>['providers'][number] | undefined;
   readonly jobs: readonly MachineJob[];
   readonly openJob: MachineJob | undefined;
-  readonly presence: Presence;
   readonly header: (stop: React.ReactNode) => React.JSX.Element;
   readonly errors: ReadonlyArray<string | undefined>;
 }): React.JSX.Element {
+  /* The person's presence is said for this machine only: the panel is keyed by machine, so it starts unattended. */
+  const presence = usePresence();
   const control = useMachineControl({
     client,
     entry,
@@ -545,9 +550,11 @@ function MachinePanel({
     <>
       {header(hasSomethingToStop(control) ? <StopButton control={control} /> : undefined)}
       <div className='relative flex min-h-0 min-w-0 flex-1 scroll-shadows-y flex-col gap-3 overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
-        {errors.map((error) =>
+        {errors.map((error, index) =>
           error === undefined ? null : (
-            <PrintNotice key={error} tone='error'>
+            // A fixed list: the directory's error, then the jobs'. Two may read the same.
+            // oxlint-disable-next-line react/no-array-index-key -- see above.
+            <PrintNotice key={index} tone='error'>
               {error}
             </PrintNotice>
           ),
@@ -560,9 +567,15 @@ function MachinePanel({
             {control.error}
           </PrintNotice>
         )}
-        <ActionApprovals control={control} bridge={bridge} />
+        <ActionApprovals client={client} control={control} bridge={bridge} />
         <PresenceRow control={control} presence={presence} />
         <JobsSection client={client} control={control} jobs={jobs} bridge={bridge} />
+        {isFff || entry.descriptor.capabilities.jobs.type === 'unsupported' ? null : (
+          /* ponytail: choosing a program file here waits for a program picker; the agent and the machine send one. */
+          <PrintNotice tone='neutral' role='status'>
+            Send a program to {entry.name} from the agent or at the machine.
+          </PrintNotice>
+        )}
         <Activities control={control} />
         <RunBlock control={control} jobs={jobs} />
         <PrintStages>
@@ -574,6 +587,7 @@ function MachinePanel({
               provider={provider}
               manifest={provider?.manifest}
               prepare={prepare}
+              control={control}
               deferred={prepareDeferred}
             />
           ) : null}
@@ -593,7 +607,7 @@ function MachinePanel({
           data-slot='print-action-bar'
           className='flex max-h-[60%] min-w-0 shrink-0 flex-col gap-2 overflow-y-auto border-t border-border/70 px-3 py-2'
         >
-          <PrepareActions prepare={prepare} />
+          <PrepareActions prepare={prepare} control={control} />
         </div>
       ) : null}
       <PrintFooter entry={entry} />

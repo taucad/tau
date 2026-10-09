@@ -4,7 +4,6 @@ import { cleanup, render, screen } from '@testing-library/react';
 import type { RequestJobOutput, ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
 import { ChatMessageToolRequestJob } from '#routes/w.$workspace.$project/chat-message-tool-request-job.js';
-import { developerModeRequired } from '#routes/w.$workspace.$project/chat-print-send.js';
 
 vi.mock('#components/chat/chat-tool-error.js', () => ({
   ChatToolError: ({ errorText, noun }: { readonly errorText: string; readonly noun: string }) => (
@@ -116,10 +115,10 @@ describe('ChatMessageToolRequestJob', () => {
       reason: 'The job failed (MACHINE_UPLOAD_TRANSFER_MISMATCH).',
     },
     {
-      scenario: "add the Print pane's fix to the printer's reason",
+      scenario: "show the provider's own reason, remedy included, as it gave it",
       state: 'rejected',
-      failure: { code: 'PROVIDER_REJECTED', message: 'mqtt message verify failed' },
-      reason: `mqtt message verify failed. ${developerModeRequired}`,
+      failure: { code: 'PROVIDER_REJECTED', message: 'The printer refused the command. Turn on Developer Mode.' },
+      reason: 'The printer refused the command. Turn on Developer Mode.',
     },
   ])('should $scenario', ({ state, failure, reason }) => {
     render(<ChatMessageToolRequestJob part={settled({ state, failure }, { machineName: 'Workshop X1C' })} />);
@@ -156,6 +155,16 @@ describe('ChatMessageToolRequestJob', () => {
     );
 
     expect(phraseOf('Requesting')).toBe('Requesting a job for main.scad');
+  });
+
+  it('should name a finished program the agent sends as is', () => {
+    render(
+      <ChatMessageToolRequestJob
+        part={{ toolCallId: 'job-1', state: 'input-available', input: { artifact: 'out/bracket.gcode' } }}
+      />,
+    );
+
+    expect(phraseOf('Requesting')).toBe('Requesting a job for out/bracket.gcode');
   });
 
   it('should hand a failure to the shared tool error with its noun', () => {

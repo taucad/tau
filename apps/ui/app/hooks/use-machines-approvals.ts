@@ -4,14 +4,12 @@ import type { MachineJob } from '@taucad/runtime/machine';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { pendingAgentHostApprovals } from '#components/chat/chat-approval-banner.js';
 import type { PendingAgentHostApproval } from '#components/chat/chat-approval-banner.js';
+import { pendingMachineActionOf } from '#components/print/machine-action-approval.js';
+import type { PendingMachineAction } from '#components/print/machine-action-approval.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 
 /**
- * The chat interrupt a Tau-hosted job request paused on, for one job.
- *
- * The tool pauses the run with `{ jobId, machineId, fileName }` in the interrupt
- * context. When the projected approval carries that context the match is exact;
- * otherwise the one pending approval whose prompt names the program is the same record.
+ * The chat interrupt a Tau-hosted job request paused on, for one job: the one whose context names the job.
  *
  * @param messages - The chat's live message list.
  * @param job - The job to correlate.
@@ -20,36 +18,12 @@ import { useChatSelector } from '#hooks/use-chat.js';
  */
 export const pendingApprovalForJob = (
   messages: readonly MyUIMessage[],
-  job: Pick<MachineJob, 'jobId' | 'program'>,
-): PendingAgentHostApproval | undefined => {
-  const pending = pendingAgentHostApprovals(messages);
-  const exact = pending.find((approval) => approval.context?.jobId === job.jobId);
-  if (exact) {
-    return exact;
-  }
-  // ponytail: hosts that predate the approval context are matched by program name; drop when every host carries `context`.
-  const [only] = pending;
-  return pending.length === 1 &&
-    only?.context?.jobId === undefined &&
-    only?.context?.action === undefined &&
-    only?.prompt.includes(job.program.name)
-    ? only
-    : undefined;
-};
-
-/** One declared action an agent asked to apply, waiting for the person's approval. @public */
-export type PendingMachineAction = Readonly<{
-  approval: PendingAgentHostApproval;
-  machineId: string;
-  componentId: string;
-  action: string;
-  operationId: string;
-  label: string;
-}>;
+  job: Pick<MachineJob, 'jobId'>,
+): PendingAgentHostApproval | undefined =>
+  pendingAgentHostApprovals(messages).find((approval) => approval.context?.jobId === job.jobId);
 
 /**
- * The machine actions a paused Tau agent waits on for one machine. The agent tool pauses with
- * `{ machineId, componentId, action, operationId, label }`; on approval the tool applies exactly that intent.
+ * The machine actions a paused Tau agent waits on for one machine.
  *
  * @param messages - The chat's live message list.
  * @param machineId - The machine the pane shows.
@@ -60,28 +34,14 @@ export const pendingMachineActions = (
   messages: readonly MyUIMessage[],
   machineId: string,
 ): readonly PendingMachineAction[] =>
-  pendingAgentHostApprovals(messages).flatMap((approval): PendingMachineAction[] => {
-    const { context } = approval;
-    return context?.machineId === machineId &&
-      context.componentId !== undefined &&
-      context.action !== undefined &&
-      context.operationId !== undefined
-      ? [
-          {
-            approval,
-            machineId,
-            componentId: context.componentId,
-            action: context.action,
-            operationId: context.operationId,
-            label: context.label ?? approval.prompt,
-          },
-        ]
-      : [];
+  pendingAgentHostApprovals(messages).flatMap((approval) => {
+    const pending = pendingMachineActionOf(approval);
+    return pending?.machineId === machineId ? [pending] : [];
   });
 
 /** How the Print pane answers a chat interrupt for a job or a machine action. @public */
 export type MachineApprovalBridge = Readonly<{
-  pendingForJob: (job: Pick<MachineJob, 'jobId' | 'program'>) => PendingAgentHostApproval | undefined;
+  pendingForJob: (job: Pick<MachineJob, 'jobId'>) => PendingAgentHostApproval | undefined;
   pendingActions: (machineId: string) => readonly PendingMachineAction[];
   respond: (approvalId: string, approved: boolean) => Promise<void>;
 }>;

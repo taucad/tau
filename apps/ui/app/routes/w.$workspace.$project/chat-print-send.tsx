@@ -25,20 +25,22 @@ import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { randomUuid } from '@taucad/utils/id';
-import { isRecord } from '@taucad/utils/schema';
-import { describeOutcome, observedTrays } from '#components/print/machine-facts.js';
+import { describeOutcome } from '#components/print/machine-facts.js';
 import { operator } from '#hooks/use-machine-control.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
-import type { MachineApprovalBridge, PendingMachineAction } from '#hooks/use-machines-approvals.js';
+import { answerMachineAction } from '#components/print/machine-action-approval.js';
+import type { PendingMachineAction } from '#components/print/machine-action-approval.js';
+import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { isOpenJob } from '#hooks/use-machines-jobs.js';
 import { useProject } from '#hooks/use-project.js';
 import {
   QualificationBadge,
   RemedyButton,
   declaredAction,
+  formParameter,
   isRunOwned,
 } from '#routes/w.$workspace.$project/chat-print-controls.js';
-import { PrintNotice, PrintSteps, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
+import { PrintNotice, PrintRow, PrintSteps, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
 import type { PrintStep } from '#routes/w.$workspace.$project/chat-print-section.js';
 import {
   formatDuration,
@@ -48,52 +50,14 @@ import {
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
 
 /**
- * Why the real Bambu printer will not take a file, in the person's words (blueprint P3).
- * @public
- */
-export const bambuStudioRequired =
-  'This printer only accepts files sliced by Bambu Studio, which was not found at its default install location. Install Bambu Studio and use the Tau desktop app.';
-
-/**
- * What to do when the printer refuses an unsigned command, in the person's words.
- * @public
- */
-export const developerModeRequired =
-  'The printer refused an unsigned command. On the printer, turn on LAN Only mode and Developer Mode, then send again.';
-
-const unqualifiedCode = 'ARTIFACT_UNQUALIFIED';
-
-/** The X1C's reason when it refuses a command it cannot verify; Developer Mode being off is the likely cause. */
-const unsignedCommandReason = 'mqtt message verify failed';
-
-/**
- * A refusal as the pane shows it: the host's message, except that a file the printer refuses for its producer says
- * how to slice one it accepts, and an unsigned-command refusal keeps the printer's reason and adds how to allow it.
- *
- * @param code - The refusal code, when there is one.
- * @param message - The host's message.
- * @returns Plain copy.
- * @public
- */
-export const describePrintFailure = (code: string | undefined, message: string): string => {
-  if (code === unqualifiedCode) {
-    return bambuStudioRequired;
-  }
-  return message.trim().toLowerCase() === unsignedCommandReason ? `${message}. ${developerModeRequired}` : message;
-};
-
-/**
- * A thrown request failure as the pane shows it, mapped like {@link describePrintFailure}.
+ * A thrown request failure as the pane shows it: the host's or the provider's own words. What clears a refusal
+ * arrives as a check's remedy, never from parsing this text.
  *
  * @param error - What a machine client call rejected with.
  * @returns Plain copy.
  * @public
  */
-export const describePrintError = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : String(error);
-  const code = isRecord(error) && typeof error['code'] === 'string' ? error['code'] : undefined;
-  return describePrintFailure(code ?? (message.includes(unqualifiedCode) ? unqualifiedCode : undefined), message);
-};
+export const describePrintError = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
  * Why the machine cannot take a job right now, or nothing when it can: a current connected observation, no run in
@@ -117,32 +81,6 @@ export const startBlocker = (entry: MachineDirectoryEntry): string | undefined =
   }
   if (state.status !== 'ready') {
     return `${name} is not ready${state.reason === undefined ? '' : `: ${state.reason}`}. Wait until it reports ready.`;
-  }
-  return undefined;
-};
-
-/**
- * Why the observed material slots cannot serve a submission, or nothing when they can. A mismatch holds sending,
- * never slicing; the machine's own job checks say it again once the job is asked for.
- *
- * @param configuration - The submission configuration with its expected materials.
- * @param entry - The machine as observed.
- * @returns The first mismatch in the person's words: "PETG is not loaded in A1 (PLA is)."
- * @public
- */
-export const materialMismatch = (configuration: unknown, entry: MachineDirectoryEntry): string | undefined => {
-  const expected = isRecord(configuration) ? configuration['expectedMaterials'] : undefined;
-  const trays = observedTrays(entry);
-  for (const candidate of Array.isArray(expected) ? expected : []) {
-    if (!isRecord(candidate) || typeof candidate['slot'] !== 'number' || typeof candidate['materialId'] !== 'string') {
-      continue;
-    }
-    const { slot, materialId } = candidate;
-    const tray = trays.find((observed) => observed.slot === slot);
-    if (tray?.state !== 'loaded' || (tray.materialId !== undefined && tray.materialId !== materialId)) {
-      const loaded = tray?.state === 'loaded' && tray.materialId !== undefined ? ` (${tray.materialId} is)` : '';
-      return `${materialId} is not loaded in ${tray?.label ?? `Slot ${String(slot + 1)}`}${loaded}.`;
-    }
   }
   return undefined;
 };
@@ -192,6 +130,43 @@ const checkWords = {
   blocked: 'blocked',
   unknown: 'not known',
 } as const;
+
+/**
+ * A machine's checks of a job, each with its state and, while it is not passed, what clears it.
+ *
+ * @param properties - The control remedies are sent through, and the checks.
+ * @returns The list.
+ * @public
+ */
+export function JobChecks({
+  control,
+  checks,
+}: {
+  readonly control: MachineControl;
+  readonly checks: readonly MachineCheck[];
+}): React.JSX.Element {
+  return (
+    <ul aria-label='Checks' className='flex flex-col gap-1.5 text-xs'>
+      {checks.map((check) => (
+        <li key={check.id} className='flex min-w-0 items-start gap-1.5'>
+          {checkIcon(check.state)}
+          <div className='flex min-w-0 flex-1 flex-col gap-1'>
+            <span>
+              {check.label}
+              <span className='sr-only'> ({checkWords[check.state]})</span>
+            </span>
+            {check.detail === undefined ? null : <span className='text-muted-foreground'>{check.detail}</span>}
+            {check.remedy === undefined || check.state === 'passed' ? null : (
+              <div>
+                <RemedyButton control={control} remedy={check.remedy} />
+              </div>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /**
  * A job waiting for the person: the program, the machine's checks with their remedies, what the person vouches for,
@@ -306,27 +281,7 @@ function JobReview({
           {pending === undefined ? null : <p className='text-xs'>{pending.prompt}</p>}
         </div>
       </div>
-      {job.checks.length === 0 ? null : (
-        <ul aria-label='Checks' className='flex flex-col gap-1.5 text-xs'>
-          {job.checks.map((check) => (
-            <li key={check.id} className='flex min-w-0 items-start gap-1.5'>
-              {checkIcon(check.state)}
-              <div className='flex min-w-0 flex-1 flex-col gap-1'>
-                <span>
-                  {check.label}
-                  <span className='sr-only'> ({checkWords[check.state]})</span>
-                </span>
-                {check.detail === undefined ? null : <span className='text-muted-foreground'>{check.detail}</span>}
-                {check.remedy === undefined || check.state === 'passed' ? null : (
-                  <div>
-                    <RemedyButton control={control} remedy={check.remedy} />
-                  </div>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      {job.checks.length === 0 ? null : <JobChecks control={control} checks={job.checks} />}
       {attestations.length === 0 ? null : (
         <fieldset className='flex min-w-0 flex-col gap-1.5'>
           <legend className='mb-1.5 text-xs font-medium text-muted-foreground'>You confirm</legend>
@@ -621,7 +576,7 @@ function FailureCard({
         {job.state === 'rejected' ? 'The machine rejected the start' : 'The job was refused before anything was sent'}
         {failure ? ` (${failure.code})` : ''}
       </p>
-      {failure ? <p>{describePrintFailure(failure.code, failure.message)}</p> : null}
+      {failure ? <p>{failure.message}</p> : null}
       <p className='text-muted-foreground'>{job.program.name}. Prepare it again to start a new job.</p>
       <Button type='button' size='xs' variant='outline' className='mt-1' onClick={onDismiss}>
         Dismiss
@@ -705,17 +660,20 @@ export function JobsSection({
 }
 
 /**
- * One action an agent asks to apply: what it does on this machine, whether it could be sent now, and Approve or
- * Decline. Approving answers the chat; the paused tool sends exactly this intent once.
+ * One action an agent asks to apply: what it does on this machine, the values it would send, whether it could be
+ * sent now, and Approve or Decline. The decision is recorded on the host through the person's own session, then the
+ * chat is answered; the paused tool sends exactly this intent once.
  *
- * @param properties - The control, the pending action and the bridge.
+ * @param properties - The person's machines client, the control, the pending action and the bridge.
  * @returns The card.
  */
 function ActionApproval({
+  client,
   control,
   pending,
   bridge,
 }: {
+  readonly client: MachineClient;
   readonly control: MachineControl;
   readonly pending: PendingMachineAction;
   readonly bridge: MachineApprovalBridge;
@@ -725,6 +683,7 @@ function ActionApproval({
   const [error, setError] = useState<string>();
   const now = useNow();
   const descriptor = declaredAction(entry, pending.componentId, pending.action);
+  const parameters = Object.entries(pending.parameters);
   const check = checkMachineAction({
     entry,
     componentId: pending.componentId,
@@ -737,9 +696,9 @@ function ActionApproval({
     setIsBusy(true);
     setError(undefined);
     try {
-      await bridge.respond(pending.approval.approvalId, approved);
+      await answerMachineAction({ client, pending, approved, respond: bridge.respond });
     } catch (error_) {
-      setError(error_ instanceof Error ? error_.message : String(error_));
+      setError(describePrintError(error_));
     } finally {
       setIsBusy(false);
     }
@@ -761,8 +720,21 @@ function ActionApproval({
             .join(' ')}
         </p>
       )}
+      {parameters.length === 0 ? null : (
+        <dl aria-label='Parameters' className='flex flex-col gap-0.5'>
+          {parameters.map(([name, value]) => {
+            const title = formParameter(descriptor, name)?.['title'];
+            return (
+              <PrintRow key={name} label={typeof title === 'string' ? title : name}>
+                {typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)}
+              </PrintRow>
+            );
+          })}
+        </dl>
+      )}
       <p className='text-xs text-muted-foreground'>
-        Approving sends exactly this action once, to {entry.name}. The agent cannot change it after you approve.
+        Approving sends exactly this action once, with these values, to {entry.name}. The agent cannot change it after
+        you approve.
       </p>
       {check.status === 'unavailable' ? (
         <PrintNotice tone='warning' role='status'>
@@ -800,14 +772,16 @@ function ActionApproval({
 /**
  * Every machine action a paused agent waits on for this machine.
  *
- * @param properties - The control and the chat bridge.
+ * @param properties - The person's machines client, the control and the chat bridge.
  * @returns The cards, or nothing.
  * @public
  */
 export function ActionApprovals({
+  client,
   control,
   bridge,
 }: {
+  readonly client: MachineClient;
   readonly control: MachineControl;
   readonly bridge: MachineApprovalBridge;
 }): React.JSX.Element | undefined {
@@ -818,7 +792,13 @@ export function ActionApprovals({
   return (
     <>
       {pending.map((item) => (
-        <ActionApproval key={item.approval.approvalId} control={control} pending={item} bridge={bridge} />
+        <ActionApproval
+          key={item.approval.approvalId}
+          client={client}
+          control={control}
+          pending={item}
+          bridge={bridge}
+        />
       ))}
     </>
   );

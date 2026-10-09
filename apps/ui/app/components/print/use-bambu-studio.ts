@@ -23,8 +23,6 @@ import type {
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { observedTrays, toolheadOf } from '#components/print/machine-facts.js';
 
-/** Providers whose printers slice with Bambu Studio when it is installed. */
-const bambuProviderIds: ReadonlySet<string> = new Set(['bambu', 'bambu-simulator']);
 const bambuPlateIds: ReadonlySet<string> = new Set<BambuPlate['id']>([
   'cool',
   'engineering',
@@ -36,24 +34,14 @@ const bambuPlateIds: ReadonlySet<string> = new Set<BambuPlate['id']>([
 export type BambuQualityPreset = NonNullable<BambuMachineHints['preset']>;
 
 /**
- * Whether a provider drives a Bambu Lab printer.
+ * Whether a provider drives a Bambu Lab printer, which slices with Bambu Studio when it is installed. The vendor
+ * decides, never the provider id; whether the printer takes a file is its own job check.
  *
  * @param provider - The selected machine's provider.
- * @returns True for the Bambu LAN provider, its simulator and any provider declaring the vendor.
+ * @returns True for any provider declaring the vendor.
  * @public
  */
-export const isBambuProvider = (provider: MachineProvider | undefined): boolean =>
-  provider !== undefined && (bambuProviderIds.has(provider.id) || provider.vendor === 'Bambu Lab');
-
-/**
- * Whether a provider is the real Bambu printer, which accepts only Bambu Studio archives (blueprint P3).
- *
- * @param provider - The selected machine's provider.
- * @returns True for the real printer, false for the simulator and every other provider.
- * @public
- */
-export const isRealBambuPrinter = (provider: MachineProvider | undefined): boolean =>
-  provider?.id === 'bambu' || provider?.id === 'bambu-a1-mini';
+export const isBambuProvider = (provider: MachineProvider | undefined): boolean => provider?.vendor === 'Bambu Lab';
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

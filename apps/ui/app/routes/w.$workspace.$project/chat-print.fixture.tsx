@@ -14,6 +14,7 @@ import type { CapabilitiesManifest, ExportResult } from '@taucad/runtime';
 import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type {
   ComponentObservation,
+  MachineCheckJobInput,
   MachineClient,
   MachineDirectoryEntry,
   MachineDirectoryFrame,
@@ -33,7 +34,10 @@ import { projectFiles } from '#components/print/testing/project-files.js';
 import { formatDisplayLabel } from '#utils/string.utils.js';
 import type { PendingAgentHostApproval } from '#components/chat/chat-approval-banner.js';
 import type { DesktopBambuStudio } from '#filesystem/desktop-bridge.js';
-import type { MachineApprovalBridge, PendingMachineAction } from '#hooks/use-machines-approvals.js';
+import type { PendingMachineAction } from '#components/print/machine-action-approval.js';
+import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
+import { fffProcessOf } from '@taucad/runtime/machine';
+import { observedTrays, toolheadOf } from '#components/print/machine-facts.js';
 import {
   bambuContainer,
   fffComponents,
@@ -365,8 +369,55 @@ export const parametersMock = (actual: typeof ParametersModule): typeof Paramete
 
 export const provider: MachineProvider = { ...providerFor('bambu', x1cManifest), name: 'Bambu LAN' };
 
-/** The simulator: the same printer shape, and it accepts files from any slicer (blueprint P3). */
-export const simulatorProvider: MachineProvider = { ...provider, id: 'bambu-simulator', name: 'Bambu simulator' };
+/** The simulator: the same printer shape on a simulated transport, and it accepts files from any slicer (P3). */
+export const simulatorProvider: MachineProvider = {
+  ...provider,
+  id: 'bambu-simulator',
+  name: 'Bambu simulator',
+  manifest: {
+    ...x1cManifest,
+    qualifications: x1cManifest.qualifications.map((profile) => ({ ...profile, environment: 'simulation' })),
+  },
+};
+
+type Fields = Readonly<Record<string, MachineCheckJobInput['configuration']>>;
+
+const isFields = (value: MachineCheckJobInput['configuration']): value is Fields =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The start form completed as the Bambu provider completes it: the machine's model and nozzle, the filament
+ * diameter, the material in each mapped slot, Bambu Studio's start defaults; what the caller gave wins.
+ *
+ * @param machine - The machine as the directory reports it.
+ * @param configuration - The partial form the pane sent.
+ * @returns The completed form.
+ */
+const completeConfiguration = (
+  machine: MachineDirectoryEntry | undefined,
+  configuration: MachineCheckJobInput['configuration'],
+): Fields => {
+  const given = isFields(configuration) ? configuration : {};
+  const mapping = Array.isArray(given['amsMapping'])
+    ? given['amsMapping'].filter((slot): slot is number => typeof slot === 'number')
+    : [];
+  const trays = machine === undefined ? [] : observedTrays(machine);
+  const nozzle = machine === undefined ? undefined : toolheadOf(machine.descriptor.capabilities)?.nozzles[0];
+  const filament = machine === undefined ? undefined : fffProcessOf(machine.descriptor.capabilities)?.filamentDiameter;
+  return {
+    ...(machine === undefined ? {} : { expectedModel: machine.descriptor.model }),
+    ...(nozzle === undefined ? {} : { expectedNozzleDiameter: nozzle.diameter.value }),
+    ...(filament === undefined ? {} : { expectedFilamentDiameter: filament.value }),
+    expectedMaterials: mapping.flatMap((slot) => {
+      const materialId = trays.find((tray) => tray.slot === slot)?.materialId;
+      return materialId === undefined ? [] : [{ slot, materialId }];
+    }),
+    bedLeveling: true,
+    flowCalibration: true,
+    timelapse: false,
+    ...given,
+  };
+};
 
 /** What the idle X1C reports: the shared FFF readings, with the textured PEI plate observed on the bed. */
 const idleComponents = (): readonly ComponentObservation[] =>
@@ -384,7 +435,7 @@ const idleComponents = (): readonly ComponentObservation[] =>
 
 /**
  * A machine as the directory reports it. The simulator by default, so the reference-engine
- * flow can send; the real printer (`providerId: 'bambu'`) takes only Bambu Studio archives.
+ * flow can send; a test of the real printer's refusal answers `checkJob` with its blocked producer check.
  */
 export const entry = (overrides: Partial<MachineDirectoryEntry> = {}): MachineDirectoryEntry => {
   const base = machineEntry({ manifest: x1cManifest, snapshot: machineSnapshot(idleComponents()) });
@@ -619,7 +670,9 @@ const channel = <T,>() => {
 export type PrintClientFixture = Readonly<{
   client: MachineClient;
   applyAction: Mock<MachineClient['applyAction']>;
+  approveAction: Mock<MachineClient['approveAction']>;
   beginHold: Mock<MachineClient['beginHold']>;
+  checkJob: Mock<MachineClient['checkJob']>;
   endHold: Mock<MachineClient['endHold']>;
   goStale: () => void;
   journal: (record: MachineJob) => void;
@@ -663,6 +716,20 @@ export const createFixture = ({
     return current;
   };
 
+  /* The host records the person's decision as given. */
+  const approveAction = vi.fn<MachineClient['approveAction']>(async ({ decision, operationId }) =>
+    decision === 'approve' ? { status: 'approved', operationId, expiresAt: later } : { status: 'denied', operationId },
+  );
+  /* Ready, with the form completed from what the machine reports, as the provider answers a job check. */
+  const checkJob = vi.fn<MachineClient['checkJob']>(async (input) => ({
+    status: 'ready',
+    program: { name: input.artifact.path, facts: { process: 'other' } },
+    checks: [],
+    configuration: completeConfiguration(
+      snapshot.entries.find((candidate) => candidate.machineId === input.machineId),
+      input.configuration,
+    ),
+  }));
   const requestJob = vi.fn<MachineClient['requestJob']>(async (input) =>
     settle({
       version: 1,
@@ -756,11 +823,10 @@ export const createFixture = ({
       return found;
     },
     watch: ({ signal }) => directory.iterate(signal),
-    checkJob: async () => {
-      throw new Error('not used');
-    },
+    approveAction,
+    checkJob,
     requestJob,
-    /* Filtered as the host filters: by machine, and by the project the artifact names. */
+    /* Filtered as the host filters: by machine, and by the project the artifact names when one is given. */
     listJobs: async ({ machineId, projectId: project }) =>
       [...records.values()].filter(
         (record) =>
@@ -814,7 +880,9 @@ export const createFixture = ({
   return {
     client,
     applyAction,
+    approveAction,
     beginHold,
+    checkJob,
     endHold,
     goStale,
     journal: settle,

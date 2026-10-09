@@ -5,7 +5,9 @@
  * @module
  */
 
+import { bambuSlotOf } from '@taucad/bambu/settings';
 import { componentValue } from '@taucad/runtime/machine';
+import type { Quantity } from '@taucad/units/quantity';
 import type {
   MachineComponent,
   MachineDirectoryEntry,
@@ -119,51 +121,6 @@ export const declaredSlots = (
   );
 
 /**
- * The Bambu tray index a submission names a slot by: feeder units four trays each, in manifest order, and 254 for
- * the external holder. Only the Bambu submission form carries these numbers; actions use slot addresses.
- *
- * @param system - The material system.
- * @param address - The slot.
- * @returns The tray index, or nothing for an undeclared slot.
- * @public
- */
-export const bambuTrayIndex = (
-  system: MaterialSystemComponent | undefined,
-  address: MaterialSlotAddress,
-): number | undefined => {
-  if (isExternalSlot(system, address)) {
-    return 254;
-  }
-  const feeders = system?.units.filter((unit) => unit.kind === 'feeder') ?? [];
-  const unitIndex = feeders.findIndex((unit) => unit.id === address.unitId);
-  const slotIndex = feeders[unitIndex]?.slots.findIndex((slot) => slot.id === address.slotId) ?? -1;
-  // ponytail: Bambu numbers trays four per AMS; a six-slot feeder would need its own stride.
-  return unitIndex === -1 || slotIndex === -1 ? undefined : unitIndex * 4 + slotIndex;
-};
-
-/**
- * The slot address of a Bambu tray index, the inverse of {@link bambuTrayIndex}.
- *
- * @param system - The material system.
- * @param index - The tray index a submission names.
- * @returns The address, or nothing for an index the manifest does not declare.
- * @public
- */
-export const slotOfBambuTray = (
-  system: MaterialSystemComponent | undefined,
-  index: number,
-): MaterialSlotAddress | undefined => {
-  if (index === 254) {
-    const external = system?.units.find((unit) => unit.kind === 'external');
-    const slot = external?.slots[0];
-    return external === undefined || slot === undefined ? undefined : { unitId: external.id, slotId: slot.id };
-  }
-  const unit = system?.units.filter((candidate) => candidate.kind === 'feeder')[Math.floor(index / 4)];
-  const slot = unit?.slots[index % 4];
-  return unit === undefined || slot === undefined ? undefined : { unitId: unit.id, slotId: slot.id };
-};
-
-/**
  * A halt outcome in one sentence, shown beside Stop, Pause and Cancel before they are pressed.
  *
  * @param outcome - What halting leaves the machine doing.
@@ -184,21 +141,14 @@ export const describeOutcome = (outcome: MachineHaltOutcome): string => {
   return `${[motion, spindle, heaters, position].filter((part) => part !== undefined).join(', ')}.`;
 };
 
-/**
- * Whether a provider is a simulator, which every surface marks as simulated.
- *
- * @param providerId - The provider id.
- * @returns True for a simulator provider.
- * @public
- */
-export const isSimulatedProvider = (providerId: string): boolean => providerId.includes('simulator');
-
 /** One material slot as a Bambu printer numbers its trays, the vocabulary of Bambu Studio and the submission. @public */
 export type ObservedTray = Readonly<{
-  /** The Bambu tray index ({@link bambuTrayIndex}). */
+  /** The Bambu tray number, as the provider encodes it (`bambuSlotOf`). */
   slot: number;
   address: MaterialSlotAddress;
   label: string;
+  /** On an external holder: it feeds one-filament prints only. */
+  isExternal: boolean;
   state: MaterialSlotSnapshot['state'];
   /** The material type the slot reports, such as `PLA`. */
   materialId?: string;
@@ -209,7 +159,8 @@ export type ObservedTray = Readonly<{
 }>;
 
 /**
- * The machine's declared material slots as Bambu tray numbers, with what each reports.
+ * The machine's declared material slots as Bambu tray numbers, with what each reports. The provider owns the
+ * numbering; a slot it cannot number is left out.
  *
  * @param entry - The machine as observed.
  * @returns Every declared slot in manifest order; none on a machine without a material system.
@@ -218,7 +169,7 @@ export type ObservedTray = Readonly<{
 export const observedTrays = (entry: MachineDirectoryEntry): readonly ObservedTray[] => {
   const system = materialSystemOf(entry.descriptor.capabilities);
   return declaredSlots(system, materialSystemValue(entry)).flatMap((slot): ObservedTray[] => {
-    const index = bambuTrayIndex(system, slot.slot);
+    const index = bambuSlotOf(slot.slot);
     return index === undefined
       ? []
       : [
@@ -226,6 +177,7 @@ export const observedTrays = (entry: MachineDirectoryEntry): readonly ObservedTr
             slot: index,
             address: slot.slot,
             label: slotLabel(system, slot.slot),
+            isExternal: isExternalSlot(system, slot.slot),
             state: slot.state,
             ...(slot.material === undefined
               ? {}
@@ -249,7 +201,9 @@ export const observedTrays = (entry: MachineDirectoryEntry): readonly ObservedTr
  */
 export const trayLabel = (capabilities: WithComponents | undefined, index: number): string => {
   const system = capabilities === undefined ? undefined : materialSystemOf(capabilities);
-  const address = slotOfBambuTray(system, index);
+  const address = (system?.units ?? [])
+    .flatMap((unit) => unit.slots.map((slot) => ({ unitId: unit.id, slotId: slot.id })))
+    .find((candidate) => bambuSlotOf(candidate) === index);
   return address === undefined ? `Slot ${String(index + 1)}` : slotLabel(system, address);
 };
 
@@ -270,4 +224,27 @@ export const observedPlate = (entry: MachineDirectoryEntry): string | undefined 
     }
   }
   return undefined;
+};
+
+const unitSymbols: ReadonlyMap<string, string> = new Map([
+  ['Cel', '°C'],
+  ['mm', 'mm'],
+  ['m', 'm'],
+  ['%', '%'],
+]);
+
+/** A snapshot quantity or a manifest quantity: both carry a value and a UCUM unit code. @public */
+export type PrintQuantity = Quantity | Readonly<{ value: number; unit: string }>;
+
+/**
+ * A native quantity in its own unit, rounded for reading: "215 °C", "0.4 mm".
+ *
+ * @param quantity - Any admitted quantity.
+ * @returns The value and its unit symbol.
+ * @public
+ */
+export const formatQuantity = (quantity: PrintQuantity): string => {
+  const code = typeof quantity.unit === 'string' ? quantity.unit : quantity.unit.code;
+  const value = typeof quantity.value === 'number' ? Math.round(quantity.value * 100) / 100 : quantity.value;
+  return `${String(value)} ${unitSymbols.get(code) ?? code}`;
 };

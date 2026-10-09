@@ -80,6 +80,85 @@ export const declaredAction = (
   return descriptor !== undefined && 'scope' in descriptor ? descriptor : undefined;
 };
 
+/** A schema keyword's list, or none. */
+const listOf = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
+
+/**
+ * The JSON Schema of one parameter in a control's form; for a form of alternatives (`spindle.set`), the first branch
+ * that declares it.
+ *
+ * @param descriptor - The action or hold.
+ * @param name - The parameter.
+ * @returns The parameter's schema, or nothing when the form does not name it.
+ * @public
+ */
+export const formParameter = (
+  descriptor: MachineActionDescriptor | MachineHoldDescriptor | undefined,
+  name: string,
+): Record<string, unknown> | undefined => {
+  const schema: unknown = descriptor?.configuration.legacyProjection.inputSchema;
+  if (!isRecord(schema)) {
+    return undefined;
+  }
+  const branches = [schema, ...listOf(schema['oneOf']), ...listOf(schema['anyOf'])];
+  for (const branch of branches) {
+    const property = isRecord(branch) && isRecord(branch['properties']) ? branch['properties'][name] : undefined;
+    if (isRecord(property)) {
+      return property;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * A number for one parameter from the control's form: its default, else the pane's choice kept inside the form's
+ * bounds.
+ *
+ * @param descriptor - The action or hold.
+ * @param name - The parameter.
+ * @param preferred - What the pane sends when the form declares no default.
+ * @returns The value to send.
+ * @public
+ */
+export const formNumber = (
+  descriptor: MachineActionDescriptor | MachineHoldDescriptor | undefined,
+  name: string,
+  preferred: number,
+): number => {
+  const property = formParameter(descriptor, name);
+  if (typeof property?.['default'] === 'number') {
+    return property['default'];
+  }
+  const maximum = typeof property?.['maximum'] === 'number' ? property['maximum'] : Number.POSITIVE_INFINITY;
+  const minimum = typeof property?.['minimum'] === 'number' ? property['minimum'] : Number.NEGATIVE_INFINITY;
+  return Math.min(maximum, Math.max(minimum, preferred));
+};
+
+/**
+ * The choices one parameter's form offers: `oneOf` constants with their titles, or an `enum`.
+ *
+ * @param descriptor - The action.
+ * @param name - The parameter.
+ * @returns Value and label pairs; none when the form offers no fixed choices.
+ * @public
+ */
+export const formChoices = (
+  descriptor: MachineActionDescriptor | undefined,
+  name: string,
+): ReadonlyArray<Readonly<{ value: string; label: string }>> => {
+  const property = formParameter(descriptor, name);
+  if (Array.isArray(property?.['oneOf'])) {
+    return property['oneOf'].flatMap((choice) =>
+      isRecord(choice) && typeof choice['const'] === 'string'
+        ? [{ value: choice['const'], label: typeof choice['title'] === 'string' ? choice['title'] : choice['const'] }]
+        : [],
+    );
+  }
+  return Array.isArray(property?.['enum'])
+    ? property['enum'].filter((value) => typeof value === 'string').map((value) => ({ value, label: value }))
+    : [];
+};
+
 /**
  * The marks a control wears: "Unqualified" while it is designed but tried under testing.
  *
@@ -326,8 +405,8 @@ type MotionComponent = Extract<MachineComponent, { kind: 'motion' }>;
 
 const jogSteps = ['0.1', '1', '10', 'hold'] as const;
 type JogStep = (typeof jogSteps)[number];
-/** Millimetres per minute for a jog from the pane. */
-const jogFeed = 1000;
+/** Millimetres per minute a jog from the pane asks for when the form declares no default. */
+const preferredJogFeed = 1000;
 
 /**
  * The pad, in the direction each arrow shows. Z's arrows show what moves vertically: on a machine whose bed rides Z
@@ -362,16 +441,15 @@ function JogPad({
   readonly motion: MotionComponent;
   readonly axes: readonly MachineAxis[];
 }): React.JSX.Element {
-  const holdDescriptor = machineActionOf(control.entry, {
-    componentId: motion.id,
-    action: 'motion.jog',
-    kind: 'hold',
-  }) as MachineHoldDescriptor | undefined;
+  const declaredHold = machineActionOf(control.entry, { componentId: motion.id, action: 'motion.jog', kind: 'hold' });
+  const holdDescriptor = declaredHold !== undefined && 'lease' in declaredHold ? declaredHold : undefined;
+  const stepDescriptor = declaredAction(control.entry, motion.id, 'motion.jog');
   const steps = jogSteps.filter((step) => step !== 'hold' || holdDescriptor !== undefined);
   const [step, setStep] = useState<JogStep>('1');
   const isHold = step === 'hold';
   const check = control.check(motion.id, 'motion.jog', isHold ? 'hold' : 'action');
   const isEnabled = check.status === 'available';
+  const jogFeed = formNumber(isHold ? holdDescriptor : stepDescriptor, 'feed', preferredJogFeed);
   const present = new Set(axes.map((axis) => axis.id));
   const isBedOnZ = axes.find((axis) => axis.id === 'z')?.carries === 'work';
   const home = declaredAction(control.entry, motion.id, 'motion.home');
@@ -400,7 +478,8 @@ function JogPad({
         aria-pressed={
           isHold ? control.hold?.parameters.axis === axis && control.hold.parameters.direction === direction : undefined
         }
-        disabled={!isEnabled}
+        /* The button whose hold is in force stays live: a disabled button may never see its own release. */
+        disabled={!isEnabled && control.hold === undefined}
         className={cn(jogCell, area)}
         onPointerDown={begin}
         onPointerUp={end}
@@ -440,9 +519,7 @@ function JogPad({
   return (
     <div className='flex min-w-0 flex-col gap-3'>
       <PrintSetupRow label='Jog' reading='mm'>
-        <QualificationBadge
-          descriptor={isHold ? holdDescriptor : declaredAction(control.entry, motion.id, 'motion.jog')}
-        />
+        <QualificationBadge descriptor={isHold ? holdDescriptor : stepDescriptor} />
         <ToggleGroup
           type='single'
           variant='outline'
@@ -599,6 +676,43 @@ function MotionGroup({
 }
 
 /**
+ * One probe's cycles as its form names them: a button for a single cycle, a choice and a button for several. A form
+ * that names no cycles offers none, since the pane cannot know what the probe runs.
+ *
+ * @param properties - The control and the probe.
+ * @returns The control, or nothing.
+ */
+function ProbeCycle({
+  control,
+  probe,
+}: {
+  readonly control: MachineControl;
+  readonly probe: MachineComponent;
+}): React.JSX.Element | undefined {
+  const cycles = formChoices(declaredAction(control.entry, probe.id, 'probe.run'), 'cycle');
+  const [cycle, setCycle] = useState(cycles[0]?.value);
+  if (cycle === undefined) {
+    return undefined;
+  }
+  const button = (
+    <ActionButton control={control} componentId={probe.id} action='probe.run' parameters={{ cycle }} icon={Crosshair} />
+  );
+  return cycles.length === 1 ? (
+    button
+  ) : (
+    <PrintSetupRow label='Cycle'>
+      <ParameterSelect
+        label={`${probe.label} cycle`}
+        value={cycle}
+        groups={[{ options: cycles }]}
+        onChange={setCycle}
+      />
+      {button}
+    </PrintSetupRow>
+  );
+}
+
+/**
  * Tools and probing: probe cycles, a tool change to a chosen tool and measuring the tool.
  *
  * @param properties - The control.
@@ -635,14 +749,7 @@ function ToolsGroup({ control }: { readonly control: MachineControl }): React.JS
       <Blocked control={control} componentId={first.componentId} action={first.id} />
       <div className='flex flex-wrap gap-2'>
         {probes.map((probe) => (
-          <ActionButton
-            key={probe.id}
-            control={control}
-            componentId={probe.id}
-            action='probe.run'
-            parameters={{ cycle: 'z' }}
-            icon={Crosshair}
-          />
+          <ProbeCycle key={probe.id} control={control} probe={probe} />
         ))}
         {probes.map((probe) => (
           <ActionButton key={`${probe.id}-measure`} control={control} componentId={probe.id} action='tool.measure' />
@@ -684,8 +791,10 @@ function ToolsGroup({ control }: { readonly control: MachineControl }): React.JS
 
 type SpindleComponent = Extract<MachineComponent, { kind: 'spindle' }>;
 
-/** How long a spindle switched on from the pane turns before it stops by itself. Seconds. */
-const spindleSeconds = 10;
+/** How long a spindle switched on from the pane turns, when its form declares no default. Seconds. */
+const preferredSpindleSeconds = 10;
+/** The speed a programmed spindle runs at from the pane, when its form declares no default. Revolutions per minute. */
+const preferredSpindleSpeed = 10_000;
 
 /**
  * The spindle: on for a bounded time, or off.
@@ -707,8 +816,11 @@ function SpindleGroup({
   const value = componentValue(control.entry.snapshot.components, spindle.id, 'spindle');
   const check = control.check(spindle.id, 'spindle.set');
   const direction = spindle.directions[0] ?? 'clockwise';
+  const spindleSeconds = formNumber(descriptor, 'duration', preferredSpindleSeconds);
   const speed =
-    spindle.control === 'programmed' && spindle.speed !== undefined ? Math.min(10_000, spindle.speed.max) : undefined;
+    spindle.control === 'programmed' && formParameter(descriptor, 'speed') !== undefined
+      ? Math.min(formNumber(descriptor, 'speed', preferredSpindleSpeed), spindle.speed?.max ?? Number.POSITIVE_INFINITY)
+      : undefined;
   const description =
     check.status === 'unavailable'
       ? check.message
@@ -751,17 +863,9 @@ const optionChoices = (
   entry: MachineDirectoryEntry,
   descriptor: MachineActionDescriptor,
 ): ReadonlyArray<Readonly<{ value: string; label: string }>> => {
-  const schema: unknown = descriptor.configuration.legacyProjection.inputSchema;
-  const option = isRecord(schema) && isRecord(schema['properties']) ? schema['properties']['option'] : undefined;
-  if (isRecord(option) && Array.isArray(option['oneOf'])) {
-    return option['oneOf'].flatMap((choice) =>
-      isRecord(choice) && typeof choice['const'] === 'string'
-        ? [{ value: choice['const'], label: typeof choice['title'] === 'string' ? choice['title'] : choice['const'] }]
-        : [],
-    );
-  }
-  if (isRecord(option) && Array.isArray(option['enum'])) {
-    return option['enum'].filter((value) => typeof value === 'string').map((value) => ({ value, label: value }));
+  const declared = formChoices(descriptor, 'option');
+  if (declared.length > 0) {
+    return declared;
   }
   const kind = entry.descriptor.capabilities.components.find(
     (component) => component.id === descriptor.componentId,
@@ -789,8 +893,9 @@ function AccessoryRow({
 }): React.JSX.Element {
   const { entry } = control;
   const { componentId, id, label } = descriptor;
-  // ponytail: the level last chosen here; the machine reports only the speed it runs at, not its target.
-  const [target, setTarget] = useState<number>();
+  /* The level last chosen here, until the machine reports a different one: the machine reports only the speed it
+   * runs at, and a program that changes it wins. */
+  const [target, setTarget] = useState<Readonly<{ level: number; reported: number | undefined }>>();
   const check = control.check(componentId, id);
   const isDisabled = check.status !== 'available' || control.pending !== undefined;
   const description = check.status === 'unavailable' ? check.message : descriptor.consequence;
@@ -815,7 +920,12 @@ function AccessoryRow({
     const ratio = componentValue(components, componentId, 'level')?.ratio;
     const levels: readonly number[] = kind === 'override' ? overrideLevels : fanLevels;
     const percent = (level: number): string => `${String(Math.round(level * 100))} %`;
-    const chosen = target ?? (ratio !== undefined && levels.includes(ratio) ? ratio : undefined);
+    const chosen =
+      target !== undefined && target.reported === ratio
+        ? target.level
+        : ratio !== undefined && levels.includes(ratio)
+          ? ratio
+          : undefined;
     return (
       <PrintSetupRow label={label} reading={ratio === undefined ? undefined : percent(ratio)} description={description}>
         <QualificationBadge descriptor={descriptor} />
@@ -826,7 +936,7 @@ function AccessoryRow({
           isDisabled={isDisabled}
           groups={[{ options: levels.map((level) => ({ value: String(level), label: percent(level) })) }]}
           onChange={(value) => {
-            setTarget(Number(value));
+            setTarget({ level: Number(value), reported: ratio });
             void control.apply(componentId, id, { ratio: Number(value) });
           }}
         />
@@ -1184,11 +1294,11 @@ export function Activities({ control }: { readonly control: MachineControl }): R
   );
 }
 
-const rebind = 'bind it again in Settings under Machines with the access code shown on its screen';
+const rebind = 'bind the machine again in Settings under Machines';
 
 /**
  * What a person reads when a still capture fails, by the fixed code it rejects with: the camera
- * leg (`@taucad/host`), its pinned connection and saved access code, and the host's own checks.
+ * leg (`@taucad/host`), its pinned connection and saved credentials, and the host's own checks.
  */
 const stillFailures: ReadonlyMap<string, string> = new Map([
   [
@@ -1199,23 +1309,23 @@ const stillFailures: ReadonlyMap<string, string> = new Map([
     'MACHINE_STILL_FFMPEG_FAILED',
     'Tau could not start ffmpeg; reinstall it (with Homebrew on macOS: brew reinstall ffmpeg), then capture again.',
   ],
-  ['MACHINE_STILL_AUTH_REJECTED', `The camera refused the printer's saved access code; ${rebind}.`],
-  ['MACHINE_SECRET_UNKNOWN', `Tau no longer has this printer's access code; ${rebind}.`],
+  ['MACHINE_STILL_AUTH_REJECTED', `The camera refused the machine's saved credentials; ${rebind}.`],
+  ['MACHINE_SECRET_UNKNOWN', `Tau no longer has this machine's credentials; ${rebind}.`],
   [
     'MACHINE_TLS_PIN_MISMATCH',
-    'The camera presented a different certificate from the one saved when the printer was bound, so Tau did not connect; if the printer was reset or replaced, bind it again in Settings under Machines.',
+    `The camera presented a different certificate from the one saved when the machine was bound, so Tau did not connect; if the machine was reset or replaced, ${rebind}.`,
   ],
   [
     'MACHINE_CONNECT_FAILED',
-    'Tau could not connect to the camera; check that the printer is on and on this network, then capture again.',
+    'Tau could not connect to the camera; check that the machine is on and on this network, then capture again.',
   ],
   [
     'MACHINE_CONNECT_TIMEOUT',
-    'The camera did not answer in time; check that the printer is on and on this network, then capture again.',
+    'The camera did not answer in time; check that the machine is on and on this network, then capture again.',
   ],
   [
     'MACHINE_STILL_TIMEOUT',
-    'The camera sent no picture in time; check that the printer is on and connected, then capture again.',
+    'The camera sent no picture in time; check that the machine is on and connected, then capture again.',
   ],
   [
     'MACHINE_STILL_STREAM_FAILED',
@@ -1233,9 +1343,9 @@ const stillFailures: ReadonlyMap<string, string> = new Map([
   ],
   [
     'MACHINE_STILL_REQUEST_INVALID',
-    "Tau built an invalid request for this printer's camera, so nothing was sent; report this as a bug.",
+    'Tau built an invalid request for this camera, so nothing was sent; report this as a bug.',
   ],
-  ['MACHINE_STILL_UNAVAILABLE', 'Tau is not connected to this printer right now; capture again once it reconnects.'],
+  ['MACHINE_STILL_UNAVAILABLE', 'Tau is not connected to this machine right now; capture again once it reconnects.'],
   ['MACHINE_STILL_RATE_LIMITED', 'Stills are limited to one every 5 seconds; wait a moment, then capture again.'],
 ]);
 

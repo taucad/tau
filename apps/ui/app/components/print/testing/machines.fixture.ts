@@ -84,7 +84,7 @@ export const bambuSubmission = defineConfiguration({
     bedLeveling: z.boolean().default(true),
     flowCalibration: z.boolean().default(true),
     expectedBedType: z.string().min(1),
-    expectedMaterials: z.array(z.object({ slot: z.number().int(), materialId: z.string() })).default([]),
+    expectedMaterials: z.array(z.object({ slot: z.number().int(), materialId: z.string() })).min(1),
     expectedFilamentDiameter: quantity({
       unit: 'mm',
       quantityKind: quantityKinds.diameter,
@@ -517,6 +517,8 @@ export const routerManifest: MachineManifest = parseMachineManifest({
       componentId: 'touch-plate',
       label: 'Probe with the touch plate',
       when: ready,
+      // As the Grbl provider narrows it: the touch plate probes Z only.
+      schema: z.strictObject({ cycle: z.enum(['z']).meta({ title: 'Cycle' }) }),
       consequence: 'The bit moves down until it touches the plate. Attach the magnet first; the router must be off.',
     }),
     action({
@@ -676,6 +678,8 @@ export const carveraManifest: MachineManifest = parseMachineManifest({
       label: 'Probe',
       when: ready,
       safety: { interlocks: ['cover'] },
+      // As the Carvera provider narrows it.
+      schema: z.strictObject({ cycle: z.enum(['z-surface', 'corner', 'bore-centre']).meta({ title: 'Cycle' }) }),
     }),
     action({
       id: 'tool.change',
@@ -753,7 +757,6 @@ export const providerFor = (id: string, manifest: MachineManifest): MachineProvi
   vendor: manifest.identity.vendor,
   manifest,
   bindingConfiguration: bindingConfiguration.manifest,
-  queries: {},
 });
 
 /**

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { checkMachineAction } from '@taucad/runtime/machine';
+import { checkMachineAction, machineActionIntent } from '@taucad/runtime/machine';
 import type {
   MachineActionCheck,
   MachineClient,
@@ -58,8 +58,44 @@ export const usePresence = (): Presence => {
 /** A press-and-hold in force, as the pane shows it. @public */
 export type ActiveHold = Readonly<{ parameters: MachineJogHoldParameters }>;
 
-/** The lease behind a press: granted id, renewal timer, and whether the press already ended. */
-type HoldLease = { holdId?: string; timer?: ReturnType<typeof setInterval>; released: boolean };
+/** The lease behind a press: its component, granted id, renewal timer, release listeners and whether it ended. */
+type HoldLease = {
+  componentId: string;
+  holdId?: string;
+  timer?: ReturnType<typeof setInterval>;
+  unlisten?: () => void;
+  released: boolean;
+};
+
+/**
+ * Whether a hold in force may keep renewing on the machine as now observed. A machine moving under the hold reports
+ * itself active; that is the hold itself, so the check reads it as ready.
+ *
+ * @param entry - The machine as observed.
+ * @param componentId - The held component.
+ * @returns The check, as for a new press.
+ */
+const checkHeld = (entry: MachineDirectoryEntry, componentId: string): MachineActionCheck => {
+  const { state } = entry.snapshot;
+  const moving: MachineDirectoryEntry['snapshot'] | undefined =
+    state.status === 'active' ? { ...entry.snapshot, state: { ...state, status: 'ready' } } : undefined;
+  const result = checkMachineAction({
+    entry: moving === undefined ? entry : { ...entry, snapshot: moving },
+    componentId,
+    action: 'motion.jog',
+    kind: 'hold',
+    caller: 'person',
+    attended: true,
+    now: Date.now(),
+  });
+  return entry.freshness === 'current' || result.status === 'unavailable'
+    ? result
+    : {
+        status: 'unavailable',
+        code: 'MACHINE_ACTION_STALE_OBSERVATION',
+        message: `No current observation from ${entry.name}.`,
+      };
+};
 
 /** Every control the pane offers, sent the one way the contract allows. @public */
 export type MachineControl = Readonly<{
@@ -84,8 +120,9 @@ export type MachineControl = Readonly<{
 
 /**
  * Sends the pane's controls for one machine: every action through {@link checkMachineAction} (as a person, attended
- * as the presence says) and then `applyAction` with a fresh operation id, the capability revision and the run the
- * person saw; `stop` as its own operation; and jog holds renewed every half lease until released.
+ * as the presence says) and then `applyAction` with the intent {@link machineActionIntent} builds from what the person
+ * saw; `stop` as its own operation, never waiting on another; and jog holds renewed every half lease until released
+ * anywhere on the page, the page is hidden, or the hold's own check fails.
  *
  * @param input - The client, the machine as observed, the presence, how to change it and what to call when a control
  * is used.
@@ -107,7 +144,8 @@ export const useMachineControl = ({
 }): MachineControl => {
   const [pending, setPending] = useState<string>();
   const [error, setError] = useState<string>();
-  const [isStopping, setIsStopping] = useState(false);
+  /* Stops in flight: each press is its own operation, so a second press never waits for the first. */
+  const [stopping, setStopping] = useState(0);
   const [hold, setHold] = useState<ActiveHold>();
   /** The hold in force: its id once granted, its renewal timer, and whether the press already ended. */
   const holdRef = useRef<HoldLease>(undefined);
@@ -143,23 +181,21 @@ export const useMachineControl = ({
       return false;
     }
     const { descriptor } = result;
+    if (!('scope' in descriptor)) {
+      return false;
+    }
     onUsed?.();
     setPending(`${componentId}:${action}`);
     setError(undefined);
     try {
-      const receipt = await client.applyAction({
-        machineId: entry.machineId,
-        componentId,
-        capabilityRevision: entry.descriptor.capabilities.revision,
-        operationId: randomUuid(),
-        action,
-        version: descriptor.version,
-        expectedRunId:
-          'scope' in descriptor && descriptor.scope === 'idle' ? null : (entry.snapshot.run?.runId ?? null),
-        parameters,
-        requestedBy: operator,
-        attended,
-      });
+      const receipt = await client.applyAction(
+        machineActionIntent(entry, descriptor, {
+          operationId: randomUuid(),
+          parameters,
+          requestedBy: operator,
+          attended,
+        }),
+      );
       if (receipt.status === 'rejected') {
         setError(receipt.message);
       } else if (receipt.status === 'unknown') {
@@ -177,7 +213,7 @@ export const useMachineControl = ({
   };
 
   const stop = async (): Promise<void> => {
-    setIsStopping(true);
+    setStopping((count) => count + 1);
     setError(undefined);
     try {
       const receipt = await client.stop({
@@ -195,9 +231,27 @@ export const useMachineControl = ({
         `${error_ instanceof Error ? error_.message : String(error_)} Use the machine’s own stop if it is still moving.`,
       );
     } finally {
-      setIsStopping(false);
+      setStopping((count) => count - 1);
     }
   };
+
+  /* Ends a granted lease. One the machine already ended needs no word; any other failure is said, and the machine
+   * stops by itself once the lease runs out. */
+  const release = useCallback(
+    async (holdId: string): Promise<void> => {
+      try {
+        await client.endHold({ holdId });
+      } catch (error_) {
+        const message = error_ instanceof Error ? error_.message : String(error_);
+        if (!message.includes('MACHINE_HOLD_ENDED')) {
+          setError(
+            `${entry.name} did not confirm the end of the jog (${message}); it stops by itself when the hold lapses.`,
+          );
+        }
+      }
+    },
+    [client, entry.name],
+  );
 
   const endHold = useCallback((): void => {
     const { current } = holdRef;
@@ -208,19 +262,26 @@ export const useMachineControl = ({
     holdRef.current = undefined;
     setHold(undefined);
     globalThis.clearInterval(current.timer);
+    current.unlisten?.();
     const { holdId } = current;
     if (holdId !== undefined) {
-      const release = async (): Promise<void> => {
-        try {
-          await client.endHold({ holdId });
-        } catch {
-          // The machine stops within its bound even if the release never arrives.
-        }
-      };
-      // async-iife: release -- the press ended; nothing waits on the machine's answer.
-      void release();
+      // async-iife: release -- the press ended; the release reports its own failure.
+      void release(holdId);
     }
-  }, [client]);
+  }, [release]);
+
+  /* A held control lets go when what it needs stops holding: stale, disconnected, alarm, an interlock. */
+  useEffect(() => {
+    const { current } = holdRef;
+    if (current === undefined) {
+      return;
+    }
+    const result = checkHeld(entry, current.componentId);
+    if (result.status === 'unavailable') {
+      endHold();
+      setError(`${entry.name} stopped the jog: ${result.message}`);
+    }
+  }, [entry, endHold]);
 
   const beginHold = (componentId: string, parameters: MachineJogHoldParameters): void => {
     const result = check(componentId, 'motion.jog', 'hold');
@@ -232,9 +293,31 @@ export const useMachineControl = ({
     }
     onUsed?.();
     setError(undefined);
-    const current: HoldLease = { released: false };
+    const current: HoldLease = { componentId, released: false };
     holdRef.current = current;
     setHold({ parameters });
+    /* The press ends wherever it is let go: a disabled or moved-away button may never see its own release. */
+    const letGo = (): void => {
+      if (holdRef.current === current) {
+        endHold();
+      }
+    };
+    const hidden = (): void => {
+      if (document.visibilityState === 'hidden') {
+        letGo();
+      }
+    };
+    const releases = ['pointerup', 'pointercancel', 'keyup', 'blur'] as const;
+    for (const type of releases) {
+      globalThis.addEventListener(type, letGo);
+    }
+    document.addEventListener('visibilitychange', hidden);
+    current.unlisten = () => {
+      for (const type of releases) {
+        globalThis.removeEventListener(type, letGo);
+      }
+      document.removeEventListener('visibilitychange', hidden);
+    };
     const begin = async (): Promise<void> => {
       try {
         const granted = await client.beginHold({
@@ -255,7 +338,7 @@ export const useMachineControl = ({
         }
         current.holdId = granted.holdId;
         if (current.released) {
-          await client.endHold({ holdId: granted.holdId });
+          await release(granted.holdId);
           return;
         }
         current.timer = globalThis.setInterval(() => {
@@ -263,12 +346,16 @@ export const useMachineControl = ({
             try {
               const renewed = await client.renewHold({ holdId: granted.holdId });
               if (renewed.status === 'ended' && holdRef.current === current) {
-                globalThis.clearInterval(current.timer);
-                holdRef.current = undefined;
-                setHold(undefined);
+                current.holdId = undefined;
+                endHold();
+                setError(`${entry.name} ended the jog.`);
               }
-            } catch {
-              // A missed renewal stops the machine within its bound; that is the design.
+            } catch (error_) {
+              // The machine stops within its bound once renewals stop; the pad lets go and says why.
+              if (holdRef.current === current) {
+                endHold();
+                setError(`${entry.name} ended the jog: ${error_ instanceof Error ? error_.message : String(error_)}`);
+              }
             }
           };
           // async-iife: lease -- each renewal stands alone; the next one follows on the interval.
@@ -287,5 +374,18 @@ export const useMachineControl = ({
 
   useEffect(() => endHold, [endHold]);
 
-  return { entry, attended, setAttended, check, apply, pending, error, stop, isStopping, beginHold, endHold, hold };
+  return {
+    entry,
+    attended,
+    setAttended,
+    check,
+    apply,
+    pending,
+    error,
+    stop,
+    isStopping: stopping > 0,
+    beginHold,
+    endHold,
+    hold,
+  };
 };

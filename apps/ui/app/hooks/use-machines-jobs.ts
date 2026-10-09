@@ -54,23 +54,44 @@ export type JobsView = Readonly<{
   error: string | undefined;
 }>;
 
+/** The first wait before following the ledger again after its watch ended. Milliseconds. */
+const firstResync = 500;
+/** The longest wait between resyncs. Milliseconds. */
+const longestResync = 30_000;
+
 /**
- * Subscribe to the host's job ledger for one machine.
+ * Wait, unless the wait is aborted first.
  *
- * The list seeds the projection and every watched transition folds into it; the
- * host's store stays the only authority. Unmount aborts the watch.
+ * @param milliseconds - How long.
+ * @param signal - Ends the wait early.
+ * @returns When the time is up or the signal aborted.
+ */
+const pause = async (milliseconds: number, signal: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    const timer = globalThis.setTimeout(resolve, milliseconds);
+    signal.addEventListener(
+      'abort',
+      () => {
+        globalThis.clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+
+/**
+ * Subscribe to the host's job ledger for one machine: every job on it, whichever project asked.
+ *
+ * The list seeds the projection and every watched transition folds into it; the host's store stays the only
+ * authority. A watch that ends (a host restart, a transport resync) means resync: list again, then watch again,
+ * waiting longer each time one ends without news. Unmount aborts the watch.
  *
  * @param client - The negotiated machines facet, or nothing while none is available.
  * @param machineId - The machine whose jobs to read, or nothing while none is selected.
- * @param projectId - When set, only jobs whose artifact belongs to this project.
  * @returns The live jobs.
  * @public
  */
-export const useMachinesJobs = (
-  client: MachineClient | undefined,
-  machineId: string | undefined,
-  projectId?: string,
-): JobsView => {
+export const useMachinesJobs = (client: MachineClient | undefined, machineId: string | undefined): JobsView => {
   const [records, setRecords] = useState<ReadonlyMap<string, MachineJob>>(new Map());
   const [error, setError] = useState<string>();
 
@@ -79,28 +100,43 @@ export const useMachinesJobs = (
       return;
     }
     const abort = new AbortController();
+    const { signal } = abort;
+    const fold = (jobs: readonly MachineJob[]): void => {
+      setRecords((current) => {
+        let next = current;
+        for (const job of jobs) {
+          next = reduceJobs(next, job);
+        }
+        return next;
+      });
+    };
+    /* Read through a call: the abort lands while awaiting, which narrowing on the property cannot see. */
+    const isAborted = (): boolean => signal.aborted;
     const observe = async (): Promise<void> => {
-      try {
-        setError(undefined);
-        const scope = projectId === undefined ? { machineId } : { machineId, projectId };
-        const initial = await client.listJobs({ ...scope, signal: abort.signal });
-        if (abort.signal.aborted) {
-          return;
-        }
-        setRecords((current) => {
-          let next = current;
-          for (const job of initial) {
-            next = reduceJobs(next, job);
+      let wait = firstResync;
+      while (!isAborted()) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- each resync lists, then watches, in order; never in parallel.
+          const initial = await client.listJobs({ machineId, signal });
+          if (isAborted()) {
+            return;
           }
-          return next;
-        });
-        for await (const job of client.watchJobs({ ...scope, signal: abort.signal })) {
-          setRecords((current) => reduceJobs(current, job));
+          setError(undefined);
+          fold(initial);
+          // oxlint-disable-next-line no-await-in-loop -- the watch runs until it ends; the next resync follows it.
+          for await (const job of client.watchJobs({ machineId, signal })) {
+            fold([job]);
+            wait = firstResync;
+          }
+        } catch (error_) {
+          if (isAborted()) {
+            return;
+          }
+          setError(error_ instanceof Error ? error_.message : String(error_));
         }
-      } catch (error) {
-        if (!abort.signal.aborted) {
-          setError(error instanceof Error ? error.message : String(error));
-        }
+        // oxlint-disable-next-line no-await-in-loop -- the backoff between resyncs is the point of the loop.
+        await pause(wait, signal);
+        wait = Math.min(wait * 2, longestResync);
       }
     };
     // async-iife: bootstrap -- a React effect cannot await; cleanup aborts the ledger watch.
@@ -108,7 +144,7 @@ export const useMachinesJobs = (
     return () => {
       abort.abort();
     };
-  }, [client, machineId, projectId]);
+  }, [client, machineId]);
 
   const jobs = useMemo(
     () => [...records.values()].filter((job) => job.machineId === machineId).sort(byNewest),

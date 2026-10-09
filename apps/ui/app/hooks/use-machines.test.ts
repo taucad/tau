@@ -205,6 +205,23 @@ describe('machine identity across telemetry', () => {
     ).toEqual(['x1', 'mini', 'third']);
   });
 
+  it('folds an observed frame into its machine without moving the cursor', () => {
+    const x1 = entry({ machineId: 'x1' });
+    const mini = entry({ machineId: 'mini' });
+    const [first, ...rest] = x1.snapshot.components;
+    const moved = { ...first!, receivedAt: '2026-09-24T02:00:09.000Z' };
+    const directory = projectMachineDirectoryFrame(
+      { ...snapshot, entries: [x1, mini] },
+      { type: 'observed', machineId: 'x1', observedAt: '2026-09-24T02:00:09.000Z', components: [moved] },
+    );
+    expect(directory.cursor).toBe(snapshot.cursor);
+    const [folded, untouched] = directory.entries;
+    expect(folded?.snapshot.observedAt).toBe('2026-09-24T02:00:09.000Z');
+    expect(folded?.snapshot.components).toEqual(expect.arrayContaining([moved, ...rest]));
+    expect(folded?.snapshot.components).toHaveLength(x1.snapshot.components.length);
+    expect(untouched).toBe(mini);
+  });
+
   it('shares an explicit selection between mounted panes within one project only', () => {
     const entries = [entry({ machineId: 'x1' }), entry({ machineId: 'mini' })];
     const panes = renderHook(() => ({

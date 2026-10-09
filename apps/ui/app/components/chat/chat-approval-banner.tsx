@@ -10,6 +10,10 @@ import { agentApprovalToolName, parseAgentHostApproval } from '#services/agent-h
 import type { AgentHostApproval, AgentHostApprovalOption } from '#services/agent-host-event-projection.js';
 import { toast } from '#components/ui/sonner.js';
 import { ChatLoginAffordance } from '#components/chat/chat-login-affordance.js';
+import { answerMachineAction, pendingMachineActionOf } from '#components/print/machine-action-approval.js';
+import { useMachinesFacet } from '#hooks/use-machines.js';
+import type { MachineClient } from '@taucad/runtime/machine';
+import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 
 /** One unresolved interrupt, located in the transcript that projected it. @public */
 export type PendingAgentHostApproval = AgentHostApproval & {
@@ -59,17 +63,21 @@ export const pendingAgentHostApprovals = (messages: readonly MyUIMessage[]): rea
       part.type === 'dynamic-tool' && part.toolName === agentApprovalToolName
         ? parseAgentHostApproval(part.input)
         : undefined;
-    pending.push({
-      messageId: message.id,
-      approvalId: part.approval.id,
-      interruptId: projected?.interruptId ?? part.approval.id,
-      kind: projected?.kind ?? 'approval',
-      prompt: projected?.prompt ?? getToolPartName(part),
-      options: projected?.options ?? [],
-      ...(projected?.agentId === undefined ? {} : { agentId: projected.agentId }),
-      ...(projected?.login === undefined ? {} : { login: projected.login }),
-      ...(projected === undefined ? { tauTool: true } : {}),
-    });
+    // A projected interrupt keeps all it carries, its ledger correlation (`context`) included: the Print pane finds a
+    // job's or a machine action's interrupt by it.
+    pending.push(
+      projected === undefined
+        ? {
+            messageId: message.id,
+            approvalId: part.approval.id,
+            interruptId: part.approval.id,
+            kind: 'approval',
+            prompt: getToolPartName(part),
+            options: [],
+            tauTool: true,
+          }
+        : { ...projected, messageId: message.id, approvalId: part.approval.id },
+    );
   }
   return pending;
 };
@@ -159,6 +167,35 @@ const continuationNote = (execution: CadAgentExecution | undefined, name: string
     : `Approving lets ${name} continue this turn; Tau does not ask again for each action it takes.`;
 
 /**
+ * Answer one interrupt. An agent's machine action is recorded on the host through the person's own machines session
+ * first (R15), so the paused tool's apply finds the approval; any other interrupt is answered directly.
+ *
+ * @param input - The interrupt, the decision, this computer's machines and how the chat is answered.
+ * @throws When the machines cannot be reached or the host refuses the record; the interrupt stays open.
+ */
+const answerInterrupt = async ({
+  approval,
+  approved,
+  machines,
+  answer,
+}: Readonly<{
+  approval: PendingAgentHostApproval;
+  approved: boolean;
+  machines: RuntimeTransportFacet<MachineClient>;
+  answer: (approvalId: string, approved: boolean) => Promise<void>;
+}>): Promise<void> => {
+  const pending = pendingMachineActionOf(approval);
+  if (pending === undefined) {
+    await answer(approval.approvalId, approved);
+    return;
+  }
+  if (!machines.available) {
+    throw new Error('This computer cannot reach its machines, so Tau cannot record your answer.');
+  }
+  await answerMachineAction({ client: machines, pending, approved, respond: answer });
+};
+
+/**
  * The one presenter for a paused run's interrupt, wherever the run is placed.
  *
  * Mounted above the composer (`chat-textarea.tsx`), because a run that is
@@ -172,6 +209,7 @@ const continuationNote = (execution: CadAgentExecution | undefined, name: string
  */
 export function ChatApprovalBanner(): React.JSX.Element | undefined {
   const { respondToToolApproval } = useCadChatClient();
+  const machines = useMachinesFacet();
   const activeExecution = useChatSelector((state) => state.activeExecution);
   const messages = useChatSelector((state) => state.messages);
   const login = currentRunLogin(messages);
@@ -189,9 +227,12 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
   const name = approval.tauTool ? 'Tau' : requesterName(approval.agentId, activeExecution);
   const focused = defaultOption(approval.options);
   const respond = (approved: boolean, optionId?: string): void => {
+    const answer = async (approvalId: string, isApproved: boolean): Promise<void> => {
+      await respondToToolApproval(approvalId, isApproved, { optionId });
+    };
     const resolve = async (): Promise<void> => {
       try {
-        await respondToToolApproval(approval.approvalId, approved, { optionId });
+        await answerInterrupt({ approval, approved, machines, answer });
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'The host did not accept that decision.');
       }

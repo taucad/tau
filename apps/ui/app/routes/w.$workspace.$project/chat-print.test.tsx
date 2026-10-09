@@ -9,7 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fffProcessOf } from '@taucad/runtime/machine';
-import type { MachineClient, MaterialSlotSnapshot } from '@taucad/runtime/machine';
+import type { MachineClient, MachineDirectoryEntry, MaterialSlotSnapshot } from '@taucad/runtime/machine';
 import { machineSettingsPath, serializeMachineSettings, readMachineSettings } from '@taucad/runtime/machine/settings';
 import type { MachineSettingsRecord, MachineSettingsValue } from '@taucad/types';
 import { slicingPreferences } from '@taucad/slicer/preferences';
@@ -19,10 +19,19 @@ import { ToolpathParseError, parseGcode } from '@taucad/slicer/toolpath';
 import type * as Toolpath from '@taucad/slicer/toolpath';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { projectFiles } from '#components/print/testing/project-files.js';
-import { bambuContainer, fffSlots, machineEntry, x1cManifest } from '#components/print/testing/machines.fixture.js';
+import {
+  bambuContainer,
+  fffSlots,
+  machineEntry,
+  machineSnapshot,
+  millingComponents,
+  routerManifest,
+  x1cManifest,
+} from '#components/print/testing/machines.fixture.js';
 import { bambuA1MiniManifest, bambuX1cManifest } from '@taucad/bambu';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
+import type { MachineControl } from '#hooks/use-machine-control.js';
 import { summarizeGcodeContainer } from '#components/printer/printer-summary.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
 import type * as PrintSummary from '#routes/w.$workspace.$project/chat-print-summary.js';
@@ -59,13 +68,13 @@ import {
   timestamp,
 } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 import { submissionDefaults } from '#routes/w.$workspace.$project/chat-print-prepare.js';
+import { startBlocker } from '#routes/w.$workspace.$project/chat-print-send.js';
 import {
-  bambuStudioRequired,
-  developerModeRequired,
-  materialMismatch,
-  startBlocker,
-} from '#routes/w.$workspace.$project/chat-print-send.js';
-import { PrintPanel, nextAction, presentMachine } from '#routes/w.$workspace.$project/chat-print.js';
+  PrintPanel,
+  hasSomethingToStop,
+  nextAction,
+  presentMachine,
+} from '#routes/w.$workspace.$project/chat-print.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 
 vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
@@ -170,6 +179,14 @@ const prepareRegion = (): HTMLElement => {
 const prepareActions = (): BoundFunctions<typeof queries> => {
   const bar = document.querySelector<HTMLElement>('[data-slot="print-action-bar"]');
   return within(bar ?? prepareRegion());
+};
+
+/** Review print once the machine has checked the fresh slice and it can be sent. */
+const reviewPrint = async (): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(prepareActions().getByRole('button', { name: 'Review print' })).toBeEnabled();
+  });
+  return prepareActions().getByRole('button', { name: 'Review print' });
 };
 
 /** The slice result with its folded details open. */
@@ -607,13 +624,6 @@ describe('Print pane orientation', () => {
     expect(
       startBlocker(entry({ snapshot: { ...entry().snapshot, state: { status: 'active', reason: 'calibrating' } } })),
     ).toBe('Workshop X1C is not ready: calibrating. Wait until it reports ready.');
-    expect(materialMismatch(agentJob().configuration, entry())).toBeUndefined();
-    expect(materialMismatch({ expectedMaterials: [{ slot: 0, materialId: 'PETG' }] }, entry())).toBe(
-      'PETG is not loaded in A1 (PLA is).',
-    );
-    expect(materialMismatch({ expectedMaterials: [{ slot: 1, materialId: 'PLA' }] }, entry())).toBe(
-      'PLA is not loaded in A2.',
-    );
   });
 
   it('renders explicit grant refusals instead of a broken control surface', () => {
@@ -807,8 +817,7 @@ describe('Print pane prepare and send', () => {
     await user.click(prepareActions().getByRole('button', { name: 'Preview' }));
     expect(mockEditorSend).toHaveBeenCalledExactlyOnceWith({ type: 'openFile', path: slicePath, source: 'user' });
 
-    expect(prepareActions().getByRole('button', { name: 'Review print' })).toBeEnabled();
-    await user.click(prepareActions().getByRole('button', { name: 'Review print' }));
+    await user.click(await reviewPrint());
     // Review asks the machine for a job; nothing reaches the printer until the person starts it.
     await waitFor(() => {
       expect(fixture.requestJob).toHaveBeenCalledOnce();
@@ -926,7 +935,7 @@ describe('Print pane prepare and send', () => {
     await findMachine('Ready');
 
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
-    expect(await prepareActions().findByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
 
     await openAdvancedSettings(user);
     const options = await screen.findByLabelText('Slicer options');
@@ -956,7 +965,7 @@ describe('Print pane prepare and send', () => {
         options: { ...machineSliceOptions, layerHeight: 0.16 },
       });
     });
-    expect(await prepareActions().findByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
   });
 
   it('should discard a prepared slice when switching printers and prepare again for the selected machine', async () => {
@@ -968,7 +977,7 @@ describe('Print pane prepare and send', () => {
     renderPane(fixture.client);
     await findMachine('Ready');
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
-    expect(await prepareActions().findByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
     await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Mini');
     expect(screen.queryByRole('button', { name: 'Send to Mini' })).not.toBeInTheDocument();
     expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
@@ -1003,7 +1012,7 @@ describe('Print pane prepare and send', () => {
     await findMachine('Ready');
 
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
-    expect(await prepareActions().findByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
 
     act(() => {
       renderGeometry();
@@ -1017,7 +1026,7 @@ describe('Print pane prepare and send', () => {
     ).toBeInTheDocument();
 
     await user.click(prepareActions().getByRole('button', { name: 'Slice again' }));
-    expect(await prepareActions().findByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
   });
 
   it("starts the machine mapping from the provider schema's own defaults, so bed leveling and flow calibration show on", async () => {
@@ -1040,10 +1049,7 @@ describe('Print pane prepare and send', () => {
     expect(await screen.findByRole('switch', { name: 'Toggle for Bed levelling' })).toBeChecked();
     expect(screen.getByRole('switch', { name: 'Toggle for Flow calibration' })).toBeChecked();
     expect(screen.getByRole('switch', { name: 'Toggle for Timelapse' })).not.toBeChecked();
-    expect(within(mapping).getByRole('spinbutton', { name: 'Input for Expected Filament Diameter' })).toHaveValue(
-      '1.75',
-    );
-    expect(within(mapping).getByRole('spinbutton', { name: 'Input for Expected Nozzle Diameter' })).toHaveValue('0.4');
+    // The diameters are the machine's to fill once it checks a slice (CB-6); the send flow asserts what it fills.
     for (const label of [
       'Kind',
       'Space',
@@ -1063,7 +1069,7 @@ describe('Print pane prepare and send', () => {
     renderPane(fixture.client);
     await findMachine('Ready');
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
-    expect(await prepareActions().findByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
 
     openDisclosure(/^Start options/u);
     const bed = screen.getByRole('switch', { name: 'Toggle for Bed levelling' });
@@ -1084,14 +1090,29 @@ describe('Print pane prepare and send', () => {
     expect(fixture.requestJob.mock.calls[0]?.[0].configuration).toMatchObject({ bedLeveling: false });
   });
 
-  it('disables sending, not slicing, when the chosen material is no longer the loaded one', async () => {
+  it("checks the job again when a spool changes, and disables sending, not slicing, on the machine's answer", async () => {
     const fixture = createFixture();
     const user = userEvent.setup();
     renderPane(fixture.client);
     await findMachine('Ready');
     expect(screen.getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
-    expect(await prepareActions().findByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
+    const checks = fixture.checkJob.mock.calls.length;
+    fixture.checkJob.mockResolvedValue({
+      status: 'blocked',
+      program: { name: 'main.gcode.3mf', facts: { process: 'fff' } },
+      checks: [
+        {
+          id: 'material',
+          label: 'Material',
+          state: 'blocked',
+          source: 'observed',
+          detail: 'PLA is not loaded in A1 (PETG is).',
+        },
+      ],
+      configuration: {},
+    });
 
     act(() => {
       fixture.observe(
@@ -1101,9 +1122,10 @@ describe('Print pane prepare and send', () => {
 
     const send = await prepareActions().findByRole('button', { name: 'Review print' });
     await waitFor(() => {
-      expect(send).toBeDisabled();
+      expect(send).toHaveAccessibleDescription('Material: PLA is not loaded in A1 (PETG is).');
     });
-    expect(send).toHaveAccessibleDescription('PLA is not loaded in A1 (PETG is).');
+    expect(send).toBeDisabled();
+    expect(fixture.checkJob.mock.calls.length).toBe(checks + 1);
     expect(within(prepareRegion()).getByRole('button', { name: 'Slice again' })).toBeEnabled();
   });
 
@@ -1113,7 +1135,7 @@ describe('Print pane prepare and send', () => {
     renderPane(fixture.client);
     await findMachine('Ready');
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
-    expect(await prepareActions().findByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
 
     const send = (): HTMLElement => prepareActions().getByRole('button', { name: 'Review print' });
     const expectSendHeld = async (next: ReturnType<typeof entry>, reason: string): Promise<void> => {
@@ -1164,16 +1186,6 @@ describe('Print pane external spool', () => {
     expect(within(material).queryByRole('button', { name: 'Reset Material' })).not.toBeInTheDocument();
   });
 
-  it('falls back to the loaded tray when the saved one is not on this printer', async () => {
-    // Another printer of this type saved A4; this one (a simulator, say) has only A1 loaded.
-    projectFiles.write(settingsPath, preferencesBytes({ material: { defaultSlot: 3 } }));
-    renderPane(createFixture().client);
-
-    const material = await screen.findByRole('group', { name: 'Material' });
-    expect(within(material).getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
-    expect(within(material).queryByRole('button', { name: 'Reset Material' })).not.toBeInTheDocument();
-  });
-
   it('offers the external spool as Ext and sends from it with the external-spool checks', async () => {
     const fixture = createFixture({ entries: [withExternalSpool(whitePetg)] });
     const user = userEvent.setup();
@@ -1187,8 +1199,7 @@ describe('Print pane external spool', () => {
     expect(selector).toHaveTextContent('Ext');
 
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
-    const send = await prepareActions().findByRole('button', { name: 'Review print' });
-    await user.click(send);
+    await user.click(await reviewPrint());
     await waitFor(() => {
       expect(fixture.requestJob).toHaveBeenCalledOnce();
     });
@@ -1207,12 +1218,40 @@ describe('Print pane external spool', () => {
     expect(externalSpool).toHaveAttribute('data-disabled');
   });
 
-  it('names the external spool when the material there no longer matches', () => {
-    const configuration = { expectedMaterials: [{ slot: 254, materialId: 'PETG' }] };
-    expect(materialMismatch(configuration, withExternalSpool(loadedSlot('external/spool', 'PLA')))).toBe(
-      'PETG is not loaded in Ext (PLA is).',
-    );
-    expect(materialMismatch(configuration, withExternalSpool(whitePetg))).toBeUndefined();
+  it("holds sending on the machine's own check and offers its remedy, never its own guess", async () => {
+    const fixture = createFixture({ entries: [withExternalSpool(loadedSlot('external/spool', 'PLA'))] });
+    fixture.checkJob.mockResolvedValue({
+      status: 'blocked',
+      program: { name: 'main.gcode.3mf', facts: { process: 'fff', layers: 125, filamentLength: 3200 } },
+      checks: [
+        {
+          id: 'materials',
+          label: 'Material matches',
+          state: 'blocked',
+          source: 'observed',
+          detail: 'PETG is not loaded in Ext (PLA is).',
+          remedy: { type: 'person', instruction: 'Load PETG on the external spool.' },
+        },
+      ],
+      configuration: { amsMapping: [254] },
+    });
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await findMachine('Ready');
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+
+    const send = await prepareActions().findByRole('button', { name: 'Review print' });
+    await waitFor(() => {
+      expect(send).toHaveAccessibleDescription('Material matches: PETG is not loaded in Ext (PLA is).');
+    });
+    expect(send).toBeDisabled();
+    const checks = prepareActions().getByRole('list', { name: 'Checks' });
+    expect(checks).toHaveTextContent('At the machine: Load PETG on the external spool.');
+    // The machine was asked with the person's choices only; it completes the rest from what it reports.
+    const asked = fixture.checkJob.mock.lastCall?.[0];
+    expect(asked?.machineId).toBe('machine-1');
+    expect(asked?.configuration).not.toHaveProperty('expectedMaterials');
+    expect(fixture.requestJob).not.toHaveBeenCalled();
   });
 
   it('shows Ext in the monitor, in use while the printer feeds from it', async () => {
@@ -1502,6 +1541,27 @@ describe('Print pane jobs', () => {
   });
 });
 
+/** The X1C with its chamber light qualified, as an agent may be approved to switch it. */
+const qualifiedLight = (): MachineDirectoryEntry => {
+  const base = entry();
+  const { capabilities } = base.descriptor;
+  const pause = capabilities.actions.find((descriptor) => descriptor.id === 'run.pause');
+  return {
+    ...base,
+    descriptor: {
+      ...base.descriptor,
+      capabilities: {
+        ...capabilities,
+        actions: capabilities.actions.map((descriptor) =>
+          descriptor.componentId === 'chamber-light' && pause !== undefined
+            ? { ...descriptor, qualification: pause.qualification }
+            : descriptor,
+        ),
+      },
+    },
+  };
+};
+
 describe('Print pane monitor and controls', () => {
   it('states the run plainly and sends Pause and Cancel against the exact observed run', async () => {
     const fixture = createFixture({ entries: [printing()] });
@@ -1536,13 +1596,22 @@ describe('Print pane monitor and controls', () => {
     );
 
     await user.click(within(run).getByRole('button', { name: 'Cancel print' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Confirm cancel print' });
-    expect(dialog).toHaveTextContent('Cancel print pyramid.gcode.3mf on Workshop X1C? The print cannot be continued.');
+    const question = 'Cancel print pyramid.gcode.3mf on Workshop X1C?';
+    const dialog = screen.getByRole('alertdialog', { name: question });
+    expect(dialog).toHaveAccessibleDescription(/^The print cannot be continued\./u);
+    // The confirmation takes focus, so a keyboard user lands on its first choice.
+    await waitFor(() => {
+      expect(within(dialog).getByRole('button', { name: 'Confirm cancel print' })).toHaveFocus();
+    });
     await user.click(within(dialog).getByRole('button', { name: 'Keep going' }));
     expect(fixture.applyAction).toHaveBeenCalledOnce();
     await user.click(within(run).getByRole('button', { name: 'Cancel print' }));
+    // Escape keeps going, as the button does.
+    fireEvent.keyDown(screen.getByRole('alertdialog', { name: question }), { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    await user.click(within(run).getByRole('button', { name: 'Cancel print' }));
     await user.click(
-      within(screen.getByRole('alertdialog', { name: 'Confirm cancel print' })).getByRole('button', {
+      within(screen.getByRole('alertdialog', { name: question })).getByRole('button', {
         name: 'Confirm cancel print',
       }),
     );
@@ -1572,7 +1641,9 @@ describe('Print pane monitor and controls', () => {
         expect.objectContaining({ machineId: 'machine-1', requestedBy: byPerson }),
       );
     });
+    // Stop is the whole act: no job is resolved and no action follows its receipt.
     expect(fixture.applyAction).not.toHaveBeenCalled();
+    expect(fixture.resolveJob).not.toHaveBeenCalled();
   });
 
   it('says plainly when the machine does not confirm a Stop', async () => {
@@ -1644,6 +1715,7 @@ describe('Print pane monitor and controls', () => {
   it.each([
     { name: 'finished', state: 'completed', origin: 'tau', line: 'Last run: Finished · pyramid.gcode.3mf' },
     { name: 'failed external', state: 'failed', origin: 'external', line: 'Last run: Failed · pyramid.gcode.3mf' },
+    { name: 'cancelled', state: 'cancelled', origin: 'tau', line: 'Last run: Cancelled · pyramid.gcode.3mf' },
   ] as const)(
     'reads a $name run the printer still reports as one quiet line, never as live',
     async ({ state, origin, line }) => {
@@ -1779,7 +1851,7 @@ describe('Print pane monitor and controls', () => {
     expect(fan).toHaveTextContent('Part fanWaiting for the report');
   });
 
-  it('shows an agent’s pending action with its consequence and answers the chat', async () => {
+  it('holds an agent’s request for a control not yet qualified, even while a person tests it', async () => {
     const approval = {
       interruptId: 'interrupt-2',
       kind: 'approval',
@@ -1787,15 +1859,9 @@ describe('Print pane monitor and controls', () => {
       options: [],
       messageId: 'assistant-1',
       approvalId: 'interrupt-2',
-      context: {
-        machineId: 'machine-1',
-        componentId: 'filament',
-        action: 'material.load',
-        operationId: 'op-9',
-        label: 'Load',
-      },
+      context: { machineId: 'machine-1', componentId: 'filament', action: 'material.load', operationId: 'op-9' },
     } as const;
-    const { bridge, respond } = createBridge(undefined, [
+    const { bridge } = createBridge(undefined, [
       {
         approval,
         machineId: 'machine-1',
@@ -1803,28 +1869,142 @@ describe('Print pane monitor and controls', () => {
         action: 'material.load',
         operationId: 'op-9',
         label: 'Load',
+        parameters: {},
+        version: 1,
+        prompt: approval.prompt,
       },
     ]);
-    // Load is only designed on the X1C: Approve waits for the machine's Testing switch.
-    const untested = renderPane(createFixture().client, bridge);
-    const blocked = await screen.findByRole('region', { name: 'Agent request' });
-    expect(blocked).toHaveTextContent('Load is not yet qualified on this machine. Turn on testing');
-    expect(within(blocked).getByRole('button', { name: 'Approve' })).toBeDisabled();
-    untested.unmount();
+    renderPane(createFixture({ entries: [entry({ testing: true })] }).client, bridge);
+    const card = await screen.findByRole('region', { name: 'Agent request' });
+    expect(card).toHaveTextContent('The agent asks to: LoadUnqualified');
+    expect(card).toHaveTextContent('The printer heats the nozzle and feeds filament.');
+    expect(card).toHaveTextContent('Load is not yet qualified on this machine; only a person testing it may try it.');
+    expect(within(card).getByRole('button', { name: 'Approve' })).toBeDisabled();
+  });
 
-    const fixture = createFixture({ entries: [entry({ testing: true })] });
+  it('records an agent’s approved action on the host, then answers the chat', async () => {
+    const approval = {
+      interruptId: 'interrupt-2',
+      kind: 'approval',
+      prompt: 'Chamber light ({"on":true}) on Workshop X1C?',
+      options: [],
+      messageId: 'assistant-1',
+      approvalId: 'interrupt-2',
+      context: { machineId: 'machine-1', componentId: 'chamber-light', action: 'switch.set', operationId: 'op-9' },
+    } as const;
+    const { bridge, respond } = createBridge(undefined, [
+      {
+        approval,
+        machineId: 'machine-1',
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        operationId: 'op-9',
+        label: 'Chamber light',
+        parameters: { on: true },
+        version: 1,
+        prompt: approval.prompt,
+      },
+    ]);
+    const fixture = createFixture({ entries: [qualifiedLight()] });
     const user = userEvent.setup();
     renderPane(fixture.client, bridge);
 
     const card = await screen.findByRole('region', { name: 'Agent request' });
-    expect(card).toHaveTextContent('The agent asks to: LoadUnqualified');
-    expect(card).toHaveTextContent('The printer heats the nozzle and feeds filament.');
     await user.click(within(card).getByRole('button', { name: 'Approve' }));
     await waitFor(() => {
       expect(respond).toHaveBeenCalledExactlyOnceWith('interrupt-2', true);
     });
+    // The person's own session records the approval for this exact intent before the chat is answered (R15).
+    expect(fixture.approveAction).toHaveBeenCalledExactlyOnceWith({
+      machineId: 'machine-1',
+      operationId: 'op-9',
+      intent: { componentId: 'chamber-light', action: 'switch.set', version: 1, parameters: { on: true } },
+      decision: 'approve',
+    });
+    expect(fixture.approveAction.mock.invocationCallOrder[0]).toBeLessThan(respond.mock.invocationCallOrder[0]!);
     // The paused tool sends the action; the pane never applies the agent's intent itself.
     expect(fixture.applyAction).not.toHaveBeenCalled();
+  });
+
+  it('records a decline on the host before answering, and leaves the chat unanswered when the host refuses', async () => {
+    const approval = {
+      interruptId: 'interrupt-4',
+      kind: 'approval',
+      prompt: 'Chamber light ({"on":true}) on Workshop X1C?',
+      options: [],
+      messageId: 'assistant-1',
+      approvalId: 'interrupt-4',
+      context: { machineId: 'machine-1', componentId: 'chamber-light', action: 'switch.set', operationId: 'op-11' },
+    } as const;
+    const { bridge, respond } = createBridge(undefined, [
+      {
+        approval,
+        machineId: 'machine-1',
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        operationId: 'op-11',
+        label: 'Chamber light',
+        parameters: { on: true },
+        version: 1,
+        prompt: approval.prompt,
+      },
+    ]);
+    const fixture = createFixture({ entries: [qualifiedLight()] });
+    fixture.approveAction.mockResolvedValueOnce({
+      status: 'refused',
+      code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
+      message: 'This approval has expired; ask the agent again.',
+    });
+    const user = userEvent.setup();
+    renderPane(fixture.client, bridge);
+    const card = await screen.findByRole('region', { name: 'Agent request' });
+
+    await user.click(within(card).getByRole('button', { name: 'Approve' }));
+    expect(await within(card).findByText('This approval has expired; ask the agent again.')).toBeVisible();
+    expect(respond).not.toHaveBeenCalled();
+
+    await user.click(within(card).getByRole('button', { name: 'Decline' }));
+    await waitFor(() => {
+      expect(respond).toHaveBeenCalledExactlyOnceWith('interrupt-4', false);
+    });
+    expect(fixture.approveAction).toHaveBeenLastCalledWith(expect.objectContaining({ decision: 'deny' }));
+  });
+
+  it('shows the values of the exact intent an agent asks to apply before it can be approved', async () => {
+    const approval = {
+      interruptId: 'interrupt-3',
+      kind: 'approval',
+      prompt: 'Chamber light ({"on":false}) on Workshop X1C?',
+      options: [],
+      messageId: 'assistant-1',
+      approvalId: 'interrupt-3',
+      context: {
+        machineId: 'machine-1',
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        operationId: 'op-10',
+        label: 'Chamber light',
+      },
+    } as const;
+    const { bridge } = createBridge(undefined, [
+      {
+        approval,
+        machineId: 'machine-1',
+        componentId: 'chamber-light',
+        action: 'switch.set',
+        operationId: 'op-10',
+        label: 'Chamber light',
+        parameters: { on: false },
+        version: 1,
+        prompt: approval.prompt,
+      },
+    ]);
+    renderPane(createFixture({ entries: [qualifiedLight()] }).client, bridge);
+    const card = await screen.findByRole('region', { name: 'Agent request' });
+    const values = within(card).getByRole('definition');
+    expect(values).toHaveTextContent('false');
+    expect(within(card).getByText('On')).toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Approve' })).toBeEnabled();
   });
 });
 
@@ -1927,7 +2107,7 @@ describe('Print pane Bambu Studio mode', () => {
     );
 
     // A Bambu Studio archive is what the real printer takes: the request names its producer.
-    await user.click(prepareActions().getByRole('button', { name: 'Review print' }));
+    await user.click(await reviewPrint());
     await waitFor(() => {
       expect(fixture.requestJob).toHaveBeenCalledOnce();
     });
@@ -2045,8 +2225,7 @@ describe('Print pane Bambu Studio mode', () => {
     const { studio } = await renderStudio();
     summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
-    const sendButton = await prepareActions().findByRole('button', { name: 'Review print' });
-    expect(sendButton).toBeEnabled();
+    await reviewPrint();
 
     studio.resolveSelection.mockRejectedValueOnce(new Error('No compatible process for Bambu PETG Basic @BBL X1C.'));
     await chooseOption(user, combobox('Filament A1'), 'Bambu PETG Basic @BBL X1C');
@@ -2241,7 +2420,7 @@ describe('Print pane Bambu Studio mode', () => {
     expect(within(result).getByRole('status')).toHaveTextContent(refusal);
     expect(within(result).queryByText('Toolpath')).not.toBeInTheDocument();
     expect(within(result).queryByText(/fits the plate/u)).not.toBeInTheDocument();
-    expect(prepareActions().getByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
   });
 
   it('shows what the slicer warned about a slice it still made', async () => {
@@ -2286,8 +2465,7 @@ describe('Print pane Bambu Studio mode', () => {
     );
     expect(within(result).getByText('Plate').nextElementSibling).toHaveTextContent('The part fits the plate');
     expect(within(result).queryByRole('alert')).not.toBeInTheDocument();
-    const send = prepareActions().getByRole('button', { name: 'Review print' });
-    expect(send).toBeEnabled();
+    const send = await reviewPrint();
     expect(send).not.toHaveAccessibleDescription();
   });
 
@@ -2366,14 +2544,28 @@ describe('Print pane Bambu Studio mode', () => {
     });
   });
 
-  it('asks the real printer for a Bambu Studio slice when Bambu Studio is unavailable, and keeps the simulator sendable', async () => {
+  it("holds the real printer's send on its own producer check when Bambu Studio is unavailable, and keeps the simulator sendable", async () => {
     const user = userEvent.setup();
     const unavailable = createBambuStudio(false);
     desktopHost.bambuStudio = unavailable;
     const fixture = createFixture({ entries: [realPrinter()] });
+    const producer = 'Slice it with Bambu Studio in Tau (desktop app with Bambu Studio installed), then send it again.';
+    // The printer, not the pane, says which files it takes: its job check refuses the reference slicer's.
+    fixture.checkJob.mockResolvedValue({
+      status: 'blocked',
+      program: { name: 'main.gcode.3mf', facts: { process: 'other' } },
+      checks: [
+        { id: 'producer', label: 'Sliced by Bambu Studio', state: 'blocked', source: 'computed', detail: producer },
+      ],
+      configuration: {},
+    });
     const { unmount } = renderPane(fixture.client);
     await findMachine('Ready');
-    expect(await within(prepareRegion()).findByText(bambuStudioRequired)).toBeInTheDocument();
+    expect(
+      await within(prepareRegion()).findByText(
+        "Slicing with Tau's reference slicer: Bambu Studio is not available here.",
+      ),
+    ).toBeInTheDocument();
     expect(unavailable.catalog).not.toHaveBeenCalled();
 
     // The reference engine still slices and previews; only Send waits.
@@ -2385,8 +2577,10 @@ describe('Print pane Bambu Studio mode', () => {
       });
     });
     const send = await prepareActions().findByRole('button', { name: 'Review print' });
+    await waitFor(() => {
+      expect(send).toHaveAccessibleDescription(`Sliced by Bambu Studio: ${producer}`);
+    });
     expect(send).toBeDisabled();
-    expect(send).toHaveAccessibleDescription(bambuStudioRequired);
     unmount();
 
     // The web build has no bridge; the simulator takes the reference slice.
@@ -2396,10 +2590,10 @@ describe('Print pane Bambu Studio mode', () => {
       await screen.findByText("Slicing with Tau's reference slicer: Bambu Studio is not available here."),
     ).toBeInTheDocument();
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
-    expect(await prepareActions().findByRole('button', { name: 'Review print' })).toBeEnabled();
+    await reviewPrint();
   });
 
-  it("names the slicer on an agent's job and states a producer refusal plainly", async () => {
+  it("names the slicer on an agent's job and states the machine's own refusal", async () => {
     const { program } = agentJob();
     const fixture = createFixture({
       jobs: [agentJob({ program: { ...program, producer: { name: 'Bambu Studio', version: bambuStudioVersion } } })],
@@ -2415,16 +2609,16 @@ describe('Print pane Bambu Studio mode', () => {
       jobs: [
         agentJob({
           state: 'failed',
-          failure: { code: 'ARTIFACT_UNQUALIFIED', message: 'This file was not sliced by Bambu Studio.' },
+          failure: { code: 'MACHINE_JOB_ARTIFACT_UNQUALIFIED', message: 'This file was not sliced by Bambu Studio.' },
         }),
       ],
     });
     renderPane(refused.client);
-    expect(await screen.findByText(bambuStudioRequired)).toBeInTheDocument();
-    expect(screen.queryByText('This file was not sliced by Bambu Studio.')).not.toBeInTheDocument();
+    // The provider's words, as it reported them; the pane adds no vendor copy of its own.
+    expect(await screen.findByText('This file was not sliced by Bambu Studio.')).toBeInTheDocument();
   });
 
-  it("should keep the printer's reason and say how to allow the start when it refuses an unsigned command", async () => {
+  it("should keep the printer's reason, without parsing it, when it refuses a start", async () => {
     const reason = 'mqtt message verify failed';
     const refused = createFixture({
       entries: [realPrinter()],
@@ -2449,7 +2643,8 @@ describe('Print pane Bambu Studio mode', () => {
 
     const jobs = await screen.findByRole('region', { name: 'Jobs' });
     expect(jobs).toHaveTextContent('The machine rejected the start (MACHINE_ACTION_PROVIDER_REJECTED)');
-    expect(jobs).toHaveTextContent(`${reason}. ${developerModeRequired}`);
+    expect(jobs).toHaveTextContent(reason);
+    expect(jobs).not.toHaveTextContent('Developer Mode');
   });
 });
 
@@ -2870,7 +3065,7 @@ describe('Print pane artifacts and history', () => {
     expect(mockWriteFiles).toHaveBeenCalledOnce();
   });
 
-  it("lists only this project's jobs, as the host filters them by the project their artifacts name", async () => {
+  it('lists every job the machine holds, whichever project sent it, as Stop and Cancel act on all of them', async () => {
     const { program } = agentJob();
     const ours = agentJob({ jobId: 'job-ours', state: 'denied', program: { ...program, name: 'ours.gcode.3mf' } });
     const theirs = agentJob({
@@ -2885,7 +3080,20 @@ describe('Print pane artifacts and history', () => {
     openDisclosure(/^History/u);
     const list = await screen.findByRole('list', { name: 'Jobs' });
     expect(within(list).getByText('ours.gcode.3mf')).toBeInTheDocument();
-    expect(within(list).queryByText('theirs.gcode.3mf')).not.toBeInTheDocument();
+    expect(within(list).getByText('theirs.gcode.3mf')).toBeInTheDocument();
+  });
+
+  it('names a started job whose run the host saw interrupted, not as finished', async () => {
+    const interrupted = agentJob({
+      state: 'started',
+      run: { runId: 'provider-run-1', outcome: 'interrupted', endedAt: later },
+    });
+    renderPane(createFixture({ jobs: [interrupted] }).client);
+
+    await findMachine('Ready');
+    openDisclosure(/^History/u);
+    const list = await screen.findByRole('list', { name: 'Jobs' });
+    expect(within(list).getByText('Interrupted')).toBeInTheDocument();
   });
 
   it("offers no preview of another project's job, whose file is not in this project", async () => {
@@ -2902,11 +3110,12 @@ describe('Print pane artifacts and history', () => {
 
 describe('Print pane with the Bambu provider’s own manifests', () => {
   it.each([
-    ['X1C', bambuX1cManifest],
-    ['A1 mini', bambuA1MiniManifest],
+    // The X1C declares the four AMS units it takes and the external spool; the host's installed capabilities narrow them.
+    ['X1C', bambuX1cManifest, 17],
+    ['A1 mini', bambuA1MiniManifest, 5],
   ])(
     'serves the %s as the provider declares it: Monitor, Control and Prepare, and no Stop while idle',
-    async (_name, real) => {
+    async (_name, real, slotCount) => {
       const machine = machineEntry({ manifest: real, snapshot: entry().snapshot });
       renderPane(createFixture({ entries: [machine] }).client);
 
@@ -2915,7 +3124,7 @@ describe('Print pane with the Bambu provider’s own manifests', () => {
       // The plate is a fact beside the heaters, by the name the manifest gives it.
       expect(monitor).toHaveTextContent('PlateTextured PEI plate');
       const slots = within(monitor).getByRole('list', { name: 'Material slots' });
-      expect(within(slots).getAllByRole('listitem')).toHaveLength(5);
+      expect(within(slots).getAllByRole('listitem')).toHaveLength(slotCount);
       expect(screen.getByRole('button', { name: /^Control/u })).toBeInTheDocument();
       expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
       // Nothing to stop on an idle printer, and nothing above the stages asks whether the person is there.
@@ -2943,6 +3152,190 @@ describe('Print pane with the Bambu provider’s own manifests', () => {
         expect.objectContaining({ action: 'motion.home', attended: true }),
       );
     });
+  });
+});
+
+/** The LongMill, homed and idle, with testing on so its designed controls can be tried. */
+const router = (overrides: Partial<Parameters<typeof machineEntry>[0]> = {}): ReturnType<typeof entry> =>
+  machineEntry({
+    manifest: routerManifest,
+    name: 'Garage LongMill',
+    providerId: 'grbl-simulator',
+    testing: true,
+    snapshot: machineSnapshot(millingComponents(routerManifest)),
+    ...overrides,
+  });
+
+/** A control as the pane holds it, for the decisions that read one. */
+const controlOf = (machine: ReturnType<typeof entry>, overrides: Partial<MachineControl> = {}): MachineControl => ({
+  entry: machine,
+  attended: false,
+  setAttended: vi.fn(),
+  check: vi.fn(),
+  apply: vi.fn(),
+  pending: undefined,
+  error: undefined,
+  stop: vi.fn(),
+  isStopping: false,
+  beginHold: vi.fn(),
+  endHold: vi.fn(),
+  hold: undefined,
+  ...overrides,
+});
+
+describe('Print pane presence, Stop and jobs across machines', () => {
+  it.each([
+    { when: 'a jog is held', overrides: { hold: { parameters: { axis: 'x', direction: 1, feed: 1000 } } } },
+    { when: 'a stop is in flight', overrides: { isStopping: true } },
+  ] as const)('offers Stop while $when on an idle printer', ({ overrides }) => {
+    expect(hasSomethingToStop(controlOf(entry()))).toBe(false);
+    expect(hasSomethingToStop(controlOf(entry(), overrides))).toBe(true);
+  });
+
+  it('offers Stop for an operation still confirming, and for a stale machine whose last word was not idle', () => {
+    const idle = entry();
+    const confirming = entry({
+      snapshot: {
+        ...idle.snapshot,
+        operations: [
+          {
+            operationId: 'operation-fan',
+            machineId: 'machine-1',
+            kind: 'action',
+            inputDigest: artifact.digest,
+            state: 'confirming',
+            updatedAt: later,
+          },
+        ],
+      },
+    });
+    expect(hasSomethingToStop(controlOf(confirming))).toBe(true);
+    const unknown = { ...idle.snapshot, state: { status: 'unknown' } } as const;
+    expect(hasSomethingToStop(controlOf(entry({ snapshot: unknown })))).toBe(false);
+    expect(hasSomethingToStop(controlOf(entry({ snapshot: unknown, freshness: 'stale' })))).toBe(true);
+    expect(hasSomethingToStop(controlOf(entry({ freshness: 'stale' })))).toBe(false);
+  });
+
+  it('keeps Stop live on a stale machine and sends every press as its own stop, even while one is in flight', async () => {
+    const fixture = createFixture({ entries: [{ ...printing(), freshness: 'stale' }] });
+    const pending = Promise.withResolvers<Awaited<ReturnType<MachineClient['stop']>>>();
+    fixture.stop.mockReturnValueOnce(pending.promise);
+    const user = userEvent.setup();
+    renderPane(fixture.client);
+    await findMachine('Stale observation');
+
+    const stop = screen.getByRole('button', { name: 'Stop' });
+    expect(stop).toBeEnabled();
+    await user.click(stop);
+    expect(stop).toBeEnabled();
+    await user.click(stop);
+    await waitFor(() => {
+      expect(fixture.stop).toHaveBeenCalledTimes(2);
+    });
+    const [first, second] = fixture.stop.mock.calls.map(([input]) => input.operationId);
+    expect(first).not.toBe(second);
+    pending.resolve({
+      operationId: first ?? 'stop-1',
+      machineId: 'machine-1',
+      kind: 'stop',
+      status: 'accepted',
+      observedAt: later,
+    });
+    // A stop never waits behind another, and nothing else is sent instead.
+    expect(fixture.applyAction).not.toHaveBeenCalled();
+    expect(fixture.reconcileOperation).not.toHaveBeenCalled();
+  });
+
+  it('forgets "I am at the machine" when another machine is chosen', async () => {
+    const first = machineEntry({ manifest: bambuX1cManifest, snapshot: entry().snapshot, testing: true });
+    const second = machineEntry({
+      manifest: bambuX1cManifest,
+      machineId: 'machine-2',
+      name: 'Spare X1C',
+      snapshot: entry().snapshot,
+      testing: true,
+    });
+    const user = userEvent.setup();
+    renderPane(createFixture({ entries: [first, second] }).client);
+    await findMachine('Ready', 'Spare X1C');
+    openDisclosure(/^Control/u);
+    const presence = within(screen.getByRole('group', { name: 'Motion' })).getByRole('switch', {
+      name: 'I am at the machine',
+    });
+    await user.click(presence);
+    expect(presence).toBeChecked();
+
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Workshop X1C');
+    await findMachine('Ready');
+    openDisclosure(/^Control/u);
+    expect(
+      within(screen.getByRole('group', { name: 'Motion' })).getByRole('switch', { name: 'I am at the machine' }),
+    ).not.toBeChecked();
+  });
+
+  it('asks "I am at the machine" once above everything where starting a job needs it', async () => {
+    renderPane(createFixture({ entries: [router()] }).client);
+    await findMachine('Ready', 'Garage LongMill');
+    const presence = screen.getByRole('switch', { name: 'I am at the machine' });
+    expect(presence).not.toBeChecked();
+    expect(screen.getByText('Moving the machine and starting a job need someone who can see it.')).toBeInTheDocument();
+  });
+
+  it('asks "I am at the machine" beside the run controls that need it', async () => {
+    const unattendedJobs = {
+      ...routerManifest,
+      jobs:
+        routerManifest.jobs.type === 'supported'
+          ? { ...routerManifest.jobs, safety: { ...routerManifest.jobs.safety, attended: false } }
+          : routerManifest.jobs,
+    };
+    const held = router({
+      manifest: unattendedJobs,
+      snapshot: machineSnapshot(millingComponents(routerManifest), {
+        state: { status: 'held' },
+        run: { ...printingRun, state: 'paused' },
+      }),
+    });
+    const user = userEvent.setup();
+    renderPane(createFixture({ entries: [held] }).client);
+    await findMachine('Paused', 'Garage LongMill');
+    const run = screen.getByRole('region', { name: 'Run' });
+    const resume = within(run).getByRole('button', { name: /^Resume/u });
+    expect(resume).toBeDisabled();
+    await user.click(within(run).getByRole('switch', { name: 'I am at the machine' }));
+    expect(resume).toBeEnabled();
+  });
+
+  it("shows another project's job on this machine, marked, without its preview", async () => {
+    const theirs = agentJob({ artifact: { ...artifact, projectId: 'proj_000000000000000000002' } });
+    renderPane(createFixture({ jobs: [theirs] }).client);
+    const region = await screen.findByRole('region', { name: jobRegionName });
+    expect(within(region).getByText('From another project')).toBeInTheDocument();
+    expect(within(region).queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+  });
+
+  it('says where a program comes from on a machine Prepare does not slice for', async () => {
+    renderPane(createFixture({ entries: [router()] }).client);
+    await findMachine('Ready', 'Garage LongMill');
+    expect(screen.getByText('Send a program to Garage LongMill from the agent or at the machine.')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Prepare' })).not.toBeInTheDocument();
+  });
+
+  it('reads a run the machine stopped reporting as not reported, and says Tau did not stop it', async () => {
+    const run = printing();
+    renderPane(
+      createFixture({
+        entries: [
+          {
+            ...run,
+            snapshot: { ...run.snapshot, state: { status: 'ready' }, run: { ...printingRun, state: 'unknown' } },
+          },
+        ],
+      }).client,
+    );
+    const ended = await screen.findByRole('region', { name: 'Run' });
+    expect(ended).toHaveTextContent('Last run: Not reported · pyramid.gcode.3mf');
+    expect(ended).toHaveTextContent('Workshop X1C did not report how this run ended, and Tau did not stop it.');
   });
 });
 

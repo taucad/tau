@@ -12,7 +12,6 @@ import type { ChatToolIconTone } from '#components/chat/chat-tool-card.js';
 import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
-import { describePrintFailure } from '#routes/w.$workspace.$project/chat-print-send.js';
 
 type RequestJobInvocation = ToolInvocation<typeof toolName.requestJob>;
 type JobRecord = Extract<RequestJobInvocation, { state: 'output-available' }>['output']['job'];
@@ -66,8 +65,8 @@ const unconfirmedStart =
   "The machine hasn't confirmed the start. Check the machine; Tau updates this when the machine reports the run.";
 
 /**
- * Why a job settled as it did, in the words the agent's `nextStep` and the
- * Print pane use. A failure message that is one bare token, such as
+ * Why a job settled as it did, in the provider's own words, as the agent's
+ * `nextStep` and the Print pane give them. A failure message that is one bare token, such as
  * `MACHINE_BUSY` or `provider-rejected`, says nothing to a person, so it
  * follows the outcome instead of standing in for it.
  *
@@ -81,7 +80,7 @@ const reasonOf = ({ state, failure }: JobRecord): string | undefined => {
   if (failure === undefined) {
     return undefined;
   }
-  const described = describePrintFailure(failure.code, failure.message).trim();
+  const described = failure.message.trim();
   if (/\s/u.test(described)) {
     return described;
   }
@@ -104,7 +103,7 @@ export function ChatMessageToolRequestJob({ part }: { readonly part: RequestJobI
   switch (part.state) {
     case 'input-streaming':
     case 'input-available': {
-      const target = part.input?.targetFile;
+      const target = part.input?.targetFile ?? part.input?.artifact;
       return (
         <ChatToolCard variant='minimal' status='loading' isCollapsible={false}>
           <ChatToolCardHeader>

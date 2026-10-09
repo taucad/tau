@@ -158,7 +158,7 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     if (control.getAttribute('aria-expanded') !== 'true') {
       await page.getByRole('button', { name: /^Control/u }).click();
     }
-    await screen.findByRole('group', { name: 'Jog pad' });
+    await screen.findByRole('group', { name: 'Jog X and Y' });
   }
   return container;
 };

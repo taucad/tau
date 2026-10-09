@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { mergeComponentObservations } from '@taucad/runtime/machine';
 import type {
   MachineChannelClient,
   MachineClient,
@@ -23,6 +24,24 @@ export const projectMachineDirectoryFrame = (
 ): MachineDirectorySnapshot => {
   if (frame.type === 'snapshot' || frame.type === 'resync-required') {
     return frame.snapshot;
+  }
+  if (frame.type === 'observed') {
+    // Latest readings move outside the event tail: the cursor stays where it is.
+    return {
+      ...current,
+      entries: current.entries.map((entry) =>
+        entry.machineId === frame.machineId
+          ? {
+              ...entry,
+              snapshot: {
+                ...entry.snapshot,
+                observedAt: frame.observedAt,
+                components: mergeComponentObservations(entry.snapshot.components, frame.components),
+              },
+            }
+          : entry,
+      ),
+    };
   }
   if (frame.event.type === 'machine-directory-removed') {
     const { machineId } = frame.event;
@@ -199,6 +218,7 @@ export const createMachinesFacet = ({ dial, connect }: MachinesConnection): Runt
     resolveJob: async (input) => call(async (client) => client.resolveJob(input)),
     withdrawJob: async (input) => call(async (client) => client.withdrawJob(input)),
     applyAction: async (input) => call(async (client) => client.applyAction(input)),
+    approveAction: async (input) => call(async (client) => client.approveAction(input)),
     stop: async (input) => call(async (client) => client.stop(input)),
     beginHold: async (input) => call(async (client) => client.beginHold(input)),
     renewHold: async (input) => call(async (client) => client.renewHold(input)),

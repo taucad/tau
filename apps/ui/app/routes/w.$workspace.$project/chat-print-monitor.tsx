@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Activity, Bot, History, Info, LoaderCircle, OctagonAlert, Play, TriangleAlert } from 'lucide-react';
 import { componentValue, fffProcessOf, millingProcessOf } from '@taucad/runtime/machine';
 import type {
@@ -6,6 +6,7 @@ import type {
   MachineAlert,
   MachineDirectoryEntry,
   MachineJob,
+  MachineObservationGroup,
   MachineOperation,
   MachineProvider,
   MachineReading,
@@ -15,10 +16,11 @@ import { Button } from '@taucad/ui/components/button';
 import { Progress } from '@taucad/ui/components/progress';
 import { cn } from '@taucad/ui/utils/cn';
 import { ExternalLink } from '#components/external-link.js';
-import { describeOutcome, materialSystemOf, toolheadOf } from '#components/print/machine-facts.js';
+import { describeOutcome, formatQuantity, materialSystemOf, toolheadOf } from '#components/print/machine-facts.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import {
   ActionButton,
+  Blocked,
   Consequences,
   RemedyButton,
   declaredAction,
@@ -31,7 +33,7 @@ import {
   StaleBadge,
   useNow,
 } from '#routes/w.$workspace.$project/chat-print-section.js';
-import { formatQuantity, formatRemaining, readableStage } from '#routes/w.$workspace.$project/chat-print-summary.js';
+import { formatRemaining, readableStage } from '#routes/w.$workspace.$project/chat-print-summary.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 
 /**
@@ -150,11 +152,13 @@ export function MachineAlerts({ control }: { readonly control: MachineControl })
       )}
     >
       <ul className='flex flex-col gap-2'>
-        {alerts.map((alert) => {
+        {alerts.map((alert, index) => {
           const alertTone = toneOf(alert);
           const Glyph = alertGlyph[alertTone];
           return (
-            <li key={alert.code} className='flex min-w-0 items-start gap-2'>
+            // Alerts carry no id and two may share a code; each item is stateless, so its place is its key.
+            // oxlint-disable-next-line react/no-array-index-key -- see above.
+            <li key={index} className='flex min-w-0 items-start gap-2'>
               <Glyph
                 aria-hidden
                 className={cn(
@@ -209,14 +213,22 @@ const formatReading = (value: MachineReading['value'] | NonNullable<MachineReadi
       )
     : String(value);
 
-type ReadingsObservation = Readonly<{ componentId: string; readings: readonly MachineReading[] }>;
+type ReadingsObservation = Readonly<{ componentId: string; group: string; readings: readonly MachineReading[] }>;
 
-const readingsIn = (entry: MachineDirectoryEntry, group: string): readonly ReadingsObservation[] =>
+/* The standard observation groups the Monitor reads by id; every other group's readings show under their component. */
+const temperatureGroup: MachineObservationGroup = 'temperature';
+const positionGroup: MachineObservationGroup = 'position';
+const materialGroup: MachineObservationGroup = 'material';
+
+const readingsOf = (entry: MachineDirectoryEntry): readonly ReadingsObservation[] =>
   entry.snapshot.components.flatMap((observation: ComponentObservation) =>
-    observation.group === group && observation.knowledge === 'known' && observation.value.kind === 'readings'
-      ? [{ componentId: observation.componentId, readings: observation.value.values }]
+    observation.knowledge === 'known' && observation.value.kind === 'readings'
+      ? [{ componentId: observation.componentId, group: observation.group, readings: observation.value.values }]
       : [],
   );
+
+const readingsIn = (entry: MachineDirectoryEntry, group: string): readonly ReadingsObservation[] =>
+  readingsOf(entry).filter((observation) => observation.group === group);
 
 /**
  * Temperatures as columns a person reads at a glance: where each heater is, and where it is heading.
@@ -231,12 +243,12 @@ function TemperatureGroup({
   readonly entry: MachineDirectoryEntry;
   readonly now: number;
 }): React.JSX.Element | undefined {
-  const observations = readingsIn(entry, 'temperature');
+  const observations = readingsIn(entry, temperatureGroup);
   if (observations.length === 0) {
     return undefined;
   }
   const isStale = observations.some(({ componentId }) =>
-    isObservationStale({ entry, componentId, group: 'temperature', now }),
+    isObservationStale({ entry, componentId, group: temperatureGroup, now }),
   );
   const readings = observations.flatMap(({ componentId, readings: values }) =>
     values.map((reading) => ({ key: `${componentId}:${reading.id}`, reading })),
@@ -282,6 +294,48 @@ function TemperatureGroup({
   );
 }
 
+/**
+ * Readings in any group other than temperatures, under their component's label: a provider's own group (a vendor's
+ * `<vendor>.<name>`, an environment sensor) is shown, not dropped.
+ *
+ * @param properties - The machine and the clock.
+ * @returns The rows, or nothing when every reading is a temperature.
+ */
+function OtherReadings({
+  entry,
+  now,
+}: {
+  readonly entry: MachineDirectoryEntry;
+  readonly now: number;
+}): React.JSX.Element | undefined {
+  const observations = readingsOf(entry).filter((observation) => observation.group !== temperatureGroup);
+  if (observations.length === 0) {
+    return undefined;
+  }
+  const { components } = entry.descriptor.capabilities;
+  return (
+    <>
+      {observations.map(({ componentId, group, readings }) => (
+        <div key={`${componentId}:${group}`} className='flex min-w-0 flex-col gap-1'>
+          <div className='flex min-w-0 items-center gap-2'>
+            <h4 className='min-w-0 flex-1 truncate text-xs font-medium'>
+              {components.find((component) => component.id === componentId)?.label ?? componentId}
+            </h4>
+            {isObservationStale({ entry, componentId, group, now }) ? <StaleBadge /> : null}
+          </div>
+          <dl className='flex flex-col gap-1'>
+            {readings.map((reading) => (
+              <PrintRow key={reading.id} label={reading.label}>
+                {formatReading(reading.value)}
+              </PrintRow>
+            ))}
+          </dl>
+        </div>
+      ))}
+    </>
+  );
+}
+
 const trustWords = { homed: 'Homed', kept: 'Kept since homing', lost: 'Lost', unknown: 'Not homed' } as const;
 
 /**
@@ -311,7 +365,7 @@ function Position({
       <div className='flex items-center justify-between gap-2 text-xs'>
         <h4 className='font-medium'>Position</h4>
         <span className='flex items-center gap-2'>
-          {isObservationStale({ entry, componentId: motionId, group: 'position', now }) ? <StaleBadge /> : null}
+          {isObservationStale({ entry, componentId: motionId, group: positionGroup, now }) ? <StaleBadge /> : null}
           <Badge
             variant={isKnown ? 'secondary' : 'outline'}
             className={isKnown ? undefined : 'border-transparent bg-feature/10 text-feature'}
@@ -502,7 +556,7 @@ export const monitorSummary = (entry: MachineDirectoryEntry): string => {
       .filter(Boolean)
       .join(' · ');
   }
-  const readings = readingsIn(entry, 'temperature').flatMap((observation) => observation.readings);
+  const readings = readingsIn(entry, temperatureGroup).flatMap((observation) => observation.readings);
   return [
     materialInUse(entry),
     ...readings.slice(0, 2).map((reading) => `${reading.label.toLowerCase()} ${formatReading(reading.value)}`),
@@ -537,11 +591,12 @@ export function MonitorStage({ control }: { readonly control: MachineControl }):
         <Position entry={entry} motionId={motion.id} axes={motion.axes} now={now} />
       ) : null}
       <TemperatureGroup entry={entry} now={now} />
+      <OtherReadings entry={entry} now={now} />
       {isMilling ? <MillingRows entry={entry} /> : null}
       {system === undefined ? null : (
         <MaterialSlots
           control={control}
-          isStale={isObservationStale({ entry, componentId: system.id, group: 'material', now })}
+          isStale={isObservationStale({ entry, componentId: system.id, group: materialGroup, now })}
         />
       )}
       {stage === undefined || entry.snapshot.run === undefined ? null : (
@@ -575,6 +630,15 @@ export function RunBlock({
   const { entry } = control;
   const { run } = entry.snapshot;
   const [isConfirmingCancel, setIsConfirmingCancel] = useState(false);
+  const confirmTitleId = useId();
+  const confirmDescriptionId = useId();
+  const confirmRef = useRef<HTMLDivElement>(null);
+  /* The confirmation takes focus when it opens, so a keyboard user lands on its first choice. */
+  useEffect(() => {
+    if (isConfirmingCancel) {
+      confirmRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    }
+  }, [isConfirmingCancel]);
   if (run === undefined) {
     return undefined;
   }
@@ -602,6 +666,11 @@ export function RunBlock({
   }
   const { progress } = run;
   const cancel = declaredAction(entry, controllerId, 'run.cancel');
+  const primary = run.state === 'paused' ? 'run.resume' : 'run.pause';
+  /* An attended run control asks for presence beside the run's controls, where it is used. */
+  const asking =
+    [primary, 'run.cancel'].find((action) => declaredAction(entry, controllerId, action)?.safety.attended === true) ??
+    primary;
   return (
     <section aria-label='Run' className='flex min-w-0 flex-col gap-2'>
       <p className='min-w-0 text-xs break-words'>
@@ -641,14 +710,26 @@ export function RunBlock({
       ) : null}
       {isConfirmingCancel ? (
         <div
+          ref={confirmRef}
           role='alertdialog'
-          aria-label={`Confirm ${cancel?.label.toLowerCase() ?? 'cancel'}`}
+          aria-labelledby={confirmTitleId}
+          aria-describedby={confirmDescriptionId}
           className='rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs'
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              event.stopPropagation();
+              setIsConfirmingCancel(false);
+            }
+          }}
         >
-          <p>
+          <p id={confirmTitleId}>
             {cancel?.label ?? 'Cancel'}
-            {name === undefined ? '' : ` ${name}`} on {entry.name}? {cancel?.consequence ?? ''}{' '}
-            {cancel?.outcome === undefined ? '' : describeOutcome(cancel.outcome)}
+            {name === undefined ? '' : ` ${name}`} on {entry.name}?
+          </p>
+          <p id={confirmDescriptionId} className='text-muted-foreground'>
+            {[cancel?.consequence, cancel?.outcome === undefined ? undefined : describeOutcome(cancel.outcome)]
+              .filter((part) => part !== undefined)
+              .join(' ')}
           </p>
           <div className='mt-2 flex flex-wrap gap-2'>
             <ActionButton
@@ -675,6 +756,7 @@ export function RunBlock({
         </div>
       ) : (
         <div className='flex flex-col gap-1.5'>
+          <Blocked control={control} componentId={controllerId} action={asking} hasRemedy={false} />
           <div role='group' aria-label={`Controls for ${entry.name}`} className='flex flex-wrap gap-2'>
             {run.state === 'paused' ? (
               <ActionButton

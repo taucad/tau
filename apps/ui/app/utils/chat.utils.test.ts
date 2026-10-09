@@ -505,6 +505,21 @@ describe('serializeMessage', () => {
       );
     });
 
+    it('serializes a request_job for a finished program by its artifact', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-request_job',
+          toolCallId: 'c1',
+          state: 'output-error',
+          input: { artifact: 'out/bracket.gcode', machineId: 'router' },
+          errorText: 'No machine',
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="request_job">\nartifact: out/bracket.gcode\nmachineId: router\n</tool_call>\n<tool_result>\n[Error: No machine]\n</tool_result>',
+      );
+    });
+
     it('serializes tool with output-error state', () => {
       const message = baseMessage([
         {

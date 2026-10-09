@@ -1,11 +1,12 @@
 import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
+import type { LoaderFunctionArgs } from 'react-router';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import type { ObservationWatch } from '@taucad/fs-client/observation-service';
 import type { FileSystemBridgeRootedProxy } from '@taucad/fs-bridge';
 import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '#components/ui/loader.js';
-import { getEnvironment } from '#environment.config.js';
+import { ENV, getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
@@ -429,12 +430,16 @@ const installObservationWatchControls = (paths: readonly string[]): void => {
   Object.assign(globalThis, { __tauE2eObservationWatch: control });
 };
 
-export const loader = async (): Promise<Response> => {
+export const loader = async ({ request }: LoaderFunctionArgs): Promise<Response> => {
   const environment = await getEnvironment();
 
   if (!environment.TAU_DEBUG) {
     // oxlint-disable-next-line typescript/only-throw-error -- React Router uses thrown Response objects for route control-flow.
     throw new Response('Not found', { status: 404 });
+  }
+
+  if (new URL(request.url).searchParams.get('startupTrace') === '1') {
+    console.info('PROJECT FIXTURE PHASE', 'loader.ready');
   }
 
   return Response.json({ ok: true });
@@ -445,6 +450,7 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
   const navigate = useNavigate();
   const [searchParameters] = useSearchParams();
   const workspaceFixture = searchParameters.get('workspace') ?? undefined;
+  const startupTrace = searchParameters.get('startupTrace') === '1';
   /**
    * Seeds the project the way the home composer does: a pending first message
    * plus the one-shot `startupRequest` that hydration replays. That dispatch is
@@ -470,6 +476,12 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
       return;
     }
     seedStarted.current = true;
+    const reportStartup = (phase: string, errorName?: string): void => {
+      if (ENV.TAU_DEBUG && startupTrace) {
+        console.info('PROJECT FIXTURE PHASE', JSON.stringify({ phase, errorName }));
+      }
+    };
+    reportStartup('effect.entered');
 
     // An OPFS subdirectory handle *is* a FileSystemDirectoryHandle, so it seeds
     // a genuine webaccess workspace through production APIs without a picker.
@@ -500,7 +512,9 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
 
     const seed = async (): Promise<void> => {
       try {
+        reportStartup('location.before');
         const location = await resolveLocation();
+        reportStartup('location.ready');
         const metadataPair =
           searchParameters.get('observation') === '1' && searchParameters.get('metadataPair') === '1';
         if (metadataPair) {
@@ -512,6 +526,7 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
             files: buildSeedFiles(0, 0),
           });
         }
+        reportStartup('createProject.before');
         const project = await createProject({
           location,
           project: metadataPair
@@ -537,15 +552,17 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
             },
           },
         });
-
+        reportStartup('createProject.ready');
+        reportStartup('navigate.before');
         void navigate(projectUrl(project.slugs));
       } catch (seedError) {
+        reportStartup('seed.rejected', seedError instanceof Error ? seedError.name : 'Unknown');
         setError(seedError instanceof Error ? seedError.message : String(seedError));
       }
     };
 
     void seed();
-  }, [connectWorkspace, createProject, mainFixture, navigate, workspaceFixture]);
+  }, [connectWorkspace, createProject, mainFixture, navigate, startupTrace, workspaceFixture]);
 
   if (error) {
     return (

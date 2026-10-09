@@ -44,7 +44,7 @@ test('projects independent native manifest and chat metadata while the workspace
         );
       }
     });
-    await page.goto('app://tau/__e2e/project-file-tree?chat=1');
+    await page.goto('app://tau/__e2e/project-file-tree?chat=1&startupTrace=1');
     await page.waitForURL(/\/w\//u, { timeout: 60_000 });
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]').last());
     const slug = new URL(page.url()).pathname.split('/').at(-1);

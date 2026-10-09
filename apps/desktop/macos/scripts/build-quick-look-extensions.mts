@@ -12,8 +12,6 @@ import { cp, mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { isQuickLookEnabled } from '#shared/quick-look.js';
-
 const macosRoot = resolve(import.meta.dirname, '..');
 // Kept between runs: Xcode's OBJROOT holds the explicit system-module builds, so a rebuild is incremental.
 const buildRoot = resolve(macosRoot, 'build');
@@ -21,18 +19,12 @@ const productsRoot = resolve(buildRoot, 'products');
 const extensionsRoot = resolve(macosRoot, 'dist/extensions');
 const products = ['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const;
 
-if (isQuickLookEnabled() && process.platform !== 'darwin') {
+if (process.platform !== 'darwin') {
   throw new Error('Quick Look extensions can only be built on macOS with Xcode installed.');
 }
 
 await rm(extensionsRoot, { recursive: true, force: true });
 await mkdir(extensionsRoot, { recursive: true });
-if (!isQuickLookEnabled()) {
-  console.log(
-    'Quick Look is disabled (isQuickLookEnabled() in apps/desktop/src/shared/quick-look.ts); no extensions built.',
-  );
-  process.exit(0);
-}
 
 execFileSync(
   'xcodebuild',

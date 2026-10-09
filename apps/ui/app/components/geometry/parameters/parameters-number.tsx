@@ -95,6 +95,25 @@ const fieldBinding = (fieldProjection: ParameterFieldProjection): ParameterField
   ...(fieldProjection.reference === undefined ? {} : { reference: fieldProjection.reference }),
 });
 
+/**
+ * A number entered in a field's display unit, in its native unit.
+ *
+ * @param fieldProjection - The field the number was entered into.
+ * @param value - The number as entered.
+ * @returns The number in the field's native unit.
+ */
+export const toNativeValue = (fieldProjection: ParameterFieldProjection, value: number): number => {
+  const binding = fieldBinding(fieldProjection);
+  if (binding.representation === 'safe-integer') {
+    return Math.round(value);
+  }
+  const { displayUnit } = fieldProjection;
+  if (displayUnit === undefined || binding.nativeUnit === undefined || displayUnit === binding.nativeUnit) {
+    return value;
+  }
+  return displayValue(value, { ...binding, nativeUnit: displayUnit }, binding.nativeUnit);
+};
+
 /** The authority value this row last showed, which a commit proves it was still editing. */
 type EditBase = Readonly<{ value: number; binding: ParameterFieldBinding; authorityValue: number }>;
 
@@ -200,13 +219,7 @@ export const ParametersNumber = React.memo(function ParametersNumber({
     [continualChange],
   );
 
-  const toNative = (next: number): number => {
-    if (displayUnit === undefined || binding.nativeUnit === undefined || displayUnit === binding.nativeUnit) {
-      return binding.representation === 'safe-integer' ? Math.round(next) : next;
-    }
-    const value = displayValue(next, { ...binding, nativeUnit: displayUnit }, binding.nativeUnit);
-    return binding.representation === 'safe-integer' ? Math.round(value) : value;
-  };
+  const toNative = (next: number): number => toNativeValue(fieldProjection, next);
 
   const send = (
     native: number,

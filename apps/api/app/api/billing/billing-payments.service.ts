@@ -4582,6 +4582,12 @@ export class BillingPaymentsService {
       }
       return true;
     }
+    if (purchase.state === 'failed' || purchase.state === 'canceled') {
+      // Closed only on Stripe's proof that no money moved, which the database keeps immutable: a later event for its
+      // PaymentIntent, such as the cancellation Stripe sends when a hosted Session expires, has nothing left to settle.
+      const source = await retrieveStripePaymentEvidence(this.sourceStripe, paymentIntentId);
+      return source.paymentIntent.amount_received === 0;
+    }
     const bindingRows = await this.databaseService.database
       .select()
       .from(billingStripeCustomer)
@@ -4615,6 +4621,25 @@ export class BillingPaymentsService {
       expected.customerBindingId !== binding.id
     ) {
       throw new ConflictException({ code: 'payment_proof_scope_mismatch' });
+    }
+    // A hosted payment is decided by its Checkout Session, not by one attempt on its PaymentIntent. An open Session
+    // survives a declined card or a 3-D Secure step: its customer can still pay in it, and Stripe completes it once a
+    // payment succeeds, so the purchase stays resumable at the same link. An expired one closes the purchase as its
+    // `checkout.session.expired` event would, whichever of that event and the PaymentIntent's arrives first.
+    if (checkout?.session.status === 'open') return false;
+    if (checkout?.session.status === 'expired') {
+      const [leg] = await this.databaseService.database
+        .select()
+        .from(billingProviderLeg)
+        .where(
+          and(
+            eq(billingProviderLeg.id, expected.providerLegId),
+            eq(billingProviderLeg.accountId, accountId),
+            eq(billingProviderLeg.purchaseId, purchaseId),
+          ),
+        )
+        .limit(1);
+      if (leg !== undefined && (await this.closeExpiredCheckout(leg, checkout.session, 'failed', claim))) return true;
     }
     const paymentSource = await retrieveStripePaymentEvidence(this.sourceStripe, paymentIntentId);
     // Without a delivered success event, a hosted Checkout is accepted at its settled charge's own time.

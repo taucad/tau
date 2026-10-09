@@ -57,6 +57,8 @@ const requests: string[] = [];
 const stripeAccountId = 'acct_payments_foundation';
 let latestCustomerId = `cus_${randomUUID().replaceAll('-', '')}`;
 let latestCustomerMetadata: Record<string, string> = {};
+/** The contact fields of the last Customer create, as Stripe received them. */
+let latestCustomerContact: { email?: string; name?: string } | undefined;
 const latestCustomerAddress = {
   city: 'Wellington',
   country: 'NZ',
@@ -196,6 +198,7 @@ const server = createServer((request, response) => {
         tau_account_id: form.get('metadata[tau_account_id]') ?? '',
         tau_customer_binding_id: form.get('metadata[tau_customer_binding_id]') ?? '',
       };
+      latestCustomerContact = { email: form.get('email') ?? undefined, name: form.get('name') ?? undefined };
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
         JSON.stringify({
@@ -712,6 +715,17 @@ describe('billing payments PostgreSQL foundation', () => {
       .from(billingStripeCustomer)
       .where(eq(billingStripeCustomer.accountId, owner!.accountId));
     expect(binding?.stripeCustomerId).toBe(latestCustomerId);
+    // Stripe addresses receipts, invoices and the portal to the owner; the leg keeps the same request for a replay.
+    const contact = { email: `${userId}@test.invalid`, name: 'Payment Foundation' };
+    expect(latestCustomerContact).toStrictEqual(contact);
+    const [customerLeg] = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(and(eq(billingProviderLeg.customerBindingId, binding!.id), eq(billingProviderLeg.kind, 'customer')));
+    expect(customerLeg?.request).toMatchObject({
+      ...contact,
+      metadata: { tau_account_id: owner!.accountId, tau_customer_binding_id: binding!.id },
+    });
     const purchases = await database
       .select()
       .from(billingPurchase)

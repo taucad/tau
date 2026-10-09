@@ -51,6 +51,7 @@ import {
   retrieveStripeBillingCustomer,
   retrieveStripeSetupEvidence,
   retrieveStripeSubscriptionSchedule,
+  stripeCustomerContact,
   updateStripeSubscriptionScheduleOnce,
 } from '#api/billing/billing-stripe.js';
 import type { StripeCreateLeg, StripeCreateResult } from '#api/billing/billing-stripe.js';
@@ -81,6 +82,7 @@ import {
   creditAccount,
   stripeEventInbox,
   subscription,
+  user,
 } from '#database/schema.js';
 
 type Database = DatabaseService['database'];
@@ -4105,10 +4107,17 @@ export class BillingPaymentsService {
         .for('update');
       if (existing[0] !== undefined) return { binding, dispatch: false, leg: existing[0] };
       const legId = randomUUID();
+      // Stripe addresses receipts, invoices and the portal to the Customer's email, and Checkout prefills it.
+      const [contact] = await tx
+        .select({ email: user.email, name: user.name })
+        .from(user)
+        .where(eq(user.id, owner.ownerId))
+        .limit(1);
       /* The environment stamp is what lets a test-mode cash scan tell another environment's
        * customer from unexplained cash: test mode shares one Stripe account between local
        * development, the acceptance suite and staging. */
       const request = {
+        ...stripeCustomerContact(contact),
         metadata: {
           tau_account_id: owner.accountId,
           tau_customer_binding_id: binding.id,

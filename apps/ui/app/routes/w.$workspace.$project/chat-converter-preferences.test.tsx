@@ -474,7 +474,7 @@ it('retries closed export settings in the same mounted toast surface through hel
     expect(mounted.result.current[0].shouldDownload).toBe(false);
     expect(writeFiles).not.toHaveBeenCalled();
     held = true;
-    const retry = await screen.findByRole('button', { name: 'Retry', exact: true });
+    const retry = await screen.findByRole('button', { name: 'Retry' });
     retry.focus();
     await userEvent.keyboard('{Enter}');
     expect(registrations).toHaveBeenCalledTimes(initialRegistrations + 1);

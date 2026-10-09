@@ -5,11 +5,13 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import {
   getSectionViewTestControlState,
+  getSectionViewTestRenderedModelComponentState,
   getSectionViewTestCapOverlapDiagnostics,
   getSectionViewTestCapPerformanceDiagnostics,
   getSectionViewTestHelperSummary,
   projectSectionViewTestHandle,
 } from '#components/geometry/graphics/three/react/section-view-test-bridge.js';
+import { setModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import { createSectionHandles } from '#components/geometry/graphics/three/controls/section-handles.js';
 import { sectionCapOverlapDebugUserDataKey } from '#components/geometry/graphics/three/utils/section-cap-overlap-debug.js';
 import {
@@ -169,5 +171,57 @@ describe('getSectionViewTestControlState', () => {
     expect(diagnostics?.latestFrame.exactDiagnosticIsCurrent).toBe(false);
     expect(diagnostics?.aggregates.frameTotal.max).toBe(12);
     expect(Object.keys(diagnostics?.latestFrame.timings ?? {}).sort()).toContain('overlapClassify');
+  });
+});
+
+describe('getSectionViewTestRenderedModelComponentState', () => {
+  it('should distinguish visible surfaces from fat edges and retain aggregate ancestor visibility', () => {
+    const scene = new THREE.Scene();
+    const component = new THREE.Group();
+    setModelComponentOwner(component, {
+      unitId: 'unit:main',
+      componentId: 'component:base',
+    });
+    const surface = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ opacity: 0.25 }));
+    const edgeGeometry = new LineSegmentsGeometry();
+    edgeGeometry.setPositions([0, 0, 0, 1, 0, 0]);
+    const edge = new LineSegments2(edgeGeometry, new LineMaterial({ opacity: 1 }));
+    const presentation = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial({ opacity: 0.75 }));
+    presentation.userData = sceneTagData(sceneTag.gltfSurfacePresentation);
+    component.add(surface, edge, presentation);
+    scene.add(component);
+
+    try {
+      expect(edge).toBeInstanceOf(THREE.Mesh);
+      expect(getSectionViewTestRenderedModelComponentState(scene, 'component:base')).toEqual({
+        meshCount: 3,
+        visibleMeshCount: 3,
+        materialOpacities: [0.25, 1, 0.75],
+        surfaceMaterialOpacities: [0.25],
+        edgeMaterialOpacities: [1],
+      });
+      surface.material.opacity = 1;
+      edge.material.opacity = 0.25;
+      expect(getSectionViewTestRenderedModelComponentState(scene, 'component:base')).toMatchObject({
+        surfaceMaterialOpacities: [1],
+        edgeMaterialOpacities: [0.25],
+      });
+      component.visible = false;
+      expect(getSectionViewTestRenderedModelComponentState(scene, 'component:base')).toEqual({
+        meshCount: 3,
+        visibleMeshCount: 0,
+        materialOpacities: [],
+        surfaceMaterialOpacities: [],
+        edgeMaterialOpacities: [],
+      });
+      expect(getSectionViewTestRenderedModelComponentState(scene, 'component:other').meshCount).toBe(0);
+    } finally {
+      surface.geometry.dispose();
+      surface.material.dispose();
+      edge.geometry.dispose();
+      edge.material.dispose();
+      presentation.geometry.dispose();
+      presentation.material.dispose();
+    }
   });
 });

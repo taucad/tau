@@ -35,7 +35,7 @@ const readHashedDownloads = async () => {
 };
 
 test('adopts independent rooted layout and view records in the retained browser document', async () => {
-  await target.navigate('/__e2e/project-file-tree?workspace=projection-retained');
+  await target.navigate('/__e2e/project-file-tree');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
   const route = await target.evaluate(() => location.pathname.split('/').at(-1));
   const state = await readProjectStorageState();
@@ -45,8 +45,49 @@ test('adopts independent rooted layout and view records in the retained browser 
   if (!config) {
     throw new Error('The mounted project has no persistent provider configuration.');
   }
-  expect(['opfs', 'indexeddb']).toContain(config.backend);
-  const before = await target.evaluate(() => ({ href: location.href, timeOrigin: performance.timeOrigin }));
+  try {
+    expect(['opfs', 'indexeddb']).toContain(config.backend);
+  } catch (error) {
+    try {
+      await target.writeArtifact(
+        'projection-retained-provider-precondition.json',
+        JSON.stringify(
+          {
+            config,
+            handleWorkspaceIds: state.handleWorkspaceIds,
+            originalFailure: String(error),
+            document: await target.evaluate(() => ({
+              pathname: location.pathname,
+              text: document.body.textContent.slice(-8000),
+            })),
+          },
+          null,
+          2,
+        ),
+      );
+      await target.screenshot(undefined, 'projection-retained-provider-precondition.png');
+      const physical = await readProjectTree(config);
+      await target.writeArtifact(
+        'projection-retained-provider-physical.json',
+        JSON.stringify({ config, physicalPaths: Object.keys(physical).slice(0, 128) }, null, 2),
+      );
+    } catch (captureError) {
+      await target
+        .writeArtifact(
+          'projection-retained-provider-capture-error.json',
+          JSON.stringify({
+            originalFailure: String(error),
+            captureFailure: String(captureError),
+          }),
+        )
+        .catch(() => undefined);
+    }
+    throw error;
+  }
+  const before = await target.evaluate(() => ({
+    href: location.href,
+    timeOrigin: performance.timeOrigin,
+  }));
   const layoutPath = '/.tau/workbench/layout.json';
   await expect
     .poll(
@@ -130,24 +171,33 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
 `,
   );
   // S20: renderer state, rather than just successful filesystem writes, witnesses adoption.
-  const componentIds = async (): Promise<string[]> =>
+  const components = async (): Promise<Array<{ id: string; name: string }>> =>
     target.evaluate(() => {
-      const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getModelComponents(): Array<{ id: string }> } })
-        .__TAU_SECTION_VIEW_TEST__;
-      return bridge?.getModelComponents().map(({ id }) => id) ?? [];
+      const bridge = (
+        globalThis as {
+          __TAU_SECTION_VIEW_TEST__?: {
+            getModelComponents(): Array<{ id: string; name: string }>;
+          };
+        }
+      ).__TAU_SECTION_VIEW_TEST__;
+      return bridge?.getModelComponents() ?? [];
     });
+  // The previous honeycomb manifest already has multiple nodes. Wait for the authored
+  // sibling parts, rather than accepting an old manifest or an ancestor/descendant pair.
   await expect
     .poll(
       async () => {
-        const ids = await componentIds();
-        return ids.length;
+        const current = await components();
+        return current.some(({ name }) => name === 'Base') && current.some(({ name }) => name === 'Cap');
       },
       { timeout: 60_000 },
     )
-    .toBeGreaterThanOrEqual(2);
-  const [componentId, otherComponentId] = await componentIds();
-  if (!componentId) {
-    throw new Error('The seeded production kernel rendered no components.');
+    .toBe(true);
+  const currentComponents = await components();
+  const componentId = currentComponents.find(({ name }) => name === 'Base')?.id;
+  const otherComponentId = currentComponents.find(({ name }) => name === 'Cap')?.id;
+  if (!componentId || !otherComponentId || componentId === otherComponentId) {
+    throw new Error('The authored Base and Cap must be distinct rendered component identities.');
   }
   await writeProjectionProjectFile(
     config,
@@ -185,42 +235,87 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
       },
     }),
   );
-  await expect
-    .poll(
-      async () =>
-        target.evaluate(
-          ({ id, otherId }) => {
-            const bridges =
-              (
-                globalThis as {
-                  __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
-                    getModelVisibility(): { isolatedComponentIds: string[] };
-                    getRenderedModelComponentState(id: string): {
-                      meshCount: number;
-                      visibleMeshCount: number;
-                      materialOpacities: number[];
-                    };
-                  }>;
-                }
-              ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
-            return bridges.some((bridge) => {
-              const chosen = bridge.getRenderedModelComponentState(id);
-              const other = bridge.getRenderedModelComponentState(otherId);
-              return (
-                bridge.getModelVisibility().isolatedComponentIds.includes(id) &&
-                chosen.visibleMeshCount > 0 &&
-                other.meshCount > 0 &&
-                other.visibleMeshCount === 0 &&
-                chosen.materialOpacities.length > 0 &&
-                chosen.materialOpacities.every((opacity) => Math.abs(opacity - 0.25) < 0.001)
-              );
-            });
-          },
-          { id: componentId, otherId: otherComponentId! },
-        ),
-      { timeout: 60_000 },
-    )
-    .toBe(true);
+  try {
+    await expect
+      .poll(
+        async () =>
+          target.evaluate(
+            ({ id, otherId }) => {
+              const bridges =
+                (
+                  globalThis as {
+                    __TAU_SECTION_VIEW_TEST_BRIDGES__?: Array<{
+                      getModelVisibility(): { isolatedComponentIds: string[] };
+                      getRenderedModelComponentState(id: string): {
+                        meshCount: number;
+                        visibleMeshCount: number;
+                        surfaceMaterialOpacities: number[];
+                        edgeMaterialOpacities: number[];
+                      };
+                    }>;
+                  }
+                ).__TAU_SECTION_VIEW_TEST_BRIDGES__ ?? [];
+              return bridges.some((bridge) => {
+                const chosen = bridge.getRenderedModelComponentState(id);
+                const other = bridge.getRenderedModelComponentState(otherId);
+                return (
+                  bridge.getModelVisibility().isolatedComponentIds.includes(id) &&
+                  chosen.visibleMeshCount > 0 &&
+                  other.meshCount > 0 &&
+                  other.visibleMeshCount === 0 &&
+                  chosen.surfaceMaterialOpacities.length > 0 &&
+                  chosen.surfaceMaterialOpacities.every((opacity) => Math.abs(opacity - 0.25) < 0.001) &&
+                  chosen.edgeMaterialOpacities.length > 0 &&
+                  chosen.edgeMaterialOpacities.every((opacity) => opacity === 1)
+                );
+              });
+            },
+            { id: componentId, otherId: otherComponentId },
+          ),
+        { timeout: 60_000 },
+      )
+      .toBe(true);
+  } catch (error) {
+    await target.writeArtifact(
+      'projection-retained-component-state.json',
+      JSON.stringify(
+        {
+          originalFailure: String(error),
+          componentId,
+          otherComponentId,
+          config,
+          state: await target.evaluate(
+            ({ id, otherId }) => {
+              const bridges = Reflect.get(globalThis, '__TAU_SECTION_VIEW_TEST_BRIDGES__') as
+                | Array<{
+                    getModelComponents(): unknown;
+                    getModelVisibility(): unknown;
+                    getRenderedModelComponentState(id: string): unknown;
+                  }>
+                | undefined;
+              return {
+                href: location.href,
+                timeOrigin: performance.timeOrigin,
+                text: document.body.textContent.slice(-8000),
+                bridges: bridges?.map((bridge) => ({
+                  components: bridge.getModelComponents(),
+                  visibility: bridge.getModelVisibility(),
+                  chosen: bridge.getRenderedModelComponentState(id),
+                  other: bridge.getRenderedModelComponentState(otherId),
+                })),
+              };
+            },
+            { id: componentId, otherId: otherComponentId },
+          ),
+          physical: await readProjectTree(config),
+        },
+        null,
+        2,
+      ),
+    );
+    await target.screenshot(undefined, 'projection-retained-component-state.png');
+    throw error;
+  }
   await target.click(selectors.getByRole('button', { name: 'Viewer settings' }).last());
   await target.expectVisible(
     selectors.getByCss('[data-slot="dropdown-menu-select-item"] [role="combobox"]').filter({ hasText: 'Disabled' }),

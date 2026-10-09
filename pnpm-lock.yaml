@@ -3670,9 +3670,6 @@ importers:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
-      '@taucad/esbuild':
-        specifier: workspace:*
-        version: link:../plugins/esbuild
       '@taucad/formal':
         specifier: workspace:*
         version: link:../../tools/formal
@@ -3682,12 +3679,6 @@ importers:
       '@taucad/geospec-engine-native':
         specifier: workspace:*
         version: link:../geospec-engine-native
-      '@taucad/middleware':
-        specifier: workspace:*
-        version: link:../plugins/middleware
-      '@taucad/replicad':
-        specifier: workspace:*
-        version: link:../plugins/replicad
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../revisions

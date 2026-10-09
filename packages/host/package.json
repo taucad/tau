@@ -107,12 +107,9 @@
   "devDependencies": {
     "@taucad/agent-tools": "workspace:*",
     "@taucad/chat": "workspace:*",
-    "@taucad/esbuild": "workspace:*",
     "@taucad/formal": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
     "@taucad/geospec-engine-native": "workspace:*",
-    "@taucad/middleware": "workspace:*",
-    "@taucad/replicad": "workspace:*",
     "@taucad/revisions": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/types": "workspace:*",

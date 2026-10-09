@@ -307,8 +307,10 @@ describe('createServicesHost — machines', () => {
       expect(providers.filter(({ unavailable }) => unavailable !== undefined).map(({ id }) => id)).toEqual(['grbl']);
       expect(existsSync(join(machines.store, 'store.json'))).toBe(true);
 
+      /* The ceremony's real refusal reaches main with its typed code. */
       await expect(machines.completeCeremony('bind-unknown', 'no-such-ceremony', accessCode)).resolves.toEqual({
         error: 'MACHINE_BINDING_UNKNOWN_CEREMONY',
+        code: 'MACHINE_BINDING_UNKNOWN_CEREMONY',
       });
       const machineId = await machines.bindSimulator(client, accessCode);
 

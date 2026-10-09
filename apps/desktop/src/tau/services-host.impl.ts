@@ -68,7 +68,7 @@ import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import type { HostAdmissionAuthority } from '@taucad/runtime/host';
 import { createNodeMachineHost, MachineHostStartInFlightError } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
-import { machineChannelProtocolVersion } from '@taucad/runtime/machine';
+import { machineChannelProtocolVersion, withMachineCode } from '@taucad/runtime/machine';
 import type { MachineArtifactReference, MachineBindingOutcome, MachineRun } from '@taucad/runtime/machine';
 import type { HostToolFileSystem } from '@taucad/host/agent-tools';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -1251,10 +1251,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             });
             machineBindingCompleted?.(requestId, { outcome });
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
+            /* The ceremony's refusals are thrown as `new Error('<CODE>')`; main and the renderer read `code` only. */
+            const refusal = withMachineCode(error);
+            const message = refusal instanceof Error ? refusal.message : String(refusal);
             const code =
-              typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
-                ? error.code
+              typeof refusal === 'object' && refusal !== null && 'code' in refusal && typeof refusal.code === 'string'
+                ? refusal.code
                 : undefined;
             log('machines.binding-failed', message, 'warn');
             machineBindingCompleted?.(requestId, { error: message, ...(code === undefined ? {} : { code }) });

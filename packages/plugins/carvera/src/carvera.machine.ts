@@ -90,9 +90,12 @@ export const carveraMachine = defineMachine({
       });
     }
     const { connectCarveraSession } = await import('#carvera.session.js');
+    const port = endpoint.port ?? carveraTcpPort;
     return connectCarveraSession({
       id: input.candidate.id,
       name: input.candidate.name,
+      // A broadcast shows a Carvera is there; an entered address does not until it answers.
+      ...(endpoint.interface === 'manual' ? { unprovenEndpoint: `${endpoint.address}:${String(port)}` } : {}),
       manifest: carveraManifest(),
       clock: runtime.clock,
       async *readArtifact(read) {
@@ -101,7 +104,7 @@ export const carveraMachine = defineMachine({
       log: async (entry) => runtime.log(entry),
       open: async (signal) =>
         runtime.connectStream({
-          endpoint: { address: endpoint.address, port: endpoint.port ?? carveraTcpPort },
+          endpoint: { address: endpoint.address, port },
           transport: 'tcp',
           trust: { type: 'system' },
           connectTimeout: 5000,

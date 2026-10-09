@@ -90,6 +90,11 @@ export type CarveraSessionInput = Readonly<{
   pollInterval?: number;
   /** Milliseconds to wait for the first status before deciding another app holds the machine. */
   firstStatusWait?: number;
+  /**
+   * An endpoint a person entered, as `address:port`, that nothing has yet shown to be a Carvera. The first open must
+   * get a status from it; otherwise connecting fails, so nothing is bound and nothing dials it again.
+   */
+  unprovenEndpoint?: string;
 }>;
 
 type Axis = 'x' | 'y' | 'z';
@@ -103,6 +108,25 @@ const activityRetention = 30_000;
 const jogSegment = 150;
 /** Milliseconds a start waits for the machine to show the run, refuse the file or halt. */
 const startWait = 3000;
+
+/** How many operations a session remembers for repeats and confirmation, oldest forgotten first. */
+const retainedOperations = 256;
+
+/**
+ * Receipts and confirmations by operation id, forgetting the oldest past {@link retainedOperations}.
+ * ponytail: the host escalates anything still unproven after its 180-second window anyway, so a forgotten operation
+ * reads `pending` there.
+ */
+class RecentOperations<Value> extends Map<string, Value> {
+  public override set(operationId: string, value: Value): this {
+    super.set(operationId, value);
+    if (this.size > retainedOperations) {
+      const [oldest = ''] = this.keys();
+      this.delete(oldest);
+    }
+    return this;
+  }
+}
 
 /** What the machine did with a `play`. */
 type StartAnswer = Readonly<{ type: 'started' } | { type: 'refused'; message: string } | { type: 'silent' }>;
@@ -254,13 +278,13 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
     }
   };
   const procedures: Procedure[] = [];
-  const receipts = new Map<string, MachineCommandReceipt>();
+  const receipts = new RecentOperations<MachineCommandReceipt>();
   /**
    * Tau's timed spindle run, queued whole on the machine (`M3`, `G4 P<duration>`, `M5`) so it ends there even if Tau
    * goes away; over once a report shows the machine idle after it was busy (or two seconds on), a halt, or Stop.
    */
   let timedSpindle: { sentAt: number; seenBusy: boolean } | undefined;
-  const expectations = new Map<string, () => MachineActionConfirmation>();
+  const expectations = new RecentOperations<() => MachineActionConfirmation>();
   let upload: Upload | undefined;
   let holding = false;
   const textWaiters = new Set<(line: string) => void>();
@@ -589,13 +613,21 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
       setTimeout(resolve, firstStatusWait);
     });
     void read(opened);
+    // A Carvera speaks only when asked, so the status request goes first; it is the least an unproven endpoint is
+    // sent (its type byte is still a realtime byte to a Grbl). The commands wait until a status shows a Carvera.
     try {
       await write(carveraRealtime('?'));
-      await send('version', '$G', '$#', 'diagnose');
     } catch {
       // The stream ending answers below.
     }
     await answered;
+    if (latestStatus() !== undefined) {
+      try {
+        await send('version', '$G', '$#', 'diagnose');
+      } catch {
+        // A dropped link is the reader's to handle.
+      }
+    }
     if (latestStatus() === undefined) {
       // One client at a time: a machine that takes the socket but never answers, or drops it, serves another app.
       connection = 'occupied';
@@ -2285,6 +2317,12 @@ export const connectCarveraSession = async (input: CarveraSessionInput): Promise
   // ───────────────────────────── Session ─────────────────────────────
 
   const reached = await open();
+  if (reached !== 'connected' && input.unprovenEndpoint !== undefined) {
+    sessionLifetime.abort();
+    throw unavailable(
+      `No Carvera answered at ${input.unprovenEndpoint}. Check the address, and that no other app holds the machine.`,
+    );
+  }
   if (reached === 'unreachable') {
     sessionLifetime.abort();
     throw unavailable('The Carvera did not answer. Check it is on and on this network.');

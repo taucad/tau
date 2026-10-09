@@ -681,6 +681,56 @@ describe('carvera simulator through the real session', () => {
   );
 
   it(
+    'should end a timed spindle run on a halt and on Stop, and offer the spindle again once homed',
+    { timeout: 60_000 },
+    async () => {
+      const machine = await connect();
+      await machine.waitFor(ready, 'the boot homing');
+      const spindleOf = (report: MachineReport) => ({
+        mode: componentValue(report.components, 'spindle', 'spindle')?.mode,
+        availability: report.availability.find(({ id }) => id === 'spindle.set'),
+      });
+      const spinFor = async (seconds: number): Promise<void> => {
+        const spin = await machine.act('spindle', 'spindle.set', {
+          mode: 'clockwise',
+          speed: 10_000,
+          duration: seconds,
+        });
+        expect(await spin.settled()).toEqual({ status: 'confirmed' });
+        await machine.waitFor(
+          (report) => spindleOf(report).availability?.state === 'unavailable' && report.state.status === 'active',
+          'the timed run',
+        );
+      };
+      const recover = async (): Promise<void> => {
+        const unlock = await machine.act('controller', 'controller.unlock');
+        expect(await unlock.settled()).toEqual({ status: 'confirmed' });
+        await machine.waitFor((report) => report.state.status === 'ready', 'the unlock');
+        const home = await machine.act('motion', 'motion.home');
+        expect(await home.settled()).toEqual({ status: 'confirmed' });
+        const homed = await machine.waitFor(ready, 'homing');
+        expect(spindleOf(homed)).toMatchObject({ mode: 'off', availability: { state: 'available' } });
+      };
+
+      // The emergency stop halts the machine mid-dwell: the spindle stops and the run is over.
+      await spinFor(300);
+      machine.simulator.setEstop(true);
+      const alarmed = await machine.waitFor((report) => report.state.status === 'alarm', 'the emergency stop');
+      expect(spindleOf(alarmed).mode).toBe('off');
+      machine.simulator.setEstop(false);
+      await recover();
+
+      // Stop is the early end the timed run names: the same halt, from Tau.
+      await spinFor(300);
+      const stop = await machine.session.stop({ operationId: 'stop-1', signal: new AbortController().signal });
+      expect(stop.status).toBe('accepted');
+      const stopped = await machine.waitFor((report) => report.state.status === 'alarm', 'the halt');
+      expect(spindleOf(stopped).mode).toBe('off');
+      await recover();
+    },
+  );
+
+  it(
     'should confirm the spindle, the switches and the overrides from the machine’s reports',
     { timeout: 60_000 },
     async () => {
@@ -718,6 +768,28 @@ describe('carvera simulator through the real session', () => {
       expect(await speed.settled()).toEqual({ status: 'confirmed' });
     },
   );
+
+  it('should remember only the latest 256 operations', { timeout: 30_000 }, async () => {
+    const machine = await connect();
+    await machine.waitFor((report) => report.connection === 'connected', 'the link');
+    const reconcile = async (operationId: string) =>
+      machine.session.reconcile({ operationId, kind: 'action', signal: new AbortController().signal });
+    for (let index = 0; index < 300; index += 1) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- operations are remembered in the order they were applied.
+      await machine.actions.apply({
+        operationId: `undeclared-${String(index)}`,
+        componentId: 'spindle',
+        action: 'makera.undeclared',
+        version: 1,
+        expectedRunId: null,
+        parameters: {},
+        requestedBy: { kind: 'user' },
+        signal: new AbortController().signal,
+      });
+    }
+    await expect(reconcile('undeclared-0')).resolves.toMatchObject({ status: 'unknown' });
+    await expect(reconcile('undeclared-299')).resolves.toMatchObject({ status: 'rejected' });
+  });
 
   it('should observe a snapshot first, return on abort and leave no listener behind', { timeout: 30_000 }, async () => {
     const machine = await connect();

@@ -4,12 +4,14 @@ import type {
   MachineConnectionRuntime,
   MachineDatagram,
   MachineNetworkRequest,
+  MachineNetworkStream,
   MachineSession,
 } from '@taucad/runtime/machine';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
 import { carveraMachine } from '#carvera.machine.js';
 import type { CarveraSubmission } from '#carvera.manifest.js';
+import { carveraRealtime } from '#carvera.protocol.js';
 import { createCarveraSimulator } from '#carvera.simulator.js';
 
 const clock = { now: () => new Date().toISOString() };
@@ -170,6 +172,64 @@ describe('carveraMachine', () => {
     sessions.push(session);
     expect(requests).toMatchObject([{ endpoint: { address: '10.0.5.7', port: 2223 } }]);
   });
+
+  it('should refuse an entered address where no Carvera answers, sending only the status request and leaving nothing to redial', async () => {
+    const definition = await resolveRuntimePluginDefinition('machine', carveraMachine());
+    const requests: MachineNetworkRequest[] = [];
+    const written: number[] = [];
+    // Any listener that takes the socket and says nothing, such as another controller's telnet port.
+    const silent = (): MachineNetworkStream => {
+      const closed = Promise.withResolvers<void>();
+      return {
+        readable: {
+          // oxlint-disable-next-line require-yield -- a silent listener sends nothing until the socket closes
+          async *[Symbol.asyncIterator]() {
+            await closed.promise;
+          },
+        },
+        write: async (chunk) => {
+          written.push(...chunk);
+        },
+        close: async () => {
+          closed.resolve();
+        },
+      };
+    };
+    const connecting = definition.connect(
+      {
+        candidate: {
+          id: 'carvera:10.0.5.9',
+          name: 'Carvera at 10.0.5.9',
+          endpoint: { transport: 'network', address: '10.0.5.9', interface: 'manual' },
+          claimedIdentity: { model: 'Carvera' },
+          observedAt: clock.now(),
+          expiresAt: clock.now(),
+        },
+        configuration: {},
+        connection: { secretRef: 'none', serviceTrust: {} },
+        signal: new AbortController().signal,
+      },
+      {
+        clock,
+        log: async () => undefined,
+        connectStream: async (request) => {
+          requests.push(request);
+          return silent();
+        },
+        async *readArtifact() {
+          yield new Uint8Array();
+        },
+        resolveSecret: async () => '',
+      },
+    );
+    await expect(connecting).rejects.toMatchObject({
+      code: 'MACHINE_UNAVAILABLE',
+      message: expect.stringMatching(/^No Carvera answered at 10\.0\.5\.9:2222\./u) as unknown,
+    });
+    expect(written).toEqual([...carveraRealtime('?')]);
+    // The session is gone: no reconnect timer is left to dial the address again.
+    expect(requests).toHaveLength(1);
+  }, 10_000);
 
   it('should connect over TCP 2222 to the bound address and identify the firmware', async () => {
     const simulator = createCarveraSimulator({ speed: 25, tickInterval: 10 });

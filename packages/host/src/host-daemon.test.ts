@@ -22,6 +22,7 @@ import type { RuntimeClient } from '@taucad/runtime/client';
 import { createFileSystemBridgeProxy } from '@taucad/runtime/filesystem';
 import type { FileSystemBridgeConnection } from '@taucad/runtime/filesystem';
 import type * as runtimeFilesystem from '@taucad/runtime/filesystem';
+import type * as runtimeHost from '@taucad/runtime/host';
 import { z } from 'zod';
 
 import { startHostDaemon } from '#host-daemon.js';
@@ -36,6 +37,24 @@ import type { HostJobWorkerFactory } from '#job-worker.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
  * it: the captured thunk is the connection that child's bridge opens. */
+/* Every session the daemon's machine admission revokes, so a case sees a closed channel give its session back. */
+const revokedSessions = vi.hoisted(() => [] as unknown[]);
+vi.mock('@taucad/runtime/host', async (importOriginal) => {
+  const original = await importOriginal<typeof runtimeHost>();
+  return {
+    ...original,
+    createHostAdmissionAuthority: (input: Parameters<typeof original.createHostAdmissionAuthority>[0]) => {
+      const admission = original.createHostAdmissionAuthority(input);
+      return {
+        ...admission,
+        revoke: (session: Parameters<typeof admission.revoke>[0]) => {
+          revokedSessions.push(session);
+          return admission.revoke(session);
+        },
+      };
+    },
+  };
+});
 const runtimeFileSystemOpens = vi.hoisted(() => [] as Array<() => FileSystemBridgeConnection>);
 vi.mock('@taucad/runtime/filesystem', async (importOriginal) => {
   const original = await importOriginal<typeof runtimeFilesystem>();
@@ -810,10 +829,28 @@ describe('startHostDaemon', () => {
       agentFacet.approveAction({
         machineId: 'any',
         operationId: 'op-1',
-        intent: { componentId: 'controller', action: 'controller.wake', version: 1, parameters: {} },
+        intent: {
+          componentId: 'controller',
+          action: 'controller.wake',
+          version: 1,
+          expectedRunId: null,
+          parameters: {},
+        },
         decision: 'approve',
+        approvedBy: person,
       }),
     ).rejects.toThrow('ROUTE_DENIED');
+    /* The agent's session lives only as long as its channel. */
+    const revokedBefore = revokedSessions.length;
+    const closable = (facet: typeof agentFacet): facet is typeof agentFacet & Readonly<{ close(): void }> =>
+      'close' in facet && typeof facet.close === 'function';
+    if (!closable(agentFacet)) {
+      throw new Error('The daemon offered its tools a machines facet it cannot close.');
+    }
+    agentFacet.close();
+    await vi.waitFor(() => {
+      expect(revokedSessions.length).toBe(revokedBefore + 1);
+    });
 
     const readArtifact = machineRuntimeSpy.mock.calls.at(-1)?.[0].readArtifact;
     if (readArtifact === undefined) {

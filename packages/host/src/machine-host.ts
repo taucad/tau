@@ -117,10 +117,11 @@ export const machineRouteGrants: readonly HostRouteGrant[] = (
   ] as const
 ).map((operation) => ({ route: 'machines', operation }));
 
-/* A person's own acts: finding and binding a machine, approving an action, Testing mode, and the held controls a
- * person presses. */
+/* A person's own acts: finding and binding a machine, approving an action or deciding a job (R16), Testing mode,
+ * and the held controls a person presses. */
 const personOperations: ReadonlySet<string> = new Set([
   'machines.approveAction',
+  'machines.resolveJob',
   'machines.discover',
   'machines.beginBinding',
   'machines.removeBinding',
@@ -130,7 +131,7 @@ const personOperations: ReadonlySet<string> = new Set([
 
 /**
  * What an agent's machines session is granted: {@link machineRouteGrants} without a person's own acts (discovery,
- * binding, approving an action, Testing mode, holds). The session's actor is `{ kind: 'agent' }`, set by the host that issues it, so the
+ * binding, approving an action, deciding a job, Testing mode, holds). The session's actor is `{ kind: 'agent' }`, set by the host that issues it, so the
  * host applies the agent rules whatever a call's payload says.
  * @public
  */

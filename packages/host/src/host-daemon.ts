@@ -18,6 +18,7 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeClient } from '@taucad/runtime';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
+import type { HostAdmissionAuthority } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';
 import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtime/host/node';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
@@ -690,15 +691,18 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   const openMachineHost = async (
     providers: CreateNodeMachineHostInput['providers'],
     readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'],
-  ): Promise<NonNullable<AgentServerOptions['machines']> | undefined> => {
+  ): Promise<
+    (NonNullable<AgentServerOptions['machines']> & Readonly<{ admission: HostAdmissionAuthority }>) | undefined
+  > => {
     const storeRoot = join(defaultConfigDirectory(), 'machines');
     const identity = await openMachineHostIdentity(storeRoot);
+    const admission = createHostAdmissionAuthority({ hostId: identity.hostId });
     let host: NodeMachineHost;
     try {
       host = await createNodeMachineHost({
         storeRoot,
         ...identity,
-        admission: createHostAdmissionAuthority({ hostId: identity.hostId }),
+        admission,
         providers,
         runtime: createNodeMachineRuntime({
           secrets: createMachineSecretStore({
@@ -732,7 +736,11 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       });
       return undefined;
     }
-    return { host, session: host.issueSession({ actor: { kind: 'user', id: 'daemon' }, grants: machineRouteGrants }) };
+    return {
+      host,
+      admission,
+      session: host.issueSession({ actor: { kind: 'user', id: 'daemon' }, grants: machineRouteGrants }),
+    };
   };
 
   /**
@@ -826,15 +834,18 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        * claims; the route's session stays the person's. */
       ...(machines
         ? {
-            machines: localMachineFacet((port) =>
-              machines.host.serve({
-                port,
-                session: machines.host.issueSession({
-                  actor: { kind: 'agent', id: 'tau' },
-                  grants: machineAgentGrants,
-                }),
-              }),
-            ),
+            machines: localMachineFacet((port) => {
+              const session = machines.host.issueSession({
+                actor: { kind: 'agent', id: 'tau' },
+                grants: machineAgentGrants,
+              });
+              const channel = machines.host.serve({ port, session });
+              /* As the desktop does: the session lives only as long as its channel. */
+              channel.onClose(() => {
+                machines.admission.revoke(session);
+              });
+              return channel;
+            }),
           }
         : {}),
       fileSystem: {

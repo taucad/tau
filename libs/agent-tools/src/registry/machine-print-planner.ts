@@ -176,8 +176,10 @@ const fffOf = (manifest: MachineManifest) => {
 
 /**
  * Slicer options the machine fixes rather than the print: its plate, nozzle,
- * filament and the manifest's recommended temperatures. Callers spread their
- * own options over these, so a person or agent can still set temperatures.
+ * filament, the material loaded where the print feeds from and the manifest's
+ * recommended temperatures. The reference engine records the material in the
+ * file, so a printer's filament check can read it. Callers spread their own
+ * options over these, so a person or agent can still set temperatures.
  *
  * ponytail: temperatures are the manifest's machine-wide recommendation (Bambu:
  * 250 °C / 70 °C, PETG on a smooth plate); per-material recommendations belong
@@ -185,17 +187,19 @@ const fffOf = (manifest: MachineManifest) => {
  *
  * @param manifest - The machine's manifest; quantities are in mm and °C.
  * @param plate - The manifest plate id installed.
+ * @param material - The material id loaded in the slot the print feeds from, when known.
  * @returns Slicer option values.
  * @throws When the machine has no FFF process.
  * @public
  */
-export const machineSliceOptions = (manifest: MachineManifest, plate: string): JsonObject => {
+export const machineSliceOptions = (manifest: MachineManifest, plate: string, material?: string): JsonObject => {
   const fff = fffOf(manifest);
   const nozzleDiameter = nozzleDiameterOf(manifest);
   return {
     plate,
     ...(nozzleDiameter === undefined ? {} : { nozzleDiameter }),
     filamentDiameter: fff.filamentDiameter.value,
+    ...(material === undefined ? {} : { filamentType: material }),
     nozzleTemperature: fff.slicing.recommended.nozzleTemperature.value,
     bedTemperature: fff.slicing.recommended.bedTemperature.value,
   };
@@ -332,11 +336,11 @@ const summarize = (
 
 /**
  * Program formats by file name, each with the media types that name it: a container's declared media type matches the
- * file's. ponytail: G-code is spelled two ways by providers today; add a row when a provider declares a new format.
+ * file's. ponytail: add a row when a provider declares a new format.
  */
 const programFormats: ReadonlyArray<Readonly<{ name: RegExp; mediaTypes: readonly string[] }>> = [
   { name: /\.gcode\.3mf$/iu, mediaTypes: ['application/vnd.bambulab.gcode-3mf'] },
-  { name: /\.(?:gcode|nc|ngc|tap|cnc)$/iu, mediaTypes: ['text/x-gcode', 'text/x.gcode'] },
+  { name: /\.(?:gcode|nc|ngc|tap|cnc)$/iu, mediaTypes: ['text/x.gcode'] },
 ];
 
 /**
@@ -430,10 +434,10 @@ const planProgram = async (
  */
 const sliceOptions = (
   provider: MachineProvider,
-  input: PrintChoices & Readonly<{ machine: MachineDirectoryEntry; plate: string }>,
+  input: PrintChoices & Readonly<{ machine: MachineDirectoryEntry; plate: string; material: string }>,
   bambuStudio: boolean,
 ): JsonObject => {
-  const { machine, options, profiles, settings, preset, plate } = input;
+  const { machine, options, profiles, settings, preset, plate, material } = input;
   if (!bambuStudio) {
     if (profiles !== undefined || settings !== undefined) {
       throw new Error(
@@ -443,7 +447,7 @@ const sliceOptions = (
     /* The machine's own options first, then the call's keys, the preset from
      * its own field (the registry refuses one inside `options`). */
     return {
-      ...machineSliceOptions(provider.manifest, plate),
+      ...machineSliceOptions(provider.manifest, plate, material),
       ...options,
       ...(preset === undefined ? {} : { preset }),
     };
@@ -726,7 +730,11 @@ export const createMachinePrintPlanner =
     ): Promise<Slice> =>
       exportSlice(deps, input, {
         targetFile,
-        exportOptions: sliceOptions(provider, { ...choices, profiles, machine, plate }, bambuStudio),
+        exportOptions: sliceOptions(
+          provider,
+          { ...choices, profiles, machine, plate, material: loaded.materialId },
+          bambuStudio,
+        ),
         machinePreferences,
       });
     const first = await slice(choices.profiles, intent.machinePreferences);

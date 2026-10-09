@@ -921,7 +921,11 @@ const requestJob = async (
     /* The provider's completion of what the call chose: what the person approves is what starts. */
     configuration: check.configuration,
     requestedBy: requesterOf(invocation),
-    program: plan.program,
+    /* Tau's read of the program, or the machine's facts where Tau could not read it (`other`, or none). */
+    program:
+      plan.program.facts === undefined || plan.program.facts.process === 'other'
+        ? { ...plan.program, facts: check.program.facts }
+        : plan.program,
     jobId,
     signal,
   });

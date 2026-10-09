@@ -157,7 +157,7 @@ const printReady = {
 
 const gcodeProgram = {
   contract: { id: 'tau.toolpath.gcode', version: 1 },
-  mediaType: 'text/x-gcode',
+  mediaType: 'text/x.gcode',
   requiredMembers: [],
   payloadSelection: 'single',
   technology: 'subtractive.milling',

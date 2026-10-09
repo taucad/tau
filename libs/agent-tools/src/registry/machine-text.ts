@@ -36,16 +36,23 @@ export const sentence = (text: string): string => (/[.!?]$/u.test(text) ? text :
  * What clears a refusal, an alert or a check, in words an agent can act on.
  * @param entry - The machine, for the action's label.
  * @param remedy - The remedy.
- * @returns "Home (machine_action motion motion.home)", or the person's instruction.
+ * @returns "Home (machine_action motion motion.home)", the person's instruction, or Stop with what it costs.
  */
 export const remedyText = (entry: MachineDirectoryEntry, remedy: MachineRemedy): string => {
-  if (remedy.type === 'person') {
-    return `a person: ${remedy.instruction}`;
+  switch (remedy.type) {
+    case 'person': {
+      return `a person: ${remedy.instruction}`;
+    }
+    case 'stop': {
+      return `Stop the machine (stop_machine): ${remedy.consequence}`;
+    }
+    case 'action': {
+      const label = entry.descriptor.capabilities.actions.find(
+        ({ componentId, id }) => componentId === remedy.componentId && id === remedy.action,
+      )?.label;
+      return `${label ?? remedy.action} (machine_action ${remedy.componentId} ${remedy.action})`;
+    }
   }
-  const label = entry.descriptor.capabilities.actions.find(
-    ({ componentId, id }) => componentId === remedy.componentId && id === remedy.action,
-  )?.label;
-  return `${label ?? remedy.action} (machine_action ${remedy.componentId} ${remedy.action})`;
 };
 
 /**

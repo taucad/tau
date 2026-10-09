@@ -508,6 +508,28 @@ describe('machine tool registry', () => {
       expect(text).not.toContain('legacyProjection');
     });
 
+    it('names Stop and what it costs when only Stop clears an alert', async () => {
+      const entry = fixtureEntry({
+        snapshot: {
+          alerts: [
+            {
+              code: 'spindle.timed',
+              message: 'The spindle runs until its timer ends.',
+              blocks: 'run',
+              remedies: [{ type: 'stop', consequence: 'Home the machine afterwards.' }],
+            },
+          ],
+        },
+      });
+      const { client } = fixtureClient({ entries: [entry] });
+
+      const result = await run(client, { toolName: 'get_machine', input: {} });
+
+      expect(result.content).toContain(
+        '- alert spindle.timed: The spindle runs until its timer ends.; blocks run; clears with Stop the machine (stop_machine): Home the machine afterwards.',
+      );
+    });
+
     it.each([
       ['3', 'about 1 h 5 min left.'],
       ['Heating the bed', 'about 1 h 5 min left; Heating the bed.'],
@@ -1015,6 +1037,26 @@ describe('machine tool registry', () => {
       });
     });
 
+    it("requests the job with the machine's read of the program when Tau could not read it", async () => {
+      const fixture = fixtureClient();
+      planPrint.mockResolvedValueOnce({
+        artifact: fixtureArtifact,
+        configuration: { expectedBedType: 'textured-pei' },
+        program: { name: 'pyramid.gcode.3mf', facts: { process: 'other' } },
+      });
+      const approve = approveWith('denied');
+
+      await run(fixture.client, { toolName: 'request_job', input: { targetFile: 'main.ts' }, approve });
+
+      expect(fixture.requestJob.mock.lastCall?.[0].program).toEqual({
+        name: 'pyramid.gcode.3mf',
+        facts: { process: 'fff', layers: 125 },
+      });
+      expect(approve.mock.calls[0]?.[0]).toMatchObject({
+        prompt: 'Print pyramid.gcode.3mf on Workshop X1C? 125 layers.',
+      });
+    });
+
     it('leaves a job awaiting the Print pane when the person must confirm what only they can, even after a chat approval', async () => {
       const fixture = fixtureClient({
         entries: [fixtureEntry({ attestations: [{ id: 'work-area-clear', label: 'The build plate is clear' }] })],
@@ -1163,6 +1205,12 @@ describe('machine tool registry', () => {
       artifact: { ...fixtureArtifact, path: 'cam/part.nc' },
       configuration: {},
       program: { name: 'part.nc', facts: { process: 'other' } },
+    });
+    fixture.checkJob.mockResolvedValueOnce({
+      status: 'ready',
+      configuration: {},
+      program: { name: 'part.nc', facts: { process: 'other' } },
+      checks: [],
     });
     const approve = approveWith('denied');
 
@@ -1485,6 +1533,7 @@ describe('request_job slicer options through the chat registry', () => {
           plate: 'textured-pei',
           nozzleDiameter: 0.4,
           filamentDiameter: 1.75,
+          filamentType: 'PETG',
           nozzleTemperature: 250,
           bedTemperature: 70,
           walls: 3,

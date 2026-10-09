@@ -313,7 +313,7 @@ describe('machine print planner', () => {
         path: 'cam/part.nc',
         digest: `sha256:${await sha256Bytes(program)}`,
         length: program.byteLength,
-        mediaType: 'text/x-gcode',
+        mediaType: 'text/x.gcode',
         contract: { id: 'tau.toolpath.gcode', version: 1 },
         selectedMember: 'cam/part.nc',
       },
@@ -528,11 +528,13 @@ describe('machine print planner', () => {
         options: { walls: 3 },
         preferences: current({ ...intent, options: { walls: 4, infillPercent: 30 } }),
       });
-      /* The file's Bambu Studio values never reach the reference engine, and never refuse. */
+      /* The file's Bambu Studio values never reach the reference engine, and never refuse. The loaded tray's material
+       * is recorded so the printer's filament check can read it. */
       expect(sliced(deps)).toEqual({
         plate: 'textured-pei',
         nozzleDiameter: 0.4,
         filamentDiameter: 1.75,
+        filamentType: 'PETG',
         nozzleTemperature: 250,
         bedTemperature: 70,
         walls: 3,

@@ -39,107 +39,128 @@ const observation = session.complete();
 
 ## API
 
-| Export                           | Purpose                                                         |
-| -------------------------------- | --------------------------------------------------------------- |
-| `createBundlerSourceHost`        | rooted project, built-in, URL, and package source sessions      |
-| `PackageArtifactCache`           | exact, content-addressed self-contained package artifact cache  |
-| `updatePackageManifest`          | resolve, verify and commit exact project package selections     |
-| `createPackageManifestCommit`    | publish through the existing filesystem checked-write authority |
-| `normalizeAssetImportAttributes` | length-preserving normalization for supported asset imports     |
-| `resolveAssetIntent`             | compiler-neutral query/attribute loader intent                  |
+| Export                           | Purpose                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------ |
+| `createBundlerSourceHost`        | rooted project, built-in, URL, and package source sessions               |
+| `PackageArtifactCache`           | CDN artifact cache for projects without a `package-lock.json`            |
+| `installPackages`                | Install/Upgrade: edit `dependencies`, resolve, write `package-lock.json` |
+| `materializePackages`            | fetch, verify and unpack every locked tarball into `node_modules/`       |
+| `resolveDependencyTree`          | deterministic npm-compatible tree from package.json ranges               |
+| `parsePackageLock`               | read a lockfileVersion 3 lock, including one npm wrote                   |
+| `serializePackageLock`           | write a lock byte-for-byte as npm does                                   |
+| `readPackageLock`                | read the project lock or report `lock-invalid`                           |
+| `lockMatchesManifest`            | report `lock-stale` when package.json and the lock disagree              |
+| `createPackageManifestCommit`    | publish through the existing filesystem checked-write authority          |
+| `normalizeAssetImportAttributes` | length-preserving normalization for supported asset imports              |
+| `resolveAssetIntent`             | compiler-neutral query/attribute loader intent                           |
 
-## Deterministic project packages
+## Project packages
 
-`updatePackageManifest` resolves public npm requests and writes exact versions into a project
-`package.json`. It retains each original range or dist-tag in `taucadPackageLock`, alongside the
-registry version, tarball URL/SHA-512 integrity, compatibility requirements, and the SHA-256 identity
-of the CDN code actually consumed. `tau.json` and repository dependencies remain separate.
+A Tau project is an ordinary npm package. Two files describe its packages, and both are the files npm
+itself reads:
+
+- `package.json` is the author's. `dependencies` holds ranges (`"d3-shape": "^3"`), npm aliases
+  (`"replicad": "npm:@taulabs/replicad@1.1.0-taulabs.0"`) or dist-tags. Tau changes it only when you
+  Install or remove a package, and then only the `dependencies` map; every other key, the key order and
+  the indentation are kept.
+- `package-lock.json` (lockfileVersion 3) records every package in the tree, transitive ones included,
+  at its `node_modules/<path>` with the exact version, the registry tarball URL and its SHA-512
+  `integrity`. Tau writes it in npm's layout and key order, so `npm ci` accepts it unmodified and the tree
+  matches the one npm resolves.
+
+### Install
 
 ```typescript
-import { createPackageManifestCommit, updatePackageManifest } from '@taucad/bundler-core';
+import { createPackageManifestCommit, installPackages } from '@taucad/bundler-core';
 
 const commit = createPackageManifestCommit({ authority: rootedFilesystem, signal });
 
-const lock = await updatePackageManifest({
+const { lock, issues } = await installPackages({
   filesystem,
-  requests: { 'lodash-es': '^4.17.21' },
-  imports: ['lodash-es/debounce'],
-  mode: 'install',
-  nodeVersion: '24.0.0',
-  signal,
   commit,
+  mode: 'install',
+  add: { 'd3-shape': '^3' },
+  signal,
 });
 ```
 
-The host supplies `filesystem` from its existing rooted filesystem authority and
-`commit({ expected, content })` as an **atomic compare-and-swap of `package.json`**. Compare the
-complete prior text (or absence), then publish the complete replacement in the same host-owned
-transaction/lock. Return `false` on a concurrent edit. The provided `createPackageManifestCommit` adapter calls
-`writeFileChecked` on the existing rooted authority. It preserves `known-not-applied` versus
-`potentially-applied` failures; after an uncertain failure, reread the manifest before retrying. Equal content can be a no-op inside that transaction. A separate `readFile` followed
-by `writeFile` is **not** a correct cross-worker commit adapter. Reuse the host's workspace store;
-this package does not create a second store, lock service, or filesystem authority.
+- `mode: 'install'` behaves like `npm install`: versions already in the lock are kept while they
+  satisfy package.json, so a repeated Install with nothing changed fetches nothing and writes nothing.
+  Packages named in `add` are resolved afresh, like `npm install name@range`.
+- `mode: 'upgrade'` resolves the names in `upgrade` afresh, or every package when `upgrade` is omitted.
+- Resolution follows npm 7+: the highest version satisfying each range (the `latest` tag first when it
+  satisfies), each package placed at the shallowest `node_modules` level without a conflicting
+  version, nested under its dependent otherwise. A missing peer is installed beside its dependent;
+  optional peers are not installed. Optional dependencies are recorded with their `os`/`cpu`
+  constraints; `devDependencies` are recorded with `dev: true`.
+- Writes are two checked writes through the filesystem authority: package.json against the bytes read
+  (only when `add`/`remove` changed it), then package-lock.json against its own previous bytes and the
+  package.json just written. A concurrent edit produces a `manifest-conflict` issue. If the second write
+  loses, package.json is ahead of the lock, which is npm's own recoverable state: `npm ci` refuses,
+  Tau reports `lock-stale`, and running Install again repairs it.
+- `createPackageManifestCommit` maps each write to `writeFileChecked` on the existing rooted
+  authority and preserves `known-not-applied` versus `potentially-applied` failures; after an uncertain
+  failure, reread both files before retrying. A `readFile` followed by `writeFile` is not a correct
+  commit adapter.
 
-`requests` is the complete desired root dependency set. Use the retained `requested` values when
-reinstalling or upgrading; do not substitute the generated exact `dependencies` as upgrade ranges.
-`mode: 'install'` reuses existing selections and requires an explicit upgrade when a request changes.
-`mode: 'upgrade'` fetches fresh registry metadata and selects the highest allowed stable version (or
-the explicitly requested prerelease/tag). A moving tag changes only during an explicit upgrade.
-Ordinary bundling never upgrades the manifest. The source host reads one manifest snapshot per
-session and reports both `package.json` and the locked artifact paths as dependencies.
-Selected subpaths remain admitted on reinstall and upgrade, even when `imports` is omitted;
-removing a root from `requests` removes its subpaths too.
+Every refusal is an issue with a stable `code` and a message naming the fix, and no file is written:
+`registry-unavailable`, `no-matching-version`, `peer-conflict`, `unsupported-dependency-protocol`
+(git, file, link, workspace and URL specifiers) and `manifest-conflict`. `install-script-skipped` is a
+warning: the package is locked, but its install script is never run.
 
-Warm reinstall works offline and checks cached bytes against their locked SHA-256. A missing artifact
-can be restored from its locked URL only if the original digest matches. Changed bytes, an unavailable
-URL, or an offline cold cache fail without advancing the lock. Registry retries are bounded and
-cancelable; upgrades never silently fall back to stale registry metadata. Acquisition may leave
-unreferenced cache files after failure, but only the atomic manifest commit activates a selection.
+### Materialise
 
-### Admission and limits
+`materializePackages({ filesystem, lock, signal })` installs the lock into `node_modules/<path>/`. Each
+tarball is fetched from its `resolved` URL, checked against `integrity` and unpacked in memory before a
+byte is written; a tar entry that escapes the package directory is refused, and links and devices are skipped.
+`node_modules/.tau-install-state.json` records the integrity installed at each path, so a warm run
+fetches nothing, and paths no longer in the lock are removed. Native (`os`/`cpu`) and failed optional
+packages are skipped with `package-unavailable-in-host`; any other failure is an issue for that package
+only.
 
-- This slice supports scoped/unscoped public npm roots and explicitly selected subpaths, npm
-  semver ranges, prereleases and dist-tags. Add standard subpath imports such as `lodash-es/debounce`
-  to `imports`; they resolve at the root's selected version. npm aliases, private registries and
-  authenticated registry requests are not admitted.
-- Node engine and selected root peer ranges must match. Missing optional peers are permitted;
-  incompatible selected optional peers fail. A peer's presence does not admit external imports.
-- Only self-contained ESM bundles are admitted at each selected root/subpath. Static or dynamic imports remaining after CDN
-  bundling fail with a transitive-lock diagnostic. Inlined transitive code is frozen by the bundle
-  hash; this is **not** an npm dependency-tree lock or a substitute for `pnpm-lock.yaml` when
-  installing the generated manifest with pnpm. Unbundled trees and cross-package peer identity
-  still need a broader closure contract.
-- npm's tarball integrity identifies the registry tarball; it does **not** authenticate CDN output.
-  The CDN output digest records acquired bytes and detects subsequent changes. This is not publisher
-  attestation or a sandbox. No package lifecycle hooks or downloaded code are executed by resolution.
-- A registry package without SHA-512 integrity is rejected. Compatibility for native ABI, OS/CPU,
-  and browser APIs requires host-specific admission beyond this slice.
+### How bundling resolves packages
 
-The npm metadata contract is documented in the
-[npm registry API](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md), and version selection
-uses the existing workspace catalog's [node-semver](https://github.com/npm/node-semver).
+Built-in kernel modules (`replicad`, `manifold-3d`, …) always win. For any other bare import:
+
+- **With `package-lock.json`**, the import resolves Node-style over the installed `node_modules/` tree
+  (`exports` with the `browser`, `import`, `module` and `default` conditions, `imports`, `module`/`main`,
+  nested copies first). A package that is not installed fails that import with `package-not-installed`;
+  a lock that no longer matches package.json fails every bare import with `lock-stale`. Project-relative
+  imports still build. When the lock names a different version of a built-in's package than Tau runs,
+  the build warns `package-version-mismatch`.
+- **Without a lock**, the import is loaded as a CDN bundle, as before, and the build warns
+  `package-not-locked` once per package so the author can run Install.
+
+Package issues reach `BundleResult` as `BUNDLER_FAILED` warnings or errors whose `details` is the `PackageIssue`.
+
+### What Tau never does
+
+- Run package lifecycle scripts or any project script, or spawn npm or another package manager.
+- Write a Tau-specific key into package.json or package-lock.json, or keep a second lock.
+- Treat CDN output as package identity. Identity is the registry tarball named by `resolved` and
+  verified against `integrity`.
+- Install from git, file, link, workspace or URL specifiers, or from private or authenticated
+  registries.
+
+Packuments are read in npm's abbreviated form (`application/vnd.npm.install-v1+json`), which carries no
+`license`; Tau's lock therefore omits the `license` lines npm adds from full metadata. `npm ci` does not
+read them.
 
 ### Reproduce
 
 ```bash
-pnpm install --frozen-lockfile --ignore-scripts
 pnpm nx test bundler-core --watch=false
+pnpm nx test-browser bundler-core
+TAU_NPM_LIVE_TESTS=true pnpm nx test bundler-core --watch=false
 pnpm nx lint bundler-core
 pnpm nx typecheck bundler-core
 pnpm nx build bundler-core
 ```
 
-The manifest tests cover scoped packages, exact/range/tag/prerelease selection, offline reinstall,
-explicit upgrade, unavailable versions, malformed registry responses, transient retries, peers and
-engines, concurrent commits, cancellation, atomic-write failure, cold restoration and digest failure,
-and refusal to claim a lock for remaining transitive imports. A live anonymous registry/CDN probe
-on 2026-10-01 resolved `is-number@^7.0.0` to `7.0.0`: 222 ms cold and 0.39 ms warm in one Node 24
-sample. These are illustrative measurements, not a performance guarantee.
-
-The Node authority adapter has a real disk/RPC integration test with independent clients.
-Production integration must qualify browser-worker
-network/CORS behavior, cache eviction/restoration, cancellation during actual provider writes, and
-representative UI/runtime packages. The library slice does not wire a Generate UI or TSRX action.
+The resolver tests reproduce `npm install --package-lock-only` (npm 11.6.1) output for a plain,
+transitive, nested-version, peer and npm-alias project from recorded registry packuments. The live
+test (opt in with `TAU_NPM_LIVE_TESTS=true`) installs against the public registry, compares the tree
+with npm's own resolution and runs `npm ci --ignore-scripts` on the written lock.
 
 ## Environment
 
@@ -173,36 +194,3 @@ Apache-2.0 — see [LICENSE](./LICENSE).
 - [Source](https://github.com/taucad/tau/tree/main/packages/core/bundler)
 - [Changelog](https://github.com/taucad/tau/blob/main/packages/core/bundler/CHANGELOG.md)
 - [Issues](https://github.com/taucad/tau/issues)
-
-## UI admission checkpoint (2026-10-01)
-
-The current UI runtime composition selects CAD kernels and esbuild; the base contains no TSRX or
-Generate UI kernel. The following proposed UI import shapes were probed against the real anonymous
-registry/CDN without executing downloaded code. Each used a fresh in-memory project/artifact cache,
-one sample, Node 24.19.0, and the environment's existing HTTP proxy. They do not establish browser
-rendering performance or general npm install support.
-
-| Requests and standard imports                           | Result                                                                  |
-| ------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `react@19.2.0`, `react/jsx-runtime`                     | Admitted; both selected artifacts are self-contained                    |
-| `lodash-es@4.17.21`, `lodash-es/debounce`               | Admitted; subpath resolves at the root's exact version                  |
-| `react@19.2.0` + `react-dom@19.2.0`, `react-dom/client` | Refused at react-dom's remaining runtime imports; no manifest committed |
-
-The earlier 222.256 ms cold / 0.391 ms warm observation is **one pair** for `is-number@^7.0.0`
-(resolved 7.0.0, jsDelivr, 547 source characters): cold means an empty in-memory artifact cache,
-warm means the same instance with committed bytes, rehashing and no registry/CDN fetch. Upstream
-CDN/proxy caches were not flushed. This is not a general speedup claim.
-
-The smallest next closure implementation for `react-dom/client` is to record every static ESM edge
-by canonical package/subpath identity, bind React peers to the already selected root artifact, pin
-and verify every remaining module's bytes, and resolve those edges locally in the source host.
-Cycles and converging imports must share one identity; do not bundle a second React copy into each
-entry. Verify hooks/context identity through an actual ReactDOM render, not just a successful
-import. Refuse computed dynamic imports, undeclared runtime edges and incompatible peers until
-they have an explicit admission rule. Keep ordinary installed npm trees and lockfiles pnpm-owned.
-
-`pnpm nx test-browser bundler-core` is a reproducible real IndexedDB/Web Locks authority test.
-Execution in the cloud checkpoint was blocked because Chromium was absent and the Playwright CDN
-download returned HTTP 403 `Domain forbidden`. The browser test is typechecked but not claimed
-as passed. No sandbox, registry credentials or network-access settings were changed. macOS and
-Windows disk-provider crash qualification and live browser CORS remain unverified.

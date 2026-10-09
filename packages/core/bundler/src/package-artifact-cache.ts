@@ -11,8 +11,10 @@ export type BundlerFileSystem = {
   stat?(path: string): Promise<{ readonly type: 'file' | 'dir' }>;
   readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   readFile(path: string, encoding: 'utf8'): Promise<string>;
-  writeFile(path: string, content: string): Promise<void>;
+  writeFile(path: string, content: string | Uint8Array<ArrayBuffer>): Promise<void>;
   ensureDir(path: string): Promise<void>;
+  /** Remove a file or a whole directory tree. Optional: callers that need it refuse or degrade when absent. */
+  remove?(path: string): Promise<void>;
 };
 
 /** Durable identity for one self-contained CDN package artifact. @public */

@@ -1,17 +1,4 @@
-import { maxSatisfying, valid, validRange } from 'semver';
-
 import { readPackageResponse } from '#package-response.js';
-
-/** Registry metadata retained independently of CDN artifact integrity. @public */
-export type PackageRegistryResolution = {
-  readonly name: string;
-  readonly version: string;
-  readonly tarball: string;
-  readonly integrity: string;
-  readonly peers: Readonly<Record<string, string>>;
-  readonly optionalPeers: readonly string[];
-  readonly engines: Readonly<Record<string, string>>;
-};
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -20,23 +7,6 @@ export const stringRecord = (value: unknown): value is Record<string, string> =>
   isRecord(value) && Object.values(value).every((item) => typeof item === 'string');
 
 export const isPackageName = (name: string): boolean => /^(?:@[a-z\d][a-z\d._-]*\/)?[a-z\d][a-z\d._-]*$/u.test(name);
-
-export const isIntegrity = (value: string): boolean => /^sha512-[A-Za-z\d+/]{86}==$/u.test(value);
-
-export const isRegistryResolution = (value: unknown): value is PackageRegistryResolution =>
-  isRecord(value) &&
-  typeof value['name'] === 'string' &&
-  isPackageName(value['name']) &&
-  typeof value['version'] === 'string' &&
-  valid(value['version']) === value['version'] &&
-  typeof value['tarball'] === 'string' &&
-  value['tarball'].startsWith('https://registry.npmjs.org/') &&
-  typeof value['integrity'] === 'string' &&
-  isIntegrity(value['integrity']) &&
-  stringRecord(value['peers']) &&
-  stringRecord(value['engines']) &&
-  Array.isArray(value['optionalPeers']) &&
-  value['optionalPeers'].every((name) => typeof name === 'string');
 
 const maximumMetadataBytes = 20 * 1024 * 1024;
 
@@ -79,6 +49,9 @@ const fetchMetadata = async (name: string, signal: AbortSignal): Promise<unknown
       }
       throw new Error(`Registry unavailable for '${name}' after 3 attempts. Retry when online.`);
     }
+    if (response.status === 404) {
+      return undefined;
+    }
     if (!response.ok) {
       if ((response.status === 429 || response.status >= 500) && attempt < 2) {
         continue;
@@ -105,45 +78,60 @@ const fetchMetadata = async (name: string, signal: AbortSignal): Promise<unknown
   throw new Error(`Registry unavailable for '${name}'.`);
 };
 
-export const resolveRegistryPackage = async (input: {
+/** One version document from an abbreviated (`application/vnd.npm.install-v1+json`) or full packument. @public */
+export type PackumentVersion = {
   readonly name: string;
-  readonly requested: string;
-  readonly signal: AbortSignal;
-}): Promise<PackageRegistryResolution> => {
-  const { name, requested, signal } = input;
-  if (!isPackageName(name) || requested.length === 0) {
-    throw new Error('A public npm package name and nonempty version request are required.');
+  readonly version: string;
+  readonly dependencies?: Readonly<Record<string, string>>;
+  readonly optionalDependencies?: Readonly<Record<string, string>>;
+  readonly peerDependencies?: Readonly<Record<string, string>>;
+  readonly peerDependenciesMeta?: Readonly<Record<string, Readonly<{ optional?: boolean }>>>;
+  readonly engines?: Readonly<Record<string, string>>;
+  readonly bin?: Readonly<Record<string, string>> | string;
+  /** Present in full packuments only; abbreviated documents omit it. */
+  readonly license?: string;
+  readonly os?: readonly string[];
+  readonly cpu?: readonly string[];
+  /** Registry-computed in abbreviated documents. */
+  readonly hasInstallScript?: boolean;
+  /** Full packuments carry scripts instead of `hasInstallScript`. */
+  readonly scripts?: Readonly<Record<string, string>>;
+  readonly deprecated?: string;
+  readonly dist: { readonly tarball: string; readonly integrity?: string; readonly shasum?: string };
+};
+
+/** Registry metadata for one package name. @public */
+export type Packument = {
+  readonly name: string;
+  readonly 'dist-tags': Readonly<Record<string, string>>;
+  readonly versions: Readonly<Record<string, PackumentVersion>>;
+};
+
+/**
+ * Packument source for the resolver. Resolves `undefined` when the package does not exist;
+ * rejects when the registry cannot be reached.
+ * @public
+ */
+export type PackageRegistry = (name: string, signal: AbortSignal) => Promise<Packument | undefined>;
+
+/**
+ * Fetch an abbreviated packument from the public npm registry with bounded retries.
+ * Version documents are validated by the resolver when it selects them.
+ * @param name - Package name.
+ * @param signal - Cancellation.
+ * @returns The packument, or undefined when the registry answers 404.
+ * @internal
+ */
+export const fetchPackument: PackageRegistry = async (name, signal) => {
+  if (!isPackageName(name)) {
+    throw new Error(`'${name}' is not a public npm package name.`);
   }
   const metadata = await fetchMetadata(name, signal);
+  if (metadata === undefined) {
+    return undefined;
+  }
   if (!isRecord(metadata) || !isRecord(metadata['versions']) || !stringRecord(metadata['dist-tags'])) {
-    throw new Error(`Registry returned incomplete metadata for '${name}'.`);
+    throw new Error(`Registry returned incomplete metadata for '${name}'. Retry the operation.`);
   }
-  const { versions } = metadata;
-  const range = validRange(requested);
-  const version = range === null ? metadata['dist-tags'][requested] : maxSatisfying(Object.keys(versions), range);
-  if (!version || !Object.hasOwn(versions, version)) {
-    throw new Error(`No published version of '${name}' satisfies '${requested}'. Check the range or dist-tag.`);
-  }
-  const entry = versions[version];
-  if (!isRecord(entry) || entry['name'] !== name || entry['version'] !== version || !isRecord(entry['dist'])) {
-    throw new Error(`Registry returned incomplete metadata for '${name}@${version}'.`);
-  }
-  const peerMeta = entry['peerDependenciesMeta'];
-  const result = {
-    name,
-    version,
-    tarball: entry['dist']['tarball'],
-    integrity: entry['dist']['integrity'],
-    peers: entry['peerDependencies'] ?? {},
-    engines: entry['engines'] ?? {},
-    optionalPeers: isRecord(peerMeta)
-      ? Object.entries(peerMeta)
-          .filter(([, meta]) => isRecord(meta) && meta['optional'] === true)
-          .map(([peer]) => peer)
-      : [],
-  };
-  if (!isRegistryResolution(result)) {
-    throw new Error(`Registry metadata for '${name}@${version}' lacks valid integrity or compatibility fields.`);
-  }
-  return result;
+  return { name, 'dist-tags': metadata['dist-tags'], versions: metadata['versions'] as Packument['versions'] };
 };

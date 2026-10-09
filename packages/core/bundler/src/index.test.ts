@@ -8,10 +8,16 @@ describe('public surface', () => {
       'PackageArtifactCache',
       'createBundlerSourceHost',
       'createPackageManifestCommit',
+      'installPackages',
+      'lockMatchesManifest',
+      'materializePackages',
       'normalizeAssetImportAttributes',
+      'parsePackageLock',
+      'readPackageLock',
       'resolveAssetIntent',
+      'resolveDependencyTree',
+      'serializePackageLock',
       'splitAssetSpecifier',
-      'updatePackageManifest',
     ]);
   });
 });

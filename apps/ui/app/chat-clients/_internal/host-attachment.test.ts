@@ -1,7 +1,12 @@
+import { MessageChannel } from 'node:worker_threads';
 import { createActor } from 'xstate';
 import { describe, expect, it, vi } from 'vitest';
-import type { ProjectionFact, KnownProjectionEvent } from '@taucad/agent-host';
-import type { CatchUpFrame, ReadAnswer } from '@taucad/agent-host/wire';
+import type { ProjectionFact, KnownProjectionEvent, AgentChannelClient } from '@taucad/agent-host';
+import type { AgentWireProtocol, CatchUpFrame, ReadAnswer } from '@taucad/agent-host/wire';
+import { catchUpFrameSchema, agentWireVersion, agentWireProtocolSchemas } from '@taucad/agent-host/wire';
+import { createAgentChannelClient, serveAgentWorkerChannel } from '@taucad/agent-host/channel-client';
+import { createAgentHostClient } from '#services/agent-host-client.js';
+import { createDaemonAgentHostTransport } from '#services/daemon-agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { chunksOf, chatProjectionLogic } from '#machines/chat-projection.logic.js';
 import { lifecycleRow } from '#machines/chat-projection.fixture.js';
@@ -11,7 +16,7 @@ const healthy = { historyIntact: true, newerHistory: false, quarantined: false }
 const lifecycleFact = (
   sequence: number,
   state: Extract<KnownProjectionEvent, { type: 'run.lifecycle' }>['state'],
-): ProjectionFact => ({
+): Extract<ProjectionFact, { classification: 'known' }> => ({
   classification: 'known',
   row: { version: 1, leaderEpoch: 'g1', sequence, recordedAt: '2026-09-28T00:00:00.000Z', runId: 'run_1', attempt: 1 },
   effect: { type: 'run.lifecycle', state },
@@ -22,6 +27,109 @@ const writerOwnedCatchUp = async function* ({ chatId }: { chatId: string }): Asy
 };
 
 describe('hostAttachment', () => {
+  it('dispatches the real live listen before capture and read after delayed transport readiness', async () => {
+    const channel = new MessageChannel();
+    const ready = Promise.withResolvers<AgentChannelClient>();
+    const dispatches: string[] = [];
+    let liveSignal: AbortSignal | undefined;
+    const server = serveAgentWorkerChannel<AgentWireProtocol>(channel.port1, {
+      protocolSchemas: agentWireProtocolSchemas,
+      sessionKey: 'tau-agent',
+      hello: { wire: agentWireVersion, build: 'attachment-order' },
+      impl: {
+        // oxlint-disable-next-line eslint/max-params -- existing channel-server callback contract.
+        call: async (_context, name, _args, signal) => {
+          dispatches.push(name);
+          if (name !== 'read') {
+            throw new Error(`Unexpected attachment call: ${name}`);
+          }
+          await new Promise<void>((resolve) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          throw new Error('Attachment read stopped.');
+        },
+        // oxlint-disable-next-line eslint/max-params -- existing channel-server callback contract.
+        listen: (_context, name, _args, signal) => {
+          dispatches.push(name);
+          if (name === 'liveEvents') {
+            liveSignal = signal;
+            return (async function* () {
+              dispatches.push('liveEvents.consumed');
+              await new Promise<void>((resolve) => {
+                signal.addEventListener(
+                  'abort',
+                  () => {
+                    resolve();
+                  },
+                  { once: true },
+                );
+              });
+              yield* [];
+            })();
+          }
+          if (name !== 'catchUp') {
+            throw new Error(`Unexpected attachment listen: ${name}`);
+          }
+          // The channel's generic listen signature correlates each name with its event type.
+          // This branch emits only the schema-validated catchUp frame, like the production channel adapter.
+          return (async function* () {
+            yield catchUpFrameSchema.parse({
+              type: 'validated',
+              health: healthy,
+              position: { cursor: 0, sourceGeneration: 'attachment-order' },
+              observedEndCursor: 0,
+            });
+          })() as AsyncIterable<never>;
+        },
+      },
+    });
+    const wire = createAgentChannelClient({ connect: () => channel.port2 });
+    const client = createAgentHostClient(createDaemonAgentHostTransport(async () => ready.promise));
+    const projection = createActor(chatProjectionLogic).start();
+    const connect = vi.fn(async () => client);
+    const onStatus = vi.fn();
+    const actor = createActor(hostAttachment, {
+      input: { chatId: 'chat_1', projection, connect, onStatus },
+    }).start();
+    try {
+      await vi.waitFor(() => {
+        expect(connect).toHaveBeenCalledOnce();
+      });
+      expect(dispatches).toEqual([]);
+      expect(onStatus).not.toHaveBeenCalled();
+      ready.resolve(wire);
+      await vi.waitFor(() => {
+        expect(dispatches).toContain('read');
+      });
+      expect(dispatches).toEqual(['liveEvents', 'liveEvents.consumed', 'catchUp', 'read']);
+      expect(liveSignal?.aborted).toBe(false);
+      expect(onStatus).toHaveBeenCalledWith({ type: 'attachment.attached' });
+      expect(projection.getSnapshot().context.ledger.position).toEqual({
+        cursor: 0,
+        sourceGeneration: 'attachment-order',
+      });
+      actor.stop();
+      await vi.waitFor(() => {
+        expect(liveSignal?.aborted).toBe(true);
+      });
+    } finally {
+      ready.resolve(wire);
+      actor.stop();
+      projection.stop();
+      await client.close();
+      wire.close();
+      server.dispose('attachment test complete');
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+
   for (const cursor of [0, 1]) {
     it(`freshly validates a retained cursor ${cursor} without full capture or a parked first read`, async () => {
       const projection = createActor(chatProjectionLogic).start();

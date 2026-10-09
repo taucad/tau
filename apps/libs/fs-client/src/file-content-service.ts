@@ -263,7 +263,16 @@ export class FileContentService {
   private readonly paths: WorkspacePathResolver;
   private readonly refreshGuard: RefreshGenerationGuard;
   private readonly observationErrors = new Map<string, FileContentResult>();
-  private readonly observations = new Map<string, ObservationService<FileContentResult>>();
+  // Selection can precede acquisition. Leases and active work retain the owner; the registry retains identity weakly.
+  private readonly observations = new Map<string, WeakRef<ObservationService<FileContentResult>>>();
+  private readonly retiredObservations = new FinalizationRegistry<{
+    path: string;
+    reference: WeakRef<ObservationService<FileContentResult>>;
+  }>(({ path, reference }) => {
+    if (this.observations.get(path) === reference) {
+      this.observations.delete(path);
+    }
+  });
   private readonly pendingResolves = new Map<string, Promise<FileContentResult>>();
   private readonly outcomes = new Map<string, FileContentResult>();
   private readonly binaryDigests = new WeakMap<FileContentResult, string>();
@@ -470,7 +479,7 @@ export class FileContentService {
    * @returns Shared lifecycle owner; acquire a lease to start observation.
    */
   public observeContent(path: string): ObservationService<FileContentResult> {
-    const existing = this.observations.get(path);
+    const existing = this.observations.get(path)?.deref();
     if (existing) {
       return existing;
     }
@@ -505,7 +514,7 @@ export class FileContentService {
       equal: (previous, next) => outcomesEqual(previous, next, this.binaryDigests),
     });
     service.subscribe(() => {
-      if (this.observations.get(path) !== service) {
+      if (this.observations.get(path)?.deref() !== service) {
         return;
       }
       const snapshot = service.getSnapshot();
@@ -530,7 +539,9 @@ export class FileContentService {
         this.pathNotifyRegistry.notifyPath(path, undefined);
       }
     });
-    this.observations.set(path, service);
+    const reference = new WeakRef(service);
+    this.observations.set(path, reference);
+    this.retiredObservations.register(service, { path, reference }, reference);
     return service;
   }
 
@@ -548,7 +559,7 @@ export class FileContentService {
       if (outcome.kind === 'text' || outcome.kind === 'binary') {
         return outcome;
       }
-      const value = this.observations.get(path)?.getSnapshot().value;
+      const value = this.observations.get(path)?.deref()?.getSnapshot().value;
       if (
         (outcome.kind === 'error' || outcome.kind === 'loading') &&
         (value?.kind === 'text' || value?.kind === 'binary')
@@ -1438,7 +1449,7 @@ export class FileContentService {
   }
 
   private hasAuthorityObservation(path: string): boolean {
-    return this.channel.hasAuthorityWatch && (this.observations.get(path)?.diagnostics.activeWatches ?? 0) > 0;
+    return this.channel.hasAuthorityWatch && (this.observations.get(path)?.deref()?.diagnostics.activeWatches ?? 0) > 0;
   }
 
   private onWorkerFileWritten(relativePath: string): void {
@@ -1670,10 +1681,13 @@ export class FileContentService {
 
   private clearObservations(): void {
     const services = [...this.observations.values()];
+    for (const reference of services) {
+      this.retiredObservations.unregister(reference);
+    }
     this.observations.clear();
     this.observationErrors.clear();
-    for (const service of services) {
-      service.dispose();
+    for (const reference of services) {
+      reference.deref()?.dispose();
     }
   }
 
@@ -1795,7 +1809,7 @@ export class FileContentService {
       }
       if (
         this.pathNotifyRegistry.hasPathSubscribers(path) ||
-        (this.observations.get(path)?.activeLeaseCount ?? 0) > 0 ||
+        (this.observations.get(path)?.deref()?.activeLeaseCount ?? 0) > 0 ||
         this.editorSaves.has(path) ||
         this.pendingResolves.has(path)
       ) {
@@ -1804,12 +1818,6 @@ export class FileContentService {
       this.outcomes.delete(path);
       this.orphanedPaths.delete(path);
       bytes -= bytesOf(result);
-    }
-    for (const [path, observation] of this.observations) {
-      if (observation.activeLeaseCount === 0 && !this.outcomes.has(path) && !this.pendingResolves.has(path)) {
-        observation.dispose();
-        this.observations.delete(path);
-      }
     }
   }
 

@@ -2477,6 +2477,153 @@ describe('FileContentService over the composed view (north star W2)', () => {
 });
 
 describe('inactive content outcome budget', () => {
+  it('should reuse a released selection and dispose its shared active watch with the content domain', async () => {
+    const unsubscribeWatch = vi.fn();
+    const watchReady = vi.fn<NonNullable<WorkerChangeChannelTransport['watchReady']>>().mockImplementation(() => ({
+      ready: Promise.resolve(),
+      closed: Promise.withResolvers<void>().promise,
+      unsubscribe: unsubscribeWatch,
+    }));
+    const harness = createHarness({
+      watchReady,
+      cacheOptions: { maxEntries: 1, maxTotalBytes: 4, maxSingleFileBytes: 4 },
+    });
+    const selected = harness.service.observeContent('selected.txt');
+    const initial = selected.acquire();
+    let releaseCurrent = (): void => undefined;
+    let releaseShared = (): void => undefined;
+    try {
+      await vi.waitFor(() => {
+        expect(initial.getSnapshot().status).toBe('ready');
+      });
+      initial.release();
+      expect(selected.activeLeaseCount).toBe(0);
+      expect(unsubscribeWatch).toHaveBeenCalledOnce();
+      const reselected = harness.service.observeContent('selected.txt');
+      await harness.service.resolve('unrelated.txt');
+      expect(harness.service.peekOutcome('selected.txt').kind).toBe('loading');
+      expect(harness.service.observeContent('selected.txt')).toBe(reselected);
+      expect(reselected).toBe(selected);
+      watchReady.mockClear();
+      unsubscribeWatch.mockClear();
+      const current = reselected.acquire();
+      releaseCurrent = current.release;
+      const shared = harness.service.observeContent('selected.txt').acquire();
+      releaseShared = shared.release;
+      await vi.waitFor(() => {
+        expect(current.getSnapshot().status).toBe('ready');
+      });
+      expect(shared.getSnapshot()).toBe(current.getSnapshot());
+      expect(reselected.activeLeaseCount).toBe(2);
+      expect(watchReady).toHaveBeenCalledOnce();
+      current.release();
+      expect(unsubscribeWatch).not.toHaveBeenCalled();
+      harness.service.dispose();
+      expect(unsubscribeWatch).toHaveBeenCalledOnce();
+      expect(shared.getSnapshot().status).toBe('closed');
+      expect(reselected.diagnostics.activeWatches).toBe(0);
+    } finally {
+      initial.release();
+      releaseCurrent();
+      releaseShared();
+      harness.service.dispose();
+      harness.disposeChannel();
+    }
+  });
+
+  it('should ignore stale finalized identity metadata after the content domain replaces a source', () => {
+    const callbacks: Array<(held: unknown) => void> = [];
+    const registrations: unknown[] = [];
+    const nativeRegistry = globalThis.FinalizationRegistry;
+    class ControlledRegistry extends nativeRegistry<unknown> {
+      public constructor(callback: (held: unknown) => void) {
+        super(callback);
+        callbacks.push(callback);
+      }
+
+      public override register(...args: Parameters<FinalizationRegistry<unknown>['register']>): void {
+        registrations.push(args[1]);
+        super.register(...args);
+      }
+    }
+    vi.stubGlobal('FinalizationRegistry', ControlledRegistry);
+    const harness = createHarness();
+    try {
+      const old = harness.service.observeContent('selected.txt');
+      expect(registrations).toHaveLength(1);
+      const stale = registrations[0];
+      harness.service.reset('/replacement');
+      const current = harness.service.observeContent('selected.txt');
+      expect(current).not.toBe(old);
+      expect(registrations).toHaveLength(2);
+      callbacks[0]!(stale);
+      expect(harness.service.observeContent('selected.txt')).toBe(current);
+      expect(current.getSnapshot().status).toBe('registering');
+    } finally {
+      harness.service.dispose();
+      harness.disposeChannel();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['before publication', 'after publication'] as const)(
+    'should retain a selected content owner across unrelated publication before its first lease with subscription %s',
+    async (subscriptionTiming) => {
+      const closed = Promise.withResolvers<void>();
+      const watchReady = vi.fn<NonNullable<WorkerChangeChannelTransport['watchReady']>>().mockReturnValue({
+        ready: Promise.resolve(),
+        closed: closed.promise,
+        unsubscribe: vi.fn(),
+      });
+      const harness = createHarness({ watchReady });
+      const selected = harness.service.observeContent('selected.txt');
+      const notifiedStatuses: string[] = [];
+      const notify = vi.fn(() => {
+        notifiedStatuses.push(selected.getSnapshot().status);
+      });
+      let unsubscribe = (): void => undefined;
+      if (subscriptionTiming === 'before publication') {
+        unsubscribe = selected.subscribe(notify);
+      }
+      let release = (): void => undefined;
+      try {
+        expect(selected.activeLeaseCount).toBe(0);
+        expect(watchReady).not.toHaveBeenCalled();
+        await harness.service.resolve('unrelated.txt');
+        expect(harness.service.peekOutcome('unrelated.txt').kind).toBe('text');
+        if (subscriptionTiming === 'after publication') {
+          unsubscribe = selected.subscribe(notify);
+        }
+        notify.mockClear();
+        notifiedStatuses.length = 0;
+        watchReady.mockClear();
+        const lease = selected.acquire();
+        release = lease.release;
+        await vi.waitFor(() => {
+          expect(lease.getSnapshot().status).toBe('ready');
+        });
+        expect.soft(harness.service.observeContent('selected.txt')).toBe(selected);
+        expect.soft(notifiedStatuses).toContain('ready');
+        expect.soft(watchReady).toHaveBeenCalledOnce();
+        expect(harness.service.peekOutcome('selected.txt').kind).toBe('text');
+        notify.mockClear();
+        notifiedStatuses.length = 0;
+        closed.resolve();
+        await vi.waitFor(() => {
+          expect(lease.getSnapshot().status).toBe('closed');
+        });
+        expect.soft(notifiedStatuses).toContain('closed');
+        expect.soft(harness.service.peekOutcome('selected.txt').kind).toBe('error');
+        expect(harness.service.peekOutcome('selected.txt', { retainValue: true }).kind).toBe('text');
+      } finally {
+        release();
+        unsubscribe();
+        harness.service.dispose();
+        harness.disposeChannel();
+      }
+    },
+  );
+
   it('should preserve the safe content base held by a selecting observation lease', async () => {
     const harness = createHarness({ cacheOptions: { maxEntries: 2, maxTotalBytes: 4, maxSingleFileBytes: 4 } });
     vi.mocked(harness.proxy.readFile).mockResolvedValue(new Uint8Array([65, 66]));

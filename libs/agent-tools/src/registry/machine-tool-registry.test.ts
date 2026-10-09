@@ -361,6 +361,35 @@ describe('machine tool registry', () => {
     );
   });
 
+  it('offers the job tools for finished programs on a host that cannot slice, and refuses a targetFile there', async () => {
+    const fixture = fixtureClient();
+    const registry = createChatToolRegistry({
+      fileSystemFor: () => {
+        throw new Error('not used');
+      },
+      machines: { available: true, ...fixture.client },
+      machineSettings: emptySettings,
+      /* No graphics client, so no export route to slice through. */
+      print: { projectId, readArtifact: async () => Uint8Array.from([1, 2, 3]) },
+      testingEnabled: false,
+    });
+    const check = async (input: JsonValue) =>
+      registry.invoke({ toolCallId: 'call-1', toolName: 'check_job', input, signal: new AbortController().signal });
+
+    expect(registry.list().map(({ name }) => name)).toEqual(expect.arrayContaining(['request_job', 'check_job']));
+    await expect(check({ artifact: '.tau/artifacts/call-0/pyramid.gcode.3mf' })).resolves.toMatchObject({
+      isError: false,
+    });
+    expect(fixture.checkJob).toHaveBeenCalledTimes(1);
+    await expect(check({ targetFile: 'main.ts' })).resolves.toEqual({
+      isError: true,
+      content: {
+        errorCode: 'MACHINE_TOOL_ERROR',
+        message: 'This host cannot slice; name a finished program with artifact.',
+      },
+    });
+  });
+
   it('should publish every definition short and without the JSON Schema keywords providers refuse', () => {
     const definitions = createMachineToolRegistry(fixtureClient().client, { planPrint }).list();
     const serialized = JSON.stringify(definitions.map(({ inputSchema }) => inputSchema));
@@ -411,9 +440,9 @@ describe('machine tool registry', () => {
         "machine_action": "Apply one declared action that get_machine lists, by componentId, action and parameters.
 
       An action you may use now runs at once; one that needs approval pauses for the person to approve exactly this request in a Tau chat, and elsewhere returns needs-approval for the person to do it in Tau; one only a person at the machine may use is refused with what the person must do. Report the message as it states it. Never resend an action that is confirming or unknown, and never work around a refusal with other tools. To halt the machine, use stop_machine.",
-        "request_job": "The only way to start a program on a machine. Name targetFile, a CAD source Tau slices (machines with an fff process: 3D printers), or artifact, a finished program in the project run as is (get_machine's Jobs line lists what the machine accepts). Nothing is transferred or started until a person accepts. A Tau-hosted turn waits for the answer; otherwise, or when only the person can confirm something, the job awaits approval in Tau's Print pane. Report the outcome as nextStep states it; an unconfirmed start is unknown, never "started". Never retry.
+        "request_job": "The only way to start a program on a machine. Name targetFile, a CAD source Tau slices (3D printers only), or artifact, a finished program in the project run as is (get_machine lists what the machine accepts). Nothing starts until a person accepts. A Tau-hosted turn waits for the answer; otherwise, or when only the person can confirm something, the job awaits approval in Tau's Print pane. Report the outcome as nextStep states it; an unconfirmed start is unknown, never "started". Request a job once; after an approval reminder, repeat the same call to read the answer.
 
-      Call check_job first; for targetFile also test_model, the build-volume fit and get_print_profiles. When get_machine reports no plate, ask which is installed and pass plate. Under engine "bambu-studio" use bambuStudio.profiles and .settings as get_print_profiles names them; under the reference engine options accept only layerHeight, walls, infillPercent, infillPattern, supports, nozzleTemperature, bedTemperature, printSpeed, travelSpeed.",
+      For targetFile, first run test_model, fit get_machine's build volume and read get_print_profiles. When get_machine reports no plate, ask which is installed and pass plate. Under engine "bambu-studio" use bambuStudio.profiles and .settings as get_print_profiles names them; under the reference engine options accept only layerHeight, walls, infillPercent, infillPattern, supports, nozzleTemperature, bedTemperature, printSpeed, travelSpeed.",
         "stop_machine": "Stop the machine now: its fastest halt, open to you at any time without approval, and not an emergency stop. Returns what the machine is left doing and how a person recovers it. To pause a run that can continue, use machine_action with run.pause.",
       }
     `);
@@ -439,6 +468,47 @@ describe('machine tool registry', () => {
         content:
           '- machine-1: Workshop X1C (Bambu Lab X1C), connected, active, run running 42%\n- machine-2: Mini (Bambu Lab X1C), connected, ready',
       });
+    });
+
+    it('tells the agent where the person adds a machine when none is bound', async () => {
+      const { client } = fixtureClient({ entries: [] });
+
+      const result = await run(client, { toolName: 'list_machines', input: {} });
+
+      expect(result.content).toBe('No machine is bound on this computer; the person adds one in Settings › Machines.');
+    });
+
+    it('says a simulator is simulated wherever the agent or the person reads about it', async () => {
+      const fixture = fixtureClient({ entries: [fixtureEntry({ simulated: true })] });
+      const approve = approveWith('denied');
+
+      const listed = await run(fixture.client, { toolName: 'list_machines', input: {} });
+      const described = await run(fixture.client, { toolName: 'get_machine', input: {} });
+      const requested = await run(fixture.client, {
+        toolName: 'request_job',
+        input: { targetFile: 'main.ts' },
+        approve,
+      });
+      const checked = await run(fixture.client, { toolName: 'check_job', input: { targetFile: 'main.ts' } });
+      const actionApproval = approveWith('denied');
+      await run(fixture.client, {
+        toolName: 'machine_action',
+        input: { componentId: 'controller', action: 'run.cancel' },
+        approve: actionApproval,
+      });
+
+      expect(listed.content).toBe(
+        '- machine-1: Workshop X1C (Bambu Lab X1C) (simulated, no machine attached), connected, active, run running 42%',
+      );
+      expect(described.content).toContain(
+        'Workshop X1C (machine-1): Bambu Lab X1C (simulated, no machine attached), firmware 01.08.00.00.',
+      );
+      expect(approve.mock.calls[0]?.[0].prompt).toBe(
+        'Simulated: Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min.',
+      );
+      expect(actionApproval.mock.calls[0]?.[0].prompt).toMatch(/^Simulated: Cancel the print on Workshop X1C\?/u);
+      expect(requestJobOutputSchema.parse(requested.content)).toMatchObject({ simulated: true });
+      expect(checkJobOutputSchema.parse(checked.content)).toMatchObject({ simulated: true });
     });
 
     it('describes the machine compactly: run, components, prompts, alerts and what the agent may do with each action', async () => {
@@ -485,6 +555,8 @@ describe('machine tool registry', () => {
       expect(text).toContain('Workshop X1C (machine-1): Bambu Lab X1C, firmware 01.08.00.00. connected, active.');
       expect(text).toContain('Run run-1: pyramid.gcode.3mf running, 42%, Layer 50/125, about 1 h 5 min left.');
       expect(text).toContain('- chamber-light (light, Chamber light): off');
+      /* What request_job checks a model against and names a plate by. */
+      expect(text).toContain('Process fff: build volume 256×256×256 mm; plates textured-pei, cool.');
       expect(text).toContain('- filament (material-system, Filament): ams-a/a1 loaded PETG #FF0000FF');
       expect(text).toContain('asks "Is filament coming out of the nozzle?" (Yes / Retry), which a person answers');
       expect(text).toContain(
@@ -700,7 +772,7 @@ describe('machine tool registry', () => {
 
       expect(result.content).toEqual({
         status: 'denied',
-        message: 'The person declined Cancel the print on Workshop X1C.',
+        message: 'The person declined Cancel the print on Workshop X1C. Do not retry it unless they ask.',
       });
       expect(fixture.applyAction).not.toHaveBeenCalled();
     });
@@ -822,6 +894,34 @@ describe('machine tool registry', () => {
 
       expect(result.content).toMatchObject({ status: 'denied' });
       expect(approve).not.toHaveBeenCalled();
+      expect(fixture.applyAction).not.toHaveBeenCalled();
+    });
+
+    it('never says the person declined an approval the stopped turn cancelled', async () => {
+      const fixture = fixtureClient();
+      const cancelled = {
+        status: 'refused',
+        message:
+          'Nothing was sent: the chat turn stopped before the person answered whether to do run.cancel on Workshop X1C. Ask again only if they still want it.',
+      };
+      const approve = Object.assign(approveWith('approved'), {
+        recall: vi.fn<NonNullable<NonNullable<HostToolInvocation['approve']>['recall']>>(async () => ({
+          payload: { kind: 'machine-action' },
+          resolution: { interruptId: 'interrupt-1', outcome: 'cancelled' },
+        })),
+      });
+
+      const recalled = await run(fixture.client, { ...action('controller', 'run.cancel'), approve });
+      const asked = await run(fixture.client, {
+        ...action('controller', 'run.cancel'),
+        approve: approveWith('cancelled'),
+      });
+
+      expect(recalled.content).toEqual(cancelled);
+      expect(asked.content).toMatchObject({
+        status: 'refused',
+        message: expect.stringContaining('Cancel the print on Workshop X1C') as string,
+      });
       expect(fixture.applyAction).not.toHaveBeenCalled();
     });
 
@@ -1033,8 +1133,20 @@ describe('machine tool registry', () => {
       expect(requestJobOutputSchema.parse(result.content)).toMatchObject({
         job: { jobId: 'call-1', state: 'transferring' },
         machineName: 'Workshop X1C',
+        simulated: false,
         approval: 'approved',
       });
+    });
+
+    it('names the plate the person stated in the approval prompt when the machine reports none', async () => {
+      const fixture = fixtureClient({ entries: [fixtureEntry({ plate: false })] });
+      const approve = approveWith('denied');
+
+      await run(fixture.client, { toolName: 'request_job', input: { targetFile: 'main.ts', plate: 'cool' }, approve });
+
+      expect(approve.mock.calls[0]?.[0].prompt).toBe(
+        'Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min. On the Cool plate, as stated; Workshop X1C does not report its plate.',
+      );
     });
 
     it("requests the job with the machine's read of the program when Tau could not read it", async () => {
@@ -1239,6 +1351,7 @@ describe('machine tool registry', () => {
       expect(fixture.requestJob).not.toHaveBeenCalled();
       expect(checkJobOutputSchema.parse(result.content)).toEqual({
         status: 'blocked',
+        simulated: false,
         program: { name: 'pyramid.gcode.3mf', facts: { process: 'fff', layers: 125 } },
         checks: [
           {
@@ -1439,9 +1552,9 @@ describe('machine tool registry', () => {
 
     it('names the reference engine for another vendor', async () => {
       const bambuStudio = engine();
-      const other: MachineProvider = { ...fixtureProvider(), vendor: 'Prusa Research' };
+      const other = fixtureProvider(fixtureManifest({ generic: true }));
 
-      await expect(profilesOf(bambuStudio, undefined, other)).resolves.toMatchObject({
+      await expect(profilesOf(bambuStudio, [fixtureEntry({ generic: true })], other)).resolves.toMatchObject({
         content: { engine: 'reference', reason: expect.stringContaining('not a Bambu printer') as string },
       });
       expect(bambuStudio.findBambuStudio).not.toHaveBeenCalled();

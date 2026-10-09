@@ -1,10 +1,12 @@
 /**
- * A Bambu X1C as the v3 machine contract describes it, for the machine tool tests. Shapes follow the lane conventions (component ids `controller`, `chamber-light`, `motion`, `tool-0`,
- * `bed`, `part-fan`, `filament`).
+ * A Bambu X1C as the v3 machine contract describes it, for the machine tool tests, and a generic FFF printer of
+ * another vendor with its own material system and plain G-code. Shapes follow the lane conventions (component ids
+ * `controller`, `chamber-light`, `motion`, `tool-0`, `bed`, `part-fan`, `filament`).
  *
  * @module
  */
 
+import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
 import {
   defineMachineAction,
   machineActionDescriptorOf,
@@ -168,7 +170,65 @@ export type FixtureManifestInput = Readonly<{
   attestations?: ReadonlyArray<{ id: string; label: string }>;
   /** A router's milling process and spindle in place of the printer's process. */
   milling?: boolean;
+  /**
+   * A non-Bambu FFF printer: vendor "Prusa Research", its own material system (`mmu/1`..`mmu/3` and the
+   * `spool-holder/main` external spool), plain G-code jobs and no Bambu settings.
+   */
+  generic?: boolean;
+  /** A simulator: every qualification is in simulation. */
+  simulated?: boolean;
 }>;
+
+/** The X1C's material system: an AMS and the external spool, Bambu trays 0-3 and 254. */
+const bambuMaterialSystem = {
+  id: 'filament',
+  label: 'Filament',
+  kind: 'material-system',
+  units: [
+    {
+      id: 'ams-a',
+      label: 'AMS',
+      kind: 'feeder',
+      slots: ['a1', 'a2', 'a3', 'a4'].map((id) => ({ id, label: id.toUpperCase() })),
+    },
+    { id: 'external', label: 'External spool', kind: 'external', slots: [{ id: 'spool', label: 'Spool' }] },
+  ],
+  routes: [
+    { unitId: 'ams-a', toolheadIds: ['tool-0'] },
+    { unitId: 'external', toolheadIds: ['tool-0'] },
+  ],
+};
+
+/** The generic printer's material system: its own unit and slot ids, none a Bambu tray. */
+const genericMaterialSystem = {
+  id: 'filament',
+  label: 'Filament',
+  kind: 'material-system',
+  units: [
+    {
+      id: 'mmu',
+      label: 'MMU',
+      kind: 'feeder',
+      slots: ['1', '2', '3'].map((id) => ({ id, label: `Slot ${id}` })),
+    },
+    { id: 'spool-holder', label: 'Spool holder', kind: 'external', slots: [{ id: 'main', label: 'Spool' }] },
+  ],
+  routes: [
+    { unitId: 'mmu', toolheadIds: ['tool-0'] },
+    { unitId: 'spool-holder', toolheadIds: ['tool-0'] },
+  ],
+};
+
+const gcodePrint = { ...gcodeProgram, technology: 'additive.fff' };
+
+const simulation = {
+  id: 'simulator',
+  environment: 'simulation',
+  model: 'Simulated printer',
+  firmware: [],
+  attachments: [],
+  evidence: 'Runs against the in-process simulator only.',
+};
 
 const fffProcess = {
   type: 'fff',
@@ -216,10 +276,17 @@ const millingProcess = { type: 'milling', version: 1, simultaneousAxes: 3, featu
  * @param input - What differs.
  * @returns The manifest.
  */
-export const fixtureManifest = ({ attestations = [], milling = false }: FixtureManifestInput = {}): MachineManifest =>
+export const fixtureManifest = ({
+  attestations = [],
+  milling = false,
+  generic = false,
+  simulated = false,
+}: FixtureManifestInput = {}): MachineManifest =>
   parseMachineManifest({
     version: 3,
-    identity: { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'x1c', displayName: 'Bambu Lab X1C' },
+    identity: generic
+      ? { typeId: 'prusa.mk4', vendor: 'Prusa Research', model: 'mk4', displayName: 'Prusa MK4' }
+      : { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'x1c', displayName: 'Bambu Lab X1C' },
     connection: { transport: 'network', exclusive: false, opening: 'nothing', identity: 'authenticated' },
     axes: ['x', 'y', 'z'].map((id) => ({
       id,
@@ -253,31 +320,14 @@ export const fixtureManifest = ({ attestations = [], milling = false }: FixtureM
       ...(milling
         ? [{ id: 'spindle', label: 'Spindle', kind: 'spindle', control: 'switched', directions: ['clockwise'] }]
         : []),
-      {
-        id: 'filament',
-        label: 'Filament',
-        kind: 'material-system',
-        units: [
-          {
-            id: 'ams-a',
-            label: 'AMS',
-            kind: 'feeder',
-            slots: ['a1', 'a2', 'a3', 'a4'].map((id) => ({ id, label: id.toUpperCase() })),
-          },
-          { id: 'external', label: 'External spool', kind: 'external', slots: [{ id: 'spool', label: 'Spool' }] },
-        ],
-        routes: [
-          { unitId: 'ams-a', toolheadIds: ['tool-0'] },
-          { unitId: 'external', toolheadIds: ['tool-0'] },
-        ],
-      },
+      generic ? genericMaterialSystem : bambuMaterialSystem,
     ],
     processes: [milling ? millingProcess : fffProcess],
     actions: milling ? [...fixtureActions, spindleAction] : fixtureActions,
     holds: [],
     jobs: {
       type: 'supported',
-      accepts: [milling ? gcodeProgram : printReady],
+      accepts: [milling ? gcodeProgram : generic ? gcodePrint : printReady],
       delivery: 'stored',
       start: 'remote',
       submission: chamberLight.configuration,
@@ -286,20 +336,33 @@ export const fixtureManifest = ({ attestations = [], milling = false }: FixtureM
     },
     stop: halt,
     observations: [],
-    qualifications: [],
+    qualifications: simulated ? [simulation] : [],
   });
 
-/** The provider over {@link fixtureManifest}. */
+/** The provider over {@link fixtureManifest}: Bambu's, with Bambu's settings, unless the manifest is another vendor's. */
 export const fixtureProvider = (manifest = fixtureManifest()): MachineProvider =>
-  parseMachineProvider({
-    id: 'bambu',
-    name: 'Bambu Lab',
-    version: '1',
-    protocolVersion: 2,
-    vendor: 'Bambu Lab',
-    manifest,
-    bindingConfiguration: chamberLight.configuration,
-  });
+  parseMachineProvider(
+    manifest.identity.vendor === 'Bambu Lab'
+      ? {
+          id: 'bambu',
+          name: 'Bambu Lab',
+          version: '1',
+          protocolVersion: 2,
+          vendor: 'Bambu Lab',
+          manifest,
+          bindingConfiguration: chamberLight.configuration,
+          settingsConfiguration: bambuSettingsConfiguration.manifest,
+        }
+      : {
+          id: 'prusa',
+          name: 'Prusa',
+          version: '1',
+          protocolVersion: 2,
+          vendor: manifest.identity.vendor,
+          manifest,
+          bindingConfiguration: chamberLight.configuration,
+        },
+  );
 
 const observation = (componentId: string, group: string, value: MachineComponentValue): ComponentObservation => ({
   componentId,
@@ -334,6 +397,10 @@ export type FixtureEntryInput = Readonly<{
   milling?: boolean;
   /** The person's testing switch for this machine. */
   testing?: boolean;
+  /** The generic non-Bambu printer of {@link FixtureManifestInput}. */
+  generic?: boolean;
+  /** A simulator. */
+  simulated?: boolean;
   snapshot?: Partial<MachineSnapshot>;
 }>;
 
@@ -358,12 +425,21 @@ export const fixtureRun: MachineRun = {
  * @returns The entry.
  */
 export const fixtureEntry = (input: FixtureEntryInput = {}): MachineDirectoryEntry => {
+  const generic = input.generic === true;
   const manifest = fixtureManifest({
     ...(input.attestations === undefined ? {} : { attestations: input.attestations }),
     ...(input.milling === undefined ? {} : { milling: input.milling }),
+    generic,
+    simulated: input.simulated === true,
   });
   const trays = input.trays ?? [
-    { unitId: 'ams-a', slotId: 'a1', materialType: 'PETG', profileId: 'GFG00', color: '#FF0000FF' },
+    {
+      unitId: generic ? 'mmu' : 'ams-a',
+      slotId: generic ? '1' : 'a1',
+      materialType: 'PETG',
+      profileId: 'GFG00',
+      color: '#FF0000FF',
+    },
   ];
   const run = input.run === false ? undefined : (input.run ?? fixtureRun);
   const plate = input.plate === false ? undefined : (input.plate ?? 'textured-pei');
@@ -409,15 +485,15 @@ export const fixtureEntry = (input: FixtureEntryInput = {}): MachineDirectoryEnt
   ];
   return {
     machineId: input.machineId ?? 'machine-1',
-    name: input.name ?? 'Workshop X1C',
-    providerId: 'bambu',
+    name: input.name ?? (generic ? 'Workshop MK4' : 'Workshop X1C'),
+    providerId: generic ? 'prusa' : 'bambu',
     freshness: 'current',
     ...(input.testing === undefined ? {} : { testing: input.testing }),
     descriptor: {
       id: 'physical-1',
       name: 'X1C',
-      vendor: 'Bambu Lab',
-      model: 'X1C',
+      vendor: manifest.identity.vendor,
+      model: generic ? 'MK4' : 'X1C',
       firmware: '01.08.00.00',
       capabilities: {
         connection: manifest.connection,
@@ -428,6 +504,8 @@ export const fixtureEntry = (input: FixtureEntryInput = {}): MachineDirectoryEnt
         holds: manifest.holds,
         jobs: manifest.jobs,
         stop: manifest.stop,
+        /* Stamped by the host from the provider's manifest. */
+        qualifications: manifest.qualifications,
         revision: 'revision-1',
         incarnation: 'incarnation-1',
       },

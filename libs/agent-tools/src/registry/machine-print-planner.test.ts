@@ -13,8 +13,10 @@ import { writeBambuContainer, slicedFilamentColors } from '@taucad/slicer/contai
 import { sha256Bytes } from '@taucad/utils/hash';
 import { createMachinePrintPlanner, defaultFilamentSlots } from '#registry/machine-print-planner.js';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
+import { observedSlots, readProjectMachinePreferences } from '#registry/print-profiles.js';
 import type { BambuStudioEngine, ResolvedMachinePreferences } from '#registry/print-profiles.js';
 import { fixtureEntry, fixtureManifest, fixtureProvider } from '#registry/machine.fixture.js';
+import type { FixtureTray } from '#registry/machine.fixture.js';
 
 /* Three annotated layers; relative extrusion totals 5 mm. */
 const gcode = [
@@ -126,7 +128,7 @@ const provider = (() => {
 })();
 
 const dependencies = () => ({
-  exportModel: vi.fn<MachinePrintPlannerDependencies['exportModel']>(async () => ({
+  exportModel: vi.fn<NonNullable<MachinePrintPlannerDependencies['exportModel']>>(async () => ({
     isError: false,
     content: {
       success: true,
@@ -415,14 +417,7 @@ describe('machine print planner', () => {
     expect(deps.exportModel).not.toHaveBeenCalled();
   });
 
-  it('falls back to the reference engine without Bambu Studio or for another vendor, refusing Bambu Studio fields', async () => {
-    const other = {
-      ...withBambuStudio(),
-      machines: { listProviders: async () => [{ ...provider, vendor: 'Prusa Research' }] },
-    };
-    await plan(other);
-    expect(other.exportModel.mock.calls[0]![0].options).not.toHaveProperty('engine');
-
+  it('falls back to the reference engine without Bambu Studio, refusing Bambu Studio fields', async () => {
     const refused = dependencies();
     await expect(plan(refused, machine(loaded), { settings: { wall_loops: 3 } })).rejects.toThrow(
       'Bambu Studio does not slice for Workshop X1C on this host, so profiles and settings do not apply',
@@ -431,6 +426,160 @@ describe('machine print planner', () => {
       plan(refused, machine(loaded), { profiles: { printer: 'Bambu Lab X1 Carbon 0.4 nozzle' } }),
     ).rejects.toThrow('profiles and settings do not apply');
     expect(refused.exportModel).not.toHaveBeenCalled();
+  });
+
+  describe("for another vendor's printer", () => {
+    /* Its own material system (`mmu/1`.., `spool-holder/main`), plain G-code and no Bambu settings. */
+    const prusa = fixtureProvider(fixtureManifest({ generic: true }));
+    const gcodePath = '.tau/artifacts/call-1__main.ts-gcode/pyramid.gcode';
+    const program = new TextEncoder().encode(gcode);
+    const generic = () => {
+      const deps = withBambuStudio();
+      return {
+        ...deps,
+        machines: { listProviders: async () => [prusa] },
+        exportModel: vi.fn<NonNullable<MachinePrintPlannerDependencies['exportModel']>>(async () => ({
+          isError: false,
+          content: {
+            success: true,
+            to: 'gcode',
+            files: [{ name: 'pyramid.gcode', artifactPath: gcodePath, mimeType: 'text/x.gcode', byteLength: 1 }],
+          },
+        })),
+        readArtifact: vi.fn<MachinePrintPlannerDependencies['readArtifact']>(async () => program),
+      };
+    };
+    const mk4 = (trays: readonly FixtureTray[]) => fixtureEntry({ generic: true, run: false, trays });
+
+    it('keys its slots by address, every one the material system reports', () => {
+      const entry = mk4([
+        { unitId: 'mmu', slotId: '1', materialType: 'PLA' },
+        { unitId: 'spool-holder', slotId: 'main', materialType: 'PETG' },
+      ]);
+      expect(observedSlots(entry).map(({ address }) => address)).toEqual([
+        { unitId: 'mmu', slotId: '1' },
+        { unitId: 'spool-holder', slotId: 'main' },
+      ]);
+    });
+
+    it('plans a slice from the loaded slot, sends no Bambu keys, and exports the container its accepts name', async () => {
+      const deps = generic();
+      const entry = mk4([
+        { unitId: 'mmu', slotId: '1', state: 'empty' },
+        { unitId: 'mmu', slotId: '2', materialType: 'PLA' },
+      ]);
+
+      const result = await plan(deps, entry);
+
+      /* The provider completes its own form from the program and what it reports (R5). */
+      expect(result.configuration).toEqual({});
+      /* Not Bambu's: the reference engine slices, to the plain G-code the printer accepts. */
+      expect(deps.exportModel.mock.calls[0]![0]).toMatchObject({
+        to: 'gcode',
+        options: { plate: 'textured-pei', filamentType: 'PLA' },
+      });
+      expect(deps.exportModel.mock.calls[0]![0].options).not.toHaveProperty('engine');
+      expect(result.artifact).toMatchObject({
+        path: gcodePath,
+        mediaType: 'text/x.gcode',
+        contract: { id: 'tau.toolpath.gcode', version: 1 },
+        selectedMember: gcodePath,
+      });
+
+      /* Its external spool feeds a print too. */
+      await expect(
+        plan(generic(), mk4([{ unitId: 'spool-holder', slotId: 'main', materialType: 'PETG' }])),
+      ).resolves.toMatchObject({ configuration: {} });
+    });
+
+    it("keeps a stated plate out of a finished program's configuration, which the provider completes", async () => {
+      const deps = generic();
+      const result = await createMachinePrintPlanner(deps)({
+        toolCallId: 'call-1',
+        artifact: 'out/part.gcode',
+        plate: 'cool',
+        machine: fixtureEntry({ generic: true, run: false, plate: false }),
+        signal: new AbortController().signal,
+      });
+      expect(result.configuration).toEqual({});
+    });
+  });
+
+  describe('a plate stated for a finished program', () => {
+    const finished = async (entry: MachineDirectoryEntry, plate: string, deps = dependencies()) =>
+      createMachinePrintPlanner(deps)({
+        toolCallId: 'call-1',
+        artifact: artifactPath,
+        plate,
+        machine: entry,
+        signal: new AbortController().signal,
+      });
+
+    it('is carried as operator confirmed for a Bambu printer that reports none', async () => {
+      const result = await finished(machine({ materials: loaded.materials }), 'cool');
+      expect(result.configuration).toEqual({ operatorConfirmedBedType: 'cool' });
+      /* The printer's own report wins. */
+      await expect(finished(machine(loaded), 'cool')).resolves.toMatchObject({ configuration: {} });
+    });
+
+    it('refuses on a machine that is no 3D printer, or a plate not its own, reading nothing', async () => {
+      const deps = dependencies();
+      await expect(finished(fixtureEntry({ milling: true, run: false }), 'cool', deps)).rejects.toThrow(
+        'plate applies to a 3D printer; Workshop X1C is not one, so pass no plate.',
+      );
+      await expect(finished(machine({ materials: loaded.materials }), 'glass', deps)).rejects.toThrow(
+        'plate "glass" is not one of Workshop X1C\'s plates: textured-pei, cool.',
+      );
+      expect(deps.readArtifact).not.toHaveBeenCalled();
+    });
+  });
+
+  it('runs finished programs on a host that cannot slice, and refuses a targetFile there', async () => {
+    const deps = { ...dependencies(), exportModel: undefined };
+    await expect(plan(deps)).rejects.toThrow('This host cannot slice; name a finished program with artifact.');
+    await expect(
+      createMachinePrintPlanner(deps)({
+        toolCallId: 'call-1',
+        artifact: artifactPath,
+        machine: machine(loaded),
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ artifact: { mediaType } });
+  });
+
+  it("reads only slicing and the provider's own settings, ignoring any other saved source", async () => {
+    const record: MachineSettingsRecord = {
+      version: 1,
+      typeId: 'bambu.x1c',
+      activeProfile: 'default',
+      profiles: {
+        default: {
+          name: 'Default',
+          configurations: {
+            [slicingPreferences.manifest.source.id]: {
+              version: slicingPreferences.manifest.source.version,
+              values: { preset: 'fine' },
+            },
+            [bambuSettingsConfiguration.manifest.source.id]: {
+              version: bambuSettingsConfiguration.manifest.source.version,
+              values: { plate: 'cool' },
+            },
+            'acme.machine.settings': { version: '9.0.0', values: { nozzle: 'ruby' } },
+          },
+        },
+      },
+    };
+    const service = { readMachineSettings: async () => ({ status: 'current', record }) as const };
+    const { signal } = new AbortController();
+
+    await expect(readProjectMachinePreferences(service, provider, { signal })).resolves.toMatchObject({
+      preferences: { preset: 'fine', plate: 'cool' },
+      machine: { plate: 'cool' },
+    });
+    /* Bambu's settings are a Bambu provider's alone. */
+    await expect(
+      readProjectMachinePreferences(service, fixtureProvider(fixtureManifest({ generic: true })), { signal }),
+    ).resolves.toMatchObject({ preferences: { preset: 'fine' }, machine: {} });
   });
 
   it("names the container's producer and prefers the slicer's own time estimate", async () => {

@@ -5,7 +5,7 @@
  * @module
  */
 
-import { checkMachineAction } from '@taucad/runtime/machine';
+import { checkMachineAction, fffProcessOf, isSimulatedMachine } from '@taucad/runtime/machine';
 import type {
   MachineActionDescriptor,
   MachineCheck,
@@ -202,6 +202,28 @@ const valueText = (value: MachineComponentValue): string => {
   }
 };
 
+/**
+ * What a simulated machine adds to its name, so the agent never tells the person a real machine is working.
+ * @param entry - The machine.
+ * @returns " (simulated, no machine attached)", or '' for a real one.
+ */
+export const simulatedText = (entry: Pick<MachineDirectoryEntry, 'descriptor'>): string =>
+  isSimulatedMachine(entry.descriptor.capabilities) ? ' (simulated, no machine attached)' : '';
+
+/**
+ * A 3D printer's build volume and plate ids, which `request_job` checks a model against and names a plate by.
+ * @param capabilities - The installed capabilities.
+ * @returns "Process fff: build volume 256×256×256 mm; plates textured-pei, cool.", or undefined for no fff process.
+ */
+const fffText = (capabilities: MachineInstalledCapabilities): string | undefined => {
+  const fff = fffProcessOf(capabilities);
+  if (fff === undefined) {
+    return undefined;
+  }
+  const { x, y, z } = fff.geometry.buildVolume;
+  return `Process fff: build volume ${String(x)}×${String(y)}×${String(z)} ${fff.geometry.unit}; plates ${fff.bed.plates.map(({ id }) => id).join(', ')}.`;
+};
+
 /** A run stage in words, or nothing for a bare vendor stage number, which says nothing to a reader. */
 const readableStage = (stage: string | undefined): string | undefined =>
   stage === undefined || /^\d+$/u.test(stage) ? undefined : stage;
@@ -270,6 +292,9 @@ const actionText = (entry: MachineDirectoryEntry, action: MachineActionDescripto
   return `- ${action.componentId} ${action.id}${personOnly || signature === '{}' ? '' : ` ${signature}`}: ${action.label}.${what === '' ? '' : ` ${what}`} ${availability}`;
 };
 
+/** What the agent reads when nothing is bound: binding is the person's, in Settings. */
+export const noMachineText = 'No machine is bound on this computer; the person adds one in Settings › Machines.';
+
 /**
  * One line per bound machine.
  * @param entries - The directory.
@@ -277,14 +302,15 @@ const actionText = (entry: MachineDirectoryEntry, action: MachineActionDescripto
  */
 export const listMachinesText = (entries: readonly MachineDirectoryEntry[]): string =>
   entries.length === 0
-    ? 'No machine is bound on this computer; the person binds one in the Print pane.'
+    ? noMachineText
     : entries
-        .map(({ machineId, name, descriptor, snapshot, freshness }) => {
+        .map((entry) => {
+          const { machineId, name, descriptor, snapshot, freshness } = entry;
           const run =
             snapshot.run === undefined
               ? ''
               : `, run ${snapshot.run.state}${snapshot.run.progress.fraction === undefined ? '' : ` ${percent(snapshot.run.progress.fraction)}`}`;
-          return `- ${machineId}: ${name} (${descriptor.vendor} ${descriptor.model}), ${snapshot.connection}${freshness === 'stale' ? ' (stale)' : ''}, ${snapshot.state.status}${run}`;
+          return `- ${machineId}: ${name} (${descriptor.vendor} ${descriptor.model})${simulatedText(entry)}, ${snapshot.connection}${freshness === 'stale' ? ' (stale)' : ''}, ${snapshot.state.status}${run}`;
         })
         .join('\n');
 
@@ -301,7 +327,7 @@ export const describeMachineText = (
   const { descriptor, snapshot } = entry;
   const { capabilities } = descriptor;
   const lines = [
-    `${entry.name} (${entry.machineId}): ${descriptor.vendor} ${descriptor.model}, firmware ${descriptor.firmware}. ${snapshot.connection}${entry.freshness === 'stale' ? ' (stale)' : ''}, ${snapshot.state.status}${snapshot.state.reason === undefined ? '' : `: ${snapshot.state.reason}`}. Observed ${snapshot.observedAt}.`,
+    `${entry.name} (${entry.machineId}): ${descriptor.vendor} ${descriptor.model}${simulatedText(entry)}, firmware ${descriptor.firmware}. ${snapshot.connection}${entry.freshness === 'stale' ? ' (stale)' : ''}, ${snapshot.state.status}${snapshot.state.reason === undefined ? '' : `: ${snapshot.state.reason}`}. Observed ${snapshot.observedAt}.`,
   ];
   if (snapshot.run !== undefined) {
     lines.push(runText(snapshot.run));
@@ -351,6 +377,10 @@ export const describeMachineText = (
   }
   lines.push(`Stop (stop_machine, always open to you): ${outcomeText(entry, capabilities.stop)}`);
   lines.push(jobsText(capabilities.jobs));
+  const fff = fffText(capabilities);
+  if (fff !== undefined) {
+    lines.push(fff);
+  }
   if (capabilities.jobs.type === 'supported' && context.jobs.length > 0) {
     lines.push('Recent jobs:');
     for (const { job, nextStep } of context.jobs) {

@@ -9,7 +9,7 @@ import type {
   ToolRegistry,
 } from '@taucad/agent-host';
 import type { KernelIssue } from '@taucad/runtime';
-import { checkMachineAction, fffProcessOf, machineActionIntent } from '@taucad/runtime/machine';
+import { checkMachineAction, fffProcessOf, isSimulatedMachine, machineActionIntent } from '@taucad/runtime/machine';
 import type {
   MachineActionDescriptor,
   MachineApplyActionInput,
@@ -48,6 +48,7 @@ import {
   describeMachineText,
   formatDuration,
   listMachinesText,
+  noMachineText,
   outcomeText,
   remedyText,
   sentence,
@@ -55,6 +56,7 @@ import {
 import {
   defaultBambuStudioEngine,
   describePrintProfiles,
+  observedPlate,
   readProjectMachinePreferences,
 } from '#registry/print-profiles.js';
 import type { BambuStudioEngine, ResolvedMachinePreferences } from '#registry/print-profiles.js';
@@ -118,8 +120,9 @@ const asJson = (value: unknown): JsonValue => {
 /**
  * What `request_job` and `check_job` need from their host beyond the machine client.
  *
- * For a `targetFile`, slices it through the runtime export route to `gcode.3mf` — the same route `export_model`
- * takes, so the artifact is recorded in the project and named by the project, its path and its digest. For an
+ * For a `targetFile`, slices it through the runtime export route into a container the machine accepts — the same
+ * route `export_model` takes, so the artifact is recorded in the project and named by the project, its path and its
+ * digest; a host without that route refuses a `targetFile`. For an
  * `artifact`, reads the finished program and names it the same way, in the container the machine accepts. Either
  * way it returns only what the call chose of the provider's start form; the provider completes the rest from what
  * the machine reports (`checkJob`), and summarizes the program for the approval prompt.
@@ -273,7 +276,7 @@ const resolveMachine = async (
   }
   throw new Error(
     entries.length === 0
-      ? 'No machine is bound on this computer; the person binds one in the Print pane.'
+      ? noMachineText
       : `Several machines are bound; pass machineId. Bound machines: ${describeMachines(entries)}.`,
   );
 };
@@ -432,6 +435,20 @@ const applyIntent = async (
   return watch();
 };
 
+/**
+ * What the agent reads when a person did not approve an action: declined, or the turn stopped before they answered.
+ * @param outcome - How the approval ended.
+ * @param named - "Cancel the print on Workshop X1C".
+ * @returns The report; nothing was sent.
+ */
+const unapprovedReport = (outcome: InterruptResolution['outcome'], named: string): ActionReport =>
+  outcome === 'cancelled'
+    ? {
+        status: 'refused',
+        message: `Nothing was sent: the chat turn stopped before the person answered whether to do ${named}. Ask again only if they still want it.`,
+      }
+    : { status: 'denied', message: `The person declined ${named}. Do not retry it unless they ask.` };
+
 /** The approval prompt for one action: what, where, and what it does. */
 const actionPrompt = (entry: MachineDirectoryEntry, descriptor: MachineActionDescriptor, parameters: JsonObject) => {
   const shown = Object.keys(parameters).length === 0 ? '' : ` (${JSON.stringify(parameters)})`;
@@ -483,10 +500,7 @@ const machineAction = async (
   const prior = await invocation.approve?.recall?.(key);
   if (prior !== undefined) {
     if (prior.resolution.outcome !== 'approved') {
-      return {
-        status: 'denied',
-        message: `The person declined ${action} on ${entry.name}. Do not retry it unless they ask.`,
-      };
+      return unapprovedReport(prior.resolution.outcome, `${action} on ${entry.name}`);
     }
     const recalled = recalledIntentSchema.safeParse(prior.payload['intent']);
     if (!recalled.success) {
@@ -548,7 +562,7 @@ const machineAction = async (
       message: `${descriptor.label} on ${entry.name} needs a person's approval, which only Tau can ask for. Ask the person to do it in Tau.`,
     };
   }
-  const prompt = actionPrompt(entry, descriptor, parameters);
+  const prompt = `${isSimulatedMachine(entry.descriptor.capabilities) ? 'Simulated: ' : ''}${actionPrompt(entry, descriptor, parameters)}`;
   const resolution = await invocation.approve({
     key,
     prompt,
@@ -567,7 +581,7 @@ const machineAction = async (
     },
   });
   if (resolution.outcome !== 'approved') {
-    return { status: 'denied', message: `The person declined ${descriptor.label} on ${entry.name}.` };
+    return unapprovedReport(resolution.outcome, `${descriptor.label} on ${entry.name}`);
   }
   /* The person's Approve recorded the approval on the host before it answered this interrupt. */
   return applyIntent(client, invocation, { entry, intent, confirmation: options.confirmation });
@@ -759,8 +773,16 @@ const settleApproval = async (
 /** What starting a program does, by process: a printer prints, a mill cuts, anything else runs it. */
 const processVerbs: Readonly<Record<string, string>> = { fff: 'Print', milling: 'Cut' };
 
-/** The one line the person decides on: "Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min." */
-const approvalPrompt = (job: MachineJob, entry: MachineDirectoryEntry): string => {
+/**
+ * The one line the person decides on: "Print pyramid.gcode.3mf on Workshop X1C? 125 layers, about 1 h 5 min.", with
+ * "Simulated: " before it for a simulator and the plate a person stated when the machine reports none.
+ *
+ * @param job - The job awaiting approval.
+ * @param entry - Its machine.
+ * @param statedPlate - The plate id the agent passed, when the machine does not report its own.
+ * @returns The prompt.
+ */
+const approvalPrompt = (job: MachineJob, entry: MachineDirectoryEntry, statedPlate: string | undefined): string => {
   const { program } = job;
   /* A program the host has not read yet is `other`; the machine's own process names it then. */
   const process =
@@ -774,15 +796,19 @@ const approvalPrompt = (job: MachineJob, entry: MachineDirectoryEntry): string =
       : []),
     ...(program.estimatedDuration === undefined ? [] : [formatDuration(program.estimatedDuration)]),
   ];
+  const plate = fffProcessOf(entry.descriptor.capabilities)?.bed.plates.find(({ id }) => id === statedPlate);
   const confirmations = personOnlyApproval(entry);
-  return `${verb} ${program.name} on ${entry.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}${confirmations === undefined ? '' : ` Accept it in the Print pane, confirming: ${confirmations.join('; ')}.`}`;
+  const simulated = isSimulatedMachine(entry.descriptor.capabilities) ? 'Simulated: ' : '';
+  return `${simulated}${verb} ${program.name} on ${entry.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}${plate === undefined ? '' : ` On the ${plate.label}, as stated; ${entry.name} does not report its plate.`}${confirmations === undefined ? '' : ` Accept it in the Print pane, confirming: ${confirmations.join('; ')}.`}`;
 };
 
 const jobReport = (job: MachineJob, entry: MachineDirectoryEntry | undefined, extra: JsonObject = {}): JsonValue => {
   const nextStep = nextStepOf(job, entry);
   return {
     job: jobOutput(job, entry),
-    ...(entry === undefined ? {} : { machineName: entry.name }),
+    ...(entry === undefined
+      ? {}
+      : { machineName: entry.name, simulated: isSimulatedMachine(entry.descriptor.capabilities) }),
     ...extra,
     ...(nextStep === undefined ? {} : { nextStep }),
   };
@@ -935,7 +961,7 @@ const requestJob = async (
   }
   const resolution = await invocation.approve({
     key: approvalKey,
-    prompt: approvalPrompt(job, entry),
+    prompt: approvalPrompt(job, entry, observedPlate(entry) === undefined ? parsed.plate : undefined),
     payload: {
       kind: 'job',
       jobId,
@@ -959,7 +985,12 @@ const checkJob = async (
   const entry = await resolveMachine(client, parsed.machineId, signal);
   const { check, reported } = await planJob(client, options, { invocation, parsed, entry });
   if (check.status === 'refused') {
-    return { status: 'refused', message: refusedText(entry, check), ...reported };
+    return {
+      status: 'refused',
+      simulated: isSimulatedMachine(entry.descriptor.capabilities),
+      message: refusedText(entry, check),
+      ...reported,
+    };
   }
   const checks = check.checks
     .filter(({ state }) => state !== 'passed')
@@ -972,6 +1003,7 @@ const checkJob = async (
     }));
   return asJson({
     status: check.status,
+    simulated: isSimulatedMachine(entry.descriptor.capabilities),
     program: check.program,
     ...(checks.length === 0 ? {} : { checks }),
     ...reported,

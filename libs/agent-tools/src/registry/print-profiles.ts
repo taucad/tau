@@ -56,12 +56,22 @@ const bambuVendor = 'Bambu Lab';
 export const isBambuProvider = (provider: MachineProvider): boolean => provider.vendor === bambuVendor;
 
 /**
- * One material slot by the tray number the Bambu provider gives its address (`bambuSlotOf`), the vocabulary of
- * Bambu Studio's hints, the provider's submission configuration and the saved print intent.
+ * Whether the provider's start form and saved settings are Bambu's: the one settings source whose submission keys
+ * (`amsMapping`, `expectedBedType`, ...) and tray numbers the planner writes. Any other provider receives only what
+ * it declares and completes the rest itself (R5).
+ *
+ * @param provider - The machine's provider.
+ * @returns True when its settings configuration is Bambu's.
  * @internal
  */
-export type ObservedTray = Readonly<{
-  slot: number;
+export const isBambuSettings = (provider: MachineProvider): boolean =>
+  provider.settingsConfiguration?.source.id === bambuSettingsConfiguration.manifest.source.id;
+
+/**
+ * One material slot by its address, as any provider's material system reports it.
+ * @internal
+ */
+export type ObservedSlot = Readonly<{
   address: MaterialSlotAddress;
   state: 'empty' | 'loaded' | 'unknown';
   /** The material type the slot reports, such as `PLA`. */
@@ -74,14 +84,18 @@ export type ObservedTray = Readonly<{
 
 type MaterialSystem = Extract<MachineComponent, { kind: 'material-system' }>;
 
+/** Whether two addresses name the same slot. @internal */
+export const sameSlot = (a: MaterialSlotAddress, b: MaterialSlotAddress | undefined): boolean =>
+  a.unitId === b?.unitId && a.slotId === b.slotId;
+
 /**
- * The machine's material slots as Bambu tray numbers, through the provider's own encoding.
+ * The machine's material slots by address.
  *
  * @param machine - The machine as observed.
- * @returns Every slot the material system reports that has a tray number, in its order; none when it reports nothing.
+ * @returns Every slot the material system reports, in its order; none when it reports nothing.
  * @internal
  */
-export const observedTrays = (machine: MachineDirectoryEntry): readonly ObservedTray[] => {
+export const observedSlots = (machine: MachineDirectoryEntry): readonly ObservedSlot[] => {
   const declared = machine.descriptor.capabilities.components.find(
     (component): component is MaterialSystem => component.kind === 'material-system',
   );
@@ -89,37 +103,28 @@ export const observedTrays = (machine: MachineDirectoryEntry): readonly Observed
   if (!declared || !value) {
     return [];
   }
-  return value.slots.flatMap(({ slot, state, material }) => {
-    const tray = bambuSlotOf(slot);
-    if (tray === undefined) {
-      return [];
-    }
-    return [
-      {
-        slot: tray,
-        address: slot,
-        state,
-        ...(material === undefined
-          ? {}
-          : { materialId: material.materialType, profileId: material.preset.profileId, color: material.color }),
-      },
-    ];
-  });
+  return value.slots.map(({ slot, state, material }) => ({
+    address: slot,
+    state,
+    ...(material === undefined
+      ? {}
+      : { materialId: material.materialType, profileId: material.preset.profileId, color: material.color }),
+  }));
 };
 
 /**
- * The external spool's tray number, when the machine has one.
+ * The external spool's address, when the machine has one: it cannot change filament mid-print.
  * @param manifest - The machine's manifest.
- * @returns Its tray number, or undefined.
+ * @returns Its address, or undefined.
  * @internal
  */
-export const externalSpoolSlotOf = (manifest: Pick<MachineManifest, 'components'>): number | undefined => {
+export const externalSpoolOf = (manifest: Pick<MachineManifest, 'components'>): MaterialSlotAddress | undefined => {
   for (const component of manifest.components) {
     const unit =
       component.kind === 'material-system' ? component.units.find(({ kind }) => kind === 'external') : undefined;
     const slot = unit?.slots[0];
     if (unit !== undefined && slot !== undefined) {
-      return bambuSlotOf({ unitId: unit.id, slotId: slot.id });
+      return { unitId: unit.id, slotId: slot.id };
     }
   }
   return undefined;
@@ -158,34 +163,29 @@ export const nozzleDiameterOf = (manifest: Pick<MachineManifest, 'components'>):
 };
 
 /**
- * The machine as a print from one tray sees it: the material system reports that tray only.
+ * The machine as a print from one slot sees it: the material system reports that slot only.
  * @param machine - The machine as observed.
- * @param slot - The tray number.
+ * @param address - The slot.
  * @returns The same entry with the other slots left out.
  * @internal
  */
-export const withOnlyTray = (machine: MachineDirectoryEntry, slot: number): MachineDirectoryEntry => {
-  const address = observedTrays(machine).find((tray) => tray.slot === slot)?.address;
-  return {
-    ...machine,
-    snapshot: {
-      ...machine.snapshot,
-      components: machine.snapshot.components.map((observation) =>
-        observation.knowledge === 'known' && observation.value.kind === 'material-system'
-          ? {
-              ...observation,
-              value: {
-                ...observation.value,
-                slots: observation.value.slots.filter(
-                  ({ slot: candidate }) => candidate.unitId === address?.unitId && candidate.slotId === address.slotId,
-                ),
-              },
-            }
-          : observation,
-      ),
-    },
-  };
-};
+export const withOnlySlot = (machine: MachineDirectoryEntry, address: MaterialSlotAddress): MachineDirectoryEntry => ({
+  ...machine,
+  snapshot: {
+    ...machine.snapshot,
+    components: machine.snapshot.components.map((observation) =>
+      observation.knowledge === 'known' && observation.value.kind === 'material-system'
+        ? {
+            ...observation,
+            value: {
+              ...observation.value,
+              slots: observation.value.slots.filter(({ slot }) => sameSlot(slot, address)),
+            },
+          }
+        : observation,
+    ),
+  },
+});
 
 /**
  * The material a single-material print uses: the first loaded slot.
@@ -194,8 +194,8 @@ export const withOnlyTray = (machine: MachineDirectoryEntry, slot: number): Mach
  * @returns That slot, when one is loaded with a known material.
  * @internal
  */
-export const loadedMaterial = (machine: MachineDirectoryEntry): ObservedTray | undefined =>
-  observedTrays(machine).find((material) => material.state === 'loaded' && material.materialId !== undefined);
+export const loadedMaterial = (machine: MachineDirectoryEntry): ObservedSlot | undefined =>
+  observedSlots(machine).find((material) => material.state === 'loaded' && material.materialId !== undefined);
 
 /**
  * What the printer reports, as Bambu Studio's preset defaults read it.
@@ -212,6 +212,7 @@ export const bambuHints = (
   choices: Readonly<{ preset?: BambuMachineHints['preset']; plate?: string }> = {},
 ): BambuMachineHints => {
   const material = loadedMaterial(machine);
+  const tray = material === undefined ? undefined : bambuSlotOf(material.address);
   const plate = bambuPlates.find(({ id }) => id === choices.plate)?.id;
   const nozzleDiameter = nozzleDiameterOf(provider.manifest);
   return {
@@ -220,11 +221,11 @@ export const bambuHints = (
     ...(choices.preset === undefined ? {} : { preset: choices.preset }),
     ...(plate === undefined ? {} : { plate }),
     materials:
-      material === undefined
+      material === undefined || tray === undefined
         ? []
         : [
             {
-              slot: material.slot,
+              slot: tray,
               ...(material.materialId === undefined ? {} : { materialId: material.materialId }),
               ...(material.profileId === undefined ? {} : { profileId: material.profileId }),
             },
@@ -258,7 +259,12 @@ export type PrintChoices = Readonly<
   }
 >;
 
-/** Resolve the selected saved profile once through the root owner. Missing files use defaults; unreadable records refuse preparation. @internal */
+/**
+ * Resolve the selected saved profile once through the root owner. Missing files use defaults; unreadable records
+ * refuse preparation. Only slicing and the provider's own settings source are read: Bambu's settings apply to a
+ * provider whose settings are Bambu's, and any other source in the profile is ignored, never refused.
+ * @internal
+ */
 export const readProjectMachinePreferences = async (
   service: Pick<MachineSettingsService, 'readMachineSettings'>,
   provider: MachineProvider,
@@ -278,24 +284,20 @@ export const readProjectMachinePreferences = async (
     throw new Error(file.message);
   }
   const selected = profileId ?? file.record.activeProfile;
-  const unavailable = Object.keys(file.record.profiles[selected]?.configurations ?? {}).find(
-    (id) => id !== slicingPreferences.manifest.source.id && id !== bambuSettingsConfiguration.manifest.source.id,
-  );
-  if (unavailable) {
-    throw new Error(`Saved configuration source ${unavailable} is unavailable.`);
-  }
   const slicing = await readMachineConfiguration({
     settings: file.record,
     profileId: selected,
     definition: slicingPreferences,
     signal,
   });
-  const machine = await readMachineConfiguration({
-    settings: file.record,
-    profileId: selected,
-    definition: bambuSettingsConfiguration,
-    signal,
-  });
+  const machine = isBambuSettings(provider)
+    ? await readMachineConfiguration({
+        settings: file.record,
+        profileId: selected,
+        definition: bambuSettingsConfiguration,
+        signal,
+      })
+    : ({ status: 'absent' } as const);
   if (slicing.status === 'refused') {
     throw new Error(slicing.message);
   }
@@ -341,7 +343,7 @@ const referenceIntent = (intent: PrintPreferences, choices: PrintChoices) => {
 };
 
 /**
- * The file's filament for the slot a print uses, the first loaded one.
+ * The file's filament for the slot a print uses, the first loaded one; the file keys filaments by Bambu tray number.
  *
  * @param intent - The project's print intent.
  * @param machine - The machine as observed.
@@ -351,7 +353,8 @@ const slotFilament = (
   intent: PrintPreferences,
   machine: MachineDirectoryEntry,
 ): Readonly<{ key: string; name: string }> | undefined => {
-  const slot = loadedMaterial(machine)?.slot;
+  const material = loadedMaterial(machine);
+  const slot = material === undefined ? undefined : bambuSlotOf(material.address);
   const name = slot === undefined ? undefined : intent.filaments?.[String(slot)];
   return name === undefined ? undefined : { key: String(slot), name };
 };

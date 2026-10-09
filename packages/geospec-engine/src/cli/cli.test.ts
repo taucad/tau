@@ -10,7 +10,7 @@ import {
   runReportJson,
 } from '#cli/cli.js';
 import type { GeoSpecCliHost } from '#cli/cli.js';
-import type { GeometryDiagnostic } from '#mesh/types.js';
+import type { GeometryDiagnostic } from 'geospec/mesh';
 import type { GeoSpecRunResult } from '#runner/types.js';
 
 const bundle = { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
@@ -27,17 +27,15 @@ const parsed = (...argv: string[]) => {
 const cliHost = (options: {
   tree?: Readonly<Record<string, string[]>>;
   result?: GeoSpecRunnerResult;
-}): GeoSpecCliHost & { written: string[]; runs: unknown[]; closed: () => number; flushed: () => number } => {
+}): GeoSpecCliHost & { written: string[]; runs: unknown[]; closed: () => number } => {
   const written: string[] = [];
   const runs: unknown[] = [];
   let closed = 0;
-  let flushed = 0;
   const tree = options.tree ?? { '/project': ['a.geospec.ts'] };
   return {
     written,
     runs,
     closed: () => closed,
-    flushed: () => flushed,
     cwd: () => '/project',
     write: (line) => written.push(line),
     discoveryFileSystem: () => ({
@@ -68,9 +66,6 @@ const cliHost = (options: {
           closed += 1;
         },
       };
-    },
-    flush: async () => {
-      flushed += 1;
     },
   };
 };
@@ -174,12 +169,19 @@ describe('parseGeoSpecCliArguments', () => {
     });
   });
 
-  it('should parse the operational cache and forensic flags', () => {
-    expect(parsed('run', '--cache-directory', '/tmp/evidence', '--forensic')).toMatchObject({
-      cacheDirectory: '/tmp/evidence',
-      forensic: true,
+  it('should parse the forensic flag', () => {
+    expect(parsed('run', '--forensic').forensic).toBe(true);
+  });
+
+  it('should reject the retired evidence cache flags as unknown options', () => {
+    expect(parseGeoSpecCliArguments(['run', '--no-cache'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--no-cache'.",
     });
-    expect(parsed('run', '--no-cache').cache).toBe(false);
+    expect(parseGeoSpecCliArguments(['run', '--cache-directory', '/tmp/evidence'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--cache-directory'.",
+    });
   });
 
   it('should auto-size --workers when no count follows it', () => {
@@ -201,16 +203,12 @@ describe('parseGeoSpecCliArguments', () => {
       ['run', '--test-timeout'],
       ['run', '--test-timeout', 'soon'],
       ['run', '--workers', 'lots'],
-      ['run', '--cache-directory'],
       ['run', '--matcher-wall-backstop'],
       ['run', '--matcher-wall-backstop', '0'],
       ['run', '--matcher-wall-backstop', '-1'],
     ]) {
       expect(parseGeoSpecCliArguments(argv).kind).toBe('error');
     }
-    expect(parseGeoSpecCliArguments(['run', '--no-cache', '--cache-directory', '/tmp/evidence'])).toMatchObject({
-      kind: 'error',
-    });
   });
 });
 
@@ -622,7 +620,7 @@ describe('runGeoSpecCli', () => {
     expect(JSON.parse(host.written[0] ?? '{}')).toMatchObject({ success: false, unmatchedRoots: ['nope'] });
   });
 
-  it('should thread the run filters through and close and flush exactly once', async () => {
+  it('should thread the run filters through and close exactly once', async () => {
     const host = cliHost({});
 
     const code = await runGeoSpecCli(['run', '.', '-t', 'volume', '--test-timeout', '9000', '--bail'], host);
@@ -634,7 +632,7 @@ describe('runGeoSpecCli', () => {
       testTimeout: 9000,
       bail: true,
     });
-    expect([host.closed(), host.flushed()]).toStrictEqual([1, 1]);
+    expect(host.closed()).toBe(1);
   });
 
   it('should ask for a pool only when --workers is given', async () => {
@@ -651,9 +649,9 @@ describe('runGeoSpecCli', () => {
   it('should map operational flags directly to the runner factory and run', async () => {
     const host = cliHost({});
 
-    await runGeoSpecCli(['run', '.', '--no-cache', '--forensic', '--matcher-wall-backstop', '1234'], host);
+    await runGeoSpecCli(['run', '.', '--forensic', '--matcher-wall-backstop', '1234'], host);
 
-    expect(host.runs[0]).toMatchObject({ cache: false, cacheDirectory: undefined });
+    expect(host.runs[0]).toStrictEqual({ projectPath: '/project', workers: undefined, shardTimeout: undefined });
     expect(host.runs[1]).toMatchObject({ forensic: true, matcherWallBackstop: 1234 });
   });
 
@@ -721,7 +719,7 @@ describe('runGeoSpecCli', () => {
     expect(await runGeoSpecCli(['run', '.'], host)).toBe(1);
   });
 
-  it('should close and flush even when the run throws', async () => {
+  it('should close even when the run throws', async () => {
     const host = cliHost({});
     const failing: GeoSpecCliHost = {
       ...host,
@@ -736,7 +734,7 @@ describe('runGeoSpecCli', () => {
     };
 
     await expect(runGeoSpecCli(['run', '.'], failing)).rejects.toThrow('runner exploded');
-    expect(host.flushed()).toBe(1);
+    expect(host.closed()).toBe(1);
   });
 
   it('should include the glob filters in discovery', async () => {

@@ -15,10 +15,11 @@ import { jscad } from '@taucad/jscad';
 import { replicad } from '@taucad/replicad';
 import { esbuild } from '@taucad/esbuild';
 import { middleware } from '@taucad/middleware';
-import '@taucad/geospec-engine/register/node';
-import { createModelLoader } from 'geospec/model';
+import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { Engine } from '@taucad/geospec-engine-native/node';
 import { runGeoSpecModule } from 'geospec/runner';
-import { createNodeVmFileSystem } from 'geospec/runner/node';
+import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
+import type { GeoSpecNativeLoadModelOptions, ManagedGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import { Mesh, Vector3 } from 'three';
 import { GLTFLoader, MeshSurfaceSampler } from 'three/addons';
 
@@ -33,6 +34,7 @@ const main = async () => {
   const runtime: AnyRuntimeDefinition = defineRuntime({ plugins: [esbuild(), middleware(), jscad()] });
   const client = await createNodeClient({ runtime, projectPath: sourcePath });
   const variants = [];
+  const engine = new Engine();
   await mkdir(assetPath, { recursive: true });
   await mkdir(reportPath, { recursive: true });
   try {
@@ -48,15 +50,22 @@ const main = async () => {
         document.close();
       }
     }
-    const loader = createModelLoader({ runtime: client, projectPath: sourcePath });
+    const loader = createGeoSpecNativeModelLoader({ engine, runtime: client, projectPath: sourcePath });
     for (const module of [3.5, 3]) {
       console.log(`Validating module ${module}`);
+      const nativeModelLoader: ManagedGeoSpecNativeModelLoader = Object.assign(
+        async (options: GeoSpecNativeLoadModelOptions) =>
+          loader({ ...options, parameters: { ...options.parameters, module } }),
+        { releaseAll: async () => loader.releaseAll() },
+      );
       const result = await runGeoSpecModule({
         entryPath: 'main.geospec.js',
         filesystem: createNodeVmFileSystem(sourcePath),
-        modelLoader: async (options) => loader({ ...options, parameters: { ...options.parameters, module } }),
+        nativeAssertions: { engine },
+        nativeModelLoader,
         testTimeout: 120_000,
       });
+      await loader.releaseAll();
       if (!result.success) {
         throw new Error(JSON.stringify(result));
       }
@@ -165,6 +174,7 @@ const main = async () => {
     console.log('Hero geometry and evidence baked successfully');
   } finally {
     await client.shutdown();
+    engine.close();
   }
 };
 

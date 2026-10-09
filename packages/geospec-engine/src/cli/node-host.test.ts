@@ -55,37 +55,14 @@ describe('createNodeGeoSpecCliHost', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should accept disabled caching and reject unsupported persistent cache controls', async () => {
-    const root = await project();
-    const host = createNodeGeoSpecCliHost({ reportStream: () => undefined });
-    const serial = host.createRunner({ projectPath: root, workers: undefined, shardTimeout: undefined, cache: false });
-    const serialResult = await serial.run({ files: ['a.geospec.ts'] });
-    expect(serialResult.success).toBe(true);
-    await serial.close();
+  it('should write through a supplied report stream instead of stdout', () => {
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const lines: string[] = [];
 
-    expect(() =>
-      host.createRunner({
-        projectPath: root,
-        workers: undefined,
-        shardTimeout: undefined,
-        cacheDirectory: join(tmpdir(), 'geospec-node-host-serial-cache'),
-      }),
-    ).toThrow('does not support persistent evidence cache');
+    createNodeGeoSpecCliHost({ reportStream: (text) => lines.push(text) }).write('report');
 
-    expect(() =>
-      host.createRunner({
-        projectPath: root,
-        workers: 1,
-        shardTimeout: undefined,
-        cacheDirectory: join(tmpdir(), 'geospec-node-host-cache'),
-      }),
-    ).toThrow('does not support persistent evidence cache');
-    expect(() => host.createRunner({ projectPath: root, workers: 1, shardTimeout: undefined, cache: true })).toThrow(
-      'does not support persistent evidence cache',
-    );
-    expect(typeof host.createRunner({ projectPath: root, workers: 1, shardTimeout: undefined, cache: false }).run).toBe(
-      'function',
-    );
+    expect(lines).toStrictEqual(['report\n']);
+    expect(stdout).not.toHaveBeenCalled();
   });
 
   it('should build a pool runner when a worker count is requested', () => {
@@ -93,9 +70,5 @@ describe('createNodeGeoSpecCliHost', () => {
 
     expect(typeof host.createRunner({ projectPath: '/x', workers: 2, shardTimeout: 1000 }).run).toBe('function');
     expect(typeof host.createRunner({ projectPath: '/x', workers: 0, shardTimeout: undefined }).run).toBe('function');
-  });
-
-  it('should expose a flush that resolves', async () => {
-    await expect(createNodeGeoSpecCliHost().flush()).resolves.toBeUndefined();
   });
 });

@@ -13,13 +13,11 @@ type PackageJson = {
   publishConfig?: { exports?: Record<string, Record<string, string>> };
 };
 
-const nativeSubpath = './native/opencascade/single';
-
 const readPackageJson = async (): Promise<PackageJson> =>
   JSON.parse(await readFile(resolve(import.meta.dirname, '../package.json'), 'utf8')) as PackageJson;
 
 describe('@taucad/geospec-engine package metadata', () => {
-  it('depends on the substrate it registers into', async () => {
+  it('depends on the substrate whose specs it runs', async () => {
     const packageJson = await readPackageJson();
 
     expect(packageJson.dependencies?.['geospec']).toBe('workspace:*');
@@ -60,48 +58,12 @@ describe('@taucad/geospec-engine package metadata', () => {
     expect(projectJson.targets['pkgcheck']?.dependsOn).toContain('generate-provenance');
   });
 
-  it('ships the single-only assembly through its one generated initialiser', async () => {
-    // The assembly declares exactly one variant (closeout C1), so `init.js` has
-    // nothing to select: no capability probe, one glue URL. It is also the only
-    // initialiser `libcascade assemble` still generates — pinned `init.<name>.*`
-    // entries and the `./<name>/init` export are emitted solely when there is
-    // more than one variant (`@libcascade/toolchain` dist/assemble/index.js:711),
-    // so targeting `init.single.js` would ship an orphan that the next
-    // `build-wasm` silently stops maintaining.
+  it('publishes only the CLI host subpaths, with identical source and publish maps', async () => {
     const packageJson = await readPackageJson();
+    const subpaths = ['./native-pool/node', './node-filesystem', './package.json'];
 
-    for (const map of [packageJson.exports, packageJson.publishConfig?.exports]) {
-      const entry = Object.entries(map?.[nativeSubpath] ?? {});
-      expect(entry.length).toBeGreaterThan(0);
-      for (const [condition, target] of entry) {
-        expect(target).toMatch(condition === 'types' ? /\/init\.d\.ts$/u : /\/init\.js$/u);
-      }
-    }
-
-    const { default: build } = (await import('../native/opencascade/libcascade.config.js')) as {
-      default: { variants: ReadonlyArray<{ name: string }> };
-    };
-    expect(build.variants.map(({ name }) => name)).toStrictEqual(['single']);
-
-    const assembled = JSON.parse(
-      await readFile(resolve(import.meta.dirname, '../native/opencascade/dist/exports.json'), 'utf8'),
-    ) as { exports: Record<string, unknown> };
-    expect(Object.keys(assembled.exports)).toStrictEqual(['.', './init', './single', './single/wasm']);
-
-    // The eager `index` root and the raw-glue `variant.d.ts` stay unpublished:
-    // nothing shipped imports them, and `init.d.ts` reaches only `types.d.ts`.
-    const config = await readFile(resolve(import.meta.dirname, '../tsdown.config.ts'), 'utf8');
-    const artifacts = [
-      ...(/nativeOpenCascadeArtifacts = \[(?<list>[^\]]*)\]/u.exec(config)?.groups?.['list'] ?? '').matchAll(
-        /'(?<file>[^']+)'/gu,
-      ),
-    ].map((match) => match.groups?.['file'] ?? '');
-
-    expect(artifacts).toContain('init.js');
-    expect(artifacts).toContain('init.d.ts');
-    expect(artifacts.filter((file) => /^index\.|^variant\.d\.ts$|_multi|^init\.single\./u.test(file))).toStrictEqual(
-      [],
-    );
+    expect(Object.keys(packageJson.exports ?? {}).toSorted()).toStrictEqual(subpaths);
+    expect(Object.keys(packageJson.publishConfig?.exports ?? {}).toSorted()).toStrictEqual(subpaths);
   });
 
   it('ships its Apache-2.0 licence in the tarball', async () => {

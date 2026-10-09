@@ -1,6 +1,4 @@
 export { createNoMatchingGeoSpecTestsIssue } from '#runner/worker/no-matching-tests-issue.js';
-export { startGeoSpecPoolWorkerHost } from '#runner/worker/pool-worker-host.js';
-export type { GeoSpecPoolWorkerHostOptions } from '#runner/worker/pool-worker-host.js';
 export type {
   GeoSpecPoolHostMessage,
   GeoSpecPoolShard,

@@ -49,9 +49,6 @@
           "env": "TAU_EXAMPLE_PATTERN"
         },
         {
-          "env": "TAU_GEOSPEC_CACHE"
-        },
-        {
           "env": "TAU_PICOGK_RESOURCE_ROOT"
         },
         {
@@ -81,9 +78,6 @@
         "^default",
         {
           "env": "TAU_EXAMPLE_PATTERN"
-        },
-        {
-          "env": "TAU_GEOSPEC_CACHE"
         }
       ]
     },

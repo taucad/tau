@@ -3,7 +3,7 @@ title: 'GeoSpec Policy'
 description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, compiled native/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
-updated: '2026-09-05'
+updated: '2026-10-08'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md
@@ -321,15 +321,14 @@ const open = voxelFloodFill(region, resolution); // resolution-dependent; unfals
 
 - Charge verdict-bearing work in deterministic work units. A wall-clock watchdog reports infrastructure failure and never selects a geometry verdict or fallback engine.
 - Engine selection and retry order are pure functions of the claim and evidence. They must not depend on remaining shared budget, cache history, or machine timing. Shared budget exhaustion reports `MATCHER_TIMEOUT`.
-- Keep persistent evidence outside the project under test. Cache keys include content identity, every read argument, and an engine-family version. Different byte-producing engines use different family versions. Never cache failures, unsupported results, or exhausted-budget outcomes; a tolerance-free key may store only a payload identical at every claim tolerance.
-- Treat native OpenCascade as a process-local shared resource. Dispose run resources idempotently, make lazy facade `delete` and `isDeleted` independent of materialization, and copy borrowed `HEAPF64` data before any `await`.
+- Keep persistent evidence outside the project under test. Cache keys include content identity, every read argument, and an engine-family version. A backend change that alters produced bytes bumps the family version. Never cache failures, unsupported results, or exhausted-budget outcomes; a tolerance-free key may store only a payload identical at every claim tolerance.
+- Treat the native OCCT library as a process-local shared resource: release admitted subjects idempotently and never share one engine handle across concurrent runs.
 - Approximate winding membership near a surface requires true point-to-triangle distance or an equivalent separation certificate. Closedness prefilters require exact-weld edge counts, use winding magnitude for orientation-independent membership, and fall through to the canonical proof on uncertainty.
-- Persist eagerly consumed STEP/XDE structure by artifact identity while keeping the native read handle lazy. Resolve the derived structure during load so parse failures remain load-fatal. Install optional capabilities from the materialized native handle, and keep cache-hit reads unmaterialized until a geometry operation actually needs them.
-- Link shared globals emitted into every native wrapper translation unit with weak linkage; strong linkage duplicates symbols and translation-unit-local state silently forks ownership.
+- STEP/XDE parse failures remain load-fatal.
 - Compute selector face boxes with `BRepBndLib::Add(..., useTriangulation=false)` so prior tessellation of a shared TShape cannot change exact evidence. Select ambiguous STEP occurrences by exact `path:`.
 - Require exact bit-level output for parity-sensitive floating-point accumulation. Keep a spawned CLI or browser end-to-end gate for the real package wire instead of accepting only in-process tests.
 
-The removed `GEOSPEC_*` engine, cache, native-singleton, and forensic controls are historical evidence only. Do not restore environment-dependent verdict paths. Compare deterministic work counters before attributing a timing change to the implementation; a machine-load threshold alone is not evidence.
+Verdict paths never read environment variables or select an engine at run time. Compare deterministic work counters before attributing a timing change to the implementation; a machine-load threshold alone is not evidence.
 
 ## 17. Prefer Exact Geometry Over Discretized Sampling
 
@@ -354,7 +353,7 @@ for (const cell of grid) open[cell] = classify(cell.center) === 'out';
 
 ## 18. Do Heavy Geometry In The Compiled Engine, Minimizing Boundary Crossings
 
-Perform heavy geometry in the compiled native/WASM engine. The additive Rust engine owns analysis, proof computation and Manifold Rust CSG; OCCT operations stay inside its private C++ bridge. Treat JS/Python↔engine crossings as a first-order cost. A matcher's engine entry point accepts a whole claim or claim batch and returns complete verdicts in coarse calls named by the engineering question (§1), not per-point or per-pair host queries. Minimize crossing count and marshalled bytes. Intermediate geometry stays in engine-owned Rust/C++ memory, including BRep-to-CSG transfer. Preserve the existing TypeScript/WASM engine and its immutable reference evidence during the additive program.
+Perform heavy geometry in the compiled engine (`@taucad/geospec-engine-native`). Its Rust core owns analysis, proof computation and Manifold Rust CSG; OCCT operations stay inside its private C++ bridge. Treat JS/Python↔engine crossings as a first-order cost. A matcher's engine entry point accepts a whole claim or claim batch and returns complete verdicts in coarse calls named by the engineering question (§1), not per-point or per-pair host queries. Minimize crossing count and marshalled bytes. Intermediate geometry stays in engine-owned Rust/C++ memory, including BRep-to-CSG transfer.
 
 **Why**: Boundary crossings and serialization dominate the cost of fine-grained native APIs; one `proveX(...)` call keeps the algorithm and its intermediate geometry where they belong.
 
@@ -376,7 +375,7 @@ for (const occurrence of material) states.push(native.classifyPoints(occurrence,
 
 ## 19. Use A Hybrid Geometry Kernel, Each Engine Where Strongest
 
-GeoSpec's compiled engine may embed multiple backends behind provider-neutral capability contracts. Select operations deterministically by the claim and required evidence (§5, §16); timing, cache state or an operation failure never selects weaker evidence. Perform interop (for example AP242 BRep tessellation to a CSG mesh) inside engine-owned Rust/C++ memory, never by round-tripping geometry through JS or Python. Keep foreign kernel types private to their backend. The additive native program uses Manifold Rust; a shipping C++ Manifold fallback requires a separately recorded user exception under the native charter's Q3 ruling.
+GeoSpec's compiled engine may embed multiple backends behind provider-neutral capability contracts. Select operations deterministically by the claim and required evidence (§5, §16); timing, cache state or an operation failure never selects weaker evidence. Perform interop (for example AP242 BRep tessellation to a CSG mesh) inside engine-owned Rust/C++ memory, never by round-tripping geometry through JS or Python. Keep foreign kernel types private to their backend. The native engine uses Manifold Rust; a shipping C++ Manifold fallback requires a separately recorded user exception under the native charter's Q3 ruling.
 
 | Concern                                                                                   | Engine                     | Why                                                                                                |
 | ----------------------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------- |

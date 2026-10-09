@@ -25,7 +25,6 @@ vi.mock('@taucad/runtime/node', () => ({ createNodeClient: owner.client }));
 vi.mock('@taucad/runtime/worker', () => ({ defineRuntime: owner.definition }));
 vi.mock('@taucad/picogk', () => ({ loadPicogkKernelOptions: owner.resources, picogk: owner.plugin }));
 vi.mock('#model/default-runtime.js', () => ({ defaultRuntime: owner.defaults }));
-vi.mock('#register-node.js', () => ({}));
 vi.mock('#runner/node/node-vm-filesystem.js', () => ({ createNodeVmFileSystem: vi.fn(() => ({})) }));
 vi.mock('#runner/pool/worker-host.js', () => ({ startGeoSpecPoolWorkerHost: vi.fn() }));
 

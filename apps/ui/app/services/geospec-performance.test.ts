@@ -359,20 +359,21 @@ describe('GeoSpec performance route adapter', () => {
     }
   });
 
-  it('should preserve a combined warm worker when the legacy worker fails', async () => {
+  it('should preserve a combined ST warm worker when a combined MT worker fails', async () => {
     const fixture = performanceLabFixtures.find(({ id }) => id === 'box-step')!;
-    const calls: Array<{ worker: number; engine: string; cache: string }> = [];
+    const calls: Array<{ worker: number; variant: string; cache: string }> = [];
     const terminated: number[] = [];
     let nextWorker = 0;
     class InertWorker extends EventTarget {
       public readonly id = nextWorker++;
-      public postMessage(request: { id: number; input: { engine: string; cache: string } }): void {
+      public postMessage(request: { id: number; input: { execution?: { variant: string }; cache: string } }): void {
+        const variant = request.input.execution?.variant ?? 'st';
         calls.push({
           worker: this.id,
-          engine: request.input.engine,
+          variant,
           cache: request.input.cache,
         });
-        if (request.input.engine === 'legacy-wasm') {
+        if (variant === 'mt') {
           this.dispatchEvent(new Event('error'));
           return;
         }
@@ -392,23 +393,27 @@ describe('GeoSpec performance route adapter', () => {
     }
     vi.stubGlobal('Worker', InertWorker);
     const service = new GeoSpecPerformanceService();
-    const input = (engine: 'combined-wasm' | 'legacy-wasm') =>
+    const input = (variant: 'st' | 'mt') =>
       runInput({
-        engine,
+        engine: 'combined-wasm',
         fixture,
         bytes: new Uint8Array([1]),
         cases: casesForFixture(fixture.id).slice(0, 1),
         repeats: 1,
         cache: 'warm',
+        execution:
+          variant === 'mt'
+            ? { variant, permits: 2, receipt: 'https://tau.example/geospec-mt/permits-2/geospec_engine_native.mt.json' }
+            : { variant },
       });
     try {
-      await service.run(input('combined-wasm'));
-      await expect(service.run(input('legacy-wasm'))).rejects.toThrow('failed to start or execute');
-      await service.run(input('combined-wasm'));
+      await service.run(input('st'));
+      await expect(service.run(input('mt'))).rejects.toThrow('failed to start or execute');
+      await service.run(input('st'));
       expect(calls).toEqual([
-        { worker: 0, engine: 'combined-wasm', cache: 'cold' },
-        { worker: 1, engine: 'legacy-wasm', cache: 'cold' },
-        { worker: 0, engine: 'combined-wasm', cache: 'warm' },
+        { worker: 0, variant: 'st', cache: 'cold' },
+        { worker: 1, variant: 'mt', cache: 'cold' },
+        { worker: 0, variant: 'st', cache: 'warm' },
       ]);
       expect(terminated).toEqual([1]);
     } finally {

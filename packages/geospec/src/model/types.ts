@@ -2,9 +2,27 @@ import type { GeoSpecUnit } from '#geometry-unit.js';
 import type { MeshFileFormat } from '#mesh/types.js';
 import type { GeoSpecSubject } from '#model/subject.js';
 import type { GeoSpecNativeModelEngine, GeoSpecNativeSourceReader } from '#model/native-model-loader.js';
-import type { MeshSource } from '#mesh/load-mesh.js';
 import type { StepSource, StepStreamingMode } from '#step/types.js';
 import type { RuntimeClient } from '@taucad/runtime';
+
+/**
+ * In-memory triangle mesh source.
+ *
+ * @public
+ */
+export type MeshBufferSource = {
+  format: 'mesh-buffer';
+  positions: Float32Array<ArrayBuffer> | number[];
+  indices?: Uint32Array<ArrayBuffer> | Uint16Array<ArrayBuffer> | number[];
+  name?: string;
+};
+
+/**
+ * Mesh source forms accepted by {@link import('./load-model.js').loadModel}.
+ *
+ * @public
+ */
+export type MeshSource = Uint8Array<ArrayBuffer> | ArrayBuffer | Blob | File | URL | string | MeshBufferSource;
 
 /**
  * Geometry formats accepted by {@link import('./load-model.js').loadModel}.
@@ -174,7 +192,7 @@ export type ManagedGeoSpecModelLoader = GeoSpecModelLoader & {
  */
 export type CreateModelLoaderOptions = {
   /** Initialized compiled engine supplied by the host, never selected by an authored spec. */
-  engine?: GeoSpecNativeModelEngine;
+  engine: GeoSpecNativeModelEngine;
   /** Rooted host reader for direct filesystem or URL sources. */
   readSource?: GeoSpecNativeSourceReader;
   /** Geometry format to export when an individual call does not specify one. */

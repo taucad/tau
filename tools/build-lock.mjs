@@ -15,8 +15,7 @@
  * sessions), which no task graph dedupes, and from `build` and `build:verify`
  * sharing `apps/ui/build`.
  *
- * `mkdir` is the atomic rendezvous, the same idiom as
- * `packages/geospec-engine/src/cache/build-lock.ts`. The lock lives under
+ * `mkdir` is the atomic rendezvous. The lock lives under
  * `node_modules/.cache` so it is neither a git-visible file nor an Nx input.
  *
  * Usage: node tools/build-lock.mjs <output-dir> -- <command...>

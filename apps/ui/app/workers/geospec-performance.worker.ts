@@ -15,7 +15,6 @@ globalThis.addEventListener('message', async (event: MessageEvent<PerformanceLab
       throw new Error('Native engine runs only in the desktop utility.');
     }
     const result = await runPerformanceLabCell(parsed, {
-      legacy: async () => import('@taucad/geospec-engine/register'),
       combined: async () => import('@taucad/geospec-engine-native/wasm'),
     });
     globalThis.postMessage({ id, type: 'result', result });

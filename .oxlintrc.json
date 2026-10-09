@@ -16,7 +16,6 @@
     // their published API, and a generator is not edited to satisfy a style rule.
     "**/agent/resources.js",
     "**/agent/resources.d.ts",
-    "**/native/opencascade/geospec_opencascade_single.*",
     "**/wasm/**",
     "**/out-tsc/**",
     "**/coverage/**",
@@ -33,10 +32,6 @@
     // Compute-reuse baseline harness (charter W0): opt-in benchmark code
     // reaching runtime-internal seams through a loader hook; outside tsconfig.
     "apps/runtime-e2e/src/compute-baseline/harness/**",
-    // Frozen matcher-performance POC (docs/research/geospec-matcher-performance-poc.md):
-    // its `#mesh/*` modules moved out in the engine extraction (117b66d66), so it no
-    // longer resolves or runs. Kept as the artifact its research cites, not linted.
-    "packages/geospec-engine/experiments/matcher-performance/**",
     // Pinned external CAD model sources are fixture bytes, not GeoSpec library code.
     "packages/geospec-engine-native/bench/fixtures/performance-lab/workspace/**",
     "**/*.jscad.js",

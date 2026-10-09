@@ -1,7 +1,11 @@
-import type { GeoSpecUnit } from '#geometry-unit.js';
+/**
+ * STEP source and AP242 structure types shared by model loading and subject evidence.
+ *
+ * @module
+ */
 
 /**
- * STEP source forms accepted by {@link import('./load-step.js').loadStep}.
+ * STEP source forms accepted by `loadModel`.
  *
  * @public
  */
@@ -16,21 +20,11 @@ export type StepSource =
   | AsyncIterable<Uint8Array<ArrayBuffer>>;
 
 /**
- * STEP reader strategy used by GeoSpec.
+ * STEP reader strategy used by GeoSpec model loading.
  *
  * @public
  */
 export type StepStreamingMode = 'auto' | 'native-stream' | 'filesystem';
-
-/**
- * Progress event emitted while GeoSpec normalizes a STEP source.
- *
- * @public
- */
-export type StepLoadProgressEvent = {
-  phase: 'read-source' | 'parse-step' | 'mesh-brep';
-  bytesRead?: number;
-};
 
 /**
  * One placed occurrence recovered from an AP242 STEP structure read.
@@ -149,30 +143,3 @@ export type XdeReadResult = {
   /** Free (non-assembly) top-level shapes — the flat-export degenerate case. */
   freeShapeCount: number;
 };
-
-/**
- * Options for loading STEP/XDE/BRep evidence.
- *
- * @public
- */
-export type LoadStepOptions = {
-  source: StepSource;
-  unit?: GeoSpecUnit;
-  streaming?: StepStreamingMode;
-  mesh?: boolean;
-  meshLinearTolerance?: number;
-  meshAngularToleranceDegrees?: number;
-  maxBytes?: number;
-  signal?: AbortSignal;
-  onProgress?: (event: StepLoadProgressEvent) => void;
-  parameters?: Record<string, unknown>;
-  path?: string;
-  name?: string;
-};
-
-/**
- * Defaults accepted by {@link import('./load-step.js').createStepLoader}.
- *
- * @public
- */
-export type CreateStepLoaderOptions = Omit<LoadStepOptions, 'source'>;

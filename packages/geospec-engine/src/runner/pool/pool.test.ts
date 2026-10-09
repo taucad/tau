@@ -5,7 +5,7 @@ import type {
   GeoSpecPoolWorkerMessage,
   GeoSpecRunnerEvent,
 } from 'geospec/runner/worker';
-import { openShardTimings } from '#cache/timings.js';
+import { openShardTimings } from '#runner/pool/timings.js';
 import { createGeoSpecPoolRunner, mergeShardResults } from '#runner/pool/pool.js';
 import { sanitizePoolResult } from '#runner/pool/transport.js';
 import type { GeoSpecRunResult, GeoSpecTestCase } from '#runner/types.js';

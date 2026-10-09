@@ -180,11 +180,12 @@ describe('tsContribution static kernel types', () => {
   it('should register generated GeoSpec package and subpath declarations from the bundled-types mount', async () => {
     const proxy = createMountProxy({
       '/node_modules/geospec/index.d.ts': 'export declare const describe: unknown;',
-      '/node_modules/geospec/brep/index.d.ts': 'export declare const analyzeBrep: unknown;',
+      '/node_modules/geospec/assertion-client/index.d.ts':
+        'export declare const createGeoSpecAssertionClient: unknown;',
       '/node_modules/geospec/model/index.d.ts': 'export declare const loadModel: unknown;',
-      '/node_modules/geospec/runner/web/index.d.ts': 'export declare const createGeoSpecWebRunner: unknown;',
+      '/node_modules/geospec/runner/native/index.d.ts': 'export declare const createNativeGeoSpecRunner: unknown;',
       '/node_modules/geospec/runner/worker/index.d.ts': 'export type GeoSpecRunnerResult = unknown;',
-      '/node_modules/geospec/step/index.d.ts': 'export declare const loadStep: unknown;',
+      '/node_modules/geospec/mesh/index.d.ts': 'export type GeometryDiagnostic = unknown;',
       '/node_modules/geospec/package.json': JSON.stringify({ name: 'geospec', types: 'index.d.ts' }),
     });
     const context = createMockContext(stub, proxy);
@@ -199,28 +200,32 @@ describe('tsContribution static kernel types', () => {
 
     const tsPaths = tsAdd.mock.calls.map((c) => c[1]!);
     expect(tsPaths).toContain('file:///node_modules/geospec/index.d.ts');
-    expect(tsPaths).toContain('file:///node_modules/geospec/brep/index.d.ts');
+    expect(tsPaths).toContain('file:///node_modules/geospec/assertion-client/index.d.ts');
     expect(tsPaths).toContain('file:///node_modules/geospec/model/index.d.ts');
-    expect(tsPaths).toContain('file:///node_modules/geospec/runner/web/index.d.ts');
+    expect(tsPaths).toContain('file:///node_modules/geospec/runner/native/index.d.ts');
     expect(tsPaths).toContain('file:///node_modules/geospec/runner/worker/index.d.ts');
-    expect(tsPaths).toContain('file:///node_modules/geospec/step/index.d.ts');
+    expect(tsPaths).toContain('file:///node_modules/geospec/mesh/index.d.ts');
 
     const modelCall = tsAdd.mock.calls.find((c) => c[1] === 'file:///node_modules/geospec/model/index.d.ts');
     expect(modelCall?.[0]).toContain('loadModel');
 
-    const stepCall = tsAdd.mock.calls.find((c) => c[1] === 'file:///node_modules/geospec/step/index.d.ts');
-    expect(stepCall?.[0]).toContain('loadStep');
+    const meshCall = tsAdd.mock.calls.find((c) => c[1] === 'file:///node_modules/geospec/mesh/index.d.ts');
+    expect(meshCall?.[0]).toContain('GeometryDiagnostic');
 
-    const runnerWebCall = tsAdd.mock.calls.find((c) => c[1] === 'file:///node_modules/geospec/runner/web/index.d.ts');
-    expect(runnerWebCall?.[0]).toContain('createGeoSpecWebRunner');
+    const runnerNativeCall = tsAdd.mock.calls.find(
+      (c) => c[1] === 'file:///node_modules/geospec/runner/native/index.d.ts',
+    );
+    expect(runnerNativeCall?.[0]).toContain('createNativeGeoSpecRunner');
 
     const runnerWorkerCall = tsAdd.mock.calls.find(
       (c) => c[1] === 'file:///node_modules/geospec/runner/worker/index.d.ts',
     );
     expect(runnerWorkerCall?.[0]).toContain('GeoSpecRunnerResult');
 
-    const brepCall = tsAdd.mock.calls.find((c) => c[1] === 'file:///node_modules/geospec/brep/index.d.ts');
-    expect(brepCall?.[0]).toContain('analyzeBrep');
+    const assertionClientCall = tsAdd.mock.calls.find(
+      (c) => c[1] === 'file:///node_modules/geospec/assertion-client/index.d.ts',
+    );
+    expect(assertionClientCall?.[0]).toContain('createGeoSpecAssertionClient');
   });
 
   it('should register scoped and unscoped subpath declarations for both TypeScript and JavaScript', async () => {
@@ -261,10 +266,10 @@ describe('tsContribution static kernel types', () => {
     const packageJsonContent = JSON.stringify({
       name: 'geospec',
       types: 'index.d.ts',
-      exports: { './runner/web': { types: './runner/web/index.d.ts' } },
+      exports: { './runner/native': { types: './runner/native/index.d.ts' } },
     });
     const proxy = createMountProxy({
-      '/node_modules/geospec/runner/web/index.d.ts': 'export declare const createGeoSpecWebRunner: unknown;',
+      '/node_modules/geospec/runner/native/index.d.ts': 'export declare const createNativeGeoSpecRunner: unknown;',
       '/node_modules/geospec/index.d.ts': 'export declare const describe: unknown;',
       '/node_modules/geospec/package.json': packageJsonContent,
     });

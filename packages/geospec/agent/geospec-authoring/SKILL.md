@@ -57,7 +57,7 @@ Host/framework API: `public-api-index.md`; ordinary authoring: `api-index.md`.
 
 ## API reference
 
-All 370 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+All 345 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants

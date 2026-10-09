@@ -39,7 +39,6 @@ type InstalledClientModule = {
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const fixtureRoot = fileURLToPath(new URL('.', import.meta.url));
 const entryPath = 'model.geospec.ts';
-const legacyGuardEntryPath = 'native-helper-legacy.geospec.ts';
 const installedRoot = process.env['GEOSPEC_INSTALLED_CONSUMER_ROOT'];
 if (!installedRoot) {
   throw new Error('GEOSPEC_INSTALLED_CONSUMER_ROOT must select the current prepared installed consumer.');
@@ -416,19 +415,6 @@ describe('canonical authoring admission', () => {
       await loader.releaseAll();
       engine.close?.();
     }
-  });
-  it('rejects canonical loading without a compiled host', async () => {
-    const result = await runGeoSpecModule({ filesystem, entryPath: legacyGuardEntryPath });
-    expect(result.success).toBe(true);
-    if (!result.success) {
-      return;
-    }
-    expect(result.passed).toBe(false);
-    expect(result.tests).toHaveLength(1);
-    expect(result.tests[0]?.status).toBe('failed');
-    expect(result.tests[0]?.diagnostics).toEqual([
-      expect.objectContaining({ message: 'No GeoSpec model loader is active for this runner.' }),
-    ]);
   });
 });
 

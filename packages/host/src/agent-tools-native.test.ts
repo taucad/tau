@@ -42,9 +42,6 @@ vi.mock('@taucad/geospec-engine-native/node', () => ({
 }));
 vi.mock('geospec/runner/native', () => ({ createNativeGeoSpecRunner: native.runner }));
 vi.mock('@taucad/geospec-engine/node-filesystem', () => ({ createNodeVmFileSystem: native.filesystem }));
-vi.mock('@taucad/geospec-engine/register/node', () => {
-  throw new Error('The native host factory must not register the legacy engine.');
-});
 
 /**
  * Load the host module afresh, so each test starts before the process-wide engine exists.

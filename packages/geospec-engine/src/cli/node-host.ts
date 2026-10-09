@@ -1,7 +1,7 @@
 /**
  * The Node platform binding for the `geospec` CLI.
  *
- * Split from the bin so it can be tested: `main.ts` is three lines of process
+ * Split from the bin so it can be tested: `main.ts` is two lines of process
  * wiring, and everything that makes a decision — which runner, which
  * filesystem, how a path becomes a `kind` — lives here.
  *
@@ -9,7 +9,6 @@
  */
 
 import { readdir, stat } from 'node:fs/promises';
-import { flushEvidenceStore } from '#cache/evidence-cache.js';
 import type { GeoSpecCliHost } from '#cli/cli.js';
 import { availableParallelism } from 'node:os';
 import { createGeoSpecNativeNodePoolRunner } from '#runner/node/native-pool-runner.js';
@@ -39,20 +38,13 @@ export const createNodeGeoSpecCliHost = (options?: { reportStream?: (text: strin
         return { kind: entry.isDirectory() ? 'directory' : 'file' };
       },
     }),
-    createRunner: ({ projectPath, workers, shardTimeout, cache, cacheDirectory }) => {
-      if (cache === true || cacheDirectory !== undefined) {
-        throw new TypeError(
-          'This compiled GeoSpec host does not support persistent evidence cache options. Remove the cache option.',
-        );
-      }
-      return createGeoSpecNativeNodePoolRunner({
+    createRunner: ({ projectPath, workers, shardTimeout }) =>
+      createGeoSpecNativeNodePoolRunner({
         projectPath,
         // `--workers` with no count auto-sizes, which the pool models as an
         // absent `workers`.
         workers: workers === 0 ? availableParallelism() : (workers ?? 1),
         ...(shardTimeout === undefined ? {} : { shardTimeout }),
-      });
-    },
-    flush: flushEvidenceStore,
+      }),
   };
 };

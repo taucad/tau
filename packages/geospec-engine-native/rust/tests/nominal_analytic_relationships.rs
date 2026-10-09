@@ -285,6 +285,7 @@ impl BrepSubject for BoxControl {
         Ok(match id {
             0 => continuous::nominal_analytic_box_control(id, [0.; 3], [10.; 3]),
             1 => continuous::nominal_analytic_box_control(id, [8., 0., 0.], [12., 10., 10.]),
+            3 => continuous::nominal_analytic_box_control(id, [12., 0., 0.], [20., 10., 10.]),
             _ => continuous::nominal_analytic_box_control(id, [9., 0., 0.], [12., 10., 10.]),
         })
     }
@@ -403,4 +404,204 @@ fn nominal_analytic_box_route_uses_max_pair_and_never_falls_back_after_bad_admis
             assert_eq!(budget.used(), if bad { 1 } else { 5 });
         }
     }
+}
+
+#[test]
+fn occurrence_contact_is_not_charged_to_a_full_cylindrical_band_capacity() {
+    let mut subject = Subject::new("box-contact".into(), SubjectFormat::Step, "mm".into());
+    let identity = crate::identity::SubjectIdentity::step(
+        b"nominal-box-contact-control",
+        "millimetre",
+        1.0,
+        crate::backend::brep::BrepIdentityProfile {
+            ingest_profile: "core-control",
+            backend_profile: "core-control",
+        },
+        None,
+    )
+    .unwrap();
+    subject.content_hash = identity.primary_hash().into();
+    subject.semantic_identity.set(identity).unwrap();
+    subject.brep = Some(Box::new(BoxControl { bad: false }));
+    let subjects = [Rc::new(subject)];
+    let budget = Budget::new(1_000_000);
+    let normalized = Json::Null;
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::ToHaveSpatialRelationships,
+        "box-contact",
+        &normalized,
+        &budget,
+        None,
+    );
+    // Earlier band rows own exactly the whole 256 KiB band capacity.
+    let header = std::mem::size_of::<Vec<Rc<crate::backend::brep::NominalCylindricalBand>>>();
+    assert!(context
+        .set_cylindrical_band_output_bytes((256 * 1024 - header) as u64)
+        .is_ok());
+    let r = relationship("contact");
+    // Box-to-box contact proof bytes belong to the continuous output bound.
+    let Ok(proof) = prove_contact(&r, &[occurrence(0)], &[occurrence(1)], &mut context) else {
+        panic!("box contact must not be refused by cylindrical-band capacity");
+    };
+    assert_eq!(
+        json_field_ref(&proof.final_evidence, "method"),
+        Some(&Json::string("exact-nominal-finite-contact"))
+    );
+    // A separated box contact reports the measured gap, its witness and a
+    // spatial center like box clearance, not the compact face-contact shape.
+    let Ok(proof) = prove_contact(&r, &[occurrence(0)], &[occurrence(3)], &mut context) else {
+        panic!("separated box contact must be decided");
+    };
+    assert!(!proof.positive);
+    let selected = Selection {
+        status: SelectionStatus::Resolved,
+        entities: vec![],
+        expected: crate::analysis::selection::Cardinality::One,
+        stability: Stability::Authored,
+        candidates: vec![],
+        diagnostics: vec![],
+    };
+    let diagnostic =
+        project_relationship_diagnostic(0, &r, &selected, &selected, &proof, &proof.diagnostics[0]);
+    let actual: serde_json::Value =
+        serde_json::from_slice(&crate::codec::encode(&diagnostic.to_json()).unwrap()).unwrap();
+    assert_eq!(actual["code"], "GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH");
+    assert_eq!(
+        actual["spatial"]["center"].as_array().map(Vec::len),
+        Some(3)
+    );
+    assert_eq!(actual["spatial"].as_object().map(|o| o.len()), Some(1));
+    assert_eq!(actual["details"]["measured"]["distance"].as_f64(), Some(2.));
+    assert_eq!(
+        actual["details"]["witnesses"][0]["kind"],
+        "nominal-box-clearance"
+    );
+    // A selected-face contact still needs band capacity, and is refused first.
+    let face = endpoint(entity([0.; 3], [0., 0., 1.], true, false));
+    let Err(ProofError::Refused(Evaluation::Refused { diagnostics })) =
+        prove_contact(&r, &[face.clone()], &[face], &mut context)
+    else {
+        panic!("an oversized band claim must be refused");
+    };
+    assert_eq!(
+        diagnostics[0].message,
+        "Simultaneous cylindrical-band clearance capacity exceeds 256 KiB."
+    );
+}
+
+fn resolved(kind: &str, axis: bool, a: BrepEntity, b: BrepEntity) -> Relationship {
+    let selected = |entity: BrepEntity| Selection {
+        status: SelectionStatus::Resolved,
+        entities: vec![Entity {
+            id: format!("{entity:?}"),
+            entity_type: EntityType::Occurrence,
+            occurrence_path: None,
+            occurrence: Some(match entity {
+                BrepEntity::Occurrence(id) => id,
+                _ => 0,
+            }),
+            face: (!matches!(entity, BrepEntity::Occurrence(_))).then_some(entity),
+            facts: EntityFacts::default(),
+            topology_ref: None,
+        }],
+        expected: crate::analysis::selection::Cardinality::One,
+        stability: Stability::Authored,
+        candidates: vec![],
+        diagnostics: vec![],
+    };
+    let mut r = relationship(kind);
+    r.axis = axis.then_some([0., 0., 1.]);
+    r.resolved = Some((selected(a), selected(b)));
+    r.resolved_bores = Some((vec![None], vec![None]));
+    r
+}
+
+#[test]
+fn only_selected_face_rows_use_the_cylindrical_band_route() {
+    let face = BrepEntity::Face {
+        occurrence: 0,
+        face: 7,
+    };
+    let occurrence = BrepEntity::Occurrence(0);
+    for (kind, axis, a, b, expected) in [
+        ("contact", false, occurrence, occurrence, false),
+        ("contact", false, BrepEntity::Whole, occurrence, true),
+        ("contact", false, BrepEntity::WholeFace(1), occurrence, true),
+        ("clearance", false, face, occurrence, true),
+        ("insertion", true, face, face, true),
+        ("insertion", false, face, face, false),
+        ("insertion", true, face, occurrence, false),
+    ] {
+        let r = resolved(kind, axis, a, b);
+        assert_eq!(
+            relationship_uses_band_route(&r),
+            expected,
+            "{kind} {axis} {a:?} {b:?}"
+        );
+    }
+}
+
+#[test]
+fn box_contact_and_box_clearance_claim_takes_no_cylindrical_band_reservation() {
+    let mut subject = Subject::new("box-closeout".into(), SubjectFormat::Step, "mm".into());
+    let identity = crate::identity::SubjectIdentity::step(
+        b"nominal-box-closeout-control",
+        "millimetre",
+        1.0,
+        crate::backend::brep::BrepIdentityProfile {
+            ingest_profile: "core-control",
+            backend_profile: "core-control",
+        },
+        None,
+    )
+    .unwrap();
+    subject.content_hash = identity.primary_hash().into();
+    subject.semantic_identity.set(identity).unwrap();
+    subject.brep = Some(Box::new(BoxControl { bad: false }));
+    let subjects = [Rc::new(subject)];
+    let budget = Budget::new(1_000_000);
+    let normalized = Json::Null;
+    let mut context = EvaluationContext::new(
+        &subjects,
+        Capability::ToHaveSpatialRelationships,
+        "box-closeout",
+        &normalized,
+        &budget,
+        None,
+    );
+    // Earlier band rows own exactly the whole 256 KiB band capacity.
+    let header = std::mem::size_of::<Vec<Rc<crate::backend::brep::NominalCylindricalBand>>>();
+    assert!(context
+        .set_cylindrical_band_output_bytes((256 * 1024 - header) as u64)
+        .is_ok());
+    let mut clearance = resolved(
+        "clearance",
+        false,
+        BrepEntity::Occurrence(0),
+        BrepEntity::Occurrence(3),
+    );
+    clearance.min = Some(1.);
+    clearance.max = Some(3.);
+    let prepared = Prepared {
+        relationships: vec![
+            resolved(
+                "contact",
+                false,
+                BrepEntity::Occurrence(1),
+                BrepEntity::Occurrence(3),
+            ),
+            clearance,
+        ],
+    };
+    let Evaluation::Geometric {
+        positive_satisfied,
+        diagnostics,
+        ..
+    } = evaluate(&prepared, &mut context)
+    else {
+        panic!("a box-only claim must not be refused by band capacity");
+    };
+    assert!(positive_satisfied);
+    assert!(diagnostics.is_empty());
 }

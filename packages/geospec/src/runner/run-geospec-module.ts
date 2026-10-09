@@ -4,8 +4,6 @@ import { sha256Bytes } from '@taucad/runtime/kernel';
 import { createCollector } from '#runner/collector.js';
 import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
 import { compileGeoSpecTestNamePattern, filterGeoSpecTests } from '#runner/filter.js';
-import { getGeoSpecEngineProtocol, getRegisteredGeoSpecHostBinding } from '#engine/registry.js';
-import { analyzeMesh } from '#mesh/load-mesh.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
 import { bindGeoSpecSubject, rawSubjectResidency, resolveGeoSpecSubject } from '#model/subject.js';
 import type { CreateModelLoaderOptions, GeoSpecModelLoader, ManagedGeoSpecModelLoader } from '#model/types.js';
@@ -21,13 +19,9 @@ const geospecRunBindingsGlobalKey = '__GEOSPEC_RUN_BINDINGS__';
 
 type GeoSpecRunBinding = {
   collector: ReturnType<typeof createCollector>;
-  nativeAssertions: boolean;
-  analyzeMesh: typeof analyzeMesh;
   geoSpecModelLoadError: typeof GeoSpecModelLoadError;
-  modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
   nativeModelLoader?: GeoSpecModelLoader;
-  createModelLoader?: (defaults: CreateModelLoaderOptions) => ManagedGeoSpecModelLoader;
-  stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
+  createModelLoader?: (defaults: Partial<CreateModelLoaderOptions>) => ManagedGeoSpecModelLoader;
 };
 
 const runBindingsGlobal = globalThis as typeof globalThis & {
@@ -37,7 +31,6 @@ const runBindingsGlobal = globalThis as typeof globalThis & {
 const createRunToken = (): string => `geospec-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 const builtinIdentity = (options: RunGeoSpecModuleOptions): string =>
-  `${options.nativeAssertions === undefined ? 'legacy' : 'native'}:` +
   JSON.stringify(
     Object.entries(options.builtinModules ?? {})
       .sort(([left], [right]) => left.localeCompare(right))
@@ -177,7 +170,7 @@ export const GeoSpecModelLoadError = getRunBinding().geoSpecModelLoadError;
 
 export const loadModel = async (options) => {
   const binding = getRunBinding();
-  const loader = binding.nativeAssertions ? binding.nativeModelLoader : binding.modelLoader;
+  const loader = binding.nativeModelLoader;
   if (typeof loader !== 'function') {
     throw new GeoSpecModelLoadError([
       {
@@ -197,47 +190,6 @@ export const createModelLoader = (defaults = {}) => {
     throw new GeoSpecModelLoadError([{ code: 'GEOSPEC_MODEL_LOADER_UNAVAILABLE', severity: 'error', message: 'No managed GeoSpec model loader is active for this runner.' }]);
   }
   return factory(defaults);
-};
-`;
-
-const createGeospecStepBuiltinCode = (runToken: string): string => `
-${createBindingAccessorCode(runToken)}
-export const loadStep = async (options) => {
-  const loader = getRunBinding().stepLoader;
-  if (typeof loader !== 'function') {
-    throw new Error('No GeoSpec STEP loader is active for this runner. Run this test through the GeoSpec CLI or pass stepLoader to runGeoSpecModule().');
-  }
-  return loader(options);
-};
-
-export const createStepLoader = (defaults = {}) => async (options) => loadStep({ ...defaults, ...options });
-`;
-
-const geospecBrepBuiltinCode = `
-export const analyzeBrep = ({ subject }) => {
-  if (!subject || typeof subject !== 'object' || subject.kind !== 'geometry-subject') {
-    return {
-      success: false,
-      diagnostics: [{
-        code: 'UNSUPPORTED_GEOMETRY_SUBJECT',
-        severity: 'error',
-        message: 'analyzeBrep requires a GeoSpec GeometrySubject.',
-        suggestion: 'Load a subject with loadStep(...) or loadModel({ format: "step" }).',
-      }],
-    };
-  }
-  if (!subject.brep) {
-    return {
-      success: false,
-      diagnostics: [{
-        code: 'UNSUPPORTED_GEOMETRY_EVIDENCE',
-        severity: 'error',
-        message: 'Geometry subject does not include BRep evidence.',
-        suggestion: 'Load a STEP/BRep-capable subject with loadStep(...) or loadModel({ format: "step" }).',
-      }],
-    };
-  }
-  return { success: true, brep: subject.brep, diagnostics: subject.diagnostics ?? [] };
 };
 `;
 
@@ -262,16 +214,14 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   const collector = createCollector({
     ...(options.matcherWallBackstop === undefined ? {} : { matcherWallBackstop: options.matcherWallBackstop }),
     ...(options.forensic === undefined ? {} : { forensic: options.forensic }),
-    ...(options.nativeAssertions === undefined ? {} : { nativeAssertions: options.nativeAssertions }),
+    nativeAssertions: options.nativeAssertions,
   });
   const cached = await resolveCachedBundle(options);
   const runToken = createRunToken();
   const bindings = ensureRunBindings();
-  // D-S3: the model loader is INJECTED. The engine's runner hosts own its
-  // construction (caching, affinity, resource-scope tracking); this module
-  // compiles and executes the spec against whatever it is handed.
-  const meshSubjects = new Set<string>();
-  const meshProtocol = options.nativeAssertions === undefined ? getGeoSpecEngineProtocol() : undefined;
+  // D-S3: the native model loader is INJECTED. The host owns its construction
+  // (runtime, caching, affinity); this module compiles and executes the spec
+  // against whatever it is handed and binds each admitted subject to this run.
   const nativeAdmissions = new Set<Promise<unknown>>();
   const loads: Array<GeoSpecRunLineage['loads'][number]> = [];
   const drainAdmissions = async (): Promise<void> => {
@@ -285,13 +235,11 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     } while (nativeAdmissions.size > 0);
   };
   const configuredNativeModelLoader = options.nativeModelLoader;
-  const configuredModelLoader = options.modelLoader;
-  const admissionClient =
-    options.nativeAssertions === undefined ? undefined : createGeoSpecAssertionClient(options.nativeAssertions);
+  const admissionClient = createGeoSpecAssertionClient(options.nativeAssertions);
   let nativeScopeLive = true;
   /* oxlint-disable typescript/promise-function-async -- Return the exact admission promise to the authored module. */
   const trackedNativeModelLoader: GeoSpecModelLoader | undefined =
-    configuredNativeModelLoader === undefined && configuredModelLoader === undefined
+    configuredNativeModelLoader === undefined
       ? undefined
       : (loadOptions) => {
           const index = loads.length;
@@ -299,16 +247,9 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
           loads.push({ loadId, status: 'unavailable' });
           const pending = (async () => {
             try {
-              const admission =
-                configuredNativeModelLoader === undefined
-                  ? resolveGeoSpecSubject(await configuredModelLoader!(loadOptions), options.nativeAssertions?.engine)
-                  : undefined;
-              const rawSubject =
-                admission === undefined
-                  ? await configuredNativeModelLoader!(loadOptions)
-                  : { ...admission.identity, load: admission.load };
+              const rawSubject = await configuredNativeModelLoader(loadOptions);
               const { load, ...identity } = rawSubject;
-              const ensureResident = admission?.ensureResident ?? rawSubjectResidency(rawSubject);
+              const ensureResident = rawSubjectResidency(rawSubject);
               const evidence = load === undefined ? undefined : { ...structuredClone(load), loadId };
               loads[index] = {
                 loadId,
@@ -317,11 +258,11 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
                 ...(evidence === undefined ? {} : { evidence }),
               };
               return bindGeoSpecSubject({
-                engine: admission?.engine ?? options.nativeAssertions!.engine,
-                client: admission?.client ?? admissionClient!,
+                engine: options.nativeAssertions.engine,
+                client: admissionClient,
                 identity,
                 ...(evidence === undefined ? {} : { load: evidence }),
-                isLive: () => nativeScopeLive && (admission?.isLive() ?? true),
+                isLive: () => nativeScopeLive,
                 ...(ensureResident === undefined ? {} : { ensureResident }),
               });
             } catch (error) {
@@ -340,32 +281,13 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
           return pending;
         };
   /* oxlint-enable typescript/promise-function-async */
-  let meshAnalysisClosed = false;
-  const releaseMeshSubject = async (subjectId: string) =>
-    meshProtocol?.releaseSubject({ requestId: `${runToken}:release:${subjectId}`, subjectId });
   bindings.set(runToken, {
     collector,
-    nativeAssertions: options.nativeAssertions !== undefined,
     geoSpecModelLoadError: GeoSpecModelLoadError,
-    analyzeMesh: async (input) => {
-      if (options.nativeAssertions !== undefined) {
-        throw new Error('Native runs require host-admitted subjects through injected modules.');
-      }
-      const result = await analyzeMesh(input);
-      if (result.success && 'source' in input) {
-        if (meshAnalysisClosed) {
-          await Promise.allSettled([releaseMeshSubject(result.subject.subjectId)]);
-        } else {
-          meshSubjects.add(result.subject.subjectId);
-        }
-      }
-      return result;
-    },
-    ...(configuredModelLoader && trackedNativeModelLoader ? { modelLoader: trackedNativeModelLoader } : {}),
     ...(trackedNativeModelLoader ? { nativeModelLoader: trackedNativeModelLoader } : {}),
     ...(trackedNativeModelLoader
       ? {
-          createModelLoader: (defaults: CreateModelLoaderOptions): ManagedGeoSpecModelLoader => {
+          createModelLoader: (defaults: Partial<CreateModelLoaderOptions>): ManagedGeoSpecModelLoader => {
             // The raw loader owns the Runtime; a managed child drains its loads,
             // invalidates its facades and drops only those loads' private leases.
             if (defaults.engine !== undefined || defaults.readSource !== undefined) {
@@ -429,7 +351,6 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
           },
         }
       : {}),
-    ...(options.stepLoader ? { stepLoader: options.stepLoader } : {}),
   });
 
   vm.registerModule('geospec', {
@@ -439,23 +360,6 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
   vm.registerModule('geospec/model', {
     version: '0.0.0-poc',
     code: createGeospecModelBuiltinCode(runToken),
-  });
-  vm.registerModule('geospec/step', {
-    version: '0.0.0-poc',
-    code: createGeospecStepBuiltinCode(runToken),
-  });
-  vm.registerModule('geospec/mesh', {
-    version: '0.0.0-poc',
-    code: `${createBindingAccessorCode(runToken)}\nexport const analyzeMesh = (options) => getRunBinding().analyzeMesh(options);`,
-  });
-  vm.registerModule('geospec/brep', {
-    version: '0.0.0-poc',
-    code:
-      options.nativeAssertions === undefined
-        ? geospecBrepBuiltinCode
-        : `
-      export const analyzeBrep = () => { throw new Error('Native runs require host-injected BRep queries.'); };
-    `,
   });
   for (const [name, module_] of Object.entries(options.builtinModules ?? {})) {
     vm.registerModule(name, module_);
@@ -587,7 +491,6 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
       lineage: sourceLineage,
     };
   } finally {
-    meshAnalysisClosed = true;
     await drainAdmissions();
     nativeScopeLive = false;
     bindings.delete(runToken);
@@ -595,13 +498,5 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
       Reflect.deleteProperty(runBindingsGlobal, geospecRunBindingsGlobalKey);
     }
     vm.dispose();
-    // Complete every release even if a host throws during cleanup.
-    await Promise.allSettled([...meshSubjects].map(async (subjectId) => releaseMeshSubject(subjectId)));
-    // R9: land write-behind evidence at every module/shard boundary so
-    // pending entries become durable (and visible to sibling workers) off the
-    // matcher path. No-op when no engine or store is installed.
-    if (options.nativeAssertions === undefined) {
-      await getRegisteredGeoSpecHostBinding<() => Promise<void>>('flushEvidenceStore')?.();
-    }
   }
 }

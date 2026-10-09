@@ -1,11 +1,12 @@
 /**
  * The `test_model` adapter: discovery, one run, one projection.
  *
- * The runner is injected rather than chosen here — `createGeoSpecWebRunner` in
- * a browser worker, `createGeoSpecNodeRunner` on a daemon — because that is the
- * only part of a GeoSpec run that is host-specific. Keeping the side-effect
- * `@taucad/geospec-engine/register*` import at the consumer is what lets a
- * browser bundle stay free of the Node graph.
+ * The runner is injected rather than chosen here — `createNativeGeoSpecRunner`
+ * from `geospec/runner/native` over the WASM engine in a browser worker or the
+ * Node add-on on a daemon, or `createGeoSpecNativeNodePoolRunner` for a pool —
+ * because the compiled engine is the only host-specific part of a GeoSpec run.
+ * Constructing it at the consumer is what lets a browser bundle stay free of
+ * the Node graph.
  *
  * @module
  */

@@ -5,8 +5,8 @@
  *
  * The registry is **data**: `geoSpecMatcherDescriptors` is a frozen,
  * JSON-serializable table that a non-TypeScript client can emit verbatim. The
- * substrate owns it; an engine supplies the bodies through
- * {@link import('./seam.js').registerGeoSpecEngine}.
+ * substrate owns it; the compiled `@taucad/geospec-engine-native` core
+ * evaluates every claim lowered from it.
  *
  * @module
  */

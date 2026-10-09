@@ -1,12 +1,11 @@
 # geospec API index
 
-geospec 0.1.0-beta.1 · 370 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.1 · 345 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
 ## Functions — `api-functions.md`
 
-createGeoSpec (function) — Create a GeoSpec instance [id: typescript:createGeoSpec]
 describe (function) [1 members] — GeoSpec suite helper used inside VM-executed test modules [id: typescript:describe]
   describe.skip (method) [id: typescript:describe.skip]
 expectGeo (function) — Start a geometry assertion chain [id: typescript:expectGeo]
@@ -14,7 +13,7 @@ it (function) [1 members] — GeoSpec test helper used inside VM-executed test m
   it.skip (method) [id: typescript:it.skip]
 test (function) [1 members] — Alias for {@link it} [id: typescript:test]
   test.skip (method) [id: typescript:test.skip]
-createModelLoader (function) — Create a {@link loadModel} function with shared defaults [id: typescript:createModelLoader]
+createModelLoader (function) — Create a {@link loadModel} function over a host-supplied compiled engine [id: typescript:createModelLoader]
 loadModel (function) — Load a CAD model into GeoSpec evidence [id: typescript:loadModel]
 resolveRuntimeExportIntent (function) [id: typescript:resolveRuntimeExportIntent]
 
@@ -24,9 +23,6 @@ geoSpecMatcherNames (constant) — Every matcher name exposed by {@link expectGe
 
 ## Types — `api-types.md`
 
-GeoSpec (type) [2 members] — Stateful GeoSpec API created by {@link createGeoSpec} [id: typescript:GeoSpec]
-  GeoSpec.loadMesh (method) [id: typescript:GeoSpec.loadMesh]
-  GeoSpec.analyzeMesh (method) [id: typescript:GeoSpec.analyzeMesh]
 GeoSpecSubject (type) [1 members] — A model admitted by one live GeoSpec host scope [id: typescript:GeoSpecSubject]
   GeoSpecSubject.[subjectBrand] (property) [id: typescript:GeoSpecSubject.[subjectBrand]]
 GeoSpecUnit (type) — Geometry units accepted at GeoSpec evidence-loading boundaries [id: typescript:GeoSpecUnit]
@@ -279,27 +275,6 @@ StepEvidence (type) [6 members] — STEP/XDE evidence extracted while loading a 
   StepEvidence.capabilities (property) [id: typescript:StepEvidence.capabilities]
   StepEvidence.xde (property) — Structured AP242 XDE read result (occurrences, subshape names, datum placements) [id: typescript:StepEvidence.xde]
 Vec3 (type) — Numeric 3D vector [id: typescript:Vec3]
-AnalyzeMeshOptions (type) [8 members] — Analyze source bytes or an already retained subject, never both [id: typescript:AnalyzeMeshOptions]
-  AnalyzeMeshOptions.source (property) [id: typescript:AnalyzeMeshOptions.source]
-  AnalyzeMeshOptions.format (property) [id: typescript:AnalyzeMeshOptions.format]
-  AnalyzeMeshOptions.path (property) [id: typescript:AnalyzeMeshOptions.path]
-  AnalyzeMeshOptions.name (property) [id: typescript:AnalyzeMeshOptions.name]
-  AnalyzeMeshOptions.unit (property) — Unit exposed by the returned GeoSpec subject [id: typescript:AnalyzeMeshOptions.unit]
-  AnalyzeMeshOptions.sourceUnit (property) — Coordinate unit of the supplied mesh data before normalization [id: typescript:AnalyzeMeshOptions.sourceUnit]
-  AnalyzeMeshOptions.parameters (property) [id: typescript:AnalyzeMeshOptions.parameters]
-  AnalyzeMeshOptions.subject (property) [id: typescript:AnalyzeMeshOptions.subject]
-AnalyzeMeshResult (type) [1 members] — Mesh analysis result [id: typescript:AnalyzeMeshResult]
-  AnalyzeMeshResult.success (property) [id: typescript:AnalyzeMeshResult.success]
-LoadMeshOptions (type) [7 members] — Options for loading mesh evidence [id: typescript:LoadMeshOptions]
-  LoadMeshOptions.source (property) [id: typescript:LoadMeshOptions.source]
-  LoadMeshOptions.format (property) [id: typescript:LoadMeshOptions.format]
-  LoadMeshOptions.path (property) [id: typescript:LoadMeshOptions.path]
-  LoadMeshOptions.name (property) [id: typescript:LoadMeshOptions.name]
-  LoadMeshOptions.unit (property) — Unit exposed by the returned GeoSpec subject [id: typescript:LoadMeshOptions.unit]
-  LoadMeshOptions.sourceUnit (property) — Coordinate unit of the supplied mesh data before normalization [id: typescript:LoadMeshOptions.sourceUnit]
-  LoadMeshOptions.parameters (property) [id: typescript:LoadMeshOptions.parameters]
-LoadMeshResult (type) [1 members] — Result of loading mesh evidence into a GeoSpec geometry subject [id: typescript:LoadMeshResult]
-  LoadMeshResult.success (property) [id: typescript:LoadMeshResult.success]
 GeoSpecVec3 (type) — Numeric 3D vector [id: typescript:GeoSpecVec3]
 GeoSpecExportRoute (type) — Runtime route metadata used to decide whether a runtime export… [id: typescript:GeoSpecExportRoute]
 RuntimeBackedModelFormat (type) [id: typescript:RuntimeBackedModelFormat]

@@ -1,24 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mock } from 'vitest-mock-extended';
-import { geoSpecEngineProtocolVersion } from '#engine/protocol.js';
-import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
-import { createTestGeoSpecEngineProtocol } from '#engine/protocol.test-support.js';
 import type { VmFileSystem } from '@taucad/esbuild/vm';
-import type { GeometrySubject } from '#mesh/types.js';
-import type { GeoSpecSubject } from '#model/subject.js';
-import type { GeoSpecRunProfile } from '#runner/profile.js';
+import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
-import { createCollector, GeoSpecAssertionError } from '#runner/collector.js';
+import { GeoSpecAssertionError } from '#runner/collector.js';
 import { discoverGeoSpecFiles } from '#runner/discovery.js';
 import type { GeoSpecDiscoveryFileSystem } from '#runner/discovery.js';
-import { chargeBudget, withMatcherBudget } from '#runner/matcher-budget.js';
 import { runGeoSpecModule } from '#runner/index.js';
 import { createSerialGeoSpecRunner } from '#runner/worker/serial-runner.js';
 
 afterEach(() => {
-  clearGeoSpecEngine();
   vi.unstubAllEnvs();
 });
+
+const nativeAssertions = {
+  engine: {
+    evaluateClaim: (input: Uint8Array<ArrayBuffer>) => ({
+      canonicalClaim: input,
+      canonicalPlan: input,
+      canonicalResult: input,
+    }),
+    processRequest: (input: Uint8Array<ArrayBuffer>) => input,
+  },
+} satisfies GeoSpecAssertionClientOptions;
 
 /** A value structuredClone refuses: functions are not transferable. */
 const unclonable = (): (() => void) => () => undefined;
@@ -58,93 +61,6 @@ describe('model-load diagnostics cloning', () => {
 describe('assertion error', () => {
   it('should default its message when constructed with no diagnostics', () => {
     expect(new GeoSpecAssertionError([]).message).toBe('GeoSpec assertion failed.');
-  });
-});
-
-describe('async matcher success path', () => {
-  it('should record a passing async assertion', async () => {
-    registerGeoSpecEngine({
-      protocolVersion: geoSpecEngineProtocolVersion,
-      engine: 'edge-engine',
-      version: '0.0.0',
-      protocol: createTestGeoSpecEngineProtocol({ capabilities: ['toHaveSpatialRelationships'] }),
-    });
-
-    const collector = createCollector();
-    collector.it('relationships', () => {
-      collector.expectGeo({ subjectId: 'subject-1' }).toHaveSpatialRelationships({ relationships: [] });
-    });
-    await collector.waitForCompletion(1000);
-
-    expect(collector.tests[0]?.status).toBe('passed');
-    expect(collector.tests[0]?.assertions[0]?.passed).toBe(true);
-  });
-
-  it('should apply the deterministic work-unit budget while an async matcher starts', async () => {
-    registerGeoSpecEngine({
-      protocolVersion: geoSpecEngineProtocolVersion,
-      engine: 'edge-engine',
-      version: '0.0.0',
-      protocol: createTestGeoSpecEngineProtocol({
-        capabilities: ['toHaveSpatialRelationships'],
-        submitClaims: () => {
-          chargeBudget(8_000_001);
-          throw new Error('unreachable');
-        },
-      }),
-    });
-
-    const collector = createCollector();
-    collector.it('relationships', () => {
-      collector.expectGeo({ subjectId: 'subject-1' }).toHaveSpatialRelationships({ relationships: [] });
-    });
-    await collector.waitForCompletion(1000);
-
-    expect(collector.tests[0]?.diagnostics[0]?.code).toBe('MATCHER_TIMEOUT');
-  });
-});
-
-describe('matcher budget private test controls', () => {
-  it('should accept a private unit budget', () => {
-    const diagnostics = withMatcherBudget({
-      matcher: 'voidContinuity',
-      workUnitBudget: 1,
-      evaluate: () => {
-        chargeBudget(2);
-        return [];
-      },
-    });
-
-    expect(diagnostics[0]?.code).toBe('MATCHER_TIMEOUT');
-  });
-
-  it('should accept a private wall backstop', () => {
-    const diagnostics = withMatcherBudget({
-      matcher: 'stalled',
-      wallBackstop: 0.000001,
-      evaluate: () => {
-        const start = Date.now();
-        while (Date.now() <= start) {
-          // Spin past the deadline
-        }
-        chargeBudget(1);
-        return [];
-      },
-    });
-
-    expect(diagnostics[0]?.code).toBe('MATCHER_STALLED');
-  });
-
-  it('should use canonical defaults when no private limit is supplied', () => {
-    expect(
-      withMatcherBudget({
-        matcher: 'voidContinuity',
-        evaluate: () => {
-          chargeBudget(1);
-          return [];
-        },
-      }),
-    ).toStrictEqual([]);
   });
 });
 
@@ -230,6 +146,7 @@ describe('concurrent module runs', () => {
       runGeoSpecModule({
         filesystem: filesystemOf([]) as unknown as VmFileSystem,
         entryPath: 'spec.geospec.ts',
+        nativeAssertions,
         builtinModules: {},
       });
 
@@ -252,10 +169,12 @@ describe('concurrent module runs', () => {
       runGeoSpecModule({
         filesystem: filesystem as unknown as VmFileSystem,
         entryPath: 'a.geospec.ts',
+        nativeAssertions,
       }),
       runGeoSpecModule({
         filesystem: filesystem as unknown as VmFileSystem,
         entryPath: 'b.geospec.ts',
+        nativeAssertions,
       }),
     ]);
 
@@ -285,7 +204,7 @@ describe('serial runner edges', () => {
   it('should use the bare abort message for an empty reason', async () => {
     // oxlint-disable-next-line eslint/prefer-const -- the event handler closes over the runner it creates.
     let runner: ReturnType<typeof createSerialGeoSpecRunner>;
-    runner = createSerialGeoSpecRunner({ filesystem });
+    runner = createSerialGeoSpecRunner({ filesystem, nativeAssertions });
     runner.on('file-complete', () => {
       runner.abort('');
     });
@@ -295,21 +214,11 @@ describe('serial runner edges', () => {
     expect(result.issues?.[0]?.message).toBe('GeoSpec run aborted.');
   });
 
-  it('should forward step loaders, builtin modules, and an internal profile', async () => {
-    const subject = { kind: 'geometry-subject' } as unknown as GeometrySubject;
-    registerGeoSpecEngine({
-      protocolVersion: geoSpecEngineProtocolVersion,
-      engine: 'edge-engine',
-      version: '0.0.0',
-      protocol: createTestGeoSpecEngineProtocol(),
-    });
-
+  it('should forward builtin modules', async () => {
     const runner = createSerialGeoSpecRunner({
       filesystem,
-      modelLoader: async () => mock<GeoSpecSubject>(),
-      stepLoader: async () => subject,
+      nativeAssertions,
       builtinModules: { extra: { version: '1', code: 'export const x = 1;' } },
-      internalProfile: mock<GeoSpecRunProfile>(),
     });
 
     const result = await runner.run({ files: ['a.geospec.ts'] });

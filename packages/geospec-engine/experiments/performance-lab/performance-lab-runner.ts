@@ -10,9 +10,7 @@ import type { GeoSpecQueryCapability, GeoSpecCanonicalClaimReport } from 'geospe
 // eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Private bench-only adapter uses the public model loader; this is not packaged runtime code.
 import { createGeoSpecNativeModelLoader } from 'geospec/runner/native';
 // eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Private bench-only adapter uses canonical protocol helpers.
-import { encodeGeoSpecCanonicalJson, toGeoSpecProtocolJson } from 'geospec/engine';
-// eslint-disable-next-line @nx/enforce-module-boundaries, import-x/no-extraneous-dependencies -- Type-only protocol contract for the bench adapter.
-import type { GeoSpecEngineImplementation } from 'geospec/engine';
+import { toGeoSpecProtocolJson } from 'geospec/engine';
 import type {
   HostBytes,
   HostCacheLifecycle,
@@ -46,7 +44,7 @@ export type PerformanceLabCase = {
 
 /** Byte-only input shared by the browser and desktop benchmark hosts. @internal */
 export type PerformanceLabRunInput = {
-  engine: 'legacy-wasm' | 'combined-wasm' | 'native-desktop';
+  engine: 'combined-wasm' | 'native-desktop';
   execution?: PerformanceLabWasmExecution;
   fixture: {
     id: string;
@@ -101,9 +99,6 @@ export const withTwoCallClaims = (module: PerformanceLabEngineModule): Performan
 
 /** Lazy imports included in startup timing. @internal */
 export type PerformanceLabModules = {
-  legacy?: () => Promise<{
-    geoSpecEngineImplementation: GeoSpecEngineImplementation;
-  }>;
   combined?: () => Promise<PerformanceLabEngineModule>;
   native?: () => Promise<PerformanceLabEngineModule>;
 };
@@ -134,7 +129,7 @@ export type PerformanceLabRunResult = {
   cache: 'cold-module-cold-subject' | 'warm-module-cold-subject' | 'host-module-cache/subject-cold';
   buildIdentity: unknown;
   engineObservations: unknown;
-  initializationTiming: 'startup' | 'lazy-in-admission-or-evaluation';
+  initializationTiming: 'startup';
   perCase: readonly PerformanceLabCaseResult[];
   timing: {
     firstResult?: number | WireNull;
@@ -282,7 +277,7 @@ export const parsePerformanceLabRunInput = async (value: unknown): Promise<Perfo
   if (
     !record(value) ||
     !onlyKeys(value, ['engine', 'execution', 'fixture', 'cases', 'repeats', 'cache']) ||
-    (value['engine'] !== 'legacy-wasm' && value['engine'] !== 'combined-wasm' && value['engine'] !== 'native-desktop')
+    (value['engine'] !== 'combined-wasm' && value['engine'] !== 'native-desktop')
   ) {
     throw new TypeError('Invalid performance-lab engine.');
   }
@@ -541,181 +536,6 @@ const runNative = async (
   };
 };
 
-const runLegacy = async (
-  input: PerformanceLabRunInput,
-  load: NonNullable<PerformanceLabModules['legacy']>,
-  resultRetention: 'complete' | 'discard',
-): Promise<PerformanceLabRunResult> => {
-  const totalAt = performance.now();
-  const startupAt = performance.now();
-  const { geoSpecEngineImplementation: implementation } = await load();
-  const initialized = implementation.protocol.initialize({
-    protocolVersion: 2,
-    client: { name: 'simd-performance-lab', version: '1' },
-  });
-  const startup = ms(startupAt);
-  const supported = new Set(
-    input.fixture.format === 'rational-plate' ? [] : initialized.capabilities.map(({ name }) => name),
-  );
-  const perCase: PerformanceLabCaseResult[] = [];
-  if (input.cases.every(({ matcher, polarity }) => !supported.has(matcher) || polarity === 'negative')) {
-    for (let repeat = 0; repeat < input.repeats; repeat += 1) {
-      for (const current of input.cases) {
-        if (resultRetention === 'discard') {
-          continue;
-        }
-        perCase.push({
-          caseId: current.id,
-          matcher: current.matcher,
-          repeat,
-          status: 'unsupported',
-          expectedStatus: current.expectedStatus,
-          diagnostics: [
-            current.polarity === 'negative'
-              ? 'Legacy protocol does not evaluate negated claims.'
-              : 'Capability not advertised by legacy.',
-          ],
-          result: null,
-          evaluation: 0,
-          numericProfile: null,
-          canonicalClaimUtf8: null,
-          canonicalResultUtf8: null,
-          canonicalResultSha256: null,
-        });
-      }
-    }
-    return {
-      engine: input.engine,
-      backend: initialized.engine.name,
-      profile: null,
-      buildIdentity: initialized,
-      engineObservations: null,
-      initializationTiming: 'lazy-in-admission-or-evaluation',
-      fixtureId: input.fixture.id,
-      cache: cacheLabel(input.cache),
-      perCase,
-      timing: {
-        startup,
-        admission: 0,
-        evaluation: 0,
-        cleanup: 0,
-        total: ms(totalAt),
-      },
-    };
-  }
-  const admittedAt = performance.now();
-  const admitted = await implementation.protocol.ingestSubject(
-    {
-      requestId: `lab-ingest:${input.fixture.id}`,
-      contentHash: `sha256:${input.fixture.sha256}`,
-      format: input.fixture.format === 'rational-plate' ? 'step' : input.fixture.format,
-      frame: {
-        coordinateSystem: 'z-up',
-        sourceUnit: input.fixture.sourceUnit,
-        targetUnit: 'mm',
-      },
-      provenance: { fixtureId: input.fixture.id },
-      options: {},
-    },
-    input.fixture.bytes,
-  );
-  const admission = ms(admittedAt);
-  let evaluation = 0;
-  let cleanup = 0;
-  try {
-    /* oxlint-disable no-await-in-loop -- Sequential calls share one admitted subject and must not contend during measurement. */
-    for (let repeat = 0; repeat < input.repeats; repeat += 1) {
-      for (const current of input.cases) {
-        if (
-          !supported.has(current.matcher) ||
-          current.polarity === 'negative' ||
-          (current.kind === 'matcher' && current.payload === undefined)
-        ) {
-          if (resultRetention === 'discard') {
-            continue;
-          }
-          perCase.push({
-            caseId: current.id,
-            matcher: current.matcher,
-            repeat,
-            status: 'unsupported',
-            expectedStatus: current.expectedStatus,
-            diagnostics: [
-              current.polarity === 'negative'
-                ? 'Legacy protocol does not evaluate negated claims.'
-                : 'Capability not advertised by legacy.',
-            ],
-            result: null,
-            evaluation: 0,
-            numericProfile: null,
-            canonicalClaimUtf8: null,
-            canonicalResultUtf8: null,
-            canonicalResultSha256: null,
-          });
-          continue;
-        }
-        const payload = toGeoSpecProtocolJson(current.payload);
-        const claim = encodeGeoSpecCanonicalJson({
-          claimId: current.claimId ?? `${current.id}:${repeat}`,
-          capability: current.matcher,
-          subjectIds: [admitted.subject.subjectId],
-          payload,
-          workUnitBudget: current.workUnitBudget ?? 8_000_000,
-        });
-        const evaluatedAt = performance.now();
-        const response = await implementation.protocol.submitClaims({
-          requestId: `lab-claim:${current.id}:${repeat}`,
-          registryVersion: 3,
-          execution: { forensic: false, matcherWallBackstop: 600_000 },
-          claims: [claim],
-        });
-        const elapsed = ms(evaluatedAt);
-        evaluation += elapsed;
-        const result = response.results[0];
-        if (!result) {
-          throw new Error('Legacy GeoSpec matcher returned no report.');
-        }
-        if (resultRetention === 'discard') {
-          continue;
-        }
-        const canonicalResult = encodeGeoSpecCanonicalJson(toGeoSpecProtocolJson(result));
-        perCase.push({
-          caseId: current.id,
-          matcher: current.matcher,
-          repeat,
-          status: result.status,
-          expectedStatus: current.expectedStatus,
-          diagnostics: result.diagnostics,
-          result,
-          evaluation: elapsed,
-          numericProfile: profileOf(result.provenance),
-          ...(await canonicalFields(claim, canonicalResult)),
-        });
-      }
-    }
-    /* oxlint-enable no-await-in-loop */
-  } finally {
-    const cleanupAt = performance.now();
-    implementation.protocol.releaseSubject({
-      requestId: `lab-release:${input.fixture.id}`,
-      subjectId: admitted.subject.subjectId,
-    });
-    cleanup = ms(cleanupAt);
-  }
-  return {
-    engine: input.engine,
-    backend: initialized.engine.name,
-    profile: null,
-    buildIdentity: initialized,
-    engineObservations: null,
-    fixtureId: input.fixture.id,
-    cache: cacheLabel(input.cache),
-    initializationTiming: 'lazy-in-admission-or-evaluation',
-    perCase,
-    timing: { startup, admission, evaluation, cleanup, total: ms(totalAt) },
-  };
-};
-
 /**
  * Admit one fixture, then run sequential public calls on the injected engine.
  * @internal
@@ -729,12 +549,6 @@ export const runPerformanceLabCell = async (
   modules: PerformanceLabModules,
   resultRetention: 'complete' | 'discard' = 'complete',
 ): Promise<PerformanceLabRunResult> => {
-  if (input.engine === 'legacy-wasm') {
-    if (!modules.legacy) {
-      throw new Error('Legacy GeoSpec engine module is unavailable.');
-    }
-    return runLegacy(input, modules.legacy, resultRetention);
-  }
   const load = input.engine === 'combined-wasm' ? modules.combined : modules.native;
   if (!load) {
     throw new Error(`${input.engine} GeoSpec engine module is unavailable.`);

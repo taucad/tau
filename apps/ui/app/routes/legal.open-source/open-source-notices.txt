@@ -17,7 +17,7 @@ Tau makes use of, and is based in part on, facilities provided by the **Open CAS
 OCCT runs in the web and desktop apps as WebAssembly and, in the desktop app, as a native library, through these
 components:
 
-- The GeoSpec engine (`@taucad/geospec-engine` and `@taucad/geospec-engine-native`), built from OCCT upstream
+- The GeoSpec engine (`@taucad/geospec-engine-native`), built from OCCT upstream
   revision `3d097a0328e71b826377d4814ab05ec3c3d23871`
 - libcascade 3.0.2 ([source](https://github.com/taucad/opencascade.js))
 - occt-import-js 0.0.23 ([source](https://github.com/kovacsv/occt-import-js))

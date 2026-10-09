@@ -18,7 +18,6 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import {
   isHostContended,
-  loadLegacyWithoutPersistence,
   readHost,
   selectLabFixtures,
   selectLabProducts,
@@ -40,14 +39,12 @@ import type {
 
 // oxlint-disable-next-line typescript/no-restricted-types -- Raw JSON evidence distinguishes explicit null from omission.
 type WireNull = null;
-type Family = 'legacy' | 'native' | 'wasm';
+type Family = 'native' | 'wasm';
 /** One selected product; `files` pins the exact bytes its child verifies and loads. @internal */
 export type FocusProduct = {
   label: string;
   family: Family;
   engine: PerformanceLabRunInput['engine'];
-  /** Legacy entry module. */
-  module?: string;
   /** Native Node add-on, selected through NAPI_RS_NATIVE_LIBRARY_PATH. */
   addon?: string;
   /** ST WASM binary and Emscripten glue. */
@@ -78,7 +75,7 @@ type Options = {
 export type FocusCell<Product> = { sequence: number; round: number; caseId: string; product: Product };
 /** `at` is performance.now() milliseconds; `cpu` is cumulative process.cpuUsage(). */
 type Sample = { at: number; cpu: NodeJS.CpuUsage };
-/** One traced engine or legacy protocol call; `end` is absent when the call threw. @internal */
+/** One traced engine call; `end` is absent when the call threw. @internal */
 export type FocusCall = { method: string; start: Sample; end?: Sample };
 /** One phase: wall milliseconds and process CPU microseconds. */
 type Window = { wall: number; userMicros: number; systemMicros: number };
@@ -194,10 +191,6 @@ const root = resolvePath(import.meta.dirname, '../../../..');
 const packageRoot = resolvePath(root, 'packages/geospec-engine-native');
 const script = resolvePath(import.meta.dirname, 'performance-lab-focus.ts');
 const defaults = {
-  module: resolvePath(
-    root,
-    'out/artifacts/geospec-native-engine/legacy-reference/attempt-DzTz1z/consumer/node_modules/@taucad/geospec-engine/dist/index.mjs',
-  ),
   addon: resolvePath(packageRoot, 'bindings/node/generated/geospec-engine-native.darwin-arm64.node'),
   binary: resolvePath(packageRoot, 'bindings/emscripten/generated/geospec_engine_native.wasm'),
   glue: resolvePath(packageRoot, 'bindings/emscripten/generated/geospec_engine_native.mjs'),
@@ -214,21 +207,19 @@ const focusCaseIds = [
   'm3-toHaveVoidContinuity-positive', // Void proof on the nominal guide bore.
   'm3-query-analyzeBrep', // Broad analyzeBrep query.
 ];
-const engines = { legacy: 'legacy-wasm', native: 'native-desktop', wasm: 'combined-wasm' } as const;
+const engines = { native: 'native-desktop', wasm: 'combined-wasm' } as const;
 const productKeys: Record<Family, readonly string[]> = {
-  legacy: ['module'],
   native: ['addon', 'permits'],
   wasm: ['binary', 'glue', 'receipt', 'permits'],
 };
 const admissionMethods = new Set(['ingestSubject', 'ingestMesh', 'subjectHandle']);
-const evaluationMethods = new Set(['canonicalPlan', 'evaluateClaim', 'evaluatePlan', 'processRequest', 'submitClaims']);
+const evaluationMethods = new Set(['canonicalPlan', 'evaluateClaim', 'evaluatePlan', 'processRequest']);
 const cleanupMethods = new Set(['releaseSubject', 'close']);
 const help = `Private performance-lab focus diagnostic (not Q7 qualification).
-  --product=engine=legacy[,module=/abs/index.mjs][,label=name]
   --product=engine=native[,addon=/abs/geospec-engine-native.node][,permits=N][,label=name]
   --product=engine=wasm[,binary=/abs/geospec_engine_native.wasm][,glue=/abs/geospec_engine_native.mjs][,label=name]
   --product=engine=wasm,receipt=/abs/geospec_engine_native.mt.json,permits=N[,label=name]
-Repeat --product to compare products; the default is installed legacy, native and ST WASM. Native permits are
+Repeat --product to compare products; the default is installed native and ST WASM. Native permits are
 caller-inclusive executionPermits; an MT grant may be smaller than, never larger than, the receipt's permits.
 Products of one engine family must return identical admission and result bytes for a case; different families are
 compared by status only.
@@ -276,8 +267,8 @@ export const parseProduct = (text: string): ProductRequest => {
     }),
   );
   const family = fields.get('engine');
-  if (family !== 'legacy' && family !== 'native' && family !== 'wasm') {
-    throw new Error(`--product needs engine=legacy|native|wasm: ${text}`);
+  if (family !== 'native' && family !== 'wasm') {
+    throw new Error(`--product needs engine=native|wasm: ${text}`);
   }
   for (const [key, value] of fields) {
     const isPath = !['engine', 'label', 'permits'].includes(key);
@@ -304,7 +295,6 @@ export const parseProduct = (text: string): ProductRequest => {
     engine: engines[family],
     ...(label === undefined ? {} : { label }),
     ...(permits === undefined ? {} : { permits }),
-    ...(family === 'legacy' ? { module: pathOf('module') } : {}),
     ...(family === 'native' ? { addon: pathOf('addon') } : {}),
     ...(family === 'wasm' && receipt !== undefined ? { receipt: resolvePath(receipt) } : {}),
     ...(family === 'wasm' && receipt === undefined ? { binary: pathOf('binary'), glue: pathOf('glue') } : {}),
@@ -369,7 +359,7 @@ export const parseFocusArguments = (args: string[]): Options => {
     throw new Error(`Unknown or repeated catalog case: ${unknown.join(', ') || caseIds.join(', ')}`);
   }
   return {
-    products: (values.product ?? ['engine=legacy', 'engine=native', 'engine=wasm']).map((text) => parseProduct(text)),
+    products: (values.product ?? ['engine=native', 'engine=wasm']).map((text) => parseProduct(text)),
     caseIds,
     outputDir: resolvePath(root, values['output-dir']),
     samples,
@@ -438,7 +428,7 @@ export const phaseWindows = (
   const evaluation = calls.filter(({ method }) => evaluationMethods.has(method));
   const perRepeat = evaluation.length > 0 && evaluation.length % repeats === 0 ? evaluation.length / repeats : 0;
   return {
-    startup: span(bounds.start, calls.find(({ method }) => method === 'new Engine' || method === 'initialize')?.end),
+    startup: span(bounds.start, calls.find(({ method }) => method === 'new Engine')?.end),
     admission: span(admission[0]?.start, admission.at(-1)?.end),
     evaluation: span(evaluation[0]?.start, evaluation.at(-1)?.end),
     evaluationByRepeat:
@@ -489,8 +479,8 @@ const measureFocusCase = async (spec: { product: FocusProduct; caseId: string; r
   const calls: FocusCall[] = [];
   const seen: { admission?: Uint8Array<ArrayBuffer> } = {};
   const sample = (): Sample => ({ at: performance.now(), cpu: process.cpuUsage() });
-  // Proxies call through to the real target so private fields and legacy protocol state stay intact.
-  // oxlint-disable-next-line typescript/no-restricted-types -- Proxy targets are arbitrary engine and protocol objects.
+  // Proxies call through to the real target so private fields stay intact.
+  // oxlint-disable-next-line typescript/no-restricted-types -- Proxy targets are arbitrary engine objects.
   const trace = <T extends object>(target: T): T =>
     new Proxy(target, {
       get: (object, key) => {
@@ -526,10 +516,6 @@ const measureFocusCase = async (spec: { product: FocusProduct; caseId: string; r
   const load = selectLabProducts({ nativeAddon: product.addon, mixedGlue: product.glue, mixedBinary: product.binary });
   const hostEntry = (name: 'node' | 'wasm') => resolvePath(packageRoot, `src/${name}.ts`);
   const modules: PerformanceLabModules = {
-    legacy: async () => {
-      const { geoSpecEngineImplementation: implementation } = await loadLegacyWithoutPersistence(product.module!);
-      return { geoSpecEngineImplementation: { ...implementation, protocol: trace(implementation.protocol) } };
-    },
     native: async () => {
       const loaded = await load(hostEntry('node'));
       // An add-on from before evaluateClaim (R10) still runs the cell through the calls its client made.
@@ -825,8 +811,7 @@ export const summarizeFocusRows = (rows: readonly FocusRow[]): FocusSummary => {
       counts.unexpectedStatuses += summary.unexpectedStatuses;
       counts.unverifiedExpectations += summary.unverifiedExpectations;
       counts.unsupported += summary.unsupported;
-      counts.knownDifferences +=
-        summary.qualifiedTargetDifferences + summary.retainedLegacyNumericalOutcomes + summary.knownLegacyDefects;
+      counts.knownDifferences += summary.qualifiedTargetDifferences;
     } else {
       counts.failures += 1;
     }
@@ -879,11 +864,10 @@ export const renderFocusSummary = (summary: FocusSummary): string => {
 const writeJson = async (path: string, value: unknown): Promise<void> => {
   await writeFile(path, JSON.stringify(value, undefined, 2) + '\n', { flag: 'wx' });
 };
-const productFiles = (request: ProductRequest): string[] =>
-  request.family === 'legacy'
-    ? // The legacy cache control that loadLegacyWithoutPersistence disables before import.
-      [request.module!, resolvePath(dirname(request.module!), 'cache/evidence-cache.mjs')]
-    : [request.addon ?? request.receipt ?? request.binary!, ...(request.glue === undefined ? [] : [request.glue])];
+const productFiles = (request: ProductRequest): string[] => [
+  request.addon ?? request.receipt ?? request.binary!,
+  ...(request.glue === undefined ? [] : [request.glue]),
+];
 const sourcePaths = [
   '../geospec-engine/experiments/performance-lab/performance-lab-focus.ts',
   '../geospec-engine/experiments/performance-lab/performance-lab-cli.ts',
@@ -949,7 +933,7 @@ const runFocusParent = async (options: Options): Promise<void> => {
     protocol:
       'Fresh child per round/case/product; case offset = round, product offset = round + case index. The child verifies product and fixture SHA-256, admits once (cold module, engine and subject), then evaluates the authored claim `repeats` times on the retained subject.',
     phases:
-      'Walls are the shared runner timings; CPU windows are process.cpuUsage() deltas at traced engine-call boundaries (startup to Engine construction or legacy initialize, admission ingest through subject handle, evaluation plan/evaluate or submitClaims, cleanup release/close). processWall spans parent spawn through close, including child hash verification; harness is processWall minus the runner total (Node start, TypeScript imports, SHA-256 checks, result write), reported apart from product time; processCpu is cumulative child CPU. CPU includes background runtime threads and can exceed wall.',
+      'Walls are the shared runner timings; CPU windows are process.cpuUsage() deltas at traced engine-call boundaries (startup to Engine construction, admission ingest through subject handle, evaluation plan/evaluate, cleanup release/close). processWall spans parent spawn through close, including child hash verification; harness is processWall minus the runner total (Node start, TypeScript imports, SHA-256 checks, result write), reported apart from product time; processCpu is cumulative child CPU. CPU includes background runtime threads and can exceed wall.',
     resources:
       'maxRssBytes is process.resourceUsage().maxRSS * 1024 for the child process, taken after cleanup. threads is the parent-polled ps -M high-water, a lower bound at the sampling interval.',
     parity:

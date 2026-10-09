@@ -69,23 +69,8 @@ const toleratedImportFailures: Record<string, string> = {};
 /**
  * Payloads that only fail when instantiated, keyed by package name; the source runs inside the
  * installed application.
- *
- * `@taucad/geospec-engine` is loaded through `dist/native/opencascade-module.mjs` rather than the
- * published `./native/opencascade/single` subpath, because the adapter is the module every shipped
- * consumer path reaches — it is what proves the subpath resolves and instantiates from inside the
- * installed tree. It is not itself an export target, so it is imported by file URL from
- * `node_modules`.
  */
-const instantiationProbes: Record<string, string> = {
-  '@taucad/geospec-engine': `
-const moduleUrl = new URL('./node_modules/@taucad/geospec-engine/dist/native/opencascade-module.mjs', import.meta.url);
-const { getOpenCascadeStepModule } = await import(moduleUrl.href);
-const occt = await getOpenCascadeStepModule();
-if (!(occt.HEAPF64?.length > 0)) {
-  throw new Error('OCCT module instantiated without a heap.');
-}
-`,
-};
+const instantiationProbes: Record<string, string> = {};
 
 const invariant: (condition: unknown, message: string) => asserts condition = (condition, message) => {
   if (!condition) {

@@ -93,11 +93,6 @@ describe('importableSpecifiers', () => {
 
   it('enumerates every published subpath of the release train', () => {
     expect(importableSpecifiers(publishedManifest('packages/geospec-engine'))).toStrictEqual([
-      '@taucad/geospec-engine',
-      '@taucad/geospec-engine/register',
-      '@taucad/geospec-engine/register/node',
-      '@taucad/geospec-engine/native/opencascade/single',
-      '@taucad/geospec-engine/native/opencascade/single/wasm-url',
       '@taucad/geospec-engine/node-filesystem',
       '@taucad/geospec-engine/native-pool/node',
     ]);
@@ -220,14 +215,14 @@ describe('isToleratedImportFailure', () => {
     ).toBe(false);
   });
 
-  it('rejects a missing sibling file — the F2 native variant break', () => {
+  it('rejects a missing sibling file of an instantiated native payload', () => {
     expect(
       isToleratedImportFailure(
         {
-          specifier: '@taucad/geospec-engine (instantiate)',
+          specifier: '@taucad/example (instantiate)',
           code: 'ERR_MODULE_NOT_FOUND',
           message:
-            "Cannot find module '/app/node_modules/@taucad/geospec-engine/dist/native/opencascade/geospec_opencascade_multi.js' imported from /app/node_modules/@taucad/geospec-engine/dist/native/opencascade/init.js",
+            "Cannot find module '/app/node_modules/@taucad/example/dist/native/example_multi.js' imported from /app/node_modules/@taucad/example/dist/native/init.js",
         },
         ['electron', 'vite'],
       ),
